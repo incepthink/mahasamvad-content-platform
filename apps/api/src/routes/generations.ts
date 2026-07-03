@@ -1,0 +1,277 @@
+// Generation API routes. Thin handlers only: Zod-parse the request with the shared
+// schemas, read/write rows via @dgipr/database, and hand real work to jobs/runner.
+
+import type { FastifyInstance } from 'fastify';
+import {
+  getGeneration,
+  insertGeneration,
+  insertRevision,
+  listGenerations,
+  listRevisions,
+  publicUrl,
+  downloadPng,
+  uploadPng,
+  updateGeneration,
+  type GenerationRow,
+  type SupabaseClient,
+} from '@dgipr/database';
+import { generatePoster } from '@dgipr/poster-renderer';
+import {
+  ArticleFeedbackRequestSchema,
+  CopySchema,
+  CreateGenerationRequestSchema,
+  PosterFeedbackRequestSchema,
+  UpdateCopyRequestSchema,
+  type GenerationDetail,
+  type GenerationStep,
+  type GenerationSummary,
+} from '@dgipr/schemas';
+import {
+  isJobRunning,
+  startArticleFeedbackJob,
+  startGenerationJob,
+  startPosterFeedbackJob,
+} from '../jobs/runner.js';
+
+// First non-empty line of the article, as a headline for history cards.
+function articleHeadline(article: string | null): string | null {
+  if (!article) return null;
+  const line = article
+    .split('\n')
+    .map((l) => l.replace(/^#+\s*/, '').trim())
+    .find((l) => l.length > 0);
+  return line ?? null;
+}
+
+function toSummary(
+  client: SupabaseClient,
+  row: GenerationRow,
+): GenerationSummary {
+  const copy = CopySchema.safeParse(row.copy);
+  const copyHeadline = copy.success
+    ? ((copy.data as { headline?: string }).headline ?? null)
+    : null;
+  return {
+    id: row.id,
+    createdAt: row.createdAt,
+    outputType: row.outputType,
+    status: row.status,
+    noteExcerpt: row.note.slice(0, 160),
+    headline: copyHeadline ?? articleHeadline(row.article),
+    posterUrl: row.posterPath ? publicUrl(client, row.posterPath) : null,
+  };
+}
+
+async function toDetail(
+  client: SupabaseClient,
+  row: GenerationRow,
+): Promise<GenerationDetail> {
+  const revisions = await listRevisions(client, row.id);
+  const copy = CopySchema.safeParse(row.copy);
+  return {
+    id: row.id,
+    status: row.status,
+    step: (row.step as GenerationStep | null) ?? null,
+    outputType: row.outputType,
+    note: row.note,
+    article: row.article,
+    factCheck: row.factCheck,
+    copy: copy.success ? copy.data : null,
+    posterUrl: row.posterPath ? publicUrl(client, row.posterPath) : null,
+    sceneUrl: row.scenePath ? publicUrl(client, row.scenePath) : null,
+    error: row.error,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    revisions: revisions.map((revision) => ({
+      id: revision.id,
+      target: revision.target,
+      feedback: revision.feedback,
+      createdAt: revision.createdAt,
+    })),
+  };
+}
+
+export function registerGenerationRoutes(
+  app: FastifyInstance,
+  client: SupabaseClient,
+): void {
+  app.post('/generations', async (request, reply) => {
+    const body = CreateGenerationRequestSchema.parse(request.body);
+    const row = await insertGeneration(client, {
+      note: body.note,
+      outputType: body.outputType,
+    });
+    startGenerationJob(client, row.id);
+    return reply.code(202).send({ id: row.id });
+  });
+
+  app.get('/generations', async () => {
+    const rows = await listGenerations(client);
+    return rows.map((row) => toSummary(client, row));
+  });
+
+  app.get<{ Params: { id: string } }>(
+    '/generations/:id',
+    async (request, reply) => {
+      const row = await getGeneration(client, request.params.id);
+      if (!row) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'Generation not found.' } });
+      }
+      // Orphan check: a row stuck in queued/running whose job is not in this
+      // process died with a previous server; fail it so the UI stops spinning.
+      if (
+        (row.status === 'queued' || row.status === 'running') &&
+        !isJobRunning(row.id)
+      ) {
+        await updateGeneration(client, row.id, {
+          status: 'failed',
+          error: 'Server restarted while this job was running.',
+        });
+        return toDetail(client, {
+          ...row,
+          status: 'failed',
+          error: 'Server restarted while this job was running.',
+        });
+      }
+      return toDetail(client, row);
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    '/generations/:id/article/feedback',
+    async (request, reply) => {
+      const body = ArticleFeedbackRequestSchema.parse(request.body);
+      const row = await getGeneration(client, request.params.id);
+      if (!row) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'Generation not found.' } });
+      }
+      if (isJobRunning(row.id)) {
+        return reply
+          .code(409)
+          .send({ error: { message: 'A job is already running.' } });
+      }
+      if (!row.article) {
+        return reply
+          .code(409)
+          .send({ error: { message: 'No article to revise yet.' } });
+      }
+      // Flip to running BEFORE returning so the client's immediate refresh sees
+      // the transition and keeps polling; the detached job would otherwise set
+      // running a beat later, letting a racing poll read stale 'completed' and
+      // stop polling (the revised result then never loads without a reload).
+      await updateGeneration(client, row.id, {
+        status: 'running',
+        step: 'revise_article',
+        error: null,
+      });
+      startArticleFeedbackJob(client, row.id, body.feedback);
+      return reply.code(202).send({});
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    '/generations/:id/poster/feedback',
+    async (request, reply) => {
+      const body = PosterFeedbackRequestSchema.parse(request.body);
+      const row = await getGeneration(client, request.params.id);
+      if (!row) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'Generation not found.' } });
+      }
+      if (isJobRunning(row.id)) {
+        return reply
+          .code(409)
+          .send({ error: { message: 'A job is already running.' } });
+      }
+      if (!row.posterPath) {
+        return reply
+          .code(409)
+          .send({ error: { message: 'No poster to revise yet.' } });
+      }
+      // Flip to running BEFORE returning so the client's immediate refresh sees
+      // the transition and keeps polling; the detached job would otherwise set
+      // running a beat later, letting a racing poll read stale 'completed' and
+      // stop polling (the new poster then never loads without a reload).
+      await updateGeneration(client, row.id, {
+        status: 'running',
+        step: body.target === 'copy' ? 'revise_copy' : 'revise_scene',
+        error: null,
+      });
+      startPosterFeedbackJob(client, row.id, body.target, body.feedback);
+      return reply.code(202).send({});
+    },
+  );
+
+  // Manual poster text edit: re-typeset with the CACHED scene image and return the
+  // new poster URL synchronously (~seconds; no image-generation call).
+  app.put<{ Params: { id: string } }>(
+    '/generations/:id/poster/copy',
+    async (request, reply) => {
+      const editedCopy = UpdateCopyRequestSchema.parse(request.body);
+      const row = await getGeneration(client, request.params.id);
+      if (!row) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'Generation not found.' } });
+      }
+      if (isJobRunning(row.id)) {
+        return reply
+          .code(409)
+          .send({ error: { message: 'A job is already running.' } });
+      }
+      if (!row.scenePath) {
+        return reply
+          .code(409)
+          .send({ error: { message: 'No poster to edit yet.' } });
+      }
+
+      const sceneImage = await downloadPng(client, row.scenePath);
+      const poster = await generatePoster({ copy: editedCopy, sceneImage });
+
+      const revisions = await listRevisions(client, row.id);
+      const version = revisions.length + 2;
+      const posterObjectPath = `generations/${row.id}/poster-v${version}.png`;
+      await uploadPng(client, posterObjectPath, poster.png);
+
+      await updateGeneration(client, row.id, {
+        copy: editedCopy,
+        posterPath: posterObjectPath,
+      });
+      await insertRevision(client, {
+        generationId: row.id,
+        target: 'manual_copy',
+        copy: editedCopy,
+        posterPath: posterObjectPath,
+      });
+
+      return reply.send({ posterUrl: publicUrl(client, posterObjectPath) });
+    },
+  );
+
+  // Download proxy: the HTML `download` attribute is ignored cross-origin, so the
+  // frontend cannot force a download from the storage URL directly.
+  app.get<{ Params: { id: string } }>(
+    '/generations/:id/poster.png',
+    async (request, reply) => {
+      const row = await getGeneration(client, request.params.id);
+      if (!row?.posterPath) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'Poster not found.' } });
+      }
+      const png = await downloadPng(client, row.posterPath);
+      return reply
+        .header('content-type', 'image/png')
+        .header(
+          'content-disposition',
+          `attachment; filename="dgipr-poster-${row.id}.png"`,
+        )
+        .send(png);
+    },
+  );
+}

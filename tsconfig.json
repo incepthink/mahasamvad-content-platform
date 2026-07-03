@@ -1,0 +1,12 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/content-engine" },
+    { "path": "./packages/database" },
+    { "path": "./packages/schemas" },
+    { "path": "./packages/poster-renderer" },
+    { "path": "./apps/api" },
+    { "path": "./apps/web" }
+  ]
+}
+

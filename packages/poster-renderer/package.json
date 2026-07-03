@@ -1,0 +1,31 @@
+{
+  "name": "@dgipr/poster-renderer",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@dgipr/schemas": "workspace:*",
+    "playwright": "^1.49.1"
+  },
+  "devDependencies": {
+    "sharp": "^0.34.4",
+    "tsx": "^4.19.2"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src --ext .ts",
+    "format": "prettier src --write",
+    "format:check": "prettier src --check",
+    "assets:extract": "tsx scripts/extract-brand-assets.ts",
+    "poster:preview": "tsx scripts/preview.ts"
+  }
+}
+
