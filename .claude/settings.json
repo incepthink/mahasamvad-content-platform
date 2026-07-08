@@ -61,7 +61,9 @@
       "Bash(curl -s -o /dev/null -w '%{http_code}\\\\n' -X POST http://localhost:3001/api/generations/234b8a67-d93d-40f1-a8f7-5f2212aecccc/translate -H 'content-type: application/json' -d '{}')",
       "Bash(curl -s http://localhost:3001/api/generations/234b8a67-d93d-40f1-a8f7-5f2212aecccc)",
       "Bash(node -e \"const p=require\\('./packages/poster-renderer/package.json'\\); console.log\\(JSON.stringify\\(p.scripts,null,2\\)\\)\")",
-      "Bash(node -e \"const p=require\\('./packages/content-engine/package.json'\\); console.log\\(JSON.stringify\\(p.scripts,null,2\\)\\)\")"
+      "Bash(node -e \"const p=require\\('./packages/content-engine/package.json'\\); console.log\\(JSON.stringify\\(p.scripts,null,2\\)\\)\")",
+      "Bash(pnpm --filter \"@dgipr/web...\" exec node -e \"console.log\\(require\\('./package.json'\\).name\\)\")",
+      "Bash(pnpm --filter \"@dgipr/web...\" build)"
     ]
   }
 }
