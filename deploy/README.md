@@ -59,9 +59,11 @@ and `posters/references/master-*.png` are already uploaded. Just confirm:
 
 ## Phase B — EC2 host: run api + n8n
 
-1. **EC2 host** (you already have one): Ubuntu, `t3.small`/`t3.medium` is plenty —
-   no Chromium here, so RAM is modest (API is Node/Fastify; n8n calls the OpenAI
-   image API). Attach an **Elastic IP** so the address is stable.
+1. **EC2 host**: Ubuntu, `t3.small`/`t3.medium` is plenty — no Chromium here, so
+   RAM is modest (API is Node/Fastify; n8n calls the OpenAI image API). **Root EBS
+   volume: 30 GB gp3** — the 8 GB AMI default runs out of disk mid-build (n8n image
+   + API image + Docker build cache). Attach an **Elastic IP** so the address is
+   stable.
 2. **Security group inbound**: `80` and `443` from `0.0.0.0/0`; `22` from *your IP
    only*. Do **not** expose 3001 or 5678 publicly — Caddy fronts them.
 3. **DNS**: point `api.indicex.xyz` and `n8n.indicex.xyz` (A records) at the Elastic

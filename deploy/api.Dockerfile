@@ -2,8 +2,10 @@
 #
 # Build context is the REPO ROOT (this is a pnpm monorepo): the API imports the
 # workspace packages @dgipr/{content-engine,poster-renderer,database,schemas},
-# which build to their own dist/. We build the whole workspace in one image so
-# all @dgipr/* dist outputs exist.
+# which build to their own dist/. We build ONLY the @dgipr/api subgraph
+# (`--filter @dgipr/api...`) — api plus the packages it depends on — so we skip
+# installing/building apps/web (Next.js), which deploys on Vercel and would
+# otherwise bloat the image and build time.
 #
 #   docker build -f deploy/api.Dockerfile -t dgipr-api .
 #
@@ -26,7 +28,8 @@ RUN corepack enable
 WORKDIR /app
 
 # Install deps first (better layer caching). Copy every package.json + the
-# lockfile/workspace manifest so pnpm can resolve the full workspace graph.
+# lockfile/workspace manifest so pnpm can resolve the full workspace graph, then
+# install ONLY the @dgipr/api subgraph (skips Next.js/react/svgr from apps/web).
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY apps/api/package.json apps/api/
 COPY apps/web/package.json apps/web/
@@ -34,11 +37,12 @@ COPY packages/content-engine/package.json packages/content-engine/
 COPY packages/poster-renderer/package.json packages/poster-renderer/
 COPY packages/database/package.json packages/database/
 COPY packages/schemas/package.json packages/schemas/
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --filter "@dgipr/api..."
 
-# Now the source, then build every package in topological order.
+# Now the source, then build the api + its workspace deps in topological order
+# (NOT apps/web — that's Vercel's job).
 COPY . .
-RUN pnpm -r --if-present build
+RUN pnpm --filter "@dgipr/api..." --if-present build
 
 # Bind to all interfaces inside the container (the app defaults to 127.0.0.1,
 # which would be unreachable from outside). PORT/CORS_ORIGIN/etc. come from the
