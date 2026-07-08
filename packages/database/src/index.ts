@@ -26,6 +26,8 @@ export {
   listGenerations,
   insertRevision,
   listRevisions,
+  type Category,
+  type DesignMode,
   type OutputType,
   type GenerationStatus,
   type GenerationRow,

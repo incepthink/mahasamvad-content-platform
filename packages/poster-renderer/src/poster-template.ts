@@ -4,10 +4,13 @@
 // correct `copy`, rendered by Chromium's HarfBuzz shaper in an embedded Noto Sans
 // Devanagari webfont, so conjuncts like क्ती / ऱ्या are always right.
 //
-// Layout mirrors the DGIPR reference masters: a saffron header (with the राजमुद्रा emblem
-// chip), a bold headline block, the AI photo in a central zone, a type-specific body band
-// (stats / bullets / quote / timeline), an optional call-to-action strip, and the cropped
-// DGIPR footer band. The AI supplies ONLY the photo; every band is drawn here in code.
+// Layout mirrors the DGIPR farm-article references: one bold scheme headline beside/over the
+// AI photo, wrapped by the poster-header-footer.png frame (राजमुद्रा emblem top-right + the
+// DGIPR footer band). Three interchangeable layouts — `arch`, `split`, `bottom` — are picked
+// at random per poster. The AI supplies ONLY the photo; the headline and frame are drawn here.
+//
+// The per-post_type body bands (stats / bullets / quote / timeline, below) are kept but no
+// longer drawn on the poster image — the article poster is headline-only by design.
 
 import type { Copy } from '@dgipr/schemas';
 import type { BrandAssets } from './assets.js';
@@ -15,16 +18,28 @@ import type { BrandAssets } from './assets.js';
 export const POSTER_WIDTH = 1080;
 export const POSTER_HEIGHT = 1350;
 
+// The three reference layouts (farm-article-ref1/2/3): `arch` = photo in a rounded arch on
+// the right; `split` = rectangular photo filling the right; `bottom` = photo across the
+// bottom with the headline above it. One is chosen per poster.
+export type PosterVariant = 'arch' | 'split' | 'bottom';
+export const POSTER_VARIANTS: readonly PosterVariant[] = ['arch', 'split', 'bottom'];
+
+function pickVariant(): PosterVariant {
+  return POSTER_VARIANTS[Math.floor(Math.random() * POSTER_VARIANTS.length)]!;
+}
+
 export type BuildPosterHtmlInput = Readonly<{
   copy: Copy;
   // Background photo for the image zone, as a data URI (or any URL Chromium can load).
   sceneDataUri: string;
   assets: BrandAssets;
+  // Which reference layout to use. Omit to pick one at random.
+  variant?: PosterVariant;
 }>;
 
 // --- small helpers ---------------------------------------------------------------
 
-function esc(value: string): string {
+export function esc(value: string): string {
   return value
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -176,7 +191,7 @@ function scheduleRibbon(copy: Copy): string {
 }
 
 // Headline / subhead vary in field name per type; pull the best-fit strings.
-function headStrings(copy: Copy): { kicker?: string; headline: string; subhead?: string } {
+export function headStrings(copy: Copy): { kicker?: string; headline: string; subhead?: string } {
   if (copy.post_type === 'quote') {
     return {
       ...(has(copy.topic_label) ? { kicker: copy.topic_label } : {}),
@@ -200,7 +215,10 @@ function headStrings(copy: Copy): { kicker?: string; headline: string; subhead?:
 
 export function buildPosterHtml(input: BuildPosterHtmlInput): string {
   const { copy, sceneDataUri, assets } = input;
-  const { kicker, headline, subhead } = headStrings(copy);
+  const variant = input.variant ?? pickVariant();
+  // The article poster shows only the scheme headline; headStrings resolves the best
+  // heading for every post_type (quote falls back to its quote_text).
+  const { headline } = headStrings(copy);
 
   return `<!doctype html>
 <html lang="mr">
@@ -234,164 +252,77 @@ export function buildPosterHtml(input: BuildPosterHtmlInput): string {
     text-rendering: optimizeLegibility;
   }
   .stage {
+    position: relative;
     width: ${POSTER_WIDTH}px;
     height: ${POSTER_HEIGHT}px;
-    display: flex;
-    flex-direction: column;
     overflow: hidden;
-    background: var(--cream);
-  }
-
-  /* Header */
-  .topbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 16px 34px;
-    background: linear-gradient(135deg, var(--saffron1), var(--saffron2));
-    color: #fff;
-  }
-  .brandmark { font-weight: 800; font-size: 34px; letter-spacing: .5px; }
-  .brandmark small { display: block; font-weight: 600; font-size: 18px; opacity: .92; }
-  .emblem-chip {
     background: #fff;
-    border-radius: 12px;
-    padding: 6px 10px;
-    box-shadow: 0 3px 10px rgba(0,0,0,.18);
-    display: flex;
   }
-  .emblem-chip img { height: 74px; display: block; }
 
-  /* Headline */
-  .headline-block { padding: 26px 44px 20px; text-align: center; }
-  .kicker {
-    display: inline-block;
-    background: var(--green);
-    color: #fff;
-    font-weight: 700;
-    font-size: 22px;
-    padding: 6px 20px;
-    border-radius: 999px;
-    margin-bottom: 14px;
-  }
+  /* Layers (bottom to top): background · photo · headline · white footer plate · frame */
+  .bg { position: absolute; inset: 0; z-index: 0; }
+  .photo { position: absolute; z-index: 1; overflow: hidden; }
+  .photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .headline-wrap { position: absolute; z-index: 2; display: flex; }
   .headline {
     font-weight: 900;
-    font-size: 66px;
-    line-height: 1.08;
-    color: var(--maroon);
+    line-height: 1.12;
     letter-spacing: -.5px;
+    text-wrap: balance;
   }
-  .subhead {
-    margin-top: 14px;
-    font-weight: 700;
-    font-size: 30px;
-    color: var(--navy);
-    line-height: 1.25;
+  /* Keeps the frame's social-handle row on a clean light strip (like the references). */
+  .footer-plate { position: absolute; left: 0; right: 0; bottom: 0; height: 176px; background: #fff; z-index: 5; }
+  .frame { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 10; display: block; pointer-events: none; }
+
+  /* --- arch (ref1): headline left, photo in a rounded arch on the right --- */
+  [data-variant="arch"] .bg {
+    background: linear-gradient(155deg, #ffe1b0 0%, #ffb457 42%, #f4851d 100%);
+  }
+  [data-variant="arch"] .headline-wrap {
+    left: 60px; top: 150px; width: 500px; height: 1000px; align-items: center;
+  }
+  [data-variant="arch"] .headline { font-size: 58px; color: var(--maroon); }
+  [data-variant="arch"] .photo {
+    right: 56px; top: 208px; width: 400px; height: 812px;
+    border-radius: 200px 200px 30px 30px;
+    border: 8px solid #fff;
+    box-shadow: 0 18px 40px rgba(122,21,18,.28);
   }
 
-  /* Bands */
-  .band { padding: 18px 44px; }
-  .band-date {
-    background: var(--green);
-    color: #fff;
-    font-weight: 800;
-    font-size: 30px;
-    text-align: center;
-    padding: 14px;
+  /* --- split (ref2): headline left on saffron, rectangular photo right --- */
+  [data-variant="split"] .bg {
+    background: radial-gradient(120% 100% at 0% 0%, #ff9a34 0%, #f4791a 60%, #e56a12 100%);
+  }
+  [data-variant="split"] .headline-wrap {
+    left: 60px; top: 150px; width: 470px; height: 1000px; align-items: center;
+  }
+  [data-variant="split"] .headline { font-size: 56px; color: #fff; text-shadow: 0 2px 10px rgba(0,0,0,.14); }
+  [data-variant="split"] .photo {
+    right: 0; top: 150px; width: 500px; height: 1000px;
+    border-left: 8px solid #fff;
   }
 
-  /* Photo zone */
-  .photo {
-    position: relative;
-    flex: 1 1 auto;
-    min-height: 300px;
-    border-top: 6px solid var(--gold);
-    border-bottom: 6px solid var(--gold);
-    overflow: hidden;
+  /* --- bottom (ref3): headline over sky at top, photo across the bottom --- */
+  [data-variant="bottom"] .bg {
+    background: linear-gradient(180deg, #cfe9ff 0%, #eaf6ff 55%, #ffffff 100%);
   }
-  .photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
-
-  /* Stats */
-  .band-stats { background: linear-gradient(180deg, var(--navy), var(--navy2)); padding: 26px 30px; }
-  .stats { display: flex; align-items: stretch; justify-content: space-around; }
-  .stat { flex: 1; text-align: center; padding: 0 12px; color: #fff; }
-  .stat-icon {
-    width: 62px; height: 62px; margin: 0 auto 8px;
-    border-radius: 50%;
-    background: var(--gold); color: var(--navy2);
-    font-size: 34px; font-weight: 900;
-    display: flex; align-items: center; justify-content: center;
+  [data-variant="bottom"] .headline-wrap {
+    left: 64px; top: 172px; width: 780px; height: 360px; align-items: flex-start;
   }
-  .stat-value { font-size: 42px; font-weight: 900; line-height: 1.1; }
-  .stat-label { font-size: 22px; font-weight: 500; margin-top: 4px; opacity: .95; }
-  .stat-div { width: 2px; background: rgba(255,255,255,.28); margin: 6px 0; }
-
-  /* Bullets */
-  .band-bullets { background: var(--cream); }
-  .bullets { list-style: none; display: flex; flex-direction: column; gap: 18px; }
-  .bullet { display: flex; gap: 18px; align-items: flex-start; }
-  .bullet-mark {
-    flex: none; width: 20px; height: 20px; margin-top: 8px;
-    border-radius: 50%; background: var(--saffron2);
-    box-shadow: 0 0 0 5px rgba(239,83,20,.18);
+  [data-variant="bottom"] .headline { font-size: 58px; color: var(--navy2); }
+  [data-variant="bottom"] .photo {
+    left: 0; right: 0; top: 556px; height: 610px; width: 100%;
+    border-top: 8px solid #fff;
   }
-  .bullet-text { font-size: 30px; font-weight: 600; line-height: 1.32; color: var(--ink); }
-  .bullet-text b { color: var(--saffron2); }
-
-  /* Quote */
-  .band-quote { background: var(--cream); position: relative; text-align: center; padding: 30px 54px; }
-  .quote-mark { font-size: 120px; line-height: .6; color: var(--gold); font-weight: 900; }
-  .quote-text { font-size: 40px; font-weight: 700; line-height: 1.3; color: var(--maroon); }
-  .quote-attrib { margin-top: 16px; font-size: 26px; font-weight: 700; color: var(--navy); }
-  .points { display: flex; justify-content: center; gap: 28px; margin-top: 18px; flex-wrap: wrap; }
-  .point { display: flex; align-items: center; gap: 8px; font-size: 24px; font-weight: 600; }
-  .point-icon { color: var(--saffron2); }
-
-  /* Timeline */
-  .band-timeline { background: var(--cream); }
-  .timeline { display: flex; flex-direction: column; gap: 18px; border-left: 4px solid var(--saffron2); padding-left: 26px; margin-left: 8px; }
-  .milestone { position: relative; }
-  .milestone::before {
-    content: ''; position: absolute; left: -34px; top: 6px;
-    width: 16px; height: 16px; border-radius: 50%; background: var(--saffron2);
-    box-shadow: 0 0 0 4px var(--cream), 0 0 0 6px var(--saffron2);
-  }
-  .milestone-date { font-size: 24px; font-weight: 800; color: var(--navy); }
-  .milestone-text { font-size: 28px; font-weight: 500; line-height: 1.3; color: var(--ink); }
-
-  /* CTA */
-  .band-cta {
-    background: linear-gradient(135deg, var(--saffron1), var(--saffron2));
-    color: #fff; text-align: center; padding: 18px 44px;
-  }
-  .cta-audience { font-size: 24px; font-weight: 600; opacity: .95; margin-bottom: 6px; }
-  .cta-text { font-size: 30px; font-weight: 800; line-height: 1.25; }
-
-  /* Footer */
-  .footer { width: 100%; display: block; }
-  .footer img { width: 100%; display: block; }
 </style>
 </head>
 <body>
-  <div class="stage">
-    <header class="topbar">
-      <div class="brandmark">महासंवाद<small>DGIPR • महाराष्ट्र शासन</small></div>
-      <div class="emblem-chip"><img src="${assets.emblemDataUri}" alt="" /></div>
-    </header>
-
-    <div class="headline-block">
-      ${kicker ? `<div class="kicker">${esc(kicker)}</div>` : ''}
-      <h1 class="headline">${esc(headline)}</h1>
-      ${subhead ? `<div class="subhead">${esc(subhead)}</div>` : ''}
-    </div>
-
-    ${scheduleRibbon(copy)}
-
+  <div class="stage" data-variant="${variant}">
+    <div class="bg"></div>
     <div class="photo"><img src="${sceneDataUri}" alt="" /></div>
-
-    ${bodyFor(copy)}
-
-    <footer class="footer"><img src="${assets.footerDataUri}" alt="" /></footer>
+    <div class="headline-wrap"><h1 class="headline">${esc(headline)}</h1></div>
+    <div class="footer-plate"></div>
+    <img class="frame" src="${assets.frameDataUri}" alt="" />
   </div>
 </body>
 </html>`;

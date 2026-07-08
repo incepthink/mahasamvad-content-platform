@@ -2,6 +2,7 @@
 // schemas, read/write rows via @dgipr/database, and hand real work to jobs/runner.
 
 import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
 import {
   getGeneration,
   insertGeneration,
@@ -15,11 +16,12 @@ import {
   type GenerationRow,
   type SupabaseClient,
 } from '@dgipr/database';
-import { generatePoster } from '@dgipr/poster-renderer';
+import { generateArticlePoster } from '@dgipr/poster-renderer';
 import {
   ArticleFeedbackRequestSchema,
   CopySchema,
   CreateGenerationRequestSchema,
+  GenerationStepSchema,
   PosterFeedbackRequestSchema,
   UpdateCopyRequestSchema,
   type GenerationDetail,
@@ -31,7 +33,11 @@ import {
   startArticleFeedbackJob,
   startGenerationJob,
   startPosterFeedbackJob,
+  startSocialPostJob,
 } from '../jobs/runner.js';
+
+// Stage ping n8n POSTs to /generations/:id/progress after each social-post stage.
+const ProgressPingSchema = z.object({ step: GenerationStepSchema });
 
 // First non-empty line of the article, as a headline for history cards.
 function articleHeadline(article: string | null): string | null {
@@ -55,7 +61,9 @@ function toSummary(
     id: row.id,
     createdAt: row.createdAt,
     outputType: row.outputType,
+    category: row.category,
     status: row.status,
+    step: (row.step as GenerationStep | null) ?? null,
     noteExcerpt: row.note.slice(0, 160),
     headline: copyHeadline ?? articleHeadline(row.article),
     posterUrl: row.posterPath ? publicUrl(client, row.posterPath) : null,
@@ -73,6 +81,9 @@ async function toDetail(
     status: row.status,
     step: (row.step as GenerationStep | null) ?? null,
     outputType: row.outputType,
+    category: row.category,
+    designMode: row.designMode,
+    heading: row.heading,
     note: row.note,
     article: row.article,
     factCheck: row.factCheck,
@@ -97,13 +108,40 @@ export function registerGenerationRoutes(
 ): void {
   app.post('/generations', async (request, reply) => {
     const body = CreateGenerationRequestSchema.parse(request.body);
+    // Twitter runs always need a design mode; default to 'onbrand' when absent.
+    const designMode =
+      body.category === 'twitter'
+        ? (body.designMode ?? 'onbrand')
+        : body.designMode;
     const row = await insertGeneration(client, {
       note: body.note,
       outputType: body.outputType,
+      category: body.category,
+      designMode,
+      heading: body.heading,
     });
-    startGenerationJob(client, row.id);
+    // Twitter → external n8n social-post job; news/scheme → in-process article pipeline.
+    if (row.category === 'twitter') {
+      startSocialPostJob(client, row.id);
+    } else {
+      startGenerationJob(client, row.id);
+    }
     return reply.code(202).send({ id: row.id });
   });
+
+  // Stage progress ping from n8n (fire-and-forget). Thin: advance the row's step only
+  // while it is still running, so late/duplicate pings after completion are ignored.
+  app.post<{ Params: { id: string } }>(
+    '/generations/:id/progress',
+    async (request, reply) => {
+      const { step } = ProgressPingSchema.parse(request.body);
+      const row = await getGeneration(client, request.params.id);
+      if (row && row.status === 'running') {
+        await updateGeneration(client, request.params.id, { step });
+      }
+      return reply.code(204).send();
+    },
+  );
 
   app.get('/generations', async () => {
     const rows = await listGenerations(client);
@@ -231,7 +269,7 @@ export function registerGenerationRoutes(
       }
 
       const sceneImage = await downloadPng(client, row.scenePath);
-      const poster = await generatePoster({ copy: editedCopy, sceneImage });
+      const poster = await generateArticlePoster({ copy: editedCopy, sceneImage });
 
       const revisions = await listRevisions(client, row.id);
       const version = revisions.length + 2;

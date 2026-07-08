@@ -7,59 +7,184 @@ import { chatComplete, type ChatMessage } from './openai-chat.js';
 
 const SYSTEM_PROMPT = [
   'तुम्ही महाराष्ट्र शासनाच्या माहिती व जनसंपर्क महासंचालनालयासाठी (DGIPR / महासंवाद)',
-  'पोस्टरच्या पार्श्वभूमी-दृश्याचे वर्णन (scene brief) लिहिणारे कला-दिग्दर्शक आहात.',
+  'पोस्टरच्या पार्श्वभूमी-दृश्याचे वर्णन (scene brief) लिहिणारे अनुभवी कला-दिग्दर्शक आहात.',
   'तुम्हाला सध्याचे दृश्य-वर्णन आणि वापरकर्त्याचा अभिप्राय दिला जाईल. अभिप्रायानुसार',
   'सुधारलेले नवीन दृश्य-वर्णन तयार करा.',
   '',
-  'नियम:',
-  '1. वर्णन थोडक्यात, ठोस व चित्रात्मक ठेवा (एक-दोन वाक्ये) — पोस्टरच्या पार्श्वभूमीतील',
-  '   छायाचित्रात काय दिसावे ते सांगा.',
-  '2. दृश्यात कोणताही मजकूर, अक्षरे, लोगो किंवा चिन्हे नसावीत — फक्त दृश्याचे वर्णन.',
-  '3. अभिप्रायाने मागितलेले बदल करा; बाकी सध्याच्या वर्णनाशी सुसंगत रहा.',
-  '4. विशिष्ट व्यक्तींची नावे किंवा ओळखता येतील असे चेहरे सुचवू नका.',
+  'मुख्य उद्देश:',
+  'हे scene_brief पोस्टरच्या पार्श्वभूमीतील text-free दृश्यासाठी आहे. पोस्टरवरील headline,',
+  'मुद्दे, चिन्हे, लोगो, शिक्के किंवा इतर मजकूर वेगळ्या renderer मधून बसवले जातील.',
   '',
-  'फक्त {"scene_brief": "..."} या स्वरूपात वैध JSON object परत करा — कोणतेही',
-  'स्पष्टीकरण किंवा अतिरिक्त मजकूर नको.',
+  'कठोर नियम:',
+  '1. फक्त {"scene_brief": "..."} या स्वरूपात वैध JSON object परत करा.',
+  '2. scene_brief चे मूल्य मराठीत आणि देवनागरी लिपीत लिहा.',
+  '3. scene_brief थोडक्यात, ठोस आणि चित्रात्मक ठेवा — साधारण एक ते दोन वाक्ये.',
+  '4. दृश्यात कोणताही मजकूर, अक्षरे, अंक, फलक, कागदावरील वाचनीय मजकूर, लोगो, शिक्का,',
+  '   सरकारी चिन्ह, watermark किंवा UI elements नसावेत.',
+  '5. अभिप्रायाने मागितलेले दृश्यात्मक बदल करा; पण दृश्य सध्याच्या वर्णनाशी आणि शासकीय',
+  '   पोस्टरच्या संयत, विश्वासार्ह शैलीशी सुसंगत ठेवा.',
+  '6. विशिष्ट व्यक्तींची नावे, ओळखता येतील असे चेहरे, राजकीय नेते, मंत्री, अधिकारी,',
+  '   celebrity किंवा खऱ्या व्यक्तींचे likeness सुचवू नका.',
+  '7. जर अभिप्रायात फोटोमध्ये मजकूर, लोगो, चेहरा, ओळखता येणारी व्यक्ती किंवा तथ्यात्मक',
+  '   दावा दाखवण्याची मागणी असेल, तर ती मागणी दृश्यात समाविष्ट करू नका; त्याऐवजी सुरक्षित,',
+  '   प्रतीकात्मक आणि text-free दृश्य सुचवा.',
+  '8. भीतीदायक, धक्कादायक, हिंसक, शोषणात्मक किंवा अति नाट्यमय दृश्ये सुचवू नका.',
+  '9. बालकांशी संबंधित विषय असल्यास मुलांना संकटात, रडताना, जखमी, असुरक्षित किंवा ओळखता',
+  '   येईल अशा पद्धतीने दाखवू नका; सुरक्षित, सन्मानजनक आणि प्रतीकात्मक वातावरण दाखवा.',
+  '10. दृश्य हे पार्श्वभूमीसाठी असावे — खूप गर्दीचे, अतितपशीलवार किंवा मजकुरासाठी अडथळा',
+  '    निर्माण करणारे नसावे.',
+  '',
+  'फक्त वैध JSON object परत करा. स्पष्टीकरण, markdown, code fence किंवा अतिरिक्त मजकूर देऊ नका.',
 ].join('\n');
+
+function buildMessages(
+  currentSceneBrief: string,
+  feedback: string,
+): ChatMessage[] {
+  return [
+    { role: 'system', content: SYSTEM_PROMPT },
+    {
+      role: 'user',
+      content: [
+        '<CURRENT_SCENE_BRIEF>',
+        currentSceneBrief.trim(),
+        '</CURRENT_SCENE_BRIEF>',
+        '',
+        '<FEEDBACK purpose="visual_direction_only">',
+        feedback.trim(),
+        '</FEEDBACK>',
+        '',
+        '<TASK>',
+        'FEEDBACK नुसार सुधारलेले नवीन scene_brief JSON स्वरूपात परत करा.',
+        'दृश्य text-free, लोगो-मुक्त, सुरक्षित आणि प्रतीकात्मक ठेवा.',
+        '</TASK>',
+      ].join('\n'),
+    },
+  ];
+}
+
+function buildRepairMessages(
+  currentSceneBrief: string,
+  feedback: string,
+  raw: string,
+  errorMessage: string,
+): ChatMessage[] {
+  return [
+    { role: 'system', content: SYSTEM_PROMPT },
+    {
+      role: 'user',
+      content: [
+        '<CURRENT_SCENE_BRIEF>',
+        currentSceneBrief.trim(),
+        '</CURRENT_SCENE_BRIEF>',
+        '',
+        '<FEEDBACK purpose="visual_direction_only">',
+        feedback.trim(),
+        '</FEEDBACK>',
+        '',
+        '<INVALID_OUTPUT>',
+        raw,
+        '</INVALID_OUTPUT>',
+        '',
+        '<ERROR>',
+        errorMessage,
+        '</ERROR>',
+        '',
+        '<TASK>',
+        'वरील INVALID_OUTPUT दुरुस्त करा.',
+        'फक्त {"scene_brief": "..."} या स्वरूपातील वैध JSON object परत करा.',
+        'scene_brief मराठीत, text-free दृश्यासाठी, एक-दोन वाक्यांत लिहा.',
+        'स्पष्टीकरण, markdown किंवा code fence देऊ नका.',
+        '</TASK>',
+      ].join('\n'),
+    },
+  ];
+}
+
+function parseJson(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    const firstBrace = raw.indexOf('{');
+    const lastBrace = raw.lastIndexOf('}');
+
+    if (firstBrace !== -1 && lastBrace > firstBrace) {
+      return JSON.parse(raw.slice(firstBrace, lastBrace + 1));
+    }
+
+    throw new Error('Response did not contain a valid JSON object.');
+  }
+}
+
+function validateSceneBrief(parsed: unknown, raw: string): string {
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error(
+      `Scene revision did not return a JSON object:\n---\n${raw}`,
+    );
+  }
+
+  const sceneBrief = (parsed as { scene_brief?: unknown }).scene_brief;
+
+  if (typeof sceneBrief !== 'string' || sceneBrief.trim().length === 0) {
+    throw new Error(`Scene revision returned no scene_brief:\n---\n${raw}`);
+  }
+
+  const trimmed = sceneBrief.trim();
+
+  if (trimmed.length > 450) {
+    throw new Error(
+      `Scene revision returned an overly long scene_brief (${trimmed.length} chars):\n---\n${raw}`,
+    );
+  }
+
+  return trimmed;
+}
 
 export async function reviseSceneBrief(
   currentSceneBrief: string,
   feedback: string,
 ): Promise<string> {
-  const messages: ChatMessage[] = [
-    { role: 'system', content: SYSTEM_PROMPT },
-    {
-      role: 'user',
-      content: [
-        '## सध्याचे दृश्य-वर्णन (CURRENT SCENE BRIEF):',
-        currentSceneBrief,
-        '',
-        '## वापरकर्त्याचा अभिप्राय (FEEDBACK):',
-        feedback,
-        '',
-        '## कार्य:',
-        'सुधारलेले नवीन दृश्य-वर्णन JSON स्वरूपात परत करा.',
-      ].join('\n'),
-    },
-  ];
-
-  const raw = await chatComplete(messages, {
-    temperature: 0.4,
+  const raw = await chatComplete(buildMessages(currentSceneBrief, feedback), {
+    temperature: 0.35,
     responseFormat: 'json_object',
   });
 
-  let parsed: unknown;
   try {
-    parsed = JSON.parse(raw);
-  } catch (error) {
-    throw new Error(
-      `Scene revision returned invalid JSON: ${(error as Error).message}\n---\n${raw}`,
+    return validateSceneBrief(parseJson(raw), raw);
+  } catch (firstError) {
+    const repaired = await chatComplete(
+      buildRepairMessages(
+        currentSceneBrief,
+        feedback,
+        raw,
+        (firstError as Error).message,
+      ),
+      {
+        temperature: 0,
+        responseFormat: 'json_object',
+      },
     );
-  }
 
-  const sceneBrief = (parsed as { scene_brief?: unknown }).scene_brief;
-  if (typeof sceneBrief !== 'string' || sceneBrief.trim().length === 0) {
-    throw new Error(`Scene revision returned no scene_brief:\n---\n${raw}`);
+    try {
+      return validateSceneBrief(parseJson(repaired), repaired);
+    } catch (repairError) {
+      throw new Error(
+        [
+          'Scene revision failed after repair attempt.',
+          '',
+          'First error:',
+          (firstError as Error).message,
+          '',
+          'Repair error:',
+          (repairError as Error).message,
+          '',
+          'Original output:',
+          raw,
+          '',
+          'Repaired output:',
+          repaired,
+        ].join('\n'),
+      );
+    }
   }
-  return sceneBrief.trim();
 }

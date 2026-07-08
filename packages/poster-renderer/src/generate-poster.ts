@@ -12,7 +12,7 @@ import type { Copy } from '@dgipr/schemas';
 import { buildScenePrompt } from './build-scene-prompt.js';
 import { generateImage } from './openai-image.js';
 import { loadBrandAssets } from './assets.js';
-import { buildPosterHtml } from './poster-template.js';
+import { buildPosterHtml, type PosterVariant } from './poster-template.js';
 import { renderHtmlToPng } from './render-html.js';
 
 export type GeneratePosterInput = Readonly<{
@@ -20,6 +20,8 @@ export type GeneratePosterInput = Readonly<{
   // Optional pre-rendered scene (PNG). When given, the OpenAI image call is skipped —
   // used by the offline preview script and for cheap re-renders of the template.
   sceneImage?: Buffer;
+  // Which reference layout to use. Omit to let the template pick one at random.
+  variant?: PosterVariant;
 }>;
 
 export type GeneratedPoster = Readonly<{
@@ -51,6 +53,8 @@ export async function generatePoster(
     copy,
     sceneDataUri: toDataUri(sceneImage),
     assets,
+    // exactOptionalPropertyTypes: only set `variant` when the caller supplied one.
+    ...(input.variant ? { variant: input.variant } : {}),
   });
   const png = await renderHtmlToPng(html);
 

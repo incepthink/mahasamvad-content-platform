@@ -7,6 +7,8 @@ export const GENERATIONS_TABLE = 'generations';
 export const GENERATION_REVISIONS_TABLE = 'generation_revisions';
 
 export type OutputType = 'article' | 'poster' | 'both';
+export type Category = 'news' | 'scheme' | 'twitter';
+export type DesignMode = 'onbrand' | 'adaptive' | 'fresh';
 export type GenerationStatus = 'queued' | 'running' | 'completed' | 'failed';
 export type RevisionTarget =
   | 'article'
@@ -20,6 +22,9 @@ export type GenerationRow = Readonly<{
   id: string;
   note: string;
   outputType: OutputType;
+  category: Category;
+  designMode: DesignMode | null;
+  heading: string | null;
   status: GenerationStatus;
   step: string | null;
   error: string | null;
@@ -40,6 +45,9 @@ type GenerationDbRow = {
   id: string;
   note: string;
   output_type: OutputType;
+  category: Category;
+  design_mode: string | null;
+  heading: string | null;
   status: GenerationStatus;
   step: string | null;
   error: string | null;
@@ -60,6 +68,9 @@ function fromDbRow(row: GenerationDbRow): GenerationRow {
     id: row.id,
     note: row.note,
     outputType: row.output_type,
+    category: row.category,
+    designMode: row.design_mode as DesignMode | null,
+    heading: row.heading,
     status: row.status,
     step: row.step,
     error: row.error,
@@ -115,11 +126,23 @@ function patchToDbRow(patch: GenerationPatch): Record<string, unknown> {
 
 export async function insertGeneration(
   client: SupabaseClient,
-  input: Readonly<{ note: string; outputType: OutputType }>,
+  input: Readonly<{
+    note: string;
+    outputType: OutputType;
+    category: Category;
+    designMode?: DesignMode | undefined;
+    heading?: string | undefined;
+  }>,
 ): Promise<GenerationRow> {
   const { data, error } = await client
     .from(GENERATIONS_TABLE)
-    .insert({ note: input.note, output_type: input.outputType })
+    .insert({
+      note: input.note,
+      output_type: input.outputType,
+      category: input.category,
+      design_mode: input.designMode ?? null,
+      heading: input.heading ?? null,
+    })
     .select()
     .single();
   if (error) {

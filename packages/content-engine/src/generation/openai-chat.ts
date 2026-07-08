@@ -30,10 +30,16 @@ function requireApiKey(): string {
 
 // Returns the assistant's message content for a single completion. Pass
 // responseFormat: 'json_object' to force a JSON reply (the prompt must still ask
-// for JSON) — used by copy generation, which needs structured output.
+// for JSON) — used by copy generation, which needs structured output. Pass `model`
+// to override the default (e.g. a cheaper model for bulk offline data prep, or the
+// fine-tuned model id).
 export async function chatComplete(
   messages: readonly ChatMessage[],
-  options?: { temperature?: number; responseFormat?: 'json_object' },
+  options?: {
+    temperature?: number;
+    responseFormat?: 'json_object';
+    model?: string;
+  },
 ): Promise<string> {
   const apiKey = requireApiKey();
   const response = await fetch(CHAT_URL, {
@@ -43,7 +49,7 @@ export async function chatComplete(
       'content-type': 'application/json',
     },
     body: JSON.stringify({
-      model: CHAT_MODEL,
+      model: options?.model ?? CHAT_MODEL,
       messages,
       temperature: options?.temperature ?? 0.4,
       ...(options?.responseFormat

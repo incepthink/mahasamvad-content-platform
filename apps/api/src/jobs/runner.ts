@@ -8,6 +8,7 @@
 // (b) lets the detail route detect rows orphaned by a server restart mid-job.
 
 import {
+  FACT_CHECK_DELIMITER,
   generateArticle,
   generateCopy,
   reviseArticle,
@@ -15,9 +16,9 @@ import {
   reviseSceneBrief,
 } from '@dgipr/content-engine';
 import {
-  buildScenePrompt,
+  buildArticleScenePrompt,
   generateImage,
-  generatePoster,
+  generateArticlePoster,
 } from '@dgipr/poster-renderer';
 import {
   getGeneration,
@@ -35,6 +36,17 @@ const running = new Set<string>();
 
 export function isJobRunning(id: string): boolean {
   return running.has(id);
+}
+
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(
+      `Missing required environment variable ${name}. ` +
+        'Copy .env.example to .env and fill it in (see repo README).',
+    );
+  }
+  return value;
 }
 
 // Storage paths are versioned per render: public bucket URLs are CDN-cached, so a
@@ -98,6 +110,17 @@ function runJob(
   })();
 }
 
+// The article pipeline only handles 'news'/'scheme'; 'twitter' rows are dispatched
+// to startSocialPostJob (see routes/generations.ts), so a twitter category never
+// reaches the article jobs. Narrow the widened Category for the article engine and
+// hard-fail if that routing invariant is ever violated.
+function articleCategoryOf(
+  category: GenerationRow['category'],
+): 'news' | 'scheme' {
+  if (category === 'news' || category === 'scheme') return category;
+  throw new Error(`Article pipeline received unsupported category: ${category}`);
+}
+
 // Full pipeline for a new generation: article (always — poster copy derives its
 // facts from the verified article even in poster-only mode), then optionally
 // copy -> scene image -> typeset poster.
@@ -113,6 +136,8 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
     });
 
     const result = await generateArticle(row.note, {
+      category: articleCategoryOf(row.category),
+      heading: row.heading ?? undefined,
       onProgress: (phase) => {
         void updateGeneration(client, id, { step: phase }).catch((error) => {
           console.error(`[job ${id}] progress update failed:`, error);
@@ -132,11 +157,11 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
     const copy = await generateCopy(result.article);
 
     await updateGeneration(client, id, { step: 'scene' });
-    const scenePrompt = buildScenePrompt(copy);
+    const scenePrompt = buildArticleScenePrompt(copy);
     const sceneImage = await generateImage(scenePrompt);
 
     await updateGeneration(client, id, { step: 'render' });
-    const poster = await generatePoster({ copy, sceneImage });
+    const poster = await generateArticlePoster({ copy, sceneImage });
 
     const sceneObjectPath = scenePath(id, 1);
     const posterObjectPath = posterPath(id, 1);
@@ -147,6 +172,77 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
       copy,
       scenePrompt,
       scenePath: sceneObjectPath,
+      posterPath: posterObjectPath,
+    });
+  });
+}
+
+// Shape n8n's social-post-v2-api workflow returns from its Respond-to-Webhook node.
+type SocialPostResult = {
+  post_type?: string;
+  title?: string;
+  caption?: string;
+  poster_png_base64?: string;
+};
+
+// Twitter pipeline: the heavy lifting (classify → copy → image → caption) runs in the
+// external n8n `social-post-v2-api` workflow. This job is a thin orchestrator — it
+// POSTs the note to the webhook, awaits the JSON result, then uploads the returned PNG
+// to Supabase Storage (Supabase creds stay in the API, never in n8n, per AGENTS.md).
+// n8n reports stage progress out-of-band via the /progress endpoint (progress_url),
+// so this function only sets the initial running state and persists the final result.
+export function startSocialPostJob(client: SupabaseClient, id: string): void {
+  runJob(client, id, async () => {
+    const row = await getGeneration(client, id);
+    if (!row) throw new Error(`Generation ${id} not found.`);
+
+    const webhookUrl = requireEnv('N8N_SOCIAL_POST_WEBHOOK_URL');
+    const apiPublicUrl = requireEnv('API_PUBLIC_URL');
+    const webhookSecret = process.env.N8N_WEBHOOK_SECRET;
+
+    await updateGeneration(client, id, {
+      status: 'running',
+      step: null,
+      error: null,
+    });
+
+    const headers: Record<string, string> = {
+      'content-type': 'application/json',
+    };
+    if (webhookSecret) headers['x-n8n-webhook-secret'] = webhookSecret;
+
+    // Generous timeout to outlast the workflow's ~6-min image generation stage.
+    const response = await fetch(webhookUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        meeting_notes: row.note,
+        design_mode: row.designMode ?? 'onbrand',
+        generation_id: id,
+        progress_url: `${apiPublicUrl}/api/generations/${id}/progress`,
+      }),
+      signal: AbortSignal.timeout(420_000),
+    });
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '');
+      throw new Error(
+        `n8n social-post webhook failed (${response.status}): ${detail.slice(0, 500)}`,
+      );
+    }
+
+    const result = (await response.json()) as SocialPostResult;
+    if (!result.caption || !result.poster_png_base64) {
+      throw new Error('n8n social-post webhook returned no caption or poster.');
+    }
+
+    const posterPng = Buffer.from(result.poster_png_base64, 'base64');
+    const posterObjectPath = posterPath(id, 1);
+    await uploadPng(client, posterObjectPath, posterPng);
+
+    // Caption → article column; classifier title → referenceTitle (surfaced in UI).
+    await updateGeneration(client, id, {
+      article: result.caption,
+      referenceTitle: result.title ?? null,
       posterPath: posterObjectPath,
     });
   });
@@ -171,9 +267,15 @@ export function startArticleFeedbackJob(
     });
 
     const currentContent = row.factCheck
-      ? `${row.article}\n\n---तथ्य-तपासणी---\n${row.factCheck}`
+      ? `${row.article}\n\n${FACT_CHECK_DELIMITER}\n${row.factCheck}`
       : row.article;
-    const revised = await reviseArticle(row.note, currentContent, feedback);
+    const revised = await reviseArticle(
+      row.note,
+      currentContent,
+      feedback,
+      articleCategoryOf(row.category),
+      row.heading ?? undefined,
+    );
 
     await updateGeneration(client, id, {
       article: revised.article,
@@ -218,7 +320,10 @@ export function startPosterFeedbackJob(
 
       await updateGeneration(client, id, { step: 'render' });
       const sceneImage = await downloadPng(client, row.scenePath);
-      const poster = await generatePoster({ copy: revisedCopy, sceneImage });
+      const poster = await generateArticlePoster({
+        copy: revisedCopy,
+        sceneImage,
+      });
 
       const posterObjectPath = posterPath(id, version);
       await uploadPng(client, posterObjectPath, poster.png);
@@ -240,11 +345,14 @@ export function startPosterFeedbackJob(
     const revisedCopy: Copy = { ...copy, scene_brief: sceneBrief };
 
     await updateGeneration(client, id, { step: 'scene' });
-    const scenePrompt = buildScenePrompt(revisedCopy);
+    const scenePrompt = buildArticleScenePrompt(revisedCopy);
     const sceneImage = await generateImage(scenePrompt);
 
     await updateGeneration(client, id, { step: 'render' });
-    const poster = await generatePoster({ copy: revisedCopy, sceneImage });
+    const poster = await generateArticlePoster({
+      copy: revisedCopy,
+      sceneImage,
+    });
 
     const sceneObjectPath = scenePath(id, version);
     const posterObjectPath = posterPath(id, version);

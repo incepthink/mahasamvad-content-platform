@@ -1,10 +1,12 @@
 // Offline template preview — render a poster from an existing *.copy.json WITHOUT calling
 // the image model. A placeholder photo stands in for the AI scene, so the HTML/CSS layout,
-// Devanagari typesetting, header emblem and footer band can be iterated for free.
+// Devanagari typesetting and the header/footer frame can be iterated for free.
 //
-//   pnpm --filter @dgipr/poster-renderer poster:preview [copy.json] [scene.png]
+//   pnpm --filter @dgipr/poster-renderer poster:preview [copy.json] [scene.png] [variant]
 //
-// Defaults to the karjamukti campaign copy. Writes <copy>.preview.png next to the input.
+// Defaults to the karjamukti copy. With no [variant] it renders all three layouts
+// (arch/split/bottom), writing <copy>.preview-<variant>.png next to the input; pass a single
+// variant name to render just that one.
 
 import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
@@ -12,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import { CopySchema } from '@dgipr/schemas';
 import { generatePoster } from '../src/generate-poster.js';
+import { POSTER_VARIANTS, type PosterVariant } from '../src/poster-template.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_COPY = resolve(
@@ -34,24 +37,34 @@ async function placeholderScene(): Promise<Buffer> {
   return sharp(Buffer.from(svg)).png().toBuffer();
 }
 
+const isVariant = (value: string): value is PosterVariant =>
+  (POSTER_VARIANTS as readonly string[]).includes(value);
+
 async function main(): Promise<void> {
-  const copyPath = resolve(process.argv[2] ?? DEFAULT_COPY);
-  const scenePath = process.argv[3];
+  // A trailing arg naming a variant is pulled out; the rest are [copy.json] [scene.png].
+  const args = process.argv.slice(2);
+  const variantArg = args.find(isVariant);
+  const positional = args.filter((a) => a !== variantArg);
+
+  const copyPath = resolve(positional[0] ?? DEFAULT_COPY);
+  const scenePath = positional[1];
+  const variants: readonly PosterVariant[] = variantArg
+    ? [variantArg]
+    : POSTER_VARIANTS;
 
   const copy = CopySchema.parse(JSON.parse(await readFile(copyPath, 'utf8')));
   const sceneImage = scenePath
     ? await readFile(resolve(scenePath))
     : await placeholderScene();
 
-  const { png } = await generatePoster({ copy, sceneImage });
-
-  const outPath = join(
-    dirname(copyPath),
-    copyPath.replace(/\.copy\.json$/i, '').split(/[\\/]/).pop() + '.preview.png',
-  );
-  await writeFile(outPath, png);
+  const base = copyPath.replace(/\.copy\.json$/i, '').split(/[\\/]/).pop();
   console.log(`post_type: ${copy.post_type}`);
-  console.log(`Wrote ${outPath}`);
+  for (const variant of variants) {
+    const { png } = await generatePoster({ copy, sceneImage, variant });
+    const outPath = join(dirname(copyPath), `${base}.preview-${variant}.png`);
+    await writeFile(outPath, png);
+    console.log(`Wrote ${outPath}`);
+  }
 }
 
 main().catch((error: unknown) => {

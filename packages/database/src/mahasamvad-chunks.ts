@@ -2,6 +2,7 @@
 // supabase/migrations/0001_mahasamvad_chunks.sql).
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Category } from './generations.js';
 
 export const MAHASAMVAD_CHUNKS_TABLE = 'mahasamvad_chunks';
 
@@ -17,6 +18,8 @@ export type ChunkRow = Readonly<{
   publishedTime: string | null;
   categories: readonly string[];
   tags: readonly string[];
+  // Coarse style bucket this chunk belongs to; scopes retrieval (see migration 0004).
+  styleCategory: Category;
   embedding: readonly number[];
 }>;
 
@@ -37,6 +40,7 @@ function toDbRow(row: ChunkRow): Record<string, unknown> {
     published_time: row.publishedTime,
     categories: row.categories,
     tags: row.tags,
+    style_category: row.styleCategory,
     embedding: toVectorLiteral(row.embedding),
   };
 }
@@ -64,15 +68,18 @@ type MatchDbRow = {
 
 // Vector similarity search via the match_mahasamvad_chunks RPC. Embeds must already
 // be produced by the same model (text-embedding-3-large, 3072 dims); the vector is
-// sent as the halfvec literal the RPC expects.
+// sent as the halfvec literal the RPC expects. `filterCategory` scopes the search to
+// one style bucket ('news' / 'scheme'); null/undefined searches the whole table.
 export async function matchChunks(
   client: SupabaseClient,
   queryEmbedding: readonly number[],
   matchCount = 5,
+  filterCategory: Category | null = null,
 ): Promise<MatchRow[]> {
   const { data, error } = await client.rpc('match_mahasamvad_chunks', {
     query_embedding: toVectorLiteral(queryEmbedding),
     match_count: matchCount,
+    filter_category: filterCategory,
   });
   if (error) {
     throw new Error(`Failed to match chunks: ${error.message}`);

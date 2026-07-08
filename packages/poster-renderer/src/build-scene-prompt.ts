@@ -29,3 +29,24 @@ export function buildScenePrompt(copy: Copy): string {
     NO_TEXT,
   ].join('\n');
 }
+
+// Scene prompt for the LANDSCAPE article image (article-template.ts). Same documentary photo,
+// but composed for a full-bleed landscape frame with a text panel on the LEFT: the subject sits
+// to the RIGHT and the left side is kept calm and open (sky, field, soft blur) so the maroon
+// headline stays legible over it.
+export function buildArticleScenePrompt(copy: Copy): string {
+  const subject = copy.scene_brief.trim();
+  return [
+    'A single photorealistic, documentary-style photograph for the full-bleed background of a',
+    'wide LANDSCAPE (16:9) Government of Maharashtra public-information banner.',
+    'Subject: ' + subject,
+    'Style: real, natural daylight; authentic skin, fabric and material textures; realistic depth',
+    'of field; candid, dignified and hopeful mood. Rich, saturated colours that suit an official',
+    'government campaign. Do NOT use illustration, cartoon, flat vector art, 3D render or collage.',
+    'Composition: place the main subject in the RIGHT half / right third of the frame, facing or',
+    'looking toward the left. Keep the LEFT third calm, simple and uncluttered — open sky, field',
+    'or gently blurred background with no busy detail — so a headline can be overlaid there. The',
+    'image must read well when it fills the whole landscape banner edge to edge.',
+    NO_TEXT,
+  ].join('\n');
+}

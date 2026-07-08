@@ -1,3 +1,5 @@
+import type { ArticleCategory } from './generation/category-prompt.js';
+
 export const CONTENT_ENGINE_PACKAGE = '@dgipr/content-engine';
 
 // Generation pipeline — the entry points the backend API imports.
@@ -9,6 +11,7 @@ export {
   type GenerateArticlePhase,
   type GenerateArticleOptions,
 } from './generation/generate-article.js';
+export { polishArticleWithSarvam } from './generation/polish-article.js';
 export { generateCopy } from './generation/generate-copy.js';
 export {
   reviseArticle,
@@ -27,5 +30,7 @@ export type ContentChunk = Readonly<{
   publishedTime: string | null;
   categories: readonly string[];
   tags: readonly string[];
+  // Coarse style bucket (news vs scheme) this chunk is a reference for; scopes retrieval.
+  styleCategory: ArticleCategory;
 }>;
 

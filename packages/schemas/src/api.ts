@@ -2,10 +2,19 @@
 // parsing) and apps/web (typed fetch wrappers + client-side validation).
 
 import { z } from 'zod';
-import { CopySchema } from './copy.js';
+import { CopySchema, DesignModeSchema } from './copy.js';
 
 export const OutputTypeSchema = z.enum(['article', 'poster', 'both']);
 export type OutputType = z.infer<typeof OutputTypeSchema>;
+
+// Which Mahasamvad voice to write in: 'scheme' (योजना-लेख feature), 'news' (बातमी
+// report), or 'twitter' (n8n-backed poster + X caption, background task).
+export const CategorySchema = z.enum(['news', 'scheme', 'twitter']);
+export type Category = z.infer<typeof CategorySchema>;
+
+// Poster design mode for the Twitter flow ('onbrand'/'adaptive' reuse master
+// templates, 'fresh' paints a new background) is imported from copy.ts above —
+// same values, single source of truth. The package barrel re-exports it via copy.js.
 
 export const GenerationStatusSchema = z.enum([
   'queued',
@@ -22,7 +31,11 @@ export const GenerationStepSchema = z.enum([
   'draft',
   'coverage',
   'faithfulness',
+  // Twitter (n8n social-post) stages: classify → copy (reused) → image → caption.
+  'classify',
   'copy',
+  'image',
+  'caption',
   'scene',
   'render',
   'revise_article',
@@ -44,6 +57,15 @@ export const CreateGenerationRequestSchema = z.object({
   // The Marathi note (टिपणी) — sole factual source for everything generated.
   note: z.string().trim().min(20).max(60_000),
   outputType: OutputTypeSchema,
+  // The Mahasamvad voice to write in. Defaults to 'scheme' (the original behaviour).
+  category: CategorySchema.default('scheme'),
+  // Poster design mode for the Twitter flow (ignored for news/scheme). The runner
+  // defaults it to 'onbrand' when absent for a twitter request.
+  designMode: DesignModeSchema.optional(),
+  // Optional editorial angle / title directive supplied by the user. NOT a fact
+  // source — only steers emphasis + heading. Empty/absent ⇒ the model picks its
+  // own angle (today's behaviour). Consumed by the engine in later parts.
+  heading: z.string().trim().max(200).optional(),
 });
 export type CreateGenerationRequest = z.infer<
   typeof CreateGenerationRequestSchema
@@ -77,12 +99,15 @@ export const UpdateCopyResponseSchema = z.object({
 });
 export type UpdateCopyResponse = z.infer<typeof UpdateCopyResponseSchema>;
 
-// History card.
+// History card. `category` + `step` let the web tasks panel filter to twitter
+// runs and drive the staged progress bar from the list endpoint on refresh.
 export const GenerationSummarySchema = z.object({
   id: z.string(),
   createdAt: z.string(),
   outputType: OutputTypeSchema,
+  category: CategorySchema,
   status: GenerationStatusSchema,
+  step: GenerationStepSchema.nullable(),
   noteExcerpt: z.string(),
   headline: z.string().nullable(),
   posterUrl: z.string().nullable(),
@@ -102,7 +127,12 @@ export const GenerationDetailSchema = z.object({
   status: GenerationStatusSchema,
   step: GenerationStepSchema.nullable(),
   outputType: OutputTypeSchema,
+  category: CategorySchema,
+  // Poster design mode the run was created with (null for non-twitter rows).
+  designMode: DesignModeSchema.nullable(),
   note: z.string(),
+  // Optional editorial angle the run was created with (null for pre-heading rows).
+  heading: z.string().nullable(),
   article: z.string().nullable(),
   factCheck: z.string().nullable(),
   copy: CopySchema.nullable(),

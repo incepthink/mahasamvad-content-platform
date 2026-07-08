@@ -88,17 +88,22 @@ function normalizePost(post: WpPost): MahasamvadPost {
   };
 }
 
+// Fetch all posts in a category, or — when `maxPosts` is given — stop once that many
+// have been collected. The cap matters for large categories (e.g. वृत्त विशेष has
+// ~14k posts): a fine-tuning pilot only needs a few dozen, not every page.
 export async function fetchMahasamvadCategoryPosts(
   categoryId: number,
+  maxPosts?: number,
 ): Promise<MahasamvadPost[]> {
   const posts: MahasamvadPost[] = [];
   let page = 1;
   let totalPages = 1;
+  const perPage = maxPosts ? Math.min(100, maxPosts) : 100;
 
   do {
     const url =
       `${SITE}/wp-json/wp/v2/posts?categories=${categoryId}` +
-      `&per_page=100&_embed=1&page=${page}`;
+      `&per_page=${perPage}&_embed=1&page=${page}`;
     const response = await fetch(url, { headers: REQUEST_HEADERS });
 
     if (!response.ok) {
@@ -117,25 +122,34 @@ export async function fetchMahasamvadCategoryPosts(
       posts.push(normalizePost(post));
     }
 
+    if (maxPosts && posts.length >= maxPosts) {
+      return posts.slice(0, maxPosts);
+    }
+
     page += 1;
   } while (page <= totalPages);
 
   return posts;
 }
 
-// Run directly (`tsx src/scraping/mahasamvad-rest.ts [categoryId]`) to fetch a
-// category's posts and write them to data/karjamukti-2026.json.
+// Run directly to fetch a category's posts. Args:
+//   tsx src/scraping/mahasamvad-rest.ts [categoryId] [outputName] [maxPosts]
+// Writes data/<outputName>.json. maxPosts caps huge categories (e.g. वृत्त विशेष has
+// ~14k posts — a style-reference corpus only needs a few hundred). Defaults reproduce
+// the original karjamukti (scheme) scrape when run with no args.
 if (
   process.argv[1] &&
   import.meta.url === pathToFileURL(process.argv[1]).href
 ) {
   const categoryId = Number(process.argv[2]) || KARJAMUKTI_2026_CATEGORY_ID;
+  const outputName = process.argv[3] ?? 'karjamukti-2026';
+  const maxPosts = Number(process.argv[4]) || undefined;
   const outputPath = resolve(
     dirname(fileURLToPath(import.meta.url)),
-    '../../data/karjamukti-2026.json',
+    `../../data/${outputName}.json`,
   );
 
-  fetchMahasamvadCategoryPosts(categoryId)
+  fetchMahasamvadCategoryPosts(categoryId, maxPosts)
     .then(async (posts) => {
       await mkdir(dirname(outputPath), { recursive: true });
       await writeFile(outputPath, JSON.stringify(posts, null, 2), 'utf8');

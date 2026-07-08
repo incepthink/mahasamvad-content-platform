@@ -9,6 +9,7 @@ export const STR = {
   appSubtitle: 'माहिती व जनसंपर्क महासंचालनालय, महाराष्ट्र शासन',
   navNew: 'नवीन मजकूर',
   navHistory: 'मागील काम',
+  poweredBy: 'Powered by',
 
   // New-generation form
   newTitle: 'नवीन लेख / पोस्टर तयार करा',
@@ -17,6 +18,31 @@ export const STR = {
   notePlaceholder:
     'उदा. शासन निर्णय, बैठकीची टिपणी, योजनेची माहिती… ही टिपणीच लेखाचा एकमेव आधार असेल.',
   uploadTxt: 'किंवा .txt फाईल निवडा',
+  headingLabel: 'शीर्षक किंवा लेखाचा रोख (ऐच्छिक)',
+  headingHint:
+    'शीर्षक द्या, किंवा लेखाचा रोख थोडक्यात सांगा — रिकामे ठेवल्यास मंच स्वतः रोख ठरवेल.',
+  headingPlaceholder: 'उदा. कर्जमुक्तीमुळे ग्रामीण अर्थव्यवस्थेला नवी ऊर्जा',
+  categoryLabel: 'लेखाचा प्रकार?',
+  categoryScheme: 'योजना-लेख',
+  categorySchemeDesc: 'सविस्तर, चिंतनशील महासंवाद फीचर-लेख',
+  categoryNews: 'बातमी',
+  categoryNewsDesc: 'नेमकी, वस्तुनिष्ठ बातमी (dateline शैली)',
+  categoryTwitter: 'ट्विटर पोस्ट',
+  categoryTwitterDesc: 'X (ट्विटर) साठी मराठी पोस्टर + कॅप्शन',
+
+  // Design-mode selector (shown only for the ट्विटर पोस्ट flow)
+  designModeLabel: 'पोस्टरची रचना-शैली?',
+  designOnbrand: 'ब्रँडनुसार',
+  designOnbrandDesc: 'DGIPR ठरलेल्या टेम्पलेटनुसार पोस्टर',
+  designAdaptive: 'अनुकूल',
+  designAdaptiveDesc: 'टेम्पलेटचा आधार, पण विषयानुसार बदल',
+  designFresh: 'नवीन',
+  designFreshDesc: 'विषयानुसार पूर्णपणे नवे चित्र',
+
+  // Shown on the ट्विटर पोस्ट card while one such task is already running
+  twitterBusyInfo:
+    'एक ट्विटर पोस्ट सध्या तयार होत आहे. ती पूर्ण झाल्यावर नवीन सुरू करता येईल.',
+
   outputTypeLabel: 'काय तयार करायचे?',
   outputArticle: 'लेख',
   outputArticleDesc: 'महासंवाद शैलीतील सविस्तर मराठी लेख',
@@ -67,6 +93,15 @@ export const STR = {
   sendingFeedback: 'पाठवत आहोत…',
   feedbackTooShort: 'कृपया थोडक्यात अभिप्राय लिहा.',
 
+  // Background tasks panel (ट्विटर पोस्ट runs, tracked in the navbar)
+  tasksButton: 'सुरू असलेली कामे',
+  tasksTitle: 'ट्विटर पोस्ट — सुरू असलेली कामे',
+  tasksEmpty: 'सध्या कोणतेही काम सुरू नाही.',
+  taskCopyCaption: 'कॅप्शन कॉपी करा',
+  taskDownloadPoster: 'पोस्टर डाउनलोड करा',
+  taskRegenerate: 'पुन्हा तयार करा',
+  taskViewFull: 'पूर्ण पाहा',
+
   // History
   historyTitle: 'मागील काम',
   historyEmpty: 'अजून काहीही तयार केलेले नाही.',
@@ -84,7 +119,10 @@ export const STEP_LABELS: Record<GenerationStep, string> = {
   draft: 'लेख लिहित आहोत…',
   coverage: 'लेखाची पूर्णता तपासत आहोत…',
   faithfulness: 'तथ्यांची पडताळणी करत आहोत…',
+  classify: 'विषय ओळखत आहोत…',
   copy: 'पोस्टरचा मजकूर तयार करत आहोत…',
+  image: 'पोस्टरचे चित्र तयार करत आहोत…',
+  caption: 'ट्विटर कॅप्शन लिहित आहोत…',
   scene: 'पोस्टरचे चित्र तयार करत आहोत…',
   render: 'पोस्टर जुळवत आहोत…',
   revise_article: 'अभिप्रायानुसार लेख सुधारत आहोत…',

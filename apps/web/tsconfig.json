@@ -25,6 +25,7 @@
     "app",
     "components",
     "lib",
+    "svg.d.ts",
     "next-env.d.ts",
     ".next/types/**/*.ts"
   ],

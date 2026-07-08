@@ -11,16 +11,20 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { JSDOM } from 'jsdom';
 import type { ContentChunk } from '../index.js';
+import type { ArticleCategory } from '../generation/category-prompt.js';
 import type { MahasamvadPost } from '../scraping/mahasamvad-rest.js';
 
 export type ChunkOptions = Readonly<{
   // Preferred chunk size in characters. A chunk is closed once adding the next
   // paragraph would push it past this size.
   targetChars: number;
+  // Style bucket every produced chunk is tagged with; scopes retrieval at query time.
+  styleCategory: ArticleCategory;
 }>;
 
 const DEFAULT_OPTIONS: ChunkOptions = {
   targetChars: 1000,
+  styleCategory: 'scheme',
 };
 
 // Extract paragraph texts from an article's rendered HTML. Mirrors the JSDOM
@@ -58,6 +62,7 @@ export function chunkArticle(
       publishedTime: post.publishedTime,
       categories: post.categories,
       tags: post.tags,
+      styleCategory: options.styleCategory,
     });
     buffer = [];
     bufferChars = 0;
@@ -84,17 +89,26 @@ export function chunkArticles(
   return posts.flatMap((post) => chunkArticle(post, options));
 }
 
-// Run directly (`tsx src/chunking/chunk-articles.ts`) to chunk the scraped
-// karjamukti posts and write them to data/karjamukti-2026.chunks.json.
+// Run directly to chunk a scraped dataset. Args:
+//   tsx src/chunking/chunk-articles.ts [datasetName] [styleCategory]
+// Reads data/<datasetName>.json, writes data/<datasetName>.chunks.json, tagging every
+// chunk with <styleCategory> ('news' | 'scheme'). Defaults reproduce the original
+// karjamukti (scheme) behaviour when run with no args.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const datasetName = process.argv[2] ?? 'karjamukti-2026';
+  const styleCategory: ArticleCategory =
+    process.argv[3] === 'news' ? 'news' : 'scheme';
   const dataDir = resolve(dirname(fileURLToPath(import.meta.url)), '../../data');
-  const inputPath = resolve(dataDir, 'karjamukti-2026.json');
-  const outputPath = resolve(dataDir, 'karjamukti-2026.chunks.json');
+  const inputPath = resolve(dataDir, `${datasetName}.json`);
+  const outputPath = resolve(dataDir, `${datasetName}.chunks.json`);
 
   readFile(inputPath, 'utf8')
     .then(async (raw) => {
       const posts = JSON.parse(raw) as MahasamvadPost[];
-      const chunks = chunkArticles(posts);
+      const chunks = chunkArticles(posts, {
+        ...DEFAULT_OPTIONS,
+        styleCategory,
+      });
 
       await mkdir(dataDir, { recursive: true });
       await writeFile(outputPath, JSON.stringify(chunks, null, 2), 'utf8');

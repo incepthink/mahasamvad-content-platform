@@ -4,11 +4,14 @@ import { use } from 'react';
 import { useRouter } from 'next/navigation';
 import { useGeneration } from '../../../lib/useGeneration';
 import { createGeneration } from '../../../lib/api';
+import { useTasks } from '../../../lib/TasksProvider';
 import { STR } from '../../../lib/strings';
 import { ProgressSteps } from '../../../components/ProgressSteps';
+import { TaskProgressBar } from '../../../components/TaskProgressBar';
 import { StatusChip } from '../../../components/StatusChip';
 import { ArticleView } from '../../../components/ArticleView';
 import { PosterPanel } from '../../../components/PosterPanel';
+import { SocialPostView } from '../../../components/SocialPostView';
 
 export default function GenerationDetailPage({
   params,
@@ -17,14 +20,23 @@ export default function GenerationDetailPage({
 }) {
   const { id } = use(params);
   const router = useRouter();
+  const { addTask, openPanel } = useTasks();
   const { detail, error, refresh } = useGeneration(id);
 
   const retry = async () => {
     if (!detail) return;
     const newId = await createGeneration({
       note: detail.note,
+      heading: detail.heading ?? undefined,
+      category: detail.category,
       outputType: detail.outputType,
+      designMode: detail.designMode ?? undefined,
     });
+    // Twitter reruns are background tasks: track + surface them in the panel.
+    if (detail.category === 'twitter') {
+      addTask(newId);
+      openPanel();
+    }
     router.push(`/generations/${newId}`);
   };
 
@@ -67,7 +79,18 @@ export default function GenerationDetailPage({
       </div>
 
       {(detail.status === 'queued' || detail.status === 'running') &&
-        !posterBusy && <ProgressSteps detail={detail} />}
+        !posterBusy &&
+        (detail.category === 'twitter' ? (
+          <section className="card" aria-live="polite">
+            <h2>{STR.progressTitle}</h2>
+            <p className="hint">{STR.progressHint}</p>
+            <div style={{ marginTop: 16 }}>
+              <TaskProgressBar status={detail.status} step={detail.step} />
+            </div>
+          </section>
+        ) : (
+          <ProgressSteps detail={detail} />
+        ))}
 
       {detail.status === 'failed' && (
         <section className="card">
@@ -81,20 +104,23 @@ export default function GenerationDetailPage({
         </section>
       )}
 
-      {(detail.status === 'completed' || posterBusy) && (
-        <>
-          {detail.article ? (
-            <ArticleView detail={detail} onFeedbackSent={refresh} />
-          ) : null}
-          {detail.posterUrl ? (
-            <PosterPanel
-              detail={detail}
-              onChanged={refresh}
-              busy={posterBusy}
-            />
-          ) : null}
-        </>
-      )}
+      {(detail.status === 'completed' || posterBusy) &&
+        (detail.category === 'twitter' ? (
+          <SocialPostView detail={detail} onRegenerate={retry} />
+        ) : (
+          <>
+            {detail.article ? (
+              <ArticleView detail={detail} onFeedbackSent={refresh} />
+            ) : null}
+            {detail.posterUrl ? (
+              <PosterPanel
+                detail={detail}
+                onChanged={refresh}
+                busy={posterBusy}
+              />
+            ) : null}
+          </>
+        ))}
     </main>
   );
 }
