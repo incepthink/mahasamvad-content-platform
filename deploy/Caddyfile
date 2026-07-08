@@ -1,0 +1,21 @@
+# Caddy reverse proxy with automatic HTTPS (Let's Encrypt).
+# DNS for both names must already point at this host (A records -> Elastic IP),
+# and ports 80/443 must be open, before Caddy can obtain certs.
+# Change the ACME email if you want expiry notices elsewhere.
+
+{
+	email incepthinkhashcase@gmail.com
+}
+
+# Public API — this is the value of NEXT_PUBLIC_API_URL on Vercel (https://api.indicex.xyz)
+api.indicex.xyz {
+	reverse_proxy api:3001
+}
+
+# n8n editor + webhooks. The API calls n8n internally (http://n8n:5678), so this
+# public endpoint is mainly for you to open the editor and, if you ever POST the
+# webhook from outside the box, for that. Header-Auth on the webhook node still
+# applies on top of this.
+n8n.indicex.xyz {
+	reverse_proxy n8n:5678
+}

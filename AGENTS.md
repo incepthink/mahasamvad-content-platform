@@ -23,9 +23,12 @@ it are implemented and working end-to-end:
   (`packages/content-engine/src/{scraping,chunking,embedding,retrieval}`)
 - Article generation with coverage + faithfulness verification
   (`packages/content-engine/src/generation/generate-article.ts`)
-- Poster generation: a text-free AI background photo, typeset in HTML and
-  screenshotted with Chromium so Devanagari is never mangled
-  (`packages/poster-renderer`)
+- Poster generation, two modes selected by `ARTICLE_POSTER_MODE`:
+  - `n8n` (default): the `article-poster-v1-api` workflow paints the whole landscape
+    article poster (incl. the single Marathi headline) by editing a master template —
+    same external-render pattern as the twitter path (`renderArticlePosterViaN8n`).
+  - `html`: a text-free AI background photo typeset in HTML and screenshotted with
+    Chromium so Devanagari is never mangled (`packages/poster-renderer`) — kept as fallback.
 - Feedback/revision loops for the article and poster text/scene
   (`packages/content-engine/src/generation/revise-*.ts`)
 - A Fastify API (`apps/api`) exposing generation, feedback, and poster-edit
@@ -36,7 +39,17 @@ it are implemented and working end-to-end:
   staff: create a generation, watch progress, edit poster text, send feedback,
   and browse history
 
-Not implemented yet: Canva integration, n8n workflows, authentication.
+Two n8n workflows are implemented and host-independent for deployment, both fetching
+their master templates from Supabase Storage over HTTPS (never local disk):
+- `social-post-v2-api` (the 'twitter' generation path) — five brand masters
+  `posters/references/master-*.png`, seeded via `upload:references`.
+- `article-poster-v1-api` (the default news/scheme poster path) — one landscape master
+  `posters/references/master-article.png`, seeded via `upload:article-master`; the API
+  sends `{ headline, scene_brief }` and the workflow edits the master with gpt-image-2.
+Both are committed under `n8n/workflow-exports/` (`social-post-v2-api.json`,
+`article-poster-v1-api.json`) — the artifacts to import into the AWS n8n.
+
+Not implemented yet: Canva integration, authentication.
 
 ## Planned Architecture
 
@@ -47,7 +60,7 @@ Not implemented yet: Canva integration, n8n workflows, authentication.
 - `packages/schemas`: shared Zod schemas and TypeScript types (poster copy + generation API)
 - `packages/poster-renderer`: poster-generation logic (Canva integration still future)
 - `supabase/migrations`: SQL migrations
-- `n8n/workflow-exports`: future exported n8n workflows
+- `n8n/workflow-exports`: committed n8n workflow exports (`social-post-v2-api.json`, `article-poster-v1-api.json`)
 - `docs`: project documentation
 
 ## Product Principles

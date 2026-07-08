@@ -10,6 +10,7 @@ import { ProgressSteps } from '../../../components/ProgressSteps';
 import { TaskProgressBar } from '../../../components/TaskProgressBar';
 import { StatusChip } from '../../../components/StatusChip';
 import { ArticleView } from '../../../components/ArticleView';
+import { FiveWOneHView } from '../../../components/FiveWOneHView';
 import { PosterPanel } from '../../../components/PosterPanel';
 import { SocialPostView } from '../../../components/SocialPostView';
 
@@ -66,6 +67,11 @@ export default function GenerationDetailPage({
       detail.step === 'scene' ||
       detail.step === 'render');
 
+  // An on-demand English translation runs against a completed article; keep the
+  // finished article on screen (ArticleView shows its own inline indicator)
+  // instead of swapping to the step list, mirroring the poster-busy pattern.
+  const articleBusy = !!detail.article && detail.step === 'translate';
+
   return (
     <main className="page">
       <div
@@ -80,6 +86,7 @@ export default function GenerationDetailPage({
 
       {(detail.status === 'queued' || detail.status === 'running') &&
         !posterBusy &&
+        !articleBusy &&
         (detail.category === 'twitter' ? (
           <section className="card" aria-live="polite">
             <h2>{STR.progressTitle}</h2>
@@ -104,11 +111,12 @@ export default function GenerationDetailPage({
         </section>
       )}
 
-      {(detail.status === 'completed' || posterBusy) &&
+      {(detail.status === 'completed' || posterBusy || articleBusy) &&
         (detail.category === 'twitter' ? (
           <SocialPostView detail={detail} onRegenerate={retry} />
         ) : (
           <>
+            {detail.fiveWOneH ? <FiveWOneHView detail={detail} /> : null}
             {detail.article ? (
               <ArticleView detail={detail} onFeedbackSent={refresh} />
             ) : null}

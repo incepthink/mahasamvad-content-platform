@@ -48,7 +48,20 @@
       "Bash(git -C \"c:/Users/shaik/Desktop/dev-work/mahasamvad-content-platform\" log --oneline --all -20)",
       "Bash(git -C \"c:/Users/shaik/Desktop/dev-work/mahasamvad-content-platform\" stash show --stat b799cc6)",
       "Bash(git checkout *)",
-      "Bash(git stash *)"
+      "Bash(git stash *)",
+      "Bash(pnpm --filter @dgipr/schemas build)",
+      "Bash(pnpm --filter @dgipr/database build)",
+      "Bash(pnpm --filter @dgipr/api build)",
+      "Bash(pnpm typecheck *)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(node --env-file=../../.env check-migrations.mjs)",
+      "Bash(node --env-file=.env -e ' *)",
+      "Bash(node --env-file=../../.env -e ' *)",
+      "Bash(curl -s -X POST http://localhost:3001/api/generations/does-not-exist/translate -H \"content-type: application/json\" -d '{}')",
+      "Bash(curl -s -o /dev/null -w '%{http_code}\\\\n' -X POST http://localhost:3001/api/generations/234b8a67-d93d-40f1-a8f7-5f2212aecccc/translate -H 'content-type: application/json' -d '{}')",
+      "Bash(curl -s http://localhost:3001/api/generations/234b8a67-d93d-40f1-a8f7-5f2212aecccc)",
+      "Bash(node -e \"const p=require\\('./packages/poster-renderer/package.json'\\); console.log\\(JSON.stringify\\(p.scripts,null,2\\)\\)\")",
+      "Bash(node -e \"const p=require\\('./packages/content-engine/package.json'\\); console.log\\(JSON.stringify\\(p.scripts,null,2\\)\\)\")"
     ]
   }
 }

@@ -1,0 +1,374 @@
+{
+  "name": "social-post-v2-api",
+  "nodes": [
+    {
+      "id": "w1",
+      "name": "Webhook",
+      "parameters": {
+        "httpMethod": "POST",
+        "options": {},
+        "path": "dgipr-social-post",
+        "responseMode": "responseNode"
+      },
+      "position": [-240, 0],
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "webhookId": "b1c2d3e4-0002-4abc-8def-000000000002"
+    },
+    {
+      "id": "s1",
+      "name": "DGIPR Post Form",
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "a1", "name": "meeting_notes", "type": "string", "value": "={{ $json.body.meeting_notes }}" },
+            { "id": "a2", "name": "design_mode", "type": "string", "value": "={{ $json.body.design_mode }}" },
+            { "id": "a3", "name": "generation_id", "type": "string", "value": "={{ $json.body.generation_id }}" },
+            { "id": "a4", "name": "progress_url", "type": "string", "value": "={{ $json.body.progress_url }}" }
+          ]
+        },
+        "includeOtherFields": false,
+        "mode": "manual",
+        "options": {}
+      },
+      "position": [-20, 0],
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4
+    },
+    {
+      "id": "n2",
+      "name": "Build Classify Request",
+      "parameters": {
+        "jsCode": "// Classify the meeting notes into ONE DGIPR post type.\nconst notes = ($input.first().json.meeting_notes || '').toString().trim();\nif (!notes) { throw new Error('No \"meeting_notes\" received from the form.'); }\n\nconst system = [\n  'You are an editorial classifier for DGIPR Maharashtra (Directorate General of Information & Public Relations).',\n  'You read raw meeting notes and decide which ONE poster format best fits the PRIMARY message.',\n  'If the notes cover several topics, pick the single most important/foreground topic.',\n  'Respond with STRICT JSON only.',\n  '',\n  'Post types:',\n  '- \"alert\": urgent public-safety warning or advisory (caution, dos and donts, helpline). Kicker + a few action points.',\n  '- \"campaign\": a drive / event / service / vaccination / scheme that has a date, an audience, a call-to-action and figures.',\n  '- \"info_bullets\": general information, achievements or arrangements conveyed as a headline plus a list of points.',\n  '- \"quote\": a statement or quote by a leader/official (e.g. the Chief Minister), with attribution and supporting points.',\n  '- \"timeline\": a chronological sequence of dated milestones or achievements.',\n  '',\n  'title: a short Marathi (Devanagari) working title for the post.',\n  'reason: one short English sentence on why this type fits best.',\n].join('\\n');\n\nconst body = {\n  model: 'gpt-4o-mini',\n  temperature: 0,\n  messages: [\n    { role: 'system', content: system },\n    { role: 'user', content: 'Meeting notes:\\n' + notes },\n  ],\n  response_format: {\n    type: 'json_schema',\n    json_schema: {\n      name: 'post_classification',\n      strict: true,\n      schema: {\n        type: 'object',\n        additionalProperties: false,\n        properties: {\n          post_type: { type: 'string', enum: ['alert', 'campaign', 'info_bullets', 'quote', 'timeline'] },\n          title: { type: 'string' },\n          reason: { type: 'string' },\n        },\n        required: ['post_type', 'title', 'reason'],\n      },\n    },\n  },\n};\n\nreturn [{ json: { body, meeting_notes: notes } }];\n",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      },
+      "position": [200, 0],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2
+    },
+    {
+      "credentials": {
+        "httpHeaderAuth": { "id": "eFTnHTRa1l1U4ukJ", "name": "OpenAI Bearer (DGIPR)" }
+      },
+      "id": "n3",
+      "name": "Classify L0",
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "contentType": "json",
+        "genericAuthType": "httpHeaderAuth",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "method": "POST",
+        "options": { "timeout": 120000 },
+        "sendBody": true,
+        "specifyBody": "json",
+        "url": "https://api.openai.com/v1/chat/completions"
+      },
+      "position": [420, 0],
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4
+    },
+    {
+      "id": "p1",
+      "name": "Ping Classify",
+      "parameters": {
+        "contentType": "json",
+        "jsonBody": "={{ JSON.stringify({ step: 'classify' }) }}",
+        "method": "POST",
+        "options": { "timeout": 5000 },
+        "sendBody": true,
+        "specifyBody": "json",
+        "url": "={{ $('DGIPR Post Form').first().json.progress_url }}"
+      },
+      "position": [420, 220],
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "n4",
+      "name": "Build Copy Request",
+      "parameters": {
+        "jsCode": "// Select the per-type copy schema from the classifier result, then build the copy request.\nconst res = $input.first().json;\nconst content = res && res.choices && res.choices[0] && res.choices[0].message ? res.choices[0].message.content : undefined;\nif (!content) { throw new Error('No classifier content: ' + JSON.stringify(res).slice(0, 500)); }\n\nlet cls;\ntry { cls = typeof content === 'string' ? JSON.parse(content) : content; }\ncatch (e) { throw new Error('Classifier JSON parse failed: ' + e.message + ' | raw: ' + String(content).slice(0, 400)); }\n\nconst TYPES = ['alert', 'campaign', 'info_bullets', 'quote', 'timeline'];\nlet post_type = cls.post_type;\nif (TYPES.indexOf(post_type) === -1) post_type = 'info_bullets';\n\nconst notes = $('DGIPR Post Form').first().json.meeting_notes;\n\nconst str = { type: 'string' };\nconst bulletItem = {\n  type: 'object', additionalProperties: false,\n  properties: { text: str, emphasis: { type: 'array', items: str } },\n  required: ['text', 'emphasis'],\n};\nconst obj = (props, required) => ({ type: 'object', additionalProperties: false, properties: props, required: required });\n\nconst REG = {\n  alert: {\n    system: [\n      'ALERT poster. Fields:',\n      '- kicker: 1-2 word Marathi alert tag (e.g. सावधान, सूचना, इशारा).',\n      '- headline: punchy Marathi headline, 3-6 words.',\n      '- subhead: one supporting Marathi line, about 8-12 words.',\n      '- bullets: EXACTLY 3 items; each text is a short Marathi action (<=10 words); emphasis = 1-2 substrings copied VERBATIM from that same text.',\n      '- scene_brief: one English sentence describing only the background imagery.',\n    ].join('\\n'),\n    schema: obj({ kicker: str, headline: str, subhead: str, bullets: { type: 'array', items: bulletItem }, scene_brief: str }, ['kicker', 'headline', 'subhead', 'bullets', 'scene_brief']),\n  },\n  campaign: {\n    system: [\n      'CAMPAIGN / DRIVE / SERVICE poster. Fields:',\n      '- kicker: 1-2 word Marathi tag (e.g. मोहीम, लसीकरण, सेवा).',\n      '- headline: the Marathi campaign/event name, 3-7 words.',\n      '- subhead: one Marathi line on the purpose or target.',\n      '- schedule.date and schedule.time: Marathi date and time strings if the notes give them, else empty strings.',\n      '- audience: Marathi eligibility/audience line, else empty string.',\n      '- cta: a strong Marathi call-to-action, else empty string.',\n      '- stats: 2-4 items, each { value (figure as given), label (short Marathi), icon_hint (1-3 English words naming an icon) }. Use only figures present in the notes.',\n      '- scene_brief: one English sentence, background/hero imagery only.',\n    ].join('\\n'),\n    schema: obj({\n      kicker: str, headline: str, subhead: str,\n      schedule: obj({ date: str, time: str }, ['date', 'time']),\n      audience: str, cta: str,\n      stats: { type: 'array', items: obj({ value: str, label: str, icon_hint: str }, ['value', 'label', 'icon_hint']) },\n      scene_brief: str,\n    }, ['kicker', 'headline', 'subhead', 'schedule', 'audience', 'cta', 'stats', 'scene_brief']),\n  },\n  info_bullets: {\n    system: [\n      'INFORMATIONAL poster (headline + points). Fields:',\n      '- kicker: short Marathi tag, else empty string.',\n      '- headline: Marathi headline, 3-8 words.',\n      '- subhead: one supporting Marathi line.',\n      '- bullets: 4 to 6 items; each text a concise Marathi point; emphasis = 0-2 substrings copied VERBATIM from that text.',\n      '- scene_brief: one English sentence, background imagery only.',\n    ].join('\\n'),\n    schema: obj({ kicker: str, headline: str, subhead: str, bullets: { type: 'array', items: bulletItem }, scene_brief: str }, ['kicker', 'headline', 'subhead', 'bullets', 'scene_brief']),\n  },\n  quote: {\n    system: [\n      'QUOTE / STATEMENT poster. Fields:',\n      '- topic_label: short Marathi tag (e.g. चर्चा, गुंतवणूक).',\n      '- headline: Marathi subject line (what the statement is about).',\n      '- quote_text: the main Marathi quote (one or two sentences).',\n      '- attribution.name and attribution.title: Marathi name and designation of the speaker.',\n      '- points: 2-3 supporting items, each { text (short Marathi), icon_hint (1-3 English words) }.',\n      '- scene_brief: one English sentence, thematic background imagery only.',\n    ].join('\\n'),\n    schema: obj({\n      topic_label: str, headline: str, quote_text: str,\n      attribution: obj({ name: str, title: str }, ['name', 'title']),\n      points: { type: 'array', items: obj({ text: str, icon_hint: str }, ['text', 'icon_hint']) },\n      scene_brief: str,\n    }, ['topic_label', 'headline', 'quote_text', 'attribution', 'points', 'scene_brief']),\n  },\n  timeline: {\n    system: [\n      'TIMELINE / ACHIEVEMENTS poster. Fields:',\n      '- headline: Marathi headline.',\n      '- intro: one Marathi line introducing the sequence, else empty string.',\n      '- side_label: a longer Marathi phrase used as a bold side/emphasis label, else empty string.',\n      '- milestones: 3-4 items in chronological order, each { date (Marathi date/period), text (short Marathi description) }.',\n      '- scene_brief: one English sentence, background imagery only.',\n    ].join('\\n'),\n    schema: obj({\n      headline: str, intro: str, side_label: str,\n      milestones: { type: 'array', items: obj({ date: str, text: str }, ['date', 'text']) },\n      scene_brief: str,\n    }, ['headline', 'intro', 'side_label', 'milestones', 'scene_brief']),\n  },\n};\n\nconst COMMON = [\n  'You are a senior bilingual (Marathi/English) creative director for DGIPR Maharashtra. You write copy for an OFFICIAL government poster. Respond with STRICT JSON only, no commentary.',\n  'All on-poster copy MUST be natural Marathi in the Devanagari script. The scene_brief is ENGLISH only and describes ONLY background imagery (never any text, words, letters, numbers or logos).',\n  'Base everything strictly on the supplied notes; do not invent facts. If a field is not supported by the notes, use an empty string (and keep arrays to only what the notes support).',\n].join('\\n');\n\nconst reg = REG[post_type];\nconst system = COMMON + '\\n\\n' + reg.system;\n\nconst body = {\n  model: 'gpt-4o-mini',\n  temperature: 0.6,\n  messages: [\n    { role: 'system', content: system },\n    { role: 'user', content: 'Notes for the ' + post_type + ' poster:\\n' + notes },\n  ],\n  response_format: {\n    type: 'json_schema',\n    json_schema: { name: post_type + '_copy', strict: true, schema: reg.schema },\n  },\n};\n\nreturn [{ json: { body, post_type, title: cls.title, meeting_notes: notes } }];\n",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      },
+      "position": [640, 0],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2
+    },
+    {
+      "credentials": {
+        "httpHeaderAuth": { "id": "eFTnHTRa1l1U4ukJ", "name": "OpenAI Bearer (DGIPR)" }
+      },
+      "id": "n5",
+      "name": "Generate Copy L1",
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "contentType": "json",
+        "genericAuthType": "httpHeaderAuth",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "method": "POST",
+        "options": { "timeout": 120000 },
+        "sendBody": true,
+        "specifyBody": "json",
+        "url": "https://api.openai.com/v1/chat/completions"
+      },
+      "position": [860, 0],
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4
+    },
+    {
+      "id": "p2",
+      "name": "Ping Copy",
+      "parameters": {
+        "contentType": "json",
+        "jsonBody": "={{ JSON.stringify({ step: 'copy' }) }}",
+        "method": "POST",
+        "options": { "timeout": 5000 },
+        "sendBody": true,
+        "specifyBody": "json",
+        "url": "={{ $('DGIPR Post Form').first().json.progress_url }}"
+      },
+      "position": [860, 220],
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "n6",
+      "name": "Build Image Prompt",
+      "parameters": {
+        "jsCode": "// Parse the copy JSON and assemble the image prompt for the inferred post type + design mode.\nconst res = $input.first().json;\nconst content = res && res.choices && res.choices[0] && res.choices[0].message ? res.choices[0].message.content : undefined;\nif (!content) { throw new Error('No copy content: ' + JSON.stringify(res).slice(0, 500)); }\n\nlet copy;\ntry { copy = typeof content === 'string' ? JSON.parse(content) : content; }\ncatch (e) { throw new Error('Copy JSON parse failed: ' + e.message + ' | raw: ' + String(content).slice(0, 400)); }\n\nconst post_type = $('Build Copy Request').first().json.post_type;\nconst title = $('Build Copy Request').first().json.title;\n\nconst dmRaw = ($('DGIPR Post Form').first().json.design_mode || '').toString().toLowerCase();\nconst design_mode = dmRaw.indexOf('fresh') !== -1 ? 'fresh' : (dmRaw.indexOf('adaptive') !== -1 ? 'adaptive' : 'onbrand');\n\nconst REF_DIR = 'https://scmwebkxoftkqdyujibw.supabase.co/storage/v1/object/public/posters/references/';\nconst masterByType = {\n  alert: 'master-alert.png',\n  campaign: 'master-campaign.png',\n  info_bullets: 'master-info_bullets.png',\n  quote: 'master-quote.png',\n  timeline: 'master-timeline.png',\n};\nconst masterFile = REF_DIR + (masterByType[post_type] || 'master-alert.png');\n\nconst fmtBullets = (arr) => (arr || []).map((b, i) => {\n  const e = (b.emphasis || []).filter(Boolean);\n  return '  ' + (i + 1) + '. ' + b.text + (e.length ? '  [emphasise: ' + e.join(' | ') + ']' : '');\n}).join('\\n');\n\nfunction buildChange(t, c) {\n  let lines;\n  if (t === 'alert') {\n    lines = [\n      'KICKER (small alert tag near the top): ' + c.kicker,\n      'HEADLINE (largest text block): ' + c.headline,\n      'SUBHEAD (line under the headline): ' + c.subhead,\n      'BULLET POINTS (exactly 3, in the body list zone):',\n      fmtBullets(c.bullets),\n    ];\n  } else if (t === 'campaign') {\n    const sch = c.schedule || {};\n    lines = [\n      'KICKER (small tag near the top): ' + c.kicker,\n      'HEADLINE (largest block, the campaign name): ' + c.headline,\n      'SUBHEAD: ' + c.subhead,\n      'DATE: ' + (sch.date || ''),\n      'TIME: ' + (sch.time || ''),\n      'AUDIENCE / ELIGIBILITY: ' + (c.audience || ''),\n      'CALL TO ACTION (make it prominent): ' + (c.cta || ''),\n      'STAT CALLOUTS (each as icon + figure + label):',\n      (c.stats || []).map((s, i) => '  ' + (i + 1) + '. ' + s.value + ' — ' + s.label + '  [icon: ' + s.icon_hint + ']').join('\\n'),\n    ];\n  } else if (t === 'info_bullets') {\n    lines = [\n      'KICKER (small tag): ' + c.kicker,\n      'HEADLINE (largest block): ' + c.headline,\n      'SUBHEAD: ' + c.subhead,\n      'BULLET POINTS (in the body list zone):',\n      fmtBullets(c.bullets),\n    ];\n  } else if (t === 'quote') {\n    const at = c.attribution || {};\n    lines = [\n      'TOPIC LABEL (small tag near the top): ' + c.topic_label,\n      'HEADLINE (subject line): ' + c.headline,\n      'QUOTE (main text, inside large quotation marks): ' + c.quote_text,\n      'ATTRIBUTION (name then designation): ' + (at.name || '') + ', ' + (at.title || ''),\n      'SUPPORTING POINTS (each as icon + text):',\n      (c.points || []).map((p, i) => '  ' + (i + 1) + '. ' + p.text + '  [icon: ' + p.icon_hint + ']').join('\\n'),\n    ];\n  } else {\n    lines = [\n      'SIDE LABEL (bold side/left emphasis text): ' + (c.side_label || ''),\n      'HEADLINE (top): ' + c.headline,\n      'INTRO: ' + (c.intro || ''),\n      'TIMELINE MILESTONES (dated, top to bottom):',\n      (c.milestones || []).map((m, i) => '  ' + (i + 1) + '. [' + m.date + '] ' + m.text).join('\\n'),\n    ];\n  }\n  return lines.join('\\n');\n}\n\nconst change = buildChange(post_type, copy);\n\nconst BRAND = \"The footer band reads 'माहिती व जनसंपर्क महासंचालनालय, महाराष्ट्र शासन' above a social-handle strip (www.mahasamvad.in, @MahaDGIPR, @MAHARASHTRADGIPR). The top-right carries the Government of Maharashtra emblem with 'महाराष्ट्र शासन'.\";\n\nlet prompt;\nif (design_mode === 'fresh') {\n  prompt = [\n    'Design a single, complete 4:5 portrait OFFICIAL DGIPR Maharashtra government poster from scratch.',\n    'Government public-information aesthetic: bold, high-contrast, highly legible Devanagari (Marathi) typography, clean and trustworthy layout, strong colour blocks suited to the topic.',\n    'Choose a layout appropriate to a \"' + post_type + '\" poster. ' + BRAND,\n    'Render ALL Marathi text crisply and correctly in Devanagari, spelled EXACTLY as given. Do not add English body text beyond the fixed footer handles. One poster, no outer border.',\n    '',\n    'CONTENT TO TYPESET:',\n    change,\n    '',\n    'BACKGROUND IMAGERY (must never cover the text): ' + copy.scene_brief,\n  ].join('\\n');\n} else {\n  const layoutRule = design_mode === 'adaptive'\n    ? \"You MAY re-arrange and resize the template's text zones to best fit the content, but keep its brand colours, header emblem and footer band.\"\n    : \"KEEP the master template's overall layout, proportions, brand colour bands, header and footer zones and safe margins EXACTLY as in the provided image.\";\n  const LOCKED = [\n    'You are editing a master template for an OFFICIAL DGIPR Maharashtra government poster (type: ' + post_type + ').',\n    layoutRule,\n    'Single 4:5 portrait poster. Typography: bold, high-contrast, highly legible Devanagari (Marathi). Government public-notice aesthetic: clean, serious, trustworthy.',\n    'Render ALL Marathi text crisply and correctly in Devanagari, spelled exactly as below.',\n  ].join(' ');\n  prompt = [\n    LOCKED,\n    '',\n    \"REPLACE the editable content of the poster with the following, fitting the master's existing text zones:\",\n    '',\n    change,\n    '',\n    'BACKGROUND IMAGERY (only inside the designated image zone, must never cover the text): ' + copy.scene_brief,\n    '',\n    'Do not add any English text beyond the fixed footer handles. Do not add extra logos. Keep one single poster within the canvas, no outer borders.',\n  ].join('\\n');\n}\n\nreturn [{ json: { prompt, copy, post_type, title, design_mode, masterFile } }];\n",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      },
+      "position": [1080, 0],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2
+    },
+    {
+      "id": "n7",
+      "name": "IF Fresh",
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "cond-fresh-1",
+              "leftValue": "={{ $json.design_mode }}",
+              "operator": { "operation": "equals", "type": "string" },
+              "rightValue": "fresh"
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          }
+        }
+      },
+      "position": [1300, 0],
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2
+    },
+    {
+      "credentials": {
+        "httpHeaderAuth": { "id": "eFTnHTRa1l1U4ukJ", "name": "OpenAI Bearer (DGIPR)" }
+      },
+      "id": "n8",
+      "name": "Generate Image L2",
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "contentType": "json",
+        "genericAuthType": "httpHeaderAuth",
+        "jsonBody": "={{ JSON.stringify({ model: 'gpt-image-2', prompt: $('Build Image Prompt').first().json.prompt, size: '1280x1600', quality: 'high', n: 1 }) }}",
+        "method": "POST",
+        "options": { "timeout": 360000 },
+        "sendBody": true,
+        "specifyBody": "json",
+        "url": "https://api.openai.com/v1/images/generations"
+      },
+      "position": [1520, -140],
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4
+    },
+    {
+      "id": "n9",
+      "name": "Read Master Template",
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.masterFile }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "master"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "position": [1520, 160],
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4
+    },
+    {
+      "credentials": {
+        "httpHeaderAuth": { "id": "eFTnHTRa1l1U4ukJ", "name": "OpenAI Bearer (DGIPR)" }
+      },
+      "id": "n10",
+      "name": "Edit Image L2",
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "bodyParameters": {
+          "parameters": [
+            { "inputDataFieldName": "master", "name": "image", "parameterType": "formBinaryData" },
+            { "name": "model", "parameterType": "formData", "value": "gpt-image-2" },
+            { "name": "prompt", "parameterType": "formData", "value": "={{ $('Build Image Prompt').first().json.prompt }}" },
+            { "name": "size", "parameterType": "formData", "value": "1280x1600" },
+            { "name": "quality", "parameterType": "formData", "value": "high" },
+            { "name": "n", "parameterType": "formData", "value": "1" }
+          ]
+        },
+        "contentType": "multipart-form-data",
+        "genericAuthType": "httpHeaderAuth",
+        "method": "POST",
+        "options": { "timeout": 360000 },
+        "sendBody": true,
+        "url": "https://api.openai.com/v1/images/edits"
+      },
+      "position": [1740, 160],
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4
+    },
+    {
+      "id": "n11",
+      "name": "Decode Image",
+      "parameters": {
+        "jsCode": "// Decode the base64 PNG returned by whichever image step ran into an n8n binary item.\nconst res = $input.first().json;\nconst b64 = res && res.data && res.data[0] ? res.data[0].b64_json : undefined;\nif (!b64) { throw new Error('No image b64_json returned: ' + JSON.stringify(res).slice(0, 500)); }\n\nconst post_type = $('Build Image Prompt').first().json.post_type;\nconst title = $('Build Image Prompt').first().json.title;\nconst fileName = post_type + '-' + $now.toFormat('yyyyLLdd-HHmmss') + '.png';\n\nreturn [{\n  json: { fileName, post_type, title, b64 },\n  binary: { data: { data: b64, mimeType: 'image/png', fileName: fileName, fileExtension: 'png' } },\n}];\n",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      },
+      "position": [1960, 0],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2
+    },
+    {
+      "id": "p3",
+      "name": "Ping Image",
+      "parameters": {
+        "contentType": "json",
+        "jsonBody": "={{ JSON.stringify({ step: 'image' }) }}",
+        "method": "POST",
+        "options": { "timeout": 5000 },
+        "sendBody": true,
+        "specifyBody": "json",
+        "url": "={{ $('DGIPR Post Form').first().json.progress_url }}"
+      },
+      "position": [1960, 220],
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "n13",
+      "name": "Build Caption Request",
+      "parameters": {
+        "jsCode": "// Build the X (Twitter) caption request from the structured copy + the original notes.\nconst copy = $('Build Image Prompt').first().json.copy;\nconst post_type = $('Build Image Prompt').first().json.post_type;\nconst notes = $('DGIPR Post Form').first().json.meeting_notes;\n\nconst styleGuide = [\n  'House style for DGIPR Maharashtra posts on X (formerly Twitter):',\n  '- Lead in Marathi (Devanagari). Keep it crisp, factual and public-spirited; an English gloss line is optional.',\n  '- 1-3 short lines, then a blank line, then the hashtags.',\n  '- Always mention @MahaDGIPR. Include 2-4 relevant hashtags (mix of Marathi and English) plus topic tags.',\n  '- At most 1-2 tasteful emojis. No clickbait. Stay on-message with the notes.',\n].join('\\n');\n\nconst system = 'You are the social media editor for DGIPR Maharashtra. Write ONE ready-to-post X caption for the poster described. Respond with STRICT JSON only: { \"caption\": string }.\\n\\n' + styleGuide;\n\nconst user = 'Post type: ' + post_type + '\\n\\nMeeting notes:\\n' + notes + '\\n\\nPoster copy (keep the caption consistent with this):\\n' + JSON.stringify(copy);\n\nconst body = {\n  model: 'gpt-4o-mini',\n  temperature: 0.7,\n  messages: [\n    { role: 'system', content: system },\n    { role: 'user', content: user },\n  ],\n  response_format: {\n    type: 'json_schema',\n    json_schema: { name: 'x_caption', strict: true, schema: { type: 'object', additionalProperties: false, properties: { caption: { type: 'string' } }, required: ['caption'] } },\n  },\n};\n\nreturn [{ json: { body } }];\n",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      },
+      "position": [2180, 0],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2
+    },
+    {
+      "credentials": {
+        "httpHeaderAuth": { "id": "eFTnHTRa1l1U4ukJ", "name": "OpenAI Bearer (DGIPR)" }
+      },
+      "id": "n14",
+      "name": "Generate Caption L3",
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "contentType": "json",
+        "genericAuthType": "httpHeaderAuth",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "method": "POST",
+        "options": { "timeout": 120000 },
+        "sendBody": true,
+        "specifyBody": "json",
+        "url": "https://api.openai.com/v1/chat/completions"
+      },
+      "position": [2400, 0],
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4
+    },
+    {
+      "id": "n15",
+      "name": "Make Caption File",
+      "parameters": {
+        "jsCode": "// Turn the caption text into a UTF-8 .txt binary, named to match the poster PNG.\nconst res = $input.first().json;\nconst content = res && res.choices && res.choices[0] && res.choices[0].message ? res.choices[0].message.content : undefined;\nif (!content) { throw new Error('No caption content: ' + JSON.stringify(res).slice(0, 400)); }\n\nlet parsed;\ntry { parsed = typeof content === 'string' ? JSON.parse(content) : content; }\ncatch (e) { parsed = { caption: String(content) }; }\n\nconst caption = (parsed.caption || '').toString();\nconst pngName = $('Decode Image').first().json.fileName;\nconst fileName = pngName.replace('.png', '.txt');\n\nreturn [{\n  json: { caption, fileName },\n  binary: { data: { data: Buffer.from(caption, 'utf8').toString('base64'), mimeType: 'text/plain', fileName: fileName, fileExtension: 'txt' } },\n}];\n",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      },
+      "position": [2620, 0],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2
+    },
+    {
+      "id": "p4",
+      "name": "Ping Caption",
+      "parameters": {
+        "contentType": "json",
+        "jsonBody": "={{ JSON.stringify({ step: 'caption' }) }}",
+        "method": "POST",
+        "options": { "timeout": 5000 },
+        "sendBody": true,
+        "specifyBody": "json",
+        "url": "={{ $('DGIPR Post Form').first().json.progress_url }}"
+      },
+      "position": [2820, 0],
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "r1",
+      "name": "Respond to Webhook",
+      "parameters": {
+        "options": {},
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ post_type: $('Decode Image').first().json.post_type, title: $('Decode Image').first().json.title, caption: $('Make Caption File').first().json.caption, poster_png_base64: $('Decode Image').first().json.b64 }) }}"
+      },
+      "position": [3040, 0],
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5
+    }
+  ],
+  "connections": {
+    "Build Caption Request": { "main": [[{ "index": 0, "node": "Generate Caption L3", "type": "main" }]] },
+    "Build Classify Request": { "main": [[{ "index": 0, "node": "Classify L0", "type": "main" }]] },
+    "Build Copy Request": { "main": [[{ "index": 0, "node": "Generate Copy L1", "type": "main" }]] },
+    "Build Image Prompt": { "main": [[{ "index": 0, "node": "IF Fresh", "type": "main" }]] },
+    "Classify L0": { "main": [[{ "index": 0, "node": "Build Copy Request", "type": "main" }, { "index": 0, "node": "Ping Classify", "type": "main" }]] },
+    "DGIPR Post Form": { "main": [[{ "index": 0, "node": "Build Classify Request", "type": "main" }]] },
+    "Decode Image": { "main": [[{ "index": 0, "node": "Build Caption Request", "type": "main" }, { "index": 0, "node": "Ping Image", "type": "main" }]] },
+    "Edit Image L2": { "main": [[{ "index": 0, "node": "Decode Image", "type": "main" }]] },
+    "Generate Caption L3": { "main": [[{ "index": 0, "node": "Make Caption File", "type": "main" }]] },
+    "Generate Copy L1": { "main": [[{ "index": 0, "node": "Build Image Prompt", "type": "main" }, { "index": 0, "node": "Ping Copy", "type": "main" }]] },
+    "Generate Image L2": { "main": [[{ "index": 0, "node": "Decode Image", "type": "main" }]] },
+    "IF Fresh": { "main": [[{ "index": 0, "node": "Generate Image L2", "type": "main" }], [{ "index": 0, "node": "Read Master Template", "type": "main" }]] },
+    "Make Caption File": { "main": [[{ "index": 0, "node": "Ping Caption", "type": "main" }]] },
+    "Read Master Template": { "main": [[{ "index": 0, "node": "Edit Image L2", "type": "main" }]] },
+    "Webhook": { "main": [[{ "index": 0, "node": "DGIPR Post Form", "type": "main" }]] },
+    "Ping Caption": { "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]] }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {},
+  "tags": []
+}

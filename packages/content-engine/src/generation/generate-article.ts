@@ -12,12 +12,14 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { generateArticlePoster } from '@dgipr/poster-renderer';
+import type { FiveWOneH } from '@dgipr/schemas';
 import {
   retrieveReferenceArticle,
   type ReferenceArticle,
 } from '../retrieval/retrieve-references.js';
 import { chatComplete, type ChatMessage } from './openai-chat.js';
 import { generateCopy } from './generate-copy.js';
+import { extractFiveWOneH } from './extract-5w1h.js';
 import {
   buildSystemPrompt,
   buildUserPrompt,
@@ -53,6 +55,7 @@ export function buildMessages(
   reference: ReferenceArticle | null,
   category: ArticleCategory = 'scheme',
   heading?: string,
+  fiveW1H?: FiveWOneH,
 ): ChatMessage[] {
   const styleExample = reference
     ? `शीर्षक: ${reference.title}\n\n${reference.text}`
@@ -64,7 +67,7 @@ export function buildMessages(
     { role: 'system', content: buildSystemPrompt(category) },
     {
       role: 'user',
-      content: buildUserPrompt(note, category, styleExample, heading),
+      content: buildUserPrompt(note, category, styleExample, heading, fiveW1H),
     },
   ];
 }
@@ -78,6 +81,9 @@ export type GeneratedArticle = Readonly<{
   factCheck: string | null;
   // The single full article retrieved and fed as a style/structure reference.
   reference: ReferenceArticle | null;
+  // 5W1H fact scaffold extracted from the note before drafting (empty strings for any
+  // field the note did not state). Note-derived, so it does not change on revision.
+  fiveWOneH: FiveWOneH;
 }>;
 
 // Notes longer than this (characters) are split into sections and generated
@@ -147,6 +153,7 @@ async function generateSectioned(
   note: string,
   reference: ReferenceArticle | null,
   heading?: string,
+  fiveW1H?: FiveWOneH,
 ): Promise<string> {
   const sections = splitNoteIntoSections(note);
   const passages: string[] = [];
@@ -156,8 +163,9 @@ async function generateSectioned(
   const draft = passages.join('\n\n');
   // Assemble from the drafted prose, but keep the original notes as the completeness
   // spec so the assembly pass can restore anything a section draft compressed. The
-  // heading steers the assembly pass toward the chosen editorial angle.
-  const messages = buildMessages(note, reference, 'scheme', heading);
+  // heading steers the assembly pass toward the chosen editorial angle, and the 5W1H
+  // scaffold toward an inverted-pyramid lead.
+  const messages = buildMessages(note, reference, 'scheme', heading, fiveW1H);
   messages.push({
     role: 'user',
     content: [
@@ -301,7 +309,11 @@ const MAX_COVERAGE_REVISIONS = 2;
 // Pipeline phases reported through onProgress, in order, so a caller (the API job
 // runner) can surface user-visible progress while generation runs.
 export type GenerateArticlePhase =
-  'retrieve' | 'draft' | 'coverage' | 'faithfulness';
+  | 'retrieve'
+  | 'extract_5w1h'
+  | 'draft'
+  | 'coverage'
+  | 'faithfulness';
 
 export type GenerateArticleOptions = Readonly<{
   onProgress?: (phase: GenerateArticlePhase) => void;
@@ -329,14 +341,23 @@ export async function generateArticle(
   onProgress('retrieve');
   const reference = await retrieveReferenceArticle(note, category, heading);
 
+  // 5W1H fact scaffold: extract कोण/काय/केव्हा/कुठे/का/कसे strictly from the note before
+  // drafting, so the draft can lead in inverted-pyramid order. Best-effort (returns an
+  // empty scaffold on failure) — never invents, and the note is the only fact source.
+  onProgress('extract_5w1h');
+  const fiveWOneH = await extractFiveWOneH(note, category, heading);
+
   // News pieces are short, so they always draft in one pass; only long scheme notes take
   // the section-by-section path (which is scheme-specific). The heading (if any) steers
-  // both the single-pass draft and the sectioned-assembly pass toward the chosen angle.
+  // both the single-pass draft and the sectioned-assembly pass toward the chosen angle,
+  // and the 5W1H scaffold toward an inverted-pyramid lead.
   onProgress('draft');
   let content =
     category === 'scheme' && note.length > SECTION_THRESHOLD_CHARS
-      ? await generateSectioned(note, reference, heading)
-      : await chatComplete(buildMessages(note, reference, category, heading));
+      ? await generateSectioned(note, reference, heading, fiveWOneH)
+      : await chatComplete(
+          buildMessages(note, reference, category, heading, fiveWOneH),
+        );
 
   // Coverage loop: verify the article body conveys every information unit in the notes;
   // if any are missing, re-prompt with only the missing ones and regenerate. Bounded by
@@ -399,7 +420,7 @@ export async function generateArticle(
   const finalContent = factCheck
     ? `${article}\n\n${FACT_CHECK_DELIMITER}\n${factCheck}`
     : article;
-  return { content: finalContent, article, factCheck, reference };
+  return { content: finalContent, article, factCheck, reference, fiveWOneH };
 }
 
 // Run directly: `tsx --env-file=../../.env src/generation/generate-article.ts`.

@@ -29,6 +29,11 @@ export function PosterPanel({
   if (!detail.posterUrl || !detail.copy) return null;
 
   const showSpinner = busy || pending;
+  // Poster text-edit + feedback (copy/scene) both re-render from the CACHED scene
+  // image, so they only work when a scene was produced locally (ARTICLE_POSTER_MODE
+  // = html). In n8n mode the poster is baked by the workflow with no separate scene
+  // (sceneUrl null), so hide those controls and keep only view + download.
+  const canRevise = !!detail.sceneUrl;
 
   return (
     <section className="card">
@@ -54,16 +59,18 @@ export function PosterPanel({
             >
               {STR.downloadPoster}
             </a>
-            <button
-              type="button"
-              className="btn"
-              onClick={() => setEditing((v) => !v)}
-            >
-              {editing ? STR.closeEditCopy : STR.editCopy}
-            </button>
+            {canRevise ? (
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setEditing((v) => !v)}
+              >
+                {editing ? STR.closeEditCopy : STR.editCopy}
+              </button>
+            ) : null}
           </div>
 
-          {editing ? (
+          {canRevise && editing ? (
             <div style={{ marginTop: 18 }}>
               <CopyEditForm
                 copy={detail.copy}
@@ -80,43 +87,45 @@ export function PosterPanel({
             </div>
           ) : null}
 
-          <div style={{ marginTop: 18 }}>
-            <FeedbackBox
-              title={STR.posterFeedbackTitle}
-              onSubmit={async (feedback) => {
-                setPending(true);
-                try {
-                  await sendPosterFeedback(detail.id, { target, feedback });
-                  await onChanged();
-                } finally {
-                  // After onChanged the server reports `running`, so the `busy`
-                  // prop keeps the spinner up through the async job.
-                  setPending(false);
-                }
-              }}
-            >
-              <div className="segmented">
-                <button
-                  type="button"
-                  className="output-option"
-                  aria-pressed={target === 'copy'}
-                  onClick={() => setTarget('copy')}
-                >
-                  <span className="name">{STR.posterFeedbackTargetCopy}</span>
-                  <span className="desc">{STR.posterFeedbackTargetCopyDesc}</span>
-                </button>
-                <button
-                  type="button"
-                  className="output-option"
-                  aria-pressed={target === 'scene'}
-                  onClick={() => setTarget('scene')}
-                >
-                  <span className="name">{STR.posterFeedbackTargetScene}</span>
-                  <span className="desc">{STR.posterFeedbackTargetSceneDesc}</span>
-                </button>
-              </div>
-            </FeedbackBox>
-          </div>
+          {canRevise ? (
+            <div style={{ marginTop: 18 }}>
+              <FeedbackBox
+                title={STR.posterFeedbackTitle}
+                onSubmit={async (feedback) => {
+                  setPending(true);
+                  try {
+                    await sendPosterFeedback(detail.id, { target, feedback });
+                    await onChanged();
+                  } finally {
+                    // After onChanged the server reports `running`, so the `busy`
+                    // prop keeps the spinner up through the async job.
+                    setPending(false);
+                  }
+                }}
+              >
+                <div className="segmented">
+                  <button
+                    type="button"
+                    className="output-option"
+                    aria-pressed={target === 'copy'}
+                    onClick={() => setTarget('copy')}
+                  >
+                    <span className="name">{STR.posterFeedbackTargetCopy}</span>
+                    <span className="desc">{STR.posterFeedbackTargetCopyDesc}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="output-option"
+                    aria-pressed={target === 'scene'}
+                    onClick={() => setTarget('scene')}
+                  >
+                    <span className="name">{STR.posterFeedbackTargetScene}</span>
+                    <span className="desc">{STR.posterFeedbackTargetSceneDesc}</span>
+                  </button>
+                </div>
+              </FeedbackBox>
+            </div>
+          ) : null}
         </div>
       </div>
     </section>

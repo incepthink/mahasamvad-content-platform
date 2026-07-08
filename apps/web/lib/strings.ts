@@ -2,13 +2,18 @@
 // with small English hints). Keep wording plain and free of technical jargon:
 // the users are non-technical government communication staff.
 
-import type { GenerationStep, GenerationStatus } from '@dgipr/schemas';
+import type {
+  GenerationStep,
+  GenerationStatus,
+  TermType,
+} from '@dgipr/schemas';
 
 export const STR = {
   appName: 'महासंवाद मजकूर मंच',
   appSubtitle: 'माहिती व जनसंपर्क महासंचालनालय, महाराष्ट्र शासन',
   navNew: 'नवीन मजकूर',
   navHistory: 'मागील काम',
+  navGlossary: 'शब्दकोश',
   poweredBy: 'Powered by',
 
   // New-generation form
@@ -67,10 +72,24 @@ export const STR = {
   articleTitle: 'तयार झालेला लेख',
   factCheckTitle: 'तथ्य-तपासणी (माहिती कुठून आली?)',
   noteTitle: 'मूळ टिपणी',
+
+  // 5W1H at-a-glance card (कोण/काय/केव्हा/कुठे/का/कसे — extracted from the note)
+  fiveWOneHTitle: 'थोडक्यात — कोण, काय, केव्हा, कुठे, का, कसे',
+  fiveWWho: 'कोण',
+  fiveWWhat: 'काय',
+  fiveWWhen: 'केव्हा',
+  fiveWWhere: 'कुठे',
+  fiveWWhy: 'का',
+  fiveWHow: 'कसे',
+  fiveWEmpty: 'या टिपणीत नमूद नाही',
   copyText: 'मजकूर कॉपी करा',
   copied: 'कॉपी झाले ✓',
   downloadTxt: '.txt डाउनलोड',
   downloadMd: '.md डाउनलोड',
+  translateToEnglish: 'इंग्रजीत भाषांतर करा',
+  showMarathi: 'मराठी',
+  showEnglish: 'English',
+  translating: 'भाषांतर सुरू आहे…',
   posterTitle: 'तयार झालेले पोस्टर',
   downloadPoster: 'पोस्टर डाउनलोड करा',
   editCopy: 'पोस्टरवरील मजकूर बदला',
@@ -102,6 +121,34 @@ export const STR = {
   taskRegenerate: 'पुन्हा तयार करा',
   taskViewFull: 'पूर्ण पाहा',
 
+  // Glossary (नाव-शब्दकोश) admin/review page
+  glossaryTitle: 'नाव-शब्दकोश (मराठी → इंग्रजी)',
+  glossaryIntro:
+    'भाषांतरात नावे, पदनाम, ठिकाणे व योजना बरोबर यावीत यासाठीचा शब्दकोश. फक्त “तपासलेली” नोंद भाषांतरात जशीच्या तशी वापरली जाते. प्रत्येक भाषांतरातून नवीन नावे आपोआप येथे येतात — ती तपासा किंवा दुरुस्त करा.',
+  glossaryAddTitle: 'नवीन नाव जोडा',
+  glossaryMarathi: 'मराठी',
+  glossaryEnglish: 'इंग्रजी',
+  glossaryType: 'प्रकार',
+  glossaryNotes: 'टीप',
+  glossaryAdd: 'जोडा',
+  glossaryAdding: 'जोडत आहोत…',
+  glossarySave: 'जतन करा',
+  glossarySaving: 'जतन करत आहोत…',
+  glossarySaved: 'जतन झाले ✓',
+  glossaryDelete: 'काढा',
+  glossaryDeleteConfirm: 'हे नाव कायमचे काढायचे?',
+  glossaryVerify: 'तपासले म्हणून खूण करा',
+  glossaryUnverify: 'खूण काढा',
+  glossaryVerified: 'तपासले',
+  glossaryUnverified: 'तपासायचे आहे',
+  glossarySearchPlaceholder: 'नाव शोधा…',
+  glossaryFilterAllTypes: 'सर्व प्रकार',
+  glossaryUnverifiedOnly: 'फक्त तपासायची',
+  glossaryEmpty: 'अजून एकही नाव नाही.',
+  glossaryMarathiPlaceholder: 'उदा. जिल्हाधिकारी',
+  glossaryEnglishPlaceholder: 'उदा. District Collector',
+  glossaryCount: 'एकूण नावे',
+
   // History
   historyTitle: 'मागील काम',
   historyEmpty: 'अजून काहीही तयार केलेले नाही.',
@@ -116,6 +163,7 @@ export const STR = {
 // Marathi labels for the machine step keys the API writes.
 export const STEP_LABELS: Record<GenerationStep, string> = {
   retrieve: 'संदर्भ लेख शोधत आहोत…',
+  extract_5w1h: 'माहितीचे विश्लेषण करत आहोत…',
   draft: 'लेख लिहित आहोत…',
   coverage: 'लेखाची पूर्णता तपासत आहोत…',
   faithfulness: 'तथ्यांची पडताळणी करत आहोत…',
@@ -128,7 +176,18 @@ export const STEP_LABELS: Record<GenerationStep, string> = {
   revise_article: 'अभिप्रायानुसार लेख सुधारत आहोत…',
   revise_copy: 'अभिप्रायानुसार मजकूर सुधारत आहोत…',
   revise_scene: 'नवीन चित्र तयार करत आहोत…',
+  translate: 'इंग्रजी भाषांतर',
   done: 'पूर्ण झाले',
+};
+
+// Marathi labels for the glossary term types (shared by the review table + filter).
+export const TERM_TYPE_LABELS: Record<TermType, string> = {
+  person: 'व्यक्ती',
+  designation: 'पदनाम',
+  scheme: 'योजना',
+  place: 'ठिकाण',
+  org: 'संस्था',
+  other: 'इतर',
 };
 
 export const STATUS_LABELS: Record<GenerationStatus, string> = {

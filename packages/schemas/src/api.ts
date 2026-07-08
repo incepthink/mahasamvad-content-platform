@@ -28,6 +28,9 @@ export type GenerationStatus = z.infer<typeof GenerationStatusSchema>;
 // Marathi progress label. Order here mirrors pipeline order.
 export const GenerationStepSchema = z.enum([
   'retrieve',
+  // Extract the 5W1H (कोण/काय/केव्हा/कुठे/का/कसे) fact scaffold from the note
+  // before drafting; runs right after retrieval.
+  'extract_5w1h',
   'draft',
   'coverage',
   'faithfulness',
@@ -41,6 +44,9 @@ export const GenerationStepSchema = z.enum([
   'revise_article',
   'revise_copy',
   'revise_scene',
+  // On-demand English translation of a completed article (Sarvam + locked
+  // glossary). A post-completion action, not part of the main pipeline.
+  'translate',
   'done',
 ]);
 export type GenerationStep = z.infer<typeof GenerationStepSchema>;
@@ -122,6 +128,19 @@ export const GenerationRevisionSchema = z.object({
 });
 export type GenerationRevision = z.infer<typeof GenerationRevisionSchema>;
 
+// 5W1H (कोण/काय/केव्हा/कुठे/का/कसे) extracted from the note before drafting, as a
+// fact-grounding + inverted-pyramid scaffold. Every field is a Marathi string;
+// "" means the note did not state it (never inferred/invented — see AGENTS.md).
+export const FiveWOneHSchema = z.object({
+  who: z.string(),
+  what: z.string(),
+  when: z.string(),
+  where: z.string(),
+  why: z.string(),
+  how: z.string(),
+});
+export type FiveWOneH = z.infer<typeof FiveWOneHSchema>;
+
 export const GenerationDetailSchema = z.object({
   id: z.string(),
   status: GenerationStatusSchema,
@@ -134,8 +153,11 @@ export const GenerationDetailSchema = z.object({
   // Optional editorial angle the run was created with (null for pre-heading rows).
   heading: z.string().nullable(),
   article: z.string().nullable(),
+  // On-demand English translation of `article`; null until the user requests it.
+  articleEnglish: z.string().nullable(),
   factCheck: z.string().nullable(),
   copy: CopySchema.nullable(),
+  fiveWOneH: FiveWOneHSchema.nullable(),
   posterUrl: z.string().nullable(),
   sceneUrl: z.string().nullable(),
   error: z.string().nullable(),
@@ -144,6 +166,61 @@ export const GenerationDetailSchema = z.object({
   revisions: z.array(GenerationRevisionSchema),
 });
 export type GenerationDetail = z.infer<typeof GenerationDetailSchema>;
+
+// ---------- Glossary (Marathi->English proper-noun lock dictionary) ----------
+// Mirrors the glossary_terms row shape in @dgipr/database. Verified terms are locked
+// into the Sarvam translation prompt so a known name is never mistranslated; unverified
+// rows are auto-mined candidates awaiting review on the /glossary page.
+
+export const TermTypeSchema = z.enum([
+  'person',
+  'designation',
+  'scheme',
+  'place',
+  'org',
+  'other',
+]);
+export type TermType = z.infer<typeof TermTypeSchema>;
+
+export const TermSourceSchema = z.enum(['auto', 'manual', 'seed']);
+export type TermSource = z.infer<typeof TermSourceSchema>;
+
+export const GlossaryTermSchema = z.object({
+  id: z.string(),
+  marathi: z.string(),
+  english: z.string(),
+  termType: TermTypeSchema,
+  verified: z.boolean(),
+  source: TermSourceSchema,
+  notes: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type GlossaryTerm = z.infer<typeof GlossaryTermSchema>;
+
+// Manual add of a term (the review form or a direct add). marathi is the conflict key.
+export const CreateGlossaryTermRequestSchema = z.object({
+  marathi: z.string().trim().min(1).max(200),
+  english: z.string().trim().min(1).max(200),
+  termType: TermTypeSchema.optional(),
+  verified: z.boolean().optional(),
+  notes: z.string().trim().max(1_000).optional(),
+});
+export type CreateGlossaryTermRequest = z.infer<
+  typeof CreateGlossaryTermRequestSchema
+>;
+
+// Edit an existing term by id. marathi (the conflict key) is intentionally not editable
+// here — changing it is a delete + re-add concern. At least one field should be present.
+export const UpdateGlossaryTermRequestSchema = z.object({
+  english: z.string().trim().min(1).max(200).optional(),
+  termType: TermTypeSchema.optional(),
+  verified: z.boolean().optional(),
+  notes: z.string().trim().max(1_000).nullable().optional(),
+});
+export type UpdateGlossaryTermRequest = z.infer<
+  typeof UpdateGlossaryTermRequestSchema
+>;
 
 export const ApiErrorSchema = z.object({
   error: z.object({ message: z.string() }),

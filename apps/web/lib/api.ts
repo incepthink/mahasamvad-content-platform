@@ -4,11 +4,16 @@
 import {
   GenerationDetailSchema,
   GenerationSummarySchema,
+  GlossaryTermSchema,
   type Copy,
   type CreateGenerationRequest,
+  type CreateGlossaryTermRequest,
   type GenerationDetail,
   type GenerationSummary,
+  type GlossaryTerm,
   type PosterFeedbackRequest,
+  type TermType,
+  type UpdateGlossaryTermRequest,
 } from '@dgipr/schemas';
 import { z } from 'zod';
 
@@ -78,6 +83,16 @@ export async function sendArticleFeedback(
   });
 }
 
+// Kicks off the on-demand English translation (Sarvam + glossary lockdict). The
+// API flips the row to running/step 'translate' before returning, so the caller
+// just needs to refresh to start polling.
+export async function requestTranslation(id: string): Promise<void> {
+  await requestJson(`/api/generations/${id}/translate`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}
+
 export async function sendPosterFeedback(
   id: string,
   input: PosterFeedbackRequest,
@@ -101,4 +116,43 @@ export async function updatePosterCopy(
 
 export function posterDownloadUrl(id: string): string {
   return `${API_URL}/api/generations/${id}/poster.png`;
+}
+
+// ---------- Glossary (Marathi->English name lock dictionary) ----------
+
+export async function listGlossaryTerms(
+  params: { verifiedOnly?: boolean; type?: TermType; search?: string } = {},
+): Promise<GlossaryTerm[]> {
+  const qs = new URLSearchParams();
+  if (params.verifiedOnly) qs.set('verifiedOnly', 'true');
+  if (params.type) qs.set('type', params.type);
+  if (params.search) qs.set('search', params.search);
+  const query = qs.toString();
+  const body = await requestJson(`/api/glossary${query ? `?${query}` : ''}`);
+  return z.array(GlossaryTermSchema).parse(body);
+}
+
+export async function createGlossaryTerm(
+  input: CreateGlossaryTermRequest,
+): Promise<GlossaryTerm> {
+  const body = await requestJson('/api/glossary', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  return GlossaryTermSchema.parse(body);
+}
+
+export async function updateGlossaryTerm(
+  id: string,
+  patch: UpdateGlossaryTermRequest,
+): Promise<GlossaryTerm> {
+  const body = await requestJson(`/api/glossary/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+  return GlossaryTermSchema.parse(body);
+}
+
+export async function deleteGlossaryTerm(id: string): Promise<void> {
+  await requestJson(`/api/glossary/${id}`, { method: 'DELETE' });
 }

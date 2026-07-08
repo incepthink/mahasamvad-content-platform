@@ -149,6 +149,45 @@ a {
   margin: 4px 0 0;
 }
 
+/* ---------- 5W1H at-a-glance card ---------- */
+
+.fivew-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+}
+
+.fivew-row {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: 12px;
+  align-items: baseline;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.fivew-row:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.fivew-row dt {
+  font-weight: 600;
+  color: var(--accent-dark);
+}
+
+.fivew-row dd {
+  margin: 0;
+}
+
+@media (max-width: 520px) {
+  .fivew-row {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}
+
 /* ---------- form controls ---------- */
 
 label.field-label {
@@ -607,6 +646,35 @@ textarea.note-input {
 
 /* ---------- article view ---------- */
 
+.article-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.lang-toggle {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.lang-toggle .btn[aria-pressed='true'] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-dark);
+}
+
+.translating-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
 .article-body {
   white-space: pre-wrap;
   font-size: 1.05rem;
@@ -797,9 +865,159 @@ fieldset.copy-group legend {
   margin: 0;
 }
 
+/* ---------- glossary (नाव-शब्दकोश) ---------- */
+
+select.glossary-select {
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  padding: 12px 14px;
+  border: 1.5px solid var(--border);
+  border-radius: 14px;
+  background: #fffdfa;
+  cursor: pointer;
+}
+
+select.glossary-select:focus {
+  outline: 3px solid var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.glossary-add {
+  display: grid;
+  grid-template-columns: 1fr 1fr 160px auto;
+  gap: 12px;
+  align-items: end;
+  margin-top: 8px;
+}
+
+.glossary-add-btn {
+  min-height: 52px;
+}
+
+.glossary-toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.glossary-toolbar .glossary-search {
+  flex: 1;
+  min-width: 200px;
+}
+
+.glossary-toolbar .glossary-select {
+  width: auto;
+  min-width: 150px;
+}
+
+.glossary-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.glossary-checkbox input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--accent);
+}
+
+.glossary-count {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin-left: auto;
+}
+
+.glossary-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.glossary-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(160px, 1.4fr) 150px auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #fffdfa;
+}
+
+.glossary-row.is-unverified {
+  border-left: 4px solid var(--warn);
+  background: var(--warn-soft);
+}
+
+.glossary-cell {
+  min-width: 0;
+}
+
+/* Inline labels: hidden on wide screens (the grid columns are self-evident),
+   shown when the row stacks on narrow screens so each field stays identifiable. */
+.glossary-field-label {
+  display: none;
+  font-weight: 600;
+  font-size: 0.82rem;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.glossary-marathi {
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: var(--accent-dark);
+  word-break: break-word;
+}
+
+.glossary-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.glossary-row-error {
+  color: var(--err);
+  font-size: 0.82rem;
+  flex-basis: 100%;
+  text-align: right;
+}
+
 /* ---------- responsive ---------- */
 
 @media (max-width: 860px) {
+  .glossary-add {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .glossary-row {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .glossary-field-label {
+    display: block;
+  }
+
+  .glossary-row-actions {
+    justify-content: flex-start;
+  }
+
+  .glossary-row-error {
+    text-align: left;
+  }
+
   .poster-layout {
     grid-template-columns: 1fr;
   }

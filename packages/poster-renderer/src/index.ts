@@ -11,6 +11,7 @@ export { loadBrandAssets, loadArticleAssets } from './assets.js';
 export type { BrandAssets } from './assets.js';
 export {
   buildPosterHtml,
+  headStrings,
   POSTER_WIDTH,
   POSTER_HEIGHT,
   POSTER_VARIANTS,

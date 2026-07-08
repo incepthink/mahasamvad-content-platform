@@ -13,12 +13,22 @@ export {
 } from './generation/generate-article.js';
 export { polishArticleWithSarvam } from './generation/polish-article.js';
 export { generateCopy } from './generation/generate-copy.js';
+export { extractFiveWOneH } from './generation/extract-5w1h.js';
 export {
   reviseArticle,
   type RevisedArticle,
 } from './generation/revise-article.js';
 export { reviseCopy } from './generation/revise-copy.js';
 export { reviseSceneBrief } from './generation/revise-scene.js';
+export {
+  translateArticleToEnglish,
+  type GlossaryEntry,
+  type TranslateOptions,
+} from './generation/translate-article.js';
+export {
+  extractGlossaryCandidates,
+  type GlossaryCandidate,
+} from './generation/extract-entities.js';
 
 export type ContentChunk = Readonly<{
   id: string; // `${articleId}-${chunkIndex}`

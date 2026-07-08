@@ -8,6 +8,8 @@ coverage
 .env
 .env.local
 .env.*.local
+.env.prod
+deploy/.env.prod
 
 # Scraped content output
 packages/content-engine/data/

@@ -29,10 +29,16 @@ export type GenerationRow = Readonly<{
   step: string | null;
   error: string | null;
   article: string | null;
+  // On-demand English translation of `article` (Sarvam + locked glossary); null
+  // until the user requests it. Plain nullable text, like `article`.
+  articleEnglish: string | null;
   factCheck: string | null;
   referenceTitle: string | null;
   referenceUrl: string | null;
   copy: unknown;
+  // 5W1H fact scaffold extracted from the note; stays `unknown` like `copy` —
+  // callers validate with FiveWOneHSchema when needed.
+  fiveWOneH: unknown;
   scenePrompt: string | null;
   scenePath: string | null;
   posterPath: string | null;
@@ -52,10 +58,12 @@ type GenerationDbRow = {
   step: string | null;
   error: string | null;
   article: string | null;
+  article_english: string | null;
   fact_check: string | null;
   reference_title: string | null;
   reference_url: string | null;
   copy: unknown;
+  five_w_one_h: unknown;
   scene_prompt: string | null;
   scene_path: string | null;
   poster_path: string | null;
@@ -75,10 +83,12 @@ function fromDbRow(row: GenerationDbRow): GenerationRow {
     step: row.step,
     error: row.error,
     article: row.article,
+    articleEnglish: row.article_english,
     factCheck: row.fact_check,
     referenceTitle: row.reference_title,
     referenceUrl: row.reference_url,
     copy: row.copy,
+    fiveWOneH: row.five_w_one_h,
     scenePrompt: row.scene_prompt,
     scenePath: row.scene_path,
     posterPath: row.poster_path,
@@ -96,10 +106,12 @@ export type GenerationPatch = Partial<
     | 'step'
     | 'error'
     | 'article'
+    | 'articleEnglish'
     | 'factCheck'
     | 'referenceTitle'
     | 'referenceUrl'
     | 'copy'
+    | 'fiveWOneH'
     | 'scenePrompt'
     | 'scenePath'
     | 'posterPath'
@@ -113,11 +125,14 @@ function patchToDbRow(patch: GenerationPatch): Record<string, unknown> {
   if (patch.step !== undefined) row.step = patch.step;
   if (patch.error !== undefined) row.error = patch.error;
   if (patch.article !== undefined) row.article = patch.article;
+  if (patch.articleEnglish !== undefined)
+    row.article_english = patch.articleEnglish;
   if (patch.factCheck !== undefined) row.fact_check = patch.factCheck;
   if (patch.referenceTitle !== undefined)
     row.reference_title = patch.referenceTitle;
   if (patch.referenceUrl !== undefined) row.reference_url = patch.referenceUrl;
   if (patch.copy !== undefined) row.copy = patch.copy;
+  if (patch.fiveWOneH !== undefined) row.five_w_one_h = patch.fiveWOneH;
   if (patch.scenePrompt !== undefined) row.scene_prompt = patch.scenePrompt;
   if (patch.scenePath !== undefined) row.scene_path = patch.scenePath;
   if (patch.posterPath !== undefined) row.poster_path = patch.posterPath;

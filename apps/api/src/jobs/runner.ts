@@ -9,19 +9,24 @@
 
 import {
   FACT_CHECK_DELIMITER,
+  extractGlossaryCandidates,
   generateArticle,
   generateCopy,
   reviseArticle,
   reviseCopy,
   reviseSceneBrief,
+  translateArticleToEnglish,
 } from '@dgipr/content-engine';
 import {
   buildArticleScenePrompt,
   generateImage,
   generateArticlePoster,
+  headStrings,
 } from '@dgipr/poster-renderer';
 import {
+  findGlossaryTermsInText,
   getGeneration,
+  insertGlossaryCandidates,
   insertRevision,
   listRevisions,
   updateGeneration,
@@ -149,6 +154,9 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
       factCheck: result.factCheck,
       referenceTitle: result.reference?.title ?? null,
       referenceUrl: result.reference?.url ?? null,
+      // 5W1H is extracted from the note before drafting (see generateArticle);
+      // persist it so the detail page can show the at-a-glance fact scaffold.
+      fiveWOneH: result.fiveWOneH,
     });
 
     if (row.outputType === 'article') return;
@@ -156,25 +164,95 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
     await updateGeneration(client, id, { step: 'copy' });
     const copy = await generateCopy(result.article);
 
-    await updateGeneration(client, id, { step: 'scene' });
-    const scenePrompt = buildArticleScenePrompt(copy);
-    const sceneImage = await generateImage(scenePrompt);
+    // ARTICLE_POSTER_MODE selects the poster renderer (default 'n8n'):
+    //   'n8n'  — the external article-poster-v1-api workflow paints the whole poster,
+    //            including the single Marathi headline, by editing the master-article
+    //            template. No local scene image / HTML+Chromium render, so no scenePath
+    //            is written (poster feedback + manual copy-edit, which require
+    //            row.scenePath, are unavailable in this mode — accepted trade-off).
+    //   'html' — the original local image + HTML/Playwright path, kept as a fallback.
+    if (process.env.ARTICLE_POSTER_MODE === 'html') {
+      await updateGeneration(client, id, { step: 'scene' });
+      const scenePrompt = buildArticleScenePrompt(copy);
+      const sceneImage = await generateImage(scenePrompt);
+
+      await updateGeneration(client, id, { step: 'render' });
+      const poster = await generateArticlePoster({ copy, sceneImage });
+
+      const sceneObjectPath = scenePath(id, 1);
+      const posterObjectPath = posterPath(id, 1);
+      await uploadPng(client, sceneObjectPath, sceneImage);
+      await uploadPng(client, posterObjectPath, poster.png);
+
+      await updateGeneration(client, id, {
+        copy,
+        scenePrompt,
+        scenePath: sceneObjectPath,
+        posterPath: posterObjectPath,
+      });
+      return;
+    }
 
     await updateGeneration(client, id, { step: 'render' });
-    const poster = await generateArticlePoster({ copy, sceneImage });
+    const posterPng = await renderArticlePosterViaN8n(id, copy);
 
-    const sceneObjectPath = scenePath(id, 1);
     const posterObjectPath = posterPath(id, 1);
-    await uploadPng(client, sceneObjectPath, sceneImage);
-    await uploadPng(client, posterObjectPath, poster.png);
+    await uploadPng(client, posterObjectPath, posterPng);
 
     await updateGeneration(client, id, {
       copy,
-      scenePrompt,
-      scenePath: sceneObjectPath,
       posterPath: posterObjectPath,
     });
   });
+}
+
+// Shape n8n's article-poster-v1-api workflow returns from its Respond-to-Webhook node.
+type ArticlePosterResult = {
+  poster_png_base64?: string;
+};
+
+// Render an article poster via the external n8n `article-poster-v1-api` workflow
+// (the ARTICLE_POSTER_MODE=n8n path). The verified article and its Copy are still
+// produced locally by @dgipr/content-engine — facts stay source-of-truth per
+// AGENTS.md — so we send only the resolved { headline, scene_brief } and n8n *only
+// renders*: its image model paints the whole poster (including the single Marathi
+// headline) by editing the master-article template. headline is resolved here via
+// headStrings so n8n stays dumb. Mirrors startSocialPostJob's fetch/timeout/error
+// handling; returns the decoded poster PNG.
+async function renderArticlePosterViaN8n(id: string, copy: Copy): Promise<Buffer> {
+  const webhookUrl = requireEnv('N8N_ARTICLE_POSTER_WEBHOOK_URL');
+  const webhookSecret = process.env.N8N_WEBHOOK_SECRET;
+
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+  };
+  if (webhookSecret) headers['x-n8n-webhook-secret'] = webhookSecret;
+
+  const { headline } = headStrings(copy);
+
+  // Generous timeout to outlast the workflow's ~1-2 min gpt-image-2 edit stage.
+  const response = await fetch(webhookUrl, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      headline,
+      scene_brief: copy.scene_brief,
+      generation_id: id,
+    }),
+    signal: AbortSignal.timeout(420_000),
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw new Error(
+      `n8n article-poster webhook failed (${response.status}): ${detail.slice(0, 500)}`,
+    );
+  }
+
+  const result = (await response.json()) as ArticlePosterResult;
+  if (!result.poster_png_base64) {
+    throw new Error('n8n article-poster webhook returned no poster.');
+  }
+  return Buffer.from(result.poster_png_base64, 'base64');
 }
 
 // Shape n8n's social-post-v2-api workflow returns from its Respond-to-Webhook node.
@@ -249,7 +327,9 @@ export function startSocialPostJob(client: SupabaseClient, id: string): void {
 }
 
 // Feedback loop for the article: revise under the original guardrails (note stays
-// the sole fact source) and snapshot the result in the revision log.
+// the sole fact source) and snapshot the result in the revision log. 5W1H is NOT
+// re-derived here — it's extracted from the immutable note, so it never goes stale
+// on revision; leave the persisted fiveWOneH untouched.
 export function startArticleFeedbackJob(
   client: SupabaseClient,
   id: string,
@@ -288,6 +368,49 @@ export function startArticleFeedbackJob(
       article: revised.article,
       factCheck: revised.factCheck,
     });
+  });
+}
+
+// On-demand English translation of a completed article. Runs the glossary-locked
+// Sarvam translation (verified proper-noun mappings present in this article are
+// passed as LOCKED TERMS so a known name is never mistranslated) and persists the
+// result to articleEnglish. The Marathi article is never mutated. Candidate mining
+// grows the review queue but must never fail the translation.
+export function startTranslateJob(client: SupabaseClient, id: string): void {
+  runJob(client, id, async () => {
+    const row = await getGeneration(client, id);
+    if (!row) throw new Error(`Generation ${id} not found.`);
+    if (!row.article) throw new Error(`Generation ${id} has no article yet.`);
+
+    await updateGeneration(client, id, {
+      status: 'running',
+      step: 'translate',
+      error: null,
+    });
+
+    // Verified glossary terms whose Marathi form appears in this article become the
+    // LOCKED TERMS table the translator must reuse verbatim.
+    const terms = await findGlossaryTermsInText(client, row.article);
+    const glossary = terms.map((t) => ({
+      marathi: t.marathi,
+      english: t.english,
+    }));
+
+    const english = await translateArticleToEnglish(row.article, glossary);
+    await updateGeneration(client, id, { articleEnglish: english });
+
+    // Grow the review queue: auto-mine proper nouns → unverified candidates. The
+    // upsert ignores duplicates, so verified/human-edited rows are never clobbered.
+    // Best-effort — a mining failure must not fail an already-persisted translation.
+    try {
+      const candidates = await extractGlossaryCandidates(row.article);
+      await insertGlossaryCandidates(
+        client,
+        candidates.map((c) => ({ ...c, source: 'auto' as const, verified: false })),
+      );
+    } catch (error) {
+      console.error(`[translate ${id}] candidate mining failed:`, error);
+    }
   });
 }
 

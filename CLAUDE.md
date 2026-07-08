@@ -27,7 +27,7 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
 | `packages/database` | `@dgipr/database` | Supabase client, queries, storage helpers, row types |
 | `packages/schemas` | `@dgipr/schemas` | Shared Zod schemas + types (poster `Copy`, generation API) |
 | `supabase/migrations` | — | SQL migrations (pgvector + generations) |
-| `n8n/workflow-exports` | — | Placeholder for future n8n exports (not used yet) |
+| `n8n/workflow-exports` | — | Committed n8n workflow JSON (`social-post-v2-api.json` twitter path; `article-poster-v1-api.json` article poster — import targets for AWS) |
 | `docs` | — | Project docs (`PROJECT_CONTEXT.md`, `web-scraping-context.md`) |
 
 ## Where things live (jump straight here)
@@ -37,9 +37,13 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
 - HTTP routes under `/api/generations` (thin) → `apps/api/src/routes/generations.ts`
 - Job orchestration + sequencing (the real pipeline) → `apps/api/src/jobs/runner.ts`
   - `startGenerationJob`: retrieve → `generateArticle` → (if poster) `generateCopy`
-    → `buildArticleScenePrompt` + `generateImage` → `generateArticlePoster` →
-    upload PNGs to Supabase Storage. Job state of record is the `generations`
-    row (status/step/error), so polling clients survive refreshes.
+    → render poster → upload PNG(s) to Supabase Storage. The poster render forks on
+    `ARTICLE_POSTER_MODE` (default `n8n`): `n8n` sends `{ headline, scene_brief }` to the
+    `article-poster-v1-api` webhook (`renderArticlePosterViaN8n`), which paints the whole
+    landscape poster incl. the headline by editing `master-article.png` — no scene image,
+    no scenePath; `html` is the original `buildArticleScenePrompt`+`generateImage`+
+    `generateArticlePoster` Chromium path (kept as fallback). Job state of record is the
+    `generations` row (status/step/error), so polling clients survive refreshes.
   - `startArticleFeedbackJob`, `startPosterFeedbackJob` (`copy` re-renders with the
     **cached** scene; `scene` regenerates the background image).
 - Article gen / coverage / faithfulness / revisions →
@@ -111,10 +115,24 @@ Chromium): `pnpm --filter @dgipr/poster-renderer exec playwright install chromiu
 - **Package boundaries.** `apps/api` routes stay thin and only sequence calls +
   persist state; all LLM/render logic lives in `@dgipr/content-engine` and
   `@dgipr/poster-renderer`. Keep it that way.
-- **Posters:** the model paints a **text-free** photo; all Devanagari text,
-  header, and footer are typeset in HTML and screenshotted with Chromium (this is
-  what prevents garbled Marathi). Storage paths are versioned per render (public
-  bucket is CDN-cached — never reuse a path).
+- **Posters (HTML path):** in `ARTICLE_POSTER_MODE=html` the model paints a **text-free**
+  photo and all Devanagari text, header, and footer are typeset in HTML and screenshotted
+  with Chromium (this is what prevents garbled Marathi). Storage paths are versioned per
+  render (public bucket is CDN-cached — never reuse a path).
+- **Article poster via n8n (default).** With `ARTICLE_POSTER_MODE=n8n` the article poster
+  is rendered by the `article-poster-v1-api` workflow, not Chromium: the API sends only
+  `{ headline, scene_brief }` and the image model paints the whole **landscape** poster
+  (one Marathi headline, no bullets/stats — deliberately simple, distinct from the Twitter
+  posters) by editing `posters/references/master-article.png`. This intentionally accepts
+  image-model Devanagari for the single headline (verified acceptable). No scene image is
+  produced, so poster feedback + manual copy-edit (which need `scenePath`) are unavailable
+  in this mode.
+- **n8n workflows are host-independent.** Their master templates live in Supabase Storage
+  under `posters/references/` — the 5 Twitter masters `master-{alert,campaign,info_bullets,quote,timeline}.png`
+  (seeded by `pnpm --filter @dgipr/content-engine upload:references`) and the article
+  `master-article.png` (seeded by `pnpm --filter @dgipr/content-engine upload:article-master`);
+  the workflows fetch them over HTTPS, so they never read local disk. Deploy artifacts:
+  `n8n/workflow-exports/{social-post-v2-api,article-poster-v1-api}.json` — import both into the AWS n8n.
 - **Env & secrets:** config comes from the root `.env` (see `.env.example`:
   Supabase + OpenAI, optional Sarvam). Never commit secrets.
 - **Scraped output** under `packages/content-engine/data/` is gitignored — don't

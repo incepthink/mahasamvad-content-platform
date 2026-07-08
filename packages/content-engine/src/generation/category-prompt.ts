@@ -5,6 +5,8 @@
 // only for tone/structure/length/phrasing, never facts. The NOTES are the only
 // fact source.
 
+import type { FiveWOneH } from '@dgipr/schemas';
+
 export type ArticleCategory = 'news' | 'scheme';
 
 export const CATEGORY_LABEL: Record<ArticleCategory, string> = {
@@ -144,11 +146,23 @@ export function buildSystemPrompt(category: ArticleCategory): string {
   ].join('\n');
 }
 
+// Order the 5W1H labels so the scaffold block reads Who→What→When→Where→Why→How
+// (कोण→काय→केव्हा→कुठे→का→कसे), matching the canonical FiveWOneH shape.
+const FIVE_W_ONE_H_ROWS: ReadonlyArray<readonly [keyof FiveWOneH, string]> = [
+  ['who', 'कोण'],
+  ['what', 'काय'],
+  ['when', 'केव्हा'],
+  ['where', 'कुठे'],
+  ['why', 'का'],
+  ['how', 'कसे'],
+];
+
 export function buildUserPrompt(
   note: string,
   category: ArticleCategory,
   styleExample?: string | null,
   heading?: string | null,
+  fiveW1H?: FiveWOneH | null,
 ): string {
   const parts: string[] = [];
 
@@ -175,6 +189,26 @@ export function buildUserPrompt(
     );
   }
 
+  // 5W1H scaffold extracted from the note (extract-5w1h.ts): a structuring aid for an
+  // inverted-pyramid draft, NOT a fact source — every value already came from the note.
+  // Only injected when at least one field is populated; empty fields are still listed so
+  // the model sees what the note left blank and does not fabricate for them.
+  const fiveW1HRows = fiveW1H
+    ? FIVE_W_ONE_H_ROWS.map(
+        ([key, label]) => `${label}: ${fiveW1H[key].trim()}`,
+      )
+    : [];
+  const hasFiveW1H =
+    fiveW1H != null && Object.values(fiveW1H).some((value) => value.trim());
+  if (hasFiveW1H) {
+    parts.push(
+      '<FIVE_W_ONE_H purpose="fact_scaffold_from_notes_only_use_for_structure_not_new_facts">',
+      ...fiveW1HRows,
+      '</FIVE_W_ONE_H>',
+      '',
+    );
+  }
+
   parts.push(
     '<NOTES purpose="only_authoritative_fact_source">',
     note.trim(),
@@ -185,6 +219,13 @@ export function buildUserPrompt(
     'लेख प्रकाशित करता येईल असा असावा; तो सारांश, स्पष्टीकरणात्मक नोट किंवा मुद्देसूद पुनर्कथन नसावे.',
     'NOTES मधील महत्त्वाचे मुद्दे गाळू नका.',
     'NOTES मध्ये नसलेले कोणतेही ठोस तथ्य, नाव, पदनाम, तारीख, ठिकाण, आकडा, कायदा, योजना, quote किंवा byline जोडू नका.',
+    ...(hasFiveW1H
+      ? [
+          'FIVE_W_ONE_H हा NOTES मधून काढलेला तथ्य-सांगाडा आहे (नवीन तथ्य नाही). लेख inverted-pyramid रचनेत लिहा: पहिल्या परिच्छेदात सर्वात महत्त्वाचे मुद्दे (सहसा काय + कोण + केव्हा/कुठे) द्या, आणि का व कसे नंतरच्या परिच्छेदांत विस्ताराने मांडा.',
+          'STYLE_EXAMPLE दिले असल्यास त्याच्या रचना व सुराला अनुसरून हा ओघ साधा.',
+          'FIVE_W_ONE_H मधील रिकामे field म्हणजे ती माहिती टिपणीत नाही — त्यासाठी काहीही रचून लिहू नका.',
+        ]
+      : []),
     ...(hasHeading
       ? [
           'HEADING हा दिलेला संपादकीय रोख आहे: याच रोखाभोवती लेख रचा आणि या अंगाला उपयुक्त तथ्ये अग्रस्थानी ठेवा; रोखासाठी दुय्यम असलेले तपशील संक्षिप्तपणे मांडा.',

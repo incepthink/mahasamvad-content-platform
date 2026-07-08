@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { ZodError } from 'zod';
 import { createServiceRoleClient } from '@dgipr/database';
 import { registerGenerationRoutes } from './routes/generations.js';
+import { registerGlossaryRoutes } from './routes/glossary.js';
 
 export async function createServer() {
   const app = Fastify({
@@ -45,6 +46,7 @@ export async function createServer() {
   await app.register(
     async (instance) => {
       registerGenerationRoutes(instance, client);
+      registerGlossaryRoutes(instance, client);
     },
     { prefix: '/api' },
   );

@@ -44,6 +44,7 @@ export default function RootLayout({
               <nav className="site-nav" aria-label="मुख्य">
                 <Link href="/">{STR.navNew}</Link>
                 <Link href="/generations">{STR.navHistory}</Link>
+                <Link href="/glossary">{STR.navGlossary}</Link>
                 <TasksMenu />
               </nav>
             </div>

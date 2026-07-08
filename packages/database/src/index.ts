@@ -37,6 +37,20 @@ export {
   type NewRevision,
 } from './generations.js';
 export {
+  GLOSSARY_TERMS_TABLE,
+  listGlossaryTerms,
+  findGlossaryTermsInText,
+  insertGlossaryCandidates,
+  upsertGlossaryTerm,
+  updateGlossaryTerm,
+  deleteGlossaryTerm,
+  type TermType,
+  type TermSource,
+  type GlossaryTerm,
+  type NewGlossaryTerm,
+  type GlossaryTermPatch,
+} from './glossary.js';
+export {
   POSTERS_BUCKET,
   uploadPng,
   publicUrl,

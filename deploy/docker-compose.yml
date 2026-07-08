@@ -1,0 +1,76 @@
+# Production stack for the DGIPR platform on a single EC2 host.
+#
+#   api    — @dgipr/api (Fastify + Chromium), built from deploy/api.Dockerfile
+#   n8n    — the social-post workflow host
+#   caddy  — reverse proxy with automatic HTTPS (Let's Encrypt) for both above
+#
+# The web app is NOT here — it runs on Vercel and calls `api` over public HTTPS.
+# Supabase is managed cloud (your existing project); nothing to run for it here.
+#
+# Bring it up from this directory:  docker compose up -d --build
+#
+# Prereqs on the box:
+#   - Docker + Docker Compose plugin installed
+#   - deploy/.env.prod filled in (see .env.prod.example)
+#   - DNS A-records: api.<domain> and n8n.<domain> -> this EC2's public IP
+#   - Security group inbound: 80 + 443 open to the world; 22 to your IP only
+
+services:
+  api:
+    build:
+      context: ..                      # repo root — the monorepo build needs it
+      dockerfile: deploy/api.Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env.prod                      # Supabase + OpenAI + n8n wiring (see template)
+    environment:
+      HOST: 0.0.0.0
+      PORT: "3001"
+      # api <-> n8n talk over the internal compose network by service name:
+      N8N_SOCIAL_POST_WEBHOOK_URL: http://n8n:5678/webhook/dgipr-social-post
+      N8N_ARTICLE_POSTER_WEBHOOK_URL: http://n8n:5678/webhook/dgipr-article-poster
+      API_PUBLIC_URL: http://api:3001  # the URL n8n pings for job progress
+      # ARTICLE_POSTER_MODE defaults to 'n8n' (render via the workflow above); set to
+      # 'html' to fall back to the in-container HTML/Playwright renderer.
+    expose:
+      - "3001"                         # internal only; Caddy publishes it
+    # No host port mapping — Caddy is the only public entrypoint.
+
+  n8n:
+    image: n8nio/n8n:latest
+    restart: unless-stopped
+    environment:
+      # Public-facing identity (Caddy terminates TLS in front of it):
+      N8N_HOST: ${N8N_SUBDOMAIN:?set N8N_SUBDOMAIN in shell or compose env}
+      N8N_PROTOCOL: https
+      N8N_PORT: "5678"
+      WEBHOOK_URL: https://${N8N_SUBDOMAIN}/
+      N8N_EDITOR_BASE_URL: https://${N8N_SUBDOMAIN}/
+      GENERIC_TIMEZONE: Asia/Kolkata
+      # Lock the editor down with basic auth (change the password!):
+      N8N_BASIC_AUTH_ACTIVE: "true"
+      N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER:-admin}
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD:?set a real n8n admin password}
+    expose:
+      - "5678"
+    volumes:
+      - n8n_data:/home/node/.n8n       # persists workflows, credentials, encryption key
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data               # ACME certs — MUST persist across restarts
+      - caddy_config:/config
+    depends_on:
+      - api
+      - n8n
+
+volumes:
+  n8n_data:
+  caddy_data:
+  caddy_config:

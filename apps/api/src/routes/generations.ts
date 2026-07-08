@@ -21,6 +21,7 @@ import {
   ArticleFeedbackRequestSchema,
   CopySchema,
   CreateGenerationRequestSchema,
+  FiveWOneHSchema,
   GenerationStepSchema,
   PosterFeedbackRequestSchema,
   UpdateCopyRequestSchema,
@@ -34,6 +35,7 @@ import {
   startGenerationJob,
   startPosterFeedbackJob,
   startSocialPostJob,
+  startTranslateJob,
 } from '../jobs/runner.js';
 
 // Stage ping n8n POSTs to /generations/:id/progress after each social-post stage.
@@ -76,6 +78,7 @@ async function toDetail(
 ): Promise<GenerationDetail> {
   const revisions = await listRevisions(client, row.id);
   const copy = CopySchema.safeParse(row.copy);
+  const fiveWOneH = FiveWOneHSchema.safeParse(row.fiveWOneH);
   return {
     id: row.id,
     status: row.status,
@@ -86,8 +89,10 @@ async function toDetail(
     heading: row.heading,
     note: row.note,
     article: row.article,
+    articleEnglish: row.articleEnglish,
     factCheck: row.factCheck,
     copy: copy.success ? copy.data : null,
+    fiveWOneH: fiveWOneH.success ? fiveWOneH.data : null,
     posterUrl: row.posterPath ? publicUrl(client, row.posterPath) : null,
     sceneUrl: row.scenePath ? publicUrl(client, row.scenePath) : null,
     error: row.error,
@@ -207,6 +212,41 @@ export function registerGenerationRoutes(
         error: null,
       });
       startArticleFeedbackJob(client, row.id, body.feedback);
+      return reply.code(202).send({});
+    },
+  );
+
+  // On-demand English translation of a completed article. Re-translatable (e.g. after
+  // a glossary correction), so no idempotency guard; the UI only offers it when there
+  // is an article and no job in flight.
+  app.post<{ Params: { id: string } }>(
+    '/generations/:id/translate',
+    async (request, reply) => {
+      const row = await getGeneration(client, request.params.id);
+      if (!row) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'Generation not found.' } });
+      }
+      if (isJobRunning(row.id)) {
+        return reply
+          .code(409)
+          .send({ error: { message: 'A job is already running.' } });
+      }
+      if (!row.article) {
+        return reply
+          .code(409)
+          .send({ error: { message: 'No article to translate yet.' } });
+      }
+      // Flip to running BEFORE returning so the client's immediate refresh sees the
+      // transition and keeps polling; the detached job would otherwise set running a
+      // beat later, letting a racing poll read stale 'completed' and stop polling.
+      await updateGeneration(client, row.id, {
+        status: 'running',
+        step: 'translate',
+        error: null,
+      });
+      startTranslateJob(client, row.id);
       return reply.code(202).send({});
     },
   );

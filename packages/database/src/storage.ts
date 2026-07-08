@@ -8,14 +8,18 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 export const POSTERS_BUCKET = 'posters';
 
+// Versioned poster/scene paths must never be overwritten (public bucket is
+// CDN-cached), so upsert defaults to false. Pass upsert: true only for stable,
+// intentionally-overwritten objects like the brand templates under references/.
 export async function uploadPng(
   client: SupabaseClient,
   path: string,
   png: Buffer,
+  upsert = false,
 ): Promise<void> {
   const { error } = await client.storage
     .from(POSTERS_BUCKET)
-    .upload(path, png, { contentType: 'image/png', upsert: false });
+    .upload(path, png, { contentType: 'image/png', upsert });
   if (error) {
     throw new Error(`Failed to upload ${path}: ${error.message}`);
   }
