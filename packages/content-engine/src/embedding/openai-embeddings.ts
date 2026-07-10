@@ -1,8 +1,13 @@
 // OpenAI embeddings for Mahasamvad chunks (PROJECT_CONTEXT step 7).
 //
 // text-embedding-3-large is a strong multilingual model (good on Marathi/Indic).
-// We call the REST API directly with fetch — same style as the scraper in
+// We call the REST API directly — same style as the scraper in
 // scraping/mahasamvad-rest.ts — to avoid pulling in the OpenAI SDK.
+//
+// Requests go through openAiFetch (serialized + retried on 429/5xx), which also keeps the
+// bulk `embed:news` ingest loop from dying partway through on a single rate-limit blip.
+
+import { openAiFetch } from '../http/openai-request.js';
 
 const EMBEDDINGS_URL = 'https://api.openai.com/v1/embeddings';
 
@@ -28,21 +33,11 @@ function requireApiKey(): string {
 }
 
 async function embedBatch(texts: string[], apiKey: string): Promise<number[][]> {
-  const response = await fetch(EMBEDDINGS_URL, {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${apiKey}`,
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({ model: EMBEDDING_MODEL, input: texts }),
+  const response = await openAiFetch(EMBEDDINGS_URL, {
+    label: 'embeddings',
+    apiKey,
+    body: { model: EMBEDDING_MODEL, input: texts },
   });
-
-  if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(
-      `OpenAI embeddings request failed: ${response.status} ${response.statusText} — ${detail}`,
-    );
-  }
 
   const body = (await response.json()) as EmbeddingResponse;
   // The API may return items out of order; sort by index to realign with input.

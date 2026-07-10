@@ -10,6 +10,7 @@ import { STEP_LABELS, STR } from '../lib/strings';
 const ARTICLE_STEPS: GenerationStep[] = [
   'retrieve',
   'extract_5w1h',
+  'editorial_brief',
   'draft',
   'coverage',
   'faithfulness',

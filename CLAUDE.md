@@ -112,6 +112,15 @@ Chromium): `pnpm --filter @dgipr/poster-renderer exec playwright install chromiu
   dates, amounts, designations, scheme names, and locations are never invented —
   the user's note/uploaded docs are the only factual source; Mahasamvad articles
   are **style/structure references only**.
+- **Completeness is tiered, not total — and tiers are citizen-first.** Foreground/supporting
+  facts must be preserved; mention-tier detail may be compressed to a clause and omit-tier
+  noise (committee rosters, accounting heads) dropped — editorial selection is a feature, not
+  a bug. The brief assigns tiers by who a fact serves (benefits/eligibility/deadlines/citizen
+  actions outrank implementation machinery; see `CATEGORY_TIER_GUIDANCE` in
+  `editorial-brief.ts`), a tier-audit pass corrects mis-tiers, and the coverage loop enforces
+  both sides (missing foreground/supporting + over-expanded mention/omit). "Never invent
+  names/dates/amounts/designations/scheme names/locations" stays absolute; the faithfulness
+  pass + fact-check appendix are the guard.
 - **Package boundaries.** `apps/api` routes stay thin and only sequence calls +
   persist state; all LLM/render logic lives in `@dgipr/content-engine` and
   `@dgipr/poster-renderer`. Keep it that way.
@@ -133,6 +142,14 @@ Chromium): `pnpm --filter @dgipr/poster-renderer exec playwright install chromiu
   `master-article.png` (seeded by `pnpm --filter @dgipr/content-engine upload:article-master`);
   the workflows fetch them over HTTPS, so they never read local disk. Deploy artifacts:
   `n8n/workflow-exports/{social-post-v2-api,article-poster-v1-api}.json` — import both into the AWS n8n.
+- **All OpenAI traffic goes through `packages/content-engine/src/http/openai-request.ts`**
+  (`openAiFetch`) — never `fetch` `api.openai.com` directly. It serializes calls process-wide
+  (`OPENAI_MAX_CONCURRENCY`, default 1) and retries 429/5xx using the wait OpenAI names in its
+  `retry-after` / `x-ratelimit-reset-*` headers. One article is 8-15 gpt-4o calls of ~5-8k
+  tokens each, so on a 30k-TPM org concurrency > 1 reliably 429s; a `429 insufficient_quota`
+  (billing, not rate) fails fast instead of backing off. Retry warnings in the log are the
+  mechanism working, not a fault. `poster-renderer`'s image call and `sarvam-chat.ts` are not
+  yet covered.
 - **Env & secrets:** config comes from the root `.env` (see `.env.example`:
   Supabase + OpenAI, optional Sarvam). Never commit secrets.
 - **Scraped output** under `packages/content-engine/data/` is gitignored — don't

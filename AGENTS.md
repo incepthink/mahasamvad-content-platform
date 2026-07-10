@@ -49,6 +49,16 @@ their master templates from Supabase Storage over HTTPS (never local disk):
 Both are committed under `n8n/workflow-exports/` (`social-post-v2-api.json`,
 `article-poster-v1-api.json`) — the artifacts to import into the AWS n8n.
 
+In progress: an editorial-rewrite pipeline (editorial brief → tiered coverage → editorial-
+quality judge → optional subheadings) that moves article generation from total-coverage
+restatement to edited, angle-led Mahasamvad articles under the tiered completeness contract
+in Product Principles. The brief tiers facts **citizen-first** (benefits/eligibility/deadlines/
+citizen actions outrank committee compositions and other implementation machinery; citizen
+outcomes buried in committee-task lists are re-attributed to the reader's perspective), a
+second tier-audit pass corrects mis-tiers, sectioned long-note drafts are tier-aware, and the
+coverage loop guards both sides (missing foreground/supporting facts AND over-expanded
+mention/omit detail). RAG stays style-only and the faithfulness/fact-check guards are untouched.
+
 Not implemented yet: Canva integration, authentication.
 
 ## Planned Architecture
@@ -70,6 +80,13 @@ Not implemented yet: Canva integration, authentication.
 - Existing Mahasamvad articles are primarily style and structure references.
 - New notes and uploaded official documents are the factual source of truth for new content.
 - Names, dates, amounts, designations, scheme names, and locations must never be invented.
+- Completeness is **tiered, not total**. The article need not restate every unit of the
+  note. Facts the pipeline tiers as **foreground/supporting must be preserved**;
+  **mention**-tier detail may be compressed to a clause; **omit**-tier noise (e.g. full
+  committee-member lists, accounting heads) may be absent. Editorial selection — a real
+  editor compresses and omits to serve an angle — is a *feature*, not a defect. The "never
+  invent names/dates/amounts/designations/scheme names/locations" rule above stays absolute
+  and unchanged; the faithfulness pass and fact-check appendix remain the guard.
 - Core business logic must remain modular, testable, version-controlled, and stored in code.
 - n8n may later be used for scheduling, notifications, retries, and automation, but the main business logic must not live inside large n8n workflows.
 - Secrets, API keys, and credentials must never be committed to the repository.

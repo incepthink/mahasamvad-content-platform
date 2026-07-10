@@ -5,6 +5,18 @@
 
 import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import {
+  Bird,
+  ClipboardList,
+  FileText,
+  Files,
+  Image as ImageIcon,
+  Newspaper,
+  Palette,
+  Sparkles,
+  Target,
+  type LucideIcon,
+} from 'lucide-react';
 import type { Category, DesignMode, OutputType } from '@dgipr/schemas';
 import { createGeneration } from '../lib/api';
 import { useTasks } from '../lib/TasksProvider';
@@ -12,35 +24,35 @@ import { STR } from '../lib/strings';
 
 const CATEGORY_OPTIONS: ReadonlyArray<{
   value: Category;
-  icon: string;
+  icon: LucideIcon;
   name: string;
   desc: string;
 }> = [
-  { value: 'scheme', icon: '📋', name: STR.categoryScheme, desc: STR.categorySchemeDesc },
-  { value: 'news', icon: '📰', name: STR.categoryNews, desc: STR.categoryNewsDesc },
-  { value: 'twitter', icon: '🐦', name: STR.categoryTwitter, desc: STR.categoryTwitterDesc },
+  { value: 'scheme', icon: ClipboardList, name: STR.categoryScheme, desc: STR.categorySchemeDesc },
+  { value: 'news', icon: Newspaper, name: STR.categoryNews, desc: STR.categoryNewsDesc },
+  { value: 'twitter', icon: Bird, name: STR.categoryTwitter, desc: STR.categoryTwitterDesc },
 ];
 
 const OUTPUT_OPTIONS: ReadonlyArray<{
   value: OutputType;
-  icon: string;
+  icon: LucideIcon;
   name: string;
   desc: string;
 }> = [
-  { value: 'article', icon: '📄', name: STR.outputArticle, desc: STR.outputArticleDesc },
-  { value: 'poster', icon: '🖼️', name: STR.outputPoster, desc: STR.outputPosterDesc },
-  { value: 'both', icon: '📄🖼️', name: STR.outputBoth, desc: STR.outputBothDesc },
+  { value: 'article', icon: FileText, name: STR.outputArticle, desc: STR.outputArticleDesc },
+  { value: 'poster', icon: ImageIcon, name: STR.outputPoster, desc: STR.outputPosterDesc },
+  { value: 'both', icon: Files, name: STR.outputBoth, desc: STR.outputBothDesc },
 ];
 
 const DESIGN_OPTIONS: ReadonlyArray<{
   value: DesignMode;
-  icon: string;
+  icon: LucideIcon;
   name: string;
   desc: string;
 }> = [
-  { value: 'onbrand', icon: '🎯', name: STR.designOnbrand, desc: STR.designOnbrandDesc },
-  { value: 'adaptive', icon: '🎨', name: STR.designAdaptive, desc: STR.designAdaptiveDesc },
-  { value: 'fresh', icon: '✨', name: STR.designFresh, desc: STR.designFreshDesc },
+  { value: 'onbrand', icon: Target, name: STR.designOnbrand, desc: STR.designOnbrandDesc },
+  { value: 'adaptive', icon: Palette, name: STR.designAdaptive, desc: STR.designAdaptiveDesc },
+  { value: 'fresh', icon: Sparkles, name: STR.designFresh, desc: STR.designFreshDesc },
 ];
 
 export default function NewGenerationPage() {
@@ -100,6 +112,9 @@ export default function NewGenerationPage() {
         setCategory('scheme');
         setSubmitting(false);
       } else {
+        // Navigate to the progress page, but also register a session row so the
+        // navbar tasks panel offers a shortcut back to this run.
+        addTask(id);
         router.push(`/generations/${id}`);
       }
     } catch (e) {
@@ -176,7 +191,7 @@ export default function NewGenerationPage() {
                 onClick={() => setCategory(option.value)}
               >
                 <span className="icon" aria-hidden="true">
-                  {option.icon}
+                  <option.icon size={30} strokeWidth={1.75} />
                 </span>
                 <span className="name">{option.name}</span>
                 <span className="desc">{option.desc}</span>
@@ -202,7 +217,7 @@ export default function NewGenerationPage() {
                 onClick={() => setDesignMode(option.value)}
               >
                 <span className="icon" aria-hidden="true">
-                  {option.icon}
+                  <option.icon size={30} strokeWidth={1.75} />
                 </span>
                 <span className="name">{option.name}</span>
                 <span className="desc">{option.desc}</span>
@@ -223,7 +238,7 @@ export default function NewGenerationPage() {
                 onClick={() => setOutputType(option.value)}
               >
                 <span className="icon" aria-hidden="true">
-                  {option.icon}
+                  <option.icon size={30} strokeWidth={1.75} />
                 </span>
                 <span className="name">{option.name}</span>
                 <span className="desc">{option.desc}</span>

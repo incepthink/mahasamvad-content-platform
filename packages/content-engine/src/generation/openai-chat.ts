@@ -1,8 +1,13 @@
 // OpenAI chat completions for article generation (PROJECT_CONTEXT step 12).
 //
 // gpt-4o is a strong multilingual model and handles long-form Marathi (Devanagari)
-// prose well. We call the REST API directly with fetch — same style as
+// prose well. We call the REST API directly — same style as
 // embedding/openai-embeddings.ts — to avoid pulling in the OpenAI SDK.
+//
+// Every request goes through openAiFetch, which serializes calls process-wide and retries
+// transient failures (429/5xx). Do not call fetch against api.openai.com directly.
+
+import { openAiFetch } from '../http/openai-request.js';
 
 const CHAT_URL = 'https://api.openai.com/v1/chat/completions';
 
@@ -41,29 +46,18 @@ export async function chatComplete(
     model?: string;
   },
 ): Promise<string> {
-  const apiKey = requireApiKey();
-  const response = await fetch(CHAT_URL, {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${apiKey}`,
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({
+  const response = await openAiFetch(CHAT_URL, {
+    label: 'chat',
+    apiKey: requireApiKey(),
+    body: {
       model: options?.model ?? CHAT_MODEL,
       messages,
       temperature: options?.temperature ?? 0.4,
       ...(options?.responseFormat
         ? { response_format: { type: options.responseFormat } }
         : {}),
-    }),
+    },
   });
-
-  if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(
-      `OpenAI chat request failed: ${response.status} ${response.statusText} — ${detail}`,
-    );
-  }
 
   const body = (await response.json()) as ChatResponse;
   const content = body.choices[0]?.message.content;

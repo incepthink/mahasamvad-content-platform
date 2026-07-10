@@ -11,6 +11,7 @@ import type { GenerationDetail } from '@dgipr/schemas';
 import { createGeneration, posterDownloadUrl } from '../lib/api';
 import { useTasks } from '../lib/TasksProvider';
 import { STR } from '../lib/strings';
+import { StatusChip } from './StatusChip';
 import { TaskProgressBar } from './TaskProgressBar';
 
 function taskTitle(task: GenerationDetail): string {
@@ -118,16 +119,30 @@ export function TasksMenu() {
               {tasks.map((task) => {
                 const done = task.status === 'completed';
                 const failed = task.status === 'failed';
+                const isTwitter = task.category === 'twitter';
                 return (
                   <li key={task.id} className="task-row">
-                    <p className="task-row-title">{taskTitle(task)}</p>
-                    <TaskProgressBar status={task.status} step={task.step} />
+                    <Link
+                      className="task-row-title"
+                      href={`/generations/${task.id}`}
+                      onClick={closePanel}
+                    >
+                      {taskTitle(task)}
+                    </Link>
+
+                    {isTwitter ? (
+                      <TaskProgressBar status={task.status} step={task.step} />
+                    ) : (
+                      <StatusChip status={task.status} />
+                    )}
 
                     {failed ? (
                       <p className="task-error">{task.error ?? STR.failedHint}</p>
                     ) : null}
 
-                    {done && task.posterUrl ? (
+                    {/* Rich in-panel result + actions are the twitter surface; other
+                        categories navigate to their detail page via the title link. */}
+                    {isTwitter && done && task.posterUrl ? (
                       <div className="task-result">
                         <img
                           src={task.posterUrl}
@@ -140,7 +155,7 @@ export function TasksMenu() {
                       </div>
                     ) : null}
 
-                    {done || failed ? (
+                    {isTwitter && (done || failed) ? (
                       <div className="task-actions">
                         {done && task.article ? (
                           <button
@@ -185,6 +200,16 @@ export function TasksMenu() {
               })}
             </ul>
           )}
+
+          <div className="tasks-popover-footer">
+            <Link
+              className="btn btn-small"
+              href="/generations"
+              onClick={closePanel}
+            >
+              {STR.navHistory}
+            </Link>
+          </div>
         </div>
       ) : null}
     </div>

@@ -149,6 +149,11 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
         });
       },
     });
+    // Log the derived editorial angle for observability; the brief itself is not
+    // persisted yet (that is a later, optional phase).
+    if (result.brief) {
+      console.log(`[job ${id}] editorial angle: ${result.brief.angle}`);
+    }
     await updateGeneration(client, id, {
       article: result.article,
       factCheck: result.factCheck,

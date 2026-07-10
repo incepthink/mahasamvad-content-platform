@@ -15,6 +15,10 @@ export { polishArticleWithSarvam } from './generation/polish-article.js';
 export { generateCopy } from './generation/generate-copy.js';
 export { extractFiveWOneH } from './generation/extract-5w1h.js';
 export {
+  deriveEditorialBrief,
+  type EditorialBrief,
+} from './generation/editorial-brief.js';
+export {
   reviseArticle,
   type RevisedArticle,
 } from './generation/revise-article.js';

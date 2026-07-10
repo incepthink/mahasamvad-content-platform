@@ -1,14 +1,15 @@
 'use client';
 
-// Global tracker for Twitter/n8n background tasks. Because a social-post run lives
-// in a separate service and can take minutes, the create page does NOT navigate on
-// submit — it hands the id here and the navbar tasks panel follows the run.
+// Global tracker for in-flight generations. Every run started this session is handed
+// here (via addTask) and followed in the navbar tasks panel. Twitter/n8n runs live in
+// a separate service and can take minutes, so the create page does NOT navigate for
+// them — the panel is their surface; article/news runs navigate to their detail page
+// but still register a row here as a shortcut.
 //
-// State of record is the server row (matches the platform's "polling clients survive
-// refreshes" principle): on mount we hydrate tracked ids from GET /api/generations
-// (category === 'twitter'), adopting any active run plus a few recent ones so a
-// just-finished result is still visible after a reload. Tracked tasks are polled at
-// the same ~2.5 s cadence as useGeneration until they reach a terminal status.
+// Session-only: the tracked list lives in memory only (no server hydration), so a
+// reload starts with an empty panel. While tracked tasks are non-terminal they are
+// polled at the same ~2.5 s cadence as useGeneration until they reach a terminal
+// status (their row stays to show the result).
 
 import {
   createContext,
@@ -20,13 +21,9 @@ import {
   type ReactNode,
 } from 'react';
 import type { GenerationDetail } from '@dgipr/schemas';
-import { getGeneration, listGenerations } from './api';
+import { getGeneration } from './api';
 
 const POLL_INTERVAL_MS = 2500;
-
-// How many already-finished twitter runs to re-adopt on refresh, so the panel still
-// shows the most recent result(s) after a reload rather than going empty.
-const HYDRATE_RECENT_TERMINAL = 3;
 
 type TasksContextValue = {
   // Loaded task details, newest-first.
@@ -78,41 +75,17 @@ export function TasksProvider({ children }: { children: ReactNode }) {
   const openPanel = useCallback(() => setIsPanelOpen(true), []);
   const closePanel = useCallback(() => setIsPanelOpen(false), []);
 
-  // Hydrate on mount (refresh-proof): adopt active twitter runs + a few recent ones.
-  useEffect(() => {
-    let cancelled = false;
-    listGenerations()
-      .then((all) => {
-        if (cancelled) return;
-        const twitter = all.filter((s) => s.category === 'twitter');
-        const active = twitter.filter((s) => isActive(s.status));
-        const terminal = twitter
-          .filter((s) => !isActive(s.status))
-          .slice(0, HYDRATE_RECENT_TERMINAL);
-        const adopt = [...active, ...terminal];
-        setIds((prev) => {
-          const merged = [...prev];
-          for (const s of adopt) if (!merged.includes(s.id)) merged.push(s.id);
-          return merged;
-        });
-        // Summaries lack caption/note/designMode, so fetch each full detail.
-        for (const s of adopt) {
-          void getGeneration(s.id).then(upsert).catch(() => {});
-        }
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [upsert]);
-
   const tasks = ids
     .map((id) => details[id])
     .filter((d): d is GenerationDetail => Boolean(d));
   const loadedActive = tasks.filter((d) => isActive(d.status)).length;
   const pendingCount = ids.filter((id) => !details[id]).length;
   const activeCount = loadedActive + pendingCount;
-  const hasActiveTwitterTask = activeCount > 0;
+  // v1 allows one active twitter task at a time; gate only on twitter runs so an
+  // in-flight article/news run doesn't disable the Twitter card.
+  const hasActiveTwitterTask = tasks.some(
+    (d) => d.category === 'twitter' && isActive(d.status),
+  );
   const idle = activeCount === 0;
 
   // Poll while anything is in flight; stop each task once it reaches a terminal

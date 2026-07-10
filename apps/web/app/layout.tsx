@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { Noto_Sans_Devanagari } from 'next/font/google';
 import { STR } from '../lib/strings';
 import { TasksProvider } from '../lib/TasksProvider';
-import { TasksMenu } from '../components/TasksMenu';
+import { SiteNav } from '../components/SiteNav';
 import HashcaseLogo from '../public/hashcase-text.svg';
 
 // Same family the poster renderer typesets with, so the UI shapes Devanagari
@@ -41,12 +41,7 @@ export default function RootLayout({
                   className="site-logo"
                 />
               </Link>
-              <nav className="site-nav" aria-label="मुख्य">
-                <Link href="/">{STR.navNew}</Link>
-                <Link href="/generations">{STR.navHistory}</Link>
-                <Link href="/glossary">{STR.navGlossary}</Link>
-                <TasksMenu />
-              </nav>
+              <SiteNav />
             </div>
           </header>
           {children}

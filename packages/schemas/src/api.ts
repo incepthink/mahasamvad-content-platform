@@ -31,6 +31,9 @@ export const GenerationStepSchema = z.enum([
   // Extract the 5W1H (कोण/काय/केव्हा/कुठे/का/कसे) fact scaffold from the note
   // before drafting; runs right after retrieval.
   'extract_5w1h',
+  // Derive the editorial brief (angle, fact tiers, arc + subheading plan) from the
+  // note before drafting; runs right after 5W1H extraction.
+  'editorial_brief',
   'draft',
   'coverage',
   'faithfulness',

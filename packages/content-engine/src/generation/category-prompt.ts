@@ -6,6 +6,9 @@
 // fact source.
 
 import type { FiveWOneH } from '@dgipr/schemas';
+// Type-only import (erased at compile time), so this does not create a runtime import
+// cycle with editorial-brief.ts, which imports CATEGORY_LABEL/ArticleCategory from here.
+import type { EditorialBrief } from './editorial-brief.js';
 
 export type ArticleCategory = 'news' | 'scheme';
 
@@ -39,7 +42,7 @@ const CATEGORY_STRUCTURE: Record<ArticleCategory, string[]> = {
     '2. पहिला परिच्छेद थेट शासन निर्णयाने सुरू करू नका. आधी लाभार्थी वर्गाची समस्या, गरज किंवा सामाजिक/आर्थिक पार्श्वभूमी मांडून लेखाला मानवी संदर्भ द्या.',
     '3. त्यानंतर शासनाने ही योजना का आणली, कोणत्या वर्गाला दिलासा मिळणार आहे आणि योजनेचे महत्त्व काय आहे हे स्पष्ट करा.',
     '4. योजनेचे मुख्य लाभ स्पष्टपणे द्या — रक्कम, पात्र लाभार्थी, प्रोत्साहनपर लाभ, OTS किंवा इतर महत्त्वाचे लाभ टिपणीत असल्यास अचूकपणे मांडावेत.',
-    '5. अंमलबजावणीबाबत जिल्हास्तरीय/राज्यस्तरीय यंत्रणा, समित्या, DBT, निधीप्रक्रिया किंवा अधिकारी यांची माहिती टिपणीत असल्यास द्या; पण ती शासन निर्णयाच्या कोरड्या यादीसारखी न देता संक्षिप्त, वाचनीय परिच्छेदांत मांडावी.',
+    '5. अंमलबजावणी-यंत्रणेला (समित्या, निधीप्रक्रिया, अधिकारी, पोर्टल-कामे) जास्तीत जास्त एकच संक्षिप्त परिच्छेद द्या, आणि तोही नागरिकाला मिळणाऱ्या हमीच्या भाषेत — उदा. "पारदर्शक अंमलबजावणीसाठी DBT द्वारे थेट खात्यात रक्कम जमा होणार असून जिल्हास्तरावर तक्रार निवारणाची सोय आहे" — यंत्रणेच्या कामकाजाच्या भाषेत नव्हे. DBT, तक्रार निवारण, याद्यांची प्रसिद्धी यांसारखे नागरिकाला थेट स्पर्श करणारे मुद्दे मात्र लाभ म्हणून मांडा.',
     '6. समितीचे सर्व सदस्य आणि प्रत्येक प्रशासकीय तपशील मुख्य लेखात लांबलचक यादीप्रमाणे देऊ नका, जोपर्यंत ते लेखासाठी अत्यावश्यक नाहीत. अशा तपशीलांचा सारांश “जिल्हास्तरावर संबंधित बँका, सहकार विभाग आणि प्रशासनाच्या समन्वयातून अंमलबजावणी केली जाणार आहे” अशा वाचनीय पद्धतीने करा.',
     '7. एकाच योजनेची लाभ, उद्दिष्टे किंवा अंमलबजावणीची माहिती पुन्हा पुन्हा आली असल्यास ती एकत्रित करून मांडावी; अनावश्यक पुनरावृत्ती करू नये.',
     '8. एकापेक्षा अधिक शासन निर्णय, तारीखा किंवा समित्या असल्यास त्यांना कालक्रमानुसार आणि विषयानुसार जोडून सलग लेख तयार करावा; वेगवेगळे GR सारांश एकामागोमाग एक चिकटवू नयेत.',
@@ -113,7 +116,7 @@ export function buildSystemPrompt(category: ArticleCategory): string {
     '2. दिलेली टिपणी (NOTES) हाच तथ्यांचा एकमेव आणि अधिकृत स्रोत आहे.',
     '3. टिपणीत नसलेली नवीन नावे, पदनामे, संस्था, आकडे, रक्कम, तारखा, ठिकाणे, कायदे, योजना, quote, byline किंवा दावे जोडू नका.',
     '4. शैली सुधारण्यासाठी वाक्यरचना, जोडवाक्ये, परिच्छेदांचा ओघ आणि अधिकृत भाषाशैली सुधारू शकता; पण नवीन ठोस तथ्य जोडू नका.',
-    '5. लेख हा सारांश नसावा. टिपणीतील महत्त्वाचे मुद्दे गाळू नका. माहिती पूर्ण, संपादित आणि अधिकृत बातमी/लेखाच्या रूपात मांडा.',
+    '5. लेख हा कोरडा, घटक-निहाय सारांश नसावा. ठळक व आधारभूत माहिती गाळू नका; दुय्यम तपशील संक्षिप्त करू शकता आणि क्षुल्लक बाबी वगळू शकता. माहिती संपादित, ओघवत्या व अधिकृत बातमी/लेखाच्या रूपात मांडा.',
     '6. अंतिम उत्तरात markdown शीर्षके, bullet points, क्रमांक, tags, JSON, स्पष्टीकरण किंवा टिपण्या वापरू नका.',
     '7. शैली-उदाहरण दिले असल्यास त्यातील फक्त रचना, सूर, परिच्छेदांची लय आणि लेखनशैली घ्या; त्यातील कोणतेही तथ्य, नाव, तारीख, आकडा, ठिकाण किंवा घटना वापरू नका.',
     '8. टिपणीत किंवा वापरकर्ता-इनपुटमध्ये ठिकाण व दिनांक स्पष्ट दिले असल्यासच dateline वापरा. नसल्यास ठिकाण-दिनांक स्वतःहून तयार करू नका.',
@@ -157,12 +160,48 @@ const FIVE_W_ONE_H_ROWS: ReadonlyArray<readonly [keyof FiveWOneH, string]> = [
   ['how', 'कसे'],
 ];
 
+// Render the editorial brief (angle, arc, planned subheads, fact tiers) as an in-context
+// PLAN block. Every tier item is a note-derived restatement, so the block is explicitly
+// marked as an editorial plan, not a fact source.
+function formatBriefBlock(brief: EditorialBrief): string[] {
+  const bullets = (items: readonly string[]): string =>
+    items.length > 0
+      ? items.map((item) => `  - ${item}`).join('\n')
+      : '  - (काही नाही)';
+
+  const lines = [
+    '<EDITORIAL_BRIEF purpose="editorial_plan_from_notes_not_fact_source">',
+    `रोख (ANGLE): ${brief.angle}`,
+  ];
+  if (brief.leadHook.trim()) {
+    lines.push(`सुरुवातीचा धागा (LEAD HOOK): ${brief.leadHook}`);
+  }
+  lines.push(
+    'मांडणी-आराखडा (ARC — याच क्रमाने लेख रचा, टिपणीच्या मूळ क्रमाने नव्हे):',
+    bullets(brief.arc),
+    'नियोजित उपशीर्षके (SUBHEADS — नियोजन; या टप्प्यावर लेखात markdown शीर्षके लिहू नका):',
+    bullets(brief.subheadings),
+    'अग्रस्थानी तथ्ये (FOREGROUND — सुरुवातीला व ठळकपणे):',
+    bullets(brief.tiers.foreground),
+    'आधारभूत तथ्ये (SUPPORTING — मुख्य भागात सविस्तर):',
+    bullets(brief.tiers.supporting),
+    'अल्प-उल्लेख तथ्ये (MENTION — फक्त एका वाक्यांशात; स्वतंत्र वाक्य/परिच्छेद देऊ नका):',
+    bullets(brief.tiers.mention),
+    'वगळावयाची माहिती (OMIT — लेखात देऊ नका; DRAFT मध्ये आली असली तरी वगळा):',
+    bullets(brief.tiers.omit),
+    '</EDITORIAL_BRIEF>',
+    '',
+  );
+  return lines;
+}
+
 export function buildUserPrompt(
   note: string,
   category: ArticleCategory,
   styleExample?: string | null,
   heading?: string | null,
   fiveW1H?: FiveWOneH | null,
+  brief?: EditorialBrief | null,
 ): string {
   const parts: string[] = [];
 
@@ -209,6 +248,15 @@ export function buildUserPrompt(
     );
   }
 
+  // Editorial brief (editorial-brief.ts): an angle + fact tiers + arc/subheading PLAN
+  // derived from the note. When present, it governs structure (the draft reorganizes
+  // around it) and fact prioritization (foreground leads, mention compresses, omit drops).
+  // NOT a fact source. Absent (best-effort null) ⇒ today's total-coverage behaviour.
+  const hasBrief = brief != null;
+  if (hasBrief) {
+    parts.push(...formatBriefBlock(brief));
+  }
+
   parts.push(
     '<NOTES purpose="only_authoritative_fact_source">',
     note.trim(),
@@ -217,13 +265,28 @@ export function buildUserPrompt(
     '<TASK>',
     `वरील NOTES मधील माहिती ${CATEGORY_LABEL[category]} शैलीत मांडून महासंवाद-शैलीतील पूर्ण मराठी लेख लिहा.`,
     'लेख प्रकाशित करता येईल असा असावा; तो सारांश, स्पष्टीकरणात्मक नोट किंवा मुद्देसूद पुनर्कथन नसावे.',
-    'NOTES मधील महत्त्वाचे मुद्दे गाळू नका.',
+    'NOTES मधील ठळक व आधारभूत मुद्दे गाळू नका; दुय्यम तपशील संक्षिप्त करू शकता आणि क्षुल्लक बाबी वगळू शकता.',
     'NOTES मध्ये नसलेले कोणतेही ठोस तथ्य, नाव, पदनाम, तारीख, ठिकाण, आकडा, कायदा, योजना, quote किंवा byline जोडू नका.',
     ...(hasFiveW1H
+      ? hasBrief
+        ? [
+            // A brief is present: its arc governs structure, so 5W1H is fact-grounding
+            // only (do NOT force a rigid inverted-pyramid over the brief's plan).
+            'FIVE_W_ONE_H हा NOTES मधून काढलेला तथ्य-सांगाडा आहे (नवीन तथ्य नाही) — तो फक्त तथ्ये अचूक ठेवण्यासाठी वापरा. लेखाची रचना EDITORIAL_BRIEF मधील रोख व मांडणी-आराखड्यानुसार (ARC) ठरवा, कठोर inverted-pyramid नुसार नव्हे.',
+            'FIVE_W_ONE_H मधील रिकामे field म्हणजे ती माहिती टिपणीत नाही — त्यासाठी काहीही रचून लिहू नका.',
+          ]
+        : [
+            'FIVE_W_ONE_H हा NOTES मधून काढलेला तथ्य-सांगाडा आहे (नवीन तथ्य नाही). लेख inverted-pyramid रचनेत लिहा: पहिल्या परिच्छेदात सर्वात महत्त्वाचे मुद्दे (सहसा काय + कोण + केव्हा/कुठे) द्या, आणि का व कसे नंतरच्या परिच्छेदांत विस्ताराने मांडा.',
+            'STYLE_EXAMPLE दिले असल्यास त्याच्या रचना व सुराला अनुसरून हा ओघ साधा.',
+            'FIVE_W_ONE_H मधील रिकामे field म्हणजे ती माहिती टिपणीत नाही — त्यासाठी काहीही रचून लिहू नका.',
+          ]
+      : []),
+    ...(hasBrief
       ? [
-          'FIVE_W_ONE_H हा NOTES मधून काढलेला तथ्य-सांगाडा आहे (नवीन तथ्य नाही). लेख inverted-pyramid रचनेत लिहा: पहिल्या परिच्छेदात सर्वात महत्त्वाचे मुद्दे (सहसा काय + कोण + केव्हा/कुठे) द्या, आणि का व कसे नंतरच्या परिच्छेदांत विस्ताराने मांडा.',
-          'STYLE_EXAMPLE दिले असल्यास त्याच्या रचना व सुराला अनुसरून हा ओघ साधा.',
-          'FIVE_W_ONE_H मधील रिकामे field म्हणजे ती माहिती टिपणीत नाही — त्यासाठी काहीही रचून लिहू नका.',
+          'EDITORIAL_BRIEF हा या NOTES वरून तयार केलेला संपादकीय आराखडा आहे (नवीन तथ्य-स्रोत नाही). लेख या रोखाभोवती (ANGLE) व मांडणी-आराखड्यानुसार (ARC) रचा.',
+          'टिपणीच्या मूळ क्रमाचे अनुसरण करू नका — मांडणी-आराखड्यानुसारच पुनर्रचना करा. FOREGROUND तथ्ये अग्रस्थानी घ्या आणि SUPPORTING तथ्ये मुख्य भागात मांडा.',
+          'MENTION तथ्याला स्वतंत्र वाक्य किंवा परिच्छेद देऊ नका — ते जास्तीत जास्त एका वाक्यांशात, नागरिकाभिमुख परिच्छेदाच्या आत आणा. OMIT तथ्ये पूर्णपणे वगळा.',
+          'हे प्राधान्य-वर्गीकरण ही संपादकीय निवड आहे — कोरडा, घटक-निहाय सारांश टाळण्यासाठीच आहे. मात्र सर्व तथ्ये फक्त NOTES मधूनच घ्या; आराखड्याच्या शब्दांतून नवीन तथ्य लेखात जोडू नका.',
         ]
       : []),
     ...(hasHeading

@@ -14,6 +14,7 @@ export const STR = {
   navNew: 'नवीन मजकूर',
   navHistory: 'मागील काम',
   navGlossary: 'शब्दकोश',
+  navMenu: 'मेनू',
   poweredBy: 'Powered by',
 
   // New-generation form
@@ -112,9 +113,9 @@ export const STR = {
   sendingFeedback: 'पाठवत आहोत…',
   feedbackTooShort: 'कृपया थोडक्यात अभिप्राय लिहा.',
 
-  // Background tasks panel (ट्विटर पोस्ट runs, tracked in the navbar)
+  // Background tasks panel (every generation started this session, tracked in the navbar)
   tasksButton: 'सुरू असलेली कामे',
-  tasksTitle: 'ट्विटर पोस्ट — सुरू असलेली कामे',
+  tasksTitle: 'सुरू असलेली कामे',
   tasksEmpty: 'सध्या कोणतेही काम सुरू नाही.',
   taskCopyCaption: 'कॅप्शन कॉपी करा',
   taskDownloadPoster: 'पोस्टर डाउनलोड करा',
@@ -164,6 +165,7 @@ export const STR = {
 export const STEP_LABELS: Record<GenerationStep, string> = {
   retrieve: 'संदर्भ लेख शोधत आहोत…',
   extract_5w1h: 'माहितीचे विश्लेषण करत आहोत…',
+  editorial_brief: 'संपादकीय आराखडा तयार करत आहोत…',
   draft: 'लेख लिहित आहोत…',
   coverage: 'लेखाची पूर्णता तपासत आहोत…',
   faithfulness: 'तथ्यांची पडताळणी करत आहोत…',
