@@ -21,7 +21,10 @@ export const SARVAM_MODEL = process.env.SARVAM_MODEL ?? 'sarvam-30b';
 // ON, that default is entirely consumed by chain-of-thought → finish_reason=length and
 // empty content. So we send a generous max_tokens (env-overridable) by default.
 export const SARVAM_MAX_TOKENS = Number.parseInt(
-  process.env.SARVAM_MAX_TOKENS ?? ' ',
+  // Fall back to the starter-tier ceiling (4096) when unset. A blank fallback here would
+  // parse to NaN → `max_tokens: null` in the JSON body → Sarvam's low 2048 default (and the
+  // translate path only dodged it by passing maxTokens explicitly).
+  process.env.SARVAM_MAX_TOKENS ?? '4096',
   10,
 );
 
@@ -75,6 +78,12 @@ export async function sarvamChatComplete(
     model?: string;
     maxTokens?: number;
     reasoningEffort?: string | null;
+    // Anti-repetition / nucleus-sampling controls (Sarvam-supported, both -2..2 / 0..1).
+    // Only sent when defined, so callers that omit them (e.g. the polish path) get an
+    // unchanged request body and Sarvam's defaults (0 / 0 / 1 = no-ops).
+    frequencyPenalty?: number;
+    presencePenalty?: number;
+    topP?: number;
   },
 ): Promise<string> {
   const apiKey = requireSarvamApiKey();
@@ -94,6 +103,15 @@ export async function sarvamChatComplete(
         options?.reasoningEffort !== undefined
           ? options.reasoningEffort
           : SARVAM_REASONING_EFFORT_DEFAULT,
+      // Spread each sampling control in only when provided, keeping other callers' bodies
+      // byte-for-byte identical to before.
+      ...(options?.frequencyPenalty !== undefined
+        ? { frequency_penalty: options.frequencyPenalty }
+        : {}),
+      ...(options?.presencePenalty !== undefined
+        ? { presence_penalty: options.presencePenalty }
+        : {}),
+      ...(options?.topP !== undefined ? { top_p: options.topP } : {}),
     }),
   });
 

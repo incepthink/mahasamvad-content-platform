@@ -37,6 +37,39 @@ const DEFAULT_MAX_CHARS_PER_BLOCK = 2500;
 // is available to the English reply; 4096 is the starter-tier ceiling.
 const MAX_TOKENS_PER_BLOCK = 4096;
 
+// Anti-repetition sampling. Without a frequency penalty, the near-greedy default
+// (temperature 0.2, no top_p) can collapse into a repetition loop at a proper-noun boundary
+// (a scheme name once looped "Shahu Maharaj" until it burned the whole token budget). A
+// positive frequency_penalty progressively suppresses any token the model keeps re-emitting,
+// which is the direct fix; presence_penalty and a modest top_p add headroom. These stay well
+// within the free-tier 4096 cap — the point is to STOP looping to the cap, not raise it.
+const TRANSLATE_SAMPLING = {
+  temperature: 0.3,
+  topP: 0.9,
+  frequencyPenalty: 0.5,
+  presencePenalty: 0.3,
+} as const;
+
+// Stronger settings for the one retry after a block still degenerates.
+const TRANSLATE_SAMPLING_RETRY = {
+  temperature: 0.5,
+  topP: 0.9,
+  frequencyPenalty: 1.0,
+  presencePenalty: 0.5,
+} as const;
+
+// A loop-collapsed reply is non-empty garbage (so the empty-content guard in sarvam-chat.ts
+// never fires) but has a tiny vocabulary: "Shahu Maharaj Shahu Maharaj…" is ~2 unique words
+// over hundreds. Flag output that is long yet overwhelmingly repetitive so it is retried and,
+// if still bad, never persisted. Short replies are exempt (a legitimately terse line can have
+// a low ratio by chance).
+function isDegenerate(text: string): boolean {
+  const words = text.split(/\s+/).filter((w) => w.length > 0);
+  if (words.length < 60) return false;
+  const unique = new Set(words.map((w) => w.toLowerCase())).size;
+  return unique / words.length < 0.25;
+}
+
 const SYSTEM_PROMPT = [
   'You are a professional Marathi-to-English translator for the Government of Maharashtra',
   '/ DGIPR (Directorate General of Information and Public Relations). You translate',
@@ -95,18 +128,46 @@ export async function translateArticleToEnglish(
   const translated: string[] = [];
   for (const [index, block] of blocks.entries()) {
     onProgress(index, blocks.length);
-    const english = await sarvamChatComplete(buildMessages(block, glossary), {
-      temperature: 0.2,
-      // null disables Sarvam's reasoning so the entire token budget goes to the reply.
-      // (The plan calls this "reasoningEffort: none"; null is the value that actually
-      // disables thinking on these hybrid-reasoning models — see sarvam-chat.ts.)
-      reasoningEffort: null,
-      maxTokens: MAX_TOKENS_PER_BLOCK,
-    });
-    translated.push(english.trim());
+    translated.push((await translateBlock(block, glossary, index, blocks.length)).trim());
   }
   onProgress(blocks.length, blocks.length);
   return translated.join('\n\n');
+}
+
+// Translate one block, guarding against repetition collapse: if the first attempt degenerates
+// into a repeat loop, retry once with stronger anti-repetition settings; if it still does,
+// throw so the job fails loudly and the garbage is never persisted (mirroring the empty-content
+// guard in sarvam-chat.ts). null disables Sarvam's reasoning so the whole token budget goes to
+// the reply (null — not 'none' — is what actually disables thinking on these hybrid models).
+async function translateBlock(
+  block: string,
+  glossary: readonly GlossaryEntry[],
+  index: number,
+  blockCount: number,
+): Promise<string> {
+  const messages = buildMessages(block, glossary);
+  const first = await sarvamChatComplete(messages, {
+    ...TRANSLATE_SAMPLING,
+    reasoningEffort: null,
+    maxTokens: MAX_TOKENS_PER_BLOCK,
+  });
+  if (!isDegenerate(first)) return first;
+
+  console.warn(
+    `[translate] block ${index + 1}/${blockCount} degenerated into a repetition loop; retrying with stronger anti-repetition settings.`,
+  );
+  const retry = await sarvamChatComplete(messages, {
+    ...TRANSLATE_SAMPLING_RETRY,
+    reasoningEffort: null,
+    maxTokens: MAX_TOKENS_PER_BLOCK,
+  });
+  if (isDegenerate(retry)) {
+    throw new Error(
+      `Translation degenerated into a repetition loop for block ${index + 1}/${blockCount}, ` +
+        `even after a retry. The English translation was not saved; try again.`,
+    );
+  }
+  return retry;
 }
 
 // Run directly to eyeball a translation in isolation (needs SARVAM_API_KEY):

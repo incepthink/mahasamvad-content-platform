@@ -86,7 +86,21 @@
       "Bash(curl -s -o /dev/null -w \"STATUS:%{http_code} TYPE:%{content_type} SIZE_BYTES:%{size_download}\\\\n\" \"https://scmwebkxoftkqdyujibw.supabase.co/storage/v1/object/public/posters/references/master-article.png\")",
       "mcp__n8n__n8n_list_workflows",
       "Bash(pnpm add *)",
-      "Bash(OPENAI_MAX_CONCURRENCY=4 npx tsx tmp-verify/verify-transport.ts)"
+      "Bash(OPENAI_MAX_CONCURRENCY=4 npx tsx tmp-verify/verify-transport.ts)",
+      "Bash(cat vercel.json)",
+      "Bash(cat apps/web/vercel.json)",
+      "Bash(ls -a .vercel apps/web/.vercel)",
+      "Bash(cp tsconfig.tsbuildinfo /c/Users/shaik/AppData/Local/Temp/claude/c--Users-shaik-Desktop-dev-work-mahasamvad-content-platform/bb8db5b7-08d5-4c96-95b1-2aed09a947cf/scratchpad/tsbuildinfo.bak)",
+      "Bash(mv dist *)",
+      "Bash(pnpm build *)",
+      "Bash(rm -f tsconfig.tsbuildinfo)",
+      "Bash(git rm *)",
+      "Bash(git add *)",
+      "Bash(git commit -q -m ' *)",
+      "Bash(rm -f /tmp/degen-check.mjs)"
+    ],
+    "additionalDirectories": [
+      "\\tmp"
     ]
   }
 }
