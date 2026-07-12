@@ -3,7 +3,7 @@
 // New generation: paste/upload the note (टिपणी), pick article/poster/both, one
 // primary action. Redirects to the generation's progress page on success.
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Bird,
@@ -21,6 +21,7 @@ import type { Category, DesignMode, OutputType } from '@dgipr/schemas';
 import { createGeneration } from '../lib/api';
 import { useTasks } from '../lib/TasksProvider';
 import { STR } from '../lib/strings';
+import ReferencePicker from '../components/ReferencePicker';
 
 const CATEGORY_OPTIONS: ReadonlyArray<{
   value: Category;
@@ -28,9 +29,24 @@ const CATEGORY_OPTIONS: ReadonlyArray<{
   name: string;
   desc: string;
 }> = [
-  { value: 'scheme', icon: ClipboardList, name: STR.categoryScheme, desc: STR.categorySchemeDesc },
-  { value: 'news', icon: Newspaper, name: STR.categoryNews, desc: STR.categoryNewsDesc },
-  { value: 'twitter', icon: Bird, name: STR.categoryTwitter, desc: STR.categoryTwitterDesc },
+  {
+    value: 'scheme',
+    icon: ClipboardList,
+    name: STR.categoryScheme,
+    desc: STR.categorySchemeDesc,
+  },
+  {
+    value: 'news',
+    icon: Newspaper,
+    name: STR.categoryNews,
+    desc: STR.categoryNewsDesc,
+  },
+  {
+    value: 'twitter',
+    icon: Bird,
+    name: STR.categoryTwitter,
+    desc: STR.categoryTwitterDesc,
+  },
 ];
 
 const OUTPUT_OPTIONS: ReadonlyArray<{
@@ -39,9 +55,24 @@ const OUTPUT_OPTIONS: ReadonlyArray<{
   name: string;
   desc: string;
 }> = [
-  { value: 'article', icon: FileText, name: STR.outputArticle, desc: STR.outputArticleDesc },
-  { value: 'poster', icon: ImageIcon, name: STR.outputPoster, desc: STR.outputPosterDesc },
-  { value: 'both', icon: Files, name: STR.outputBoth, desc: STR.outputBothDesc },
+  {
+    value: 'article',
+    icon: FileText,
+    name: STR.outputArticle,
+    desc: STR.outputArticleDesc,
+  },
+  {
+    value: 'poster',
+    icon: ImageIcon,
+    name: STR.outputPoster,
+    desc: STR.outputPosterDesc,
+  },
+  {
+    value: 'both',
+    icon: Files,
+    name: STR.outputBoth,
+    desc: STR.outputBothDesc,
+  },
 ];
 
 const DESIGN_OPTIONS: ReadonlyArray<{
@@ -50,24 +81,57 @@ const DESIGN_OPTIONS: ReadonlyArray<{
   name: string;
   desc: string;
 }> = [
-  { value: 'onbrand', icon: Target, name: STR.designOnbrand, desc: STR.designOnbrandDesc },
-  { value: 'adaptive', icon: Palette, name: STR.designAdaptive, desc: STR.designAdaptiveDesc },
-  { value: 'fresh', icon: Sparkles, name: STR.designFresh, desc: STR.designFreshDesc },
+  {
+    value: 'onbrand',
+    icon: Target,
+    name: STR.designOnbrand,
+    desc: STR.designOnbrandDesc,
+  },
+  {
+    value: 'adaptive',
+    icon: Palette,
+    name: STR.designAdaptive,
+    desc: STR.designAdaptiveDesc,
+  },
+  {
+    value: 'fresh',
+    icon: Sparkles,
+    name: STR.designFresh,
+    desc: STR.designFreshDesc,
+  },
 ];
 
 export default function NewGenerationPage() {
   const router = useRouter();
-  const { addTask, openPanel, hasActiveTwitterTask } = useTasks();
+  const { addTask, openPanel, hasActiveTwitterTask, hasActiveArticleTask } =
+    useTasks();
   const [note, setNote] = useState('');
   const [heading, setHeading] = useState('');
   const [category, setCategory] = useState<Category>('scheme');
   const [outputType, setOutputType] = useState<OutputType>('both');
   const [designMode, setDesignMode] = useState<DesignMode>('onbrand');
+  const [referenceImageId, setReferenceImageId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const isTwitter = category === 'twitter';
+
+  // Which library the template picker shows: twitter masters for the twitter flow
+  // (except 'fresh' — no master is edited), article masters for news/scheme runs
+  // that render a poster. null hides the picker entirely.
+  const pickerCategory: 'twitter' | 'article' | null = isTwitter
+    ? designMode === 'fresh'
+      ? null
+      : 'twitter'
+    : outputType !== 'article'
+      ? 'article'
+      : null;
+
+  // A pin is only meaningful for the combination it was chosen under.
+  useEffect(() => {
+    setReferenceImageId(null);
+  }, [category, designMode, outputType]);
 
   const onFile = (file: File | undefined) => {
     if (!file) return;
@@ -92,6 +156,10 @@ export default function NewGenerationPage() {
       setError(STR.busyError);
       return;
     }
+    if (!isTwitter && hasActiveArticleTask) {
+      setError(STR.busyError);
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
@@ -102,6 +170,7 @@ export default function NewGenerationPage() {
         // Twitter always produces a poster + caption; outputType is ignored by the runner.
         outputType: isTwitter ? 'poster' : outputType,
         designMode: isTwitter ? designMode : undefined,
+        referenceImageId: referenceImageId ?? undefined,
       });
       if (isTwitter) {
         // Background task: don't navigate. Track it, open the panel, reset the form
@@ -177,10 +246,13 @@ export default function NewGenerationPage() {
         <h2>{STR.categoryLabel}</h2>
         <div className="output-picker">
           {CATEGORY_OPTIONS.map((option) => {
-            // v1 allows one active Twitter task at a time: disable the card while one
-            // runs (other cards stay usable).
+            // v1 allows one active task per lane at a time: the Twitter card is
+            // gated by an in-flight twitter run, the news/scheme cards by an
+            // in-flight article run (the lanes don't block each other).
             const disabled =
-              option.value === 'twitter' && hasActiveTwitterTask;
+              option.value === 'twitter'
+                ? hasActiveTwitterTask
+                : hasActiveArticleTask;
             return (
               <button
                 key={option.value}
@@ -201,6 +273,9 @@ export default function NewGenerationPage() {
         </div>
         {hasActiveTwitterTask ? (
           <p className="info-callout">{STR.twitterBusyInfo}</p>
+        ) : null}
+        {hasActiveArticleTask ? (
+          <p className="info-callout">{STR.articleBusyInfo}</p>
         ) : null}
       </section>
 
@@ -247,6 +322,14 @@ export default function NewGenerationPage() {
           </div>
         </section>
       )}
+
+      {pickerCategory ? (
+        <ReferencePicker
+          category={pickerCategory}
+          value={referenceImageId}
+          onChange={setReferenceImageId}
+        />
+      ) : null}
 
       <section className="card">
         <div className="btn-row">

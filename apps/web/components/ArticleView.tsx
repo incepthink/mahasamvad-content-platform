@@ -9,17 +9,8 @@ import { useState } from 'react';
 import type { GenerationDetail } from '@dgipr/schemas';
 import { requestTranslation, sendArticleFeedback } from '../lib/api';
 import { STR } from '../lib/strings';
+import { downloadBlob } from '../lib/download';
 import { FeedbackBox } from './FeedbackBox';
-
-function downloadBlob(filename: string, content: string, type: string) {
-  const blob = new Blob([content], { type });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
 
 export function ArticleView({
   detail,
@@ -44,6 +35,12 @@ export function ArticleView({
   // keeps this card mounted for that step so we can show an inline indicator.
   const translating =
     detail.status === 'running' && detail.step === 'translate';
+
+  // The article is now shown while the poster phase still runs; feedback and
+  // translate would 409 against the API's isJobRunning guard, so hold them back
+  // until the job settles. Copy/download stay usable.
+  const jobActive =
+    detail.status === 'running' || detail.status === 'queued';
 
   const copyToClipboard = async () => {
     await navigator.clipboard.writeText(shown);
@@ -134,7 +131,7 @@ export function ArticleView({
               type="button"
               className="btn"
               onClick={translate}
-              disabled={requesting}
+              disabled={requesting || jobActive}
             >
               {requesting ? STR.translating : STR.translateToEnglish}
             </button>
@@ -155,16 +152,18 @@ export function ArticleView({
         <div className="fold-body">{detail.note}</div>
       </details>
 
-      <div style={{ marginTop: 18 }}>
-        <FeedbackBox
-          title={STR.articleFeedbackTitle}
-          hint={STR.articleFeedbackHint}
-          onSubmit={async (feedback) => {
-            await sendArticleFeedback(detail.id, feedback);
-            await onFeedbackSent();
-          }}
-        />
-      </div>
+      {!jobActive ? (
+        <div style={{ marginTop: 18 }}>
+          <FeedbackBox
+            title={STR.articleFeedbackTitle}
+            hint={STR.articleFeedbackHint}
+            onSubmit={async (feedback) => {
+              await sendArticleFeedback(detail.id, feedback);
+              await onFeedbackSent();
+            }}
+          />
+        </div>
+      ) : null}
     </section>
   );
 }

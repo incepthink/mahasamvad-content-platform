@@ -26,7 +26,11 @@ export function SiteNav() {
         aria-controls="site-nav"
         onClick={() => setOpen((v) => !v)}
       >
-        {open ? <X size={24} aria-hidden="true" /> : <Menu size={24} aria-hidden="true" />}
+        {open ? (
+          <X size={24} aria-hidden="true" />
+        ) : (
+          <Menu size={24} aria-hidden="true" />
+        )}
       </button>
       <nav
         id="site-nav"
@@ -39,8 +43,14 @@ export function SiteNav() {
         <Link href="/generations" onClick={close}>
           {STR.navHistory}
         </Link>
+        <Link href="/translate" onClick={close}>
+          {STR.navTranslate}
+        </Link>
         <Link href="/glossary" onClick={close}>
           {STR.navGlossary}
+        </Link>
+        <Link href="/references" onClick={close}>
+          {STR.navReferences}
         </Link>
         <TasksMenu />
       </nav>

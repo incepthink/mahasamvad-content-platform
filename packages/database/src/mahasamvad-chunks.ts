@@ -135,23 +135,78 @@ export async function fetchArticleChunks(
   }));
 }
 
+// The distinct set of article_ids already stored. A site-wide re-ingest loads this once
+// up front and skips posts already present, so re-runs only embed new articles (and a
+// crashed run resumes cheaply). Pages through the table because a single select is capped
+// at ~1000 rows by PostgREST.
+export async function fetchExistingArticleIds(
+  client: SupabaseClient,
+): Promise<Set<number>> {
+  const ids = new Set<number>();
+  const pageSize = 1000;
+  let from = 0;
+
+  for (;;) {
+    const { data, error } = await client
+      .from(MAHASAMVAD_CHUNKS_TABLE)
+      .select('article_id')
+      .range(from, from + pageSize - 1);
+    if (error) {
+      throw new Error(`Failed to fetch existing article ids: ${error.message}`);
+    }
+    const rows = (data ?? []) as Array<{ article_id: number }>;
+    for (const row of rows) ids.add(row.article_id);
+    if (rows.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return ids;
+}
+
+// A Postgres statement-timeout (SQLSTATE 57014) — the failure we hit on large upserts.
+// Each upserted row inserts a 3072-dim vector into the HNSW index, and HNSW insert cost
+// grows with the index, so a batch size that commits quickly on a small table can exceed
+// the DB's per-statement time limit once the corpus is large.
+function isStatementTimeout(message: string): boolean {
+  return /statement timeout|canceling statement due to statement timeout|57014/i.test(
+    message,
+  );
+}
+
+// Upsert one batch of already-mapped rows, halving and retrying on a statement timeout so
+// the effective batch size auto-adapts to whatever the (growing) HNSW index can absorb in
+// one statement. Any other error surfaces immediately.
+async function upsertBatchAdaptive(
+  client: SupabaseClient,
+  batch: Record<string, unknown>[],
+): Promise<number> {
+  const { error } = await client
+    .from(MAHASAMVAD_CHUNKS_TABLE)
+    .upsert(batch, { onConflict: 'id' });
+  if (!error) return batch.length;
+
+  if (isStatementTimeout(error.message) && batch.length > 1) {
+    const mid = Math.floor(batch.length / 2);
+    return (
+      (await upsertBatchAdaptive(client, batch.slice(0, mid))) +
+      (await upsertBatchAdaptive(client, batch.slice(mid)))
+    );
+  }
+  throw new Error(`Failed to upsert chunks: ${error.message}`);
+}
+
 // Upsert chunks in batches, keyed on the primary key `id`, so re-running ingestion
-// is idempotent (no duplicate rows).
+// is idempotent (no duplicate rows). Batches start small (HNSW inserts are the bottleneck)
+// and shrink further on timeout via upsertBatchAdaptive.
 export async function upsertChunks(
   client: SupabaseClient,
   rows: readonly ChunkRow[],
-  batchSize = 200,
+  batchSize = 50,
 ): Promise<number> {
   let written = 0;
   for (let start = 0; start < rows.length; start += batchSize) {
     const batch = rows.slice(start, start + batchSize).map(toDbRow);
-    const { error } = await client
-      .from(MAHASAMVAD_CHUNKS_TABLE)
-      .upsert(batch, { onConflict: 'id' });
-    if (error) {
-      throw new Error(`Failed to upsert chunks: ${error.message}`);
-    }
-    written += batch.length;
+    written += await upsertBatchAdaptive(client, batch);
   }
   return written;
 }

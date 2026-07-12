@@ -5,6 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
   getGeneration,
+  getReferenceImageRow,
   insertGeneration,
   insertRevision,
   listGenerations,
@@ -69,6 +70,7 @@ function toSummary(
     noteExcerpt: row.note.slice(0, 160),
     headline: copyHeadline ?? articleHeadline(row.article),
     posterUrl: row.posterPath ? publicUrl(client, row.posterPath) : null,
+    costUsd: row.costUsd,
   };
 }
 
@@ -87,6 +89,7 @@ async function toDetail(
     category: row.category,
     designMode: row.designMode,
     heading: row.heading,
+    referenceImageId: row.referenceImageId,
     note: row.note,
     article: row.article,
     articleEnglish: row.articleEnglish,
@@ -96,6 +99,8 @@ async function toDetail(
     posterUrl: row.posterPath ? publicUrl(client, row.posterPath) : null,
     sceneUrl: row.scenePath ? publicUrl(client, row.scenePath) : null,
     error: row.error,
+    costUsd: row.costUsd,
+    costBreakdown: row.costBreakdown ?? null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     revisions: revisions.map((revision) => ({
@@ -118,12 +123,34 @@ export function registerGenerationRoutes(
       body.category === 'twitter'
         ? (body.designMode ?? 'onbrand')
         : body.designMode;
+    // Optional pin: must reference an existing library image of the matching
+    // category (twitter↔twitter, news/scheme↔article), and only for runs that
+    // actually render a poster.
+    if (body.referenceImageId) {
+      if (body.category !== 'twitter' && body.outputType === 'article') {
+        return reply.code(400).send({
+          error: {
+            message:
+              'A reference image cannot be pinned for an article-only run.',
+          },
+        });
+      }
+      const image = await getReferenceImageRow(client, body.referenceImageId);
+      const expectedCategory =
+        body.category === 'twitter' ? 'twitter' : 'article';
+      if (!image || image.category !== expectedCategory) {
+        return reply.code(400).send({
+          error: { message: 'Unknown or mismatched reference image.' },
+        });
+      }
+    }
     const row = await insertGeneration(client, {
       note: body.note,
       outputType: body.outputType,
       category: body.category,
       designMode,
       heading: body.heading,
+      referenceImageId: body.referenceImageId,
     });
     // Twitter → external n8n social-post job; news/scheme → in-process article pipeline.
     if (row.category === 'twitter') {
@@ -149,7 +176,8 @@ export function registerGenerationRoutes(
   );
 
   app.get('/generations', async () => {
-    const rows = await listGenerations(client);
+    // Cap at 100 so the client-side history search/pagination has more to work with.
+    const rows = await listGenerations(client, 100);
     return rows.map((row) => toSummary(client, row));
   });
 
@@ -309,7 +337,10 @@ export function registerGenerationRoutes(
       }
 
       const sceneImage = await downloadPng(client, row.scenePath);
-      const poster = await generateArticlePoster({ copy: editedCopy, sceneImage });
+      const poster = await generateArticlePoster({
+        copy: editedCopy,
+        sceneImage,
+      });
 
       const revisions = await listRevisions(client, row.id);
       const version = revisions.length + 2;

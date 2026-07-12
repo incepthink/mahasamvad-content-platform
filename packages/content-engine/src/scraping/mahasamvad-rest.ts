@@ -6,7 +6,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { JSDOM } from 'jsdom';
+import { htmlToPlainText } from './html.js';
 
 const SITE = 'https://mahasamvad.in';
 
@@ -55,11 +55,10 @@ type WpPost = {
   };
 };
 
-// Strip HTML tags and decode entities (titles/excerpts arrive as e.g. &#8216;).
+// Strip HTML tags and decode entities (titles/excerpts arrive as e.g. &#8216;). Delegates
+// to the shared safe parser, which tolerates inline styles jsdom would otherwise crash on.
 function htmlToText(html: string): string {
-  if (!html) return '';
-  const { document } = new JSDOM(`<body>${html}</body>`).window;
-  return (document.body.textContent ?? '').replace(/\s+/g, ' ').trim();
+  return htmlToPlainText(html);
 }
 
 function termNames(post: WpPost, taxonomy: string): string[] {
@@ -130,6 +129,98 @@ export async function fetchMahasamvadCategoryPosts(
   } while (page <= totalPages);
 
   return posts;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+// One page of the WordPress REST posts endpoint, with retry + backoff. A large
+// site-wide crawl (~250 pages) will occasionally hit a 429/5xx or a transient network
+// blip; retrying a single page is far cheaper than restarting the whole run.
+async function fetchPostsPageWithRetry(
+  url: string,
+  maxRetries: number,
+): Promise<Response> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    try {
+      const response = await fetch(url, { headers: REQUEST_HEADERS });
+      // 5xx and 429 are transient; back off and retry. 4xx (other than 429) is a
+      // real error (e.g. paged past the end) and should surface immediately.
+      if (response.ok || (response.status !== 429 && response.status < 500)) {
+        return response;
+      }
+      lastError = new Error(`${response.status} ${response.statusText}`);
+    } catch (error) {
+      lastError = error;
+    }
+    if (attempt < maxRetries) {
+      // Exponential backoff: 1s, 2s, 4s, … capped at 15s.
+      await sleep(Math.min(1000 * 2 ** attempt, 15_000));
+    }
+  }
+  throw new Error(`Failed to fetch ${url} after ${maxRetries + 1} attempts: ${String(lastError)}`);
+}
+
+export type PagedFetchOptions = Readonly<{
+  // First page to fetch (1-based). Defaults to 1.
+  startPage?: number | undefined;
+  // Stop after yielding this many pages (for smoke runs). Undefined = all pages.
+  maxPages?: number | undefined;
+  // Posts per page (WordPress caps this at 100).
+  perPage?: number | undefined;
+  // Polite delay between page requests, ms.
+  delayMs?: number | undefined;
+  // Max retries per page before giving up.
+  maxRetries?: number | undefined;
+}>;
+
+// Stream EVERY published post on the site, one page at a time, so a caller can chunk +
+// embed + upsert incrementally without ever holding the whole (~25k-post) corpus in
+// memory. No category filter, so each post is yielded exactly once. Ordered by id asc:
+// unlike date-desc, this keeps pagination stable even if new posts are published mid-crawl
+// (they land on the last page rather than shifting every subsequent page).
+export async function* fetchAllPostsPaged(
+  options: PagedFetchOptions = {},
+): AsyncGenerator<MahasamvadPost[], void, void> {
+  const perPage = Math.min(100, options.perPage ?? 100);
+  const delayMs = options.delayMs ?? 400;
+  const maxRetries = options.maxRetries ?? 5;
+  const startPage = options.startPage ?? 1;
+
+  let page = startPage;
+  let totalPages = 1;
+  let pagesYielded = 0;
+
+  do {
+    const url =
+      `${SITE}/wp-json/wp/v2/posts?per_page=${perPage}&_embed=1` +
+      `&orderby=id&order=asc&page=${page}`;
+    const response = await fetchPostsPageWithRetry(url, maxRetries);
+
+    if (!response.ok) {
+      // A 400 here typically means we paged past the last page — treat as clean end.
+      if (response.status === 400) return;
+      throw new Error(
+        `Failed to fetch ${url}: ${response.status} ${response.statusText}`,
+      );
+    }
+
+    if (page === startPage) {
+      totalPages = Number(response.headers.get('x-wp-totalpages')) || 1;
+    }
+
+    const batch = (await response.json()) as WpPost[];
+    if (batch.length === 0) return;
+
+    yield batch.map(normalizePost);
+    pagesYielded += 1;
+    if (options.maxPages && pagesYielded >= options.maxPages) return;
+
+    page += 1;
+    if (page <= totalPages && delayMs > 0) await sleep(delayMs);
+  } while (page <= totalPages);
 }
 
 // Run directly to fetch a category's posts. Args:

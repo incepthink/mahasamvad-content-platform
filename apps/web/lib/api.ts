@@ -5,15 +5,25 @@ import {
   GenerationDetailSchema,
   GenerationSummarySchema,
   GlossaryTermSchema,
+  ReferenceImageSchema,
+  ReferenceTypeSchema,
+  TranslateTextResponseSchema,
   type Copy,
   type CreateGenerationRequest,
   type CreateGlossaryTermRequest,
+  type CreateReferenceTypeRequest,
   type GenerationDetail,
   type GenerationSummary,
   type GlossaryTerm,
   type PosterFeedbackRequest,
+  type ReferenceCategory,
+  type ReferenceImage,
+  type ReferenceType,
   type TermType,
+  type TranslateTextRequest,
+  type TranslateTextResponse,
   type UpdateGlossaryTermRequest,
+  type UpdateReferenceTypeRequest,
 } from '@dgipr/schemas';
 import { z } from 'zod';
 
@@ -22,14 +32,7 @@ export const API_URL =
 
 // Reads the API's { error: { message } } body when present so users see the
 // server's reason, not just an HTTP status.
-async function requestJson(path: string, init?: RequestInit): Promise<unknown> {
-  const response = await fetch(`${API_URL}${path}`, {
-    ...init,
-    headers: {
-      'content-type': 'application/json',
-      ...init?.headers,
-    },
-  });
+async function readJsonResponse(response: Response): Promise<unknown> {
   const body: unknown = await response.json().catch(() => null);
   if (!response.ok) {
     const message =
@@ -43,6 +46,17 @@ async function requestJson(path: string, init?: RequestInit): Promise<unknown> {
     throw new ApiRequestError(message, response.status);
   }
   return body;
+}
+
+async function requestJson(path: string, init?: RequestInit): Promise<unknown> {
+  const response = await fetch(`${API_URL}${path}`, {
+    ...init,
+    headers: {
+      'content-type': 'application/json',
+      ...init?.headers,
+    },
+  });
+  return readJsonResponse(response);
 }
 
 export class ApiRequestError extends Error {
@@ -118,6 +132,18 @@ export function posterDownloadUrl(id: string): string {
   return `${API_URL}/api/generations/${id}/poster.png`;
 }
 
+// Standalone Marathi->English translation of arbitrary pasted text. Unlike
+// requestTranslation(), this is synchronous and is not tied to a generation.
+export async function translateText(
+  input: TranslateTextRequest,
+): Promise<TranslateTextResponse> {
+  const body = await requestJson('/api/translate', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  return TranslateTextResponseSchema.parse(body);
+}
+
 // ---------- Glossary (Marathi->English name lock dictionary) ----------
 
 export async function listGlossaryTerms(
@@ -155,4 +181,73 @@ export async function updateGlossaryTerm(
 
 export async function deleteGlossaryTerm(id: string): Promise<void> {
   await requestJson(`/api/glossary/${id}`, { method: 'DELETE' });
+}
+
+// ---------- Reference type catalog + master-template library ----------
+
+export async function listReferenceTypes(): Promise<ReferenceType[]> {
+  const body = await requestJson('/api/reference-types');
+  return z.array(ReferenceTypeSchema).parse(body);
+}
+
+export async function createReferenceType(
+  input: CreateReferenceTypeRequest,
+): Promise<ReferenceType> {
+  const body = await requestJson('/api/reference-types', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  return ReferenceTypeSchema.parse(body);
+}
+
+export async function updateReferenceType(
+  id: string,
+  patch: UpdateReferenceTypeRequest,
+): Promise<ReferenceType> {
+  const body = await requestJson(`/api/reference-types/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+  return ReferenceTypeSchema.parse(body);
+}
+
+export async function deleteReferenceType(id: string): Promise<void> {
+  await requestJson(`/api/reference-types/${id}`, { method: 'DELETE' });
+}
+
+export async function listReferenceImages(): Promise<ReferenceImage[]> {
+  const body = await requestJson('/api/references');
+  return z.array(ReferenceImageSchema).parse(body);
+}
+
+export async function uploadReferenceImage(
+  category: ReferenceCategory,
+  subtype: string,
+  file: File,
+): Promise<ReferenceImage> {
+  const query = new URLSearchParams({ category, subtype });
+  const form = new FormData();
+  form.set('file', file);
+  const response = await fetch(`${API_URL}/api/references?${query}`, {
+    method: 'POST',
+    body: form,
+  });
+  return ReferenceImageSchema.parse(await readJsonResponse(response));
+}
+
+// Toggle an image in the per-generation random rotation (many images per type
+// may be enabled at once).
+export async function setReferenceImageEnabled(
+  id: string,
+  enabled: boolean,
+): Promise<ReferenceImage> {
+  const body = await requestJson(
+    `/api/references/${id}/${enabled ? 'enable' : 'disable'}`,
+    { method: 'POST' },
+  );
+  return ReferenceImageSchema.parse(body);
+}
+
+export async function deleteReferenceImage(id: string): Promise<void> {
+  await requestJson(`/api/references/${id}`, { method: 'DELETE' });
 }

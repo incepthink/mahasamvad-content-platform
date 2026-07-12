@@ -1,88 +1,51 @@
 'use client';
 
-// Navbar "ongoing tasks" button + popover. Tracks Twitter/n8n background runs from
-// TasksProvider: a staged progress bar while running, and on completion the finished
-// poster + caption inline (copy / download / regenerate / open full). This is the
-// primary surface for twitter runs — the create page never navigates for them.
+// Navbar "ongoing tasks" button + centered modal. Tracks every generation started this
+// session from TasksProvider and lists them compactly: a one-line heading + a status
+// dot/label, with a small poster thumbnail for twitter runs. Each row is a link to its
+// detail page (/generations/{id}), where the full result and all actions already live.
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import type { GenerationDetail } from '@dgipr/schemas';
-import { createGeneration, posterDownloadUrl } from '../lib/api';
 import { useTasks } from '../lib/TasksProvider';
-import { STR } from '../lib/strings';
-import { StatusChip } from './StatusChip';
-import { TaskProgressBar } from './TaskProgressBar';
+import { STATUS_LABELS, STEP_LABELS, STR } from '../lib/strings';
 
+// One-line title: user heading → twitter poster headline → truncated source note.
 function taskTitle(task: GenerationDetail): string {
   const heading = task.heading?.trim();
   if (heading) return heading;
+  const posterHeadline = task.copy?.headline?.trim();
+  if (posterHeadline) return posterHeadline;
   const note = task.note.trim();
-  return note.length > 64 ? `${note.slice(0, 64)}…` : note;
+  return note.length > 80 ? `${note.slice(0, 80)}…` : note;
 }
 
 export function TasksMenu() {
-  const {
-    tasks,
-    activeCount,
-    addTask,
-    isPanelOpen,
-    openPanel,
-    closePanel,
-  } = useTasks();
-  const menuRef = useRef<HTMLDivElement>(null);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [regenerating, setRegenerating] = useState<string | null>(null);
+  const { tasks, activeCount, isPanelOpen, openPanel, closePanel } = useTasks();
+  const [mounted, setMounted] = useState(false);
 
-  // Close on outside click / Escape while open.
+  // Portal targets document.body, which only exists on the client.
+  useEffect(() => setMounted(true), []);
+
+  // While open: close on Escape and lock background scroll.
   useEffect(() => {
     if (!isPanelOpen) return;
-    const onPointer = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        closePanel();
-      }
-    };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') closePanel();
     };
-    document.addEventListener('mousedown', onPointer);
     document.addEventListener('keydown', onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
     return () => {
-      document.removeEventListener('mousedown', onPointer);
       document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
     };
   }, [isPanelOpen, closePanel]);
 
-  const copyCaption = async (task: GenerationDetail) => {
-    if (!task.article) return;
-    try {
-      await navigator.clipboard.writeText(task.article);
-      setCopiedId(task.id);
-      setTimeout(() => setCopiedId((id) => (id === task.id ? null : id)), 1800);
-    } catch {
-      /* clipboard blocked — ignore */
-    }
-  };
-
-  const regenerate = async (task: GenerationDetail) => {
-    setRegenerating(task.id);
-    try {
-      const newId = await createGeneration({
-        note: task.note,
-        heading: task.heading ?? undefined,
-        category: 'twitter',
-        outputType: 'poster',
-        designMode: task.designMode ?? 'onbrand',
-      });
-      addTask(newId);
-      openPanel();
-    } finally {
-      setRegenerating((id) => (id === task.id ? null : id));
-    }
-  };
-
   return (
-    <div className="tasks-menu" ref={menuRef}>
+    <div className="tasks-menu">
       <button
         type="button"
         className="tasks-button"
@@ -98,120 +61,94 @@ export function TasksMenu() {
         ) : null}
       </button>
 
-      {isPanelOpen ? (
-        <div className="tasks-popover" role="dialog" aria-label={STR.tasksTitle}>
-          <div className="tasks-popover-header">
-            <strong>{STR.tasksTitle}</strong>
-            <button
-              type="button"
-              className="tasks-close"
-              aria-label="बंद करा"
-              onClick={closePanel}
-            >
-              ✕
-            </button>
-          </div>
+      {mounted && isPanelOpen
+        ? createPortal(
+            <div className="tasks-backdrop" onClick={closePanel}>
+              <div
+                className="tasks-modal"
+                role="dialog"
+                aria-modal="true"
+                aria-label={STR.tasksTitle}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="tasks-modal-header">
+                  <strong>{STR.tasksTitle}</strong>
+                  <button
+                    type="button"
+                    className="tasks-close"
+                    aria-label="बंद करा"
+                    onClick={closePanel}
+                  >
+                    ✕
+                  </button>
+                </div>
 
-          {tasks.length === 0 ? (
-            <p className="tasks-empty">{STR.tasksEmpty}</p>
-          ) : (
-            <ul className="task-list">
-              {tasks.map((task) => {
-                const done = task.status === 'completed';
-                const failed = task.status === 'failed';
-                const isTwitter = task.category === 'twitter';
-                return (
-                  <li key={task.id} className="task-row">
-                    <Link
-                      className="task-row-title"
-                      href={`/generations/${task.id}`}
-                      onClick={closePanel}
-                    >
-                      {taskTitle(task)}
-                    </Link>
-
-                    {isTwitter ? (
-                      <TaskProgressBar status={task.status} step={task.step} />
-                    ) : (
-                      <StatusChip status={task.status} />
-                    )}
-
-                    {failed ? (
-                      <p className="task-error">{task.error ?? STR.failedHint}</p>
-                    ) : null}
-
-                    {/* Rich in-panel result + actions are the twitter surface; other
-                        categories navigate to their detail page via the title link. */}
-                    {isTwitter && done && task.posterUrl ? (
-                      <div className="task-result">
-                        <img
-                          src={task.posterUrl}
-                          alt={STR.posterTitle}
-                          className="task-thumb"
-                        />
-                        {task.article ? (
-                          <p className="task-caption">{task.article}</p>
-                        ) : null}
-                      </div>
-                    ) : null}
-
-                    {isTwitter && (done || failed) ? (
-                      <div className="task-actions">
-                        {done && task.article ? (
-                          <button
-                            type="button"
-                            className="btn btn-small"
-                            onClick={() => copyCaption(task)}
-                          >
-                            {copiedId === task.id
-                              ? STR.copied
-                              : STR.taskCopyCaption}
-                          </button>
-                        ) : null}
-                        {done && task.posterUrl ? (
-                          <a
-                            className="btn btn-small"
-                            href={posterDownloadUrl(task.id)}
-                          >
-                            {STR.taskDownloadPoster}
-                          </a>
-                        ) : null}
-                        <button
-                          type="button"
-                          className="btn btn-small"
-                          disabled={regenerating === task.id}
-                          onClick={() => regenerate(task)}
-                        >
-                          {STR.taskRegenerate}
-                        </button>
-                        {done ? (
+                {tasks.length === 0 ? (
+                  <p className="tasks-empty">{STR.tasksEmpty}</p>
+                ) : (
+                  <ul className="task-list">
+                    {tasks.map((task) => {
+                      const failed = task.status === 'failed';
+                      const isTwitter = task.category === 'twitter';
+                      const active =
+                        task.status === 'queued' || task.status === 'running';
+                      // Active runs show the fine-grained step; otherwise the status.
+                      const statusLabel =
+                        active && task.step
+                          ? STEP_LABELS[task.step]
+                          : STATUS_LABELS[task.status];
+                      return (
+                        <li key={task.id}>
                           <Link
-                            className="btn btn-small"
+                            className="task-row"
                             href={`/generations/${task.id}`}
                             onClick={closePanel}
                           >
-                            {STR.taskViewFull}
-                          </Link>
-                        ) : null}
-                      </div>
-                    ) : null}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+                            {isTwitter ? (
+                              task.posterUrl ? (
+                                <img
+                                  src={task.posterUrl}
+                                  alt=""
+                                  className="task-thumb"
+                                />
+                              ) : (
+                                <span
+                                  className="task-thumb task-thumb--pending"
+                                  aria-hidden
+                                />
+                              )
+                            ) : null}
 
-          <div className="tasks-popover-footer">
-            <Link
-              className="btn btn-small"
-              href="/generations"
-              onClick={closePanel}
-            >
-              {STR.navHistory}
-            </Link>
-          </div>
-        </div>
-      ) : null}
+                            <span className="task-row-body">
+                              <span className="task-row-title">
+                                {taskTitle(task)}
+                              </span>
+                              <span
+                                className={`task-status task-status-${task.status}`}
+                              >
+                                <span
+                                  className={`dot${active ? ' dot--pulse' : ''}`}
+                                  aria-hidden
+                                />
+                                {statusLabel}
+                              </span>
+                              {failed ? (
+                                <span className="task-error">
+                                  {task.error ?? STR.failedHint}
+                                </span>
+                              ) : null}
+                            </span>
+                          </Link>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }

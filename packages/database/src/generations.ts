@@ -11,10 +11,7 @@ export type Category = 'news' | 'scheme' | 'twitter';
 export type DesignMode = 'onbrand' | 'adaptive' | 'fresh';
 export type GenerationStatus = 'queued' | 'running' | 'completed' | 'failed';
 export type RevisionTarget =
-  | 'article'
-  | 'poster_copy'
-  | 'poster_scene'
-  | 'manual_copy';
+  'article' | 'poster_copy' | 'poster_scene' | 'manual_copy';
 
 // One row in generations. `copy` stays `unknown` here — the database package does
 // not depend on the Copy schema; callers validate with CopySchema when needed.
@@ -25,6 +22,9 @@ export type GenerationRow = Readonly<{
   category: Category;
   designMode: DesignMode | null;
   heading: string | null;
+  // Optional pin: the exact reference image the run was asked to use (null =
+  // automatic rotation; the FK sets null if the image is later deleted).
+  referenceImageId: string | null;
   status: GenerationStatus;
   step: string | null;
   error: string | null;
@@ -42,8 +42,37 @@ export type GenerationRow = Readonly<{
   scenePrompt: string | null;
   scenePath: string | null;
   posterPath: string | null;
+  // Total USD this generation has cost so far (text measured from OpenAI usage + a fixed
+  // per-render image tier price), accumulated across the initial run and any feedback
+  // jobs. Null for pre-feature rows. `costBreakdown` holds the token/split audit detail.
+  costUsd: number | null;
+  costBreakdown: unknown;
   createdAt: string;
   updatedAt: string;
+}>;
+
+// Structured audit detail stored in cost_breakdown (jsonb). `runs` counts how many jobs
+// (initial + feedback) have contributed to the totals.
+export type GenerationCostBreakdown = Readonly<{
+  chatCalls: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  textCostUsd: number;
+  imageCount: number;
+  imageCostUsd: number;
+  runs: number;
+}>;
+
+// One job's contribution to a generation's cost (matches the engine's CostAccumulator).
+export type GenerationCostIncrement = Readonly<{
+  chatCalls: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  textCostUsd: number;
+  imageCount: number;
+  imageCostUsd: number;
 }>;
 
 // Shape returned by selects (snake_case column names).
@@ -54,6 +83,7 @@ type GenerationDbRow = {
   category: Category;
   design_mode: string | null;
   heading: string | null;
+  reference_image_id: string | null;
   status: GenerationStatus;
   step: string | null;
   error: string | null;
@@ -67,6 +97,9 @@ type GenerationDbRow = {
   scene_prompt: string | null;
   scene_path: string | null;
   poster_path: string | null;
+  // PostgREST may serialise numeric as a string; fromDbRow coerces to number.
+  cost_usd: number | string | null;
+  cost_breakdown: unknown;
   created_at: string;
   updated_at: string;
 };
@@ -79,6 +112,7 @@ function fromDbRow(row: GenerationDbRow): GenerationRow {
     category: row.category,
     designMode: row.design_mode as DesignMode | null,
     heading: row.heading,
+    referenceImageId: row.reference_image_id,
     status: row.status,
     step: row.step,
     error: row.error,
@@ -92,6 +126,11 @@ function fromDbRow(row: GenerationDbRow): GenerationRow {
     scenePrompt: row.scene_prompt,
     scenePath: row.scene_path,
     posterPath: row.poster_path,
+    costUsd:
+      row.cost_usd === null || row.cost_usd === undefined
+        ? null
+        : Number(row.cost_usd),
+    costBreakdown: row.cost_breakdown,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -147,6 +186,8 @@ export async function insertGeneration(
     category: Category;
     designMode?: DesignMode | undefined;
     heading?: string | undefined;
+    // Insert-only (not in GenerationPatch): a pin never changes after creation.
+    referenceImageId?: string | undefined;
   }>,
 ): Promise<GenerationRow> {
   const { data, error } = await client
@@ -157,6 +198,7 @@ export async function insertGeneration(
       category: input.category,
       design_mode: input.designMode ?? null,
       heading: input.heading ?? null,
+      reference_image_id: input.referenceImageId ?? null,
     })
     .select()
     .single();
@@ -179,6 +221,69 @@ export async function updateGeneration(
     .eq('id', id);
   if (error) {
     throw new Error(`Failed to update generation ${id}: ${error.message}`);
+  }
+}
+
+function round(value: number, decimals: number): number {
+  const factor = 10 ** decimals;
+  return Math.round(value * factor) / factor;
+}
+
+// Add one job's cost to a generation's running totals. Read-modify-write (jobs for a
+// given generation run one at a time, so no lost-update race in practice): reads the
+// current cost_usd/cost_breakdown, folds in the increment, and writes both back — so
+// cost is additive across the initial run and every later feedback/revision job. A
+// genuinely zero increment is a no-op (no needless write / run bump).
+export async function addGenerationCost(
+  client: SupabaseClient,
+  id: string,
+  increment: GenerationCostIncrement,
+): Promise<void> {
+  const isZero =
+    increment.chatCalls === 0 &&
+    increment.imageCount === 0 &&
+    increment.textCostUsd === 0 &&
+    increment.imageCostUsd === 0;
+  if (isZero) return;
+
+  const { data, error } = await client
+    .from(GENERATIONS_TABLE)
+    .select('cost_breakdown')
+    .eq('id', id)
+    .maybeSingle();
+  if (error) {
+    throw new Error(
+      `Failed to read cost for generation ${id}: ${error.message}`,
+    );
+  }
+  const prev = (data?.cost_breakdown ??
+    null) as Partial<GenerationCostBreakdown> | null;
+
+  const merged: GenerationCostBreakdown = {
+    chatCalls: (prev?.chatCalls ?? 0) + increment.chatCalls,
+    inputTokens: (prev?.inputTokens ?? 0) + increment.inputTokens,
+    cachedInputTokens:
+      (prev?.cachedInputTokens ?? 0) + increment.cachedInputTokens,
+    outputTokens: (prev?.outputTokens ?? 0) + increment.outputTokens,
+    textCostUsd: round((prev?.textCostUsd ?? 0) + increment.textCostUsd, 6),
+    imageCount: (prev?.imageCount ?? 0) + increment.imageCount,
+    imageCostUsd: round((prev?.imageCostUsd ?? 0) + increment.imageCostUsd, 6),
+    runs: (prev?.runs ?? 0) + 1,
+  };
+  const totalUsd = round(merged.textCostUsd + merged.imageCostUsd, 4);
+
+  const { error: updateError } = await client
+    .from(GENERATIONS_TABLE)
+    .update({
+      cost_usd: totalUsd,
+      cost_breakdown: merged,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', id);
+  if (updateError) {
+    throw new Error(
+      `Failed to persist cost for generation ${id}: ${updateError.message}`,
+    );
   }
 }
 

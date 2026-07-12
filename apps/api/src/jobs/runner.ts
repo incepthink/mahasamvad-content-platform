@@ -9,13 +9,21 @@
 
 import {
   FACT_CHECK_DELIMITER,
+  buildTwitterCatalog,
+  createCostAccumulator,
   extractGlossaryCandidates,
   generateArticle,
   generateCopy,
+  pickArticleReferenceUrl,
+  recordImageCost,
+  resolvePinnedReference,
   reviseArticle,
   reviseCopy,
   reviseSceneBrief,
+  runInCostScope,
   translateArticleToEnglish,
+  type ImageQuality,
+  type PinnedReference,
 } from '@dgipr/content-engine';
 import {
   buildArticleScenePrompt,
@@ -24,6 +32,7 @@ import {
   headStrings,
 } from '@dgipr/poster-renderer';
 import {
+  addGenerationCost,
   findGlossaryTermsInText,
   getGeneration,
   insertGlossaryCandidates,
@@ -83,6 +92,14 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+// Quality the image renders run at — must stay in sync with OPENAI_IMAGE_QUALITY
+// (openai-image.ts) and the two n8n workflow JSONs. Used only to attribute the fixed
+// per-render image cost; image usage itself is not measurable (the render runs in n8n).
+function imageQuality(): ImageQuality {
+  const q = process.env.OPENAI_IMAGE_QUALITY;
+  return q === 'high' || q === 'low' ? q : 'medium';
+}
+
 // Wrap a job body with the shared bookkeeping: claim the id, flip the row to
 // running, persist completed/failed, always release the id.
 function runJob(
@@ -92,8 +109,11 @@ function runJob(
 ): void {
   running.add(id);
   void (async () => {
+    // Meter every OpenAI text call this job makes (chatComplete records into the ambient
+    // accumulator) plus the fixed image-render cost the job records explicitly.
+    const cost = createCostAccumulator();
     try {
-      await job();
+      await runInCostScope(cost, job);
       await updateGeneration(client, id, {
         status: 'completed',
         step: 'done',
@@ -110,6 +130,14 @@ function runJob(
         console.error(`[job ${id}] could not persist failure:`, updateError);
       }
     } finally {
+      // Persist the cost this job accrued, additively (initial run + every feedback job),
+      // even on failure — a failed run still spent tokens. Best-effort: a cost-write
+      // failure must not mask the job's own outcome.
+      try {
+        await addGenerationCost(client, id, cost);
+      } catch (costError) {
+        console.error(`[job ${id}] could not persist cost:`, costError);
+      }
       running.delete(id);
     }
   })();
@@ -123,7 +151,9 @@ function articleCategoryOf(
   category: GenerationRow['category'],
 ): 'news' | 'scheme' {
   if (category === 'news' || category === 'scheme') return category;
-  throw new Error(`Article pipeline received unsupported category: ${category}`);
+  throw new Error(
+    `Article pipeline received unsupported category: ${category}`,
+  );
 }
 
 // Full pipeline for a new generation: article (always — poster copy derives its
@@ -171,15 +201,17 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
 
     // ARTICLE_POSTER_MODE selects the poster renderer (default 'n8n'):
     //   'n8n'  — the external article-poster-v1-api workflow paints the whole poster,
-    //            including the single Marathi headline, by editing the master-article
-    //            template. No local scene image / HTML+Chromium render, so no scenePath
-    //            is written (poster feedback + manual copy-edit, which require
-    //            row.scenePath, are unavailable in this mode — accepted trade-off).
+    //            including the single Marathi headline, by editing the master template
+    //            whose library URL we send as reference_url. No local scene image /
+    //            HTML+Chromium render, so no scenePath is written (poster feedback +
+    //            manual copy-edit, which require row.scenePath, are unavailable in
+    //            this mode — accepted trade-off).
     //   'html' — the original local image + HTML/Playwright path, kept as a fallback.
     if (process.env.ARTICLE_POSTER_MODE === 'html') {
       await updateGeneration(client, id, { step: 'scene' });
       const scenePrompt = buildArticleScenePrompt(copy);
       const sceneImage = await generateImage(scenePrompt);
+      recordImageCost('article', imageQuality());
 
       await updateGeneration(client, id, { step: 'render' });
       const poster = await generateArticlePoster({ copy, sceneImage });
@@ -199,7 +231,16 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
     }
 
     await updateGeneration(client, id, { step: 'render' });
-    const posterPng = await renderArticlePosterViaN8n(id, copy);
+    // The master the workflow edits: the pinned image if the run has one (honored
+    // even if meanwhile disabled; a deleted pin falls back), else a random pick
+    // among the enabled article masters.
+    const pinned = row.referenceImageId
+      ? await resolvePinnedReference(client, row.referenceImageId)
+      : null;
+    const referenceUrl = pinned?.url ?? (await pickArticleReferenceUrl(client));
+    const posterPng = await renderArticlePosterViaN8n(id, copy, referenceUrl);
+    // Image is painted inside n8n (gpt-image-2 @ 1536x1024); attribute the fixed tier price.
+    recordImageCost('article', imageQuality());
 
     const posterObjectPath = posterPath(id, 1);
     await uploadPng(client, posterObjectPath, posterPng);
@@ -219,12 +260,17 @@ type ArticlePosterResult = {
 // Render an article poster via the external n8n `article-poster-v1-api` workflow
 // (the ARTICLE_POSTER_MODE=n8n path). The verified article and its Copy are still
 // produced locally by @dgipr/content-engine — facts stay source-of-truth per
-// AGENTS.md — so we send only the resolved { headline, scene_brief } and n8n *only
+// AGENTS.md — so we send only the resolved { headline, scene_brief } plus the
+// immutable library URL of the master to edit (referenceUrl), and n8n *only
 // renders*: its image model paints the whole poster (including the single Marathi
-// headline) by editing the master-article template. headline is resolved here via
-// headStrings so n8n stays dumb. Mirrors startSocialPostJob's fetch/timeout/error
-// handling; returns the decoded poster PNG.
-async function renderArticlePosterViaN8n(id: string, copy: Copy): Promise<Buffer> {
+// headline) by editing that master. headline is resolved here via headStrings so
+// n8n stays dumb. Mirrors startSocialPostJob's fetch/timeout/error handling;
+// returns the decoded poster PNG.
+async function renderArticlePosterViaN8n(
+  id: string,
+  copy: Copy,
+  referenceUrl: string,
+): Promise<Buffer> {
   const webhookUrl = requireEnv('N8N_ARTICLE_POSTER_WEBHOOK_URL');
   const webhookSecret = process.env.N8N_WEBHOOK_SECRET;
 
@@ -243,6 +289,7 @@ async function renderArticlePosterViaN8n(id: string, copy: Copy): Promise<Buffer
       headline,
       scene_brief: copy.scene_brief,
       generation_id: id,
+      reference_url: referenceUrl,
     }),
     signal: AbortSignal.timeout(420_000),
   });
@@ -289,6 +336,15 @@ export function startSocialPostJob(client: SupabaseClient, id: string): void {
       error: null,
     });
 
+    // The type catalog the workflow's classify/copy/image nodes run on. Sent even
+    // in 'fresh' mode (classification still needs the type descriptions; the
+    // reference URLs just go unused) so the empty-catalog failure applies
+    // uniformly. A pin forces the type + master and skips classification.
+    const pinned: PinnedReference | null = row.referenceImageId
+      ? await resolvePinnedReference(client, row.referenceImageId)
+      : null;
+    const types = await buildTwitterCatalog(client, pinned ?? undefined);
+
     const headers: Record<string, string> = {
       'content-type': 'application/json',
     };
@@ -303,6 +359,11 @@ export function startSocialPostJob(client: SupabaseClient, id: string): void {
         design_mode: row.designMode ?? 'onbrand',
         generation_id: id,
         progress_url: `${apiPublicUrl}/api/generations/${id}/progress`,
+        types,
+        // Always-present strings (empty = not pinned) so the workflow's IF node
+        // sees a definite value.
+        forced_type: pinned?.subtype ?? '',
+        forced_reference_url: pinned?.url ?? '',
       }),
       signal: AbortSignal.timeout(420_000),
     });
@@ -317,6 +378,10 @@ export function startSocialPostJob(client: SupabaseClient, id: string): void {
     if (!result.caption || !result.poster_png_base64) {
       throw new Error('n8n social-post webhook returned no caption or poster.');
     }
+    // The whole twitter pipeline (classify/copy/caption text + image) runs inside n8n;
+    // only the image (gpt-image-2 @ 1280x1600) is attributed here. The gpt-4o-mini text
+    // is external and not measured (negligible, <$0.001), so the stored cost is image-only.
+    recordImageCost('twitter', imageQuality());
 
     const posterPng = Buffer.from(result.poster_png_base64, 'base64');
     const posterObjectPath = posterPath(id, 1);
@@ -411,7 +476,11 @@ export function startTranslateJob(client: SupabaseClient, id: string): void {
       const candidates = await extractGlossaryCandidates(row.article);
       await insertGlossaryCandidates(
         client,
-        candidates.map((c) => ({ ...c, source: 'auto' as const, verified: false })),
+        candidates.map((c) => ({
+          ...c,
+          source: 'auto' as const,
+          verified: false,
+        })),
       );
     } catch (error) {
       console.error(`[translate ${id}] candidate mining failed:`, error);
@@ -475,6 +544,7 @@ export function startPosterFeedbackJob(
     await updateGeneration(client, id, { step: 'scene' });
     const scenePrompt = buildArticleScenePrompt(revisedCopy);
     const sceneImage = await generateImage(scenePrompt);
+    recordImageCost('article', imageQuality());
 
     await updateGeneration(client, id, { step: 'render' });
     const poster = await generateArticlePoster({

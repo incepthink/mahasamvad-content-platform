@@ -33,6 +33,9 @@ type TasksContextValue = {
   // True while any tracked twitter task is still in flight — disables the create
   // page's Twitter card (v1 allows one active twitter task at a time).
   hasActiveTwitterTask: boolean;
+  // Same gate for news/scheme (article) runs — disables the non-twitter category
+  // cards while one is in flight.
+  hasActiveArticleTask: boolean;
   // Start tracking a run id (called on submit / regenerate). Fetches its detail now.
   addTask: (id: string) => void;
   isPanelOpen: boolean;
@@ -86,6 +89,10 @@ export function TasksProvider({ children }: { children: ReactNode }) {
   const hasActiveTwitterTask = tasks.some(
     (d) => d.category === 'twitter' && isActive(d.status),
   );
+  // Mirror gate for news/scheme runs: one active article generation at a time.
+  const hasActiveArticleTask = tasks.some(
+    (d) => d.category !== 'twitter' && isActive(d.status),
+  );
   const idle = activeCount === 0;
 
   // Poll while anything is in flight; stop each task once it reaches a terminal
@@ -120,6 +127,7 @@ export function TasksProvider({ children }: { children: ReactNode }) {
     tasks,
     activeCount,
     hasActiveTwitterTask,
+    hasActiveArticleTask,
     addTask,
     isPanelOpen,
     openPanel,

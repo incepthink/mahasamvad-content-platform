@@ -1,15 +1,18 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import multipart from '@fastify/multipart';
 import { fileURLToPath } from 'node:url';
 import { ZodError } from 'zod';
 import { createServiceRoleClient } from '@dgipr/database';
 import { registerGenerationRoutes } from './routes/generations.js';
 import { registerGlossaryRoutes } from './routes/glossary.js';
+import { registerTranslateRoutes } from './routes/translate.js';
+import { registerReferenceRoutes } from './routes/references.js';
 
 export async function createServer() {
   const app = Fastify({
     logger: true,
-    // Requests carry note text + copy JSON only; images never pass through bodies.
+    // JSON requests stay capped at 1 MiB. Multipart uploads have their own limit below.
     bodyLimit: 1_048_576,
   });
 
@@ -18,6 +21,10 @@ export async function createServer() {
       process.env.CORS_ORIGIN ?? 'http://localhost:3000,http://127.0.0.1:3000'
     ).split(','),
     methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'],
+  });
+
+  await app.register(multipart, {
+    limits: { fileSize: 10_485_760, files: 1 },
   });
 
   app.setErrorHandler((error: unknown, request, reply) => {
@@ -47,6 +54,8 @@ export async function createServer() {
     async (instance) => {
       registerGenerationRoutes(instance, client);
       registerGlossaryRoutes(instance, client);
+      registerTranslateRoutes(instance, client);
+      registerReferenceRoutes(instance, client);
     },
     { prefix: '/api' },
   );

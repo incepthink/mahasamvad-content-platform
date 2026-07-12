@@ -3,8 +3,10 @@
 // the users are non-technical government communication staff.
 
 import type {
+  Category,
   GenerationStep,
   GenerationStatus,
+  ReferenceCategory,
   TermType,
 } from '@dgipr/schemas';
 
@@ -13,7 +15,9 @@ export const STR = {
   appSubtitle: 'माहिती व जनसंपर्क महासंचालनालय, महाराष्ट्र शासन',
   navNew: 'नवीन मजकूर',
   navHistory: 'मागील काम',
+  navTranslate: 'भाषांतर',
   navGlossary: 'शब्दकोश',
+  navReferences: 'मास्टर टेम्पलेट',
   navMenu: 'मेनू',
   poweredBy: 'Powered by',
 
@@ -49,6 +53,10 @@ export const STR = {
   twitterBusyInfo:
     'एक ट्विटर पोस्ट सध्या तयार होत आहे. ती पूर्ण झाल्यावर नवीन सुरू करता येईल.',
 
+  // Shown on the योजना/बातमी cards while a news/scheme run is already in flight
+  articleBusyInfo:
+    'एक लेख सध्या तयार होत आहे. तो पूर्ण झाल्यावर नवीन सुरू करता येईल.',
+
   outputTypeLabel: 'काय तयार करायचे?',
   outputArticle: 'लेख',
   outputArticleDesc: 'महासंवाद शैलीतील सविस्तर मराठी लेख',
@@ -61,9 +69,24 @@ export const STR = {
   noteTooShort: 'कृपया किमान २० अक्षरांची टिपणी लिहा.',
   txtOnly: 'कृपया फक्त .txt फाईल निवडा.',
 
+  // Standalone Marathi-to-English translation
+  translatePageTitle: 'भाषांतर (Translation)',
+  translateInputLabel: 'मराठी मजकूर येथे लिहा किंवा चिकटवा',
+  translateInputHint:
+    'या मजकुराचे थेट इंग्रजी भाषांतर केले जाईल. हा मजकूर जतन केला जाणार नाही.',
+  translateInputPlaceholder: 'भाषांतरासाठी मराठी मजकूर येथे लिहा…',
+  translateMineTerms: 'या मजकुरातून नवीन नाव-शब्दकोश संज्ञा शोधा',
+  translateAction: 'भाषांतर करा',
+  translateMayTakeTime: 'मोठ्या मजकुराला एक-दोन मिनिटे लागू शकतात.',
+  translateOverLimit: 'मजकूर १०,००० अक्षरांपेक्षा जास्त आहे.',
+  translateOutputTitle: 'इंग्रजी भाषांतर',
+  translateLockedTerms: 'शब्दकोश संज्ञा वापरल्या',
+  translateMinedTerms: 'नवीन संज्ञा तपासणीसाठी जोडल्या',
+
   // Progress
   progressTitle: 'तयार होत आहे…',
-  progressHint: 'यास काही मिनिटे लागू शकतात. हे पान उघडे ठेवा किंवा नंतर परत या.',
+  progressHint:
+    'यास काही मिनिटे लागू शकतात. हे पान उघडे ठेवा किंवा नंतर परत या.',
   stepDone: 'पूर्ण',
   failedTitle: 'काम अपूर्ण राहिले',
   failedHint: 'क्षमस्व, काहीतरी चुकले. पुन्हा प्रयत्न करून पहा.',
@@ -92,6 +115,8 @@ export const STR = {
   showEnglish: 'English',
   translating: 'भाषांतर सुरू आहे…',
   posterTitle: 'तयार झालेले पोस्टर',
+  // Poster-skeleton label while the article is shown but the poster still renders
+  posterPreparing: 'पोस्टर तयार होत आहे…',
   downloadPoster: 'पोस्टर डाउनलोड करा',
   editCopy: 'पोस्टरवरील मजकूर बदला',
   closeEditCopy: 'बदल बंद करा',
@@ -154,7 +179,70 @@ export const STR = {
   historyTitle: 'मागील काम',
   historyEmpty: 'अजून काहीही तयार केलेले नाही.',
   historyNew: '+ नवीन तयार करा',
+  historySearchPlaceholder: 'मागील काम शोधा…',
+  historyNoResults: 'शोधाशी जुळणारे काही सापडले नाही.',
+  historyCount: 'एकूण',
+  paginationPrev: 'मागील',
+  paginationNext: 'पुढील',
   open: 'उघडा',
+
+  // Cost badge (estimated OpenAI spend for the run)
+  costLabel: 'अंदाजे खर्च',
+
+  // Poster master-template library (enabled-rotation semantics: many images per
+  // type may be in use at once; one is picked at random per poster).
+  refTitle: 'पोस्टर मास्टर टेम्पलेट',
+  refIntro:
+    'पोस्टरसाठी वापरली जाणारी मूळ (मास्टर) टेम्पलेट चित्रे येथे व्यवस्थापित करा. एका प्रकारात एकाच वेळी अनेक चित्रे "वापरात" ठेवता येतात — प्रत्येक पोस्टरसाठी त्यांतील एक आपोआप निवडले जाते. नवीन प्रकारही तयार करता येतात.',
+  refUpload: 'नवीन चित्र अपलोड करा',
+  refUploading: 'अपलोड होत आहे…',
+  refEnabled: 'वापरात',
+  refEnable: 'वापरा',
+  refDisable: 'थांबवा',
+  refDelete: 'काढा',
+  refDeleteConfirm: 'हे चित्र कायमचे काढायचे?',
+  refEmpty: 'या प्रकारात अजून एकही चित्र नाही.',
+  refNoneEnabled: 'या प्रकारातील एकही चित्र सध्या वापरात नाही.',
+  refFileTypeError: 'कृपया PNG, JPEG किंवा WebP चित्र निवडा.',
+  refUploadedOn: 'अपलोड',
+  refCustomChip: 'नवीन प्रकार',
+
+  // Custom reference types (create / edit / delete)
+  refTypeNew: '+ नवीन प्रकार तयार करा',
+  refTypeNewHint:
+    'ट्विटर पोस्टरसाठी स्वतःचा प्रकार बनवा — नाव, थोडक्यात वर्णन आणि किमान एक टेम्पलेट चित्र.',
+  refTypeName: 'प्रकाराचे नाव',
+  refTypeNamePlaceholder: 'उदा. शेतकरी योजना',
+  refTypeDesc: 'वर्णन',
+  refTypeDescHint:
+    'या वर्णनावरूनच टिपणीसाठी योग्य प्रकार आपोआप निवडला जातो — हे पोस्टर कधी वापरावे ते थोडक्यात लिहा.',
+  refTypeDescPlaceholder:
+    'उदा. शेतकऱ्यांसाठीच्या योजना, अनुदान किंवा कर्जमाफीची माहिती',
+  refTypeCreate: 'प्रकार तयार करा',
+  refTypeCreating: 'तयार करत आहोत…',
+  refTypeEdit: 'संपादन',
+  refTypeSave: 'जतन करा',
+  refTypeSaving: 'जतन करत आहोत…',
+  refTypeCancel: 'रद्द करा',
+  refTypeDelete: 'प्रकार काढा',
+  refTypeDeleteConfirm:
+    'हा प्रकार कायमचा काढायचा? यातील सर्व टेम्पलेट चित्रेही काढली जातील.',
+
+  // Home-page reference picker (pin a specific master template for this run)
+  refPickerTitle: 'पोस्टर टेम्पलेट',
+  refPickerHint:
+    'सहसा "आपोआप निवड" पुरेशी असते. हवे असल्यास गॅलरीतून ठरावीक टेम्पलेट निवडता येते.',
+  refPickerAuto: 'आपोआप निवड (शिफारस)',
+  refPickerAutoDesc: 'विषयानुसार योग्य प्रकार व चित्र मंच स्वतः निवडेल',
+  refPickerOpen: 'टेम्पलेट गॅलरी उघडा',
+  refPickerClose: 'गॅलरी बंद करा',
+  refPickerClear: 'आपोआप करा',
+  refPickerSelected: 'निवडलेले टेम्पलेट',
+  refPickerEmpty:
+    'एकही टेम्पलेट चित्र वापरात नाही. "मास्टर टेम्पलेट" पानावर चित्रे सुरू करा.',
+  refPickerLoading: 'टेम्पलेट आणत आहोत…',
+  refPickerPinnedTypeHint:
+    'हा प्रकार व हेच चित्र वापरले जाईल; प्रकार आपोआप निवडला जाणार नाही.',
 
   // Errors
   genericError: 'काहीतरी चुकले. कृपया पुन्हा प्रयत्न करा.',
@@ -192,6 +280,19 @@ export const TERM_TYPE_LABELS: Record<TermType, string> = {
   other: 'इतर',
 };
 
+export const REF_CATEGORY_LABELS: Record<ReferenceCategory, string> = {
+  twitter: 'ट्विटर पोस्टर टेम्पलेट',
+  article: 'लेख पोस्टर टेम्पलेट',
+};
+
+// Short Marathi category labels for the history-card gradient banner (image-less
+// cards). Distinct from the longer form labels (categoryScheme etc.).
+export const CATEGORY_LABELS: Record<Category, string> = {
+  scheme: 'योजना',
+  news: 'बातमी',
+  twitter: 'ट्विटर',
+};
+
 export const STATUS_LABELS: Record<GenerationStatus, string> = {
   queued: 'रांगेत',
   running: 'सुरू आहे…',
@@ -209,4 +310,11 @@ const DATE_FORMAT = new Intl.DateTimeFormat('mr-IN', {
 
 export function formatDate(iso: string): string {
   return DATE_FORMAT.format(new Date(iso));
+}
+
+// The estimated USD cost of a run, for the small cost badge. Null (pre-feature rows or a
+// run that hasn't recorded cost yet) shows an em dash.
+export function formatCost(usd: number | null): string {
+  if (usd === null || Number.isNaN(usd)) return '—';
+  return `$${usd.toFixed(2)}`;
 }

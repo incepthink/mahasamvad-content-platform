@@ -8,10 +8,17 @@
 // transient failures (429/5xx). Do not call fetch against api.openai.com directly.
 
 import { openAiFetch } from '../http/openai-request.js';
+import { recordChatUsage, type ChatUsage } from '../cost/cost-meter.js';
 
 const CHAT_URL = 'https://api.openai.com/v1/chat/completions';
 
 export const CHAT_MODEL = 'gpt-4o';
+
+// Bound the completion so one runaway generation can't silently cost several times a
+// normal run (unbounded, gpt-4o defaults to its 16,384-token ceiling). 4096 is ~2x the
+// largest current output (~2,000 tk draft), so it never truncates normal output. Callers
+// with a known-tighter (short JSON verifiers) or longer need can override via maxTokens.
+const DEFAULT_MAX_TOKENS = 4096;
 
 export type ChatMessage = Readonly<{
   role: 'system' | 'user' | 'assistant';
@@ -20,6 +27,7 @@ export type ChatMessage = Readonly<{
 
 type ChatResponse = {
   choices: Array<{ message: { content: string | null } }>;
+  usage?: ChatUsage;
 };
 
 function requireApiKey(): string {
@@ -44,15 +52,18 @@ export async function chatComplete(
     temperature?: number;
     responseFormat?: 'json_object';
     model?: string;
+    maxTokens?: number;
   },
 ): Promise<string> {
+  const model = options?.model ?? CHAT_MODEL;
   const response = await openAiFetch(CHAT_URL, {
     label: 'chat',
     apiKey: requireApiKey(),
     body: {
-      model: options?.model ?? CHAT_MODEL,
+      model,
       messages,
       temperature: options?.temperature ?? 0.4,
+      max_tokens: options?.maxTokens ?? DEFAULT_MAX_TOKENS,
       ...(options?.responseFormat
         ? { response_format: { type: options.responseFormat } }
         : {}),
@@ -60,6 +71,8 @@ export async function chatComplete(
   });
 
   const body = (await response.json()) as ChatResponse;
+  // Record token usage into the ambient cost meter (no-op outside a metered scope).
+  recordChatUsage(model, body.usage);
   const content = body.choices[0]?.message.content;
   if (!content) {
     throw new Error('OpenAI chat response contained no content.');

@@ -64,8 +64,11 @@ export function buildMessages(
   fiveW1H?: FiveWOneH,
   brief?: EditorialBrief | null,
 ): ChatMessage[] {
+  // The reference is a style/structure exemplar only (never a fact source), so cap it the
+  // same way the brief does (editorial-brief.ts) — the tail adds tokens to the largest
+  // prompt without improving style guidance.
   const styleExample = reference
-    ? `शीर्षक: ${reference.title}\n\n${reference.text}`
+    ? `शीर्षक: ${reference.title}\n\n${reference.text.slice(0, 1500)}`
     : category === 'news'
       ? NEWS_STYLE_EXEMPLAR
       : null;

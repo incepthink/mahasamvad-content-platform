@@ -38,14 +38,34 @@ it are implemented and working end-to-end:
 - A Marathi-first Next.js frontend (`apps/web`) for non-technical government
   staff: create a generation, watch progress, edit poster text, send feedback,
   and browse history
+- Standalone Marathi-to-English text translation (`POST /api/translate` and
+  `/translate`) using the existing Sarvam block translation and verified glossary
+  locks, with optional best-effort glossary candidate mining; ad-hoc text is not stored
+- A reference-template system (`reference_types` + `reference_images`,
+  `/api/reference-types` + `/api/references`, and the `/references` page): poster
+  types are catalog rows — six builtins plus user-created custom twitter types
+  (Marathi label + a description the n8n classifier routes by; generic copy
+  layout) — each holding a rotation of immutable library images under
+  `references/library/`. Any number of images per type may be **enabled**
+  (`is_active`); one is picked at random per generation, and the home create form
+  can pin a specific image (`generations.reference_image_id`; a twitter pin also
+  pins the post type and skips classification). The API sends the full enabled
+  catalog to n8n in each webhook payload, so the workflows are data-driven. The
+  old copy-on-activate canonical `master-*.png` mechanism is retired — those
+  storage objects remain only as inert seed data for `seed:reference-library`.
 
-Two n8n workflows are implemented and host-independent for deployment, both fetching
-their master templates from Supabase Storage over HTTPS (never local disk):
-- `social-post-v2-api` (the 'twitter' generation path) — five brand masters
-  `posters/references/master-*.png`, seeded via `upload:references`.
-- `article-poster-v1-api` (the default news/scheme poster path) — one landscape master
-  `posters/references/master-article.png`, seeded via `upload:article-master`; the API
-  sends `{ headline, scene_brief }` and the workflow edits the master with gpt-image-2.
+Two n8n workflows are implemented and host-independent for deployment; their master
+templates arrive as immutable `references/library/...` public URLs inside each webhook
+payload (fetched over HTTPS — never local disk, no hardcoded storage paths):
+- `social-post-v2-api` (the 'twitter' generation path) — the API sends the full `types`
+  catalog (slug/label/description/copy_style/reference_url per enabled type) plus
+  `forced_type`/`forced_reference_url` (empty strings unless pinned). The
+  classify/copy/image nodes are data-driven from that catalog; a forced type skips the
+  classify LLM call, and custom types render with the generic (headline + points) copy
+  layout.
+- `article-poster-v1-api` (the default news/scheme poster path) — the API sends
+  `{ headline, scene_brief, reference_url }` and the workflow edits that master with
+  gpt-image-2 (it fails loudly if `reference_url` is missing).
 Both are committed under `n8n/workflow-exports/` (`social-post-v2-api.json`,
 `article-poster-v1-api.json`) — the artifacts to import into the AWS n8n.
 

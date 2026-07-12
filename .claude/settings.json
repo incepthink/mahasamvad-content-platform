@@ -97,7 +97,17 @@
       "Bash(git rm *)",
       "Bash(git add *)",
       "Bash(git commit -q -m ' *)",
-      "Bash(rm -f /tmp/degen-check.mjs)"
+      "Bash(rm -f /tmp/degen-check.mjs)",
+      "Bash(node -e \"try{require.resolve\\('playwright'\\);console.log\\('playwright OK', require.resolve\\('playwright'\\)\\)}catch\\(e\\){console.log\\('no playwright'\\)}; try{require.resolve\\('playwright-core'\\);console.log\\('playwright-core OK'\\)}catch\\(e\\){console.log\\('no playwright-core'\\)}\")",
+      "Bash(node \"C:/Users/shaik/AppData/Local/Temp/claude/c--Users-shaik-Desktop-dev-work-mahasamvad-content-platform/6a1c0f55-c39e-42ad-95c5-0edbf4da8805/scratchpad/verify-tasks-modal.mjs\")",
+      "Bash(node \"C:/Users/shaik/AppData/Local/Temp/claude/c--Users-shaik-Desktop-dev-work-mahasamvad-content-platform/766cefc5-ae6d-4558-b0fc-de028404b3f9/scratchpad/patch-social.mjs\" \"n8n/workflow-exports/social-post-v2-api.json\")",
+      "Bash(node -e \"JSON.parse\\(require\\('fs'\\).readFileSync\\('n8n/workflow-exports/social-post-v2-api.json','utf8'\\)\\); JSON.parse\\(require\\('fs'\\).readFileSync\\('n8n/workflow-exports/article-poster-v1-api.json','utf8'\\)\\); console.log\\('both JSONs valid'\\)\")",
+      "Bash(node --input-type=module)",
+      "Bash(pnpm --filter @dgipr/content-engine ingest:all -- --limit 2)",
+      "Bash(echo \"=== last page lines ===\")",
+      "Bash(grep -E '^page ' C:/Users/shaik/AppData/Local/Temp/claude/c--Users-shaik-Desktop-dev-work-mahasamvad-content-platform/515782b9-86c4-4c56-b1a5-e4b4527af12f/scratchpad/ingest-full.log)",
+      "Bash(echo \"=== last pages ===\")",
+      "Bash(grep -E '^page ' C:/Users/shaik/AppData/Local/Temp/claude/c--Users-shaik-Desktop-dev-work-mahasamvad-content-platform/515782b9-86c4-4c56-b1a5-e4b4527af12f/scratchpad/ingest-full-2.log)"
     ],
     "additionalDirectories": [
       "\\tmp"

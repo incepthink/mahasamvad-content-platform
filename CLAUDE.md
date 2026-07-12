@@ -38,12 +38,17 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
 - Job orchestration + sequencing (the real pipeline) → `apps/api/src/jobs/runner.ts`
   - `startGenerationJob`: retrieve → `generateArticle` → (if poster) `generateCopy`
     → render poster → upload PNG(s) to Supabase Storage. The poster render forks on
-    `ARTICLE_POSTER_MODE` (default `n8n`): `n8n` sends `{ headline, scene_brief }` to the
-    `article-poster-v1-api` webhook (`renderArticlePosterViaN8n`), which paints the whole
-    landscape poster incl. the headline by editing `master-article.png` — no scene image,
-    no scenePath; `html` is the original `buildArticleScenePrompt`+`generateImage`+
-    `generateArticlePoster` Chromium path (kept as fallback). Job state of record is the
-    `generations` row (status/step/error), so polling clients survive refreshes.
+    `ARTICLE_POSTER_MODE` (default `n8n`): `n8n` sends `{ headline, scene_brief,
+    reference_url }` to the `article-poster-v1-api` webhook (`renderArticlePosterViaN8n`;
+    `reference_url` = the pinned image, else a random enabled article master), which
+    paints the whole landscape poster incl. the headline by editing that master — no
+    scene image, no scenePath; `html` is the original `buildArticleScenePrompt`+
+    `generateImage`+`generateArticlePoster` Chromium path (kept as fallback). Job state
+    of record is the `generations` row (status/step/error), so polling clients survive
+    refreshes.
+  - `startSocialPostJob` sends the note plus the full reference-type catalog
+    (`types` built by `buildTwitterCatalog`; `forced_type`/`forced_reference_url`
+    non-empty when the run pinned an image) to `social-post-v2-api`.
   - `startArticleFeedbackJob`, `startPosterFeedbackJob` (`copy` re-renders with the
     **cached** scene; `scene` regenerates the background image).
 - Article gen / coverage / faithfulness / revisions →
@@ -55,8 +60,14 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
   (`generate-article-poster.ts`, `build-scene-prompt.ts`, `openai-image.ts`,
   `article-template.ts` / `poster-template.ts`, `render-html.ts`); public API in
   `packages/poster-renderer/src/index.ts`
+- Reference templates (type catalog + image rotation + per-run catalog for n8n) →
+  `packages/content-engine/src/references/*` (`reference-types.ts`,
+  `reference-images.ts`, `catalog.ts`); routes → `apps/api/src/routes/references.ts`;
+  web page → `apps/web/app/references/page.tsx`; home-page pin picker →
+  `apps/web/components/ReferencePicker.tsx`
 - DB access + Storage → `packages/database/src/*`
-  (`client.ts`, `generations.ts`, `mahasamvad-chunks.ts`, `storage.ts`)
+  (`client.ts`, `generations.ts`, `reference-types.ts`, `reference-images.ts`,
+  `mahasamvad-chunks.ts`, `storage.ts`)
 - Shared types/schemas → `packages/schemas/src/*` (`copy.ts`, `api.ts`)
 - content-engine public API barrel → `packages/content-engine/src/index.ts`
 
@@ -71,7 +82,9 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
   `ProgressSteps`, `FeedbackBox`, `CopyEditForm`, `HistoryCard`, `StatusChip`)
 
 **Data & schema:** `supabase/migrations/0001…0004_*.sql` — pgvector Mahasamvad
-chunks, `generations` table, generation category + chunk style-category columns.
+chunks, `generations` table, generation category + chunk style-category columns;
+`0012`/`0013` — reference-image library + `reference_types` catalog (rotation
+semantics, `generations.reference_image_id` pin).
 
 **Aux / not on the main request path:**
 - `packages/content-engine/src/finetune/*` — reusable JSONL dataset pipeline
@@ -130,18 +143,29 @@ Chromium): `pnpm --filter @dgipr/poster-renderer exec playwright install chromiu
   render (public bucket is CDN-cached — never reuse a path).
 - **Article poster via n8n (default).** With `ARTICLE_POSTER_MODE=n8n` the article poster
   is rendered by the `article-poster-v1-api` workflow, not Chromium: the API sends only
-  `{ headline, scene_brief }` and the image model paints the whole **landscape** poster
-  (one Marathi headline, no bullets/stats — deliberately simple, distinct from the Twitter
-  posters) by editing `posters/references/master-article.png`. This intentionally accepts
-  image-model Devanagari for the single headline (verified acceptable). No scene image is
-  produced, so poster feedback + manual copy-edit (which need `scenePath`) are unavailable
-  in this mode.
-- **n8n workflows are host-independent.** Their master templates live in Supabase Storage
-  under `posters/references/` — the 5 Twitter masters `master-{alert,campaign,info_bullets,quote,timeline}.png`
-  (seeded by `pnpm --filter @dgipr/content-engine upload:references`) and the article
-  `master-article.png` (seeded by `pnpm --filter @dgipr/content-engine upload:article-master`);
-  the workflows fetch them over HTTPS, so they never read local disk. Deploy artifacts:
-  `n8n/workflow-exports/{social-post-v2-api,article-poster-v1-api}.json` — import both into the AWS n8n.
+  `{ headline, scene_brief, reference_url }` and the image model paints the whole
+  **landscape** poster (one Marathi headline, no bullets/stats — deliberately simple,
+  distinct from the Twitter posters) by editing the master at `reference_url`. This
+  intentionally accepts image-model Devanagari for the single headline (verified
+  acceptable). No scene image is produced, so poster feedback + manual copy-edit (which
+  need `scenePath`) are unavailable in this mode.
+- **Reference templates are a data-driven catalog, not a fixed list.** `reference_types`
+  (migration 0013) holds the six builtins plus user-created custom twitter types; each
+  type has a rotation of immutable library images (`reference_images`, many may be
+  enabled at once, one picked at random per run) managed on `/references`. The home form
+  can pin one image (`generations.reference_image_id`); a twitter pin also pins the post
+  type and skips classification. Custom-type slugs are server-generated
+  (`custom_` + 8 hex) because they feed OpenAI json_schema enums + storage paths; custom
+  copy uses the `generic` layout. If nothing is enabled in a category, the job fails
+  with a Marathi error shown raw in the UI.
+- **n8n workflows are host-independent.** They no longer hardcode master URLs: the API
+  sends the full type catalog (with immutable `references/library/...` public URLs) in
+  every webhook payload, and the workflows fetch those over HTTPS — never local disk.
+  The legacy canonical `references/master-*.png` objects remain in Storage only as seed
+  data for `pnpm --filter @dgipr/content-engine seed:reference-library`. Deploy
+  artifacts: `n8n/workflow-exports/{social-post-v2-api,article-poster-v1-api}.json` —
+  import both into the AWS n8n (deploy the API first; the reworked workflows need the
+  catalog fields in the payload).
 - **All OpenAI traffic goes through `packages/content-engine/src/http/openai-request.ts`**
   (`openAiFetch`) — never `fetch` `api.openai.com` directly. It serializes calls process-wide
   (`OPENAI_MAX_CONCURRENCY`, default 1) and retries 429/5xx using the wait OpenAI names in its

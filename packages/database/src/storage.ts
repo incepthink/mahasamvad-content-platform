@@ -41,3 +41,18 @@ export async function downloadPng(
   }
   return Buffer.from(await data.arrayBuffer());
 }
+
+// Removes library objects when a gallery image (or a whole custom type) is
+// deleted. The legacy canonical references/master-*.png objects are inert seed
+// data for seed-reference-library — leave them alone.
+export async function removeObjects(
+  client: SupabaseClient,
+  paths: readonly string[],
+): Promise<void> {
+  const { error } = await client.storage
+    .from(POSTERS_BUCKET)
+    .remove([...paths]);
+  if (error) {
+    throw new Error(`Failed to remove ${paths.join(', ')}: ${error.message}`);
+  }
+}

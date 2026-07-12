@@ -8,6 +8,7 @@
 // bulk `embed:news` ingest loop from dying partway through on a single rate-limit blip.
 
 import { openAiFetch } from '../http/openai-request.js';
+import { recordEmbeddingUsage, type EmbeddingUsage } from '../cost/cost-meter.js';
 
 const EMBEDDINGS_URL = 'https://api.openai.com/v1/embeddings';
 
@@ -19,6 +20,7 @@ const DEFAULT_BATCH_SIZE = 100;
 
 type EmbeddingResponse = {
   data: Array<{ index: number; embedding: number[] }>;
+  usage?: EmbeddingUsage;
 };
 
 function requireApiKey(): string {
@@ -40,6 +42,8 @@ async function embedBatch(texts: string[], apiKey: string): Promise<number[][]> 
   });
 
   const body = (await response.json()) as EmbeddingResponse;
+  // Record token usage into the ambient cost meter (no-op outside a metered scope).
+  recordEmbeddingUsage(EMBEDDING_MODEL, body.usage);
   // The API may return items out of order; sort by index to realign with input.
   return body.data
     .slice()

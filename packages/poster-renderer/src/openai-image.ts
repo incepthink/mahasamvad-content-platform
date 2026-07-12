@@ -11,10 +11,14 @@
 
 const GENERATIONS_URL = 'https://api.openai.com/v1/images/generations';
 
-export const IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL ?? 'gpt-image-1';
+// gpt-image-2 (gpt-image-1 is deprecated on OpenAI's model page); matches what both
+// n8n workflows use. Env-overridable if an account can't request it.
+export const IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL ?? 'gpt-image-2';
 // Landscape 3:2 — object-fit:cover-cropped into the poster's photo zone.
 const SIZE = process.env.OPENAI_IMAGE_SIZE ?? '1536x1024';
-const QUALITY = process.env.OPENAI_IMAGE_QUALITY ?? 'high';
+// 'medium' is ~4x cheaper than 'high' with an acceptable poster background; keep in sync
+// with the n8n workflow JSONs (and apps/api reads OPENAI_IMAGE_QUALITY to attribute cost).
+const QUALITY = process.env.OPENAI_IMAGE_QUALITY ?? 'medium';
 
 type ImageResponse = {
   data: Array<{ b64_json?: string }>;

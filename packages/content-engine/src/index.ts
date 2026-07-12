@@ -34,6 +34,46 @@ export {
   type GlossaryCandidate,
 } from './generation/extract-entities.js';
 
+// Cost metering — the runner opens a scope per job and reads the accumulator back.
+export {
+  createCostAccumulator,
+  runInCostScope,
+  recordImageCost,
+  totalCostUsd,
+  type CostAccumulator,
+} from './cost/cost-meter.js';
+export {
+  priceText,
+  estimateImageCostUsd,
+  type ImageKind,
+  type ImageQuality,
+} from './cost/pricing.js';
+
+// Reference-image library (enabled-rotation semantics) + type catalog.
+export {
+  ACCEPTED_UPLOAD_MIME_TYPES,
+  MASTER_DIMENSIONS,
+  deleteReferenceImage,
+  listReferenceLibrary,
+  normalizeReferenceImage,
+  setReferenceImageEnabled,
+  uploadReferenceImage,
+} from './references/reference-images.js';
+export {
+  createReferenceType,
+  deleteReferenceType,
+  listReferenceTypes,
+  updateReferenceType,
+} from './references/reference-types.js';
+// Per-generation catalog sent to the n8n workflows in the webhook payload.
+export {
+  buildTwitterCatalog,
+  pickArticleReferenceUrl,
+  resolvePinnedReference,
+  type PinnedReference,
+  type ReferenceCatalogEntry,
+} from './references/catalog.js';
+
 export type ContentChunk = Readonly<{
   id: string; // `${articleId}-${chunkIndex}`
   articleId: number;
@@ -47,4 +87,3 @@ export type ContentChunk = Readonly<{
   // Coarse style bucket (news vs scheme) this chunk is a reference for; scopes retrieval.
   styleCategory: ArticleCategory;
 }>;
-

@@ -22,8 +22,8 @@
     "scrape:news": "tsx src/scraping/mahasamvad-rest.ts 16 mahasamvad-news 250",
     "chunk:news": "tsx src/chunking/chunk-articles.ts mahasamvad-news news",
     "embed:news": "tsx --env-file=../../.env src/embedding/ingest-chunks.ts mahasamvad-news",
-    "upload:references": "tsx --env-file=../../.env src/scripts/upload-references.ts",
-    "upload:article-master": "tsx --env-file=../../.env src/scripts/seed-article-master.ts",
+    "ingest:all": "tsx --env-file=../../.env src/scripts/ingest-mahasamvad.ts",
+    "seed:reference-library": "tsx --env-file=../../.env src/scripts/seed-reference-library.ts",
     "retrieve:test": "tsx --env-file=../../.env src/retrieval/retrieve-references.ts",
     "generate:test": "tsx --env-file=../../.env src/generation/generate-article.ts",
     "polish:test": "tsx --env-file=../../.env src/generation/polish-article.ts"
@@ -33,11 +33,11 @@
     "@dgipr/poster-renderer": "workspace:*",
     "@dgipr/schemas": "workspace:*",
     "@mozilla/readability": "^0.6.0",
-    "jsdom": "^29.1.1"
+    "jsdom": "^29.1.1",
+    "sharp": "^0.34.4"
   },
   "devDependencies": {
     "@types/jsdom": "^28.0.3",
-    "sharp": "^0.34.4",
     "tsx": "^4.19.2"
   }
 }

@@ -75,6 +75,10 @@ export const CreateGenerationRequestSchema = z.object({
   // source — only steers emphasis + heading. Empty/absent ⇒ the model picks its
   // own angle (today's behaviour). Consumed by the engine in later parts.
   heading: z.string().trim().max(200).optional(),
+  // Optional pin: use exactly this reference image (from the master-template
+  // library) for the run's poster instead of the per-type random rotation.
+  // Pinning a twitter image also pins the post type (classification is skipped).
+  referenceImageId: z.string().uuid().optional(),
 });
 export type CreateGenerationRequest = z.infer<
   typeof CreateGenerationRequestSchema
@@ -120,6 +124,9 @@ export const GenerationSummarySchema = z.object({
   noteExcerpt: z.string(),
   headline: z.string().nullable(),
   posterUrl: z.string().nullable(),
+  // Total USD the run has cost so far (null for pre-feature rows). Estimate: text is
+  // measured from OpenAI usage, image is a fixed per-render tier price.
+  costUsd: z.number().nullable(),
 });
 export type GenerationSummary = z.infer<typeof GenerationSummarySchema>;
 
@@ -155,6 +162,9 @@ export const GenerationDetailSchema = z.object({
   note: z.string(),
   // Optional editorial angle the run was created with (null for pre-heading rows).
   heading: z.string().nullable(),
+  // The reference image the run was pinned to (null = automatic rotation, or the
+  // image was later deleted — the FK sets null).
+  referenceImageId: z.string().nullable(),
   article: z.string().nullable(),
   // On-demand English translation of `article`; null until the user requests it.
   articleEnglish: z.string().nullable(),
@@ -164,6 +174,10 @@ export const GenerationDetailSchema = z.object({
   posterUrl: z.string().nullable(),
   sceneUrl: z.string().nullable(),
   error: z.string().nullable(),
+  // Total USD the run has cost so far (null for pre-feature rows). `costBreakdown` carries
+  // the audit detail (token counts + text-vs-image split); shape is intentionally loose.
+  costUsd: z.number().nullable(),
+  costBreakdown: z.unknown().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
   revisions: z.array(GenerationRevisionSchema),
@@ -224,6 +238,95 @@ export const UpdateGlossaryTermRequestSchema = z.object({
 export type UpdateGlossaryTermRequest = z.infer<
   typeof UpdateGlossaryTermRequestSchema
 >;
+
+// ---------- Standalone text translation (not tied to a generation) ----------
+
+// Translation is one sequential Sarvam call per ~2500 chars, so the input is capped to keep
+// a synchronous request bounded (~4 blocks). Shared with the web form's character counter so
+// the client and the API agree on the limit.
+export const TRANSLATE_TEXT_MAX_CHARS = 10_000;
+
+export const TranslateTextRequestSchema = z.object({
+  text: z.string().trim().min(1).max(TRANSLATE_TEXT_MAX_CHARS),
+  // Opt-in: also mine proper-noun candidates from this text into the glossary review queue.
+  mineTerms: z.boolean().optional(),
+});
+export type TranslateTextRequest = z.infer<typeof TranslateTextRequestSchema>;
+
+export const TranslateTextResponseSchema = z.object({
+  english: z.string(),
+  // Transparency for the UI: how many verified glossary terms were locked, and how many new
+  // candidates were mined (0 when mineTerms is off, or when mining failed — it's best-effort).
+  lockedTermCount: z.number().int().nonnegative(),
+  minedTermCount: z.number().int().nonnegative(),
+});
+export type TranslateTextResponse = z.infer<typeof TranslateTextResponseSchema>;
+
+// ---------- Reference types + images ----------
+
+export const ReferenceCategorySchema = z.enum(['twitter', 'article']);
+export type ReferenceCategory = z.infer<typeof ReferenceCategorySchema>;
+
+// Which copy schema/layout the n8n social-post workflow renders a type with.
+// Builtin twitter types keep their bespoke layout; custom types are 'generic'
+// (headline + points, info_bullets-shaped).
+export const CopyStyleSchema = z.enum([
+  'alert',
+  'campaign',
+  'info_bullets',
+  'quote',
+  'timeline',
+  'generic',
+]);
+export type CopyStyle = z.infer<typeof CopyStyleSchema>;
+
+// One poster type slot (builtin, or a user-created custom twitter type). Slugs
+// are server-generated and machine-safe (^[a-z0-9_]+$) because they feed OpenAI
+// json_schema enums and storage paths; labelMr carries the Devanagari.
+export const ReferenceTypeSchema = z.object({
+  id: z.string(),
+  category: ReferenceCategorySchema,
+  slug: z.string(),
+  labelMr: z.string(),
+  description: z.string(),
+  copyStyle: CopyStyleSchema,
+  isBuiltin: z.boolean(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type ReferenceType = z.infer<typeof ReferenceTypeSchema>;
+
+export const CreateReferenceTypeRequestSchema = z.object({
+  labelMr: z.string().trim().min(1).max(60),
+  // Required: the n8n classifier routes notes to this type by its description.
+  description: z.string().trim().min(3).max(300),
+});
+export type CreateReferenceTypeRequest = z.infer<
+  typeof CreateReferenceTypeRequestSchema
+>;
+
+export const UpdateReferenceTypeRequestSchema = z.object({
+  labelMr: z.string().trim().min(1).max(60).optional(),
+  description: z.string().trim().min(3).max(300).optional(),
+});
+export type UpdateReferenceTypeRequest = z.infer<
+  typeof UpdateReferenceTypeRequestSchema
+>;
+
+export const ReferenceImageSchema = z.object({
+  id: z.string(),
+  category: ReferenceCategorySchema,
+  // A reference_types slug; validated against the catalog server-side.
+  subtype: z.string(),
+  storagePath: z.string(),
+  url: z.string(),
+  // Enabled in the rotation: many images per type may be enabled at once; one
+  // is picked at random per generation.
+  isActive: z.boolean(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type ReferenceImage = z.infer<typeof ReferenceImageSchema>;
 
 export const ApiErrorSchema = z.object({
   error: z.object({ message: z.string() }),

@@ -9,7 +9,7 @@
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { JSDOM } from 'jsdom';
+import { htmlToParagraphs } from '../scraping/html.js';
 import type { ContentChunk } from '../index.js';
 import type { ArticleCategory } from '../generation/category-prompt.js';
 import type { MahasamvadPost } from '../scraping/mahasamvad-rest.js';
@@ -27,14 +27,10 @@ const DEFAULT_OPTIONS: ChunkOptions = {
   styleCategory: 'scheme',
 };
 
-// Extract paragraph texts from an article's rendered HTML. Mirrors the JSDOM
-// text extraction in mahasamvad-rest.ts, but per-<p> so boundaries survive.
+// Extract paragraph texts from an article's rendered HTML, per-<p> so boundaries survive.
+// Delegates to the shared safe parser (tolerates inline styles jsdom would crash on).
 export function extractParagraphs(contentHtml: string): string[] {
-  if (!contentHtml) return [];
-  const { document } = new JSDOM(`<body>${contentHtml}</body>`).window;
-  return Array.from(document.querySelectorAll('p'))
-    .map((p) => (p.textContent ?? '').replace(/\s+/g, ' ').trim())
-    .filter((text) => text.length > 0);
+  return htmlToParagraphs(contentHtml);
 }
 
 // Group an article's paragraphs into paragraph-aligned chunks. A single
