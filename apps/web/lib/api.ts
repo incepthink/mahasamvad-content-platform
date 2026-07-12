@@ -52,7 +52,11 @@ async function requestJson(path: string, init?: RequestInit): Promise<unknown> {
   const response = await fetch(`${API_URL}${path}`, {
     ...init,
     headers: {
-      'content-type': 'application/json',
+      // Only declare a JSON content-type when we actually send a body.
+      // Fastify's JSON parser rejects an empty body when content-type is
+      // application/json ("Body cannot be empty..."), which broke bodyless
+      // POST/DELETE calls (e.g. reference enable/disable, deletes).
+      ...(init?.body != null ? { 'content-type': 'application/json' } : {}),
       ...init?.headers,
     },
   });
