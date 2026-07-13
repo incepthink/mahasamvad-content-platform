@@ -6,7 +6,7 @@ import { useGeneration } from '../../../lib/useGeneration';
 import { useGenerationThread } from '../../../lib/useGenerationThread';
 import { createGeneration } from '../../../lib/api';
 import { useTasks } from '../../../lib/TasksProvider';
-import { STR, formatCost } from '../../../lib/strings';
+import { STR } from '../../../lib/strings';
 import { GenerationThread } from '../../../components/GenerationThread';
 import { ProgressSteps } from '../../../components/ProgressSteps';
 import { TaskProgressBar } from '../../../components/TaskProgressBar';
@@ -108,11 +108,6 @@ export default function GenerationDetailPage({
           {STR.newTitle}
         </h1>
         <div className="btn-row" style={{ gap: 10, alignItems: 'center' }}>
-          {detail.costUsd !== null ? (
-            <span className="cost-badge" title={STR.costLabel}>
-              {STR.costLabel} {formatCost(detail.costUsd)}
-            </span>
-          ) : null}
           <StatusChip status={detail.status} />
         </div>
       </div>

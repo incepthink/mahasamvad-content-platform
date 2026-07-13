@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import type { GenerationSummary } from '@dgipr/schemas';
-import { CATEGORY_LABELS, formatCost, formatDate, STR } from '../lib/strings';
+import { CATEGORY_LABELS, formatDate, STR } from '../lib/strings';
 import { StatusChip } from './StatusChip';
 
 export function HistoryCard({ item }: { item: GenerationSummary }) {
@@ -25,15 +25,7 @@ export function HistoryCard({ item }: { item: GenerationSummary }) {
         <StatusChip status={item.status} />
         <p className="history-headline">{item.headline ?? item.noteExcerpt}</p>
         <p className="history-excerpt">{item.noteExcerpt}</p>
-        <p className="history-date">
-          {formatDate(item.createdAt)}
-          {item.costUsd !== null ? (
-            <span className="history-cost">
-              {' · '}
-              {STR.costLabel} {formatCost(item.costUsd)}
-            </span>
-          ) : null}
-        </p>
+        <p className="history-date">{formatDate(item.createdAt)}</p>
       </div>
     </Link>
   );
