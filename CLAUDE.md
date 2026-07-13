@@ -105,7 +105,12 @@ pnpm build          # build all packages
 pnpm typecheck      # tsc --noEmit across the workspace
 pnpm lint
 pnpm format         # prettier --write
+pnpm n8n:push       # ship n8n/workflow-exports/*.json to a running n8n (see below)
 ```
+
+`pnpm n8n:push [--dry-run] [--only=<name>] [--create]` (`n8n/push-workflows.mjs`) is the
+**only** way workflow changes reach a running n8n — see the gotcha below. It needs
+`N8N_API_URL` + `N8N_API_KEY` in the root `.env` (key: n8n editor → Settings → n8n API).
 
 Content pipeline (from `packages/content-engine`, e.g.
 `pnpm --filter @dgipr/content-engine scrape:news`):
@@ -160,6 +165,18 @@ Chromium): `pnpm --filter @dgipr/poster-renderer exec playwright install chromiu
   (`custom_` + 8 hex) because they feed OpenAI json_schema enums + storage paths; custom
   copy uses the `generic` layout. If nothing is enabled in a category, the job fails
   with a Marathi error shown raw in the UI.
+- **Editing a workflow JSON does not deploy it.** n8n keeps workflows in its own database
+  (the `n8n_data` volume on the EC2 box); it never reads `n8n/workflow-exports/*.json` from
+  disk. `git pull` + `docker compose up -d --build` on the host rebuilds only the **api**
+  image, so the hosted workflows stay on whatever was last imported. Ship workflow changes
+  with `pnpm n8n:push` (after deploying the API — the workflows need the API's newer payload
+  fields). Two more traps the script exists to handle: the exports carry no `id` (a plain
+  import creates duplicates that then collide on the webhook path), and credential ids +
+  the Webhook node's Header Auth are instance-specific — the script re-binds them by name
+  off the live workflow so a push can't unbind OpenAI or disable `N8N_WEBHOOK_SECRET`.
+- **The n8n MCP points at the LOCAL n8n** (`http://localhost:5678`), not the hosted one.
+  Workflow ids seen through it (`1emSaqFmkLRUubUM`, `J4UTtNt2KMxuDSKf`) are local-dev ids
+  and are meaningless on `n8n.indicex.xyz`. Never treat an MCP publish as a prod deploy.
 - **n8n workflows are host-independent.** They no longer hardcode master URLs: the API
   sends the full type catalog (with immutable `references/library/...` public URLs) in
   every webhook payload, and the workflows fetch those over HTTPS — never local disk.

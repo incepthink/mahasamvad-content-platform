@@ -107,7 +107,9 @@
       "Bash(echo \"=== last page lines ===\")",
       "Bash(grep -E '^page ' C:/Users/shaik/AppData/Local/Temp/claude/c--Users-shaik-Desktop-dev-work-mahasamvad-content-platform/515782b9-86c4-4c56-b1a5-e4b4527af12f/scratchpad/ingest-full.log)",
       "Bash(echo \"=== last pages ===\")",
-      "Bash(grep -E '^page ' C:/Users/shaik/AppData/Local/Temp/claude/c--Users-shaik-Desktop-dev-work-mahasamvad-content-platform/515782b9-86c4-4c56-b1a5-e4b4527af12f/scratchpad/ingest-full-2.log)"
+      "Bash(grep -E '^page ' C:/Users/shaik/AppData/Local/Temp/claude/c--Users-shaik-Desktop-dev-work-mahasamvad-content-platform/515782b9-86c4-4c56-b1a5-e4b4527af12f/scratchpad/ingest-full-2.log)",
+      "Bash(npx prettier *)",
+      "Bash(echo \"eslint exit=$?\")"
     ],
     "additionalDirectories": [
       "\\tmp"

@@ -20,4 +20,11 @@ export default [
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
     },
   },
+  {
+    // Plain-JS operational scripts (e.g. n8n/push-workflows.mjs) — Node-only, no TS.
+    files: ['**/*.{js,mjs,cjs}'],
+    languageOptions: {
+      globals: { ...globals.node },
+    },
+  },
 ];

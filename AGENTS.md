@@ -71,17 +71,22 @@ payload (fetched over HTTPS — never local disk, no hardcoded storage paths):
   `{ headline, scene_brief, reference_url }` and the workflow edits that master with
   gpt-image-2 (it fails loudly if `reference_url` is missing).
 Both are committed under `n8n/workflow-exports/` (`social-post-v2-api.json`,
-`article-poster-v1-api.json`) — the artifacts to import into the AWS n8n.
-On 2026-07-13, the existing workflow IDs `1emSaqFmkLRUubUM` and
-`J4UTtNt2KMxuDSKf` on the n8n instance connected through MCP were synchronized
-from those exports and republished; API job logs now record the exact pinned or
-selected reference URL sent to each workflow so future deployment drift is visible.
-Later that day, `article-poster-v1-api` was republished with the iterative image-
-feedback prompt. The matching `social-post-v2-api` feedback branch is committed in
-its export, but its live update was rejected by the MCP safety review because the
-branch sends the current poster and feedback text to OpenAI Images; the live social
-workflow remains on the prior published version until that data-export action is
-explicitly approved and the committed export is synchronized.
+`article-poster-v1-api.json`).
+
+**Deploying a workflow change: `pnpm n8n:push` (`n8n/push-workflows.mjs`).** n8n stores
+workflows in its own database (the `n8n_data` volume), never reading the committed JSON
+from disk — so editing an export, committing it, and `git pull`ing on the EC2 box does
+**nothing** to the hosted workflows; `docker compose up -d --build` there rebuilds only the
+`api` image. `pnpm n8n:push` PUTs the exports into the n8n named by `N8N_API_URL` over its
+public REST API, matching by workflow name, re-binding credential ids and the Webhook
+node's Header Auth from the live workflow (both are instance-specific and absent from the
+committed JSON), and republishing. Run it **after** deploying the API — the workflows need
+the catalog fields the current API sends. Related: the n8n **MCP server is pointed at the
+local dev n8n** (`http://localhost:5678`); the workflow ids visible through it
+(`1emSaqFmkLRUubUM`, `J4UTtNt2KMxuDSKf`) are local ids, and an MCP publish is **not** a
+prod deploy — earlier notes claiming those exports were "synchronized and republished" on
+2026-07-13 described the local instance only. API job logs record the exact pinned or
+selected reference URL sent to each workflow, so drift stays visible.
 
 In progress: an editorial-rewrite pipeline (editorial brief → tiered coverage → editorial-
 quality judge → optional subheadings) that moves article generation from total-coverage

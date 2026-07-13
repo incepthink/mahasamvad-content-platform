@@ -10,7 +10,8 @@
     "typecheck": "pnpm -r --if-present typecheck",
     "lint": "pnpm -r --if-present lint",
     "format": "prettier . --write",
-    "format:check": "prettier . --check"
+    "format:check": "prettier . --check",
+    "n8n:push": "node --env-file-if-exists=.env n8n/push-workflows.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.30.1",

@@ -105,23 +105,58 @@ and `posters/references/master-*.png` are already uploaded. Just confirm:
 
 ---
 
-## Phase C — n8n: import the workflow
+## Phase C — n8n: import the workflows
 
-1. Open `https://n8n.indicex.xyz` (basic-auth with the creds from step B6). Create the
-   owner account if prompted.
+> ⚠️ **n8n does not read workflow JSON from disk.** Workflows live in n8n's own database
+> inside the `n8n_data` volume. `git pull` on this box — and `docker compose up -d --build`,
+> which only rebuilds the **api** image — changes nothing about them. The workflows are
+> shipped separately, by the two mechanisms below. This is the #1 cause of "I pushed my
+> changes but the hosted workflow is still the old one".
+
+### C1 — First-time bootstrap (once per n8n instance, in the browser)
+
+Only the credentials must be created by hand — an API key cannot create them for you.
+
+1. Open `https://n8n.indicex.xyz` and create the owner account if prompted.
 2. **Import both workflows** (Workflows → Import from File):
    - `n8n/workflow-exports/social-post-v2-api.json` (twitter/social path)
    - `n8n/workflow-exports/article-poster-v1-api.json` (news/scheme article poster)
-3. **Header Auth on each webhook** (enforces `N8N_WEBHOOK_SECRET`):
+3. **OpenAI credential**: create a Header Auth credential named exactly `OpenAI Bearer
+   (DGIPR)` (Name `Authorization`, Value `Bearer sk-…`) and bind it on every HTTP node
+   that calls OpenAI. The name must match — `pnpm n8n:push` re-binds by name on every
+   later push.
+4. **Header Auth on each webhook** (enforces `N8N_WEBHOOK_SECRET`):
    - Webhook node → Authentication → **Header Auth**.
    - Create/reuse a Header Auth credential: Name `x-n8n-webhook-secret`, Value = the
      same `N8N_WEBHOOK_SECRET` you put in `.env.prod`.
-4. Re-check the **credentials** each workflow needs (both reuse the `OpenAI Bearer
-   (DGIPR)` Header Auth credential) exist in this n8n.
+   - `pnpm n8n:push` preserves this on later pushes (the committed JSON has auth off).
 5. **Activate** both workflows. The API reaches them internally at
    `http://n8n:5678/webhook/dgipr-social-post` and
    `http://n8n:5678/webhook/dgipr-article-poster` (already wired in compose) — no
    public webhook call needed from the API.
+6. In the n8n editor: **Settings → n8n API → Create an API key**. Keep it for C2.
+
+### C2 — Every workflow change after that: `pnpm n8n:push`
+
+From your laptop (root `.env`, gitignored):
+
+```bash
+N8N_API_URL=https://n8n.indicex.xyz
+N8N_API_KEY=<the key from C1 step 6>
+```
+
+```bash
+pnpm n8n:push --dry-run   # shows the name matches + credential remap; writes nothing
+pnpm n8n:push             # PUTs both exports, then deactivate/activate to republish
+```
+
+It matches workflows **by name**, rewrites the export's credential ids to this instance's
+(matched by credential name), preserves the Webhook node's Header Auth, and refuses to
+guess if a name is missing or duplicated. It is idempotent — re-run it freely.
+
+**Deploy the API before pushing workflows.** The current workflows are data-driven and
+need payload fields (`types` catalog, `forced_type`, `reference_url`) that only the
+current API sends; pushing them ahead of an API deploy breaks both paths.
 
 ---
 
@@ -164,6 +199,8 @@ and `posters/references/master-*.png` are already uploaded. Just confirm:
 
 - **Logs**: `docker compose logs -f api` / `... n8n`.
 - **Update the API**: `git pull && docker compose up -d --build`.
+- **Update the workflows**: `pnpm n8n:push` (Phase C2) — *not* `git pull`, which cannot
+  touch them. Do it after the API update, never before.
 - **n8n data** (workflows, credentials, encryption key) lives in the `n8n_data`
   volume — back it up; losing it means re-importing + re-entering credentials.
 - **Certs** live in the `caddy_data` volume — keep it so you don't re-issue on every
