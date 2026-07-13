@@ -1,18 +1,21 @@
 import { randomUUID } from 'node:crypto';
 import {
   deleteReferenceImageRow,
+  downloadPng,
   getReferenceImageRow,
   insertReferenceImageRow,
   listReferenceImageRows,
   publicUrl,
   removeObjects,
   setReferenceImageActive,
+  setReferenceImageLayoutSpec,
   uploadPng,
   type ReferenceImageRow,
   type SupabaseClient,
 } from '@dgipr/database';
 import type { ReferenceCategory, ReferenceImage } from '@dgipr/schemas';
 import sharp from 'sharp';
+import { analyzeReferenceTemplate } from './analyze-template.js';
 
 export const MASTER_DIMENSIONS: Record<
   ReferenceCategory,
@@ -73,8 +76,62 @@ export async function uploadReferenceImage(
     category,
     subtype,
     storagePath,
+    // The normalized buffer is already in hand, so the vision pass costs no
+    // extra download. Best-effort: a null spec makes the workflow fall back to
+    // its old behaviour, which is a worse poster — never a failed upload.
+    layoutSpec: await analyzeQuietly(png, storagePath),
   });
   return withUrl(client, row);
+}
+
+async function analyzeQuietly(png: Buffer, label: string) {
+  try {
+    return await analyzeReferenceTemplate(png);
+  } catch (error) {
+    console.warn(
+      `Failed to analyze reference template ${label} (it will render with the ` +
+        'legacy photo-zone assumption until re-checked):',
+      error,
+    );
+    return null;
+  }
+}
+
+// Re-runs the vision pass against the stored master. Backs the re-check action on
+// /references, and the analyze:references backfill for rows uploaded before 0016.
+// Throws on failure — unlike upload, the operator asked for this and wants the error.
+export async function reanalyzeReferenceImage(
+  client: SupabaseClient,
+  id: string,
+): Promise<ReferenceImage | null> {
+  const row = await getReferenceImageRow(client, id);
+  if (!row) return null;
+
+  const png = await downloadPng(client, row.storagePath);
+  const spec = await analyzeReferenceTemplate(png);
+  return withUrl(client, await setReferenceImageLayoutSpec(client, id, spec));
+}
+
+// Manual correction of a bad vision read. The rest of the spec (bulletSlots,
+// layoutSummary) still describes the master accurately, so only the flag flips.
+export async function overrideReferenceImagePhotoZone(
+  client: SupabaseClient,
+  id: string,
+  hasPhotoZone: boolean,
+): Promise<ReferenceImage | null> {
+  const row = await getReferenceImageRow(client, id);
+  if (!row) return null;
+  if (!row.layoutSpec) {
+    throw new Error(
+      'This template has not been analyzed yet — run a re-check before overriding it.',
+    );
+  }
+
+  const updated = await setReferenceImageLayoutSpec(client, id, {
+    ...row.layoutSpec,
+    hasPhotoZone,
+  });
+  return withUrl(client, updated);
 }
 
 // Toggles whether the image participates in the per-generation random rotation.

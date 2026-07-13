@@ -7,6 +7,8 @@ import {
   deleteReferenceType,
   listReferenceLibrary,
   listReferenceTypes,
+  overrideReferenceImagePhotoZone,
+  reanalyzeReferenceImage,
   setReferenceImageEnabled,
   updateReferenceType,
   uploadReferenceImage,
@@ -14,6 +16,7 @@ import {
 import {
   CreateReferenceTypeRequestSchema,
   ReferenceCategorySchema,
+  UpdateLayoutSpecRequestSchema,
   UpdateReferenceTypeRequestSchema,
 } from '@dgipr/schemas';
 import { z } from 'zod';
@@ -79,11 +82,9 @@ export function registerReferenceRoutes(
     const { category, subtype } = UploadQuerySchema.parse(request.query);
     const type = await findReferenceTypeRow(client, category, subtype);
     if (!type) {
-      return reply
-        .code(400)
-        .send({
-          error: { message: `Unknown reference type ${category}/${subtype}.` },
-        });
+      return reply.code(400).send({
+        error: { message: `Unknown reference type ${category}/${subtype}.` },
+      });
     }
 
     const file = await request.file();
@@ -133,6 +134,41 @@ export function registerReferenceRoutes(
       },
     );
   }
+
+  // Re-read the master's layout off its pixels. The cached spec is what decides
+  // whether the poster may contain photography at all, so a stale or wrong read
+  // silently produces a wrong poster — this is the operator's way to redo it.
+  app.post<{ Params: { id: string } }>(
+    '/references/:id/analyze',
+    async (request, reply) => {
+      const image = await reanalyzeReferenceImage(client, request.params.id);
+      if (!image) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'Reference image not found.' } });
+      }
+      return image;
+    },
+  );
+
+  // Manual override when the vision pass gets the photo-zone call wrong.
+  app.patch<{ Params: { id: string } }>(
+    '/references/:id/layout-spec',
+    async (request, reply) => {
+      const body = UpdateLayoutSpecRequestSchema.parse(request.body);
+      const image = await overrideReferenceImagePhotoZone(
+        client,
+        request.params.id,
+        body.hasPhotoZone,
+      );
+      if (!image) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'Reference image not found.' } });
+      }
+      return image;
+    },
+  );
 
   app.delete<{ Params: { id: string } }>(
     '/references/:id',

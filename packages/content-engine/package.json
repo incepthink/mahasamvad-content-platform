@@ -24,6 +24,7 @@
     "embed:news": "tsx --env-file=../../.env src/embedding/ingest-chunks.ts mahasamvad-news",
     "ingest:all": "tsx --env-file=../../.env src/scripts/ingest-mahasamvad.ts",
     "seed:reference-library": "tsx --env-file=../../.env src/scripts/seed-reference-library.ts",
+    "analyze:references": "tsx --env-file=../../.env src/scripts/analyze-reference-library.ts",
     "retrieve:test": "tsx --env-file=../../.env src/retrieval/retrieve-references.ts",
     "generate:test": "tsx --env-file=../../.env src/generation/generate-article.ts",
     "polish:test": "tsx --env-file=../../.env src/generation/polish-article.ts"

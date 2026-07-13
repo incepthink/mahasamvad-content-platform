@@ -62,9 +62,9 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
   `packages/poster-renderer/src/index.ts`
 - Reference templates (type catalog + image rotation + per-run catalog for n8n) →
   `packages/content-engine/src/references/*` (`reference-types.ts`,
-  `reference-images.ts`, `catalog.ts`); routes → `apps/api/src/routes/references.ts`;
-  web page → `apps/web/app/references/page.tsx`; home-page pin picker →
-  `apps/web/components/ReferencePicker.tsx`
+  `reference-images.ts`, `catalog.ts`, `analyze-template.ts`); routes →
+  `apps/api/src/routes/references.ts`; web page → `apps/web/app/references/page.tsx`;
+  home-page pin picker → `apps/web/components/ReferencePicker.tsx`
 - DB access + Storage → `packages/database/src/*`
   (`client.ts`, `generations.ts`, `reference-types.ts`, `reference-images.ts`,
   `mahasamvad-chunks.ts`, `storage.ts`)
@@ -84,7 +84,8 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
 **Data & schema:** `supabase/migrations/0001…0004_*.sql` — pgvector Mahasamvad
 chunks, `generations` table, generation category + chunk style-category columns;
 `0012`/`0013`/`0015` — reference-image library + `reference_types` catalog
-(rotation semantics, exact-image and whole-type generation pins).
+(rotation semantics, exact-image and whole-type generation pins); `0016` —
+`reference_images.layout_spec` (the master's vision-derived layout).
 
 **Aux / not on the main request path:**
 - `packages/content-engine/src/finetune/*` — reusable JSONL dataset pipeline
@@ -154,6 +155,21 @@ Chromium): `pnpm --filter @dgipr/poster-renderer exec playwright install chromiu
   intentionally accepts image-model Devanagari for the single headline (verified
   acceptable). No scene image is produced, so poster feedback + manual copy-edit (which
   need `scenePath`) are unavailable in this mode.
+- **Whether a poster may contain a photo comes from the master's PIXELS, not its type
+  description.** A vision pass (`references/analyze-template.ts`, gpt-4o-mini) runs once
+  per uploaded master and caches `{ hasPhotoZone, bulletSlots, layoutSummary }` on
+  `reference_images.layout_spec` (migration 0016); `buildTwitterCatalog` ships it to n8n
+  as the picked image's `layout_spec`. `social-post-v2-api` branches on it: with
+  `hasPhotoZone: false` it drops `scene_brief` from the copy json_schema entirely and
+  emits a text-only lock instead of the "erase the existing photo, paint a NEW scene"
+  clauses — which it used to emit **unconditionally**, which is why a text-only advisory
+  master came back with an invented hero photograph. A **null** spec (un-analyzed image)
+  deliberately reproduces the old prompt byte-for-byte, so backfill
+  (`pnpm --filter @dgipr/content-engine analyze:references`, `--dry-run` to preview)
+  is required for the fix to take effect on pre-0016 rows. A type's `description` still
+  only steers the classifier + copy tone — never structure. Vision can misread, so
+  `/references` shows the verdict per image with a re-check and a manual flip
+  (`POST/PATCH /api/references/:id/analyze|layout-spec`).
 - **Reference templates are a data-driven catalog, not a fixed list.** `reference_types`
   (migration 0013) holds the six builtins plus user-created custom twitter types; each
   type has a rotation of immutable library images (`reference_images`, many may be

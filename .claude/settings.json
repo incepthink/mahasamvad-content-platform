@@ -109,7 +109,14 @@
       "Bash(echo \"=== last pages ===\")",
       "Bash(grep -E '^page ' C:/Users/shaik/AppData/Local/Temp/claude/c--Users-shaik-Desktop-dev-work-mahasamvad-content-platform/515782b9-86c4-4c56-b1a5-e4b4527af12f/scratchpad/ingest-full-2.log)",
       "Bash(npx prettier *)",
-      "Bash(echo \"eslint exit=$?\")"
+      "Bash(echo \"eslint exit=$?\")",
+      "Bash(node \"C:/Users/shaik/AppData/Local/Temp/claude/c--Users-shaik-Desktop-dev-work-mahasamvad-content-platform/a57f1d3b-e73b-4391-9cfa-8edd21abf1bd/scratchpad/patch-workflow.mjs\")",
+      "Bash(node \"C:/Users/shaik/AppData/Local/Temp/claude/c--Users-shaik-Desktop-dev-work-mahasamvad-content-platform/a57f1d3b-e73b-4391-9cfa-8edd21abf1bd/scratchpad/sim.mjs\")",
+      "Bash(node -e *)",
+      "Bash(pnpm --filter @dgipr/content-engine analyze:references -- --dry-run)",
+      "Bash(xargs echo \"text-only:\")",
+      "Bash(xargs echo \"with photo:\")",
+      "Bash(xargs echo \"failures:\")"
     ],
     "additionalDirectories": [
       "\\tmp"

@@ -67,10 +67,12 @@ export {
   getReferenceImageRow,
   insertReferenceImageRow,
   setReferenceImageActive,
+  setReferenceImageLayoutSpec,
   deleteReferenceImageRow,
   type ReferenceCategory,
   type ReferenceSubtype,
   type ReferenceImageRow,
+  type ReferenceLayoutSpec,
 } from './reference-images.js';
 export {
   REFERENCE_TYPES_TABLE,

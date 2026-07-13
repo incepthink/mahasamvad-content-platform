@@ -9,6 +9,7 @@ import type { GenerationDetail } from '@dgipr/schemas';
 import { posterDownloadUrl, sendPosterImageFeedback } from '../lib/api';
 import { STR } from '../lib/strings';
 import { FeedbackBox } from './FeedbackBox';
+import { PosterVersionStrip } from './PosterVersionStrip';
 
 export function SocialPostView({
   detail,
@@ -100,6 +101,7 @@ export function SocialPostView({
               <FeedbackBox
                 title={STR.posterImageFeedbackTitle}
                 hint={STR.posterImageFeedbackHint}
+                suggestions={STR.chipsPosterImage}
                 disabled={showSpinner}
                 onSubmit={async (feedback) => {
                   setPending(true);
@@ -115,6 +117,7 @@ export function SocialPostView({
           ) : null}
         </div>
       </div>
+      <PosterVersionStrip detail={detail} />
     </section>
   );
 }

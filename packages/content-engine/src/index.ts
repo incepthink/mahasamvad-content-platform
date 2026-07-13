@@ -56,9 +56,17 @@ export {
   deleteReferenceImage,
   listReferenceLibrary,
   normalizeReferenceImage,
+  overrideReferenceImagePhotoZone,
+  reanalyzeReferenceImage,
   setReferenceImageEnabled,
   uploadReferenceImage,
 } from './references/reference-images.js';
+// The master's layout, read off its pixels — what tells the n8n image prompt
+// whether the template has a photo zone at all.
+export {
+  analyzeReferenceTemplate,
+  type ReferenceLayoutSpec,
+} from './references/analyze-template.js';
 export {
   createReferenceType,
   deleteReferenceType,

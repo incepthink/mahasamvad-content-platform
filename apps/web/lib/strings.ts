@@ -140,6 +140,46 @@ export const STR = {
   sendFeedback: 'बदल करा',
   sendingFeedback: 'पाठवत आहोत…',
   feedbackTooShort: 'कृपया थोडक्यात अभिप्राय लिहा.',
+  // One-tap suggestions that prefill the feedback box (still editable before sending).
+  feedbackSuggestionsLabel: 'झटपट सूचना:',
+  chipsArticle: [
+    'आणखी थोडक्यात लिहा',
+    'आणखी सविस्तर लिहा',
+    'भाषा आणखी सोपी करा',
+    'सुरुवात आणखी आकर्षक करा',
+  ],
+  chipsPosterImage: [
+    'रंग अधिक उठावदार करा',
+    'मजकूर आणखी मोठा व वाचनीय करा',
+    'मांडणी अधिक नीटनेटकी करा',
+  ],
+
+  // Poster version history (every render is kept; the strip lets users compare/download)
+  posterVersionsTitle: 'आधीच्या आवृत्त्या',
+  posterVersionLabel: 'आवृत्ती',
+  posterVersionOriginal: 'मूळ',
+  posterVersionCurrent: 'सद्य',
+  posterVersionOpen: 'मोठ्या आकारात पाहा',
+
+  // "Next step" panel on a finished generation (create the other format from the
+  // same note, or edit the note and re-run)
+  nextActionsTitle: 'पुढील पाऊल',
+  nextActionsHint:
+    'हीच टिपणी वापरून आणखी काही तयार करायचे आहे? खालील पर्याय निवडा.',
+  nextTwitterTitle: 'याच टिपणीवरून ट्विटर पोस्ट तयार करा',
+  nextTwitterHint:
+    'हीच टिपणी वापरून X (ट्विटर) साठी मराठी पोस्टर + कॅप्शन तयार होईल.',
+  nextTwitterCta: 'ट्विटर पोस्ट तयार करा',
+  nextTwitterStarted:
+    'ट्विटर पोस्ट तयार होत आहे — प्रगती वरील "सुरू असलेली कामे" मध्ये पाहा.',
+  nextArticleTitle: 'याच टिपणीवरून लेख तयार करा',
+  nextArticleHint:
+    'हीच टिपणी वापरून महासंवाद शैलीतील लेख (हवे असल्यास पोस्टरसह) तयार होईल.',
+  nextArticleCta: 'लेख तयार करा',
+  editNoteTitle: 'टिपणी बदलून पुन्हा तयार करा',
+  editNoteHint:
+    'टिपणीत हवे ते बदल करा — त्याच सेटिंग्जसह नवीन काम सुरू होईल; हे काम जसेच्या तसे राहील.',
+  editNoteCta: 'नव्याने तयार करा',
 
   // Background tasks panel (every generation started this session, tracked in the navbar)
   tasksButton: 'सुरू असलेली कामे',
@@ -210,6 +250,21 @@ export const STR = {
   refUploadedOn: 'अपलोड',
   refCustomChip: 'नवीन प्रकार',
 
+  // Template layout, read off the master's pixels. This — not the type
+  // description — decides whether the generated poster may carry a photo at all,
+  // so a wrong reading here quietly produces a wrong poster: it is shown on every
+  // tile, and can be re-checked or corrected by hand.
+  refLayoutTextOnly: 'फक्त मजकूर',
+  refLayoutWithPhoto: 'छायाचित्रासह',
+  refLayoutUnknown: 'तपासलेले नाही',
+  refLayoutUnknownHint:
+    'या चित्राची मांडणी अजून तपासलेली नाही. तोपर्यंत पोस्टरमध्ये छायाचित्र येऊ शकते.',
+  refLayoutRecheck: 'पुन्हा तपासा',
+  refLayoutChecking: 'तपासत आहे…',
+  refLayoutSlots: 'मुद्दे',
+  refLayoutFlipToTextOnly: '“फक्त मजकूर” म्हणून नोंदवा',
+  refLayoutFlipToPhoto: '“छायाचित्रासह” म्हणून नोंदवा',
+
   // Custom reference types (create / edit / delete)
   refTypeNew: '+ नवीन प्रकार तयार करा',
   refTypeNewHint:
@@ -241,7 +296,7 @@ export const STR = {
   refPickerManualDesc: 'गॅलरीतून ठरावीक टेम्पलेट निवडा',
   refPickerBadge: 'निवडले',
   refPickerSelected: 'निवडलेले टेम्पलेट',
-  refPickerTypeSelect: 'संपूर्ण प्रकार निवडा',
+  refPickerTypeSelect: 'संपूर्ण प्रकार वापरा (यादृच्छिक चित्र)',
   refPickerTypeBadge: 'संपूर्ण प्रकार',
   refPickerTypeSelected: 'निवडलेला प्रकार',
   refPickerTypeHint:

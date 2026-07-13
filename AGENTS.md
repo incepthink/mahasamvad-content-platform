@@ -57,6 +57,19 @@ it are implemented and working end-to-end:
   catalog to n8n in each webhook payload, so the workflows are data-driven. The
   old copy-on-activate canonical `master-*.png` mechanism is retired — those
   storage objects remain only as inert seed data for `seed:reference-library`.
+- **Template layout is read off the master's pixels, not declared in prose**
+  (`references/analyze-template.ts`, migration 0016). A gpt-4o-mini vision pass runs once
+  per uploaded master and caches `{ hasPhotoZone, bulletSlots, layoutSummary }` on
+  `reference_images.layout_spec`; the per-run catalog carries the picked image's spec to
+  n8n. `social-post-v2-api` branches on `hasPhotoZone`: a text-only master gets
+  `scene_brief` removed from the copy json_schema and a hard no-imagery lock, instead of
+  the "erase the existing photo / paint a NEW scene" clauses the workflow previously
+  emitted on **every** render — which is what made a text-only advisory master come back
+  as an infographic with an invented hero photograph. A type's `description` remains a
+  classifier/tone steer only; it is not a structural signal and never was one. Null spec
+  = un-analyzed = the old behaviour, so `analyze:references` must be run after 0016.
+  `/references` surfaces each verdict with a re-check and a manual override, because a
+  wrong photo-zone reading is otherwise invisible until a poster comes out wrong.
 
 Two n8n workflows are implemented and host-independent for deployment; their master
 templates arrive as immutable `references/library/...` public URLs inside each webhook

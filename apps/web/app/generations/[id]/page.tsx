@@ -11,6 +11,7 @@ import { TaskProgressBar } from '../../../components/TaskProgressBar';
 import { StatusChip } from '../../../components/StatusChip';
 import { ArticleView } from '../../../components/ArticleView';
 import { FiveWOneHView } from '../../../components/FiveWOneHView';
+import { NextActions } from '../../../components/NextActions';
 import { PosterPanel } from '../../../components/PosterPanel';
 import { PosterSkeleton } from '../../../components/PosterSkeleton';
 import { SocialPostView } from '../../../components/SocialPostView';
@@ -166,6 +167,10 @@ export default function GenerationDetailPage({
             ) : null}
           </>
         ))}
+
+      {/* "Next step": cross-format generation from the same note + edit-note
+          re-run. Renders nothing while the run (or a revision) is in flight. */}
+      <NextActions detail={detail} />
     </main>
   );
 }

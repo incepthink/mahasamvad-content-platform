@@ -158,6 +158,7 @@ export function ArticleView({
           <FeedbackBox
             title={STR.articleFeedbackTitle}
             hint={STR.articleFeedbackHint}
+            suggestions={STR.chipsArticle}
             onSubmit={async (feedback) => {
               await sendArticleFeedback(detail.id, feedback);
               await onFeedbackSent();

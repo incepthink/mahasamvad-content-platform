@@ -6,19 +6,29 @@
 // own name + classifier description and can be created/deleted here.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pencil, Plus, Trash2, Upload } from 'lucide-react';
+import {
+  ImageIcon,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Trash2,
+  Type,
+  Upload,
+} from 'lucide-react';
 import type {
   ReferenceCategory,
   ReferenceImage,
   ReferenceType,
 } from '@dgipr/schemas';
 import {
+  analyzeReferenceImage,
   createReferenceType,
   deleteReferenceImage,
   deleteReferenceType,
   listReferenceImages,
   listReferenceTypes,
   setReferenceImageEnabled,
+  setReferenceImagePhotoZone,
   updateReferenceType,
   uploadReferenceImage,
 } from '../../lib/api';
@@ -35,19 +45,102 @@ function errText(error: unknown): string {
   return error instanceof Error ? error.message : STR.genericError;
 }
 
-// One image tile: preview + date + enable/disable/delete actions.
+// What the vision pass read off this master. hasPhotoZone is the consequential
+// field: it is what stops the image model painting a hero photograph onto a
+// text-only template, so it is surfaced (not buried) and stays correctable.
+function LayoutBadge({
+  image,
+  disabled,
+  onRecheck,
+  onFlip,
+}: {
+  image: ReferenceImage;
+  disabled: boolean;
+  onRecheck: () => void;
+  onFlip: () => void;
+}) {
+  const spec = image.layoutSpec;
+
+  if (!spec) {
+    return (
+      <div className="ref-layout ref-layout-unknown">
+        <span className="ref-layout-row">
+          <span className="chip chip-queued">{STR.refLayoutUnknown}</span>
+          <button
+            type="button"
+            className="btn btn-small"
+            disabled={disabled}
+            onClick={onRecheck}
+          >
+            <RefreshCw size={14} strokeWidth={2} aria-hidden="true" />
+            {disabled ? STR.refLayoutChecking : STR.refLayoutRecheck}
+          </button>
+        </span>
+        <p className="hint">{STR.refLayoutUnknownHint}</p>
+      </div>
+    );
+  }
+
+  const Icon = spec.hasPhotoZone ? ImageIcon : Type;
+  return (
+    <div className="ref-layout">
+      <span className="ref-layout-row">
+        <span
+          className={`chip ref-layout-chip ${spec.hasPhotoZone ? 'chip-running' : 'chip-completed'}`}
+        >
+          <Icon size={13} strokeWidth={2} aria-hidden="true" />
+          {spec.hasPhotoZone ? STR.refLayoutWithPhoto : STR.refLayoutTextOnly}
+        </span>
+        {spec.bulletSlots > 0 ? (
+          <span className="ref-layout-slots">
+            {spec.bulletSlots} {STR.refLayoutSlots}
+          </span>
+        ) : null}
+        <button
+          type="button"
+          className="btn btn-small"
+          disabled={disabled}
+          onClick={onRecheck}
+          aria-label={STR.refLayoutRecheck}
+        >
+          <RefreshCw size={14} strokeWidth={2} aria-hidden="true" />
+          {disabled ? STR.refLayoutChecking : STR.refLayoutRecheck}
+        </button>
+      </span>
+      <p className="ref-layout-summary" title={spec.layoutSummary}>
+        {spec.layoutSummary}
+      </p>
+      <button
+        type="button"
+        className="ref-layout-flip"
+        disabled={disabled}
+        onClick={onFlip}
+      >
+        {spec.hasPhotoZone
+          ? STR.refLayoutFlipToTextOnly
+          : STR.refLayoutFlipToPhoto}
+      </button>
+    </div>
+  );
+}
+
+// One image tile: preview + date + layout reading + enable/disable/delete actions.
 function ImageTile({
   image,
   typeLabel,
   disabled,
   onToggle,
   onDelete,
+  onRecheck,
+  onFlip,
 }: {
   image: ReferenceImage;
   typeLabel: string;
   disabled: boolean;
   onToggle: () => void;
   onDelete: () => void;
+  onRecheck: () => void;
+  onFlip: () => void;
 }) {
   return (
     <div className={`ref-thumb${image.isActive ? ' is-enabled' : ''}`}>
@@ -62,6 +155,12 @@ function ImageTile({
         <span className="ref-thumb-date">
           {STR.refUploadedOn}: {DATE_FORMAT.format(new Date(image.createdAt))}
         </span>
+        <LayoutBadge
+          image={image}
+          disabled={disabled}
+          onRecheck={onRecheck}
+          onFlip={onFlip}
+        />
         <div className="ref-thumb-actions">
           <button
             type="button"
@@ -279,6 +378,15 @@ function TypeCard({
                 if (!window.confirm(STR.refDeleteConfirm)) return;
                 void run(() => deleteReferenceImage(image.id));
               }}
+              onRecheck={() => void run(() => analyzeReferenceImage(image.id))}
+              onFlip={() =>
+                void run(() =>
+                  setReferenceImagePhotoZone(
+                    image.id,
+                    !image.layoutSpec?.hasPhotoZone,
+                  ),
+                )
+              }
             />
           ))}
         </div>

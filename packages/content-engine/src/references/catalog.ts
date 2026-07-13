@@ -12,6 +12,7 @@ import {
   listReferenceTypeRows,
   publicUrl,
   type ReferenceImageRow,
+  type ReferenceLayoutSpec,
   type SupabaseClient,
 } from '@dgipr/database';
 import type { ReferenceCategory } from '@dgipr/schemas';
@@ -22,18 +23,24 @@ const EMPTY_CATALOG_ERROR =
 const EMPTY_TYPE_ERROR = (label: string) =>
   `«${label}» प्रकारात एकही चित्र वापरात नाही. कृपया "मास्टर टेम्पलेट" पानावर किमान एक चित्र सुरू करा.`;
 
+// snake_case: this IS the wire shape. layout_spec describes the exact image at
+// reference_url (not the type), because two images of one type can have different
+// structures — it is what stops the workflow painting a photo onto a text-only
+// master. null = un-analyzed, and the workflow falls back to its old behaviour.
 export type ReferenceCatalogEntry = Readonly<{
   slug: string;
   label: string;
   description: string;
   copy_style: string;
   reference_url: string;
+  layout_spec: ReferenceLayoutSpec | null;
 }>;
 
 export type PinnedReference = Readonly<{
   url: string;
   category: ReferenceCategory;
   subtype: string;
+  layoutSpec: ReferenceLayoutSpec | null;
 }>;
 
 function pickRandom<T>(items: readonly T[]): T {
@@ -72,34 +79,47 @@ export async function buildTwitterCatalog(
     if (type.category !== 'twitter') continue;
     const enabled = enabledImagesFor(images, 'twitter', type.slug);
     if (enabled.length === 0) continue;
+    // The spec must describe the image we actually rolled, so pick once.
+    const image = pickRandom(enabled);
     entries.push({
       slug: type.slug,
       label: type.labelMr,
       description: type.description,
       copy_style: type.copyStyle,
-      reference_url: publicUrl(client, pickRandom(enabled).storagePath),
+      reference_url: publicUrl(client, image.storagePath),
+      layout_spec: image.layoutSpec,
     });
   }
 
   if (pinned) {
-    if (!entries.some((entry) => entry.slug === pinned.subtype)) {
-      const type = await findReferenceTypeRow(
-        client,
-        'twitter',
-        pinned.subtype,
-      );
-      if (!type) {
-        // The composite FK makes this unreachable; fail loudly if it ever isn't.
-        throw new Error(`Reference type twitter/${pinned.subtype} not found.`);
-      }
-      entries.push({
-        slug: type.slug,
-        label: type.labelMr,
-        description: type.description,
-        copy_style: type.copyStyle,
+    // The pinned image — not the one this loop happened to roll for that type —
+    // is what gets rendered (n8n prefers forced_reference_url). Its entry must
+    // therefore carry the PINNED url and spec, or the workflow would branch on
+    // the layout of a different image than the one it edits.
+    const index = entries.findIndex((entry) => entry.slug === pinned.subtype);
+    if (index >= 0) {
+      const entry = entries[index] as ReferenceCatalogEntry;
+      entries[index] = {
+        ...entry,
         reference_url: pinned.url,
-      });
+        layout_spec: pinned.layoutSpec,
+      };
+      return entries;
     }
+
+    const type = await findReferenceTypeRow(client, 'twitter', pinned.subtype);
+    if (!type) {
+      // The composite FK makes this unreachable; fail loudly if it ever isn't.
+      throw new Error(`Reference type twitter/${pinned.subtype} not found.`);
+    }
+    entries.push({
+      slug: type.slug,
+      label: type.labelMr,
+      description: type.description,
+      copy_style: type.copyStyle,
+      reference_url: pinned.url,
+      layout_spec: pinned.layoutSpec,
+    });
     return entries;
   }
 
@@ -129,6 +149,7 @@ export async function resolvePinnedReference(
     url: publicUrl(client, row.storagePath),
     category: row.category,
     subtype: row.subtype,
+    layoutSpec: row.layoutSpec,
   };
 }
 
@@ -146,9 +167,11 @@ export async function resolvePinnedTypeReference(
   const enabled = enabledImagesFor(images, 'twitter', type.slug);
   if (enabled.length === 0) throw new Error(EMPTY_TYPE_ERROR(type.labelMr));
 
+  const image = pickRandom(enabled);
   return {
-    url: publicUrl(client, pickRandom(enabled).storagePath),
+    url: publicUrl(client, image.storagePath),
     category: 'twitter',
     subtype: type.slug,
+    layoutSpec: image.layoutSpec,
   };
 }

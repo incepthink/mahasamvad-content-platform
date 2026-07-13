@@ -79,3 +79,53 @@ export async function chatComplete(
   }
   return content;
 }
+
+// Vision variant: one user turn carrying a prompt plus one image. chatComplete's
+// ChatMessage.content is a plain string and cannot express the multimodal content
+// array, and this is the only caller that needs one — so it lives here rather than
+// widening every text call site. Used to read a master template's layout off its
+// pixels (references/analyze-template.ts). Cheap model by default: the answer is a
+// three-field JSON description, not prose.
+export const VISION_MODEL = 'gpt-4o-mini';
+
+export async function chatCompleteVision(
+  prompt: string,
+  imageDataUrl: string,
+  options?: {
+    temperature?: number;
+    responseFormat?: 'json_object';
+    model?: string;
+    maxTokens?: number;
+  },
+): Promise<string> {
+  const model = options?.model ?? VISION_MODEL;
+  const response = await openAiFetch(CHAT_URL, {
+    label: 'vision',
+    apiKey: requireApiKey(),
+    body: {
+      model,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: prompt },
+            { type: 'image_url', image_url: { url: imageDataUrl } },
+          ],
+        },
+      ],
+      temperature: options?.temperature ?? 0,
+      max_tokens: options?.maxTokens ?? 600,
+      ...(options?.responseFormat
+        ? { response_format: { type: options.responseFormat } }
+        : {}),
+    },
+  });
+
+  const body = (await response.json()) as ChatResponse;
+  recordChatUsage(model, body.usage);
+  const content = body.choices[0]?.message.content;
+  if (!content) {
+    throw new Error('OpenAI vision response contained no content.');
+  }
+  return content;
+}

@@ -164,6 +164,15 @@ export const GenerationRevisionSchema = z.object({
 });
 export type GenerationRevision = z.infer<typeof GenerationRevisionSchema>;
 
+// One stored poster render. Every render writes a new immutable versioned PNG
+// (the public bucket is CDN-cached, paths are never reused), so the full history
+// stays downloadable. Ordered oldest→newest; the last entry is the current poster.
+export const PosterVersionSchema = z.object({
+  posterUrl: z.string(),
+  createdAt: z.string(),
+});
+export type PosterVersion = z.infer<typeof PosterVersionSchema>;
+
 // 5W1H (कोण/काय/केव्हा/कुठे/का/कसे) extracted from the note before drafting, as a
 // fact-grounding + inverted-pyramid scaffold. Every field is a Marathi string;
 // "" means the note did not state it (never inferred/invented — see AGENTS.md).
@@ -201,6 +210,9 @@ export const GenerationDetailSchema = z.object({
   fiveWOneH: FiveWOneHSchema.nullable(),
   posterUrl: z.string().nullable(),
   sceneUrl: z.string().nullable(),
+  // Every poster render of this generation, oldest→newest (empty when the run has
+  // no poster). The last entry always matches `posterUrl`.
+  posterVersions: z.array(PosterVersionSchema),
   error: z.string().nullable(),
   // The on-demand English translation runs alongside the main job (the article is
   // final before the poster phase starts), so it cannot own status/step/error —
@@ -347,6 +359,29 @@ export type UpdateReferenceTypeRequest = z.infer<
   typeof UpdateReferenceTypeRequestSchema
 >;
 
+// What a master template actually looks like, read off its pixels by a vision
+// pass at upload time (migration 0016). This — not the type's prose description —
+// is what tells the n8n image prompt whether the template has a photo to repaint,
+// so a text-only master is never given a hero photograph it never had.
+export const ReferenceLayoutSpecSchema = z.object({
+  // A distinct photograph/portrait/illustration of a subject. A faded background
+  // wash or watermark is NOT a photo zone — see analyze-template.ts.
+  hasPhotoZone: z.boolean(),
+  // Repeating body slots (cards / bullets / rows); 0 if the template has none.
+  // Pins the bullet count in the copy prompt so copy can't overflow the master.
+  bulletSlots: z.number().int().min(0).max(12),
+  layoutSummary: z.string(),
+});
+export type ReferenceLayoutSpec = z.infer<typeof ReferenceLayoutSpecSchema>;
+
+// Manual override for a bad vision read: rewrites the cached jsonb in place.
+export const UpdateLayoutSpecRequestSchema = z.object({
+  hasPhotoZone: z.boolean(),
+});
+export type UpdateLayoutSpecRequest = z.infer<
+  typeof UpdateLayoutSpecRequestSchema
+>;
+
 export const ReferenceImageSchema = z.object({
   id: z.string(),
   category: ReferenceCategorySchema,
@@ -357,6 +392,9 @@ export const ReferenceImageSchema = z.object({
   // Enabled in the rotation: many images per type may be enabled at once; one
   // is picked at random per generation.
   isActive: z.boolean(),
+  // null = not analyzed yet (pre-0016 rows). The workflow falls back to its
+  // previous behaviour rather than failing.
+  layoutSpec: ReferenceLayoutSpecSchema.nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

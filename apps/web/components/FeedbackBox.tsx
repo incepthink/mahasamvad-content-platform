@@ -11,12 +11,16 @@ export function FeedbackBox({
   hint,
   onSubmit,
   disabled = false,
+  suggestions,
   children,
 }: {
   title: string;
   hint?: string;
   onSubmit: (feedback: string) => Promise<void>;
   disabled?: boolean;
+  // One-tap common asks: clicking a chip prefills the textarea (still editable),
+  // so frequent revisions don't require typing.
+  suggestions?: readonly string[];
   // Optional extra controls rendered above the textarea (e.g. the poster's
   // text-vs-picture choice).
   children?: React.ReactNode;
@@ -49,6 +53,27 @@ export function FeedbackBox({
       <div className="fold-body">
         {hint ? <p className="hint">{hint}</p> : null}
         {children}
+        {suggestions && suggestions.length > 0 ? (
+          <div className="suggestion-row">
+            <span className="suggestion-label">
+              {STR.feedbackSuggestionsLabel}
+            </span>
+            {suggestions.map((suggestion) => (
+              <button
+                key={suggestion}
+                type="button"
+                className="suggestion-chip"
+                disabled={disabled || sending}
+                onClick={() => {
+                  setFeedback(suggestion);
+                  setError(null);
+                }}
+              >
+                {suggestion}
+              </button>
+            ))}
+          </div>
+        ) : null}
         <textarea
           value={feedback}
           onChange={(e) => setFeedback(e.target.value)}

@@ -14,6 +14,7 @@ import {
 import { STR } from '../lib/strings';
 import { CopyEditForm } from './CopyEditForm';
 import { FeedbackBox } from './FeedbackBox';
+import { PosterVersionStrip } from './PosterVersionStrip';
 
 export function PosterPanel({
   detail,
@@ -139,6 +140,7 @@ export function PosterPanel({
               <FeedbackBox
                 title={STR.posterImageFeedbackTitle}
                 hint={STR.posterImageFeedbackHint}
+                suggestions={STR.chipsPosterImage}
                 disabled={showSpinner}
                 onSubmit={async (feedback) => {
                   setPending(true);
@@ -156,6 +158,7 @@ export function PosterPanel({
           )}
         </div>
       </div>
+      <PosterVersionStrip detail={detail} />
     </section>
   );
 }

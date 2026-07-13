@@ -262,6 +262,30 @@ export async function setReferenceImageEnabled(
   return ReferenceImageSchema.parse(body);
 }
 
+// Re-read the master's layout from its pixels. The cached spec decides whether the
+// poster may contain photography at all, so this is the fix for a stale/wrong read.
+export async function analyzeReferenceImage(
+  id: string,
+): Promise<ReferenceImage> {
+  const body = await requestJson(`/api/references/${id}/analyze`, {
+    method: 'POST',
+  });
+  return ReferenceImageSchema.parse(body);
+}
+
+// Manual override when the vision pass called the photo zone wrong.
+export async function setReferenceImagePhotoZone(
+  id: string,
+  hasPhotoZone: boolean,
+): Promise<ReferenceImage> {
+  const body = await requestJson(`/api/references/${id}/layout-spec`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ hasPhotoZone }),
+  });
+  return ReferenceImageSchema.parse(body);
+}
+
 export async function deleteReferenceImage(id: string): Promise<void> {
   await requestJson(`/api/references/${id}`, { method: 'DELETE' });
 }

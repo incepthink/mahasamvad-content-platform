@@ -86,6 +86,28 @@ async function toDetail(
   const revisions = await listRevisions(client, row.id);
   const copy = CopySchema.safeParse(row.copy);
   const fiveWOneH = FiveWOneHSchema.safeParse(row.fiveWOneH);
+  // Every poster render, oldest→newest. Renders are immutable versioned PNGs:
+  // the original is always poster-v1 (its path is deterministic — the row's
+  // posterPath moves on with each revision, but v1 must have existed for any
+  // poster to exist), later versions are the poster-bearing revision snapshots.
+  const posterVersions = row.posterPath
+    ? [
+        {
+          posterUrl: publicUrl(client, `generations/${row.id}/poster-v1.png`),
+          createdAt: row.createdAt,
+        },
+        ...revisions.flatMap((revision) =>
+          revision.posterPath
+            ? [
+                {
+                  posterUrl: publicUrl(client, revision.posterPath),
+                  createdAt: revision.createdAt,
+                },
+              ]
+            : [],
+        ),
+      ]
+    : [];
   return {
     id: row.id,
     status: row.status,
@@ -104,6 +126,7 @@ async function toDetail(
     fiveWOneH: fiveWOneH.success ? fiveWOneH.data : null,
     posterUrl: row.posterPath ? publicUrl(client, row.posterPath) : null,
     sceneUrl: row.scenePath ? publicUrl(client, row.scenePath) : null,
+    posterVersions,
     error: row.error,
     // Translation runs beside the main job, so its state lives in the runner's
     // in-process registry rather than on the row (see startTranslateJob).

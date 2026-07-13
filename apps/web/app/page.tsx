@@ -5,103 +5,18 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import {
-  Bird,
-  ClipboardList,
-  FileText,
-  Files,
-  Image as ImageIcon,
-  Newspaper,
-  Palette,
-  Sparkles,
-  Target,
-  type LucideIcon,
-} from 'lucide-react';
 import type { Category, DesignMode, OutputType } from '@dgipr/schemas';
 import { createGeneration } from '../lib/api';
+import {
+  CATEGORY_OPTIONS,
+  DESIGN_OPTIONS,
+  OUTPUT_OPTIONS,
+} from '../lib/generationOptions';
 import { useTasks } from '../lib/TasksProvider';
 import { STR } from '../lib/strings';
 import ReferencePicker, {
   type ReferenceSelection,
 } from '../components/ReferencePicker';
-
-const CATEGORY_OPTIONS: ReadonlyArray<{
-  value: Category;
-  icon: LucideIcon;
-  name: string;
-  desc: string;
-}> = [
-  {
-    value: 'scheme',
-    icon: ClipboardList,
-    name: STR.categoryScheme,
-    desc: STR.categorySchemeDesc,
-  },
-  {
-    value: 'news',
-    icon: Newspaper,
-    name: STR.categoryNews,
-    desc: STR.categoryNewsDesc,
-  },
-  {
-    value: 'twitter',
-    icon: Bird,
-    name: STR.categoryTwitter,
-    desc: STR.categoryTwitterDesc,
-  },
-];
-
-const OUTPUT_OPTIONS: ReadonlyArray<{
-  value: OutputType;
-  icon: LucideIcon;
-  name: string;
-  desc: string;
-}> = [
-  {
-    value: 'article',
-    icon: FileText,
-    name: STR.outputArticle,
-    desc: STR.outputArticleDesc,
-  },
-  {
-    value: 'poster',
-    icon: ImageIcon,
-    name: STR.outputPoster,
-    desc: STR.outputPosterDesc,
-  },
-  {
-    value: 'both',
-    icon: Files,
-    name: STR.outputBoth,
-    desc: STR.outputBothDesc,
-  },
-];
-
-const DESIGN_OPTIONS: ReadonlyArray<{
-  value: DesignMode;
-  icon: LucideIcon;
-  name: string;
-  desc: string;
-}> = [
-  {
-    value: 'onbrand',
-    icon: Target,
-    name: STR.designOnbrand,
-    desc: STR.designOnbrandDesc,
-  },
-  {
-    value: 'adaptive',
-    icon: Palette,
-    name: STR.designAdaptive,
-    desc: STR.designAdaptiveDesc,
-  },
-  {
-    value: 'fresh',
-    icon: Sparkles,
-    name: STR.designFresh,
-    desc: STR.designFreshDesc,
-  },
-];
 
 export default function NewGenerationPage() {
   const router = useRouter();
@@ -328,7 +243,11 @@ export default function NewGenerationPage() {
       )}
 
       {pickerCategory ? (
+        // Keyed by category so switching it remounts the picker: the reset effect
+        // above clears the pin, and the remount drops the child's stale manual mode
+        // (which would otherwise still show the previous category's library).
         <ReferencePicker
+          key={pickerCategory}
           category={pickerCategory}
           value={reference}
           onChange={setReference}

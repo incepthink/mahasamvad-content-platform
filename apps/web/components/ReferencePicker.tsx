@@ -73,10 +73,15 @@ export default function ReferencePicker({
   category,
   value,
   onChange,
+  variant = 'card',
 }: {
   category: PickerCategory;
   value: ReferenceSelection | null;
   onChange: (selection: ReferenceSelection | null) => void;
+  // 'card' is the home form's standalone section; 'inline' drops the card chrome
+  // so the picker can sit inside another card (e.g. the detail page's next-step
+  // panel) without a nested-card look.
+  variant?: 'card' | 'inline';
 }) {
   const [mode, setMode] = useState<'auto' | 'manual'>(
     value ? 'manual' : 'auto',
@@ -156,9 +161,16 @@ export default function ReferencePicker({
       value?.kind === 'type' && value.id === id ? null : { kind: 'type', id },
     );
 
+  const Wrapper = variant === 'card' ? 'section' : 'div';
+  const Title = variant === 'card' ? 'h2' : 'h3';
+
   return (
-    <section className="card ref-picker">
-      <h2>{STR.refPickerTitle}</h2>
+    <Wrapper
+      className={
+        variant === 'card' ? 'card ref-picker' : 'ref-picker ref-picker-inline'
+      }
+    >
+      <Title className="ref-picker-title">{STR.refPickerTitle}</Title>
       <p className="hint">{STR.refPickerHint}</p>
 
       <div className="output-picker output-picker-two">
@@ -240,19 +252,20 @@ export default function ReferencePicker({
           ) : category === 'twitter' ? (
             groups.map(({ type, images }) => (
               <div key={type.id} className="ref-picker-group">
-                <button
-                  type="button"
-                  className="ref-picker-group-header"
-                  aria-pressed={value?.kind === 'type' && value.id === type.id}
-                  onClick={() => pickType(type.id)}
-                >
-                  <span className="ref-picker-group-title">{type.labelMr}</span>
-                  <span className="ref-picker-group-action">
-                    {value?.kind === 'type' && value.id === type.id
-                      ? STR.refPickerTypeBadge
-                      : STR.refPickerTypeSelect}
-                  </span>
-                </button>
+                <div className="ref-picker-group-header">
+                  <h3 className="ref-picker-group-title">{type.labelMr}</h3>
+                  {/* Checked = pin the whole type; the job then rolls one of its
+                      enabled images at random. Picking a thumbnail below swaps the
+                      type pin for an image pin, so this unchecks itself. */}
+                  <label className="ref-picker-check">
+                    <input
+                      type="checkbox"
+                      checked={value?.kind === 'type' && value.id === type.id}
+                      onChange={() => pickType(type.id)}
+                    />
+                    <span>{STR.refPickerTypeSelect}</span>
+                  </label>
+                </div>
                 <div className="ref-picker-grid">
                   {images.map((image) => (
                     <Thumb
@@ -287,6 +300,6 @@ export default function ReferencePicker({
           )}
         </div>
       ) : null}
-    </section>
+    </Wrapper>
   );
 }
