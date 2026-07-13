@@ -3,9 +3,11 @@
 import { use } from 'react';
 import { useRouter } from 'next/navigation';
 import { useGeneration } from '../../../lib/useGeneration';
+import { useGenerationThread } from '../../../lib/useGenerationThread';
 import { createGeneration } from '../../../lib/api';
 import { useTasks } from '../../../lib/TasksProvider';
 import { STR, formatCost } from '../../../lib/strings';
+import { GenerationThread } from '../../../components/GenerationThread';
 import { ProgressSteps } from '../../../components/ProgressSteps';
 import { TaskProgressBar } from '../../../components/TaskProgressBar';
 import { StatusChip } from '../../../components/StatusChip';
@@ -25,6 +27,10 @@ export default function GenerationDetailPage({
   const router = useRouter();
   const { addTask, openPanel } = useTasks();
   const { detail, error, refresh } = useGeneration(id);
+  const { thread, refresh: refreshThread } = useGenerationThread(
+    id,
+    detail?.status ?? null,
+  );
 
   const retry = async () => {
     if (!detail) return;
@@ -34,6 +40,7 @@ export default function GenerationDetailPage({
       category: detail.category,
       outputType: detail.outputType,
       designMode: detail.designMode ?? undefined,
+      sourceGenerationId: detail.id,
     });
     // Twitter reruns are background tasks: track + surface them in the panel.
     if (detail.category === 'twitter') {
@@ -168,9 +175,13 @@ export default function GenerationDetailPage({
           </>
         ))}
 
+      {/* Thread of runs spawned from this note lineage. Self-hides when this
+          run has no follow-ups; updates live while any member is in flight. */}
+      <GenerationThread items={thread} currentId={id} />
+
       {/* "Next step": cross-format generation from the same note + edit-note
           re-run. Renders nothing while the run (or a revision) is in flight. */}
-      <NextActions detail={detail} />
+      <NextActions detail={detail} onSpawned={() => void refreshThread()} />
     </main>
   );
 }

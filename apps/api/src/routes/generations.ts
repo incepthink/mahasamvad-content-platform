@@ -11,6 +11,7 @@ import {
   insertRevision,
   listGenerations,
   listRevisions,
+  listThreadGenerations,
   publicUrl,
   downloadPng,
   uploadPng,
@@ -31,6 +32,7 @@ import {
   type GenerationDetail,
   type GenerationStep,
   type GenerationSummary,
+  type ThreadItem,
 } from '@dgipr/schemas';
 import {
   getTranslateError,
@@ -192,6 +194,19 @@ export function registerGenerationRoutes(
         });
       }
     }
+    // Lineage: a follow-up spawned from a run's detail page names its source;
+    // the thread root is derived here (never client-supplied) so chains stay
+    // flat under the original run.
+    let threadRootId: string | undefined;
+    if (body.sourceGenerationId) {
+      const source = await getGeneration(client, body.sourceGenerationId);
+      if (!source) {
+        return reply
+          .code(400)
+          .send({ error: { message: 'Unknown source generation.' } });
+      }
+      threadRootId = source.threadRootId ?? source.id;
+    }
     const row = await insertGeneration(client, {
       note: body.note,
       outputType: body.outputType,
@@ -200,6 +215,8 @@ export function registerGenerationRoutes(
       heading: body.heading,
       referenceImageId: body.referenceImageId,
       referenceTypeId: body.referenceTypeId,
+      sourceGenerationId: body.sourceGenerationId,
+      threadRootId,
     });
     // Twitter → external n8n social-post job; news/scheme → in-process article pipeline.
     if (row.category === 'twitter') {
@@ -256,6 +273,35 @@ export function registerGenerationRoutes(
         });
       }
       return toDetail(client, row);
+    },
+  );
+
+  // All runs in this generation's thread (the root + every follow-up spawned
+  // from any member's detail page), oldest first. Summaries only — the detail
+  // poll stays untouched; the web fetches this separately for the thread strip.
+  app.get<{ Params: { id: string } }>(
+    '/generations/:id/thread',
+    async (request, reply) => {
+      const row = await getGeneration(client, request.params.id);
+      if (!row) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'Generation not found.' } });
+      }
+      const rootId = row.threadRootId ?? row.id;
+      const members = await listThreadGenerations(client, rootId);
+      const byId = new Map(members.map((m) => [m.id, m]));
+      return members.map(
+        (m): ThreadItem => ({
+          ...toSummary(client, m),
+          sourceGenerationId: m.sourceGenerationId,
+          // An edit-note rerun: the note differs from the direct source's. A
+          // FK-nulled source degrades to false rather than guessing.
+          noteChanged:
+            m.sourceGenerationId !== null &&
+            (byId.get(m.sourceGenerationId)?.note ?? m.note) !== m.note,
+        }),
+      );
     },
   );
 

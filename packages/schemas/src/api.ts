@@ -85,6 +85,11 @@ export const CreateGenerationRequestSchema = z
     // Optional Twitter section pin: classification is skipped, but one enabled
     // image from the selected type is rolled independently for every run.
     referenceTypeId: z.string().uuid().optional(),
+    // Lineage: the generation this run was spawned from (detail-page "next
+    // step" actions + failed-run retry). The API validates it exists and
+    // derives the thread root server-side. Absent = a new thread root (the
+    // home form).
+    sourceGenerationId: z.string().uuid().optional(),
   })
   .superRefine((value, ctx) => {
     if (value.referenceImageId && value.referenceTypeId) {
@@ -155,6 +160,16 @@ export const GenerationSummarySchema = z.object({
   costUsd: z.number().nullable(),
 });
 export type GenerationSummary = z.infer<typeof GenerationSummarySchema>;
+
+// One node in a generation thread (all runs spawned from the same note via the
+// detail page, root first): a summary plus the lineage fields the thread strip
+// needs. noteChanged = this run's note differs from its direct source's (an
+// edit-note rerun), computed server-side.
+export const ThreadItemSchema = GenerationSummarySchema.extend({
+  sourceGenerationId: z.string().nullable(),
+  noteChanged: z.boolean(),
+});
+export type ThreadItem = z.infer<typeof ThreadItemSchema>;
 
 export const GenerationRevisionSchema = z.object({
   id: z.string(),

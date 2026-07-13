@@ -7,6 +7,7 @@ import {
   GlossaryTermSchema,
   ReferenceImageSchema,
   ReferenceTypeSchema,
+  ThreadItemSchema,
   TranslateTextResponseSchema,
   type Copy,
   type CreateGenerationRequest,
@@ -20,6 +21,7 @@ import {
   type ReferenceImage,
   type ReferenceType,
   type TermType,
+  type ThreadItem,
   type TranslateTextRequest,
   type TranslateTextResponse,
   type UpdateGlossaryTermRequest,
@@ -89,6 +91,13 @@ export async function listGenerations(): Promise<GenerationSummary[]> {
 export async function getGeneration(id: string): Promise<GenerationDetail> {
   const body = await requestJson(`/api/generations/${id}`);
   return GenerationDetailSchema.parse(body);
+}
+
+// All runs in this generation's thread (root + follow-ups spawned from any
+// member's detail page), oldest first. Length 1 = no thread.
+export async function getGenerationThread(id: string): Promise<ThreadItem[]> {
+  const body = await requestJson(`/api/generations/${id}/thread`);
+  return z.array(ThreadItemSchema).parse(body);
 }
 
 export async function sendArticleFeedback(

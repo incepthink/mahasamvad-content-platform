@@ -116,7 +116,9 @@
       "Bash(pnpm --filter @dgipr/content-engine analyze:references -- --dry-run)",
       "Bash(xargs echo \"text-only:\")",
       "Bash(xargs echo \"with photo:\")",
-      "Bash(xargs echo \"failures:\")"
+      "Bash(xargs echo \"failures:\")",
+      "PowerShell(pnpm --filter @dgipr/schemas build)",
+      "PowerShell(pnpm --filter @dgipr/database build)"
     ],
     "additionalDirectories": [
       "\\tmp"

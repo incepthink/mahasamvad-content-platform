@@ -161,6 +161,15 @@ export const STR = {
   posterVersionCurrent: 'सद्य',
   posterVersionOpen: 'मोठ्या आकारात पाहा',
 
+  // Generation thread: all runs spawned from the same note lineage, shown as a
+  // horizontal rail on the detail page (hidden when the run has no follow-ups)
+  threadTitle: 'याच टिपणीवरून तयार झालेली कामे',
+  threadHint:
+    'या टिपणीवरून आतापर्यंत तयार झालेली सर्व कामे. दुसरे काम उघडण्यासाठी त्यावर क्लिक करा.',
+  threadRootBadge: 'मूळ',
+  threadCurrentBadge: 'हे पान',
+  threadNoteEdited: 'बदललेली टिपणी',
+
   // "Next step" panel on a finished generation (create the other format from the
   // same note, or edit the note and re-run)
   nextActionsTitle: 'पुढील पाऊल',

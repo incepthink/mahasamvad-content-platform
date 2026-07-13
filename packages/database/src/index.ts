@@ -26,6 +26,7 @@ export {
   addGenerationCost,
   getGeneration,
   listGenerations,
+  listThreadGenerations,
   insertRevision,
   listRevisions,
   type Category,

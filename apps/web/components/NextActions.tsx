@@ -70,8 +70,15 @@ function OptionCards<Value extends string>({
   );
 }
 
+// Every block reports a successful spawn so the page can refresh the thread
+// strip — essential for the twitter paths, which never navigate away.
+type BlockProps = {
+  detail: GenerationDetail;
+  onSpawned?: (() => void) | undefined;
+};
+
 // Article/news/scheme run → create a Twitter post from the same note.
-function CreateTwitterBlock({ detail }: { detail: GenerationDetail }) {
+function CreateTwitterBlock({ detail, onSpawned }: BlockProps) {
   const { addTask, openPanel, hasActiveTwitterTask } = useTasks();
   const [designMode, setDesignMode] = useState<DesignMode>('onbrand');
   const [reference, setReference] = useState<ReferenceSelection | null>(null);
@@ -101,11 +108,13 @@ function CreateTwitterBlock({ detail }: { detail: GenerationDetail }) {
         referenceImageId:
           reference?.kind === 'image' ? reference.id : undefined,
         referenceTypeId: reference?.kind === 'type' ? reference.id : undefined,
+        sourceGenerationId: detail.id,
       });
       addTask(id);
       openPanel();
       setStarted(true);
       setReference(null);
+      onSpawned?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : STR.genericError);
     } finally {
@@ -155,7 +164,7 @@ function CreateTwitterBlock({ detail }: { detail: GenerationDetail }) {
 
 // Twitter run → create an article (news/scheme voice, optional poster) from the
 // same note.
-function CreateArticleBlock({ detail }: { detail: GenerationDetail }) {
+function CreateArticleBlock({ detail, onSpawned }: BlockProps) {
   const router = useRouter();
   const { addTask, hasActiveArticleTask } = useTasks();
   const [category, setCategory] = useState<Category>('scheme');
@@ -184,8 +193,10 @@ function CreateArticleBlock({ detail }: { detail: GenerationDetail }) {
         outputType,
         referenceImageId:
           reference?.kind === 'image' ? reference.id : undefined,
+        sourceGenerationId: detail.id,
       });
       addTask(id);
+      onSpawned?.();
       router.push(`/generations/${id}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : STR.genericError);
@@ -241,7 +252,7 @@ function CreateArticleBlock({ detail }: { detail: GenerationDetail }) {
 // settings. Reference pins are deliberately NOT carried over — the pinned image
 // may since have been deleted or disabled, so automatic rotation is the safe
 // default for the re-run.
-function EditNoteBlock({ detail }: { detail: GenerationDetail }) {
+function EditNoteBlock({ detail, onSpawned }: BlockProps) {
   const router = useRouter();
   const { addTask, openPanel, hasActiveTwitterTask, hasActiveArticleTask } =
     useTasks();
@@ -271,8 +282,10 @@ function EditNoteBlock({ detail }: { detail: GenerationDetail }) {
         category: detail.category,
         outputType: detail.outputType,
         designMode: detail.designMode ?? undefined,
+        sourceGenerationId: detail.id,
       });
       addTask(id);
+      onSpawned?.();
       if (isTwitter) {
         openPanel();
         setStarted(true);
@@ -327,7 +340,7 @@ function EditNoteBlock({ detail }: { detail: GenerationDetail }) {
   );
 }
 
-export function NextActions({ detail }: { detail: GenerationDetail }) {
+export function NextActions({ detail, onSpawned }: BlockProps) {
   const terminal = detail.status === 'completed' || detail.status === 'failed';
   if (!terminal) return null;
 
@@ -337,12 +350,12 @@ export function NextActions({ detail }: { detail: GenerationDetail }) {
       <p className="hint">{STR.nextActionsHint}</p>
       {detail.status === 'completed' ? (
         detail.category === 'twitter' ? (
-          <CreateArticleBlock detail={detail} />
+          <CreateArticleBlock detail={detail} onSpawned={onSpawned} />
         ) : (
-          <CreateTwitterBlock detail={detail} />
+          <CreateTwitterBlock detail={detail} onSpawned={onSpawned} />
         )
       ) : null}
-      <EditNoteBlock detail={detail} />
+      <EditNoteBlock detail={detail} onSpawned={onSpawned} />
     </section>
   );
 }

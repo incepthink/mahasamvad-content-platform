@@ -28,6 +28,11 @@ export type GenerationRow = Readonly<{
   // Optional Twitter section pin: force this reference type while choosing one
   // of its enabled images at job start. The FK sets null if the type is deleted.
   referenceTypeId: string | null;
+  // Lineage: the run this one was spawned from (detail-page "next step" actions
+  // + failed-run retry) and the thread's first run, denormalized so membership
+  // is one query. Both null on thread roots and pre-feature rows.
+  sourceGenerationId: string | null;
+  threadRootId: string | null;
   status: GenerationStatus;
   step: string | null;
   error: string | null;
@@ -88,6 +93,8 @@ type GenerationDbRow = {
   heading: string | null;
   reference_image_id: string | null;
   reference_type_id: string | null;
+  source_generation_id: string | null;
+  thread_root_id: string | null;
   status: GenerationStatus;
   step: string | null;
   error: string | null;
@@ -118,6 +125,8 @@ function fromDbRow(row: GenerationDbRow): GenerationRow {
     heading: row.heading,
     referenceImageId: row.reference_image_id,
     referenceTypeId: row.reference_type_id,
+    sourceGenerationId: row.source_generation_id,
+    threadRootId: row.thread_root_id,
     status: row.status,
     step: row.step,
     error: row.error,
@@ -194,6 +203,9 @@ export async function insertGeneration(
     // Insert-only (not in GenerationPatch): a pin never changes after creation.
     referenceImageId?: string | undefined;
     referenceTypeId?: string | undefined;
+    // Insert-only lineage: immutable after creation, like the pins.
+    sourceGenerationId?: string | undefined;
+    threadRootId?: string | undefined;
   }>,
 ): Promise<GenerationRow> {
   const { data, error } = await client
@@ -206,6 +218,8 @@ export async function insertGeneration(
       heading: input.heading ?? null,
       reference_image_id: input.referenceImageId ?? null,
       reference_type_id: input.referenceTypeId ?? null,
+      source_generation_id: input.sourceGenerationId ?? null,
+      thread_root_id: input.threadRootId ?? null,
     })
     .select()
     .single();
@@ -320,6 +334,23 @@ export async function listGenerations(
     .limit(limit);
   if (error) {
     throw new Error(`Failed to list generations: ${error.message}`);
+  }
+  return ((data ?? []) as GenerationDbRow[]).map(fromDbRow);
+}
+
+// All members of a thread (the root itself + every follow-up), oldest first.
+// rootId must come from a fetched row (threadRootId ?? id), never raw input.
+export async function listThreadGenerations(
+  client: SupabaseClient,
+  rootId: string,
+): Promise<GenerationRow[]> {
+  const { data, error } = await client
+    .from(GENERATIONS_TABLE)
+    .select()
+    .or(`id.eq.${rootId},thread_root_id.eq.${rootId}`)
+    .order('created_at', { ascending: true });
+  if (error) {
+    throw new Error(`Failed to list thread ${rootId}: ${error.message}`);
   }
   return ((data ?? []) as GenerationDbRow[]).map(fromDbRow);
 }
