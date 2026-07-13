@@ -20,6 +20,13 @@ export const CHAT_MODEL = 'gpt-4o';
 // with a known-tighter (short JSON verifiers) or longer need can override via maxTokens.
 const DEFAULT_MAX_TOKENS = 4096;
 
+// Headroom for the passes that emit a whole article body (draft, sectioned assembly,
+// coverage/faithfulness/feedback rewrites). Now that the citizen-fact guard deliberately
+// grows fact-rich articles, 4096 Devanagari tokens can genuinely bind (Marathi tokenizes
+// heavily), so these callers opt into a higher ceiling; the JSON verifiers and short
+// helpers keep the tight default.
+export const ARTICLE_BODY_MAX_TOKENS = 8192;
+
 export type ChatMessage = Readonly<{
   role: 'system' | 'user' | 'assistant';
   content: string;

@@ -235,6 +235,12 @@ export const GenerationDetailSchema = z.object({
   // instead, from the API's in-process job registry (both reset on restart).
   translating: z.boolean(),
   translateError: z.string().nullable(),
+  // Article revision can also run alongside the main job: while the poster is still
+  // rendering the article is already final, so the user may refine it without waiting
+  // out the render. Like `translating`, it can't own status/step/error and is reported
+  // here from the API's in-process registry (both reset on restart).
+  articleRevising: z.boolean(),
+  articleReviseError: z.string().nullable(),
   // Total USD the run has cost so far (null for pre-feature rows). `costBreakdown` carries
   // the audit detail (token counts + text-vs-image split); shape is intentionally loose.
   costUsd: z.number().nullable(),

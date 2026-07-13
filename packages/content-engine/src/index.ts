@@ -82,6 +82,13 @@ export {
   type PinnedReference,
   type ReferenceCatalogEntry,
 } from './references/catalog.js';
+// Rotating color palette for the article poster's headline panel (Part 2 of the
+// "stop always-orange posters" work); the picked theme is shipped to n8n.
+export {
+  ARTICLE_POSTER_THEMES,
+  pickArticlePosterTheme,
+  type ArticlePosterTheme,
+} from './references/article-poster-theme.js';
 
 export type ContentChunk = Readonly<{
   id: string; // `${articleId}-${chunkIndex}`

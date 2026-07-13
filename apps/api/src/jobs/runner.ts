@@ -14,6 +14,7 @@ import {
   extractGlossaryCandidates,
   generateArticle,
   generateCopy,
+  pickArticlePosterTheme,
   pickArticleReferenceUrl,
   recordImageCost,
   resolvePinnedReference,
@@ -23,6 +24,7 @@ import {
   reviseSceneBrief,
   runInCostScope,
   translateArticleToEnglish,
+  type ArticlePosterTheme,
   type ImageQuality,
   type PinnedReference,
 } from '@dgipr/content-engine';
@@ -59,6 +61,15 @@ const running = new Set<string>();
 const translating = new Set<string>();
 const translateErrors = new Map<string, string>();
 
+// Article revision may likewise run *alongside* the poster render: the article is
+// final and persisted before the poster phase starts, so the user can refine it
+// without waiting out the ~1-2 min render. Like translation it therefore cannot use
+// the row's status/step/error (those belong to the main job) and keeps its liveness +
+// last failure here. The settled-run article revision still goes through the
+// status-owning startArticleFeedbackJob; this pair is only for the concurrent path.
+const revisingArticle = new Set<string>();
+const reviseArticleErrors = new Map<string, string>();
+
 export function isJobRunning(id: string): boolean {
   return running.has(id);
 }
@@ -69,6 +80,14 @@ export function isTranslating(id: string): boolean {
 
 export function getTranslateError(id: string): string | null {
   return translateErrors.get(id) ?? null;
+}
+
+export function isRevisingArticle(id: string): boolean {
+  return revisingArticle.has(id);
+}
+
+export function getReviseArticleError(id: string): string | null {
+  return reviseArticleErrors.get(id) ?? null;
 }
 
 function requireEnv(name: string): string {
@@ -281,10 +300,19 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
       ? await resolvePinnedReference(client, row.referenceImageId)
       : null;
     const referenceUrl = pinned?.url ?? (await pickArticleReferenceUrl(client));
+    // Rotate the headline-panel color per render so posters stop always being orange.
+    // The master's logo/layout/footer stay fixed; only the curved panel is recoloured.
+    const theme = pickArticlePosterTheme();
     console.log(
-      `[job ${id}] article poster reference: ${JSON.stringify({ id, referenceImageId: row.referenceImageId, pinned: Boolean(pinned), referenceUrl })}`,
+      `[job ${id}] article poster reference: ${JSON.stringify({ id, referenceImageId: row.referenceImageId, pinned: Boolean(pinned), referenceUrl, theme: theme.name })}`,
     );
-    const posterPng = await renderArticlePosterViaN8n(id, copy, referenceUrl);
+    const posterPng = await renderArticlePosterViaN8n(
+      id,
+      copy,
+      referenceUrl,
+      '',
+      theme,
+    );
     // Image is painted inside n8n (gpt-image-2 @ 1536x1024); attribute the fixed tier price.
     recordImageCost('article', imageQuality());
 
@@ -317,6 +345,7 @@ async function renderArticlePosterViaN8n(
   copy: Copy,
   referenceUrl: string,
   imageFeedback = '',
+  theme?: ArticlePosterTheme,
 ): Promise<Buffer> {
   const webhookUrl = requireEnv('N8N_ARTICLE_POSTER_WEBHOOK_URL');
   const webhookSecret = process.env.N8N_WEBHOOK_SECRET;
@@ -338,6 +367,12 @@ async function renderArticlePosterViaN8n(
       generation_id: id,
       reference_url: referenceUrl,
       image_feedback: imageFeedback,
+      // Panel/headline color for this render (initial renders only). Empty on the
+      // image-feedback edit path so the workflow preserves the current poster's
+      // colors; empty also makes the workflow fall back to its original orange.
+      panel_color: theme?.panelHex ?? '',
+      panel_color_name: theme?.name ?? '',
+      headline_color: theme?.headlineHex ?? '',
     }),
     signal: AbortSignal.timeout(420_000),
   });
@@ -542,6 +577,73 @@ export function startArticleFeedbackJob(
       factCheck: revised.factCheck,
     });
   });
+}
+
+// Article feedback that runs *beside* the still-in-flight poster render, so the user
+// can refine the article without waiting out the ~1-2 min render (the route dispatches
+// here only while the initial job is in its poster phase; the settled case uses
+// startArticleFeedbackJob above). Deliberately NOT wrapped in runJob: it must not claim
+// `running` (the poster job holds it) nor write status/step/error — flipping the row to
+// completed/failed would derail the poster run's polling. It writes only the disjoint
+// article/factCheck columns (updateGeneration is a partial update) + the revision log,
+// and reports its liveness/last-failure through revisingArticle/reviseArticleErrors.
+// The in-flight poster is unaffected: generateCopy already ran on the in-memory
+// pre-revision article, so it keeps the old copy (an accepted trade-off — the user can
+// re-render the poster afterward).
+export function startConcurrentArticleFeedbackJob(
+  client: SupabaseClient,
+  id: string,
+  feedback: string,
+): void {
+  revisingArticle.add(id);
+  reviseArticleErrors.delete(id);
+  void (async () => {
+    const cost = createCostAccumulator();
+    try {
+      await runInCostScope(cost, async () => {
+        const row = await getGeneration(client, id);
+        if (!row) throw new Error(`Generation ${id} not found.`);
+        if (!row.article)
+          throw new Error(`Generation ${id} has no article yet.`);
+
+        const currentContent = row.factCheck
+          ? `${row.article}\n\n${FACT_CHECK_DELIMITER}\n${row.factCheck}`
+          : row.article;
+        const revised = await reviseArticle(
+          row.note,
+          currentContent,
+          feedback,
+          articleCategoryOf(row.category),
+          row.heading ?? undefined,
+        );
+
+        await updateGeneration(client, id, {
+          article: revised.article,
+          factCheck: revised.factCheck,
+        });
+        await insertRevision(client, {
+          generationId: id,
+          target: 'article',
+          feedback,
+          article: revised.article,
+          factCheck: revised.factCheck,
+        });
+      });
+    } catch (error) {
+      console.error(`[revise-article ${id}] failed:`, error);
+      reviseArticleErrors.set(id, errorMessage(error));
+    } finally {
+      try {
+        await persistCost(client, id, cost);
+      } catch (costError) {
+        console.error(
+          `[revise-article ${id}] could not persist cost:`,
+          costError,
+        );
+      }
+      revisingArticle.delete(id);
+    }
+  })();
 }
 
 // On-demand English translation of an article. Runs the glossary-locked Sarvam

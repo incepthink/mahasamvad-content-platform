@@ -207,7 +207,7 @@ export function buildUserPrompt(
 
   if (styleExample?.trim()) {
     parts.push(
-      '<STYLE_EXAMPLE purpose="style_structure_length_phrasing_only_not_facts">',
+      '<STYLE_EXAMPLE purpose="style_structure_phrasing_only_not_length_not_facts">',
       styleExample.trim(),
       '</STYLE_EXAMPLE>',
       '',
@@ -266,6 +266,11 @@ export function buildUserPrompt(
     `वरील NOTES मधील माहिती ${CATEGORY_LABEL[category]} शैलीत मांडून महासंवाद-शैलीतील पूर्ण मराठी लेख लिहा.`,
     'लेख प्रकाशित करता येईल असा असावा; तो सारांश, स्पष्टीकरणात्मक नोट किंवा मुद्देसूद पुनर्कथन नसावे.',
     'NOTES मधील ठळक व आधारभूत मुद्दे गाळू नका; दुय्यम तपशील संक्षिप्त करू शकता आणि क्षुल्लक बाबी वगळू शकता.',
+    ...(styleExample?.trim()
+      ? [
+          'लेखाची लांबी STYLE_EXAMPLE च्या लांबीवरून ठरवू नका — ती NOTES मध्ये किती ठळक व आधारभूत नागरिकाभिमुख आशय आहे त्यावरून ठरवा. आशय जास्त असल्यास लेख अधिक सविस्तर असावा.',
+        ]
+      : []),
     'NOTES मध्ये नसलेले कोणतेही ठोस तथ्य, नाव, पदनाम, तारीख, ठिकाण, आकडा, कायदा, योजना, quote किंवा byline जोडू नका.',
     ...(hasFiveW1H
       ? hasBrief

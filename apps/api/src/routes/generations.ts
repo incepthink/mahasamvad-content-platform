@@ -35,10 +35,13 @@ import {
   type ThreadItem,
 } from '@dgipr/schemas';
 import {
+  getReviseArticleError,
   getTranslateError,
   isJobRunning,
+  isRevisingArticle,
   isTranslating,
   startArticleFeedbackJob,
+  startConcurrentArticleFeedbackJob,
   startGenerationJob,
   startPosterFeedbackJob,
   startPosterImageFeedbackJob,
@@ -134,6 +137,10 @@ async function toDetail(
     // in-process registry rather than on the row (see startTranslateJob).
     translating: isTranslating(row.id),
     translateError: getTranslateError(row.id),
+    // Article revision can run beside the poster render (same registry pattern as
+    // translation), so its liveness/failure also come from the runner, not the row.
+    articleRevising: isRevisingArticle(row.id),
+    articleReviseError: getReviseArticleError(row.id),
     costUsd: row.costUsd,
     costBreakdown: row.costBreakdown ?? null,
     createdAt: row.createdAt,
@@ -315,20 +322,41 @@ export function registerGenerationRoutes(
           .code(404)
           .send({ error: { message: 'Generation not found.' } });
       }
-      if (isJobRunning(row.id)) {
-        return reply
-          .code(409)
-          .send({ error: { message: 'A job is already running.' } });
-      }
       if (!row.article) {
         return reply
           .code(409)
           .send({ error: { message: 'No article to revise yet.' } });
       }
-      // Flip to running BEFORE returning so the client's immediate refresh sees
-      // the transition and keeps polling; the detached job would otherwise set
-      // running a beat later, letting a racing poll read stale 'completed' and
-      // stop polling (the revised result then never loads without a reload).
+      if (isRevisingArticle(row.id)) {
+        return reply
+          .code(409)
+          .send({ error: { message: 'A revision is already running.' } });
+      }
+      // While the initial job is still in its poster phase the article is already
+      // final, so refine it concurrently instead of forcing the user to wait out the
+      // render. This path does NOT flip status (the poster job owns it) — its liveness
+      // is reported via isRevisingArticle. Any other running state (e.g. a revise_*
+      // step) still rejects, so two revisions never stack.
+      if (isJobRunning(row.id)) {
+        const posterPhase =
+          row.status === 'running' &&
+          (row.step === 'faithfulness' ||
+            row.step === 'copy' ||
+            row.step === 'scene' ||
+            row.step === 'render');
+        if (!posterPhase) {
+          return reply
+            .code(409)
+            .send({ error: { message: 'A job is already running.' } });
+        }
+        startConcurrentArticleFeedbackJob(client, row.id, body.feedback);
+        return reply.code(202).send({});
+      }
+      // Settled run: flip to running BEFORE returning so the client's immediate
+      // refresh sees the transition and keeps polling; the detached job would
+      // otherwise set running a beat later, letting a racing poll read stale
+      // 'completed' and stop polling (the revised result then never loads without a
+      // reload).
       await updateGeneration(client, row.id, {
         status: 'running',
         step: 'revise_article',

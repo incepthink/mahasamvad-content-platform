@@ -37,11 +37,13 @@ export function ArticleView({
   const translating = detail.translating;
   const error = translateError ?? detail.translateError;
 
-  // The article is shown while the poster phase still runs. Article feedback would
-  // rewrite the article the poster's copy was derived from (and 409 against the API's
-  // isJobRunning guard), so it waits for the job to settle. Translation doesn't — it
-  // only reads the finished article — so it is offered right away.
-  const jobActive = detail.status === 'running' || detail.status === 'queued';
+  // Article feedback is offered as soon as the article is on screen — including while
+  // the poster still renders. The revision runs beside the poster job and reports
+  // itself through detail.articleRevising (like translation), not status/step, so the
+  // box only has to reflect that flag: swap to an inline spinner while a revise is in
+  // flight, otherwise stay interactive. (A settled-run edit flips status and swaps the
+  // whole page to ProgressSteps, unmounting this view, so no gate is needed here.)
+  const revising = detail.articleRevising;
 
   const copyToClipboard = async () => {
     await navigator.clipboard.writeText(shown);
@@ -153,8 +155,13 @@ export function ArticleView({
         <div className="fold-body">{detail.note}</div>
       </details>
 
-      {!jobActive ? (
-        <div style={{ marginTop: 18 }}>
+      <div style={{ marginTop: 18 }}>
+        {revising ? (
+          <span className="translating-note">
+            <span className="spinner" aria-hidden="true" />
+            {STR.revisingArticle}
+          </span>
+        ) : (
           <FeedbackBox
             title={STR.articleFeedbackTitle}
             hint={STR.articleFeedbackHint}
@@ -164,8 +171,11 @@ export function ArticleView({
               await onFeedbackSent();
             }}
           />
-        </div>
-      ) : null}
+        )}
+        {detail.articleReviseError ? (
+          <p className="form-error">{detail.articleReviseError}</p>
+        ) : null}
+      </div>
     </section>
   );
 }

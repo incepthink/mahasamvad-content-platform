@@ -114,6 +114,7 @@ export const STR = {
   showMarathi: 'मराठी',
   showEnglish: 'English',
   translating: 'भाषांतर सुरू आहे…',
+  revisingArticle: 'लेख सुधारला जात आहे…',
   posterTitle: 'तयार झालेले पोस्टर',
   // Poster-skeleton label while the article is shown but the poster still renders
   posterPreparing: 'पोस्टर तयार होत आहे…',

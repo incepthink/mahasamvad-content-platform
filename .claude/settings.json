@@ -119,7 +119,8 @@
       "Bash(xargs echo \"failures:\")",
       "PowerShell(pnpm --filter @dgipr/schemas build)",
       "PowerShell(pnpm --filter @dgipr/database build)",
-      "Bash(pnpm n8n:push --dry-run --only=social-post-v2-api)"
+      "Bash(pnpm n8n:push --dry-run --only=social-post-v2-api)",
+      "Bash(node -e \"const w=require\\('./n8n/workflow-exports/article-poster-v1-api.json'\\); const n=w.nodes.find\\(x=>x.name==='Build Prompt'\\); console.log\\('JSON OK. Build Prompt jsCode preview:\\\\n'\\); console.log\\(n.parameters.jsCode\\);\")"
     ],
     "additionalDirectories": [
       "\\tmp"

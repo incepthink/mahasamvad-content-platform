@@ -18,7 +18,11 @@ import {
   retrieveReferenceArticle,
   type ReferenceArticle,
 } from '../retrieval/retrieve-references.js';
-import { chatComplete, type ChatMessage } from './openai-chat.js';
+import {
+  ARTICLE_BODY_MAX_TOKENS,
+  chatComplete,
+  type ChatMessage,
+} from './openai-chat.js';
 import { generateCopy } from './generate-copy.js';
 import { extractFiveWOneH } from './extract-5w1h.js';
 import {
@@ -33,6 +37,7 @@ import {
 import { NEWS_STYLE_EXEMPLAR } from './news-exemplar.js';
 import {
   findMissingInformation,
+  findMissingNoteFacts,
   findOverweightedDetails,
   findUnsupportedClaims,
 } from './verify-coverage.js';
@@ -195,7 +200,9 @@ async function generatePassage(
         content: ['## टिपणी (भाग):', sectionNote, '', '## मजकूर:'].join('\n'),
       },
     ];
-    return (await chatComplete(messages)).trim();
+    return (
+    await chatComplete(messages, { maxTokens: ARTICLE_BODY_MAX_TOKENS })
+  ).trim();
   }
 
   const tierLines = (label: string, items: readonly string[]): string[] =>
@@ -223,7 +230,9 @@ async function generatePassage(
       ].join('\n'),
     },
   ];
-  return (await chatComplete(messages)).trim();
+  return (
+    await chatComplete(messages, { maxTokens: ARTICLE_BODY_MAX_TOKENS })
+  ).trim();
 }
 
 // Long-note path: draft each section, then run one assembly pass that merges the
@@ -269,7 +278,7 @@ async function generateSectioned(
           draft,
         ].join('\n'),
   });
-  return chatComplete(messages);
+  return chatComplete(messages, { maxTokens: ARTICLE_BODY_MAX_TOKENS });
 }
 
 // Trim trailing markdown-only noise (horizontal rules / bare heading markers) the model
@@ -540,6 +549,7 @@ export async function generateArticle(
       ? await generateSectioned(note, reference, heading, fiveWOneH, brief)
       : await chatComplete(
           buildMessages(note, reference, category, heading, fiveWOneH, brief),
+          { maxTokens: ARTICLE_BODY_MAX_TOKENS },
         );
 
   // Coverage loop: verify the article body honours the tiered contract from both sides,
@@ -551,13 +561,26 @@ export async function generateArticle(
   onProgress('coverage');
   for (let pass = 0; pass < MAX_COVERAGE_REVISIONS; pass++) {
     const { article } = splitContent(content);
-    const [missing, overweighted] = await Promise.all([
+    const [tieredMissing, citizenMissing, overweighted] = await Promise.all([
       findMissingInformation(article, note, angleForChecks, brief),
+      findMissingNoteFacts(article, note),
       findOverweightedDetails(article, brief),
     ]);
+    // The citizen-fact guard is brief-independent, so it catches benefits/eligibility/actions
+    // the brief may have buried in mention/omit (which the tiered check is told to leave
+    // alone). Merge both missing lists, deduping exact repeats so the revision weaves each
+    // fact once. Machinery still only surfaces via findOverweightedDetails (compression).
+    const seenMissing = new Set<string>();
+    const missing = [...tieredMissing, ...citizenMissing].filter((item) => {
+      const key = item.trim();
+      if (key.length === 0 || seenMissing.has(key)) return false;
+      seenMissing.add(key);
+      return true;
+    });
     if (missing.length === 0 && overweighted.length === 0) break;
     console.log(
-      `[coverage] pass ${pass + 1}: ${missing.length} घटक गहाळ, ` +
+      `[coverage] pass ${pass + 1}: ${missing.length} घटक गहाळ ` +
+        `(${citizenMissing.length} नागरिकाभिमुख), ` +
         `${overweighted.length} दुय्यम तपशील अति-विस्तारित; पुन्हा लिहित आहे...`,
     );
     content = await chatComplete(
@@ -568,6 +591,7 @@ export async function generateArticle(
         brief,
         overweighted,
       ),
+      { maxTokens: ARTICLE_BODY_MAX_TOKENS },
     );
   }
 
@@ -608,6 +632,7 @@ export async function generateArticle(
     );
     content = await chatComplete(
       buildFaithfulnessRevisionMessages(content, unsupported, category),
+      { maxTokens: ARTICLE_BODY_MAX_TOKENS },
     );
   }
 
