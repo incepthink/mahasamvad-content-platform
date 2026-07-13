@@ -9,7 +9,7 @@
 import { Fragment } from 'react';
 import Link from 'next/link';
 import type { ThreadItem } from '@dgipr/schemas';
-import { CATEGORY_LABELS, formatDate, STR } from '../lib/strings';
+import { CATEGORY_LABELS, formatDateShort, STR } from '../lib/strings';
 import { StatusChip } from './StatusChip';
 
 function ThreadNode({
@@ -41,7 +41,7 @@ function ThreadNode({
         <StatusChip status={item.status} />
         <p className="thread-node-date">
           {isCurrent ? `${STR.threadCurrentBadge} · ` : ''}
-          {formatDate(item.createdAt)}
+          {formatDateShort(item.createdAt)}
         </p>
       </div>
     </>

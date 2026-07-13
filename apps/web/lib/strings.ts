@@ -266,8 +266,6 @@ export const STR = {
   refLayoutTextOnly: 'फक्त मजकूर',
   refLayoutWithPhoto: 'छायाचित्रासह',
   refLayoutUnknown: 'तपासलेले नाही',
-  refLayoutUnknownHint:
-    'या चित्राची मांडणी अजून तपासलेली नाही. तोपर्यंत पोस्टरमध्ये छायाचित्र येऊ शकते.',
   refLayoutRecheck: 'पुन्हा तपासा',
   refLayoutChecking: 'तपासत आहे…',
   refLayoutSlots: 'मुद्दे',
@@ -383,6 +381,17 @@ const DATE_FORMAT = new Intl.DateTimeFormat('mr-IN', {
 
 export function formatDate(iso: string): string {
   return DATE_FORMAT.format(new Date(iso));
+}
+
+// Day + month only (e.g. "१३ जुलै") — for tight spots like the thread rail where the
+// full date + time overflows the compact card.
+const SHORT_DATE_FORMAT = new Intl.DateTimeFormat('mr-IN', {
+  day: 'numeric',
+  month: 'long',
+});
+
+export function formatDateShort(iso: string): string {
+  return SHORT_DATE_FORMAT.format(new Date(iso));
 }
 
 // The estimated USD cost of a run, for the small cost badge. Null (pre-feature rows or a

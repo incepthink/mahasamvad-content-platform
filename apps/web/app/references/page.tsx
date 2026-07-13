@@ -76,7 +76,6 @@ function LayoutBadge({
             {disabled ? STR.refLayoutChecking : STR.refLayoutRecheck}
           </button>
         </span>
-        <p className="hint">{STR.refLayoutUnknownHint}</p>
       </div>
     );
   }
