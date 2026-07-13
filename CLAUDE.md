@@ -171,9 +171,16 @@ Chromium): `pnpm --filter @dgipr/poster-renderer exec playwright install chromiu
   image, so the hosted workflows stay on whatever was last imported. Ship workflow changes
   with `pnpm n8n:push` (after deploying the API — the workflows need the API's newer payload
   fields). Two more traps the script exists to handle: the exports carry no `id` (a plain
-  import creates duplicates that then collide on the webhook path), and credential ids +
-  the Webhook node's Header Auth are instance-specific — the script re-binds them by name
-  off the live workflow so a push can't unbind OpenAI or disable `N8N_WEBHOOK_SECRET`.
+  import creates duplicates that then collide on the webhook path), and credentials + the
+  Webhook node's Header Auth are instance-specific. So the exports **name** their credential
+  and carry **no credential id** — an id is meaningless off the machine that minted it — and
+  each push resolves that name against the *target's own* credential list, **aborting before
+  it writes anything** if the name isn't there (falling back to ids harvested from the
+  target's live workflows only when its API won't enumerate credentials). Writing a foreign
+  credential id is what produces `Credential with ID "…" does not exist for type
+  "httpHeaderAuth"`: the workflow imports and activates cleanly, then dies mid-run. The
+  Webhook node's Header Auth is likewise read off the live workflow, so a push can't disable
+  `N8N_WEBHOOK_SECRET`.
 - **The n8n MCP points at the LOCAL n8n** (`http://localhost:5678`), not the hosted one.
   Workflow ids seen through it (`1emSaqFmkLRUubUM`, `J4UTtNt2KMxuDSKf`) are local-dev ids
   and are meaningless on `n8n.indicex.xyz`. Never treat an MCP publish as a prod deploy.

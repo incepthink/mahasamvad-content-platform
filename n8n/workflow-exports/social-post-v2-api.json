@@ -158,12 +158,7 @@
       "typeVersion": 2
     },
     {
-      "credentials": {
-        "httpHeaderAuth": {
-          "id": "eFTnHTRa1l1U4ukJ",
-          "name": "OpenAI Bearer (DGIPR)"
-        }
-      },
+      "credentials": { "httpHeaderAuth": { "name": "OpenAI Bearer (DGIPR)" } },
       "id": "n3",
       "name": "Classify L0",
       "parameters": {
@@ -215,12 +210,7 @@
       "typeVersion": 2
     },
     {
-      "credentials": {
-        "httpHeaderAuth": {
-          "id": "eFTnHTRa1l1U4ukJ",
-          "name": "OpenAI Bearer (DGIPR)"
-        }
-      },
+      "credentials": { "httpHeaderAuth": { "name": "OpenAI Bearer (DGIPR)" } },
       "id": "n5",
       "name": "Generate Copy L1",
       "parameters": {
@@ -301,12 +291,7 @@
       "typeVersion": 2.2
     },
     {
-      "credentials": {
-        "httpHeaderAuth": {
-          "id": "eFTnHTRa1l1U4ukJ",
-          "name": "OpenAI Bearer (DGIPR)"
-        }
-      },
+      "credentials": { "httpHeaderAuth": { "name": "OpenAI Bearer (DGIPR)" } },
       "id": "n8",
       "name": "Generate Image L2",
       "parameters": {
@@ -347,12 +332,7 @@
       "typeVersion": 4.4
     },
     {
-      "credentials": {
-        "httpHeaderAuth": {
-          "id": "eFTnHTRa1l1U4ukJ",
-          "name": "OpenAI Bearer (DGIPR)"
-        }
-      },
+      "credentials": { "httpHeaderAuth": { "name": "OpenAI Bearer (DGIPR)" } },
       "id": "n10",
       "name": "Edit Image L2",
       "parameters": {
@@ -448,12 +428,7 @@
       "typeVersion": 2
     },
     {
-      "credentials": {
-        "httpHeaderAuth": {
-          "id": "eFTnHTRa1l1U4ukJ",
-          "name": "OpenAI Bearer (DGIPR)"
-        }
-      },
+      "credentials": { "httpHeaderAuth": { "name": "OpenAI Bearer (DGIPR)" } },
       "id": "n14",
       "name": "Generate Caption L3",
       "parameters": {
@@ -537,12 +512,7 @@
       "typeVersion": 4.4
     },
     {
-      "credentials": {
-        "httpHeaderAuth": {
-          "id": "eFTnHTRa1l1U4ukJ",
-          "name": "OpenAI Bearer (DGIPR)"
-        }
-      },
+      "credentials": { "httpHeaderAuth": { "name": "OpenAI Bearer (DGIPR)" } },
       "id": "f4",
       "name": "Edit Feedback Image",
       "parameters": {

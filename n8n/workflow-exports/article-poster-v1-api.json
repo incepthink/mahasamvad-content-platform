@@ -94,12 +94,7 @@
       "typeVersion": 4.4
     },
     {
-      "credentials": {
-        "httpHeaderAuth": {
-          "id": "eFTnHTRa1l1U4ukJ",
-          "name": "OpenAI Bearer (DGIPR)"
-        }
-      },
+      "credentials": { "httpHeaderAuth": { "name": "OpenAI Bearer (DGIPR)" } },
       "id": "n3",
       "name": "Edit Image",
       "parameters": {

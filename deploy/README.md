@@ -121,10 +121,19 @@ Only the credentials must be created by hand — an API key cannot create them f
 2. **Import both workflows** (Workflows → Import from File):
    - `n8n/workflow-exports/social-post-v2-api.json` (twitter/social path)
    - `n8n/workflow-exports/article-poster-v1-api.json` (news/scheme article poster)
+
+   The imported nodes arrive with their OpenAI credential **unbound** — by design. A
+   credential id is meaningless outside the instance that minted it, so the committed
+   JSON names the credential but carries no id. Step 3 is mandatory, not cleanup.
 3. **OpenAI credential**: create a Header Auth credential named exactly `OpenAI Bearer
-   (DGIPR)` (Name `Authorization`, Value `Bearer sk-…`) and bind it on every HTTP node
-   that calls OpenAI. The name must match — `pnpm n8n:push` re-binds by name on every
-   later push.
+   (DGIPR)` (Name `Authorization`, Value `Bearer sk-…`) and bind it on **all 7** HTTP
+   nodes that call OpenAI:
+   - `article-poster-v1-api`: `Edit Image`
+   - `social-post-v2-api`: `Classify L0`, `Generate Copy L1`, `Generate Image L2`,
+     `Edit Image L2`, `Generate Caption L3`, `Edit Feedback Image`
+
+   The name must match exactly — `pnpm n8n:push` re-binds by name on every later push,
+   and refuses to push at all if it cannot find that name on the instance.
 4. **Header Auth on each webhook** (enforces `N8N_WEBHOOK_SECRET`):
    - Webhook node → Authentication → **Header Auth**.
    - Create/reuse a Header Auth credential: Name `x-n8n-webhook-secret`, Value = the
@@ -150,9 +159,16 @@ pnpm n8n:push --dry-run   # shows the name matches + credential remap; writes no
 pnpm n8n:push             # PUTs both exports, then deactivate/activate to republish
 ```
 
-It matches workflows **by name**, rewrites the export's credential ids to this instance's
-(matched by credential name), preserves the Webhook node's Header Auth, and refuses to
-guess if a name is missing or duplicated. It is idempotent — re-run it freely.
+It matches workflows **by name**, binds each node's credential to the id this instance's own
+credential of that name actually has, preserves the Webhook node's Header Auth, and refuses
+to guess if a name is missing or duplicated. It is idempotent — re-run it freely.
+
+**If it aborts with "credential binding(s) cannot be resolved":** the named credential does
+not exist on that n8n. Nothing was written — the live workflows are untouched. Create it in
+the UI per C1 step 3 (exact name) and re-run. The guard exists because a workflow carrying a
+credential id the instance does not have imports and *activates* perfectly, then dies mid-run
+with `Credential with ID "…" does not exist for type "httpHeaderAuth"`. `--allow-unbound`
+pushes anyway and leaves those nodes visibly unbound in the editor instead.
 
 **Deploy the API before pushing workflows.** The current workflows are data-driven and
 need payload fields (`types` catalog, `forced_type`, `reference_url`) that only the

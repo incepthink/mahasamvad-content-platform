@@ -78,9 +78,14 @@ workflows in its own database (the `n8n_data` volume), never reading the committ
 from disk — so editing an export, committing it, and `git pull`ing on the EC2 box does
 **nothing** to the hosted workflows; `docker compose up -d --build` there rebuilds only the
 `api` image. `pnpm n8n:push` PUTs the exports into the n8n named by `N8N_API_URL` over its
-public REST API, matching by workflow name, re-binding credential ids and the Webhook
-node's Header Auth from the live workflow (both are instance-specific and absent from the
-committed JSON), and republishing. Run it **after** deploying the API — the workflows need
+public REST API, matching by workflow name, binding each node's credential to the id the
+*target instance's own* credential of that name holds (the committed JSON names credentials
+but carries no ids — an id is meaningless off the machine that minted it), preserving the
+Webhook node's Header Auth read off the live workflow, and republishing. It **aborts before
+writing anything** if a credential name does not exist on the target, because a workflow
+holding a foreign credential id imports and activates cleanly and only fails once the node
+runs (`Credential with ID "…" does not exist for type "httpHeaderAuth"`) — create the
+credential in the n8n UI (runbook C1 step 3) and re-run. Run it **after** deploying the API — the workflows need
 the catalog fields the current API sends. Related: the n8n **MCP server is pointed at the
 local dev n8n** (`http://localhost:5678`); the workflow ids visible through it
 (`1emSaqFmkLRUubUM`, `J4UTtNt2KMxuDSKf`) are local ids, and an MCP publish is **not** a
