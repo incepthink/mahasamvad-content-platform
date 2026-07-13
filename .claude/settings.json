@@ -118,7 +118,8 @@
       "Bash(xargs echo \"with photo:\")",
       "Bash(xargs echo \"failures:\")",
       "PowerShell(pnpm --filter @dgipr/schemas build)",
-      "PowerShell(pnpm --filter @dgipr/database build)"
+      "PowerShell(pnpm --filter @dgipr/database build)",
+      "Bash(pnpm n8n:push --dry-run --only=social-post-v2-api)"
     ],
     "additionalDirectories": [
       "\\tmp"

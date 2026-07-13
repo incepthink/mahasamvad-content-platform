@@ -76,16 +76,21 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
 - Generation detail (progress, article, poster, feedback) →
   `apps/web/app/generations/[id]/page.tsx`; history list →
   `apps/web/app/generations/page.tsx`
-- Data layer → `apps/web/lib/api.ts`, `apps/web/lib/useGeneration.ts` (polling hook)
+- Data layer → `apps/web/lib/api.ts`, `apps/web/lib/useGeneration.ts` (polling hook),
+  `apps/web/lib/useGenerationThread.ts` (lineage rail; 5s poll only while a member runs)
 - Marathi UI strings → `apps/web/lib/strings.ts`
 - UI components → `apps/web/components/*` (`ArticleView`, `PosterPanel`,
-  `ProgressSteps`, `FeedbackBox`, `CopyEditForm`, `HistoryCard`, `StatusChip`)
+  `ProgressSteps`, `FeedbackBox`, `CopyEditForm`, `HistoryCard`, `StatusChip`,
+  `GenerationThread` — the runs-from-this-note rail above `NextActions`)
 
 **Data & schema:** `supabase/migrations/0001…0004_*.sql` — pgvector Mahasamvad
 chunks, `generations` table, generation category + chunk style-category columns;
 `0012`/`0013`/`0015` — reference-image library + `reference_types` catalog
 (rotation semantics, exact-image and whole-type generation pins); `0016` —
-`reference_images.layout_spec` (the master's vision-derived layout).
+`reference_images.layout_spec` (the master's vision-derived layout); `0017` —
+generation-thread lineage (`source_generation_id` + denormalized `thread_root_id`;
+detail-page follow-ups link, home-form runs are new roots; served by
+`GET /api/generations/:id/thread`).
 
 **Aux / not on the main request path:**
 - `packages/content-engine/src/finetune/*` — reusable JSONL dataset pipeline

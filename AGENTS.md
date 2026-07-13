@@ -70,6 +70,16 @@ it are implemented and working end-to-end:
   = un-analyzed = the old behaviour, so `analyze:references` must be run after 0016.
   `/references` surfaces each verdict with a re-check and a manual override, because a
   wrong photo-zone reading is otherwise invisible until a poster comes out wrong.
+- **Generation threads** (migration 0017): follow-ups spawned from a run's detail page
+  (the "पुढील पाऊल" cross-format/edit-note actions + failed-run retry) carry
+  `source_generation_id` (direct parent) and `thread_root_id` (denormalized root, computed
+  server-side as `parent.thread_root_id ?? parent.id` so chains stay flat). The home form
+  sends neither — those runs are new roots. `GET /api/generations/:id/thread` returns the
+  whole lineage as summaries (+ `noteChanged` vs the direct source, marking edit-note
+  reruns), and the detail page renders it as a horizontal rail (`GenerationThread`) above
+  the next-step panel — hidden when the run has no follow-ups, polled at 5s only while a
+  member is still running. Lineage is insert-only and deliberately NOT embedded in the
+  detail payload (the 2.5s detail polls stay cheap).
 
 Two n8n workflows are implemented and host-independent for deployment; their master
 templates arrive as immutable `references/library/...` public URLs inside each webhook
