@@ -133,6 +133,9 @@ export const STR = {
   posterFeedbackTargetCopyDesc: 'पोस्टरवरील शब्द / वाक्ये बदलतील (जलद)',
   posterFeedbackTargetScene: 'चित्र बदला',
   posterFeedbackTargetSceneDesc: 'मागील चित्र नव्याने तयार होईल (काही मिनिटे)',
+  posterImageFeedbackTitle: 'चित्रात बदल हवा आहे?',
+  posterImageFeedbackHint:
+    'हवा असलेला दृश्यात्मक बदल स्पष्ट लिहा. प्रत्येक नवीन सूचना सध्याच्या पोस्टरवर लागू होईल; बाकीचे चित्र, मजकूर आणि मांडणी जशीच्या तशी ठेवायची असल्यास तसे नमूद करा.',
   feedbackPlaceholder: 'येथे आपला अभिप्राय लिहा…',
   sendFeedback: 'बदल करा',
   sendingFeedback: 'पाठवत आहोत…',
@@ -231,13 +234,18 @@ export const STR = {
   // Home-page reference picker (pin a specific master template for this run)
   refPickerTitle: 'पोस्टर टेम्पलेट',
   refPickerHint:
-    'सहसा "आपोआप निवड" पुरेशी असते. हवे असल्यास गॅलरीतून ठरावीक टेम्पलेट निवडता येते.',
+    'आपोआप निवड वापरा, संपूर्ण प्रकार निवडा किंवा गॅलरीतून एक ठरावीक टेम्पलेट निवडा.',
   refPickerAuto: 'आपोआप निवड (शिफारस)',
   refPickerAutoDesc: 'विषयानुसार योग्य प्रकार व चित्र मंच स्वतः निवडेल',
-  refPickerOpen: 'टेम्पलेट गॅलरी उघडा',
-  refPickerClose: 'गॅलरी बंद करा',
-  refPickerClear: 'आपोआप करा',
+  refPickerManual: 'स्वतः निवडा',
+  refPickerManualDesc: 'गॅलरीतून ठरावीक टेम्पलेट निवडा',
+  refPickerBadge: 'निवडले',
   refPickerSelected: 'निवडलेले टेम्पलेट',
+  refPickerTypeSelect: 'संपूर्ण प्रकार निवडा',
+  refPickerTypeBadge: 'संपूर्ण प्रकार',
+  refPickerTypeSelected: 'निवडलेला प्रकार',
+  refPickerTypeHint:
+    'हा प्रकार वापरला जाईल; यातील एक चित्र आपोआप (यादृच्छिक) निवडले जाईल.',
   refPickerEmpty:
     'एकही टेम्पलेट चित्र वापरात नाही. "मास्टर टेम्पलेट" पानावर चित्रे सुरू करा.',
   refPickerLoading: 'टेम्पलेट आणत आहोत…',
@@ -266,6 +274,7 @@ export const STEP_LABELS: Record<GenerationStep, string> = {
   revise_article: 'अभिप्रायानुसार लेख सुधारत आहोत…',
   revise_copy: 'अभिप्रायानुसार मजकूर सुधारत आहोत…',
   revise_scene: 'नवीन चित्र तयार करत आहोत…',
+  revise_image: 'चित्र पुन्हा तयार करत आहोत…',
   translate: 'इंग्रजी भाषांतर',
   done: 'पूर्ण झाले',
 };

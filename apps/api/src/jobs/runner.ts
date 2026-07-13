@@ -17,6 +17,7 @@ import {
   pickArticleReferenceUrl,
   recordImageCost,
   resolvePinnedReference,
+  resolvePinnedTypeReference,
   reviseArticle,
   reviseCopy,
   reviseSceneBrief,
@@ -38,9 +39,11 @@ import {
   insertGlossaryCandidates,
   insertRevision,
   listRevisions,
+  publicUrl,
   updateGeneration,
   uploadPng,
   downloadPng,
+  type GenerationCostIncrement,
   type GenerationRow,
   type SupabaseClient,
 } from '@dgipr/database';
@@ -48,8 +51,24 @@ import { CopySchema, type Copy } from '@dgipr/schemas';
 
 const running = new Set<string>();
 
+// Translation is the one job that may run *alongside* another job on the same
+// generation: the article is final and persisted before the poster phase starts, so
+// the user can ask for English while the poster is still rendering. It therefore
+// cannot use the row's status/step/error — those belong to the main job — and keeps
+// its liveness + last failure here instead. The detail route reports both to the UI.
+const translating = new Set<string>();
+const translateErrors = new Map<string, string>();
+
 export function isJobRunning(id: string): boolean {
   return running.has(id);
+}
+
+export function isTranslating(id: string): boolean {
+  return translating.has(id);
+}
+
+export function getTranslateError(id: string): string | null {
+  return translateErrors.get(id) ?? null;
 }
 
 function requireEnv(name: string): string {
@@ -100,6 +119,30 @@ function imageQuality(): ImageQuality {
   return q === 'high' || q === 'low' ? q : 'medium';
 }
 
+// addGenerationCost is a read-modify-write on cost_usd/cost_breakdown. A translate
+// job can finish at the same moment as the main job it runs beside, so chain the
+// writers per generation to keep the additive total from losing an update.
+const costChain = new Map<string, Promise<void>>();
+
+async function persistCost(
+  client: SupabaseClient,
+  id: string,
+  cost: GenerationCostIncrement,
+): Promise<void> {
+  const previous = costChain.get(id) ?? Promise.resolve();
+  const write = previous
+    .catch(() => undefined)
+    .then(() => addGenerationCost(client, id, cost));
+  const guarded = write.catch(() => undefined);
+  costChain.set(id, guarded);
+  try {
+    await write;
+  } finally {
+    // Drop the entry once nothing else has queued behind this write.
+    if (costChain.get(id) === guarded) costChain.delete(id);
+  }
+}
+
 // Wrap a job body with the shared bookkeeping: claim the id, flip the row to
 // running, persist completed/failed, always release the id.
 function runJob(
@@ -134,7 +177,7 @@ function runJob(
       // even on failure — a failed run still spent tokens. Best-effort: a cost-write
       // failure must not mask the job's own outcome.
       try {
-        await addGenerationCost(client, id, cost);
+        await persistCost(client, id, cost);
       } catch (costError) {
         console.error(`[job ${id}] could not persist cost:`, costError);
       }
@@ -238,6 +281,9 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
       ? await resolvePinnedReference(client, row.referenceImageId)
       : null;
     const referenceUrl = pinned?.url ?? (await pickArticleReferenceUrl(client));
+    console.log(
+      `[job ${id}] article poster reference: ${JSON.stringify({ id, referenceImageId: row.referenceImageId, pinned: Boolean(pinned), referenceUrl })}`,
+    );
     const posterPng = await renderArticlePosterViaN8n(id, copy, referenceUrl);
     // Image is painted inside n8n (gpt-image-2 @ 1536x1024); attribute the fixed tier price.
     recordImageCost('article', imageQuality());
@@ -270,6 +316,7 @@ async function renderArticlePosterViaN8n(
   id: string,
   copy: Copy,
   referenceUrl: string,
+  imageFeedback = '',
 ): Promise<Buffer> {
   const webhookUrl = requireEnv('N8N_ARTICLE_POSTER_WEBHOOK_URL');
   const webhookSecret = process.env.N8N_WEBHOOK_SECRET;
@@ -290,6 +337,7 @@ async function renderArticlePosterViaN8n(
       scene_brief: copy.scene_brief,
       generation_id: id,
       reference_url: referenceUrl,
+      image_feedback: imageFeedback,
     }),
     signal: AbortSignal.timeout(420_000),
   });
@@ -314,6 +362,54 @@ type SocialPostResult = {
   caption?: string;
   poster_png_base64?: string;
 };
+
+// Re-edit a completed Twitter poster without rerunning classify/copy/caption.
+// The workflow's dedicated feedback branch accepts only the latest poster URL
+// plus the user's requested visual change and returns a replacement PNG.
+async function renderSocialPosterFeedbackViaN8n(
+  id: string,
+  currentPosterUrl: string,
+  feedback: string,
+): Promise<Buffer> {
+  const webhookUrl = requireEnv('N8N_SOCIAL_POST_WEBHOOK_URL');
+  const webhookSecret = process.env.N8N_WEBHOOK_SECRET;
+
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+  };
+  if (webhookSecret) headers['x-n8n-webhook-secret'] = webhookSecret;
+
+  const response = await fetch(webhookUrl, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      generation_id: id,
+      image_feedback: feedback,
+      current_poster_url: currentPosterUrl,
+      // Always-present placeholders keep the shared Set node deterministic;
+      // the feedback branch bypasses every consumer of these initial-run fields.
+      meeting_notes: '',
+      design_mode: 'onbrand',
+      progress_url: '',
+      types: [],
+      forced_type: '',
+      forced_reference_url: '',
+    }),
+    signal: AbortSignal.timeout(420_000),
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw new Error(
+      `n8n social-poster feedback webhook failed (${response.status}): ${detail.slice(0, 500)}`,
+    );
+  }
+
+  const result = (await response.json()) as SocialPostResult;
+  if (!result.poster_png_base64) {
+    throw new Error('n8n social-poster feedback webhook returned no poster.');
+  }
+  return Buffer.from(result.poster_png_base64, 'base64');
+}
 
 // Twitter pipeline: the heavy lifting (classify → copy → image → caption) runs in the
 // external n8n `social-post-v2-api` workflow. This job is a thin orchestrator — it
@@ -342,8 +438,15 @@ export function startSocialPostJob(client: SupabaseClient, id: string): void {
     // uniformly. A pin forces the type + master and skips classification.
     const pinned: PinnedReference | null = row.referenceImageId
       ? await resolvePinnedReference(client, row.referenceImageId)
-      : null;
+      : row.referenceTypeId
+        ? await resolvePinnedTypeReference(client, row.referenceTypeId)
+        : null;
     const types = await buildTwitterCatalog(client, pinned ?? undefined);
+    const forcedType = pinned?.subtype ?? '';
+    const forcedReferenceUrl = pinned?.url ?? '';
+    console.log(
+      `[job ${id}] social poster reference: ${JSON.stringify({ id, referenceImageId: row.referenceImageId, referenceTypeId: row.referenceTypeId, forced_type: forcedType, forced_reference_url: forcedReferenceUrl })}`,
+    );
 
     const headers: Record<string, string> = {
       'content-type': 'application/json',
@@ -362,8 +465,8 @@ export function startSocialPostJob(client: SupabaseClient, id: string): void {
         types,
         // Always-present strings (empty = not pinned) so the workflow's IF node
         // sees a definite value.
-        forced_type: pinned?.subtype ?? '',
-        forced_reference_url: pinned?.url ?? '',
+        forced_type: forcedType,
+        forced_reference_url: forcedReferenceUrl,
       }),
       signal: AbortSignal.timeout(420_000),
     });
@@ -441,51 +544,71 @@ export function startArticleFeedbackJob(
   });
 }
 
-// On-demand English translation of a completed article. Runs the glossary-locked
-// Sarvam translation (verified proper-noun mappings present in this article are
-// passed as LOCKED TERMS so a known name is never mistranslated) and persists the
-// result to articleEnglish. The Marathi article is never mutated. Candidate mining
-// grows the review queue but must never fail the translation.
+// On-demand English translation of an article. Runs the glossary-locked Sarvam
+// translation (verified proper-noun mappings present in this article are passed as
+// LOCKED TERMS so a known name is never mistranslated) and persists the result to
+// articleEnglish. The Marathi article is never mutated. Candidate mining grows the
+// review queue but must never fail the translation.
+//
+// Deliberately NOT wrapped in runJob: this is the one job that may run beside
+// another (the poster render, which is still in flight when the article first
+// appears on screen), so it must not claim `running` or write status/step/error —
+// setting status='completed' here would end the poster run's polling, and
+// status='failed' would erase a perfectly good poster job. It reports itself
+// through the `translating` set + `translateErrors` map instead.
 export function startTranslateJob(client: SupabaseClient, id: string): void {
-  runJob(client, id, async () => {
-    const row = await getGeneration(client, id);
-    if (!row) throw new Error(`Generation ${id} not found.`);
-    if (!row.article) throw new Error(`Generation ${id} has no article yet.`);
-
-    await updateGeneration(client, id, {
-      status: 'running',
-      step: 'translate',
-      error: null,
-    });
-
-    // Verified glossary terms whose Marathi form appears in this article become the
-    // LOCKED TERMS table the translator must reuse verbatim.
-    const terms = await findGlossaryTermsInText(client, row.article);
-    const glossary = terms.map((t) => ({
-      marathi: t.marathi,
-      english: t.english,
-    }));
-
-    const english = await translateArticleToEnglish(row.article, glossary);
-    await updateGeneration(client, id, { articleEnglish: english });
-
-    // Grow the review queue: auto-mine proper nouns → unverified candidates. The
-    // upsert ignores duplicates, so verified/human-edited rows are never clobbered.
-    // Best-effort — a mining failure must not fail an already-persisted translation.
+  translating.add(id);
+  translateErrors.delete(id);
+  void (async () => {
+    const cost = createCostAccumulator();
     try {
-      const candidates = await extractGlossaryCandidates(row.article);
-      await insertGlossaryCandidates(
-        client,
-        candidates.map((c) => ({
-          ...c,
-          source: 'auto' as const,
-          verified: false,
-        })),
-      );
+      await runInCostScope(cost, async () => {
+        const row = await getGeneration(client, id);
+        if (!row) throw new Error(`Generation ${id} not found.`);
+        if (!row.article)
+          throw new Error(`Generation ${id} has no article yet.`);
+
+        // Verified glossary terms whose Marathi form appears in this article become
+        // the LOCKED TERMS table the translator must reuse verbatim.
+        const terms = await findGlossaryTermsInText(client, row.article);
+        const glossary = terms.map((t) => ({
+          marathi: t.marathi,
+          english: t.english,
+        }));
+
+        const english = await translateArticleToEnglish(row.article, glossary);
+        await updateGeneration(client, id, { articleEnglish: english });
+
+        // Grow the review queue: auto-mine proper nouns → unverified candidates. The
+        // upsert ignores duplicates, so verified/human-edited rows are never
+        // clobbered. Best-effort — a mining failure must not fail an already-persisted
+        // translation.
+        try {
+          const candidates = await extractGlossaryCandidates(row.article);
+          await insertGlossaryCandidates(
+            client,
+            candidates.map((c) => ({
+              ...c,
+              source: 'auto' as const,
+              verified: false,
+            })),
+          );
+        } catch (error) {
+          console.error(`[translate ${id}] candidate mining failed:`, error);
+        }
+      });
     } catch (error) {
-      console.error(`[translate ${id}] candidate mining failed:`, error);
+      console.error(`[translate ${id}] failed:`, error);
+      translateErrors.set(id, errorMessage(error));
+    } finally {
+      try {
+        await persistCost(client, id, cost);
+      } catch (costError) {
+        console.error(`[translate ${id}] could not persist cost:`, costError);
+      }
+      translating.delete(id);
     }
-  });
+  })();
 }
 
 // Feedback loop for the poster. target 'copy' revises the Marathi text and
@@ -570,6 +693,61 @@ export function startPosterFeedbackJob(
       copy: revisedCopy,
       scenePrompt,
       scenePath: sceneObjectPath,
+      posterPath: posterObjectPath,
+    });
+  });
+}
+
+// Pixel-level poster feedback for the default n8n render paths. Each request
+// edits the latest persisted poster, so multiple revisions build on one another.
+// The caption/article and structured copy remain unchanged.
+export function startPosterImageFeedbackJob(
+  client: SupabaseClient,
+  id: string,
+  feedback: string,
+): void {
+  runJob(client, id, async () => {
+    const row = await getGeneration(client, id);
+    if (!row) throw new Error(`Generation ${id} not found.`);
+    if (!row.posterPath) {
+      throw new Error(`Generation ${id} has no poster yet.`);
+    }
+
+    await updateGeneration(client, id, {
+      status: 'running',
+      step: 'revise_image',
+      error: null,
+    });
+
+    const currentPosterUrl = publicUrl(client, row.posterPath);
+    const version = await nextVersion(client, id);
+    let posterPng: Buffer;
+
+    if (row.category === 'twitter') {
+      posterPng = await renderSocialPosterFeedbackViaN8n(
+        id,
+        currentPosterUrl,
+        feedback,
+      );
+      recordImageCost('twitter', imageQuality());
+    } else {
+      const copy = requireCopy(row);
+      posterPng = await renderArticlePosterViaN8n(
+        id,
+        copy,
+        currentPosterUrl,
+        feedback,
+      );
+      recordImageCost('article', imageQuality());
+    }
+
+    const posterObjectPath = posterPath(id, version);
+    await uploadPng(client, posterObjectPath, posterPng);
+    await updateGeneration(client, id, { posterPath: posterObjectPath });
+    await insertRevision(client, {
+      generationId: id,
+      target: 'poster_image',
+      feedback,
       posterPath: posterObjectPath,
     });
   });

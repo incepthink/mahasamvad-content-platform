@@ -10,10 +10,7 @@
         "path": "dgipr-social-post",
         "responseMode": "responseNode"
       },
-      "position": [
-        -240,
-        0
-      ],
+      "position": [-240, 0],
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
       "webhookId": "b1c2d3e4-0002-4abc-8def-000000000002"
@@ -65,6 +62,18 @@
               "name": "forced_reference_url",
               "type": "string",
               "value": "={{ $json.body.forced_reference_url }}"
+            },
+            {
+              "id": "a8",
+              "name": "image_feedback",
+              "type": "string",
+              "value": "={{ $json.body.image_feedback }}"
+            },
+            {
+              "id": "a9",
+              "name": "current_poster_url",
+              "type": "string",
+              "value": "={{ $json.body.current_poster_url }}"
             }
           ]
         },
@@ -72,12 +81,39 @@
         "mode": "manual",
         "options": {}
       },
-      "position": [
-        -20,
-        0
-      ],
+      "position": [-20, 0],
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4
+    },
+    {
+      "id": "f1",
+      "name": "IF Image Feedback",
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "cond-image-feedback-1",
+              "leftValue": "={{ $json.image_feedback }}",
+              "operator": {
+                "operation": "notEmpty",
+                "type": "string",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          }
+        }
+      },
+      "position": [180, -360],
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2
     },
     {
       "id": "n1f",
@@ -105,10 +141,7 @@
           }
         }
       },
-      "position": [
-        180,
-        0
-      ],
+      "position": [180, 0],
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2
     },
@@ -120,10 +153,7 @@
         "language": "javaScript",
         "mode": "runOnceForAllItems"
       },
-      "position": [
-        400,
-        -160
-      ],
+      "position": [400, -160],
       "type": "n8n-nodes-base.code",
       "typeVersion": 2
     },
@@ -149,10 +179,7 @@
         "specifyBody": "json",
         "url": "https://api.openai.com/v1/chat/completions"
       },
-      "position": [
-        620,
-        -160
-      ],
+      "position": [620, -160],
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4
     },
@@ -170,10 +197,7 @@
         "specifyBody": "json",
         "url": "={{ $('DGIPR Post Form').first().json.progress_url }}"
       },
-      "position": [
-        620,
-        60
-      ],
+      "position": [620, 60],
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "onError": "continueRegularOutput"
@@ -186,10 +210,7 @@
         "language": "javaScript",
         "mode": "runOnceForAllItems"
       },
-      "position": [
-        640,
-        0
-      ],
+      "position": [640, 0],
       "type": "n8n-nodes-base.code",
       "typeVersion": 2
     },
@@ -215,10 +236,7 @@
         "specifyBody": "json",
         "url": "https://api.openai.com/v1/chat/completions"
       },
-      "position": [
-        860,
-        0
-      ],
+      "position": [860, 0],
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4
     },
@@ -236,10 +254,7 @@
         "specifyBody": "json",
         "url": "={{ $('DGIPR Post Form').first().json.progress_url }}"
       },
-      "position": [
-        860,
-        220
-      ],
+      "position": [860, 220],
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "onError": "continueRegularOutput"
@@ -252,10 +267,7 @@
         "language": "javaScript",
         "mode": "runOnceForAllItems"
       },
-      "position": [
-        1080,
-        0
-      ],
+      "position": [1080, 0],
       "type": "n8n-nodes-base.code",
       "typeVersion": 2
     },
@@ -284,10 +296,7 @@
           }
         }
       },
-      "position": [
-        1300,
-        0
-      ],
+      "position": [1300, 0],
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2
     },
@@ -313,10 +322,7 @@
         "specifyBody": "json",
         "url": "https://api.openai.com/v1/images/generations"
       },
-      "position": [
-        1520,
-        -140
-      ],
+      "position": [1520, -140],
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4
     },
@@ -336,10 +342,7 @@
           "timeout": 30000
         }
       },
-      "position": [
-        1520,
-        160
-      ],
+      "position": [1520, 160],
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4
     },
@@ -397,10 +400,7 @@
         "sendBody": true,
         "url": "https://api.openai.com/v1/images/edits"
       },
-      "position": [
-        1740,
-        160
-      ],
+      "position": [1740, 160],
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4
     },
@@ -412,10 +412,7 @@
         "language": "javaScript",
         "mode": "runOnceForAllItems"
       },
-      "position": [
-        1960,
-        0
-      ],
+      "position": [1960, 0],
       "type": "n8n-nodes-base.code",
       "typeVersion": 2
     },
@@ -433,10 +430,7 @@
         "specifyBody": "json",
         "url": "={{ $('DGIPR Post Form').first().json.progress_url }}"
       },
-      "position": [
-        1960,
-        220
-      ],
+      "position": [1960, 220],
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "onError": "continueRegularOutput"
@@ -449,10 +443,7 @@
         "language": "javaScript",
         "mode": "runOnceForAllItems"
       },
-      "position": [
-        2180,
-        0
-      ],
+      "position": [2180, 0],
       "type": "n8n-nodes-base.code",
       "typeVersion": 2
     },
@@ -478,10 +469,7 @@
         "specifyBody": "json",
         "url": "https://api.openai.com/v1/chat/completions"
       },
-      "position": [
-        2400,
-        0
-      ],
+      "position": [2400, 0],
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4
     },
@@ -493,10 +481,7 @@
         "language": "javaScript",
         "mode": "runOnceForAllItems"
       },
-      "position": [
-        2620,
-        0
-      ],
+      "position": [2620, 0],
       "type": "n8n-nodes-base.code",
       "typeVersion": 2
     },
@@ -514,13 +499,112 @@
         "specifyBody": "json",
         "url": "={{ $('DGIPR Post Form').first().json.progress_url }}"
       },
-      "position": [
-        2820,
-        0
-      ],
+      "position": [2820, 0],
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "onError": "continueRegularOutput"
+    },
+    {
+      "id": "f2",
+      "name": "Build Feedback Prompt",
+      "parameters": {
+        "jsCode": "// Pixel-level revisions edit the latest finished poster and deliberately bypass\n// classify, copy, image-copy composition, and caption. Image edits regenerate the\n// full canvas, so preservation of unrequested Devanagari text is best-effort.\nconst src = $input.first().json;\nconst imageFeedback = (src.image_feedback || '').toString().trim();\nconst currentPosterUrl = (src.current_poster_url || '').toString().trim();\nif (!imageFeedback) { throw new Error('No \"image_feedback\" received in the webhook body.'); }\nif (!currentPosterUrl) { throw new Error('No \"current_poster_url\" received in the webhook body.'); }\n\nconst prompt = [\n  'You are editing an existing finished DGIPR Maharashtra government social-media poster provided as the input image: a single 4:5 portrait poster.',\n  'Apply ONLY this requested change: «' + imageFeedback + '».',\n  'Keep the exact layout, Government of Maharashtra emblem, DGIPR branding, existing Marathi text and figures, footer band and its text, social-handle strip, colours, typography, and imagery unchanged except where the requested change explicitly requires it.',\n  'Add no new text, letters, numbers, captions, logos, borders, or decorative elements. Preserve all existing Devanagari text exactly. Output ONE complete 4:5 portrait poster filling the canvas.',\n].join('\\n');\n\nreturn [{ json: { prompt, currentPosterUrl } }];\n",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      },
+      "position": [400, -460],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2
+    },
+    {
+      "id": "f3",
+      "name": "Read Current Poster",
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.currentPosterUrl }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "master"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "position": [620, -460],
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4
+    },
+    {
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "eFTnHTRa1l1U4ukJ",
+          "name": "OpenAI Bearer (DGIPR)"
+        }
+      },
+      "id": "f4",
+      "name": "Edit Feedback Image",
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "inputDataFieldName": "master",
+              "name": "image",
+              "parameterType": "formBinaryData"
+            },
+            {
+              "name": "model",
+              "parameterType": "formData",
+              "value": "gpt-image-2"
+            },
+            {
+              "name": "prompt",
+              "parameterType": "formData",
+              "value": "={{ $('Build Feedback Prompt').first().json.prompt }}"
+            },
+            {
+              "name": "size",
+              "parameterType": "formData",
+              "value": "1280x1600"
+            },
+            {
+              "name": "quality",
+              "parameterType": "formData",
+              "value": "medium"
+            },
+            {
+              "name": "n",
+              "parameterType": "formData",
+              "value": "1"
+            }
+          ]
+        },
+        "contentType": "multipart-form-data",
+        "genericAuthType": "httpHeaderAuth",
+        "method": "POST",
+        "options": {
+          "timeout": 360000
+        },
+        "sendBody": true,
+        "url": "https://api.openai.com/v1/images/edits"
+      },
+      "position": [840, -460],
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4
+    },
+    {
+      "id": "f5",
+      "name": "Respond Feedback",
+      "parameters": {
+        "options": {},
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ poster_png_base64: $json.data[0].b64_json }) }}"
+      },
+      "position": [1060, -460],
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5
     },
     {
       "id": "r1",
@@ -530,10 +614,7 @@
         "respondWith": "json",
         "responseBody": "={{ JSON.stringify({ post_type: $('Decode Image').first().json.post_type, title: $('Decode Image').first().json.title, caption: $('Make Caption File').first().json.caption, poster_png_base64: $('Decode Image').first().json.b64 }) }}"
       },
-      "position": [
-        3040,
-        0
-      ],
+      "position": [3040, 0],
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.5
     }
@@ -604,7 +685,58 @@
         [
           {
             "index": 0,
+            "node": "IF Image Feedback",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "IF Image Feedback": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Build Feedback Prompt",
+            "type": "main"
+          }
+        ],
+        [
+          {
+            "index": 0,
             "node": "IF Forced Type",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Build Feedback Prompt": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Read Current Poster",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Read Current Poster": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Edit Feedback Image",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Edit Feedback Image": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Respond Feedback",
             "type": "main"
           }
         ]

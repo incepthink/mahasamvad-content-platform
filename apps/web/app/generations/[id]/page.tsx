@@ -63,20 +63,22 @@ export default function GenerationDetailPage({
   // poster-affecting steps so an article-only revision still shows ProgressSteps.
   const posterBusy =
     !!detail.posterUrl &&
+    (detail.status === 'queued' || detail.status === 'running') &&
     (detail.step === 'revise_copy' ||
       detail.step === 'revise_scene' ||
+      detail.step === 'revise_image' ||
       detail.step === 'scene' ||
       detail.step === 'render');
 
-  // An on-demand English translation runs against a completed article; keep the
-  // finished article on screen (ArticleView shows its own inline indicator)
-  // instead of swapping to the step list, mirroring the poster-busy pattern.
-  const articleBusy = !!detail.article && detail.step === 'translate';
+  // A translation no longer takes over the row's status/step (it can run beside the
+  // poster render), so it needs no branch here: the article card stays mounted by
+  // whichever state is already true — completed, or the poster phases below — and
+  // ArticleView shows its own inline indicator from `detail.translating`.
 
   // First-run poster phase: the article is already persisted (runner saves it
   // before the poster steps), so show it early with a poster skeleton instead
-  // of the step list. Step-scoped so revise_article/translate runs keep their
-  // existing paths; posterBusy can't overlap because it requires posterUrl.
+  // of the step list. Step-scoped so a revise_article run keeps its existing
+  // path; posterBusy can't overlap because it requires posterUrl.
   const posterPending =
     detail.category !== 'twitter' &&
     detail.outputType !== 'article' &&
@@ -109,7 +111,6 @@ export default function GenerationDetailPage({
 
       {(detail.status === 'queued' || detail.status === 'running') &&
         !posterBusy &&
-        !articleBusy &&
         !posterPending &&
         (detail.category === 'twitter' ? (
           <section className="card" aria-live="polite">
@@ -137,13 +138,17 @@ export default function GenerationDetailPage({
 
       {(detail.status === 'completed' ||
         posterBusy ||
-        articleBusy ||
         posterPending ||
         // A poster-phase failure must not hide an already-good article: keep
         // the failed card above and the article content below it.
         (detail.status === 'failed' && !!detail.article)) &&
         (detail.category === 'twitter' ? (
-          <SocialPostView detail={detail} onRegenerate={retry} />
+          <SocialPostView
+            detail={detail}
+            onRegenerate={retry}
+            onChanged={refresh}
+            busy={posterBusy}
+          />
         ) : (
           <>
             {detail.fiveWOneH ? <FiveWOneHView detail={detail} /> : null}

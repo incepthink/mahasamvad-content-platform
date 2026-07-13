@@ -31,16 +31,17 @@ export function ArticleView({
   const shown = showEnglish ? english! : marathi;
   const langSuffix = showEnglish ? 'en' : 'mr';
 
-  // The translate job flips the row to running/step 'translate'; the detail page
-  // keeps this card mounted for that step so we can show an inline indicator.
-  const translating =
-    detail.status === 'running' && detail.step === 'translate';
+  // The translate job runs beside whatever else is in flight and reports itself on
+  // the detail payload rather than through status/step, so this stays accurate while
+  // the poster is still rendering. A background failure arrives the same way.
+  const translating = detail.translating;
+  const error = translateError ?? detail.translateError;
 
-  // The article is now shown while the poster phase still runs; feedback and
-  // translate would 409 against the API's isJobRunning guard, so hold them back
-  // until the job settles. Copy/download stay usable.
-  const jobActive =
-    detail.status === 'running' || detail.status === 'queued';
+  // The article is shown while the poster phase still runs. Article feedback would
+  // rewrite the article the poster's copy was derived from (and 409 against the API's
+  // isJobRunning guard), so it waits for the job to settle. Translation doesn't — it
+  // only reads the finished article — so it is offered right away.
+  const jobActive = detail.status === 'running' || detail.status === 'queued';
 
   const copyToClipboard = async () => {
     await navigator.clipboard.writeText(shown);
@@ -131,14 +132,14 @@ export function ArticleView({
               type="button"
               className="btn"
               onClick={translate}
-              disabled={requesting || jobActive}
+              disabled={requesting}
             >
               {requesting ? STR.translating : STR.translateToEnglish}
             </button>
           ))}
       </div>
 
-      {translateError ? <p className="form-error">{translateError}</p> : null}
+      {error ? <p className="form-error">{error}</p> : null}
 
       {detail.factCheck ? (
         <details className="fold">

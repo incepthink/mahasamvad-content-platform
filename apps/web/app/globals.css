@@ -352,6 +352,11 @@ textarea.note-input {
   margin-top: 8px;
 }
 
+/* Same cards, two choices (e.g. the poster-template auto/manual switch). */
+.output-picker-two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .output-option {
   border: 2px solid var(--border);
   border-radius: 16px;
@@ -878,6 +883,14 @@ details.fold .fold-body {
   font-size: 0.95rem;
 }
 
+details.fold[aria-disabled='true'] {
+  opacity: 0.72;
+}
+
+details.fold[aria-disabled='true'] summary {
+  cursor: default;
+}
+
 /* ---------- poster panel ---------- */
 
 .poster-layout {
@@ -914,6 +927,15 @@ details.fold .fold-body {
   width: 44px;
   height: 44px;
   border-width: 4px;
+}
+
+.poster-feedback {
+  margin-top: 18px;
+}
+
+.poster-feedback details.fold {
+  margin-top: 0;
+  background: var(--bg-accent);
 }
 
 /* Poster placeholder while the render is still in flight: landscape 3:2 box
@@ -1458,14 +1480,24 @@ textarea.ref-desc-input {
   box-shadow: 0 0 0 2px var(--ok-soft);
 }
 
+/* Reserve the master's box so the grid never jumps as bitmaps decode. */
 .ref-thumb-frame {
   position: relative;
 }
 
+.ref-thumb-frame-twitter {
+  aspect-ratio: 4 / 5; /* 1280x1600 masters */
+}
+
+.ref-thumb-frame-article {
+  aspect-ratio: 3 / 2; /* 1536x1024 masters */
+}
+
 .ref-thumb img {
   width: 100%;
-  height: auto;
+  height: 100%;
   display: block;
+  object-fit: contain;
 }
 
 /* Enabled badge sits ON the image so status reads at a glance while scanning. */
@@ -1578,60 +1610,9 @@ textarea.ref-desc-input {
 
 /* ---------- home-page reference picker ---------- */
 
-.ref-picker-toprow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-top: 14px;
-}
-
-/* The default state: mirrors a selected .output-option so "auto" reads as the
-   current choice, not as an unset field. */
-.ref-picker-auto {
-  display: inline-flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 18px;
-  border: 2px solid var(--accent);
-  border-radius: 16px;
-  background: var(--accent-soft);
-  min-width: 0;
-}
-
-.ref-picker-auto-icon {
-  display: grid;
-  place-items: center;
-  color: var(--accent);
-  flex-shrink: 0;
-}
-
-.ref-picker-auto-text {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.ref-picker-auto-text .name {
-  font-weight: 700;
-}
-
-.ref-picker-auto-text .desc {
-  color: var(--muted);
-  font-size: 0.82rem;
-}
-
-.ref-picker-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  flex-shrink: 0;
-}
-
-/* Pinned summary: thumbnail + type label + clear-back-to-auto. */
+/* Pinned summary: thumbnail + type label, above the gallery grid. */
 .ref-picker-selected {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 14px;
   padding: 10px 14px;
@@ -1639,7 +1620,6 @@ textarea.ref-desc-input {
   border-radius: 16px;
   background: var(--accent-soft);
   min-width: 0;
-  flex: 1;
 }
 
 .ref-picker-selected img {
@@ -1669,12 +1649,27 @@ textarea.ref-desc-input {
   line-height: 1.45;
 }
 
-.ref-picker-selected .btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+.ref-picker-selected-type-icon {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 12px;
+  color: var(--accent);
+  background: #fff;
+  border: 1px solid var(--border);
   flex-shrink: 0;
-  margin-left: auto;
+}
+
+.ref-picker-selected-count {
+  width: fit-content;
+  margin-top: 3px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  color: var(--accent-dark);
+  background: #fff;
+  font-size: 0.74rem;
+  font-weight: 700;
 }
 
 .ref-picker-gallery {
@@ -1694,11 +1689,49 @@ textarea.ref-desc-input {
   margin: 0;
 }
 
-.ref-picker-group-title {
+.ref-picker-group-header {
+  width: 100%;
   margin: 0 0 10px;
+  padding: 9px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--accent-dark);
+  background: var(--bg-accent);
+  cursor: pointer;
+  text-align: left;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.ref-picker-group-header:hover {
+  border-color: var(--accent);
+}
+
+.ref-picker-group-header[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.ref-picker-group-title {
   font-size: 0.95rem;
   font-weight: 700;
-  color: var(--accent-dark);
+}
+
+.ref-picker-group-action {
+  flex-shrink: 0;
+  padding: 3px 9px;
+  border-radius: 999px;
+  color: var(--accent);
+  background: #fff;
+  font-size: 0.74rem;
+  font-weight: 700;
 }
 
 .ref-picker-grid {
@@ -1713,6 +1746,7 @@ textarea.ref-desc-input {
 }
 
 .ref-picker-thumb {
+  position: relative;
   padding: 0;
   overflow: hidden;
   border: 2px solid var(--border);
@@ -1725,8 +1759,17 @@ textarea.ref-desc-input {
     box-shadow 0.15s ease;
 }
 
+/* Reserve the master's box so a tile never resizes when its bitmap decodes. */
+.ref-picker-thumb-twitter {
+  aspect-ratio: 4 / 5; /* 1280x1600 masters */
+}
+
+.ref-picker-thumb-article {
+  aspect-ratio: 3 / 2; /* 1536x1024 masters */
+}
+
+/* Hover lifts but does NOT paint the accent border — that border means selected. */
 .ref-picker-thumb:hover {
-  border-color: var(--accent);
   transform: translateY(-2px);
   box-shadow: 0 8px 24px rgba(61, 42, 26, 0.14);
 }
@@ -1739,8 +1782,28 @@ textarea.ref-desc-input {
 
 .ref-picker-thumb img {
   width: 100%;
-  height: auto;
+  height: 100%;
   display: block;
+  object-fit: contain; /* contain, not cover: an off-spec upload letterboxes, never crops */
+}
+
+.ref-picker-thumb-skeleton {
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+}
+
+.ref-picker-thumb-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
 }
 
 /* ---------- responsive ---------- */
@@ -1786,15 +1849,6 @@ textarea.ref-desc-input {
 
   .card {
     padding: 20px;
-  }
-
-  .ref-picker-toprow {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .ref-picker-toggle {
-    justify-content: center;
   }
 
   .ref-picker-selected {

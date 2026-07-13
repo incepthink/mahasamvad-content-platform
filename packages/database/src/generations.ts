@@ -11,7 +11,7 @@ export type Category = 'news' | 'scheme' | 'twitter';
 export type DesignMode = 'onbrand' | 'adaptive' | 'fresh';
 export type GenerationStatus = 'queued' | 'running' | 'completed' | 'failed';
 export type RevisionTarget =
-  'article' | 'poster_copy' | 'poster_scene' | 'manual_copy';
+  'article' | 'poster_copy' | 'poster_scene' | 'manual_copy' | 'poster_image';
 
 // One row in generations. `copy` stays `unknown` here — the database package does
 // not depend on the Copy schema; callers validate with CopySchema when needed.
@@ -25,6 +25,9 @@ export type GenerationRow = Readonly<{
   // Optional pin: the exact reference image the run was asked to use (null =
   // automatic rotation; the FK sets null if the image is later deleted).
   referenceImageId: string | null;
+  // Optional Twitter section pin: force this reference type while choosing one
+  // of its enabled images at job start. The FK sets null if the type is deleted.
+  referenceTypeId: string | null;
   status: GenerationStatus;
   step: string | null;
   error: string | null;
@@ -84,6 +87,7 @@ type GenerationDbRow = {
   design_mode: string | null;
   heading: string | null;
   reference_image_id: string | null;
+  reference_type_id: string | null;
   status: GenerationStatus;
   step: string | null;
   error: string | null;
@@ -113,6 +117,7 @@ function fromDbRow(row: GenerationDbRow): GenerationRow {
     designMode: row.design_mode as DesignMode | null,
     heading: row.heading,
     referenceImageId: row.reference_image_id,
+    referenceTypeId: row.reference_type_id,
     status: row.status,
     step: row.step,
     error: row.error,
@@ -188,6 +193,7 @@ export async function insertGeneration(
     heading?: string | undefined;
     // Insert-only (not in GenerationPatch): a pin never changes after creation.
     referenceImageId?: string | undefined;
+    referenceTypeId?: string | undefined;
   }>,
 ): Promise<GenerationRow> {
   const { data, error } = await client
@@ -199,6 +205,7 @@ export async function insertGeneration(
       design_mode: input.designMode ?? null,
       heading: input.heading ?? null,
       reference_image_id: input.referenceImageId ?? null,
+      reference_type_id: input.referenceTypeId ?? null,
     })
     .select()
     .single();

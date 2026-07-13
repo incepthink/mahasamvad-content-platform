@@ -6,6 +6,7 @@ import { z } from 'zod';
 import {
   getGeneration,
   getReferenceImageRow,
+  getReferenceTypeRow,
   insertGeneration,
   insertRevision,
   listGenerations,
@@ -25,16 +26,20 @@ import {
   FiveWOneHSchema,
   GenerationStepSchema,
   PosterFeedbackRequestSchema,
+  PosterImageFeedbackRequestSchema,
   UpdateCopyRequestSchema,
   type GenerationDetail,
   type GenerationStep,
   type GenerationSummary,
 } from '@dgipr/schemas';
 import {
+  getTranslateError,
   isJobRunning,
+  isTranslating,
   startArticleFeedbackJob,
   startGenerationJob,
   startPosterFeedbackJob,
+  startPosterImageFeedbackJob,
   startSocialPostJob,
   startTranslateJob,
 } from '../jobs/runner.js';
@@ -90,6 +95,7 @@ async function toDetail(
     designMode: row.designMode,
     heading: row.heading,
     referenceImageId: row.referenceImageId,
+    referenceTypeId: row.referenceTypeId,
     note: row.note,
     article: row.article,
     articleEnglish: row.articleEnglish,
@@ -99,6 +105,10 @@ async function toDetail(
     posterUrl: row.posterPath ? publicUrl(client, row.posterPath) : null,
     sceneUrl: row.scenePath ? publicUrl(client, row.scenePath) : null,
     error: row.error,
+    // Translation runs beside the main job, so its state lives in the runner's
+    // in-process registry rather than on the row (see startTranslateJob).
+    translating: isTranslating(row.id),
+    translateError: getTranslateError(row.id),
     costUsd: row.costUsd,
     costBreakdown: row.costBreakdown ?? null,
     createdAt: row.createdAt,
@@ -144,6 +154,21 @@ export function registerGenerationRoutes(
         });
       }
     }
+    if (body.referenceTypeId) {
+      if (body.category !== 'twitter') {
+        return reply.code(400).send({
+          error: {
+            message: 'A reference type can only be pinned for a Twitter run.',
+          },
+        });
+      }
+      const type = await getReferenceTypeRow(client, body.referenceTypeId);
+      if (!type || type.category !== 'twitter') {
+        return reply.code(400).send({
+          error: { message: 'Unknown or mismatched reference type.' },
+        });
+      }
+    }
     const row = await insertGeneration(client, {
       note: body.note,
       outputType: body.outputType,
@@ -151,6 +176,7 @@ export function registerGenerationRoutes(
       designMode,
       heading: body.heading,
       referenceImageId: body.referenceImageId,
+      referenceTypeId: body.referenceTypeId,
     });
     // Twitter → external n8n social-post job; news/scheme → in-process article pipeline.
     if (row.category === 'twitter') {
@@ -244,9 +270,14 @@ export function registerGenerationRoutes(
     },
   );
 
-  // On-demand English translation of a completed article. Re-translatable (e.g. after
-  // a glossary correction), so no idempotency guard; the UI only offers it when there
-  // is an article and no job in flight.
+  // On-demand English translation. Unlike the other jobs this one may run while the
+  // main job is still going — the article is persisted before the poster phase, so
+  // the UI offers Translate as soon as the article appears rather than making the
+  // user wait out the poster render. It never touches status/step, so there is no
+  // transition to flip here; the detail payload's `translating` flag keeps the client
+  // polling. Re-translatable (e.g. after a glossary correction), so the only guards
+  // are: an article must exist, one translation at a time, and not while a revision
+  // is rewriting the very article we would translate.
   app.post<{ Params: { id: string } }>(
     '/generations/:id/translate',
     async (request, reply) => {
@@ -256,24 +287,21 @@ export function registerGenerationRoutes(
           .code(404)
           .send({ error: { message: 'Generation not found.' } });
       }
-      if (isJobRunning(row.id)) {
-        return reply
-          .code(409)
-          .send({ error: { message: 'A job is already running.' } });
-      }
       if (!row.article) {
         return reply
           .code(409)
           .send({ error: { message: 'No article to translate yet.' } });
       }
-      // Flip to running BEFORE returning so the client's immediate refresh sees the
-      // transition and keeps polling; the detached job would otherwise set running a
-      // beat later, letting a racing poll read stale 'completed' and stop polling.
-      await updateGeneration(client, row.id, {
-        status: 'running',
-        step: 'translate',
-        error: null,
-      });
+      if (isTranslating(row.id)) {
+        return reply
+          .code(409)
+          .send({ error: { message: 'A translation is already running.' } });
+      }
+      if (isJobRunning(row.id) && row.step === 'revise_article') {
+        return reply
+          .code(409)
+          .send({ error: { message: 'The article is being revised.' } });
+      }
       startTranslateJob(client, row.id);
       return reply.code(202).send({});
     },
@@ -309,6 +337,42 @@ export function registerGenerationRoutes(
         error: null,
       });
       startPosterFeedbackJob(client, row.id, body.target, body.feedback);
+      return reply.code(202).send({});
+    },
+  );
+
+  // Edit the latest complete poster through the relevant n8n image-edit
+  // workflow. This is separate from the legacy scenePath-bound copy/scene route
+  // above and therefore works for article n8n posters and Twitter posters.
+  app.post<{ Params: { id: string } }>(
+    '/generations/:id/poster/image-feedback',
+    async (request, reply) => {
+      const body = PosterImageFeedbackRequestSchema.parse(request.body);
+      const row = await getGeneration(client, request.params.id);
+      if (!row) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'Generation not found.' } });
+      }
+      if (isJobRunning(row.id)) {
+        return reply
+          .code(409)
+          .send({ error: { message: 'A job is already running.' } });
+      }
+      if (!row.posterPath) {
+        return reply
+          .code(409)
+          .send({ error: { message: 'No poster to revise yet.' } });
+      }
+
+      // Persist the transition before returning so the first client poll cannot
+      // observe a stale completed row and stop before the new poster is stored.
+      await updateGeneration(client, row.id, {
+        status: 'running',
+        step: 'revise_image',
+        error: null,
+      });
+      startPosterImageFeedbackJob(client, row.id, body.feedback);
       return reply.code(202).send({});
     },
   );

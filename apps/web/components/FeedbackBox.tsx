@@ -10,11 +10,13 @@ export function FeedbackBox({
   title,
   hint,
   onSubmit,
+  disabled = false,
   children,
 }: {
   title: string;
   hint?: string;
   onSubmit: (feedback: string) => Promise<void>;
+  disabled?: boolean;
   // Optional extra controls rendered above the textarea (e.g. the poster's
   // text-vs-picture choice).
   children?: React.ReactNode;
@@ -24,6 +26,7 @@ export function FeedbackBox({
   const [error, setError] = useState<string | null>(null);
 
   const submit = async () => {
+    if (disabled || sending) return;
     if (feedback.trim().length < 3) {
       setError(STR.feedbackTooShort);
       return;
@@ -41,7 +44,7 @@ export function FeedbackBox({
   };
 
   return (
-    <details className="fold">
+    <details className="fold" aria-disabled={disabled}>
       <summary>{title}</summary>
       <div className="fold-body">
         {hint ? <p className="hint">{hint}</p> : null}
@@ -51,6 +54,7 @@ export function FeedbackBox({
           onChange={(e) => setFeedback(e.target.value)}
           placeholder={STR.feedbackPlaceholder}
           rows={3}
+          disabled={disabled || sending}
           style={{ marginTop: 10 }}
         />
         <div className="btn-row" style={{ marginTop: 12 }}>
@@ -58,7 +62,7 @@ export function FeedbackBox({
             type="button"
             className="btn btn-primary"
             onClick={submit}
-            disabled={sending}
+            disabled={disabled || sending}
           >
             {sending ? STR.sendingFeedback : STR.sendFeedback}
           </button>

@@ -30,7 +30,9 @@ it are implemented and working end-to-end:
   - `html`: a text-free AI background photo typeset in HTML and screenshotted with
     Chromium so Devanagari is never mangled (`packages/poster-renderer`) — kept as fallback.
 - Feedback/revision loops for the article and poster text/scene
-  (`packages/content-engine/src/generation/revise-*.ts`)
+  (`packages/content-engine/src/generation/revise-*.ts`), plus iterative pixel-level
+  image feedback for n8n-rendered article and twitter posters: each edit uses the
+  latest stored poster as its input and creates a new immutable poster version
 - A Fastify API (`apps/api`) exposing generation, feedback, and poster-edit
   endpoints under `/api/generations`, backed by Supabase tables
   (`supabase/migrations/0002_generations.sql`) and a public Storage bucket for
@@ -48,8 +50,10 @@ it are implemented and working end-to-end:
   layout) — each holding a rotation of immutable library images under
   `references/library/`. Any number of images per type may be **enabled**
   (`is_active`); one is picked at random per generation, and the home create form
-  can pin a specific image (`generations.reference_image_id`; a twitter pin also
-  pins the post type and skips classification). The API sends the full enabled
+  can pin either a specific image (`generations.reference_image_id`) or a whole
+  twitter type (`generations.reference_type_id`). Both pins force the type and skip
+  classification; a type pin still rolls one enabled image from that type per run.
+  The API sends the full enabled
   catalog to n8n in each webhook payload, so the workflows are data-driven. The
   old copy-on-activate canonical `master-*.png` mechanism is retired — those
   storage objects remain only as inert seed data for `seed:reference-library`.
@@ -68,6 +72,16 @@ payload (fetched over HTTPS — never local disk, no hardcoded storage paths):
   gpt-image-2 (it fails loudly if `reference_url` is missing).
 Both are committed under `n8n/workflow-exports/` (`social-post-v2-api.json`,
 `article-poster-v1-api.json`) — the artifacts to import into the AWS n8n.
+On 2026-07-13, the existing workflow IDs `1emSaqFmkLRUubUM` and
+`J4UTtNt2KMxuDSKf` on the n8n instance connected through MCP were synchronized
+from those exports and republished; API job logs now record the exact pinned or
+selected reference URL sent to each workflow so future deployment drift is visible.
+Later that day, `article-poster-v1-api` was republished with the iterative image-
+feedback prompt. The matching `social-post-v2-api` feedback branch is committed in
+its export, but its live update was rejected by the MCP safety review because the
+branch sends the current poster and feedback text to OpenAI Images; the live social
+workflow remains on the prior published version until that data-export action is
+explicitly approved and the committed export is synchronized.
 
 In progress: an editorial-rewrite pipeline (editorial brief → tiered coverage → editorial-
 quality judge → optional subheadings) that moves article generation from total-coverage

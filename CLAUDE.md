@@ -48,7 +48,7 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
     refreshes.
   - `startSocialPostJob` sends the note plus the full reference-type catalog
     (`types` built by `buildTwitterCatalog`; `forced_type`/`forced_reference_url`
-    non-empty when the run pinned an image) to `social-post-v2-api`.
+    non-empty when the run pinned an image or a whole type) to `social-post-v2-api`.
   - `startArticleFeedbackJob`, `startPosterFeedbackJob` (`copy` re-renders with the
     **cached** scene; `scene` regenerates the background image).
 - Article gen / coverage / faithfulness / revisions →
@@ -83,8 +83,8 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
 
 **Data & schema:** `supabase/migrations/0001…0004_*.sql` — pgvector Mahasamvad
 chunks, `generations` table, generation category + chunk style-category columns;
-`0012`/`0013` — reference-image library + `reference_types` catalog (rotation
-semantics, `generations.reference_image_id` pin).
+`0012`/`0013`/`0015` — reference-image library + `reference_types` catalog
+(rotation semantics, exact-image and whole-type generation pins).
 
 **Aux / not on the main request path:**
 - `packages/content-engine/src/finetune/*` — reusable JSONL dataset pipeline
@@ -153,8 +153,10 @@ Chromium): `pnpm --filter @dgipr/poster-renderer exec playwright install chromiu
   (migration 0013) holds the six builtins plus user-created custom twitter types; each
   type has a rotation of immutable library images (`reference_images`, many may be
   enabled at once, one picked at random per run) managed on `/references`. The home form
-  can pin one image (`generations.reference_image_id`); a twitter pin also pins the post
-  type and skips classification. Custom-type slugs are server-generated
+  can pin either one exact image (`generations.reference_image_id`) or a whole Twitter
+  type (`generations.reference_type_id`). Both skip classification and force the type;
+  a type pin still rolls one of that type's enabled images afresh per run. Custom-type
+  slugs are server-generated
   (`custom_` + 8 hex) because they feed OpenAI json_schema enums + storage paths; custom
   copy uses the `generic` layout. If nothing is enabled in a category, the job fails
   with a Marathi error shown raw in the UI.

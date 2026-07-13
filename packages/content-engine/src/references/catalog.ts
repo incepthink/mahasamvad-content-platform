@@ -7,6 +7,7 @@
 import {
   findReferenceTypeRow,
   getReferenceImageRow,
+  getReferenceTypeRow,
   listReferenceImageRows,
   listReferenceTypeRows,
   publicUrl,
@@ -18,6 +19,8 @@ import type { ReferenceCategory } from '@dgipr/schemas';
 // generations.error is shown raw in the UI, so this user-facing failure is Marathi.
 const EMPTY_CATALOG_ERROR =
   'एकही संदर्भ टेम्पलेट चित्र वापरात नाही. कृपया "मास्टर टेम्पलेट" पानावर किमान एक चित्र सुरू करा.';
+const EMPTY_TYPE_ERROR = (label: string) =>
+  `«${label}» प्रकारात एकही चित्र वापरात नाही. कृपया "मास्टर टेम्पलेट" पानावर किमान एक चित्र सुरू करा.`;
 
 export type ReferenceCatalogEntry = Readonly<{
   slug: string;
@@ -126,5 +129,26 @@ export async function resolvePinnedReference(
     url: publicUrl(client, row.storagePath),
     category: row.category,
     subtype: row.subtype,
+  };
+}
+
+// A pinned section forces the Twitter type but rolls one of its enabled images
+// afresh at job start. Returning PinnedReference keeps every downstream caller
+// and the n8n webhook contract identical to an exact-image pin.
+export async function resolvePinnedTypeReference(
+  client: SupabaseClient,
+  typeId: string,
+): Promise<PinnedReference | null> {
+  const type = await getReferenceTypeRow(client, typeId);
+  if (!type || type.category !== 'twitter') return null;
+
+  const images = await listReferenceImageRows(client);
+  const enabled = enabledImagesFor(images, 'twitter', type.slug);
+  if (enabled.length === 0) throw new Error(EMPTY_TYPE_ERROR(type.labelMr));
+
+  return {
+    url: publicUrl(client, pickRandom(enabled).storagePath),
+    category: 'twitter',
+    subtype: type.slug,
   };
 }

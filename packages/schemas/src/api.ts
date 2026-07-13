@@ -47,6 +47,7 @@ export const GenerationStepSchema = z.enum([
   'revise_article',
   'revise_copy',
   'revise_scene',
+  'revise_image',
   // On-demand English translation of a completed article (Sarvam + locked
   // glossary). A post-completion action, not part of the main pipeline.
   'translate',
@@ -59,27 +60,42 @@ export const RevisionTargetSchema = z.enum([
   'poster_copy',
   'poster_scene',
   'manual_copy',
+  'poster_image',
 ]);
 export type RevisionTarget = z.infer<typeof RevisionTargetSchema>;
 
-export const CreateGenerationRequestSchema = z.object({
-  // The Marathi note (टिपणी) — sole factual source for everything generated.
-  note: z.string().trim().min(20).max(60_000),
-  outputType: OutputTypeSchema,
-  // The Mahasamvad voice to write in. Defaults to 'scheme' (the original behaviour).
-  category: CategorySchema.default('scheme'),
-  // Poster design mode for the Twitter flow (ignored for news/scheme). The runner
-  // defaults it to 'onbrand' when absent for a twitter request.
-  designMode: DesignModeSchema.optional(),
-  // Optional editorial angle / title directive supplied by the user. NOT a fact
-  // source — only steers emphasis + heading. Empty/absent ⇒ the model picks its
-  // own angle (today's behaviour). Consumed by the engine in later parts.
-  heading: z.string().trim().max(200).optional(),
-  // Optional pin: use exactly this reference image (from the master-template
-  // library) for the run's poster instead of the per-type random rotation.
-  // Pinning a twitter image also pins the post type (classification is skipped).
-  referenceImageId: z.string().uuid().optional(),
-});
+export const CreateGenerationRequestSchema = z
+  .object({
+    // The Marathi note (टिपणी) — sole factual source for everything generated.
+    note: z.string().trim().min(20).max(60_000),
+    outputType: OutputTypeSchema,
+    // The Mahasamvad voice to write in. Defaults to 'scheme' (the original behaviour).
+    category: CategorySchema.default('scheme'),
+    // Poster design mode for the Twitter flow (ignored for news/scheme). The runner
+    // defaults it to 'onbrand' when absent for a twitter request.
+    designMode: DesignModeSchema.optional(),
+    // Optional editorial angle / title directive supplied by the user. NOT a fact
+    // source — only steers emphasis + heading. Empty/absent ⇒ the model picks its
+    // own angle (today's behaviour). Consumed by the engine in later parts.
+    heading: z.string().trim().max(200).optional(),
+    // Optional pin: use exactly this reference image (from the master-template
+    // library) for the run's poster instead of the per-type random rotation.
+    // Pinning a twitter image also pins the post type (classification is skipped).
+    referenceImageId: z.string().uuid().optional(),
+    // Optional Twitter section pin: classification is skipped, but one enabled
+    // image from the selected type is rolled independently for every run.
+    referenceTypeId: z.string().uuid().optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.referenceImageId && value.referenceTypeId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          'Reference image and reference type pins are mutually exclusive.',
+        path: ['referenceTypeId'],
+      });
+    }
+  });
 export type CreateGenerationRequest = z.infer<
   typeof CreateGenerationRequestSchema
 >;
@@ -103,6 +119,16 @@ export const PosterFeedbackRequestSchema = z.object({
   feedback: z.string().trim().min(3).max(4_000),
 });
 export type PosterFeedbackRequest = z.infer<typeof PosterFeedbackRequestSchema>;
+
+// Pixel-level feedback for an already rendered poster. Unlike the legacy
+// copy/scene route, this edits the latest complete poster through n8n and works
+// for both article and Twitter generations.
+export const PosterImageFeedbackRequestSchema = z.object({
+  feedback: z.string().trim().min(3).max(4_000),
+});
+export type PosterImageFeedbackRequest = z.infer<
+  typeof PosterImageFeedbackRequestSchema
+>;
 
 // Manual poster text edit: the full edited Copy JSON.
 export const UpdateCopyRequestSchema = CopySchema;
@@ -165,6 +191,8 @@ export const GenerationDetailSchema = z.object({
   // The reference image the run was pinned to (null = automatic rotation, or the
   // image was later deleted — the FK sets null).
   referenceImageId: z.string().nullable(),
+  // The Twitter reference type pinned at creation (null = classifier chooses).
+  referenceTypeId: z.string().nullable(),
   article: z.string().nullable(),
   // On-demand English translation of `article`; null until the user requests it.
   articleEnglish: z.string().nullable(),
@@ -174,6 +202,12 @@ export const GenerationDetailSchema = z.object({
   posterUrl: z.string().nullable(),
   sceneUrl: z.string().nullable(),
   error: z.string().nullable(),
+  // The on-demand English translation runs alongside the main job (the article is
+  // final before the poster phase starts), so it cannot own status/step/error —
+  // those belong to the main job. Its liveness and failure are reported here
+  // instead, from the API's in-process job registry (both reset on restart).
+  translating: z.boolean(),
+  translateError: z.string().nullable(),
   // Total USD the run has cost so far (null for pre-feature rows). `costBreakdown` carries
   // the audit detail (token counts + text-vs-image split); shape is intentionally loose.
   costUsd: z.number().nullable(),

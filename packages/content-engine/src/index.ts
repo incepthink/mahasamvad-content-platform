@@ -70,6 +70,7 @@ export {
   buildTwitterCatalog,
   pickArticleReferenceUrl,
   resolvePinnedReference,
+  resolvePinnedTypeReference,
   type PinnedReference,
   type ReferenceCatalogEntry,
 } from './references/catalog.js';

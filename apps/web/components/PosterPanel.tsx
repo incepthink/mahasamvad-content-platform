@@ -5,7 +5,12 @@
 
 import { useState } from 'react';
 import type { GenerationDetail } from '@dgipr/schemas';
-import { posterDownloadUrl, sendPosterFeedback, updatePosterCopy } from '../lib/api';
+import {
+  posterDownloadUrl,
+  sendPosterFeedback,
+  sendPosterImageFeedback,
+  updatePosterCopy,
+} from '../lib/api';
 import { STR } from '../lib/strings';
 import { CopyEditForm } from './CopyEditForm';
 import { FeedbackBox } from './FeedbackBox';
@@ -32,7 +37,8 @@ export function PosterPanel({
   // Poster text-edit + feedback (copy/scene) both re-render from the CACHED scene
   // image, so they only work when a scene was produced locally (ARTICLE_POSTER_MODE
   // = html). In n8n mode the poster is baked by the workflow with no separate scene
-  // (sceneUrl null), so hide those controls and keep only view + download.
+  // (sceneUrl null), so replace them with pixel-level feedback against the latest
+  // complete poster rather than pretending structured copy remains editable.
   const canRevise = !!detail.sceneUrl;
 
   return (
@@ -53,10 +59,7 @@ export function PosterPanel({
         </div>
         <div>
           <div className="btn-row">
-            <a
-              className="btn btn-primary"
-              href={posterDownloadUrl(detail.id)}
-            >
+            <a className="btn btn-primary" href={posterDownloadUrl(detail.id)}>
               {STR.downloadPoster}
             </a>
             {canRevise ? (
@@ -111,7 +114,9 @@ export function PosterPanel({
                     onClick={() => setTarget('copy')}
                   >
                     <span className="name">{STR.posterFeedbackTargetCopy}</span>
-                    <span className="desc">{STR.posterFeedbackTargetCopyDesc}</span>
+                    <span className="desc">
+                      {STR.posterFeedbackTargetCopyDesc}
+                    </span>
                   </button>
                   <button
                     type="button"
@@ -119,13 +124,36 @@ export function PosterPanel({
                     aria-pressed={target === 'scene'}
                     onClick={() => setTarget('scene')}
                   >
-                    <span className="name">{STR.posterFeedbackTargetScene}</span>
-                    <span className="desc">{STR.posterFeedbackTargetSceneDesc}</span>
+                    <span className="name">
+                      {STR.posterFeedbackTargetScene}
+                    </span>
+                    <span className="desc">
+                      {STR.posterFeedbackTargetSceneDesc}
+                    </span>
                   </button>
                 </div>
               </FeedbackBox>
             </div>
-          ) : null}
+          ) : (
+            <div className="poster-feedback">
+              <FeedbackBox
+                title={STR.posterImageFeedbackTitle}
+                hint={STR.posterImageFeedbackHint}
+                disabled={showSpinner}
+                onSubmit={async (feedback) => {
+                  setPending(true);
+                  try {
+                    await sendPosterImageFeedback(detail.id, feedback);
+                    await onChanged();
+                  } finally {
+                    // The refreshed row now drives `busy` until the n8n edit
+                    // finishes, so the overlay does not flicker between states.
+                    setPending(false);
+                  }
+                }}
+              />
+            </div>
+          )}
         </div>
       </div>
     </section>

@@ -21,7 +21,9 @@ import type { Category, DesignMode, OutputType } from '@dgipr/schemas';
 import { createGeneration } from '../lib/api';
 import { useTasks } from '../lib/TasksProvider';
 import { STR } from '../lib/strings';
-import ReferencePicker from '../components/ReferencePicker';
+import ReferencePicker, {
+  type ReferenceSelection,
+} from '../components/ReferencePicker';
 
 const CATEGORY_OPTIONS: ReadonlyArray<{
   value: Category;
@@ -110,7 +112,7 @@ export default function NewGenerationPage() {
   const [category, setCategory] = useState<Category>('scheme');
   const [outputType, setOutputType] = useState<OutputType>('both');
   const [designMode, setDesignMode] = useState<DesignMode>('onbrand');
-  const [referenceImageId, setReferenceImageId] = useState<string | null>(null);
+  const [reference, setReference] = useState<ReferenceSelection | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -130,7 +132,7 @@ export default function NewGenerationPage() {
 
   // A pin is only meaningful for the combination it was chosen under.
   useEffect(() => {
-    setReferenceImageId(null);
+    setReference(null);
   }, [category, designMode, outputType]);
 
   const onFile = (file: File | undefined) => {
@@ -170,7 +172,9 @@ export default function NewGenerationPage() {
         // Twitter always produces a poster + caption; outputType is ignored by the runner.
         outputType: isTwitter ? 'poster' : outputType,
         designMode: isTwitter ? designMode : undefined,
-        referenceImageId: referenceImageId ?? undefined,
+        referenceImageId:
+          reference?.kind === 'image' ? reference.id : undefined,
+        referenceTypeId: reference?.kind === 'type' ? reference.id : undefined,
       });
       if (isTwitter) {
         // Background task: don't navigate. Track it, open the panel, reset the form
@@ -326,8 +330,8 @@ export default function NewGenerationPage() {
       {pickerCategory ? (
         <ReferencePicker
           category={pickerCategory}
-          value={referenceImageId}
-          onChange={setReferenceImageId}
+          value={reference}
+          onChange={setReference}
         />
       ) : null}
 

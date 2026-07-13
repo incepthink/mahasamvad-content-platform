@@ -29,10 +29,14 @@ export function useGeneration(id: string): {
     }
   }, [id]);
 
+  // `translating` is tracked separately from status: a translation can run beside the
+  // poster render, and on a finished generation it runs while the row stays
+  // 'completed' — so polling has to follow it too, or the English never arrives.
   const active =
     detail === null ||
     detail.status === 'queued' ||
-    detail.status === 'running';
+    detail.status === 'running' ||
+    detail.translating;
 
   useEffect(() => {
     if (!active) return;

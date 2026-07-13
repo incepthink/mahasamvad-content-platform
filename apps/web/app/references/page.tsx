@@ -51,7 +51,7 @@ function ImageTile({
 }) {
   return (
     <div className={`ref-thumb${image.isActive ? ' is-enabled' : ''}`}>
-      <div className="ref-thumb-frame">
+      <div className={`ref-thumb-frame ref-thumb-frame-${image.category}`}>
         {/* Immutable library URLs are safe to render directly. */}
         <img src={image.url} alt={typeLabel} loading="lazy" />
         {image.isActive ? (

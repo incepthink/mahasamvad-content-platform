@@ -101,9 +101,9 @@ export async function sendArticleFeedback(
   });
 }
 
-// Kicks off the on-demand English translation (Sarvam + glossary lockdict). The
-// API flips the row to running/step 'translate' before returning, so the caller
-// just needs to refresh to start polling.
+// Kicks off the on-demand English translation (Sarvam + glossary lockdict). It runs
+// beside any job already in flight and reports itself through the detail payload's
+// `translating` flag, so the caller just needs to refresh to start polling.
 export async function requestTranslation(id: string): Promise<void> {
   await requestJson(`/api/generations/${id}/translate`, {
     method: 'POST',
@@ -118,6 +118,16 @@ export async function sendPosterFeedback(
   await requestJson(`/api/generations/${id}/poster/feedback`, {
     method: 'POST',
     body: JSON.stringify(input),
+  });
+}
+
+export async function sendPosterImageFeedback(
+  id: string,
+  feedback: string,
+): Promise<void> {
+  await requestJson(`/api/generations/${id}/poster/image-feedback`, {
+    method: 'POST',
+    body: JSON.stringify({ feedback }),
   });
 }
 
