@@ -9,7 +9,7 @@ The platform turns an official note — a Government Resolution (शासन �
 * **ट्विटर पोस्ट** (Twitter post) — a square Marathi poster plus a ready-to-paste caption for X (Twitter).
 * **भाषांतर** (Translation) — accurate Marathi → English translation, with a name glossary that keeps official names, designations and scheme names correct.
 
-![The home page — create a new article or poster](assets/01-intro--home.png)
+![The home page — create a new article or poster](.gitbook/assets/01-intro--home.png)
 
 ## What makes the platform trustworthy
 
@@ -32,15 +32,15 @@ Everyday users of the platform: communication staff who write and publish. No te
 
 ## The journeys
 
-| Chapter | What you will learn |
-| --- | --- |
-| [Getting Around](getting-around.md) | The menu bar, the ongoing-tasks panel, using the platform on a phone |
-| [Journey 1: Create](create-content.md) | Enter a note and start an article, poster, or both |
-| [Journey 2: Progress & Results](progress-and-results.md) | Follow the live progress and read the finished article, summary and poster |
-| [Journey 3: Feedback](improve-with-feedback.md) | Improve the article or poster with one-tap or written feedback |
-| [Journey 4: Twitter Posts](twitter-posts.md) | Create a Twitter poster + caption, and track it as a background task |
+| Chapter                                                      | What you will learn                                                          |
+| ------------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| [Getting Around](getting-around.md)                          | The menu bar, the ongoing-tasks panel, using the platform on a phone         |
+| [Journey 1: Create](create-content.md)                       | Enter a note and start an article, poster, or both                           |
+| [Journey 2: Progress & Results](progress-and-results.md)     | Follow the live progress and read the finished article, summary and poster   |
+| [Journey 3: Feedback](improve-with-feedback.md)              | Improve the article or poster with one-tap or written feedback               |
+| [Journey 4: Twitter Posts](twitter-posts.md)                 | Create a Twitter poster + caption, and track it as a background task         |
 | [Journey 5: Next Steps & History](next-steps-and-history.md) | Reuse the same note across formats, follow a note's thread, browse past work |
-| [Translation](translation.md) | Translate any Marathi text to English |
-| [Glossary](glossary.md) | Review and verify the Marathi → English name dictionary |
-| [Master Templates](master-templates.md) | *(Admin)* Manage the poster template library |
-| [FAQ & Troubleshooting](faq-troubleshooting.md) | Every error message, and answers to common questions |
+| [Translation](translation.md)                                | Translate any Marathi text to English                                        |
+| [Glossary](glossary.md)                                      | Review and verify the Marathi → English name dictionary                      |
+| [Master Templates](master-templates.md)                      | _(Admin)_ Manage the poster template library                                 |
+| [FAQ & Troubleshooting](faq-troubleshooting.md)              | Every error message, and answers to common questions                         |

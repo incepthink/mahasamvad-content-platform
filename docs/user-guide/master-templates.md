@@ -2,7 +2,7 @@
 
 The **"मास्टर टेम्पलेट"** page manages the poster template library — the master images every poster is painted on. It is meant for the team members who own the visual brand; everyday users normally never need it.
 
-![The template library](assets/10-refs--overview.png)
+![The template library](.gitbook/assets/10-refs--overview.png)
 
 The page has two sections:
 
@@ -27,7 +27,7 @@ Click **"नवीन चित्र अपलोड करा"** (Upload a new
 
 When a master is uploaded, the platform **reads its layout from the pixels** and shows the verdict on the tile:
 
-![A tile with its layout badge and actions](assets/10-refs--tile-badges.png)
+![A tile with its layout badge and actions](.gitbook/assets/10-refs--tile-badges.png)
 
 * **"छायाचित्रासह"** (With photograph) — the template has a photo zone; posters made from it may contain a scene photo.
 * **"फक्त मजकूर"** (Text only) — the template is purely typographic; the platform will **never paint a photo** onto posters made from it.
@@ -40,13 +40,13 @@ This one reading decides whether a generated poster may carry photography at all
 
 ## Type name & description ("संपादन")
 
-Each type card shows its description, editable via **"संपादन"** (Edit) → **"जतन करा"** (Save). The description matters: **the automatic classifier reads it** to decide which type suits a note (as the form says: *"या वर्णनावरूनच टिपणीसाठी योग्य प्रकार आपोआप निवडला जातो"*). Describe **when** the poster should be used — it steers type choice and copy tone, not the layout (layout comes from the pixels, above).
+Each type card shows its description, editable via **"संपादन"** (Edit) → **"जतन करा"** (Save). The description matters: **the automatic classifier reads it** to decide which type suits a note (as the form says: _"या वर्णनावरूनच टिपणीसाठी योग्य प्रकार आपोआप निवडला जातो"_). Describe **when** the poster should be used — it steers type choice and copy tone, not the layout (layout comes from the pixels, above).
 
 ## Custom Twitter types ("+ नवीन प्रकार तयार करा")
 
 Your team can add its own poster types to the Twitter section:
 
-![The new-type form](assets/10-refs--newtype-form.png)
+![The new-type form](.gitbook/assets/10-refs--newtype-form.png)
 
 1. Click **"+ नवीन प्रकार तयार करा"** (Create a new type).
 2. Give it a **"प्रकाराचे नाव"** (Type name — e.g. शेतकरी योजना) and a **"वर्णन"** (Description — when should this poster be used?).

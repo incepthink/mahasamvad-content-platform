@@ -4,11 +4,11 @@ The **"शब्दकोश"** page manages the **नाव-शब्दको�
 
 New candidate names flow in automatically from translations (when term-mining is on); your team's job on this page is to **review, correct, and verify** them.
 
-![The glossary page](assets/09-glossary--overview.png)
+![The glossary page](.gitbook/assets/09-glossary--overview.png)
 
 ## Adding a name yourself ("नवीन नाव जोडा")
 
-![The add-a-name form](assets/09-glossary--add-filled.png)
+![The add-a-name form](.gitbook/assets/09-glossary--add-filled.png)
 
 1. **"मराठी"** — the name as it appears in Marathi (e.g. जिल्हाधिकारी).
 2. **"इंग्रजी"** — the exact English rendering you want (e.g. District Collector).
@@ -26,7 +26,7 @@ The toolbar above the list:
 
 ## Reviewing a row
 
-![Verified and unverified rows](assets/09-glossary--row-states.png)
+![Verified and unverified rows](.gitbook/assets/09-glossary--row-states.png)
 
 Each row shows the Marathi name (fixed), an **editable** English field, and the type. Rows are tagged either **"तपासले"** (Verified — used in translations) or **"तपासायचे आहे"** (To be reviewed).
 
