@@ -80,6 +80,14 @@ it are implemented and working end-to-end:
   the next-step panel — hidden when the run has no follow-ups, polled at 5s only while a
   member is still running. Lineage is insert-only and deliberately NOT embedded in the
   detail payload (the 2.5s detail polls stay cheap).
+- **End-user documentation** (2026-07-14): a bilingual (English prose + verbatim Marathi
+  UI labels), journey-wise GitBook manual in `docs/user-guide/` — 11 chapters,
+  `SUMMARY.md`, ~54 real screenshots under `assets/` — served to GitBook via the root
+  `.gitbook.yaml` (Git Sync). Screenshots regenerate with
+  `pnpm --filter @dgipr/poster-renderer docs:shots <phase>`
+  (`packages/poster-renderer/scripts/docs-shots/`); the `run-*` phases drive real
+  generations through the UI with Playwright (OpenAI spend; needs `pnpm dev` + n8n),
+  and `verify` lints SUMMARY/chapter/image links.
 
 Two n8n workflows are implemented and host-independent for deployment; their master
 templates arrive as immutable `references/library/...` public URLs inside each webhook

@@ -28,7 +28,7 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
 | `packages/schemas` | `@dgipr/schemas` | Shared Zod schemas + types (poster `Copy`, generation API) |
 | `supabase/migrations` | — | SQL migrations (pgvector + generations) |
 | `n8n/workflow-exports` | — | Committed n8n workflow JSON (`social-post-v2-api.json` twitter path; `article-poster-v1-api.json` article poster — import targets for AWS) |
-| `docs` | — | Project docs (`PROJECT_CONTEXT.md`, `web-scraping-context.md`) |
+| `docs` | — | Project docs (`PROJECT_CONTEXT.md`, `web-scraping-context.md`); `docs/user-guide/` is the GitBook end-user manual (bilingual, journey-wise, real screenshots in `assets/`; root `.gitbook.yaml` points GitBook Git Sync at it) |
 
 ## Where things live (jump straight here)
 
@@ -126,6 +126,13 @@ embed to pgvector), plus `:karjamukti` variants; `retrieve:test`,
 
 Poster preview (renders sample posters without the API):
 `pnpm --filter @dgipr/poster-renderer poster:preview` and `poster:preview:article`.
+
+User-guide screenshots (`docs/user-guide/assets`):
+`pnpm --filter @dgipr/poster-renderer docs:shots <phase>` — phases
+`preflight|static|run-article|run-feedback|run-twitter|run-rerun|history|optimize|verify`
+(`--force` retakes; idempotent otherwise). The `run-*` phases trigger REAL generations
+(OpenAI spend) and need `pnpm dev` + n8n up (local n8n starts with `npx n8n`). See
+`packages/poster-renderer/scripts/docs-shots/cli.ts`.
 
 One-time per machine (the API process renders posters too, so it needs a local
 Chromium): `pnpm --filter @dgipr/poster-renderer exec playwright install chromium`.

@@ -26,7 +26,8 @@
     "format:check": "prettier src --check",
     "assets:extract": "tsx scripts/extract-brand-assets.ts",
     "poster:preview": "tsx scripts/preview.ts",
-    "poster:preview:article": "tsx scripts/preview-article.ts"
+    "poster:preview:article": "tsx scripts/preview-article.ts",
+    "docs:shots": "tsx scripts/docs-shots/cli.ts"
   }
 }
 
