@@ -2,20 +2,20 @@
 
 The **"भाषांतर"** page translates any Marathi text to English — independent of articles. Use it for letters, notes, press material, anything. It uses the same verified [name glossary](glossary.md) as article translation, so official names, designations, scheme names and places come out correctly and consistently.
 
-![The translation page](assets/08-translate--form.png)
+![The translation page](.gitbook/assets/08-translate--form.png)
 
 ## Translating a text
 
 1. Type or paste the Marathi text into **"मराठी मजकूर येथे लिहा किंवा चिकटवा"** (Write or paste Marathi text here) — or load it with **"किंवा .txt फाईल निवडा"** (Or choose a .txt file).
 2. Watch the counter below the box: up to **10,000 characters** per translation. Over the limit the counter turns red with **"मजकूर १०,००० अक्षरांपेक्षा जास्त आहे."** (The text exceeds 10,000 characters.)
 3. Optional: tick **"या मजकुरातून नवीन नाव-शब्दकोश संज्ञा शोधा"** (Find new glossary terms from this text). The translation will then also collect names it encountered and add them to the [glossary](glossary.md) for your team to review — this is how the dictionary grows.
-4. Click **"भाषांतर करा"** (Translate). While it works you'll see **"भाषांतर सुरू आहे… मोठ्या मजकुराला एक-दोन मिनिटे लागू शकतात."** (*Translation in progress… large texts can take a minute or two.*)
+4. Click **"भाषांतर करा"** (Translate). While it works you'll see **"भाषांतर सुरू आहे… मोठ्या मजकुराला एक-दोन मिनिटे लागू शकतात."** (_Translation in progress… large texts can take a minute or two._)
 
-![The translation in progress](assets/08-translate--busy.png)
+![The translation in progress](.gitbook/assets/08-translate--busy.png)
 
 ## The result ("इंग्रजी भाषांतर")
 
-![A finished translation](assets/08-translate--result.png)
+![A finished translation](.gitbook/assets/08-translate--result.png)
 
 * **"मजकूर कॉपी करा"** (Copy text) — copies the English text; the button briefly shows **"कॉपी झाले ✓"**.
 * **".txt डाउनलोड"** — downloads the English text as a file.
