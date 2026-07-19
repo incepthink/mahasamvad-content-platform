@@ -12,8 +12,15 @@ import {
   updatePosterCopy,
 } from '../lib/api';
 import { STR } from '../lib/strings';
+import { usePosterMarkers } from '../lib/usePosterMarkers';
 import { CopyEditForm } from './CopyEditForm';
 import { FeedbackBox } from './FeedbackBox';
+import {
+  ARTICLE_RESERVED_ZONES,
+  PosterAnnotator,
+  markerInZones,
+} from './PosterAnnotator';
+import { PosterImageFeedbackBox } from './PosterImageFeedbackBox';
 import { PosterVersionStrip } from './PosterVersionStrip';
 
 export function PosterPanel({
@@ -31,6 +38,19 @@ export function PosterPanel({
   // Bridges the gap before the first poll reports `running`, and covers the
   // fully-synchronous manual copy edit (status never leaves `completed`).
   const [pending, setPending] = useState(false);
+  // Numbered click-to-point markers for the n8n pixel-feedback path. Armed only
+  // while the feedback fold is open; the last sent round stays on screen inert
+  // (usePosterMarkers) so the user can see what they asked for.
+  const {
+    markers,
+    submittedMarkers,
+    addMarker,
+    removeMarker,
+    setNote,
+    markSubmitted,
+    dismissSubmitted,
+  } = usePosterMarkers(detail);
+  const [annotOpen, setAnnotOpen] = useState(false);
 
   if (!detail.posterUrl || !detail.copy) return null;
 
@@ -51,7 +71,19 @@ export function PosterPanel({
             src={detail.posterUrl}
             alt={STR.posterTitle}
             className="poster-image"
+            draggable={false}
           />
+          {!canRevise ? (
+            <PosterAnnotator
+              markers={markers}
+              onAdd={addMarker}
+              onRemove={removeMarker}
+              active={annotOpen && !showSpinner}
+              disabled={showSpinner}
+              submittedMarkers={submittedMarkers}
+              onDismissSubmitted={dismissSubmitted}
+            />
+          ) : null}
           {showSpinner ? (
             <div className="poster-loading" aria-live="polite" aria-busy="true">
               <span className="spinner spinner-lg" />
@@ -137,15 +169,21 @@ export function PosterPanel({
             </div>
           ) : (
             <div className="poster-feedback">
-              <FeedbackBox
-                title={STR.posterImageFeedbackTitle}
-                hint={STR.posterImageFeedbackHint}
-                suggestions={STR.chipsPosterImage}
+              <PosterImageFeedbackBox
+                markers={markers}
+                onNoteChange={setNote}
+                onRemoveMarker={removeMarker}
+                onOpenChange={setAnnotOpen}
                 disabled={showSpinner}
-                onSubmit={async (feedback) => {
+                showReservedWarning={markers.some((m) =>
+                  markerInZones(m.region, ARTICLE_RESERVED_ZONES),
+                )}
+                submittedMarkers={submittedMarkers}
+                onSubmit={async (payload) => {
                   setPending(true);
                   try {
-                    await sendPosterImageFeedback(detail.id, feedback);
+                    await sendPosterImageFeedback(detail.id, payload);
+                    markSubmitted();
                     await onChanged();
                   } finally {
                     // The refreshed row now drives `busy` until the n8n edit

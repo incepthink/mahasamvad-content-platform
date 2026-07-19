@@ -33,6 +33,9 @@ export type GenerationRow = Readonly<{
   // is one query. Both null on thread roots and pre-feature rows.
   sourceGenerationId: string | null;
   threadRootId: string | null;
+  // Lineage/audit: the DLO intake this run's note came from (null = home form
+  // or detail-page follow-up). Insert-only, like the pins.
+  dloIntakeId: string | null;
   status: GenerationStatus;
   step: string | null;
   error: string | null;
@@ -95,6 +98,7 @@ type GenerationDbRow = {
   reference_type_id: string | null;
   source_generation_id: string | null;
   thread_root_id: string | null;
+  dlo_intake_id: string | null;
   status: GenerationStatus;
   step: string | null;
   error: string | null;
@@ -127,6 +131,7 @@ function fromDbRow(row: GenerationDbRow): GenerationRow {
     referenceTypeId: row.reference_type_id,
     sourceGenerationId: row.source_generation_id,
     threadRootId: row.thread_root_id,
+    dloIntakeId: row.dlo_intake_id,
     status: row.status,
     step: row.step,
     error: row.error,
@@ -206,6 +211,7 @@ export async function insertGeneration(
     // Insert-only lineage: immutable after creation, like the pins.
     sourceGenerationId?: string | undefined;
     threadRootId?: string | undefined;
+    dloIntakeId?: string | undefined;
   }>,
 ): Promise<GenerationRow> {
   const { data, error } = await client
@@ -220,6 +226,7 @@ export async function insertGeneration(
       reference_type_id: input.referenceTypeId ?? null,
       source_generation_id: input.sourceGenerationId ?? null,
       thread_root_id: input.threadRootId ?? null,
+      dlo_intake_id: input.dloIntakeId ?? null,
     })
     .select()
     .single();

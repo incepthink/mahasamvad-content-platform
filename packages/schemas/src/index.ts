@@ -16,3 +16,6 @@ export * from './copy.js';
 
 // Generation API request/response schemas (apps/api + apps/web).
 export * from './api.js';
+
+// DLO intake API schemas (file transcription/extraction → reviewed note).
+export * from './dlo.js';

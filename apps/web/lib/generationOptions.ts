@@ -71,6 +71,27 @@ export const OUTPUT_OPTIONS: ReadonlyArray<GenerationOption<OutputType>> = [
   },
 ];
 
+// What text a twitter follow-up spawned from a finished article run is built
+// from: the run's generated article (default) or the user's original note.
+export type TwitterSource = 'article' | 'note';
+
+export const TWITTER_SOURCE_OPTIONS: ReadonlyArray<
+  GenerationOption<TwitterSource>
+> = [
+  {
+    value: 'article',
+    icon: FileText,
+    name: STR.sourceArticle,
+    desc: STR.sourceArticleDesc,
+  },
+  {
+    value: 'note',
+    icon: ClipboardList,
+    name: STR.sourceNote,
+    desc: STR.sourceNoteDesc,
+  },
+];
+
 export const DESIGN_OPTIONS: ReadonlyArray<GenerationOption<DesignMode>> = [
   {
     value: 'onbrand',

@@ -8,6 +8,39 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 export const POSTERS_BUCKET = 'posters';
 
+// PRIVATE bucket for DLO intake source files (mp3/pdf/docx) — see migration
+// 0018_dlo_intakes.sql. Service-role access only; nothing here gets a public URL.
+export const DLO_UPLOADS_BUCKET = 'dlo-uploads';
+
+// Generic variants of the PNG helpers below, for buckets/content types beyond
+// poster PNGs (first user: DLO intake uploads). Same error contract.
+export async function uploadFile(
+  client: SupabaseClient,
+  bucket: string,
+  path: string,
+  data: Buffer,
+  contentType: string,
+): Promise<void> {
+  const { error } = await client.storage
+    .from(bucket)
+    .upload(path, data, { contentType, upsert: false });
+  if (error) {
+    throw new Error(`Failed to upload ${bucket}/${path}: ${error.message}`);
+  }
+}
+
+export async function downloadFile(
+  client: SupabaseClient,
+  bucket: string,
+  path: string,
+): Promise<Buffer> {
+  const { data, error } = await client.storage.from(bucket).download(path);
+  if (error) {
+    throw new Error(`Failed to download ${bucket}/${path}: ${error.message}`);
+  }
+  return Buffer.from(await data.arrayBuffer());
+}
+
 // Versioned poster/scene paths must never be overwritten (public bucket is
 // CDN-cached), so upsert defaults to false. Pass upsert: true only for stable,
 // intentionally-overwritten objects like the brand templates under references/.

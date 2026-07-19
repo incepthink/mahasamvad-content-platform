@@ -25,6 +25,12 @@ export {
 export { reviseCopy } from './generation/revise-copy.js';
 export { reviseSceneBrief } from './generation/revise-scene.js';
 export {
+  interpretImageFeedback,
+  type FeedbackAnnotationInput,
+  type InterpretImageFeedbackInput,
+  type InterpretedImageFeedback,
+} from './generation/interpret-image-feedback.js';
+export {
   translateArticleToEnglish,
   type GlossaryEntry,
   type TranslateOptions,
@@ -33,6 +39,20 @@ export {
   extractGlossaryCandidates,
   type GlossaryCandidate,
 } from './generation/extract-entities.js';
+
+// DLO intake — Sarvam batch STT + document digitization + DOCX extraction, and
+// the combiner that builds the reviewable Marathi text from all sources.
+export {
+  transcribeAudioFiles,
+  type AudioFileInput,
+  type AudioTranscription,
+} from './intake/sarvam-stt.js';
+export { extractPdfText } from './intake/sarvam-doc.js';
+export { extractDocxText } from './intake/docx.js';
+export {
+  combineIntakeSources,
+  type IntakeSource,
+} from './intake/combine.js';
 
 // Cost metering — the runner opens a scope per job and reads the accumulator back.
 export {
@@ -76,7 +96,7 @@ export {
 // Per-generation catalog sent to the n8n workflows in the webhook payload.
 export {
   buildTwitterCatalog,
-  pickArticleReferenceUrl,
+  pickArticleReference,
   resolvePinnedReference,
   resolvePinnedTypeReference,
   type PinnedReference,

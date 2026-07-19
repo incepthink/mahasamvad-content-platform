@@ -57,11 +57,28 @@ export {
 } from './glossary.js';
 export {
   POSTERS_BUCKET,
+  DLO_UPLOADS_BUCKET,
   uploadPng,
+  uploadFile,
   publicUrl,
   downloadPng,
+  downloadFile,
   removeObjects,
 } from './storage.js';
+export {
+  DLO_INTAKES_TABLE,
+  insertDloIntake,
+  updateDloIntake,
+  getDloIntake,
+  type DloIntakeStatus,
+  type DloIntakeStep,
+  type DloIntakeFileKind,
+  type DloIntakeFileStatus,
+  type DloIntakeCategory,
+  type DloIntakeFileEntry,
+  type DloIntakeRow,
+  type DloIntakePatch,
+} from './dlo-intakes.js';
 export {
   REFERENCE_IMAGES_TABLE,
   listReferenceImageRows,

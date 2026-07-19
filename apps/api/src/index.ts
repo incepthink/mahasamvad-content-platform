@@ -4,6 +4,7 @@ import multipart from '@fastify/multipart';
 import { fileURLToPath } from 'node:url';
 import { ZodError } from 'zod';
 import { createServiceRoleClient } from '@dgipr/database';
+import { registerDloRoutes } from './routes/dlo.js';
 import { registerGenerationRoutes } from './routes/generations.js';
 import { registerGlossaryRoutes } from './routes/glossary.js';
 import { registerTranslateRoutes } from './routes/translate.js';
@@ -56,6 +57,7 @@ export async function createServer() {
       registerGlossaryRoutes(instance, client);
       registerTranslateRoutes(instance, client);
       registerReferenceRoutes(instance, client);
+      registerDloRoutes(instance, client);
     },
     { prefix: '/api' },
   );

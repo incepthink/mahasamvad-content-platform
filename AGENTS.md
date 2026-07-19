@@ -24,15 +24,43 @@ it are implemented and working end-to-end:
 - Article generation with coverage + faithfulness verification
   (`packages/content-engine/src/generation/generate-article.ts`)
 - Poster generation, two modes selected by `ARTICLE_POSTER_MODE`:
-  - `n8n` (default): the `article-poster-v1-api` workflow paints the whole landscape
-    article poster (incl. the single Marathi headline) by editing a master template —
-    same external-render pattern as the twitter path (`renderArticlePosterViaN8n`).
+  - `n8n` (default): the `article-poster-v1-api` workflow paints the landscape
+    article poster body (incl. the single Marathi headline) by editing a master
+    template — same external-render pattern as the twitter path
+    (`renderArticlePosterViaN8n`). The logo/footer chrome is no longer painted by
+    the image model: the prompt erases the master's branding and reserves those
+    zones, and the API composites `article-logo.png` (top-left) +
+    `poster-footer.png` (full-width bottom) in code after the webhook returns
+    (`overlayArticleChrome`, `packages/poster-renderer/src/article-chrome.ts`) —
+    on initial renders and image-feedback re-renders alike.
   - `html`: a text-free AI background photo typeset in HTML and screenshotted with
     Chromium so Devanagari is never mangled (`packages/poster-renderer`) — kept as fallback.
 - Feedback/revision loops for the article and poster text/scene
   (`packages/content-engine/src/generation/revise-*.ts`), plus iterative pixel-level
   image feedback for n8n-rendered article and twitter posters: each edit uses the
   latest stored poster as its input and creates a new immutable poster version
+- **Click-to-point poster feedback** (2026-07-19): the pixel-feedback request may carry
+  up to 3 numbered marker annotations (`{ region (normalized 0..1), note }`), placed on
+  the poster by click/drag in the web UI (`PosterAnnotator` overlay +
+  `PosterImageFeedbackBox`, both poster kinds). Markers are **pointing gestures, not
+  masks** — the change applies to the whole element at/around the mark. The job draws
+  the same numbered red boxes on the poster (`annotateFeedbackRegions`,
+  poster-renderer, vector-path digits so no container fonts needed), uploads that copy
+  as `feedback-marked-v{n}-{ts}.png` (never a poster version; timestamped per attempt
+  because the version counter only advances on success — a failed round + resubmit
+  would otherwise collide on the same storage path), runs a gpt-4o vision
+  interpreter (`interpretImageFeedback`, content-engine; falls back to raw numbered
+  notes on failure) to produce one element-aware instruction, and sends the MARKED
+  image URL + instruction + `marker_count` to n8n; both workflows' feedback prompts
+  branch on `marker_count` (0 = the old prompt byte-for-byte) and tell the model to
+  erase the marks. Revision history stores the user's raw numbered notes. On the web
+  side the submitted markers stay visible client-side (dashed/dimmed, `usePosterMarkers`)
+  through the re-render and on the new poster, and are restored to editable if the round
+  fails; marker regions are not persisted server-side (future work). **Deploy
+  ordering for this feature is inverted: push workflows first, then the API** — new
+  workflow + old API degrades cleanly to the old prompt, but old workflow + new API
+  would edit a marked image with no marker semantics and can leave red boxes in the
+  output.
 - A Fastify API (`apps/api`) exposing generation, feedback, and poster-edit
   endpoints under `/api/generations`, backed by Supabase tables
   (`supabase/migrations/0002_generations.sql`) and a public Storage bucket for
@@ -42,7 +70,25 @@ it are implemented and working end-to-end:
   and browse history
 - Standalone Marathi-to-English text translation (`POST /api/translate` and
   `/translate`) using the existing Sarvam block translation and verified glossary
-  locks, with optional best-effort glossary candidate mining; ad-hoc text is not stored
+  locks; ad-hoc text is not stored
+- **Pre-translation name check** (2026-07-20): every translation — generation detail
+  page and `/translate` alike — starts with an in-page "check the names" step instead
+  of mining glossary candidates after the fact (names mined post-translation could
+  never fix the run that produced them, e.g. संवाद वारी → "dialogue van", and fixing
+  one meant a /glossary round-trip the target users never made). A prepare step
+  (`POST /api/generations/:id/translate/prepare`, `POST /api/translate/prepare` →
+  `prepareTranslationTerms` in `apps/api/src/jobs/translation-terms.ts`) runs the
+  existing `extractGlossaryCandidates` merged with glossary rows found in the text;
+  the web review card (`apps/web/components/TranslationTermsReview.tsx`) shows each
+  name with an editable English spelling (verified rows badged, missed names addable),
+  and confirming sends the list on the translate request — the API upserts them as
+  VERIFIED glossary rows (source `manual`) before translating, so the confirmed
+  spellings lock into that very run and every future one; post-translation mining is
+  skipped on this path (the no-`terms` legacy path still mines, best-effort). The
+  generation page also gained the previously missing re-translate affordance: once
+  English exists, a fold re-runs the same name check and re-translates. No skip path
+  by design; a prepare failure surfaces a retry, never a silent unchecked translation.
+  No migration; deploy is API + web only.
 - A reference-template system (`reference_types` + `reference_images`,
   `/api/reference-types` + `/api/references`, and the `/references` page): poster
   types are catalog rows — six builtins plus user-created custom twitter types
@@ -88,6 +134,22 @@ it are implemented and working end-to-end:
   (`packages/poster-renderer/scripts/docs-shots/`); the `run-*` phases drive real
   generations through the UI with Playwright (OpenAI spend; needs `pnpm dev` + n8n),
   and `verify` lints SUMMARY/chapter/image links.
+- **DLO intake** (2026-07-19): the `/dlo` page turns meeting material into an article —
+  free-text notes + uploaded MP3 recordings / PDFs / DOCX. Files land in the PRIVATE
+  `dlo-uploads` bucket and a `dlo_intakes` row (migration 0018); `startDloIntakeJob`
+  (`apps/api/src/jobs/dlo-runner.ts`) transcribes all audio in ONE Sarvam **batch STT**
+  job (`saaras:v3` mode `transcribe` → Marathi-in-Marathi-out; the sync endpoint only
+  takes ~30s clips), OCRs PDFs via Sarvam **document digitization** (scanned Marathi
+  GRs work), extracts DOCX locally with mammoth (all in
+  `packages/content-engine/src/intake/`, official `sarvamai` SDK), and combines
+  everything under per-source Marathi headers. A file failure marks only that file
+  (surfaced at review); the intake fails only when nothing survived. The officer then
+  **reviews and edits** the combined text (STT errors in names/amounts would otherwise
+  become "facts" — the pipeline never invents but trusts its input), picks news/scheme,
+  and `POST /api/dlo/intakes/:id/generate` funnels it as the note of a NORMAL
+  generations row (`dlo_intake_id` lineage) through the existing pipeline — history,
+  feedback, translation, and posters (via the detail page) all work on DLO runs.
+  Requires `SARVAM_API_KEY`; no new article-generation logic was added.
 
 Two n8n workflows are implemented and host-independent for deployment; their master
 templates arrive as immutable `references/library/...` public URLs inside each webhook
@@ -97,10 +159,28 @@ payload (fetched over HTTPS — never local disk, no hardcoded storage paths):
   `forced_type`/`forced_reference_url` (empty strings unless pinned). The
   classify/copy/image nodes are data-driven from that catalog; a forced type skips the
   classify LLM call, and custom types render with the generic (headline + points) copy
-  layout.
+  layout. Like the article path, the brand chrome is no longer painted by the image
+  model: the workflow's prompts erase the master's महाराष्ट्र शासन emblem (top-right)
+  and footer band/social-handle strip and declare them reserved zones (~220x180
+  top-right, ~130px bottom at 1280x1600), and the API composites
+  `poster-logo.png` + `poster-footer.png` in code after the webhook returns
+  (`overlayTwitterChrome`, `packages/poster-renderer/src/twitter-chrome.ts`) — on
+  initial renders and image-feedback re-renders alike. Deploy order for this is the
+  NORMAL one (API first, then workflows): the new workflow with the old API would
+  ship unbranded posters.
 - `article-poster-v1-api` (the default news/scheme poster path) — the API sends
-  `{ headline, scene_brief, reference_url }` and the workflow edits that master with
-  gpt-image-2 (it fails loudly if `reference_url` is missing).
+  `{ headline, scene_brief, reference_url, layout_summary, has_photo_zone }` and the
+  workflow edits that master with gpt-image-2 (it fails loudly if `reference_url` is
+  missing). Its Build Prompt is **layout-agnostic** (2026-07-20): it used to hardcode
+  the original master's anatomy ("curved left headline panel + right-hand photo
+  zone"), which made the image model reshape EVERY rotated master into that one look —
+  the whole article-master rotation produced visually identical posters. Structure now
+  comes only from the picked master's own vision-derived `layout_spec`
+  (`pickArticleReference` returns it; the API flattens it to `layout_summary` +
+  tri-state `has_photo_zone` strings, '' = un-analyzed → generic conditional prompt).
+  `has_photo_zone: 'false'` emits a hard no-imagery lock, and the rotating panel-colour
+  theme is applied conditionally (only if the master actually has a solid headline
+  panel). Run the `analyze:references` backfill so article masters carry specs.
 Both are committed under `n8n/workflow-exports/` (`social-post-v2-api.json`,
 `article-poster-v1-api.json`).
 

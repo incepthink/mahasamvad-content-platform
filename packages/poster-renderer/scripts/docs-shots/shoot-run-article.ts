@@ -79,7 +79,9 @@ export async function shootRunArticle(): Promise<void> {
           // callout + the running task row. Client-side nav only — a reload would
           // wipe the in-memory session task list that drives both states.
           if (!busyCalloutDone) {
-            await page.locator('.site-nav a', { hasText: 'नवीन मजकूर' }).click();
+            await page
+              .locator('.sidebar-nav a', { hasText: 'नवीन मजकूर' })
+              .click();
             await page
               .locator('.info-callout')
               .first()

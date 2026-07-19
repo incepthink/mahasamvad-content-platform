@@ -12,10 +12,10 @@
   },
   "dependencies": {
     "@dgipr/schemas": "workspace:*",
-    "playwright": "^1.49.1"
+    "playwright": "^1.49.1",
+    "sharp": "^0.34.4"
   },
   "devDependencies": {
-    "sharp": "^0.34.4",
     "tsx": "^4.19.2"
   },
   "scripts": {
@@ -27,6 +27,9 @@
     "assets:extract": "tsx scripts/extract-brand-assets.ts",
     "poster:preview": "tsx scripts/preview.ts",
     "poster:preview:article": "tsx scripts/preview-article.ts",
+    "poster:preview:chrome": "tsx scripts/preview-article-chrome.ts",
+    "poster:preview:chrome:twitter": "tsx scripts/preview-twitter-chrome.ts",
+    "poster:preview:markers": "tsx scripts/preview-feedback-marker.ts",
     "docs:shots": "tsx scripts/docs-shots/cli.ts"
   }
 }

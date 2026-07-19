@@ -28,6 +28,7 @@ import {
   GenerationStepSchema,
   PosterFeedbackRequestSchema,
   PosterImageFeedbackRequestSchema,
+  TranslateGenerationRequestSchema,
   UpdateCopyRequestSchema,
   type GenerationDetail,
   type GenerationStep,
@@ -48,6 +49,7 @@ import {
   startSocialPostJob,
   startTranslateJob,
 } from '../jobs/runner.js';
+import { prepareTranslationTerms } from '../jobs/translation-terms.js';
 
 // Stage ping n8n POSTs to /generations/:id/progress after each social-post stage.
 const ProgressPingSchema = z.object({ step: GenerationStepSchema });
@@ -367,17 +369,43 @@ export function registerGenerationRoutes(
     },
   );
 
+  // Pre-translation name check: extracts the article's proper nouns (merged with
+  // glossary rows found in the text) so the user confirms/corrects the English
+  // spellings BEFORE translating — the confirmed set then arrives on the translate
+  // request below. Synchronous like /api/translate (one OpenAI call); errors bubble
+  // to the shared error handler so the UI shows a retry rather than silently
+  // translating with unchecked names.
+  app.post<{ Params: { id: string } }>(
+    '/generations/:id/translate/prepare',
+    async (request, reply) => {
+      const row = await getGeneration(client, request.params.id);
+      if (!row) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'Generation not found.' } });
+      }
+      if (!row.article) {
+        return reply
+          .code(409)
+          .send({ error: { message: 'No article to translate yet.' } });
+      }
+      return prepareTranslationTerms(client, row.article);
+    },
+  );
+
   // On-demand English translation. Unlike the other jobs this one may run while the
   // main job is still going — the article is persisted before the poster phase, so
   // the UI offers Translate as soon as the article appears rather than making the
   // user wait out the poster render. It never touches status/step, so there is no
   // transition to flip here; the detail payload's `translating` flag keeps the client
-  // polling. Re-translatable (e.g. after a glossary correction), so the only guards
+  // polling. Re-translatable (e.g. after a name correction), so the only guards
   // are: an article must exist, one translation at a time, and not while a revision
-  // is rewriting the very article we would translate.
+  // is rewriting the very article we would translate. The body carries the
+  // user-confirmed names from the prepare step (optional for older clients).
   app.post<{ Params: { id: string } }>(
     '/generations/:id/translate',
     async (request, reply) => {
+      const body = TranslateGenerationRequestSchema.parse(request.body ?? {});
       const row = await getGeneration(client, request.params.id);
       if (!row) {
         return reply
@@ -399,7 +427,7 @@ export function registerGenerationRoutes(
           .code(409)
           .send({ error: { message: 'The article is being revised.' } });
       }
-      startTranslateJob(client, row.id);
+      startTranslateJob(client, row.id, body.terms);
       return reply.code(202).send({});
     },
   );
@@ -469,7 +497,7 @@ export function registerGenerationRoutes(
         step: 'revise_image',
         error: null,
       });
-      startPosterImageFeedbackJob(client, row.id, body.feedback);
+      startPosterImageFeedbackJob(client, row.id, body);
       return reply.code(202).send({});
     },
   );

@@ -23,7 +23,9 @@ import {
   ARTICLE_CATEGORY_OPTIONS,
   DESIGN_OPTIONS,
   OUTPUT_OPTIONS,
+  TWITTER_SOURCE_OPTIONS,
   type GenerationOption,
+  type TwitterSource,
 } from '../lib/generationOptions';
 import { useTasks } from '../lib/TasksProvider';
 import { STR } from '../lib/strings';
@@ -80,6 +82,13 @@ type BlockProps = {
 // Article/news/scheme run → create a Twitter post from the same note.
 function CreateTwitterBlock({ detail, onSpawned }: BlockProps) {
   const { addTask, openPanel, hasActiveTwitterTask } = useTasks();
+  // The generated article is the default source; the guard mirrors the API's
+  // 20-char note minimum so a degenerate article silently falls back to the note.
+  const articleText = detail.article?.trim() ?? '';
+  const canUseArticle = articleText.length >= 20;
+  const [source, setSource] = useState<TwitterSource>(
+    canUseArticle ? 'article' : 'note',
+  );
   const [designMode, setDesignMode] = useState<DesignMode>('onbrand');
   const [reference, setReference] = useState<ReferenceSelection | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -100,7 +109,8 @@ function CreateTwitterBlock({ detail, onSpawned }: BlockProps) {
     setError(null);
     try {
       const id = await createGeneration({
-        note: detail.note,
+        note:
+          source === 'article' && canUseArticle ? articleText : detail.note,
         heading: detail.heading ?? undefined,
         category: 'twitter',
         outputType: 'poster',
@@ -127,6 +137,14 @@ function CreateTwitterBlock({ detail, onSpawned }: BlockProps) {
       <summary>{STR.nextTwitterTitle}</summary>
       <div className="fold-body">
         <p className="hint">{STR.nextTwitterHint}</p>
+        {canUseArticle ? (
+          <OptionCards
+            label={STR.nextSourceLabel}
+            options={TWITTER_SOURCE_OPTIONS}
+            value={source}
+            onSelect={setSource}
+          />
+        ) : null}
         <OptionCards
           label={STR.designModeLabel}
           options={DESIGN_OPTIONS}

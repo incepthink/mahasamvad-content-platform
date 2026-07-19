@@ -4,6 +4,12 @@
 // We call the REST API directly — same style as the scraper in
 // scraping/mahasamvad-rest.ts — to avoid pulling in the OpenAI SDK.
 //
+// Embeddings are requested at 1024 dims, not the model's native 3072. The model is
+// Matryoshka-trained, so `dimensions: 1024` (truncate + l2-renormalize, done by the
+// API) keeps most retrieval quality at a third of the storage — this is what keeps
+// mahasamvad_chunks inside the Supabase free tier (migration 0019 truncated the
+// stored vectors the same way, so old rows and new queries stay comparable).
+//
 // Requests go through openAiFetch (serialized + retried on 429/5xx), which also keeps the
 // bulk `embed:news` ingest loop from dying partway through on a single rate-limit blip.
 
@@ -13,7 +19,7 @@ import { recordEmbeddingUsage, type EmbeddingUsage } from '../cost/cost-meter.js
 const EMBEDDINGS_URL = 'https://api.openai.com/v1/embeddings';
 
 export const EMBEDDING_MODEL = 'text-embedding-3-large';
-export const EMBEDDING_DIMENSIONS = 3072;
+export const EMBEDDING_DIMENSIONS = 1024;
 
 // Keep each request comfortably under the API's per-request input limit.
 const DEFAULT_BATCH_SIZE = 100;
@@ -38,7 +44,7 @@ async function embedBatch(texts: string[], apiKey: string): Promise<number[][]> 
   const response = await openAiFetch(EMBEDDINGS_URL, {
     label: 'embeddings',
     apiKey,
-    body: { model: EMBEDDING_MODEL, input: texts },
+    body: { model: EMBEDDING_MODEL, input: texts, dimensions: EMBEDDING_DIMENSIONS },
   });
 
   const body = (await response.json()) as EmbeddingResponse;

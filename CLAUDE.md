@@ -39,18 +39,47 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
   - `startGenerationJob`: retrieve → `generateArticle` → (if poster) `generateCopy`
     → render poster → upload PNG(s) to Supabase Storage. The poster render forks on
     `ARTICLE_POSTER_MODE` (default `n8n`): `n8n` sends `{ headline, scene_brief,
-    reference_url }` to the `article-poster-v1-api` webhook (`renderArticlePosterViaN8n`;
-    `reference_url` = the pinned image, else a random enabled article master), which
-    paints the whole landscape poster incl. the headline by editing that master — no
-    scene image, no scenePath; `html` is the original `buildArticleScenePrompt`+
+    reference_url, layout_summary, has_photo_zone }` to the `article-poster-v1-api`
+    webhook (`renderArticlePosterViaN8n`; `reference_url` = the pinned image, else a
+    random enabled article master via `pickArticleReference`, which also returns the
+    picked master's `layout_spec` — flattened to the two layout strings), which
+    paints the poster body (headline + photo, following THAT master's layout) while
+    leaving the logo/footer reserved zones blank; the API then code-stamps the crisp
+    chrome (`overlayArticleChrome`) before upload — no scene image, no scenePath; `html` is the original `buildArticleScenePrompt`+
     `generateImage`+`generateArticlePoster` Chromium path (kept as fallback). Job state
     of record is the `generations` row (status/step/error), so polling clients survive
     refreshes.
   - `startSocialPostJob` sends the note plus the full reference-type catalog
     (`types` built by `buildTwitterCatalog`; `forced_type`/`forced_reference_url`
     non-empty when the run pinned an image or a whole type) to `social-post-v2-api`.
+    The workflow paints only the poster body (its prompts erase the master's
+    emblem/footer and reserve those zones); the API stamps `poster-logo.png`
+    (top-right) + `poster-footer.png` (bottom) in code (`overlayTwitterChrome`) on
+    every returned PNG — initial and image-feedback renders alike.
   - `startArticleFeedbackJob`, `startPosterFeedbackJob` (`copy` re-renders with the
     **cached** scene; `scene` regenerates the background image).
+  - `startPosterImageFeedbackJob` (pixel feedback, both poster kinds): with marker
+    annotations it draws numbered red boxes on the current poster
+    (`annotateFeedbackRegions`), uploads `feedback-marked-v{n}-{ts}.png` (timestamped
+    per attempt — the version counter only advances on success, so a failed round +
+    resubmit would otherwise collide on the same path), turns marks +
+    notes into one element-aware instruction via a gpt-4o vision pass
+    (`interpretImageFeedback`, raw-notes fallback), and sends the marked URL +
+    `marker_count` to n8n — whose feedback prompts branch on it (0 = legacy prompt
+    byte-for-byte, so plain text feedback is unchanged). Web side:
+    `PosterAnnotator` + `PosterImageFeedbackBox`. Deploy ordering is INVERTED for
+    this feature: `pnpm n8n:push` first, API second (old workflow + new API can
+    leave the red marker boxes in the output).
+- DLO intake (meeting MP3s/PDFs/DOCX → reviewed Marathi text → normal generation):
+  routes → `apps/api/src/routes/dlo.ts` (multipart with per-request 120 MiB/10-file
+  limits; `/api/dlo/intakes` + `/:id` poll + `/:id/generate`); job →
+  `apps/api/src/jobs/dlo-runner.ts` (`startDloIntakeJob`: one Sarvam batch STT job
+  for ALL audio, per-file doc extraction, per-file failures don't sink the intake);
+  Sarvam/extraction logic → `packages/content-engine/src/intake/*`
+  (`sarvam-stt.ts`, `sarvam-doc.ts`, `docx.ts`, `combine.ts`; official `sarvamai`
+  SDK, key `SARVAM_API_KEY`); rows/bucket → `packages/database/src/dlo-intakes.ts`
+  + the PRIVATE `dlo-uploads` bucket (generic `uploadFile`/`downloadFile` in
+  `storage.ts`).
 - Article gen / coverage / faithfulness / revisions →
   `packages/content-engine/src/generation/*`
   (`generate-article.ts`, `verify-coverage.ts`, `generate-copy.ts`, `revise-*.ts`,
@@ -58,17 +87,18 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
 - RAG + ingestion → `packages/content-engine/src/{retrieval,embedding,chunking,scraping}/*`
 - Poster rendering → `packages/poster-renderer/src/*`
   (`generate-article-poster.ts`, `build-scene-prompt.ts`, `openai-image.ts`,
-  `article-template.ts` / `poster-template.ts`, `render-html.ts`); public API in
-  `packages/poster-renderer/src/index.ts`
+  `article-template.ts` / `poster-template.ts`, `render-html.ts`,
+  `article-chrome.ts` / `twitter-chrome.ts` — sharp overlays of the brand chrome
+  onto n8n article/twitter posters); public API in `packages/poster-renderer/src/index.ts`
 - Reference templates (type catalog + image rotation + per-run catalog for n8n) →
   `packages/content-engine/src/references/*` (`reference-types.ts`,
   `reference-images.ts`, `catalog.ts`, `analyze-template.ts`); routes →
   `apps/api/src/routes/references.ts`; web page → `apps/web/app/references/page.tsx`;
   home-page pin picker → `apps/web/components/ReferencePicker.tsx`
 - DB access + Storage → `packages/database/src/*`
-  (`client.ts`, `generations.ts`, `reference-types.ts`, `reference-images.ts`,
-  `mahasamvad-chunks.ts`, `storage.ts`)
-- Shared types/schemas → `packages/schemas/src/*` (`copy.ts`, `api.ts`)
+  (`client.ts`, `generations.ts`, `dlo-intakes.ts`, `reference-types.ts`,
+  `reference-images.ts`, `mahasamvad-chunks.ts`, `storage.ts`)
+- Shared types/schemas → `packages/schemas/src/*` (`copy.ts`, `api.ts`, `dlo.ts`)
 - content-engine public API barrel → `packages/content-engine/src/index.ts`
 
 **Web flow (user journey starts here):**
@@ -82,6 +112,9 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
 - UI components → `apps/web/components/*` (`ArticleView`, `PosterPanel`,
   `ProgressSteps`, `FeedbackBox`, `CopyEditForm`, `HistoryCard`, `StatusChip`,
   `GenerationThread` — the runs-from-this-note rail above `NextActions`)
+- DLO page (notes + MP3/PDF/DOCX → processing → **editable review** → article) →
+  `apps/web/app/dlo/page.tsx`; intake poll hook → `apps/web/lib/useDloIntake.ts`
+  (the generating phase reuses `useGeneration` + `ProgressSteps`)
 
 **Data & schema:** `supabase/migrations/0001…0004_*.sql` — pgvector Mahasamvad
 chunks, `generations` table, generation category + chunk style-category columns;
@@ -90,7 +123,11 @@ chunks, `generations` table, generation category + chunk style-category columns;
 `reference_images.layout_spec` (the master's vision-derived layout); `0017` —
 generation-thread lineage (`source_generation_id` + denormalized `thread_root_id`;
 detail-page follow-ups link, home-form runs are new roots; served by
-`GET /api/generations/:id/thread`).
+`GET /api/generations/:id/thread`); `0018` — `dlo_intakes` table + private
+`dlo-uploads` bucket + `generations.dlo_intake_id` lineage; `0019` — chunk embeddings
+slimmed to `halfvec(1024)` (Matryoshka truncation of text-embedding-3-large) and the
+HNSW index dropped, to fit the Supabase free tier — all embeds pass `dimensions: 1024`
+and the match RPC signature is `halfvec(1024)` (deploy 0019 + the code together).
 
 **Aux / not on the main request path:**
 - `packages/content-engine/src/finetune/*` — reusable JSONL dataset pipeline
@@ -122,10 +159,13 @@ Content pipeline (from `packages/content-engine`, e.g.
 `pnpm --filter @dgipr/content-engine scrape:news`):
 `scrape:news` / `chunk:news` / `embed:news` (WordPress-REST ingest → chunk →
 embed to pgvector), plus `:karjamukti` variants; `retrieve:test`,
-`generate:test`, `polish:test`.
+`generate:test`, `polish:test`; `intake:test <files…>` exercises the DLO
+Sarvam STT/doc extraction on local files without the web UI (Sarvam spend).
 
 Poster preview (renders sample posters without the API):
-`pnpm --filter @dgipr/poster-renderer poster:preview` and `poster:preview:article`.
+`pnpm --filter @dgipr/poster-renderer poster:preview` and `poster:preview:article`;
+`poster:preview:markers` renders the numbered feedback-marker overlay at both
+poster sizes (tune `src/feedback-marker.ts` for free).
 
 User-guide screenshots (`docs/user-guide/assets`):
 `pnpm --filter @dgipr/poster-renderer docs:shots <phase>` — phases
@@ -160,13 +200,40 @@ Chromium): `pnpm --filter @dgipr/poster-renderer exec playwright install chromiu
   with Chromium (this is what prevents garbled Marathi). Storage paths are versioned per
   render (public bucket is CDN-cached — never reuse a path).
 - **Article poster via n8n (default).** With `ARTICLE_POSTER_MODE=n8n` the article poster
-  is rendered by the `article-poster-v1-api` workflow, not Chromium: the API sends only
-  `{ headline, scene_brief, reference_url }` and the image model paints the whole
-  **landscape** poster (one Marathi headline, no bullets/stats — deliberately simple,
-  distinct from the Twitter posters) by editing the master at `reference_url`. This
-  intentionally accepts image-model Devanagari for the single headline (verified
-  acceptable). No scene image is produced, so poster feedback + manual copy-edit (which
-  need `scenePath`) are unavailable in this mode.
+  is rendered by the `article-poster-v1-api` workflow, not Chromium: the API sends
+  `{ headline, scene_brief, reference_url, layout_summary, has_photo_zone }` and the
+  image model paints the **landscape** poster body (one Marathi headline, no
+  bullets/stats — deliberately simple, distinct from the Twitter posters) by editing the
+  master at `reference_url`. The workflow's Build Prompt is **layout-agnostic**: it never
+  names a specific anatomy (a hardcoded "curved left panel + right photo zone" once made
+  gpt-image-2 reshape every master into that one look, defeating the rotation's variety);
+  structure is asserted only from `layout_summary`/`has_photo_zone` — the picked master's
+  own `reference_images.layout_spec` (migration 0016) flattened to strings ('' = un-analyzed
+  → generic conditional prompt; `has_photo_zone: 'false'` = hard no-imagery lock; the
+  panel-colour theme is applied conditionally, only if the master actually has a solid
+  headline panel). Article masters therefore need the `analyze:references` backfill just
+  like twitter ones. This intentionally accepts image-model Devanagari for the single
+  headline (verified acceptable). The brand chrome is NOT painted by the model: the prompt erases the
+  master's logo/footer and declares those areas reserved zones (top-left ~560x220,
+  bottom ~140px at 1536x1024, quiet background only), and `renderArticlePosterViaN8n`
+  stamps `assets/article-logo.png` + `assets/poster-footer.png` in code
+  (`overlayArticleChrome` in `packages/poster-renderer/src/article-chrome.ts`; zone
+  numbers there and in the workflow's Build Prompt node must stay in sync; tune for
+  free with `poster:preview:chrome`). The overlay also runs on image-feedback
+  re-renders, re-stamping any chrome drift. No scene image is produced, so poster
+  feedback + manual copy-edit (which need `scenePath`) are unavailable in this mode.
+- **Twitter posters get the same code-stamped chrome.** `social-post-v2-api`'s prompts
+  erase the master's महाराष्ट्र शासन emblem (top-right) + footer band/social strip and
+  declare them reserved zones (top-right ~220x180, bottom ~130px at 1280x1600, quiet
+  background only); `overlayTwitterChrome`
+  (`packages/poster-renderer/src/twitter-chrome.ts`) stamps `assets/poster-logo.png` +
+  `assets/poster-footer.png` on every webhook return — `startSocialPostJob` and the
+  twitter image-feedback path alike. Zone numbers in twitter-chrome.ts and the
+  workflow's Build Image Prompt / Build Feedback Prompt nodes must stay in sync; tune
+  for free with `poster:preview:chrome:twitter`. Deploy order is the NORMAL one (API
+  first, then `pnpm n8n:push`): new workflow + old API would ship posters with EMPTY
+  reserved zones (no branding), while old workflow + new API merely double-stamps in
+  place.
 - **Whether a poster may contain a photo comes from the master's PIXELS, not its type
   description.** A vision pass (`references/analyze-template.ts`, gpt-4o-mini) runs once
   per uploaded master and caches `{ hasPhotoZone, bulletSlots, layoutSummary }` on

@@ -1,20 +1,34 @@
 'use client';
 
+// Standalone Marathi→English translation of pasted text. Same two-step flow as the
+// generation page: submitting first runs the name check (TranslationTermsReview) so
+// the user confirms/corrects every proper noun's English spelling in place, and only
+// then does the translation run — with those spellings locked and saved to the
+// नाव-शब्दकोश for future runs.
+
 import { useRef, useState } from 'react';
-import { TRANSLATE_TEXT_MAX_CHARS } from '@dgipr/schemas';
-import { translateText } from '../../lib/api';
+import {
+  TRANSLATE_TEXT_MAX_CHARS,
+  type PrepareTranslationResponse,
+  type TranslationTermInput,
+} from '@dgipr/schemas';
+import { prepareTextTranslation, translateText } from '../../lib/api';
 import { downloadBlob } from '../../lib/download';
 import { STR } from '../../lib/strings';
+import { TranslationTermsReview } from '../../components/TranslationTermsReview';
 
 type TranslationResult = Readonly<{
   english: string;
   lockedTermCount: number;
-  minedTermCount: number;
 }>;
 
 export default function TranslatePage() {
   const [text, setText] = useState('');
-  const [mineTerms, setMineTerms] = useState(false);
+  // Name-check flow: idle → preparing (extracting names) → review (card shown).
+  const [prep, setPrep] = useState<'idle' | 'preparing' | 'review'>('idle');
+  const [prepared, setPrepared] = useState<
+    PrepareTranslationResponse['terms'] | null
+  >(null);
   const [result, setResult] = useState<TranslationResult | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -22,7 +36,16 @@ export default function TranslatePage() {
   const fileInput = useRef<HTMLInputElement>(null);
 
   const overLimit = text.length > TRANSLATE_TEXT_MAX_CHARS;
-  const disabled = submitting || text.trim().length === 0 || overLimit;
+  const disabled =
+    submitting || prep !== 'idle' || text.trim().length === 0 || overLimit;
+
+  // Any change to the text invalidates a prepared name list and an old result.
+  const resetFlow = () => {
+    setResult(null);
+    setPrep('idle');
+    setPrepared(null);
+    setError(null);
+  };
 
   const onFile = (file: File | undefined) => {
     if (!file) return;
@@ -33,18 +56,40 @@ export default function TranslatePage() {
     const reader = new FileReader();
     reader.onload = () => {
       setText(String(reader.result ?? ''));
-      setResult(null);
-      setError(null);
+      resetFlow();
     };
     reader.readAsText(file, 'utf-8');
   };
 
-  const submit = async () => {
+  // Step 1: extract the text's names for review. Failure returns to idle with a
+  // Marathi error — never silently translating with unchecked names.
+  const startNameCheck = async () => {
     if (disabled) return;
+    setPrep('preparing');
+    setError(null);
+    setResult(null);
+    try {
+      const res = await prepareTextTranslation(text.trim());
+      setPrepared(res.terms);
+      setPrep('review');
+    } catch {
+      setError(STR.namesPrepareError);
+      setPrep('idle');
+    }
+  };
+
+  // Step 2: translate with the confirmed spellings locked (and saved verified).
+  const confirmTranslate = async (terms: TranslationTermInput[]) => {
     setSubmitting(true);
     setError(null);
     try {
-      setResult(await translateText({ text: text.trim(), mineTerms }));
+      const res = await translateText({ text: text.trim(), terms });
+      setResult({
+        english: res.english,
+        lockedTermCount: res.lockedTermCount,
+      });
+      setPrep('idle');
+      setPrepared(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : STR.genericError);
     } finally {
@@ -75,7 +120,7 @@ export default function TranslatePage() {
           value={text}
           onChange={(event) => {
             setText(event.target.value);
-            setResult(null);
+            resetFlow();
           }}
           style={{ marginTop: 10 }}
         />
@@ -100,14 +145,6 @@ export default function TranslatePage() {
             onChange={(event) => onFile(event.target.files?.[0])}
           />
         </div>
-        <label style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-          <input
-            type="checkbox"
-            checked={mineTerms}
-            onChange={(event) => setMineTerms(event.target.checked)}
-          />
-          <span>{STR.translateMineTerms}</span>
-        </label>
       </section>
 
       <section className="card">
@@ -115,11 +152,17 @@ export default function TranslatePage() {
           <button
             type="button"
             className="btn btn-primary"
-            onClick={submit}
+            onClick={startNameCheck}
             disabled={disabled}
           >
             {STR.translateAction}
           </button>
+          {prep === 'preparing' ? (
+            <span className="translating-note">
+              <span className="spinner" aria-hidden="true" />
+              {STR.namesChecking}
+            </span>
+          ) : null}
           {submitting ? (
             <span className="translating-note">
               <span className="spinner" aria-hidden="true" />
@@ -127,6 +170,17 @@ export default function TranslatePage() {
             </span>
           ) : null}
         </div>
+        {prep === 'review' && prepared ? (
+          <TranslationTermsReview
+            terms={prepared}
+            busy={submitting}
+            onConfirm={confirmTranslate}
+            onCancel={() => {
+              setPrep('idle');
+              setPrepared(null);
+            }}
+          />
+        ) : null}
         {error ? <p className="form-error">{error}</p> : null}
       </section>
 
@@ -154,9 +208,6 @@ export default function TranslatePage() {
           </div>
           <p className="hint">
             {result.lockedTermCount} {STR.translateLockedTerms}
-            {mineTerms
-              ? ` · ${result.minedTermCount} ${STR.translateMinedTerms}`
-              : ''}
           </p>
         </section>
       ) : null}

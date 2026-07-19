@@ -14,8 +14,9 @@ import {
   extractGlossaryCandidates,
   generateArticle,
   generateCopy,
+  interpretImageFeedback,
   pickArticlePosterTheme,
-  pickArticleReferenceUrl,
+  pickArticleReference,
   recordImageCost,
   resolvePinnedReference,
   resolvePinnedTypeReference,
@@ -27,12 +28,16 @@ import {
   type ArticlePosterTheme,
   type ImageQuality,
   type PinnedReference,
+  type ReferenceLayoutSpec,
 } from '@dgipr/content-engine';
 import {
+  annotateFeedbackRegions,
   buildArticleScenePrompt,
   generateImage,
   generateArticlePoster,
   headStrings,
+  overlayArticleChrome,
+  overlayTwitterChrome,
 } from '@dgipr/poster-renderer';
 import {
   addGenerationCost,
@@ -45,11 +50,17 @@ import {
   updateGeneration,
   uploadPng,
   downloadPng,
+  upsertGlossaryTerm,
   type GenerationCostIncrement,
   type GenerationRow,
   type SupabaseClient,
 } from '@dgipr/database';
-import { CopySchema, type Copy } from '@dgipr/schemas';
+import {
+  CopySchema,
+  type Copy,
+  type PosterImageFeedbackRequest,
+  type TranslationTermInput,
+} from '@dgipr/schemas';
 
 const running = new Set<string>();
 
@@ -299,19 +310,22 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
     const pinned = row.referenceImageId
       ? await resolvePinnedReference(client, row.referenceImageId)
       : null;
-    const referenceUrl = pinned?.url ?? (await pickArticleReferenceUrl(client));
+    const reference = pinned ?? (await pickArticleReference(client));
     // Rotate the headline-panel color per render so posters stop always being orange.
-    // The master's logo/layout/footer stay fixed; only the curved panel is recoloured.
+    // The workflow applies it conditionally (only masters that actually have a solid
+    // headline panel are recoloured — the library is a mix of layouts); the
+    // logo/footer chrome is code-stamped after the render (overlayArticleChrome).
     const theme = pickArticlePosterTheme();
     console.log(
-      `[job ${id}] article poster reference: ${JSON.stringify({ id, referenceImageId: row.referenceImageId, pinned: Boolean(pinned), referenceUrl, theme: theme.name })}`,
+      `[job ${id}] article poster reference: ${JSON.stringify({ id, referenceImageId: row.referenceImageId, pinned: Boolean(pinned), referenceUrl: reference.url, analyzed: Boolean(reference.layoutSpec), theme: theme.name })}`,
     );
     const posterPng = await renderArticlePosterViaN8n(
       id,
       copy,
-      referenceUrl,
+      reference.url,
       '',
       theme,
+      reference.layoutSpec,
     );
     // Image is painted inside n8n (gpt-image-2 @ 1536x1024); attribute the fixed tier price.
     recordImageCost('article', imageQuality());
@@ -336,16 +350,28 @@ type ArticlePosterResult = {
 // produced locally by @dgipr/content-engine — facts stay source-of-truth per
 // AGENTS.md — so we send only the resolved { headline, scene_brief } plus the
 // immutable library URL of the master to edit (referenceUrl), and n8n *only
-// renders*: its image model paints the whole poster (including the single Marathi
-// headline) by editing that master. headline is resolved here via headStrings so
+// renders*: its image model paints the poster body (panel, headline, photo) by
+// editing that master, leaving the logo/footer reserved zones as plain background.
+// The crisp brand chrome (महासंवाद logo top-left + department footer strip) is then
+// composited here in code (overlayArticleChrome) — the image model can't render
+// those Devanagari lockups reliably. headline is resolved here via headStrings so
 // n8n stays dumb. Mirrors startSocialPostJob's fetch/timeout/error handling;
-// returns the decoded poster PNG.
+// returns the chrome-stamped poster PNG.
 async function renderArticlePosterViaN8n(
   id: string,
   copy: Copy,
   referenceUrl: string,
   imageFeedback = '',
   theme?: ArticlePosterTheme,
+  // The picked master's vision-derived layout (migration 0016). null on
+  // un-analyzed masters AND on feedback edits (which edit the latest poster,
+  // not a master) — the workflow then falls back to its generic layout-agnostic
+  // prompt instead of asserting structure the master may not have.
+  layoutSpec: ReferenceLayoutSpec | null = null,
+  // > 0 only on annotated feedback edits: the referenced image then carries that
+  // many numbered marker boxes and the workflow prompt switches to marker
+  // semantics (apply each numbered change at its marker, then erase the marks).
+  markerCount = 0,
 ): Promise<Buffer> {
   const webhookUrl = requireEnv('N8N_ARTICLE_POSTER_WEBHOOK_URL');
   const webhookSecret = process.env.N8N_WEBHOOK_SECRET;
@@ -367,12 +393,19 @@ async function renderArticlePosterViaN8n(
       generation_id: id,
       reference_url: referenceUrl,
       image_feedback: imageFeedback,
+      marker_count: markerCount,
       // Panel/headline color for this render (initial renders only). Empty on the
       // image-feedback edit path so the workflow preserves the current poster's
       // colors; empty also makes the workflow fall back to its original orange.
       panel_color: theme?.panelHex ?? '',
       panel_color_name: theme?.name ?? '',
       headline_color: theme?.headlineHex ?? '',
+      // The master's own structure, so the workflow prompt describes THIS master
+      // instead of a hardcoded anatomy. Flattened to strings (the workflow's Set
+      // node stays all-primitive); has_photo_zone is tri-state 'true'/'false'/''
+      // where '' = unknown (un-analyzed master or feedback edit).
+      layout_summary: layoutSpec?.layoutSummary ?? '',
+      has_photo_zone: layoutSpec ? String(layoutSpec.hasPhotoZone) : '',
     }),
     signal: AbortSignal.timeout(420_000),
   });
@@ -387,7 +420,10 @@ async function renderArticlePosterViaN8n(
   if (!result.poster_png_base64) {
     throw new Error('n8n article-poster webhook returned no poster.');
   }
-  return Buffer.from(result.poster_png_base64, 'base64');
+  // Stamp the static logo/footer PNGs over their reserved zones. Also runs on the
+  // image-feedback path (the input poster already carries the chrome; re-stamping
+  // heals any drift the edit introduced).
+  return overlayArticleChrome(Buffer.from(result.poster_png_base64, 'base64'));
 }
 
 // Shape n8n's social-post-v2-api workflow returns from its Respond-to-Webhook node.
@@ -405,6 +441,9 @@ async function renderSocialPosterFeedbackViaN8n(
   id: string,
   currentPosterUrl: string,
   feedback: string,
+  // > 0 when currentPosterUrl carries numbered marker boxes (see the article
+  // renderer's note above).
+  markerCount = 0,
 ): Promise<Buffer> {
   const webhookUrl = requireEnv('N8N_SOCIAL_POST_WEBHOOK_URL');
   const webhookSecret = process.env.N8N_WEBHOOK_SECRET;
@@ -421,6 +460,7 @@ async function renderSocialPosterFeedbackViaN8n(
       generation_id: id,
       image_feedback: feedback,
       current_poster_url: currentPosterUrl,
+      marker_count: markerCount,
       // Always-present placeholders keep the shared Set node deterministic;
       // the feedback branch bypasses every consumer of these initial-run fields.
       meeting_notes: '',
@@ -443,7 +483,9 @@ async function renderSocialPosterFeedbackViaN8n(
   if (!result.poster_png_base64) {
     throw new Error('n8n social-poster feedback webhook returned no poster.');
   }
-  return Buffer.from(result.poster_png_base64, 'base64');
+  // The workflow leaves the emblem/footer reserved zones untouched; re-stamp the
+  // chrome so any drift from the edit is corrected (mirrors the article path).
+  return overlayTwitterChrome(Buffer.from(result.poster_png_base64, 'base64'));
 }
 
 // Twitter pipeline: the heavy lifting (classify → copy → image → caption) runs in the
@@ -502,6 +544,9 @@ export function startSocialPostJob(client: SupabaseClient, id: string): void {
         // sees a definite value.
         forced_type: forcedType,
         forced_reference_url: forcedReferenceUrl,
+        // Markers only exist on annotated feedback edits; keep the Set node's
+        // number field deterministic on initial runs too.
+        marker_count: 0,
       }),
       signal: AbortSignal.timeout(420_000),
     });
@@ -521,7 +566,12 @@ export function startSocialPostJob(client: SupabaseClient, id: string): void {
     // is external and not measured (negligible, <$0.001), so the stored cost is image-only.
     recordImageCost('twitter', imageQuality());
 
-    const posterPng = Buffer.from(result.poster_png_base64, 'base64');
+    // The workflow paints the poster body only (the prompt erases the master's
+    // emblem/footer and reserves those zones); the crisp brand chrome is stamped
+    // here in code, exactly like the article path's overlayArticleChrome.
+    const posterPng = await overlayTwitterChrome(
+      Buffer.from(result.poster_png_base64, 'base64'),
+    );
     const posterObjectPath = posterPath(id, 1);
     await uploadPng(client, posterObjectPath, posterPng);
 
@@ -649,8 +699,15 @@ export function startConcurrentArticleFeedbackJob(
 // On-demand English translation of an article. Runs the glossary-locked Sarvam
 // translation (verified proper-noun mappings present in this article are passed as
 // LOCKED TERMS so a known name is never mistranslated) and persists the result to
-// articleEnglish. The Marathi article is never mutated. Candidate mining grows the
-// review queue but must never fail the translation.
+// articleEnglish. The Marathi article is never mutated.
+//
+// `confirmedTerms` is the user-reviewed name list from the pre-translation check
+// (prepareTranslationTerms → the web review card). When present, each mapping is
+// saved as a VERIFIED glossary row before translating — so the confirmed spellings
+// lock into THIS run, not just future ones — and the post-translation candidate
+// mining is skipped (the same extraction already ran at prepare time; re-mining
+// would only double the spend). Without it (older client), the legacy path mines
+// unverified candidates into the review queue after the fact.
 //
 // Deliberately NOT wrapped in runJob: this is the one job that may run beside
 // another (the poster render, which is still in flight when the article first
@@ -658,7 +715,11 @@ export function startConcurrentArticleFeedbackJob(
 // setting status='completed' here would end the poster run's polling, and
 // status='failed' would erase a perfectly good poster job. It reports itself
 // through the `translating` set + `translateErrors` map instead.
-export function startTranslateJob(client: SupabaseClient, id: string): void {
+export function startTranslateJob(
+  client: SupabaseClient,
+  id: string,
+  confirmedTerms?: readonly TranslationTermInput[],
+): void {
   translating.add(id);
   translateErrors.delete(id);
   void (async () => {
@@ -669,6 +730,22 @@ export function startTranslateJob(client: SupabaseClient, id: string): void {
         if (!row) throw new Error(`Generation ${id} not found.`);
         if (!row.article)
           throw new Error(`Generation ${id} has no article yet.`);
+
+        // Persist the user-confirmed names first: a human just asserted these exact
+        // spellings, so they overwrite any existing row (upsert by Marathi key) and
+        // are verified — findGlossaryTermsInText below then picks them up. Saved
+        // before translating so a translation failure never loses the review work.
+        if (confirmedTerms) {
+          for (const term of confirmedTerms) {
+            await upsertGlossaryTerm(client, {
+              marathi: term.marathi,
+              english: term.english,
+              termType: term.termType ?? 'other',
+              verified: true,
+              source: 'manual',
+            });
+          }
+        }
 
         // Verified glossary terms whose Marathi form appears in this article become
         // the LOCKED TERMS table the translator must reuse verbatim.
@@ -681,22 +758,24 @@ export function startTranslateJob(client: SupabaseClient, id: string): void {
         const english = await translateArticleToEnglish(row.article, glossary);
         await updateGeneration(client, id, { articleEnglish: english });
 
-        // Grow the review queue: auto-mine proper nouns → unverified candidates. The
-        // upsert ignores duplicates, so verified/human-edited rows are never
-        // clobbered. Best-effort — a mining failure must not fail an already-persisted
-        // translation.
-        try {
-          const candidates = await extractGlossaryCandidates(row.article);
-          await insertGlossaryCandidates(
-            client,
-            candidates.map((c) => ({
-              ...c,
-              source: 'auto' as const,
-              verified: false,
-            })),
-          );
-        } catch (error) {
-          console.error(`[translate ${id}] candidate mining failed:`, error);
+        // Legacy path only: grow the review queue by mining proper nouns →
+        // unverified candidates. The upsert ignores duplicates, so verified/
+        // human-edited rows are never clobbered. Best-effort — a mining failure
+        // must not fail an already-persisted translation.
+        if (!confirmedTerms) {
+          try {
+            const candidates = await extractGlossaryCandidates(row.article);
+            await insertGlossaryCandidates(
+              client,
+              candidates.map((c) => ({
+                ...c,
+                source: 'auto' as const,
+                verified: false,
+              })),
+            );
+          } catch (error) {
+            console.error(`[translate ${id}] candidate mining failed:`, error);
+          }
         }
       });
     } catch (error) {
@@ -803,10 +882,17 @@ export function startPosterFeedbackJob(
 // Pixel-level poster feedback for the default n8n render paths. Each request
 // edits the latest persisted poster, so multiple revisions build on one another.
 // The caption/article and structured copy remain unchanged.
+//
+// With marker annotations, the edit gets a location signal the plain text path
+// never had: the current poster is re-uploaded with numbered marker boxes drawn
+// on (annotateFeedbackRegions), a vision pass turns the marks + notes into one
+// element-aware instruction (interpretImageFeedback, raw notes on failure), and
+// n8n edits the MARKED image under marker-count prompt semantics. Without
+// annotations every value below equals the old behaviour byte-for-byte.
 export function startPosterImageFeedbackJob(
   client: SupabaseClient,
   id: string,
-  feedback: string,
+  input: PosterImageFeedbackRequest,
 ): void {
   runJob(client, id, async () => {
     const row = await getGeneration(client, id);
@@ -821,15 +907,57 @@ export function startPosterImageFeedbackJob(
       error: null,
     });
 
-    const currentPosterUrl = publicUrl(client, row.posterPath);
+    const annotations = input.annotations ?? [];
     const version = await nextVersion(client, id);
-    let posterPng: Buffer;
+    let inputUrl = publicUrl(client, row.posterPath);
+    let feedbackText = input.feedback ?? '';
+    // Revision history keeps the user's own words, never the machine text.
+    let historyFeedback = feedbackText;
 
+    if (annotations.length > 0) {
+      const cleanPoster = await downloadPng(client, row.posterPath);
+      const marked = await annotateFeedbackRegions(
+        cleanPoster,
+        annotations.map((a) => a.region),
+      );
+      // Throwaway n8n input — never a posterPath / revision snapshot, so it
+      // can't enter the version strip. The version counter only advances when
+      // the round succeeds (insertRevision runs last), so a failed round
+      // orphans this object and a retry recomputes the SAME version; the
+      // timestamp makes each attempt's path unique. upsert is not an option:
+      // the public bucket is CDN-cached and paths must never be reused (n8n
+      // could fetch the stale cached image).
+      const markedPath = `generations/${id}/feedback-marked-v${version}-${Date.now()}.png`;
+      await uploadPng(client, markedPath, marked);
+      inputUrl = publicUrl(client, markedPath);
+
+      const interpreted = await interpretImageFeedback({
+        markedPosterPng: marked,
+        annotations: annotations.map((a, i) => ({
+          index: i + 1,
+          note: a.note,
+          region: a.region,
+        })),
+        overallNote: input.feedback,
+        posterKind: row.category === 'twitter' ? 'twitter' : 'article',
+      });
+      console.log(
+        `[job ${id}] marker feedback (${interpreted.source}): ${interpreted.instruction}`,
+      );
+      feedbackText = interpreted.instruction;
+      historyFeedback = [
+        ...annotations.map((a, i) => `[${i + 1}] ${a.note}`),
+        ...(input.feedback ? [input.feedback] : []),
+      ].join('\n');
+    }
+
+    let posterPng: Buffer;
     if (row.category === 'twitter') {
       posterPng = await renderSocialPosterFeedbackViaN8n(
         id,
-        currentPosterUrl,
-        feedback,
+        inputUrl,
+        feedbackText,
+        annotations.length,
       );
       recordImageCost('twitter', imageQuality());
     } else {
@@ -837,8 +965,11 @@ export function startPosterImageFeedbackJob(
       posterPng = await renderArticlePosterViaN8n(
         id,
         copy,
-        currentPosterUrl,
-        feedback,
+        inputUrl,
+        feedbackText,
+        undefined,
+        null,
+        annotations.length,
       );
       recordImageCost('article', imageQuality());
     }
@@ -849,7 +980,7 @@ export function startPosterImageFeedbackJob(
     await insertRevision(client, {
       generationId: id,
       target: 'poster_image',
-      feedback,
+      feedback: historyFeedback,
       posterPath: posterObjectPath,
     });
   });

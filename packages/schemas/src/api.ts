@@ -125,12 +125,70 @@ export const PosterFeedbackRequestSchema = z.object({
 });
 export type PosterFeedbackRequest = z.infer<typeof PosterFeedbackRequestSchema>;
 
+// A rectangle on the poster, normalized to 0..1 of the image's width/height so
+// it is independent of the displayed size (article 1536x1024, twitter 1280x1600).
+// Placed in the web UI by a click (default-size box) or a drag (exact box).
+export const FeedbackRegionSchema = z
+  .object({
+    x: z.number().min(0).max(1),
+    y: z.number().min(0).max(1),
+    width: z.number().min(0.005).max(1),
+    height: z.number().min(0.005).max(1),
+  })
+  .superRefine((r, ctx) => {
+    // Small epsilon: client-side float math may land exactly on the edge.
+    if (r.x + r.width > 1.0001) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Region exceeds the right edge.',
+        path: ['width'],
+      });
+    }
+    if (r.y + r.height > 1.0001) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Region exceeds the bottom edge.',
+        path: ['height'],
+      });
+    }
+  });
+export type FeedbackRegion = z.infer<typeof FeedbackRegionSchema>;
+
+// One numbered pointing gesture plus its instruction. A marker tells the model
+// WHERE the user is looking — the change applies to the element at/around it,
+// never "only inside the box".
+export const PosterFeedbackAnnotationSchema = z.object({
+  region: FeedbackRegionSchema,
+  note: z.string().trim().min(3).max(500),
+});
+export type PosterFeedbackAnnotation = z.infer<
+  typeof PosterFeedbackAnnotationSchema
+>;
+
+export const POSTER_FEEDBACK_MAX_MARKERS = 3;
+
 // Pixel-level feedback for an already rendered poster. Unlike the legacy
 // copy/scene route, this edits the latest complete poster through n8n and works
-// for both article and Twitter generations.
-export const PosterImageFeedbackRequestSchema = z.object({
-  feedback: z.string().trim().min(3).max(4_000),
-});
+// for both article and Twitter generations. Either free text, numbered marker
+// annotations, or both; clients omit empty keys (min lengths reject '' / []).
+export const PosterImageFeedbackRequestSchema = z
+  .object({
+    feedback: z.string().trim().min(3).max(4_000).optional(),
+    annotations: z
+      .array(PosterFeedbackAnnotationSchema)
+      .min(1)
+      .max(POSTER_FEEDBACK_MAX_MARKERS)
+      .optional(),
+  })
+  .superRefine((v, ctx) => {
+    if (!v.feedback && !v.annotations?.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Provide feedback text or at least one annotation.',
+        path: ['feedback'],
+      });
+    }
+  });
 export type PosterImageFeedbackRequest = z.infer<
   typeof PosterImageFeedbackRequestSchema
 >;
@@ -306,6 +364,47 @@ export type UpdateGlossaryTermRequest = z.infer<
   typeof UpdateGlossaryTermRequestSchema
 >;
 
+// ---------- Pre-translation name check ----------
+// Every translation starts with a "check the names" step: the API extracts the text's
+// proper nouns (merged with any glossary rows found in it) and the user confirms/corrects
+// the English spellings IN PLACE before translating. Confirmed terms are saved as verified
+// glossary rows and locked into the translation — so a wrong name (संवाद वारी → "dialogue
+// van") never reaches the English output, and the dictionary grows verified as a side
+// effect instead of via a separate /glossary visit.
+
+// One user-confirmed Marathi→English mapping sent along with a translate request.
+export const TranslationTermInputSchema = z.object({
+  marathi: z.string().trim().min(1).max(200),
+  english: z.string().trim().min(1).max(200),
+  termType: TermTypeSchema.optional(),
+});
+export type TranslationTermInput = z.infer<typeof TranslationTermInputSchema>;
+
+// A term proposed for review: extracted from the text and/or already in the glossary.
+// `verified` renders the reassurance badge — those rows arrive pre-locked.
+export const PrepareTranslationResponseSchema = z.object({
+  terms: z.array(
+    z.object({
+      marathi: z.string(),
+      english: z.string(),
+      termType: TermTypeSchema,
+      verified: z.boolean(),
+    }),
+  ),
+});
+export type PrepareTranslationResponse = z.infer<
+  typeof PrepareTranslationResponseSchema
+>;
+
+// Body of POST /generations/:id/translate. `terms` is the user-confirmed name list from
+// the review step; optional so a bare request (older client) still translates.
+export const TranslateGenerationRequestSchema = z.object({
+  terms: z.array(TranslationTermInputSchema).max(200).optional(),
+});
+export type TranslateGenerationRequest = z.infer<
+  typeof TranslateGenerationRequestSchema
+>;
+
 // ---------- Standalone text translation (not tied to a generation) ----------
 
 // Translation is one sequential Sarvam call per ~2500 chars, so the input is capped to keep
@@ -313,17 +412,27 @@ export type UpdateGlossaryTermRequest = z.infer<
 // the client and the API agree on the limit.
 export const TRANSLATE_TEXT_MAX_CHARS = 10_000;
 
+export const PrepareTranslateTextRequestSchema = z.object({
+  text: z.string().trim().min(1).max(TRANSLATE_TEXT_MAX_CHARS),
+});
+export type PrepareTranslateTextRequest = z.infer<
+  typeof PrepareTranslateTextRequestSchema
+>;
+
 export const TranslateTextRequestSchema = z.object({
   text: z.string().trim().min(1).max(TRANSLATE_TEXT_MAX_CHARS),
-  // Opt-in: also mine proper-noun candidates from this text into the glossary review queue.
-  mineTerms: z.boolean().optional(),
+  // User-confirmed names from the review step. When present they are saved as verified
+  // glossary rows and locked into this translation; when absent the legacy path mines
+  // candidates into the review queue instead.
+  terms: z.array(TranslationTermInputSchema).max(200).optional(),
 });
 export type TranslateTextRequest = z.infer<typeof TranslateTextRequestSchema>;
 
 export const TranslateTextResponseSchema = z.object({
   english: z.string(),
   // Transparency for the UI: how many verified glossary terms were locked, and how many new
-  // candidates were mined (0 when mineTerms is off, or when mining failed — it's best-effort).
+  // candidates were mined (always 0 when `terms` was sent — the confirmed-names path skips
+  // mining; nonzero only on the legacy no-terms path, and 0 there too if mining failed).
   lockedTermCount: z.number().int().nonnegative(),
   minedTermCount: z.number().int().nonnegative(),
 });

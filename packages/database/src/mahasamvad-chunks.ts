@@ -67,8 +67,8 @@ type MatchDbRow = {
 };
 
 // Vector similarity search via the match_mahasamvad_chunks RPC. Embeds must already
-// be produced by the same model (text-embedding-3-large, 3072 dims); the vector is
-// sent as the halfvec literal the RPC expects. `filterCategory` scopes the search to
+// be produced by the same model (text-embedding-3-large at 1024 dims — see
+// migration 0019); the vector is sent as the halfvec literal the RPC expects. `filterCategory` scopes the search to
 // one style bucket ('news' / 'scheme'); null/undefined searches the whole table.
 export async function matchChunks(
   client: SupabaseClient,
@@ -164,9 +164,10 @@ export async function fetchExistingArticleIds(
 }
 
 // A Postgres statement-timeout (SQLSTATE 57014) — the failure we hit on large upserts.
-// Each upserted row inserts a 3072-dim vector into the HNSW index, and HNSW insert cost
-// grows with the index, so a batch size that commits quickly on a small table can exceed
-// the DB's per-statement time limit once the corpus is large.
+// Historically each upserted row inserted a 3072-dim vector into the HNSW index, whose
+// insert cost grows with the index. Migration 0019 dropped the index (and slimmed
+// vectors to 1024 dims), so timeouts are now unlikely — the adaptive halving below is
+// kept as a cheap safety net for bulk ingests.
 function isStatementTimeout(message: string): boolean {
   return /statement timeout|canceling statement due to statement timeout|57014/i.test(
     message,
@@ -174,8 +175,8 @@ function isStatementTimeout(message: string): boolean {
 }
 
 // Upsert one batch of already-mapped rows, halving and retrying on a statement timeout so
-// the effective batch size auto-adapts to whatever the (growing) HNSW index can absorb in
-// one statement. Any other error surfaces immediately.
+// the effective batch size auto-adapts to whatever the DB can absorb in one statement.
+// Any other error surfaces immediately.
 async function upsertBatchAdaptive(
   client: SupabaseClient,
   batch: Record<string, unknown>[],
@@ -196,8 +197,8 @@ async function upsertBatchAdaptive(
 }
 
 // Upsert chunks in batches, keyed on the primary key `id`, so re-running ingestion
-// is idempotent (no duplicate rows). Batches start small (HNSW inserts are the bottleneck)
-// and shrink further on timeout via upsertBatchAdaptive.
+// is idempotent (no duplicate rows). Batches start small and shrink further on timeout
+// via upsertBatchAdaptive.
 export async function upsertChunks(
   client: SupabaseClient,
   rows: readonly ChunkRow[],

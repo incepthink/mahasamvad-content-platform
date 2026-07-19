@@ -128,13 +128,17 @@ export async function buildTwitterCatalog(
 }
 
 // Random pick among the enabled article masters (same rotation semantics).
-export async function pickArticleReferenceUrl(
+// Returns the picked image's layoutSpec too so the article workflow can be told
+// what THIS master actually looks like (null = un-analyzed, workflow falls back
+// to its generic prompt) — same contract as the twitter catalog entries.
+export async function pickArticleReference(
   client: SupabaseClient,
-): Promise<string> {
+): Promise<Readonly<{ url: string; layoutSpec: ReferenceLayoutSpec | null }>> {
   const images = await listReferenceImageRows(client);
   const enabled = enabledImagesFor(images, 'article');
   if (enabled.length === 0) throw new Error(EMPTY_CATALOG_ERROR);
-  return publicUrl(client, pickRandom(enabled).storagePath);
+  const image = pickRandom(enabled);
+  return { url: publicUrl(client, image.storagePath), layoutSpec: image.layoutSpec };
 }
 
 // A pinned image is honored even if it was disabled after pinning; only a

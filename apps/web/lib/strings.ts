@@ -4,6 +4,7 @@
 
 import type {
   Category,
+  DloIntakeStep,
   GenerationStep,
   GenerationStatus,
   ReferenceCategory,
@@ -18,7 +19,10 @@ export const STR = {
   navTranslate: 'भाषांतर',
   navGlossary: 'शब्दकोश',
   navReferences: 'मास्टर टेम्पलेट',
+  navDlo: 'DLO लेख',
   navMenu: 'मेनू',
+  navCollapse: 'मेनू लहान करा',
+  navExpand: 'मेनू मोठा करा',
   poweredBy: 'Powered by',
 
   // New-generation form
@@ -69,19 +73,79 @@ export const STR = {
   noteTooShort: 'कृपया किमान २० अक्षरांची टिपणी लिहा.',
   txtOnly: 'कृपया फक्त .txt फाईल निवडा.',
 
+  // DLO (Digital Liaison Officer) interface — meeting notes + recordings +
+  // documents → transcription/extraction → editable review → article.
+  dloTitle: 'DLO — बैठकीतून लेख',
+  dloIntro:
+    'बैठकीतील टिपणी, ध्वनिमुद्रण (MP3) आणि कागदपत्रे (PDF/DOCX) येथे द्या — या सर्व माहितीतून लेख तयार होईल.',
+  dloStepInput: 'माहिती द्या',
+  dloStepProcessing: 'प्रक्रिया',
+  dloStepReview: 'तपासणी व संपादन',
+  dloStepOutput: 'तयार लेख',
+  dloNotesLabel: 'बैठकीतील टिपणी येथे लिहा',
+  dloNotesHint:
+    'बैठकीत जे ऐकले, ठरले किंवा आठवते ते सर्व येथे लिहा — मुद्दे, निर्णय, घोषणा, आकडेवारी.',
+  dloNotesPlaceholder:
+    'उदा. आजच्या बैठकीत मा. मंत्री महोदयांनी… असे जाहीर केले; योजनेसाठी … कोटी रुपयांची तरतूद…',
+  dloUpload: 'फाईल जोडा (PDF / MP3 / DOCX)',
+  dloUploadHint:
+    'बैठकीचे ध्वनिमुद्रण (.mp3) आणि कागदपत्रे (.pdf, .docx) — एकावेळी अनेक फाईल जोडता येतील.',
+  dloFilesTitle: 'जोडलेल्या फाईल',
+  dloRemoveFile: 'फाईल काढा',
+  dloFileTypeError: 'कृपया फक्त .pdf, .mp3 किंवा .docx फाईल निवडा.',
+  dloNeedInput: 'कृपया टिपणी लिहा किंवा किमान एक फाईल जोडा.',
+  dloSubmit: 'पुढे जा →',
+  dloProcessingTitle: 'माहितीवर प्रक्रिया सुरू आहे…',
+  dloProcessingHint:
+    'यास काही मिनिटे लागू शकतात. हे पान उघडे ठेवा किंवा नंतर परत या.',
+  dloProcessingNotes: 'टिपणी दिली आहे',
+  dloProcessingFilesSuffix: 'फाईल जोडल्या आहेत',
+  dloSourcesTitle: 'स्रोतांची स्थिती',
+  dloFileStatusPending: 'प्रक्रियेत…',
+  dloFileStatusDone: 'पूर्ण ✓',
+  dloFileStatusFailed: 'अयशस्वी',
+  dloCharsSuffix: 'अक्षरे',
+  dloReviewTitle: 'मजकूर तपासा व दुरुस्त करा',
+  dloReviewHint:
+    'खालील मजकूर टिपणी, ध्वनिमुद्रण व कागदपत्रांतून तयार झाला आहे. नावे, आकडे, पदनामे व योजनांची नावे तपासून हवे ते बदल करा — हाच मजकूर लेखाचा एकमेव आधार असेल.',
+  dloReviewFailedWarning:
+    'काही फाईल्समधून मजकूर मिळाला नाही — त्यांशिवाय पुढे जाता येईल:',
+  dloReviewTooShort: 'कृपया किमान २० अक्षरांचा मजकूर ठेवा.',
+  dloReviewTooLong: 'मजकूर ६०,००० अक्षरांपेक्षा जास्त आहे — कृपया कमी करा.',
+  dloGenerate: 'लेख तयार करा →',
+  dloOutputTitle: 'तयार झालेला लेख',
+  dloViewDetail: 'सविस्तर पाहा (अभिप्राय, भाषांतर, पोस्टर)',
+  dloStartOver: 'पुन्हा सुरुवात करा',
+  dloNewArticle: 'नवीन DLO लेख तयार करा',
+
   // Standalone Marathi-to-English translation
   translatePageTitle: 'भाषांतर (Translation)',
   translateInputLabel: 'मराठी मजकूर येथे लिहा किंवा चिकटवा',
   translateInputHint:
     'या मजकुराचे थेट इंग्रजी भाषांतर केले जाईल. हा मजकूर जतन केला जाणार नाही.',
   translateInputPlaceholder: 'भाषांतरासाठी मराठी मजकूर येथे लिहा…',
-  translateMineTerms: 'या मजकुरातून नवीन नाव-शब्दकोश संज्ञा शोधा',
   translateAction: 'भाषांतर करा',
   translateMayTakeTime: 'मोठ्या मजकुराला एक-दोन मिनिटे लागू शकतात.',
   translateOverLimit: 'मजकूर १०,००० अक्षरांपेक्षा जास्त आहे.',
   translateOutputTitle: 'इंग्रजी भाषांतर',
   translateLockedTerms: 'शब्दकोश संज्ञा वापरल्या',
-  translateMinedTerms: 'नवीन संज्ञा तपासणीसाठी जोडल्या',
+
+  // Pre-translation name check (shown before every translation; the confirmed
+  // spellings are locked into the English output and saved to the नाव-शब्दकोश)
+  namesChecking: 'मजकुरातील नावे शोधत आहोत…',
+  namesReviewTitle: 'नावांची इंग्रजी स्पेलिंग तपासा',
+  namesReviewHint:
+    'खालील नावे इंग्रजी भाषांतरात अगदी अशीच वापरली जातील. चुकीची स्पेलिंग दुरुस्त करा; एखादे नाव राहिले असेल तर ते खाली जोडा.',
+  namesReviewEmpty:
+    'या मजकुरात एकही नाव सापडले नाही. आवश्यक असल्यास खाली नाव जोडा.',
+  namesAddName: '+ आणखी नाव जोडा',
+  namesAddMarathiPlaceholder: 'उदा. संवाद वारी',
+  namesAddEnglishPlaceholder: 'उदा. Samvad Wari',
+  namesConfirmTranslate: 'भाषांतर सुरू करा',
+  namesCancel: 'रद्द करा',
+  namesPrepareError: 'नावे शोधता आली नाहीत. कृपया पुन्हा प्रयत्न करा.',
+  namesStartCheck: 'नावे तपासा',
+  retranslateFold: 'नावे सुधारून पुन्हा भाषांतर करा',
 
   // Progress
   progressTitle: 'तयार होत आहे…',
@@ -137,6 +201,19 @@ export const STR = {
   posterImageFeedbackTitle: 'चित्रात बदल हवा आहे?',
   posterImageFeedbackHint:
     'हवा असलेला दृश्यात्मक बदल स्पष्ट लिहा. प्रत्येक नवीन सूचना सध्याच्या पोस्टरवर लागू होईल; बाकीचे चित्र, मजकूर आणि मांडणी जशीच्या तशी ठेवायची असल्यास तसे नमूद करा.',
+  // Click-to-point marker feedback (PosterAnnotator + PosterImageFeedbackBox)
+  posterAnnotateHint:
+    'पोस्टरवर जिथे बदल हवा तिथे क्लिक करा किंवा ओढून चौकट काढा — प्रत्येक खुणेसाठी वेगळी सूचना लिहा (जास्तीत जास्त ३ खुणा). खूण न करता फक्त लिहूनही चालेल.',
+  markerLabel: 'खूण',
+  markerNotePlaceholder: 'या जागी काय बदलायचे ते लिहा…',
+  markerRemove: 'खूण काढा',
+  markerNoteTooShort: 'प्रत्येक खुणेसाठी थोडक्यात सूचना लिहा.',
+  posterOverallNotePlaceholder: 'संपूर्ण पोस्टरसाठी अतिरिक्त सूचना (ऐच्छिक)…',
+  markerReservedZoneWarning:
+    'टीप: वरचा लोगो आणि खालची पट्टी नंतर सॉफ्टवेअरने छापली जाते — त्या भागात केलेले बदल दिसणार नाहीत.',
+  markersSubmittedHint:
+    'पाठवलेल्या खुणा पोस्टरवर दाखवल्या आहेत — नवीन खूण केल्यास त्या हटतील.',
+  markersDismiss: 'खुणा लपवा',
   feedbackPlaceholder: 'येथे आपला अभिप्राय लिहा…',
   sendFeedback: 'बदल करा',
   sendingFeedback: 'पाठवत आहोत…',
@@ -178,7 +255,12 @@ export const STR = {
     'हीच टिपणी वापरून आणखी काही तयार करायचे आहे? खालील पर्याय निवडा.',
   nextTwitterTitle: 'याच टिपणीवरून ट्विटर पोस्ट तयार करा',
   nextTwitterHint:
-    'हीच टिपणी वापरून X (ट्विटर) साठी मराठी पोस्टर + कॅप्शन तयार होईल.',
+    'निवडलेल्या मजकुरावरून X (ट्विटर) साठी मराठी पोस्टर + कॅप्शन तयार होईल.',
+  nextSourceLabel: 'कोणता मजकूर वापरायचा?',
+  sourceArticle: 'तयार झालेला लेख',
+  sourceArticleDesc: 'या कामात तयार झालेला लेख पोस्टसाठी आधार म्हणून वापरला जाईल.',
+  sourceNote: 'मूळ टिपणी',
+  sourceNoteDesc: 'तुम्ही दिलेली मूळ टिपणी वापरली जाईल.',
   nextTwitterCta: 'ट्विटर पोस्ट तयार करा',
   nextTwitterStarted:
     'ट्विटर पोस्ट तयार होत आहे — प्रगती वरील "सुरू असलेली कामे" मध्ये पाहा.',
@@ -319,6 +401,15 @@ export const STR = {
   genericError: 'काहीतरी चुकले. कृपया पुन्हा प्रयत्न करा.',
   busyError: 'एक काम आधीच सुरू आहे. ते पूर्ण होईपर्यंत थांबा.',
 } as const;
+
+// Marathi labels for the DLO intake job's machine step keys.
+export const DLO_INTAKE_STEP_LABELS: Record<DloIntakeStep, string> = {
+  upload: 'फाईल अपलोड होत आहेत…',
+  transcribe: 'ध्वनिमुद्रणाचे शब्दांकन होत आहे…',
+  extract: 'कागदपत्रांतील मजकूर वाचत आहोत…',
+  combine: 'सर्व माहिती एकत्र करत आहोत…',
+  done: 'पूर्ण झाले',
+};
 
 // Marathi labels for the machine step keys the API writes.
 export const STEP_LABELS: Record<GenerationStep, string> = {

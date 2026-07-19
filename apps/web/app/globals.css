@@ -36,40 +36,35 @@ body {
   line-height: 1.65;
 }
 
-/* Sticky footer: body is a full-height column; the page content grows to fill so
-   the footer pins to the viewport bottom on short pages (header/main.page/footer
-   are direct flex children — TasksProvider adds no DOM element). */
+/* Desktop shell: body is a row of [sidebar | .app-main]. .app-main is itself a
+   full-height column so the footer pins to the viewport bottom on short pages
+   (.page grows with flex: 1 0 auto — TasksProvider adds no DOM element). On
+   mobile (see the 860px block) body switches to a column: sticky topbar on top,
+   the sidebar becomes a fixed off-canvas drawer. */
 body {
   display: flex;
+  flex-direction: row;
+}
+
+.app-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
   flex-direction: column;
+  min-height: 100vh;
 }
 
 a {
   color: inherit;
 }
 
-/* ---------- header ---------- */
-
-.site-header {
-  background: var(--card);
-  border-bottom: 3px solid var(--accent);
-}
-
-.site-header-inner {
-  max-width: 1080px;
-  margin: 0 auto;
-  padding: 14px 24px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-}
+/* ---------- sidebar ---------- */
 
 .site-title {
   text-decoration: none;
   display: flex;
   align-items: center;
+  min-width: 0;
 }
 
 .site-logo {
@@ -78,29 +73,154 @@ a {
   display: block;
 }
 
-.site-nav {
+.sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  flex-shrink: 0;
+  width: 260px;
   display: flex;
-  gap: 8px;
+  flex-direction: column;
+  gap: 18px;
+  padding: 16px 14px 20px;
+  background: var(--card);
+  border-right: 3px solid var(--accent);
+  transition: width 0.2s ease;
 }
 
-.site-nav a {
-  text-decoration: none;
-  font-weight: 600;
-  padding: 10px 18px;
-  border-radius: 12px;
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 48px;
+}
+
+.sidebar-logo {
+  overflow: hidden;
+}
+
+.sidebar-logo .site-logo {
+  height: 44px;
+}
+
+.sidebar-collapse {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  padding: 8px;
+  border-radius: 10px;
   border: 1px solid var(--border);
   background: var(--bg);
+  color: var(--muted);
+  cursor: pointer;
 }
 
-.site-nav a:hover {
+.sidebar-collapse:hover {
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sidebar-link,
+.sidebar .tasks-button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-decoration: none;
+  text-align: start;
+  cursor: pointer;
+}
+
+.sidebar-link svg,
+.sidebar .tasks-button svg {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.sidebar-link:hover,
+.sidebar .tasks-button:hover {
   background: var(--accent-soft);
 }
 
-/* Hamburger toggle — hidden on desktop, shown below the mobile breakpoint. */
-.nav-toggle {
+/* Active page: accent fill + inset bar, so it never reads by color alone. */
+.sidebar-link.active {
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+  font-weight: 700;
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.sidebar-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The badge overlays the icon's corner so it survives the collapsed rail. */
+.tasks-icon {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.tasks-icon .tasks-badge {
+  position: absolute;
+  top: -8px;
+  right: -10px;
+}
+
+/* Collapsed rail: icons only, labels + logo hidden, tooltips via title. */
+.sidebar.collapsed {
+  width: 76px;
+  padding-inline: 10px;
+}
+
+.sidebar.collapsed .sidebar-head {
+  justify-content: center;
+}
+
+.sidebar.collapsed .sidebar-logo,
+.sidebar.collapsed .sidebar-label {
+  display: none;
+}
+
+.sidebar.collapsed .sidebar-link,
+.sidebar.collapsed .tasks-button {
+  justify-content: center;
+  padding-inline: 0;
+}
+
+/* Mobile topbar + drawer backdrop — desktop hides both. */
+.mobile-topbar {
   display: none;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--card);
+  border-bottom: 3px solid var(--accent);
+}
+
+.nav-toggle {
+  display: grid;
+  place-items: center;
   padding: 8px;
   border-radius: 12px;
   border: 1px solid var(--border);
@@ -113,37 +233,84 @@ a {
   background: var(--accent-soft);
 }
 
-/* Mobile: collapse the nav behind the hamburger; opened nav stacks full-width on
-   its own row (the header inner already uses flex-wrap). */
-@media (max-width: 700px) {
-  .nav-toggle {
-    display: inline-flex;
-  }
+.sidebar-backdrop {
+  display: none;
+}
 
-  .site-nav {
-    display: none;
-    flex-basis: 100%;
-  }
-
-  .site-nav.open {
-    display: flex;
+@media (max-width: 860px) {
+  body {
     flex-direction: column;
-    align-items: stretch;
-    gap: 8px;
   }
 
-  .site-nav a {
-    width: 100%;
-    text-align: center;
+  .mobile-topbar {
+    display: flex;
+    position: sticky;
+    top: 0;
+    z-index: 40;
   }
 
-  .site-nav .tasks-menu,
-  .site-nav .tasks-button {
-    width: 100%;
+  .mobile-topbar .site-logo {
+    height: 40px;
   }
 
-  .site-nav .tasks-button {
-    justify-content: center;
+  /* Off-canvas drawer. Always full width with labels: the desktop collapsed
+     preference deliberately does not apply here (.collapsed is neutralized
+     below with matching specificity). */
+  .sidebar,
+  .sidebar.collapsed {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 60;
+    height: 100dvh;
+    width: min(280px, 84vw);
+    padding-inline: 14px;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    border-right: 1px solid var(--border);
+  }
+
+  .sidebar.open {
+    transform: none;
+    box-shadow: var(--shadow);
+  }
+
+  .sidebar.collapsed .sidebar-logo {
+    display: flex;
+  }
+
+  .sidebar.collapsed .sidebar-label {
+    display: block;
+  }
+
+  .sidebar.collapsed .sidebar-link,
+  .sidebar.collapsed .tasks-button {
+    justify-content: flex-start;
+    padding-inline: 14px;
+  }
+
+  .sidebar.collapsed .sidebar-head {
+    justify-content: space-between;
+  }
+
+  .sidebar-collapse {
+    display: none;
+  }
+
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+    background: rgba(32, 25, 16, 0.42);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar,
+  .sidebar.collapsed {
+    transition: none;
   }
 }
 
@@ -413,28 +580,12 @@ textarea.note-input {
   font-size: 0.9rem;
 }
 
-/* ---------- ongoing tasks (navbar) ---------- */
+/* ---------- ongoing tasks (sidebar) ---------- */
 
+/* The trigger button itself is styled with the nav links in the sidebar
+   section (.sidebar .tasks-button); only the badge + modal live here. */
 .tasks-menu {
   position: relative;
-}
-
-.tasks-button {
-  font: inherit;
-  font-weight: 600;
-  padding: 10px 18px;
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  background: var(--bg);
-  color: inherit;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.tasks-button:hover {
-  background: var(--accent-soft);
 }
 
 .tasks-badge {
@@ -929,6 +1080,141 @@ details.fold[aria-disabled='true'] summary {
   border-width: 4px;
 }
 
+/* Click-to-point marker overlay (PosterAnnotator). Pointer-transparent unless
+   armed, so it never hijacks scrolling; the visual language (red box + white
+   halo + numbered badge) mirrors the sharp-drawn markers the model sees. */
+.poster-annotator {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.poster-annotator.active {
+  pointer-events: auto;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.marker-box {
+  position: absolute;
+  border: 2px solid #e00000;
+  border-radius: 6px;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.9),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.9);
+  pointer-events: none;
+}
+
+/* Last submitted round, shown inert through the re-render and on the new
+   poster: dashed + dimmed so it can't be mistaken for an editable marker. */
+.marker-box-submitted {
+  border-style: dashed;
+  opacity: 0.65;
+}
+
+.marker-dismiss {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  /* The parent .poster-annotator is pointer-transparent when idle. */
+  pointer-events: auto;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #fff;
+  color: #b00000;
+  border: 1px solid var(--border);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.marker-badge,
+.marker-note-badge {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #e00000;
+  color: #fff;
+  border: 2px solid #fff;
+  font-size: 13px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.marker-badge {
+  position: absolute;
+  top: -12px;
+  left: -12px;
+}
+
+.marker-remove {
+  position: absolute;
+  top: -12px;
+  right: -12px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #fff;
+  color: #b00000;
+  border: 1px solid var(--border);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.marker-ghost {
+  position: absolute;
+  border: 2px dashed #e00000;
+  border-radius: 6px;
+  background: rgba(224, 0, 0, 0.08);
+  pointer-events: none;
+}
+
+.marker-note-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.marker-note-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.marker-note-remove {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: transparent;
+  color: #b00000;
+  border: 1px solid var(--border);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.marker-note-submitted {
+  opacity: 0.75;
+}
+
+.marker-note-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+}
+
+.marker-zone-warning {
+  color: #b05a00;
+}
+
 .poster-feedback {
   margin-top: 18px;
 }
@@ -1349,6 +1635,38 @@ select.glossary-select:focus {
   font-size: 0.82rem;
   flex-basis: 100%;
   text-align: right;
+}
+
+/* ---------- pre-translation name check ---------- */
+
+.names-review {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #fffdfa;
+}
+
+.names-review-title {
+  margin: 0 0 4px;
+  font-size: 1.05rem;
+}
+
+.names-review-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(160px, 1.6fr) 110px;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.names-review-row.is-unverified {
+  border-left: 4px solid var(--warn);
+  background: var(--warn-soft);
 }
 
 /* ---------- poster master references ---------- */
@@ -2099,6 +2417,99 @@ a.thread-node:hover {
   white-space: nowrap;
 }
 
+/* ---------- DLO interface ---------- */
+
+/* Horizontal 3-step rail at the top of /dlo; reuses the .progress-step
+   done/active/pending visual language from the generation progress list. */
+.dlo-steps {
+  list-style: none;
+  margin: 0 0 24px;
+  padding: 0;
+  display: flex;
+  gap: 10px;
+}
+
+.dlo-steps .progress-step {
+  flex: 1;
+  border: 1px solid var(--border);
+  background: var(--card);
+}
+
+.dlo-steps .progress-step.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.file-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.file-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fffdfa;
+}
+
+.file-row svg {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.file-row .file-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.file-row .file-size {
+  color: var(--muted);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.file-row .file-remove {
+  margin-left: auto;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--card);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.file-row .file-remove:hover {
+  background: var(--err-soft);
+  color: var(--err);
+  border-color: var(--err);
+}
+
+.dlo-processing {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 40px 20px;
+  text-align: center;
+}
+
+.dlo-processing-title {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
 /* ---------- responsive ---------- */
 
 @media (max-width: 860px) {
@@ -2151,5 +2562,10 @@ a.thread-node:hover {
   .ref-type-desc-row {
     flex-direction: column;
     gap: 8px;
+  }
+
+  .dlo-steps {
+    flex-direction: column;
+    gap: 6px;
   }
 }

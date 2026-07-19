@@ -8,7 +8,9 @@ import { useState } from 'react';
 import type { GenerationDetail } from '@dgipr/schemas';
 import { posterDownloadUrl, sendPosterImageFeedback } from '../lib/api';
 import { STR } from '../lib/strings';
-import { FeedbackBox } from './FeedbackBox';
+import { usePosterMarkers } from '../lib/usePosterMarkers';
+import { PosterAnnotator } from './PosterAnnotator';
+import { PosterImageFeedbackBox } from './PosterImageFeedbackBox';
 import { PosterVersionStrip } from './PosterVersionStrip';
 
 export function SocialPostView({
@@ -25,6 +27,19 @@ export function SocialPostView({
   const [copied, setCopied] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [pending, setPending] = useState(false);
+  // Numbered click-to-point markers for pixel feedback (see PosterAnnotator).
+  // The last sent round stays on screen inert (usePosterMarkers) so the user
+  // can see what they asked for.
+  const {
+    markers,
+    submittedMarkers,
+    addMarker,
+    removeMarker,
+    setNote,
+    markSubmitted,
+    dismissSubmitted,
+  } = usePosterMarkers(detail);
+  const [annotOpen, setAnnotOpen] = useState(false);
   const showSpinner = busy || pending;
 
   const copyCaption = async () => {
@@ -57,6 +72,16 @@ export function SocialPostView({
               src={detail.posterUrl}
               alt={STR.posterTitle}
               className="poster-image"
+              draggable={false}
+            />
+            <PosterAnnotator
+              markers={markers}
+              onAdd={addMarker}
+              onRemove={removeMarker}
+              active={annotOpen && !showSpinner}
+              disabled={showSpinner}
+              submittedMarkers={submittedMarkers}
+              onDismissSubmitted={dismissSubmitted}
             />
             {showSpinner ? (
               <div
@@ -98,15 +123,18 @@ export function SocialPostView({
           </div>
           {detail.posterUrl ? (
             <div className="poster-feedback">
-              <FeedbackBox
-                title={STR.posterImageFeedbackTitle}
-                hint={STR.posterImageFeedbackHint}
-                suggestions={STR.chipsPosterImage}
+              <PosterImageFeedbackBox
+                markers={markers}
+                onNoteChange={setNote}
+                onRemoveMarker={removeMarker}
+                onOpenChange={setAnnotOpen}
                 disabled={showSpinner}
-                onSubmit={async (feedback) => {
+                submittedMarkers={submittedMarkers}
+                onSubmit={async (payload) => {
                   setPending(true);
                   try {
-                    await sendPosterImageFeedback(detail.id, feedback);
+                    await sendPosterImageFeedback(detail.id, payload);
+                    markSubmitted();
                     await onChanged();
                   } finally {
                     setPending(false);

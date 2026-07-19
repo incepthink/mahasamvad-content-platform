@@ -1,13 +1,16 @@
 'use client';
 
-// Navbar "ongoing tasks" button + centered modal. Tracks every generation started this
+// Sidebar "ongoing tasks" button + centered modal. Tracks every generation started this
 // session from TasksProvider and lists them compactly: a one-line heading + a status
 // dot/label, with a small poster thumbnail for twitter runs. Each row is a link to its
 // detail page (/generations/{id}), where the full result and all actions already live.
+// Styled as a sidebar link; `collapsed` hides the label like the nav links (CSS) while
+// the count badge stays overlaid on the icon.
 
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
+import { ListTodo } from 'lucide-react';
 import type { GenerationDetail } from '@dgipr/schemas';
 import { useTasks } from '../lib/TasksProvider';
 import { STATUS_LABELS, STEP_LABELS, STR } from '../lib/strings';
@@ -22,7 +25,7 @@ function taskTitle(task: GenerationDetail): string {
   return note.length > 80 ? `${note.slice(0, 80)}…` : note;
 }
 
-export function TasksMenu() {
+export function TasksMenu({ collapsed = false }: { collapsed?: boolean }) {
   const { tasks, activeCount, isPanelOpen, openPanel, closePanel } = useTasks();
   const [mounted, setMounted] = useState(false);
 
@@ -51,14 +54,19 @@ export function TasksMenu() {
         className="tasks-button"
         aria-expanded={isPanelOpen}
         aria-haspopup="dialog"
+        aria-label={STR.tasksButton}
+        title={collapsed ? STR.tasksButton : undefined}
         onClick={() => (isPanelOpen ? closePanel() : openPanel())}
       >
-        {STR.tasksButton}
-        {activeCount > 0 ? (
-          <span className="tasks-badge" aria-label={String(activeCount)}>
-            {activeCount}
-          </span>
-        ) : null}
+        <span className="tasks-icon">
+          <ListTodo size={20} aria-hidden="true" />
+          {activeCount > 0 ? (
+            <span className="tasks-badge" aria-label={String(activeCount)}>
+              {activeCount}
+            </span>
+          ) : null}
+        </span>
+        <span className="sidebar-label">{STR.tasksButton}</span>
       </button>
 
       {mounted && isPanelOpen

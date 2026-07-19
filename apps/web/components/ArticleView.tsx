@@ -1,16 +1,28 @@
 'use client';
 
 // Read-only article display + copy/download actions + the article feedback loop.
-// Once an English translation exists (Sarvam + glossary lockdict, produced on
-// demand) a मराठी ⇆ English toggle appears and copy/download follow the shown
-// language; until then a "Translate to English" button starts the job.
+// Every translation starts with the in-page name check (TranslationTermsReview):
+// "Translate to English" first fetches the article's proper nouns for the user to
+// confirm/correct, and only the confirmed spellings — locked — reach the Sarvam
+// translation. Once English exists a मराठी ⇆ English toggle appears, copy/download
+// follow the shown language, and a fold offers the same name check again for a
+// re-translate (a wrong spelling noticed late is fixed right here, not on /glossary).
 
 import { useState } from 'react';
-import type { GenerationDetail } from '@dgipr/schemas';
-import { requestTranslation, sendArticleFeedback } from '../lib/api';
+import type {
+  GenerationDetail,
+  PrepareTranslationResponse,
+  TranslationTermInput,
+} from '@dgipr/schemas';
+import {
+  prepareGenerationTranslation,
+  requestTranslation,
+  sendArticleFeedback,
+} from '../lib/api';
 import { STR } from '../lib/strings';
 import { downloadBlob } from '../lib/download';
 import { FeedbackBox } from './FeedbackBox';
+import { TranslationTermsReview } from './TranslationTermsReview';
 
 export function ArticleView({
   detail,
@@ -21,7 +33,13 @@ export function ArticleView({
 }) {
   const [copied, setCopied] = useState(false);
   const [lang, setLang] = useState<'mr' | 'en'>('mr');
-  const [requesting, setRequesting] = useState(false);
+  // Name-check flow: idle → preparing (extracting names) → review (card shown);
+  // confirming covers the translate POST fired from the review card.
+  const [prep, setPrep] = useState<'idle' | 'preparing' | 'review'>('idle');
+  const [prepared, setPrepared] = useState<
+    PrepareTranslationResponse['terms'] | null
+  >(null);
+  const [confirming, setConfirming] = useState(false);
   const [translateError, setTranslateError] = useState<string | null>(null);
 
   const marathi = detail.article ?? '';
@@ -51,18 +69,61 @@ export function ArticleView({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const translate = async () => {
-    setRequesting(true);
+  // Step 1 of translating: fetch the article's names for review. On failure the
+  // flow returns to idle with a Marathi error — never silently translating with
+  // unchecked names.
+  const startNameCheck = async () => {
+    setPrep('preparing');
     setTranslateError(null);
     try {
-      await requestTranslation(detail.id);
+      const result = await prepareGenerationTranslation(detail.id);
+      setPrepared(result.terms);
+      setPrep('review');
+    } catch {
+      setTranslateError(STR.namesPrepareError);
+      setPrep('idle');
+    }
+  };
+
+  // Step 2: the user confirmed the spellings — start the translation with them
+  // locked. The job reports itself through detail.translating, so after the
+  // refresh the existing spinner takes over.
+  const confirmTranslate = async (terms: TranslationTermInput[]) => {
+    setConfirming(true);
+    setTranslateError(null);
+    try {
+      await requestTranslation(detail.id, terms);
+      setPrep('idle');
+      setPrepared(null);
       await onFeedbackSent();
     } catch (e) {
       setTranslateError(e instanceof Error ? e.message : STR.genericError);
     } finally {
-      setRequesting(false);
+      setConfirming(false);
     }
   };
+
+  const cancelNameCheck = () => {
+    setPrep('idle');
+    setPrepared(null);
+  };
+
+  // Shared body for the name-check flow (initial translate and the re-translate
+  // fold): spinner while extracting, then the review card.
+  const nameCheckBody =
+    prep === 'preparing' ? (
+      <span className="translating-note">
+        <span className="spinner" aria-hidden="true" />
+        {STR.namesChecking}
+      </span>
+    ) : prep === 'review' && prepared ? (
+      <TranslationTermsReview
+        terms={prepared}
+        busy={confirming}
+        onConfirm={confirmTranslate}
+        onCancel={cancelNameCheck}
+      />
+    ) : null;
 
   return (
     <section className="card">
@@ -129,19 +190,40 @@ export function ArticleView({
               <span className="spinner" aria-hidden="true" />
               {STR.translating}
             </span>
-          ) : (
-            <button
-              type="button"
-              className="btn"
-              onClick={translate}
-              disabled={requesting}
-            >
-              {requesting ? STR.translating : STR.translateToEnglish}
+          ) : prep === 'idle' ? (
+            <button type="button" className="btn" onClick={startNameCheck}>
+              {STR.translateToEnglish}
             </button>
-          ))}
+          ) : null)}
       </div>
 
+      {!hasEnglish && !translating ? nameCheckBody : null}
+
       {error ? <p className="form-error">{error}</p> : null}
+
+      {hasEnglish ? (
+        <details className="fold">
+          <summary>{STR.retranslateFold}</summary>
+          <div className="fold-body">
+            {translating ? (
+              <span className="translating-note">
+                <span className="spinner" aria-hidden="true" />
+                {STR.translating}
+              </span>
+            ) : prep === 'idle' ? (
+              <button
+                type="button"
+                className="btn btn-small"
+                onClick={startNameCheck}
+              >
+                {STR.namesStartCheck}
+              </button>
+            ) : (
+              nameCheckBody
+            )}
+          </div>
+        </details>
+      ) : null}
 
       {detail.factCheck ? (
         <details className="fold">

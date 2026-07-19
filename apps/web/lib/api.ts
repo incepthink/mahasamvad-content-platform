@@ -2,21 +2,27 @@
 // shared Zod schemas so the UI never renders shapes the API didn't promise.
 
 import {
+  DloIntakeDetailSchema,
   GenerationDetailSchema,
   GenerationSummarySchema,
   GlossaryTermSchema,
+  PrepareTranslationResponseSchema,
   ReferenceImageSchema,
   ReferenceTypeSchema,
   ThreadItemSchema,
   TranslateTextResponseSchema,
   type Copy,
   type CreateGenerationRequest,
+  type DloGenerateRequest,
+  type DloIntakeDetail,
   type CreateGlossaryTermRequest,
   type CreateReferenceTypeRequest,
   type GenerationDetail,
   type GenerationSummary,
   type GlossaryTerm,
   type PosterFeedbackRequest,
+  type PosterImageFeedbackRequest,
+  type PrepareTranslationResponse,
   type ReferenceCategory,
   type ReferenceImage,
   type ReferenceType,
@@ -24,6 +30,7 @@ import {
   type ThreadItem,
   type TranslateTextRequest,
   type TranslateTextResponse,
+  type TranslationTermInput,
   type UpdateGlossaryTermRequest,
   type UpdateReferenceTypeRequest,
 } from '@dgipr/schemas';
@@ -83,6 +90,35 @@ export async function createGeneration(
   return z.object({ id: z.string() }).parse(body).id;
 }
 
+// DLO intake: multipart create (notes/category/heading fields + the uploaded
+// files). No content-type header — the browser sets the multipart boundary.
+export async function createDloIntake(form: FormData): Promise<string> {
+  const response = await fetch(`${API_URL}/api/dlo/intakes`, {
+    method: 'POST',
+    body: form,
+  });
+  const body = await readJsonResponse(response);
+  return z.object({ id: z.string() }).parse(body).id;
+}
+
+export async function getDloIntake(id: string): Promise<DloIntakeDetail> {
+  const body = await requestJson(`/api/dlo/intakes/${id}`);
+  return DloIntakeDetailSchema.parse(body);
+}
+
+// The review step's submit: the (edited) combined text becomes a normal
+// generation on the existing pipeline; returns its id for polling.
+export async function generateFromDloIntake(
+  id: string,
+  input: DloGenerateRequest,
+): Promise<string> {
+  const body = await requestJson(`/api/dlo/intakes/${id}/generate`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  return z.object({ generationId: z.string() }).parse(body).generationId;
+}
+
 export async function listGenerations(): Promise<GenerationSummary[]> {
   const body = await requestJson('/api/generations');
   return z.array(GenerationSummarySchema).parse(body);
@@ -110,13 +146,31 @@ export async function sendArticleFeedback(
   });
 }
 
-// Kicks off the on-demand English translation (Sarvam + glossary lockdict). It runs
-// beside any job already in flight and reports itself through the detail payload's
-// `translating` flag, so the caller just needs to refresh to start polling.
-export async function requestTranslation(id: string): Promise<void> {
-  await requestJson(`/api/generations/${id}/translate`, {
+// Pre-translation name check: the API extracts the article's proper nouns (merged
+// with glossary matches) for the user to confirm/correct before translating.
+// Synchronous — one OpenAI call, a few seconds.
+export async function prepareGenerationTranslation(
+  id: string,
+): Promise<PrepareTranslationResponse> {
+  const body = await requestJson(`/api/generations/${id}/translate/prepare`, {
     method: 'POST',
     body: JSON.stringify({}),
+  });
+  return PrepareTranslationResponseSchema.parse(body);
+}
+
+// Kicks off the on-demand English translation (Sarvam + glossary lockdict). `terms`
+// is the user-confirmed name list from the review step — saved as verified glossary
+// rows and locked into this run. The job runs beside any job already in flight and
+// reports itself through the detail payload's `translating` flag, so the caller just
+// needs to refresh to start polling.
+export async function requestTranslation(
+  id: string,
+  terms?: readonly TranslationTermInput[],
+): Promise<void> {
+  await requestJson(`/api/generations/${id}/translate`, {
+    method: 'POST',
+    body: JSON.stringify(terms ? { terms } : {}),
   });
 }
 
@@ -130,13 +184,15 @@ export async function sendPosterFeedback(
   });
 }
 
+// Pixel-level edit of the latest complete poster (n8n path). `input` carries
+// free text, numbered marker annotations, or both — empty keys must be omitted.
 export async function sendPosterImageFeedback(
   id: string,
-  feedback: string,
+  input: PosterImageFeedbackRequest,
 ): Promise<void> {
   await requestJson(`/api/generations/${id}/poster/image-feedback`, {
     method: 'POST',
-    body: JSON.stringify({ feedback }),
+    body: JSON.stringify(input),
   });
 }
 
@@ -153,6 +209,17 @@ export async function updatePosterCopy(
 
 export function posterDownloadUrl(id: string): string {
   return `${API_URL}/api/generations/${id}/poster.png`;
+}
+
+// Name check for ad-hoc pasted text (same review flow as a generation's article).
+export async function prepareTextTranslation(
+  text: string,
+): Promise<PrepareTranslationResponse> {
+  const body = await requestJson('/api/translate/prepare', {
+    method: 'POST',
+    body: JSON.stringify({ text }),
+  });
+  return PrepareTranslationResponseSchema.parse(body);
 }
 
 // Standalone Marathi->English translation of arbitrary pasted text. Unlike
