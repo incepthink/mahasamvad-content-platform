@@ -37,6 +37,7 @@ COPY packages/content-engine/package.json packages/content-engine/
 COPY packages/poster-renderer/package.json packages/poster-renderer/
 COPY packages/database/package.json packages/database/
 COPY packages/schemas/package.json packages/schemas/
+COPY packages/social-publisher/package.json packages/social-publisher/
 RUN pnpm install --frozen-lockfile --filter "@dgipr/api..."
 
 # Now the source, then build the api + its workspace deps in topological order
