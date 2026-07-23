@@ -1,0 +1,23 @@
+{
+  "name": "@dgipr/social-publisher",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src --ext .ts",
+    "format": "prettier src --write",
+    "format:check": "prettier src --check"
+  },
+  "dependencies": {
+    "twitter-api-v2": "^1.20.0"
+  }
+}

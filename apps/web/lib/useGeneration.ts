@@ -29,15 +29,17 @@ export function useGeneration(id: string): {
     }
   }, [id]);
 
-  // `translating` and `articleRevising` are tracked separately from status: both can
-  // run beside the poster render (and on a finished row while it stays 'completed'), so
-  // polling has to follow them too, or the translated/revised result never arrives.
+  // `translating`, `articleRevising` and `captionRevising` are tracked separately from
+  // status: each can run beside the poster render (and on a finished row while it stays
+  // 'completed'), so polling has to follow them too, or the translated/revised result
+  // never arrives.
   const active =
     detail === null ||
     detail.status === 'queued' ||
     detail.status === 'running' ||
     detail.translating ||
-    detail.articleRevising;
+    detail.articleRevising ||
+    detail.captionRevising;
 
   useEffect(() => {
     if (!active) return;

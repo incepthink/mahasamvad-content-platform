@@ -22,6 +22,10 @@ export {
   reviseArticle,
   type RevisedArticle,
 } from './generation/revise-article.js';
+export {
+  reviseCaption,
+  type ReviseCaptionInput,
+} from './generation/revise-caption.js';
 export { reviseCopy } from './generation/revise-copy.js';
 export { reviseSceneBrief } from './generation/revise-scene.js';
 export {
@@ -31,40 +35,113 @@ export {
   type InterpretedImageFeedback,
 } from './generation/interpret-image-feedback.js';
 export {
-  translateArticleToEnglish,
+  translateArticle,
   type GlossaryEntry,
   type TranslateOptions,
+  type TranslationResult,
 } from './generation/translate-article.js';
+// Page-wise translation of an uploaded PDF (/translate document path): keeps page
+// boundaries, passes English pages through for an English target, and routes them
+// en→hi for a Hindi one.
+export {
+  translateDocumentPages,
+  joinTranslatedPages,
+  detectPageLanguage,
+  type DocumentPageInput,
+  type TranslatedDocumentPage,
+  type TranslateDocumentOptions,
+} from './generation/translate-document.js';
+export {
+  interpretDocumentInstruction,
+  parsePageInstruction,
+  INSTRUCTION_MAX_CHARS,
+  type DocumentPageSummary,
+  type InterpretedDocumentInstruction,
+} from './generation/interpret-document-instruction.js';
 export {
   extractGlossaryCandidates,
   type GlossaryCandidate,
 } from './generation/extract-entities.js';
+export {
+  proofreadText,
+  detectProofreadLanguage,
+  type ProofreadGlossaryTerm,
+  type ProofreadResult,
+} from './generation/proof-read.js';
 
-// DLO intake — Sarvam batch STT + document digitization + DOCX extraction, and
-// the combiner that builds the reviewable Marathi text from all sources.
+// DLO intake — Sarvam batch STT + document digitization + DOCX extraction. The
+// combiner that assembles the reviewable Marathi text is in @dgipr/schemas: the
+// web rebuilds the same string from the officer's edits, and cannot import this
+// package.
 export {
   transcribeAudioFiles,
   type AudioFileInput,
   type AudioTranscription,
 } from './intake/sarvam-stt.js';
-export { extractPdfText } from './intake/sarvam-doc.js';
-export { extractDocxText } from './intake/docx.js';
 export {
-  combineIntakeSources,
-  type IntakeSource,
-} from './intake/combine.js';
+  extractPdfPages,
+  extractPdfPagesDetailed,
+  probePdf,
+  type PdfExtraction,
+  type PdfProbe,
+} from './intake/pdf-pages.js';
+export {
+  type PdfPage,
+  type PdfTextSource,
+  type ExtractPdfOptions,
+} from './intake/pdf-shared.js';
+export { countPdfPages, OCR_MAX_TOTAL_PAGES } from './intake/pdf-split.js';
+export { extractDocxText } from './intake/docx.js';
+
+// Explainer-video pipeline: per-scene script (gate 1), keyframe/motion prompt
+// builders, and the Veo clip client. ffmpeg assembly lives in
+// @dgipr/poster-renderer; the SRT builder + tier pricing in @dgipr/schemas.
+export {
+  generateVideoScript,
+  type GeneratedVideoScript,
+  type VideoScriptScene,
+  type VideoScriptOptions,
+} from './video/generate-video-script.js';
+export {
+  planVideoScenes,
+  type VideoScenePlan,
+  type VideoScenePlanScene,
+  type VideoScenePlanOptions,
+} from './video/plan-video-scenes.js';
+export {
+  buildKeyframePrompt,
+  buildVeoMotionPrompt,
+  VEO_NEGATIVE_PROMPT,
+} from './video/video-prompts.js';
+export {
+  generateVeoClip,
+  type VeoClipInput,
+  type VeoTier,
+  type VeoAspectRatio,
+  type VeoDurationSeconds,
+} from './video/veo-client.js';
+export {
+  synthesizeMarathiNarration,
+  ttsModel,
+  ttsSpeaker,
+  type NarrationOptions,
+} from './video/sarvam-tts.js';
 
 // Cost metering — the runner opens a scope per job and reads the accumulator back.
 export {
   createCostAccumulator,
   runInCostScope,
   recordImageCost,
+  recordVideoCost,
+  recordTtsCost,
   totalCostUsd,
   type CostAccumulator,
 } from './cost/cost-meter.js';
 export {
   priceText,
   estimateImageCostUsd,
+  estimateVideoCostUsd,
+  estimateTtsCostUsd,
   type ImageKind,
   type ImageQuality,
 } from './cost/pricing.js';
@@ -97,6 +174,7 @@ export {
 export {
   buildTwitterCatalog,
   pickArticleReference,
+  pickCmoReference,
   resolvePinnedReference,
   resolvePinnedTypeReference,
   type PinnedReference,

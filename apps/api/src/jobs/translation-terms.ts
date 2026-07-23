@@ -24,12 +24,16 @@ export async function prepareTranslationTerms(
   ]);
 
   // Merge by Marathi surface form; an existing glossary row wins over a freshly
-  // extracted candidate (its English form may already be human-corrected).
+  // extracted candidate (its English form may already be human-corrected). `hindi`
+  // is pre-filled with the stored Hindi spelling, or the Marathi form when none is
+  // set — the Marathi form is exactly what the Hindi lock produces today, so the
+  // reviewer sees the real Hindi output and only edits where it should differ.
   const byMarathi = new Map<string, PreparedTerm>();
   for (const row of glossaryRows) {
     byMarathi.set(row.marathi, {
       marathi: row.marathi,
       english: row.english,
+      hindi: row.hindi ?? row.marathi,
       termType: row.termType,
       verified: row.verified,
     });
@@ -39,6 +43,7 @@ export async function prepareTranslationTerms(
     byMarathi.set(candidate.marathi, {
       marathi: candidate.marathi,
       english: candidate.english,
+      hindi: candidate.marathi,
       termType: candidate.termType,
       verified: false,
     });

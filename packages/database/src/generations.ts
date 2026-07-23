@@ -7,11 +7,22 @@ export const GENERATIONS_TABLE = 'generations';
 export const GENERATION_REVISIONS_TABLE = 'generation_revisions';
 
 export type OutputType = 'article' | 'poster' | 'both';
-export type Category = 'news' | 'scheme' | 'twitter';
+export type Category = 'news' | 'scheme' | 'twitter' | 'facebook';
 export type DesignMode = 'onbrand' | 'adaptive' | 'fresh';
+// Template brand family (migration 0024); mirrors TemplateBrand in reference-types.ts.
+export type TemplateBrand = 'dgipr' | 'cmo';
 export type GenerationStatus = 'queued' | 'running' | 'completed' | 'failed';
+// Mirrors RevisionTargetSchema in @dgipr/schemas and the generation_revisions CHECK
+// constraint (latest: migration 0023). The 'caption'/'manual_caption' pair records
+// edits to a social run's caption, which is stored in the `article` column.
 export type RevisionTarget =
-  'article' | 'poster_copy' | 'poster_scene' | 'manual_copy' | 'poster_image';
+  | 'article'
+  | 'poster_copy'
+  | 'poster_scene'
+  | 'manual_copy'
+  | 'poster_image'
+  | 'caption'
+  | 'manual_caption';
 
 // One row in generations. `copy` stays `unknown` here — the database package does
 // not depend on the Copy schema; callers validate with CopySchema when needed.
@@ -21,6 +32,9 @@ export type GenerationRow = Readonly<{
   outputType: OutputType;
   category: Category;
   designMode: DesignMode | null;
+  // Template brand the run was created with (migration 0024). 'dgipr' for every
+  // non-social row and for social rows created before the CMO feature.
+  templateBrand: TemplateBrand;
   heading: string | null;
   // Optional pin: the exact reference image the run was asked to use (null =
   // automatic rotation; the FK sets null if the image is later deleted).
@@ -40,9 +54,11 @@ export type GenerationRow = Readonly<{
   step: string | null;
   error: string | null;
   article: string | null;
-  // On-demand English translation of `article` (Sarvam + locked glossary); null
-  // until the user requests it. Plain nullable text, like `article`.
+  // On-demand translations of `article` (Sarvam + locked glossary); each null until
+  // the user requests it. Plain nullable text, like `article`, and independent of
+  // each other — translating to one language never touches the other.
   articleEnglish: string | null;
+  articleHindi: string | null;
   factCheck: string | null;
   referenceTitle: string | null;
   referenceUrl: string | null;
@@ -58,6 +74,10 @@ export type GenerationRow = Readonly<{
   // jobs. Null for pre-feature rows. `costBreakdown` holds the token/split audit detail.
   costUsd: number | null;
   costBreakdown: unknown;
+  // Latest live social post of this run (twitter/facebook categories only);
+  // re-publishing overwrites both. Null = never published. Migration 0021.
+  publishedUrl: string | null;
+  publishedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }>;
@@ -93,6 +113,7 @@ type GenerationDbRow = {
   output_type: OutputType;
   category: Category;
   design_mode: string | null;
+  template_brand: string | null;
   heading: string | null;
   reference_image_id: string | null;
   reference_type_id: string | null;
@@ -104,6 +125,7 @@ type GenerationDbRow = {
   error: string | null;
   article: string | null;
   article_english: string | null;
+  article_hindi: string | null;
   fact_check: string | null;
   reference_title: string | null;
   reference_url: string | null;
@@ -115,6 +137,8 @@ type GenerationDbRow = {
   // PostgREST may serialise numeric as a string; fromDbRow coerces to number.
   cost_usd: number | string | null;
   cost_breakdown: unknown;
+  published_url: string | null;
+  published_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -126,6 +150,8 @@ function fromDbRow(row: GenerationDbRow): GenerationRow {
     outputType: row.output_type,
     category: row.category,
     designMode: row.design_mode as DesignMode | null,
+    // ?? 'dgipr': pre-0024 databases have no such column (undefined).
+    templateBrand: (row.template_brand as TemplateBrand | null) ?? 'dgipr',
     heading: row.heading,
     referenceImageId: row.reference_image_id,
     referenceTypeId: row.reference_type_id,
@@ -137,6 +163,10 @@ function fromDbRow(row: GenerationDbRow): GenerationRow {
     error: row.error,
     article: row.article,
     articleEnglish: row.article_english,
+    // ?? null for the same reason as the 0021 columns below: a pre-0022 database
+    // returns no such column (undefined), which JSON.stringify would drop from the
+    // detail payload and fail the web's Zod parse.
+    articleHindi: row.article_hindi ?? null,
     factCheck: row.fact_check,
     referenceTitle: row.reference_title,
     referenceUrl: row.reference_url,
@@ -150,6 +180,12 @@ function fromDbRow(row: GenerationDbRow): GenerationRow {
         ? null
         : Number(row.cost_usd),
     costBreakdown: row.cost_breakdown,
+    // ?? null: pre-0021 databases return no such columns (undefined), which
+    // JSON.stringify would silently DROP from the detail payload — failing the
+    // web's Zod parse on every detail fetch. Coalescing keeps the API usable
+    // until the migration is applied.
+    publishedUrl: row.published_url ?? null,
+    publishedAt: row.published_at ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -165,6 +201,7 @@ export type GenerationPatch = Partial<
     | 'error'
     | 'article'
     | 'articleEnglish'
+    | 'articleHindi'
     | 'factCheck'
     | 'referenceTitle'
     | 'referenceUrl'
@@ -173,6 +210,8 @@ export type GenerationPatch = Partial<
     | 'scenePrompt'
     | 'scenePath'
     | 'posterPath'
+    | 'publishedUrl'
+    | 'publishedAt'
   >
 >;
 
@@ -185,6 +224,7 @@ function patchToDbRow(patch: GenerationPatch): Record<string, unknown> {
   if (patch.article !== undefined) row.article = patch.article;
   if (patch.articleEnglish !== undefined)
     row.article_english = patch.articleEnglish;
+  if (patch.articleHindi !== undefined) row.article_hindi = patch.articleHindi;
   if (patch.factCheck !== undefined) row.fact_check = patch.factCheck;
   if (patch.referenceTitle !== undefined)
     row.reference_title = patch.referenceTitle;
@@ -194,6 +234,8 @@ function patchToDbRow(patch: GenerationPatch): Record<string, unknown> {
   if (patch.scenePrompt !== undefined) row.scene_prompt = patch.scenePrompt;
   if (patch.scenePath !== undefined) row.scene_path = patch.scenePath;
   if (patch.posterPath !== undefined) row.poster_path = patch.posterPath;
+  if (patch.publishedUrl !== undefined) row.published_url = patch.publishedUrl;
+  if (patch.publishedAt !== undefined) row.published_at = patch.publishedAt;
   return row;
 }
 
@@ -204,6 +246,9 @@ export async function insertGeneration(
     outputType: OutputType;
     category: Category;
     designMode?: DesignMode | undefined;
+    // Insert-only (like designMode): absent ⇒ 'dgipr'. Set to 'cmo' by a
+    // विभाग = CMO social run.
+    templateBrand?: TemplateBrand | undefined;
     heading?: string | undefined;
     // Insert-only (not in GenerationPatch): a pin never changes after creation.
     referenceImageId?: string | undefined;
@@ -221,6 +266,7 @@ export async function insertGeneration(
       output_type: input.outputType,
       category: input.category,
       design_mode: input.designMode ?? null,
+      template_brand: input.templateBrand ?? 'dgipr',
       heading: input.heading ?? null,
       reference_image_id: input.referenceImageId ?? null,
       reference_type_id: input.referenceTypeId ?? null,

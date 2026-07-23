@@ -54,8 +54,18 @@ async function decode(response: Response, context: string): Promise<Buffer> {
   return Buffer.from(b64, 'base64');
 }
 
-// Generates the background-scene PNG for a poster from a text-free prompt.
-export async function generateImage(prompt: string): Promise<Buffer> {
+export type GenerateImageOptions = {
+  // Override the default (landscape) size — e.g. '1024x1024' for a square photo that
+  // crops cleanly into a circle. Falls back to OPENAI_IMAGE_SIZE / the landscape default.
+  size?: string;
+};
+
+// Generates a text-free PNG for a poster from a prompt. Default size is the landscape
+// background band; pass { size } for other aspect ratios (e.g. a square CMO circle photo).
+export async function generateImage(
+  prompt: string,
+  opts: GenerateImageOptions = {},
+): Promise<Buffer> {
   const apiKey = requireApiKey();
   const response = await fetch(GENERATIONS_URL, {
     method: 'POST',
@@ -66,7 +76,7 @@ export async function generateImage(prompt: string): Promise<Buffer> {
     body: JSON.stringify({
       model: IMAGE_MODEL,
       prompt,
-      size: SIZE,
+      size: opts.size ?? SIZE,
       quality: QUALITY,
       n: 1,
     }),

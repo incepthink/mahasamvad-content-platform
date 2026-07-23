@@ -8,7 +8,10 @@
 // element at/around it), never a hard mask boundary.
 
 import { useRef, useState } from 'react';
-import { POSTER_FEEDBACK_MAX_MARKERS, type FeedbackRegion } from '@dgipr/schemas';
+import {
+  POSTER_FEEDBACK_MAX_MARKERS,
+  type FeedbackRegion,
+} from '@dgipr/schemas';
 import { STR } from '../lib/strings';
 
 export type PosterMarkerDraft = {
@@ -19,10 +22,10 @@ export type PosterMarkerDraft = {
 
 // Article chrome zones (महासंवाद logo card top-left + footer band) in normalized
 // coordinates — mirrors the reserved-zone pixel numbers in article-chrome.ts
-// (~560x220 and ~150px on a 1536x1024 canvas). Markers there get a soft warning:
+// (~420x180 and ~150px on a 1536x1024 canvas). Markers there get a soft warning:
 // the chrome is stamped in code after the edit, so changes under it won't show.
 export const ARTICLE_RESERVED_ZONES: readonly FeedbackRegion[] = [
-  { x: 0, y: 0, width: 0.365, height: 0.215 },
+  { x: 0, y: 0, width: 0.273, height: 0.176 },
   { x: 0, y: 0.854, width: 1, height: 0.146 },
 ];
 

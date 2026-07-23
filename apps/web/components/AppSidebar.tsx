@@ -12,6 +12,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   BookOpen,
+  Clapperboard,
   History,
   Languages,
   LayoutTemplate,
@@ -19,6 +20,7 @@ import {
   Mic,
   PanelLeftClose,
   PanelLeftOpen,
+  SpellCheck,
   SquarePen,
   X,
 } from 'lucide-react';
@@ -31,9 +33,11 @@ const NAV_LINKS = [
   { href: '/', label: STR.navNew, Icon: SquarePen },
   { href: '/generations', label: STR.navHistory, Icon: History },
   { href: '/translate', label: STR.navTranslate, Icon: Languages },
+  { href: '/proofread', label: STR.navProofread, Icon: SpellCheck },
   { href: '/glossary', label: STR.navGlossary, Icon: BookOpen },
   { href: '/references', label: STR.navReferences, Icon: LayoutTemplate },
   { href: '/dlo', label: STR.navDlo, Icon: Mic },
+  { href: '/video', label: STR.navVideo, Icon: Clapperboard },
 ] as const;
 
 export function AppSidebar() {
@@ -153,7 +157,9 @@ export function AppSidebar() {
             <Link
               key={href}
               href={href}
-              className={isActive(href) ? 'sidebar-link active' : 'sidebar-link'}
+              className={
+                isActive(href) ? 'sidebar-link active' : 'sidebar-link'
+              }
               aria-current={isActive(href) ? 'page' : undefined}
               title={collapsed ? label : undefined}
               onClick={closeMobile}

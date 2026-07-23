@@ -14,6 +14,7 @@ import {
   type ReferenceImageRow,
   type ReferenceLayoutSpec,
   type SupabaseClient,
+  type TemplateBrand,
 } from '@dgipr/database';
 import type { ReferenceCategory } from '@dgipr/schemas';
 
@@ -22,6 +23,8 @@ const EMPTY_CATALOG_ERROR =
   'एकही संदर्भ टेम्पलेट चित्र वापरात नाही. कृपया "मास्टर टेम्पलेट" पानावर किमान एक चित्र सुरू करा.';
 const EMPTY_TYPE_ERROR = (label: string) =>
   `«${label}» प्रकारात एकही चित्र वापरात नाही. कृपया "मास्टर टेम्पलेट" पानावर किमान एक चित्र सुरू करा.`;
+const EMPTY_CMO_ERROR =
+  'CMO विभागाचे एकही टेम्पलेट चित्र वापरात नाही. कृपया "मास्टर टेम्पलेट" पानावर CMO प्रकारात किमान एक चित्र सुरू करा.';
 
 // snake_case: this IS the wire shape. layout_spec describes the exact image at
 // reference_url (not the type), because two images of one type can have different
@@ -68,6 +71,11 @@ function enabledImagesFor(
 export async function buildTwitterCatalog(
   client: SupabaseClient,
   pinned?: PinnedReference,
+  // Which brand family the catalog is for. The default (DGIPR) is the classifier
+  // pool and MUST exclude CMO types so an ordinary Twitter run never routes into a
+  // CMO template; a 'cmo' build includes only CMO types (classification is skipped —
+  // the brand forces the family, so the catalog is really just the forced entry).
+  brand: TemplateBrand = 'dgipr',
 ): Promise<ReferenceCatalogEntry[]> {
   const [types, images] = await Promise.all([
     listReferenceTypeRows(client),
@@ -76,7 +84,7 @@ export async function buildTwitterCatalog(
 
   const entries: ReferenceCatalogEntry[] = [];
   for (const type of types) {
-    if (type.category !== 'twitter') continue;
+    if (type.category !== 'twitter' || type.brand !== brand) continue;
     const enabled = enabledImagesFor(images, 'twitter', type.slug);
     if (enabled.length === 0) continue;
     // The spec must describe the image we actually rolled, so pick once.
@@ -138,7 +146,43 @@ export async function pickArticleReference(
   const enabled = enabledImagesFor(images, 'article');
   if (enabled.length === 0) throw new Error(EMPTY_CATALOG_ERROR);
   const image = pickRandom(enabled);
-  return { url: publicUrl(client, image.storagePath), layoutSpec: image.layoutSpec };
+  return {
+    url: publicUrl(client, image.storagePath),
+    layoutSpec: image.layoutSpec,
+  };
+}
+
+// Roll a random enabled CMO master across every CMO-brand type. Returns a
+// PinnedReference so the runner reuses the exact pinned-run path (forced type +
+// url, no classification) — a CMO run has no classifier, the brand IS the choice.
+// CMO masters are category 'twitter' (they ride the social pipeline), distinguished
+// only by their type's brand flag.
+export async function pickCmoReference(
+  client: SupabaseClient,
+): Promise<PinnedReference> {
+  const [types, images] = await Promise.all([
+    listReferenceTypeRows(client),
+    listReferenceImageRows(client),
+  ]);
+  const cmoSlugs = new Set(
+    types
+      .filter((type) => type.category === 'twitter' && type.brand === 'cmo')
+      .map((type) => type.slug),
+  );
+  const enabled = images.filter(
+    (image) =>
+      image.category === 'twitter' &&
+      image.isActive &&
+      cmoSlugs.has(image.subtype),
+  );
+  if (enabled.length === 0) throw new Error(EMPTY_CMO_ERROR);
+  const image = pickRandom(enabled);
+  return {
+    url: publicUrl(client, image.storagePath),
+    category: 'twitter',
+    subtype: image.subtype,
+    layoutSpec: image.layoutSpec,
+  };
 }
 
 // A pinned image is honored even if it was disabled after pinning; only a

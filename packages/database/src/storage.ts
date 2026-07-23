@@ -12,6 +12,11 @@ export const POSTERS_BUCKET = 'posters';
 // 0018_dlo_intakes.sql. Service-role access only; nothing here gets a public URL.
 export const DLO_UPLOADS_BUCKET = 'dlo-uploads';
 
+// PUBLIC bucket for explainer-video assets (stills/clips/final MP4s/SRTs) — see
+// migration 0026_video_projects.sql. Same CDN rule as posters: versioned paths,
+// never reused.
+export const VIDEOS_BUCKET = 'videos';
+
 // Generic variants of the PNG helpers below, for buckets/content types beyond
 // poster PNGs (first user: DLO intake uploads). Same error contract.
 export async function uploadFile(
@@ -60,6 +65,15 @@ export async function uploadPng(
 
 export function publicUrl(client: SupabaseClient, path: string): string {
   return client.storage.from(POSTERS_BUCKET).getPublicUrl(path).data.publicUrl;
+}
+
+// Generic variant for public buckets beyond posters (first user: videos).
+export function publicUrlIn(
+  client: SupabaseClient,
+  bucket: string,
+  path: string,
+): string {
+  return client.storage.from(bucket).getPublicUrl(path).data.publicUrl;
 }
 
 export async function downloadPng(

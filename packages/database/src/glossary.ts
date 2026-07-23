@@ -9,12 +9,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 export const GLOSSARY_TERMS_TABLE = 'glossary_terms';
 
 export type TermType =
-  | 'person'
-  | 'designation'
-  | 'scheme'
-  | 'place'
-  | 'org'
-  | 'other';
+  'person' | 'designation' | 'scheme' | 'place' | 'org' | 'other';
 
 export type TermSource = 'auto' | 'manual' | 'seed';
 
@@ -23,6 +18,9 @@ export type GlossaryTerm = Readonly<{
   id: string;
   marathi: string;
   english: string;
+  // Optional corrected Hindi spelling. Null = the Hindi translation locks the name
+  // to its Marathi form (the default; see translate-article.ts).
+  hindi: string | null;
   termType: TermType;
   verified: boolean;
   source: TermSource;
@@ -36,6 +34,7 @@ export type GlossaryTerm = Readonly<{
 export type NewGlossaryTerm = Readonly<{
   marathi: string;
   english: string;
+  hindi?: string | null;
   termType?: TermType;
   verified?: boolean;
   source?: TermSource;
@@ -47,6 +46,7 @@ type GlossaryDbRow = {
   id: string;
   marathi: string;
   english: string;
+  hindi: string | null;
   term_type: TermType;
   verified: boolean;
   source: TermSource;
@@ -60,6 +60,7 @@ function fromDbRow(row: GlossaryDbRow): GlossaryTerm {
     id: row.id,
     marathi: row.marathi,
     english: row.english,
+    hindi: row.hindi,
     termType: row.term_type,
     verified: row.verified,
     source: row.source,
@@ -75,6 +76,7 @@ function newTermToDbRow(term: NewGlossaryTerm): Record<string, unknown> {
   return {
     marathi: term.marathi,
     english: term.english,
+    hindi: term.hindi ?? null,
     term_type: term.termType ?? 'other',
     verified: term.verified ?? false,
     source: term.source ?? 'auto',
@@ -85,12 +87,16 @@ function newTermToDbRow(term: NewGlossaryTerm): Record<string, unknown> {
 // Fields a caller may change after creation (never id/marathi/created_at here —
 // marathi is the conflict key, so changing it is a delete + re-insert concern).
 export type GlossaryTermPatch = Partial<
-  Pick<GlossaryTerm, 'english' | 'termType' | 'verified' | 'source' | 'notes'>
+  Pick<
+    GlossaryTerm,
+    'english' | 'hindi' | 'termType' | 'verified' | 'source' | 'notes'
+  >
 >;
 
 function patchToDbRow(patch: GlossaryTermPatch): Record<string, unknown> {
   const row: Record<string, unknown> = {};
   if (patch.english !== undefined) row.english = patch.english;
+  if (patch.hindi !== undefined) row.hindi = patch.hindi;
   if (patch.termType !== undefined) row.term_type = patch.termType;
   if (patch.verified !== undefined) row.verified = patch.verified;
   if (patch.source !== undefined) row.source = patch.source;
@@ -115,9 +121,11 @@ export async function listGlossaryTerms(
     query = query.eq('term_type', opts.type);
   }
   if (opts.search) {
-    // Match either side; escape LIKE wildcards in the user's search term.
+    // Match any script; escape LIKE wildcards in the user's search term.
     const escaped = opts.search.replace(/[%_]/g, (m) => `\\${m}`);
-    query = query.or(`marathi.ilike.%${escaped}%,english.ilike.%${escaped}%`);
+    query = query.or(
+      `marathi.ilike.%${escaped}%,english.ilike.%${escaped}%,hindi.ilike.%${escaped}%`,
+    );
   }
   // Unverified first (needs review), most recently touched first within each group.
   const { data, error } = await query

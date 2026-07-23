@@ -39,7 +39,8 @@ export function registerGlossaryRoutes(
     const q = ListQuerySchema.parse(request.query);
     // Build the options conditionally so exactOptionalPropertyTypes never sees an
     // explicit `undefined` on a non-`| undefined` optional field.
-    const opts: { verifiedOnly?: boolean; type?: TermType; search?: string } = {};
+    const opts: { verifiedOnly?: boolean; type?: TermType; search?: string } =
+      {};
     if (q.verifiedOnly !== undefined) opts.verifiedOnly = q.verifiedOnly;
     if (q.type !== undefined) opts.type = q.type;
     if (q.search !== undefined) opts.search = q.search;
@@ -53,6 +54,7 @@ export function registerGlossaryRoutes(
     const term = await upsertGlossaryTerm(client, {
       marathi: body.marathi,
       english: body.english,
+      hindi: body.hindi ?? null,
       termType: body.termType ?? 'other',
       verified: body.verified ?? true,
       source: 'manual',
@@ -68,11 +70,13 @@ export function registerGlossaryRoutes(
       // Mutable local (GlossaryTermPatch's fields are readonly); assignable to it.
       const patch: {
         english?: string;
+        hindi?: string | null;
         termType?: TermType;
         verified?: boolean;
         notes?: string | null;
       } = {};
       if (body.english !== undefined) patch.english = body.english;
+      if (body.hindi !== undefined) patch.hindi = body.hindi;
       if (body.termType !== undefined) patch.termType = body.termType;
       if (body.verified !== undefined) patch.verified = body.verified;
       if (body.notes !== undefined) patch.notes = body.notes;

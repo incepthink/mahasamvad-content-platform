@@ -8,9 +8,9 @@
 import { readFile } from 'node:fs/promises';
 import { basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { combineIntakeSources, type IntakeSource } from './combine.js';
+import { combineIntakeSources, type IntakeSource } from '@dgipr/schemas';
 import { extractDocxText } from './docx.js';
-import { extractPdfText } from './sarvam-doc.js';
+import { extractPdfPagesDetailed } from './pdf-pages.js';
 import { transcribeAudioFiles, type AudioFileInput } from './sarvam-stt.js';
 
 async function main(): Promise<void> {
@@ -33,8 +33,14 @@ async function main(): Promise<void> {
       audio.push({ name, data, path });
     } else if (lower.endsWith('.pdf')) {
       console.log(`[intake:test] extracting PDF ${name}…`);
-      const text = await extractPdfText(name, data);
-      console.log(`[intake:test]   ${text.length} chars`);
+      const { source, pages } = await extractPdfPagesDetailed(name, data);
+      const text = pages
+        .map((page) => page.text)
+        .filter((pageText) => pageText.length > 0)
+        .join('\n\n');
+      console.log(
+        `[intake:test]   ${text.length} chars from ${pages.length} page(s) via ${source}`,
+      );
       sources.push({ label: name, text });
     } else if (lower.endsWith('.docx')) {
       console.log(`[intake:test] extracting DOCX ${name}…`);

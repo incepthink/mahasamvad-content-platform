@@ -30,6 +30,28 @@ export function buildScenePrompt(copy: Copy): string {
   ].join('\n');
 }
 
+// Scene prompt for the CMO (मंत्रिमंडळ निर्णय) poster's single upper-right PHOTO CIRCLE
+// (overlayCmoChrome composites this into cmo-geometry.ts's CMO_BIG). Same documentary photo,
+// but generated SQUARE and composed for a CIRCULAR crop: the subject sits dead centre with
+// generous, quiet margins on all sides, because the corners are cropped away by the circle.
+export function buildCmoCirclePhotoPrompt(sceneBrief: string): string {
+  const subject = sceneBrief.trim();
+  return [
+    'A single photorealistic, documentary-style photograph to be shown inside a CIRCULAR',
+    'photo window on a Government of Maharashtra cabinet-decision (मंत्रिमंडळ निर्णय) poster.',
+    'Subject: ' + subject,
+    'Style: real, natural daylight; authentic skin, fabric and material textures; realistic',
+    'depth of field; candid, dignified and hopeful mood. Rich, saturated colours that suit an',
+    'official government notice. Do NOT use illustration, cartoon, flat vector art, 3D render',
+    'or collage.',
+    'Composition: SQUARE framing with the main subject centred and comfortably inside the',
+    'frame, surrounded by clean, uncluttered margins on all four sides — the image will be',
+    'cropped to a CIRCLE, so nothing important may sit in the corners. The subject must read',
+    'clearly at a glance.',
+    NO_TEXT,
+  ].join('\n');
+}
+
 // Scene prompt for the LANDSCAPE article image (article-template.ts). Same documentary photo,
 // but composed for a full-bleed landscape frame with a text panel on the LEFT: the subject sits
 // to the RIGHT and the left side is kept calm and open (sky, field, soft blur) so the maroon

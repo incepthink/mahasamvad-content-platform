@@ -3,6 +3,11 @@
 // captured in the cost model (docs/../plans/openai-client-call-sites-merry-newt.md,
 // fetched 2026-07-10). If OpenAI changes prices, edit only this file.
 
+import {
+  VIDEO_TIER_PRICE_PER_SECOND_USD,
+  type VideoTier,
+} from '@dgipr/schemas';
+
 // USD per 1,000,000 tokens. `input` is billed on the *uncached* portion of the
 // prompt; the cached portion (OpenAI returns it in usage.prompt_tokens_details)
 // is billed at `cachedInput`. `output` is the completion.
@@ -60,4 +65,24 @@ export function estimateImageCostUsd(
   quality: ImageQuality,
 ): number {
   return IMAGE_COST_USD[kind][quality];
+}
+
+// Video cost is per second of rendered clip, per Veo tier. The price table
+// lives in @dgipr/schemas (VIDEO_TIER_PRICE_PER_SECOND_USD) because the web
+// renders the pre-spend estimate from the same numbers and cannot import this
+// package.
+export { VIDEO_TIER_PRICE_PER_SECOND_USD, type VideoTier };
+
+export function estimateVideoCostUsd(tier: VideoTier, seconds: number): number {
+  return VIDEO_TIER_PRICE_PER_SECOND_USD[tier] * Math.max(seconds, 0);
+}
+
+// Sarvam TTS (bulbul) is billed per character of input text. Approximate public
+// price captured 2026-07-22; an estimate like the image tiers, edit if Sarvam
+// changes pricing. Narration is short (a few hundred chars/scene), so this is a
+// small line beside the Veo spend.
+export const SARVAM_TTS_PRICE_PER_1K_CHARS_USD = 0.05;
+
+export function estimateTtsCostUsd(characters: number): number {
+  return (Math.max(characters, 0) / 1000) * SARVAM_TTS_PRICE_PER_1K_CHARS_USD;
 }

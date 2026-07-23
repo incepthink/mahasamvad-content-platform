@@ -4,20 +4,42 @@
 // (free-text notes + PDF/MP3/DOCX uploads + article type), (2) processing
 // (files upload to the API; audio is transcribed via Sarvam batch STT, PDFs
 // via Sarvam document digitization, DOCX locally), (3) an EDITABLE review of
-// the combined Marathi text — the officer corrects names/amounts before they
-// become "facts" — and (4) the generated article, produced by the existing
-// generation pipeline (the reviewed text becomes a normal generation's note,
-// so feedback/translation/posters all work from its detail page).
+// the Marathi text — the officer corrects names/amounts before they become
+// "facts" — and (4) the generated article, produced by the existing generation
+// pipeline (the reviewed text becomes a normal generation's note, so
+// feedback/translation/posters all work from its detail page).
+//
+// Step 3 is per SOURCE (see DloSourceReview): each recording and document gets
+// its own editable card, and a PDF is listed page by page so pages that do not
+// belong in the article can be unchecked. What the officer ends up with is
+// re-assembled here with the same combiner the intake job used, and that string
+// is what is sent as the generation's note.
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { FileText, Music, X } from 'lucide-react';
 import type { DloCategory, DloIntakeDetail } from '@dgipr/schemas';
-import { createDloIntake, generateFromDloIntake } from '../../lib/api';
+import {
+  createDloIntake,
+  extractDloPages,
+  generateFromDloIntake,
+  reextractDloFile,
+} from '../../lib/api';
+import {
+  assembleDloText,
+  filePageNumbers,
+  forgetFile,
+  forgetFileKeys,
+  hasPendingSelection,
+  hasPerSourceText,
+  pageKey,
+  pendingSelections,
+} from '../../lib/dloReview';
 import { downloadBlob } from '../../lib/download';
 import { ARTICLE_CATEGORY_OPTIONS } from '../../lib/generationOptions';
 import { useDloIntake } from '../../lib/useDloIntake';
 import { useGeneration } from '../../lib/useGeneration';
+import { DloSourceReview } from '../../components/DloSourceReview';
 import { ProgressSteps } from '../../components/ProgressSteps';
 import { DLO_INTAKE_STEP_LABELS, STR } from '../../lib/strings';
 
@@ -89,7 +111,11 @@ function CategoryPicker({
             className="output-option"
             aria-pressed={value === option.value}
             onClick={() => {
-              if (option.value !== 'twitter') onChange(option.value);
+              // ARTICLE_CATEGORY_OPTIONS already excludes the social lanes; this
+              // re-narrows the widened Category to the two a DLO run can produce.
+              if (option.value === 'news' || option.value === 'scheme') {
+                onChange(option.value);
+              }
             }}
           >
             <span className="icon" aria-hidden="true">
@@ -170,16 +196,74 @@ export default function DloPage() {
   const [article, setArticle] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
-  const { detail: intake, error: intakeError } = useDloIntake(intakeId);
+  // Review-step state, keyed per source (see lib/dloReview): the officer's edits
+  // and the sources/pages left out of the article. Everything is included until
+  // it is unchecked, so an untouched review generates exactly what it used to.
+  const [edits, setEdits] = useState<Record<string, string>>({});
+  const [excluded, setExcluded] = useState<Set<string>>(new Set());
+  const [reextractingIndex, setReextractingIndex] = useState<number | null>(
+    null,
+  );
+  const sawReextractRunning = useRef(false);
+  // A page-selection read is in flight. Cleared by the poll, not here: the intake goes
+  // running → ready and the cards repopulate on their own.
+  const [extracting, setExtracting] = useState(false);
+  const sawExtractRunning = useRef(false);
+  const [showPreview, setShowPreview] = useState(false);
 
-  // Advance to the review step once the intake job finishes, seeding the
-  // editable text with the combined transcription/extraction output.
+  const {
+    detail: intake,
+    error: intakeError,
+    refresh,
+  } = useDloIntake(intakeId);
+
+  // Advance to the review step once the intake job finishes, seeding the legacy
+  // single-textarea fallback with the combined transcription/extraction output.
   useEffect(() => {
     if (step !== 'processing' || intake?.status !== 'ready') return;
     setCombinedText(intake.combinedText ?? '');
     setError(null);
     setStep('review');
   }, [step, intake]);
+
+  // An OCR re-read runs the intake back through running → ready. Waiting for the
+  // running state first matters: the intake is still 'ready' in the instant
+  // between asking for the re-read and the first poll landing.
+  useEffect(() => {
+    if (reextractingIndex === null) return;
+    if (intake?.status === 'running') {
+      sawReextractRunning.current = true;
+    } else if (intake?.status !== 'queued' && sawReextractRunning.current) {
+      sawReextractRunning.current = false;
+      setReextractingIndex(null);
+    }
+  }, [intake?.status, reextractingIndex]);
+
+  // Reading the selected pages takes the intake through the same running → ready loop,
+  // and needs the same "wait until you have actually seen running" guard.
+  useEffect(() => {
+    if (!extracting) return;
+    if (intake?.status === 'running') {
+      sawExtractRunning.current = true;
+    } else if (intake?.status !== 'queued' && sawExtractRunning.current) {
+      sawExtractRunning.current = false;
+      setExtracting(false);
+    }
+  }, [intake?.status, extracting]);
+
+  // An intake made before per-source text shipped carries only the combined
+  // text, so it keeps the old single box rather than a row of empty cards.
+  const perSource = intake ? hasPerSourceText(intake.files) : true;
+  // A scanned PDF nobody has chosen pages for yet. It contributes nothing to the note
+  // until it is read, so generating now would silently drop a whole source.
+  const pendingSelection = intake ? hasPendingSelection(intake.files) : false;
+  const reviewText = useMemo(
+    () =>
+      intake && perSource
+        ? assembleDloText(intake.notes, intake.files, edits, excluded)
+        : combinedText,
+    [intake, perSource, edits, excluded, combinedText],
+  );
 
   const stepIndex =
     step === 'input'
@@ -241,8 +325,92 @@ export default function DloPage() {
     }
   };
 
+  // Toggling anything closes nothing and loses nothing — edits are kept for an
+  // excluded source, so unchecking and re-checking is free.
+  const toggleKey = (key: string) => {
+    setExcluded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+    setError(null);
+  };
+
+  // A PDF's whole-file checkbox is its select-all: it works on the page keys, so
+  // the page rows and the header stay one piece of state. Works the same before a scan has
+  // been read, where the page numbers come from the probe's count rather than from pages.
+  const toggleFilePages = (index: number, include: boolean) => {
+    const file = intake?.files[index];
+    const pages = file ? (filePageNumbers(file) ?? []) : [];
+    setExcluded((prev) => {
+      const next = new Set(prev);
+      for (const page of pages) {
+        if (include) next.delete(pageKey(index, page));
+        else next.add(pageKey(index, page));
+      }
+      return next;
+    });
+    setError(null);
+  };
+
+  // "Read the pages I picked." One request for every scanned PDF still unread, so an
+  // intake holding three of them is still one click. This is the call that spends OCR
+  // credits, and only on what is ticked.
+  const readSelectedPages = async () => {
+    if (!intakeId || !intake) return;
+    const selections = pendingSelections(intake.files, excluded);
+    if (selections.length === 0) {
+      setError(STR.dloReviewNoPagesPicked);
+      return;
+    }
+    setExtracting(true);
+    setError(null);
+    try {
+      await extractDloPages(intakeId, selections);
+      await refresh();
+    } catch (e) {
+      setExtracting(false);
+      setError(e instanceof Error ? e.message : STR.genericError);
+    }
+  };
+
+  // "Read this PDF with OCR instead." The confirm the officer just accepted says
+  // this file's corrections are discarded, so they are dropped here rather than
+  // silently re-applied to pages they were never written against.
+  const reextract = async (index: number) => {
+    if (!intakeId || !intake) return;
+    const file = intake.files[index];
+    if (!file) return;
+    // Read off the CURRENT selection before it is forgotten below — re-reading is a
+    // quality fix, not a reason to re-OCR pages the officer already excluded.
+    const pages = (filePageNumbers(file) ?? []).filter(
+      (page) => !excluded.has(pageKey(index, page)),
+    );
+    if (pages.length === 0) {
+      setError(STR.dloReviewNoPagesPicked);
+      return;
+    }
+    setReextractingIndex(index);
+    sawReextractRunning.current = false;
+    setError(null);
+    setEdits((prev) => forgetFile(prev, index));
+    setExcluded((prev) => forgetFileKeys(prev, index));
+    try {
+      await reextractDloFile(intakeId, index, pages);
+      await refresh();
+    } catch (e) {
+      setReextractingIndex(null);
+      setError(e instanceof Error ? e.message : STR.genericError);
+    }
+  };
+
   const generate = async () => {
-    const text = combinedText.trim();
+    if (pendingSelection) {
+      setError(STR.dloReviewSelectionPending);
+      return;
+    }
+    const text = reviewText.trim();
     if (text.length < TEXT_MIN_CHARS) {
       setError(STR.dloReviewTooShort);
       return;
@@ -282,6 +450,11 @@ export default function DloPage() {
     setCombinedText('');
     setGenerationId(null);
     setArticle(null);
+    setEdits({});
+    setExcluded(new Set());
+    setReextractingIndex(null);
+    setExtracting(false);
+    setShowPreview(false);
   };
 
   const copyArticle = async () => {
@@ -476,22 +649,102 @@ export default function DloPage() {
                 </ul>
               </div>
             ) : null}
-            <textarea
-              className="note-input"
-              value={combinedText}
-              onChange={(event) => setCombinedText(event.target.value)}
-              style={{ marginTop: 12, minHeight: 320 }}
-            />
-            <p
-              className={
-                combinedText.length > TEXT_MAX_CHARS ? 'form-error' : 'hint'
-              }
-              style={{ marginTop: 6 }}
-            >
-              {combinedText.length.toLocaleString('mr-IN')} /{' '}
-              {TEXT_MAX_CHARS.toLocaleString('mr-IN')} {STR.dloCharsSuffix}
-            </p>
+            {!perSource ? (
+              <>
+                <textarea
+                  className="note-input"
+                  value={combinedText}
+                  onChange={(event) => setCombinedText(event.target.value)}
+                  style={{ marginTop: 12, minHeight: 320 }}
+                />
+                <p
+                  className={
+                    combinedText.length > TEXT_MAX_CHARS ? 'form-error' : 'hint'
+                  }
+                  style={{ marginTop: 6 }}
+                >
+                  {combinedText.length.toLocaleString('mr-IN')} /{' '}
+                  {TEXT_MAX_CHARS.toLocaleString('mr-IN')} {STR.dloCharsSuffix}
+                </p>
+              </>
+            ) : null}
           </section>
+
+          {perSource && intake ? (
+            <>
+              <DloSourceReview
+                intake={intake}
+                edits={edits}
+                excluded={excluded}
+                busy={submitting || extracting}
+                reextractingIndex={reextractingIndex}
+                onEdit={(key, value) =>
+                  setEdits((prev) => ({ ...prev, [key]: value }))
+                }
+                onToggle={toggleKey}
+                onToggleFilePages={toggleFilePages}
+                onReextract={(index) => void reextract(index)}
+              />
+
+              {/* One button for every unread scan in the intake — an intake holding three
+                  of them should still be one click. Nothing above this point has cost a
+                  single OCR credit; this is where the spend happens. */}
+              {pendingSelection ? (
+                <section className="card">
+                  <p className="hint">{STR.dloReviewReadSelectedHint}</p>
+                  <div className="btn-row" style={{ marginTop: 12 }}>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      disabled={extracting || submitting}
+                      onClick={() => void readSelectedPages()}
+                    >
+                      {extracting
+                        ? STR.dloReviewReading
+                        : STR.dloReviewReadSelected}
+                    </button>
+                    {extracting ? (
+                      <span className="translating-note">
+                        <span className="spinner" aria-hidden="true" />
+                        {STR.dloProcessingHint}
+                      </span>
+                    ) : null}
+                  </div>
+                </section>
+              ) : null}
+
+              {/* What actually gets sent, on demand. Read-only on purpose: the
+                  per-source cards are the one place text is edited, and a second
+                  editable copy of the same text could only disagree with them. */}
+              <section className="card">
+                <p
+                  className={
+                    reviewText.length > TEXT_MAX_CHARS ? 'form-error' : 'hint'
+                  }
+                >
+                  {STR.dloReviewTotal}{' '}
+                  {reviewText.length.toLocaleString('mr-IN')} /{' '}
+                  {TEXT_MAX_CHARS.toLocaleString('mr-IN')} {STR.dloCharsSuffix}
+                </p>
+                <div className="btn-row" style={{ marginTop: 10 }}>
+                  <button
+                    type="button"
+                    className="btn btn-small"
+                    onClick={() => setShowPreview((prev) => !prev)}
+                  >
+                    {showPreview
+                      ? STR.dloReviewPreviewHide
+                      : STR.dloReviewPreviewShow}
+                  </button>
+                </div>
+                {showPreview ? (
+                  <div className="article-body" style={{ marginTop: 12 }}>
+                    {reviewText || STR.dloReviewEmpty}
+                  </div>
+                ) : null}
+              </section>
+            </>
+          ) : null}
 
           <section className="card">
             <CategoryPicker value={category} onChange={setCategory} />
@@ -518,7 +771,12 @@ export default function DloPage() {
                 type="button"
                 className="btn btn-primary"
                 onClick={generate}
-                disabled={submitting}
+                disabled={
+                  submitting ||
+                  extracting ||
+                  pendingSelection ||
+                  reextractingIndex !== null
+                }
               >
                 {submitting ? STR.submitting : STR.dloGenerate}
               </button>
@@ -526,6 +784,9 @@ export default function DloPage() {
                 {STR.dloStartOver}
               </button>
             </div>
+            {pendingSelection ? (
+              <p className="hint">{STR.dloReviewSelectionPending}</p>
+            ) : null}
             {error ? <p className="form-error">{error}</p> : null}
           </section>
         </>

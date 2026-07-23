@@ -8,7 +8,9 @@ import { registerDloRoutes } from './routes/dlo.js';
 import { registerGenerationRoutes } from './routes/generations.js';
 import { registerGlossaryRoutes } from './routes/glossary.js';
 import { registerTranslateRoutes } from './routes/translate.js';
+import { registerProofreadRoutes } from './routes/proofread.js';
 import { registerReferenceRoutes } from './routes/references.js';
+import { registerVideoRoutes } from './routes/video.js';
 
 export async function createServer() {
   const app = Fastify({
@@ -56,8 +58,10 @@ export async function createServer() {
       registerGenerationRoutes(instance, client);
       registerGlossaryRoutes(instance, client);
       registerTranslateRoutes(instance, client);
+      registerProofreadRoutes(instance, client);
       registerReferenceRoutes(instance, client);
       registerDloRoutes(instance, client);
+      registerVideoRoutes(instance, client);
     },
     { prefix: '/api' },
   );

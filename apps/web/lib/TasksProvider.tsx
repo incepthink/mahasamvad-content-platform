@@ -20,6 +20,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { isSocialCategory } from '@dgipr/schemas';
 import type { GenerationDetail } from '@dgipr/schemas';
 import { getGeneration } from './api';
 
@@ -30,10 +31,11 @@ type TasksContextValue = {
   tasks: GenerationDetail[];
   // Non-terminal tracked tasks (running/queued or just-submitted, detail not yet loaded).
   activeCount: number;
-  // True while any tracked twitter task is still in flight — disables the create
-  // page's Twitter card (v1 allows one active twitter task at a time).
-  hasActiveTwitterTask: boolean;
-  // Same gate for news/scheme (article) runs — disables the non-twitter category
+  // True while any tracked social task (twitter/facebook) is still in flight —
+  // disables BOTH create-page social cards. The two lanes share one n8n workflow,
+  // so v1 allows one active social task at a time.
+  hasActiveSocialTask: boolean;
+  // Same gate for news/scheme (article) runs — disables the non-social category
   // cards while one is in flight.
   hasActiveArticleTask: boolean;
   // Start tracking a run id (called on submit / regenerate). Fetches its detail now.
@@ -70,7 +72,9 @@ export function TasksProvider({ children }: { children: ReactNode }) {
     (id: string) => {
       setIds((prev) => (prev.includes(id) ? prev : [id, ...prev]));
       // Load its detail immediately so the panel shows a row without a poll wait.
-      void getGeneration(id).then(upsert).catch(() => {});
+      void getGeneration(id)
+        .then(upsert)
+        .catch(() => {});
     },
     [upsert],
   );
@@ -84,14 +88,14 @@ export function TasksProvider({ children }: { children: ReactNode }) {
   const loadedActive = tasks.filter((d) => isActive(d.status)).length;
   const pendingCount = ids.filter((id) => !details[id]).length;
   const activeCount = loadedActive + pendingCount;
-  // v1 allows one active twitter task at a time; gate only on twitter runs so an
-  // in-flight article/news run doesn't disable the Twitter card.
-  const hasActiveTwitterTask = tasks.some(
-    (d) => d.category === 'twitter' && isActive(d.status),
+  // v1 allows one active social task at a time; gate only on social runs so an
+  // in-flight article/news run doesn't disable the ट्विटर/फेसबुक cards.
+  const hasActiveSocialTask = tasks.some(
+    (d) => isSocialCategory(d.category) && isActive(d.status),
   );
   // Mirror gate for news/scheme runs: one active article generation at a time.
   const hasActiveArticleTask = tasks.some(
-    (d) => d.category !== 'twitter' && isActive(d.status),
+    (d) => !isSocialCategory(d.category) && isActive(d.status),
   );
   const idle = activeCount === 0;
 
@@ -108,7 +112,11 @@ export function TasksProvider({ children }: { children: ReactNode }) {
         return !d || isActive(d.status);
       });
       await Promise.all(
-        pollIds.map((id) => getGeneration(id).then(upsert).catch(() => {})),
+        pollIds.map((id) =>
+          getGeneration(id)
+            .then(upsert)
+            .catch(() => {}),
+        ),
       );
       if (cancelled) return;
       timer = setTimeout(tick, POLL_INTERVAL_MS);
@@ -126,7 +134,7 @@ export function TasksProvider({ children }: { children: ReactNode }) {
   const value: TasksContextValue = {
     tasks,
     activeCount,
-    hasActiveTwitterTask,
+    hasActiveSocialTask,
     hasActiveArticleTask,
     addTask,
     isPanelOpen,
@@ -134,7 +142,9 @@ export function TasksProvider({ children }: { children: ReactNode }) {
     closePanel,
   };
 
-  return <TasksContext.Provider value={value}>{children}</TasksContext.Provider>;
+  return (
+    <TasksContext.Provider value={value}>{children}</TasksContext.Provider>
+  );
 }
 
 export function useTasks(): TasksContextValue {

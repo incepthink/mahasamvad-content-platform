@@ -9,9 +9,12 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import {
   estimateImageCostUsd,
+  estimateTtsCostUsd,
+  estimateVideoCostUsd,
   priceText,
   type ImageKind,
   type ImageQuality,
+  type VideoTier,
 } from './pricing.js';
 
 // Running totals for one job. Token counts are kept alongside the dollar figures so the
@@ -24,6 +27,10 @@ export type CostAccumulator = {
   textCostUsd: number;
   imageCount: number;
   imageCostUsd: number;
+  videoSeconds: number;
+  videoCostUsd: number;
+  ttsCharacters: number;
+  ttsCostUsd: number;
 };
 
 const storage = new AsyncLocalStorage<CostAccumulator>();
@@ -37,6 +44,10 @@ export function createCostAccumulator(): CostAccumulator {
     textCostUsd: 0,
     imageCount: 0,
     imageCostUsd: 0,
+    videoSeconds: 0,
+    videoCostUsd: 0,
+    ttsCharacters: 0,
+    ttsCostUsd: 0,
   };
 }
 
@@ -51,7 +62,9 @@ export function runInCostScope<T>(
 }
 
 export function totalCostUsd(acc: CostAccumulator): number {
-  return acc.textCostUsd + acc.imageCostUsd;
+  return (
+    acc.textCostUsd + acc.imageCostUsd + acc.videoCostUsd + acc.ttsCostUsd
+  );
 }
 
 // Shape of the `usage` object OpenAI returns on a chat completion (fields optional so a
@@ -102,4 +115,22 @@ export function recordImageCost(kind: ImageKind, quality: ImageQuality): void {
   if (!acc) return;
   acc.imageCount += 1;
   acc.imageCostUsd += estimateImageCostUsd(kind, quality);
+}
+
+// Record one Veo clip render: billed per second of output at the tier price
+// (Google returns no usage object; the requested duration IS the usage).
+export function recordVideoCost(tier: VideoTier, seconds: number): void {
+  const acc = storage.getStore();
+  if (!acc) return;
+  acc.videoSeconds += seconds;
+  acc.videoCostUsd += estimateVideoCostUsd(tier, seconds);
+}
+
+// Record one Sarvam TTS narration render: billed per character (Sarvam returns
+// no usage object; the input length IS the usage).
+export function recordTtsCost(characters: number): void {
+  const acc = storage.getStore();
+  if (!acc) return;
+  acc.ttsCharacters += characters;
+  acc.ttsCostUsd += estimateTtsCostUsd(characters);
 }

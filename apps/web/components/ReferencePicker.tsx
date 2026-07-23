@@ -9,7 +9,11 @@
 
 import { useMemo, useState } from 'react';
 import { Images, Sparkles } from 'lucide-react';
-import type { ReferenceImage, ReferenceType } from '@dgipr/schemas';
+import type {
+  ReferenceImage,
+  ReferenceType,
+  TemplateBrand,
+} from '@dgipr/schemas';
 import { listReferenceImages, listReferenceTypes } from '../lib/api';
 import { STR } from '../lib/strings';
 
@@ -71,11 +75,15 @@ function Thumb({
 
 export default function ReferencePicker({
   category,
+  brand = 'dgipr',
   value,
   onChange,
   variant = 'card',
 }: {
   category: PickerCategory;
+  // Which template brand family to show. The DGIPR flow excludes CMO types and vice
+  // versa, so a CMO template never appears in an ordinary Twitter run's gallery.
+  brand?: TemplateBrand;
   value: ReferenceSelection | null;
   onChange: (selection: ReferenceSelection | null) => void;
   // 'card' is the home form's standalone section; 'inline' drops the card chrome
@@ -121,7 +129,7 @@ export default function ReferencePicker({
   const groups = useMemo(() => {
     if (!library) return [];
     return library.types
-      .filter((type) => type.category === category)
+      .filter((type) => type.category === category && type.brand === brand)
       .map((type) => ({
         type,
         images: library.images.filter(
@@ -132,7 +140,7 @@ export default function ReferencePicker({
         ),
       }))
       .filter((group) => group.images.length > 0);
-  }, [library, category]);
+  }, [library, category, brand]);
 
   const selectedImage =
     value?.kind === 'image' && library

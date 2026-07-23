@@ -3,29 +3,31 @@
 // "पुढील पाऊल" panel on a finished generation. Everything here creates a NEW
 // generation from this run's note via the same API the home form uses (this run
 // is never mutated):
-//   - cross-format: an article run offers a Twitter post, a twitter run offers an
-//     article — with the same design/template questions the home form asks;
+//   - cross-format: every format EXCEPT the run's own — an article run offers both
+//     social posts, a social run offers an article plus the other platform — with
+//     the same design/template questions the home form asks;
 //   - edit-note: reopen the note prefilled, tweak it, re-run with the same settings.
-// Twitter runs are background tasks (track + open the panel, no navigation);
+// Social runs are background tasks (track + open the panel, no navigation);
 // article runs navigate to the new run's progress page — same conventions as the
 // home form's submit.
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { isSocialCategory } from '@dgipr/schemas';
 import type {
   Category,
   DesignMode,
   GenerationDetail,
   OutputType,
 } from '@dgipr/schemas';
-import { createGeneration } from '../lib/api';
+import { createGeneration, requestArticlePoster } from '../lib/api';
 import {
   ARTICLE_CATEGORY_OPTIONS,
   DESIGN_OPTIONS,
   OUTPUT_OPTIONS,
-  TWITTER_SOURCE_OPTIONS,
+  SOCIAL_SOURCE_OPTIONS,
   type GenerationOption,
-  type TwitterSource,
+  type SocialSource,
 } from '../lib/generationOptions';
 import { useTasks } from '../lib/TasksProvider';
 import { STR } from '../lib/strings';
@@ -73,20 +75,58 @@ function OptionCards<Value extends string>({
 }
 
 // Every block reports a successful spawn so the page can refresh the thread
-// strip — essential for the twitter paths, which never navigate away.
+// strip — essential for the social paths, which never navigate away.
 type BlockProps = {
   detail: GenerationDetail;
   onSpawned?: (() => void) | undefined;
 };
 
-// Article/news/scheme run → create a Twitter post from the same note.
-function CreateTwitterBlock({ detail, onSpawned }: BlockProps) {
-  const { addTask, openPanel, hasActiveTwitterTask } = useTasks();
+// The two social lanes are one flow with different labels (and, for now, one
+// shared n8n workflow), so the fold is rendered per platform from this table.
+const SOCIAL_PLATFORMS = ['twitter', 'facebook'] as const;
+type SocialPlatform = (typeof SOCIAL_PLATFORMS)[number];
+
+const SOCIAL_COPY: Record<
+  SocialPlatform,
+  { title: string; hint: string; cta: string; started: string }
+> = {
+  twitter: {
+    title: STR.nextTwitterTitle,
+    hint: STR.nextTwitterHint,
+    cta: STR.nextTwitterCta,
+    started: STR.nextTwitterStarted,
+  },
+  facebook: {
+    title: STR.nextFacebookTitle,
+    hint: STR.nextFacebookHint,
+    cta: STR.nextFacebookCta,
+    started: STR.nextFacebookStarted,
+  },
+};
+
+// Narrows a run's category to its social labels (null for news/scheme), so
+// callers read the platform copy without casting the widened Category.
+function socialCopyOf(
+  category: Category,
+): (typeof SOCIAL_COPY)[SocialPlatform] | null {
+  return category === 'twitter' || category === 'facebook'
+    ? SOCIAL_COPY[category]
+    : null;
+}
+
+// Any run → create a social post (ट्विटर/फेसबुक) from the same note.
+function CreateSocialBlock({
+  detail,
+  platform,
+  onSpawned,
+}: BlockProps & { platform: SocialPlatform }) {
+  const { addTask, openPanel, hasActiveSocialTask } = useTasks();
+  const copy = SOCIAL_COPY[platform];
   // The generated article is the default source; the guard mirrors the API's
   // 20-char note minimum so a degenerate article silently falls back to the note.
   const articleText = detail.article?.trim() ?? '';
   const canUseArticle = articleText.length >= 20;
-  const [source, setSource] = useState<TwitterSource>(
+  const [source, setSource] = useState<SocialSource>(
     canUseArticle ? 'article' : 'note',
   );
   const [designMode, setDesignMode] = useState<DesignMode>('onbrand');
@@ -101,7 +141,7 @@ function CreateTwitterBlock({ detail, onSpawned }: BlockProps) {
   }, [designMode]);
 
   const submit = async () => {
-    if (hasActiveTwitterTask) {
+    if (hasActiveSocialTask) {
       setError(STR.busyError);
       return;
     }
@@ -109,10 +149,9 @@ function CreateTwitterBlock({ detail, onSpawned }: BlockProps) {
     setError(null);
     try {
       const id = await createGeneration({
-        note:
-          source === 'article' && canUseArticle ? articleText : detail.note,
+        note: source === 'article' && canUseArticle ? articleText : detail.note,
         heading: detail.heading ?? undefined,
-        category: 'twitter',
+        category: platform,
         outputType: 'poster',
         designMode,
         referenceImageId:
@@ -134,13 +173,13 @@ function CreateTwitterBlock({ detail, onSpawned }: BlockProps) {
 
   return (
     <details className="fold">
-      <summary>{STR.nextTwitterTitle}</summary>
+      <summary>{copy.title}</summary>
       <div className="fold-body">
-        <p className="hint">{STR.nextTwitterHint}</p>
+        <p className="hint">{copy.hint}</p>
         {canUseArticle ? (
           <OptionCards
             label={STR.nextSourceLabel}
-            options={TWITTER_SOURCE_OPTIONS}
+            options={SOCIAL_SOURCE_OPTIONS}
             value={source}
             onSelect={setSource}
           />
@@ -164,15 +203,15 @@ function CreateTwitterBlock({ detail, onSpawned }: BlockProps) {
             type="button"
             className="btn btn-primary"
             onClick={submit}
-            disabled={submitting || hasActiveTwitterTask}
+            disabled={submitting || hasActiveSocialTask}
           >
-            {submitting ? STR.submitting : STR.nextTwitterCta}
+            {submitting ? STR.submitting : copy.cta}
           </button>
         </div>
-        {started && hasActiveTwitterTask ? (
-          <p className="form-success">{STR.nextTwitterStarted}</p>
-        ) : hasActiveTwitterTask ? (
-          <p className="info-callout">{STR.twitterBusyInfo}</p>
+        {started && hasActiveSocialTask ? (
+          <p className="form-success">{copy.started}</p>
+        ) : hasActiveSocialTask ? (
+          <p className="info-callout">{STR.socialBusyInfo}</p>
         ) : null}
         {error ? <p className="form-error">{error}</p> : null}
       </div>
@@ -180,7 +219,69 @@ function CreateTwitterBlock({ detail, onSpawned }: BlockProps) {
   );
 }
 
-// Twitter run → create an article (news/scheme voice, optional poster) from the
+// Article run without a poster → attach the article poster to THIS run (no new
+// generation): article-only runs, DLO runs, and poster-phase-failure retries.
+// After the 202 the row is running again, so onPosterStarted must refresh the
+// detail poll; the whole NextActions panel then unmounts (non-terminal) and the
+// page shows the poster skeleton. No addTask/lane gating — nothing new to track.
+function CreatePosterBlock({
+  detail,
+  onPosterStarted,
+}: {
+  detail: GenerationDetail;
+  onPosterStarted?: (() => void) | undefined;
+}) {
+  const [reference, setReference] = useState<ReferenceSelection | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async () => {
+    setSubmitting(true);
+    setError(null);
+    try {
+      await requestArticlePoster(
+        detail.id,
+        reference?.kind === 'image' ? reference.id : undefined,
+      );
+      onPosterStarted?.();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : STR.genericError);
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <details className="fold">
+      <summary>{STR.nextPosterTitle}</summary>
+      <div className="fold-body">
+        <p className="hint">
+          {detail.status === 'failed'
+            ? STR.nextPosterRetryHint
+            : STR.nextPosterHint}
+        </p>
+        <ReferencePicker
+          variant="inline"
+          category="article"
+          value={reference}
+          onChange={setReference}
+        />
+        <div className="btn-row" style={{ marginTop: 16 }}>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={submit}
+            disabled={submitting}
+          >
+            {submitting ? STR.submitting : STR.nextPosterCta}
+          </button>
+        </div>
+        {error ? <p className="form-error">{error}</p> : null}
+      </div>
+    </details>
+  );
+}
+
+// Social run → create an article (news/scheme voice, optional poster) from the
 // same note.
 function CreateArticleBlock({ detail, onSpawned }: BlockProps) {
   const router = useRouter();
@@ -272,10 +373,11 @@ function CreateArticleBlock({ detail, onSpawned }: BlockProps) {
 // default for the re-run.
 function EditNoteBlock({ detail, onSpawned }: BlockProps) {
   const router = useRouter();
-  const { addTask, openPanel, hasActiveTwitterTask, hasActiveArticleTask } =
+  const { addTask, openPanel, hasActiveSocialTask, hasActiveArticleTask } =
     useTasks();
-  const isTwitter = detail.category === 'twitter';
-  const laneBusy = isTwitter ? hasActiveTwitterTask : hasActiveArticleTask;
+  const socialCopy = socialCopyOf(detail.category);
+  const isSocial = socialCopy !== null;
+  const laneBusy = isSocial ? hasActiveSocialTask : hasActiveArticleTask;
   const [note, setNote] = useState(detail.note);
   const [heading, setHeading] = useState(detail.heading ?? '');
   const [submitting, setSubmitting] = useState(false);
@@ -304,7 +406,7 @@ function EditNoteBlock({ detail, onSpawned }: BlockProps) {
       });
       addTask(id);
       onSpawned?.();
-      if (isTwitter) {
+      if (isSocial) {
         openPanel();
         setStarted(true);
         setSubmitting(false);
@@ -345,11 +447,11 @@ function EditNoteBlock({ detail, onSpawned }: BlockProps) {
             {submitting ? STR.submitting : STR.editNoteCta}
           </button>
         </div>
-        {started && isTwitter && hasActiveTwitterTask ? (
-          <p className="form-success">{STR.nextTwitterStarted}</p>
+        {started && socialCopy && hasActiveSocialTask ? (
+          <p className="form-success">{socialCopy.started}</p>
         ) : laneBusy ? (
           <p className="info-callout">
-            {isTwitter ? STR.twitterBusyInfo : STR.articleBusyInfo}
+            {isSocial ? STR.socialBusyInfo : STR.articleBusyInfo}
           </p>
         ) : null}
         {error ? <p className="form-error">{error}</p> : null}
@@ -358,20 +460,44 @@ function EditNoteBlock({ detail, onSpawned }: BlockProps) {
   );
 }
 
-export function NextActions({ detail, onSpawned }: BlockProps) {
+export function NextActions({
+  detail,
+  onSpawned,
+  onPosterStarted,
+}: BlockProps & { onPosterStarted?: (() => void) | undefined }) {
   const terminal = detail.status === 'completed' || detail.status === 'failed';
   if (!terminal) return null;
+
+  const isSocial = isSocialCategory(detail.category);
+  // Offer every format except this run's own: an article run gets both social
+  // folds, a social run gets the article fold plus the other platform's.
+  const socialFolds = SOCIAL_PLATFORMS.filter(
+    (platform) => platform !== detail.category,
+  );
 
   return (
     <section className="card next-actions">
       <h2>{STR.nextActionsTitle}</h2>
       <p className="hint">{STR.nextActionsHint}</p>
+      {/* Outside the completed-only gate: on a failed row with an article the
+          failure was the poster phase, so this doubles as the cheap retry. */}
+      {!isSocial && detail.article && !detail.posterUrl ? (
+        <CreatePosterBlock detail={detail} onPosterStarted={onPosterStarted} />
+      ) : null}
       {detail.status === 'completed' ? (
-        detail.category === 'twitter' ? (
-          <CreateArticleBlock detail={detail} onSpawned={onSpawned} />
-        ) : (
-          <CreateTwitterBlock detail={detail} onSpawned={onSpawned} />
-        )
+        <>
+          {isSocial ? (
+            <CreateArticleBlock detail={detail} onSpawned={onSpawned} />
+          ) : null}
+          {socialFolds.map((platform) => (
+            <CreateSocialBlock
+              key={platform}
+              detail={detail}
+              platform={platform}
+              onSpawned={onSpawned}
+            />
+          ))}
+        </>
       ) : null}
       <EditNoteBlock detail={detail} onSpawned={onSpawned} />
     </section>

@@ -58,13 +58,35 @@ export {
 export {
   POSTERS_BUCKET,
   DLO_UPLOADS_BUCKET,
+  VIDEOS_BUCKET,
   uploadPng,
   uploadFile,
   publicUrl,
+  publicUrlIn,
   downloadPng,
   downloadFile,
   removeObjects,
 } from './storage.js';
+export {
+  VIDEO_PROJECTS_TABLE,
+  insertVideoProject,
+  updateVideoProject,
+  getVideoProject,
+  listVideoProjects,
+  findActiveVideoProject,
+  addVideoProjectCost,
+  type VideoProjectStatus,
+  type VideoProjectStep,
+  type VideoDurationBucket,
+  type VideoOrientation,
+  type VideoTier,
+  type VideoSceneStatus,
+  type VideoSceneEntry,
+  type VideoProjectRow,
+  type VideoProjectPatch,
+  type VideoProjectCostBreakdown,
+  type VideoProjectCostIncrement,
+} from './video-projects.js';
 export {
   DLO_INTAKES_TABLE,
   insertDloIntake,
@@ -76,6 +98,7 @@ export {
   type DloIntakeFileStatus,
   type DloIntakeCategory,
   type DloIntakeFileEntry,
+  type DloIntakePageEntry,
   type DloIntakeRow,
   type DloIntakePatch,
 } from './dlo-intakes.js';
@@ -101,6 +124,7 @@ export {
   updateReferenceTypeRow,
   deleteReferenceTypeRow,
   type CopyStyle,
+  type TemplateBrand,
   type ReferenceTypeRow,
   type ReferenceTypePatch,
 } from './reference-types.js';

@@ -7,6 +7,7 @@ import type {
   DloIntakeStep,
   GenerationStep,
   GenerationStatus,
+  ProofreadIssueType,
   ReferenceCategory,
   TermType,
 } from '@dgipr/schemas';
@@ -17,6 +18,7 @@ export const STR = {
   navNew: 'नवीन मजकूर',
   navHistory: 'मागील काम',
   navTranslate: 'भाषांतर',
+  navProofread: 'मुद्रितशोधन',
   navGlossary: 'शब्दकोश',
   navReferences: 'मास्टर टेम्पलेट',
   navDlo: 'DLO लेख',
@@ -43,8 +45,10 @@ export const STR = {
   categoryNewsDesc: 'नेमकी, वस्तुनिष्ठ बातमी (dateline शैली)',
   categoryTwitter: 'ट्विटर पोस्ट',
   categoryTwitterDesc: 'X (ट्विटर) साठी मराठी पोस्टर + कॅप्शन',
+  categoryFacebook: 'फेसबुक पोस्ट',
+  categoryFacebookDesc: 'फेसबुकसाठी मराठी पोस्टर + कॅप्शन',
 
-  // Design-mode selector (shown only for the ट्विटर पोस्ट flow)
+  // Design-mode selector (shown only for the समाजमाध्यम — ट्विटर/फेसबुक — flows)
   designModeLabel: 'पोस्टरची रचना-शैली?',
   designOnbrand: 'ब्रँडनुसार',
   designOnbrandDesc: 'DGIPR ठरलेल्या टेम्पलेटनुसार पोस्टर',
@@ -53,9 +57,19 @@ export const STR = {
   designFresh: 'नवीन',
   designFreshDesc: 'विषयानुसार पूर्णपणे नवे चित्र',
 
-  // Shown on the ट्विटर पोस्ट card while one such task is already running
-  twitterBusyInfo:
-    'एक ट्विटर पोस्ट सध्या तयार होत आहे. ती पूर्ण झाल्यावर नवीन सुरू करता येईल.',
+  // विभाग (template brand) selector — shown only for the social flows. Picks which
+  // department's template family the poster follows. CMO just follows its template,
+  // so choosing it hides the रचना-शैली options above.
+  brandLabel: 'विभाग?',
+  brandDgipr: 'DGIPR',
+  brandDgiprDesc: 'माहिती व जनसंपर्क महासंचालनालयाचे टेम्पलेट',
+  brandCmo: 'मुख्यमंत्री कार्यालय (CMO)',
+  brandCmoDesc: 'मंत्रिमंडळ निर्णय शैलीतील ठरलेले टेम्पलेट',
+
+  // Shown on the ट्विटर/फेसबुक cards while one such task is already running. Both
+  // lanes share one n8n workflow, so either post blocks the other.
+  socialBusyInfo:
+    'एक समाजमाध्यम पोस्ट सध्या तयार होत आहे. ती पूर्ण झाल्यावर नवीन सुरू करता येईल.',
 
   // Shown on the योजना/बातमी cards while a news/scheme run is already in flight
   articleBusyInfo:
@@ -112,40 +126,209 @@ export const STR = {
     'काही फाईल्समधून मजकूर मिळाला नाही — त्यांशिवाय पुढे जाता येईल:',
   dloReviewTooShort: 'कृपया किमान २० अक्षरांचा मजकूर ठेवा.',
   dloReviewTooLong: 'मजकूर ६०,००० अक्षरांपेक्षा जास्त आहे — कृपया कमी करा.',
+  // Review step: one card per source (notes / each recording / each document),
+  // PDFs with page-wise selection.
+  dloReviewNotesTitle: 'बैठकीतील टिपणी',
+  dloReviewInclude: 'लेखात समाविष्ट करा',
+  dloReviewExcluded: 'वगळले आहे',
+  dloReviewKindAudio: 'ध्वनिमुद्रण',
+  dloReviewKindPdf: 'PDF कागदपत्र',
+  dloReviewKindDocx: 'DOCX कागदपत्र',
+  dloReviewPagesSuffix: 'पृष्ठे',
+  dloReviewPagesSelected: 'पृष्ठे निवडली',
+  dloReviewNoPages: 'या PDF मधून एकही पान निवडलेले नाही.',
+  dloReviewSourceFailed: 'या फाईलमधून मजकूर मिळाला नाही.',
+  // A scanned PDF waiting for its page selection. Its text does not exist yet — producing
+  // it is the OCR being authorised — so the officer chooses by page number alone.
+  dloReviewNeedsSelection:
+    'ही स्कॅन केलेली PDF आहे, त्यामुळे प्रत्येक पृष्ठ OCR ने वाचावे लागेल. फक्त निवडलेलीच पृष्ठे वाचली जातील, म्हणून नको असलेली पृष्ठे आताच वगळा.',
+  dloReviewNeedsSelectionChip: 'वाचायचे बाकी',
+  dloReviewReadSelected: 'निवडलेली पृष्ठे वाचा',
+  dloReviewReadSelectedHint:
+    'निवडलेली पृष्ठे OCR ने वाचली जातील. यास काही मिनिटे लागू शकतात.',
+  dloReviewReading: 'निवडलेली पृष्ठे वाचत आहोत…',
+  dloReviewSelectionPending:
+    'लेख तयार करण्यापूर्वी वरील स्कॅन केलेल्या PDF ची पृष्ठे वाचून घ्या.',
+  dloReviewNoPagesPicked: 'किमान एक पृष्ठ निवडा.',
+  dloReviewTotal: 'लेखासाठी वापरला जाणारा मजकूर:',
+  dloReviewPreviewShow: 'पूर्ण मजकूर पाहा',
+  dloReviewPreviewHide: 'पूर्ण मजकूर लपवा',
+  dloReviewEmpty: 'कोणताही मजकूर निवडलेला नाही — किमान एक स्रोत निवडा.',
+  dloReviewRereading: 'OCR ने पुन्हा वाचत आहे…',
   dloGenerate: 'लेख तयार करा →',
   dloOutputTitle: 'तयार झालेला लेख',
   dloViewDetail: 'सविस्तर पाहा (अभिप्राय, भाषांतर, पोस्टर)',
   dloStartOver: 'पुन्हा सुरुवात करा',
   dloNewArticle: 'नवीन DLO लेख तयार करा',
 
-  // Standalone Marathi-to-English translation
+  // Standalone Marathi-to-English/Hindi translation
   translatePageTitle: 'भाषांतर (Translation)',
   translateInputLabel: 'मराठी मजकूर येथे लिहा किंवा चिकटवा',
   translateInputHint:
-    'या मजकुराचे थेट इंग्रजी भाषांतर केले जाईल. हा मजकूर जतन केला जाणार नाही.',
+    'या मजकुराचे थेट भाषांतर केले जाईल. हा मजकूर जतन केला जाणार नाही.',
   translateInputPlaceholder: 'भाषांतरासाठी मराठी मजकूर येथे लिहा…',
   translateAction: 'भाषांतर करा',
   translateMayTakeTime: 'मोठ्या मजकुराला एक-दोन मिनिटे लागू शकतात.',
   translateOverLimit: 'मजकूर १०,००० अक्षरांपेक्षा जास्त आहे.',
   translateOutputTitle: 'इंग्रजी भाषांतर',
+  translateOutputTitleHindi: 'हिंदी भाषांतर',
   translateLockedTerms: 'शब्दकोश संज्ञा वापरल्या',
 
+  // Target-language choice (standalone /translate page)
+  translateTargetLabel: 'कोणत्या भाषेत भाषांतर हवे?',
+  translateTargetEnglish: 'इंग्रजी',
+  translateTargetHindi: 'हिंदी',
+
   // Pre-translation name check (shown before every translation; the confirmed
-  // spellings are locked into the English output and saved to the नाव-शब्दकोश)
+  // spellings are locked into the English output and saved to the नाव-शब्दकोश.
+  // For Hindi the same list freezes the नावे as-is — see namesHindiHint)
   namesChecking: 'मजकुरातील नावे शोधत आहोत…',
   namesReviewTitle: 'नावांची इंग्रजी स्पेलिंग तपासा',
+  // Hindi run: the editable column is the Hindi spelling, not English.
+  namesReviewTitleHindi: 'नावांचे हिंदी स्पेलिंग तपासा',
   namesReviewHint:
     'खालील नावे इंग्रजी भाषांतरात अगदी अशीच वापरली जातील. चुकीची स्पेलिंग दुरुस्त करा; एखादे नाव राहिले असेल तर ते खाली जोडा.',
+  namesReviewHintHindi:
+    'खालील नावे हिंदी भाषांतरात अगदी अशीच वापरली जातील. गरज असल्यास हिंदी स्पेलिंग दुरुस्त करा (उदा. कोल्हापूर → कोल्हापुर); एखादे नाव राहिले असेल तर ते खाली जोडा.',
+  namesHindiHint:
+    'हिंदीत स्पेलिंग वेगळे हवे असल्यास (उदा. कोल्हापूर → कोल्हापुर) खालील हिंदी रकान्यात दुरुस्त करा; अन्यथा मराठीप्रमाणेच जशीच्या तशी राहील. स्पेलिंग बदलले तरी नावाचा अर्थ बदलणार नाही.',
+  // The per-row "keep this name verbatim in Hindi" toggle. On for real proper nouns; the
+  // officer unticks a common noun (विधानसभा, सहकारी संस्था) so it is translated normally
+  // instead of frozen, which is what unblocks a document the extractor over-locked.
+  namesLockHindi: 'हिंदीत जसेच्या तसे ठेवा',
+  namesLockHindiHint:
+    'व्यक्ती/ठिकाण/संस्था/योजनेची नावे हिंदीत जशीच्या तशी ठेवा. विधानसभा, सहकारी संस्था यांसारखे सर्वसामान्य शब्द असतील तर खूण काढा — ते हिंदीत भाषांतरित होतील.',
+  // Warning shown above a Hindi translation whose output could not carry some locked
+  // names — the translation is delivered, but these need a human's eye.
+  translateUnpreservedTitle: 'ही नावे तपासा',
+  translateUnpreservedHint:
+    'खालील नावे हिंदी भाषांतरात जशीच्या तशी दिसत नाहीत — ती बदललेली असू शकतात. कृपया भाषांतरात तपासा:',
   namesReviewEmpty:
     'या मजकुरात एकही नाव सापडले नाही. आवश्यक असल्यास खाली नाव जोडा.',
   namesAddName: '+ आणखी नाव जोडा',
   namesAddMarathiPlaceholder: 'उदा. संवाद वारी',
   namesAddEnglishPlaceholder: 'उदा. Samvad Wari',
+  namesAddHindiPlaceholder: 'उदा. संवाद वारी',
   namesConfirmTranslate: 'भाषांतर सुरू करा',
   namesCancel: 'रद्द करा',
   namesPrepareError: 'नावे शोधता आली नाहीत. कृपया पुन्हा प्रयत्न करा.',
   namesStartCheck: 'नावे तपासा',
-  retranslateFold: 'नावे सुधारून पुन्हा भाषांतर करा',
+  namesShowVerified: 'आधीच तपासलेली नावे दाखवा',
+  namesHideVerified: 'तपासलेली नावे लपवा',
+  retranslateFold: 'नावे सुधारून पुन्हा इंग्रजी भाषांतर करा',
+  retranslateFoldHindi: 'नावे सुधारून पुन्हा हिंदी भाषांतर करा',
+
+  // PDF translation (/translate → PDF mode). The uploaded file and its मजकूर are held
+  // only while the काम सुरू आहे — nothing is saved.
+  translateModeText: 'मजकूर',
+  translateModePdf: 'PDF फाईल',
+  translateDocUploadTitle: 'PDF फाईल अपलोड करा',
+  translateDocUploadHint:
+    'लेख असलेली PDF निवडा (कमाल २५ MB). स्कॅन केलेली PDF देखील चालते. फाईल जतन केली जाणार नाही.',
+  translateDocUpload: 'PDF निवडा',
+  translateDocPdfOnly: 'कृपया फक्त .pdf फाईल निवडा.',
+  translateDocTooLarge: 'फाईल २५ MB पेक्षा मोठी आहे.',
+  translateDocExtracting: 'PDF मधील मजकूर वाचत आहोत…',
+  translateDocExtractingHint:
+    'PDF मध्येच मजकूर असेल तर हे काही सेकंदांत होते; स्कॅन केलेली फाईल OCR ने वाचावी लागते आणि त्यास काही मिनिटे लागतात. हे पान उघडे ठेवा.',
+  // OCR runs one ≤10-page Sarvam job at a time, so long scans need a page counter rather
+  // than a spinner that looks stuck.
+  translateDocExtractProgress: 'OCR: पृष्ठ',
+  translateDocGone: 'ही फाईल आता उपलब्ध नाही. कृपया PDF पुन्हा अपलोड करा.',
+  // The pre-OCR selection step. Only reached for a SCANNED PDF: a document whose text can
+  // be read directly costs nothing, so its pages are read at once and picked in the normal
+  // review list. Here the text does not exist yet — showing it would mean running the very
+  // OCR the user is being asked to approve — so the choice is by page number alone.
+  translateDocSelectTitle: 'कोणती पृष्ठे वाचायची?',
+  translateDocSelectHint:
+    'ही स्कॅन केलेली PDF आहे, त्यामुळे प्रत्येक पृष्ठ OCR ने वाचावे लागेल. फक्त निवडलेलीच पृष्ठे वाचली जातील, म्हणून नको असलेली पृष्ठे आताच वगळा.',
+  translateDocSelectTotal: 'एकूण पृष्ठे',
+  translateDocSelectCount: 'पृष्ठे निवडली',
+  translateDocReadSelected: 'निवडलेली पृष्ठे वाचा',
+  translateDocChangeSelection: 'पृष्ठ निवड बदला',
+  translateDocChangeSelectionHint:
+    'वेगळी पृष्ठे निवडल्यास ती पुन्हा वाचावी लागतील, आणि सध्याचा मजकूर व भाषांतर पुन्हा तयार होईल.',
+  translateDocPagesTitle: 'कोणती पृष्ठे भाषांतरित करायची?',
+  translateDocPagesHint:
+    'वाचलेला मजकूर तपासा. चूक असल्यास पृष्ठ उघडून दुरुस्त करा — भाषांतर याच मजकुरावर होईल.',
+  // Which backend read the file. The text layer is exact; OCR guesses from pixels and can
+  // misread names and आकडे, so the review matters more there.
+  translateDocSourceTextLayer: 'मजकूर थेट PDF मधून घेतला',
+  translateDocSourceOcr: 'मजकूर OCR ने वाचला',
+  translateDocSourceTextLayerHint:
+    'नावे आणि आकडे जसेच्या तसे आले आहेत. तरीही एकदा नजर टाका.',
+  translateDocSourceOcrHint:
+    'OCR मध्ये नावे आणि आकडे चुकू शकतात — भाषांतरापूर्वी तपासा.',
+  translateDocReextract: 'मजकूर चुकीचा दिसतोय? OCR ने पुन्हा वाचा',
+  translateDocReextractHint:
+    'काही PDF मध्ये अक्षरे चुकीच्या क्रमाने साठवलेली असतात. OCR पानाचे चित्र वाचते, त्यामुळे असा मजकूर बरोबर येतो. यास काही मिनिटे लागतील आणि सध्याचा मजकूर व भाषांतर पुन्हा तयार होईल.',
+  translateDocReextractYes: 'होय, OCR ने वाचा',
+  translateDocReextractCancel: 'रद्द करा',
+  translateDocPage: 'पृष्ठ',
+  translateDocChars: 'अक्षरे',
+  translateDocSelectAll: 'सर्व निवडा',
+  translateDocClearAll: 'निवड काढा',
+  translateDocEdit: 'मजकूर पाहा / दुरुस्त करा',
+  translateDocEditClose: 'बंद करा',
+  translateDocEdited: 'दुरुस्त केले',
+  translateDocLangMr: 'मराठी',
+  translateDocLangEn: 'English',
+  translateDocSelectedSummary: 'पृष्ठे निवडली',
+  translateDocNoSelection: 'किमान एक पृष्ठ निवडा.',
+  translateDocEstimate: 'अंदाजे वेळ',
+  translateDocMinutes: 'मिनिटे',
+  translateDocInstructionLabel: 'AI सूचना (ऐच्छिक)',
+  translateDocInstructionHint:
+    'उदा. “फक्त पृष्ठ १ ते ९ भाषांतरित करा”, “शेवटची दोन पाने वगळा”. सूचनेवरून फक्त पृष्ठांची निवड ठरते — मजकूर बदलला जात नाही.',
+  translateDocInstructionPlaceholder: 'फक्त पृष्ठ १ ते ९ भाषांतरित करा',
+  translateDocInstructionApply: 'सूचना लागू करा',
+  translateDocInstructionWorking: 'सूचना समजून घेत आहोत…',
+  translateDocInstructionApplied: 'AI ने निवडलेली पृष्ठे:',
+  translateDocInstructionUnclear:
+    'सूचना समजली नाही. कृपया पृष्ठे स्वतः निवडा किंवा सूचना वेगळ्या शब्दांत लिहा.',
+  translateDocTargetsLabel: 'कोणत्या भाषांमध्ये भाषांतर हवे?',
+  translateDocTargetsHint: 'दोन्ही भाषा एकाच वेळी निवडता येतात.',
+  translateDocNoTargets: 'किमान एक भाषा निवडा.',
+  translateDocTranslating: 'भाषांतर सुरू आहे',
+  translateDocTranslatingHint:
+    'हे पान उघडे ठेवा. प्रत्येक पृष्ठाचे भाषांतर एकामागून एक होते.',
+  translateDocResultsTitle: 'भाषांतर तयार आहे',
+  translateDocPassthrough:
+    'हे पृष्ठ मुळातच इंग्रजीत आहे — जसेच्या तसे ठेवले आहे.',
+  translateDocDownload: 'संपूर्ण भाषांतर उतरवा (.txt)',
+  translateDocCopyAll: 'संपूर्ण मजकूर कॉपी करा',
+  translateDocRetranslate: 'पृष्ठे बदलून पुन्हा भाषांतर करा',
+  translateDocNewFile: 'दुसरी PDF अपलोड करा',
+  translateDocEnglishPagesNote:
+    'या फाईलमधील काही पृष्ठे इंग्रजीत आहेत. इंग्रजी भाषांतरात ती जशीच्या तशी राहतील; हिंदीसाठी त्यांचे भाषांतर केले जाईल.',
+
+  // Proof read (ad-hoc grammar/name/style check of pasted text; nothing stored)
+  proofreadPageTitle: 'मुद्रितशोधन (Proof Read)',
+  proofreadInputLabel: 'मराठी किंवा इंग्रजी मजकूर येथे चिकटवा',
+  proofreadInputHint:
+    'व्याकरण, शुद्धलेखन, विरामचिन्हे, नावांची पडताळणी आणि महासंवाद-शैली तपासली जाईल. फक्त खात्रीशीर चुका दाखवल्या जातात. हा मजकूर जतन केला जाणार नाही.',
+  proofreadInputPlaceholder: 'तपासणीसाठी मजकूर येथे चिकटवा…',
+  proofreadAction: 'तपासणी करा',
+  proofreadChecking: 'तपासणी सुरू आहे… यास एक-दोन मिनिटे लागू शकतात.',
+  proofreadOverLimit: 'मजकूर १०,००० अक्षरांपेक्षा जास्त आहे.',
+  proofreadError: 'तपासणी अयशस्वी झाली. कृपया पुन्हा प्रयत्न करा.',
+  proofreadIssuesTitle: 'आढळलेल्या चुका',
+  proofreadNoIssues: 'कोणतीही चूक आढळली नाही — मजकूर स्वच्छ आहे ✓',
+  proofreadSuggestionArrow: 'सुचवलेली दुरुस्ती:',
+  proofreadStyleAdvisoryTitle: 'शैली-सूचना (ऐच्छिक)',
+  proofreadStyleAdvisoryHint:
+    'या फक्त सूचना आहेत; दुरुस्त मजकुरात त्या लागू केलेल्या नाहीत.',
+  proofreadUnverifiedTitle: 'अपडताळलेली नावे',
+  proofreadUnverifiedHint:
+    'ही नावे नाव-शब्दकोशात नाहीत, म्हणून ती बदललेली नाहीत — कृपया स्वतः खात्री करा. शब्दकोश पानावर नाव जोडल्यास पुढील तपासणीत ते आपोआप पडताळले जाईल.',
+  proofreadCorrectedTitle: 'दुरुस्त मजकूर',
+  proofreadCorrectedUnchanged:
+    'कोणतीही दुरुस्ती आवश्यक नव्हती — मूळ मजकूर जसाच्या तसा आहे.',
+  proofreadCorrectedUnavailable:
+    'सुरक्षा-तपासणीमुळे दुरुस्त मजकूर देता आला नाही; वरील चुका पाहून स्वतः दुरुस्ती करा.',
+  proofreadEnglishStyleNote:
+    'महासंवाद-शैली तपासणी फक्त मराठी मजकुरासाठी उपलब्ध आहे; या इंग्रजी मजकुराची व्याकरण व नाव-पडताळणी केली आहे.',
+  proofreadStyleRefNote: 'शैली-संदर्भ:',
 
   // Progress
   progressTitle: 'तयार होत आहे…',
@@ -175,9 +358,13 @@ export const STR = {
   downloadTxt: '.txt डाउनलोड',
   downloadMd: '.md डाउनलोड',
   translateToEnglish: 'इंग्रजीत भाषांतर करा',
+  translateToHindi: 'हिंदीत भाषांतर करा',
   showMarathi: 'मराठी',
   showEnglish: 'English',
+  showHindi: 'हिंदी',
   translating: 'भाषांतर सुरू आहे…',
+  translatingEnglish: 'इंग्रजी भाषांतर सुरू आहे…',
+  translatingHindi: 'हिंदी भाषांतर सुरू आहे…',
   revisingArticle: 'लेख सुधारला जात आहे…',
   posterTitle: 'तयार झालेले पोस्टर',
   // Poster-skeleton label while the article is shown but the poster still renders
@@ -232,6 +419,29 @@ export const STR = {
     'मांडणी अधिक नीटनेटकी करा',
   ],
 
+  // Caption of a social post (twitter/facebook): hand edit + AI feedback loop
+  captionLabel: 'कॅप्शन',
+  captionEdit: 'कॅप्शन बदला',
+  captionEditHint:
+    'कॅप्शन इथेच बदलता येते — बदल केल्यावर "कॅप्शन जतन करा" वर क्लिक करा.',
+  captionSave: 'कॅप्शन जतन करा',
+  captionSaving: 'जतन करत आहोत…',
+  captionSaved: 'कॅप्शन जतन झाली ✓',
+  captionRevert: 'बदल रद्द करा',
+  captionDirtyBlocksAi:
+    'कॅप्शन बदलणे सुरू आहे — आधी ते जतन करा किंवा रद्द करा.',
+  captionCounterLabel: 'अक्षरे',
+  captionFeedbackTitle: 'कॅप्शनमध्ये बदल हवा आहे?',
+  captionFeedbackHint:
+    'काय बदलायचे ते आपल्या शब्दांत लिहा — उदा. "२८० अक्षरांपेक्षा लहान करा", "सर्व आकडे मराठी अंकांत लिहा". टिपणीत नसलेली माहिती जोडली जाणार नाही.',
+  revisingCaption: 'कॅप्शन सुधारली जात आहे…',
+  chipsCaption: [
+    '२८० अक्षरांपेक्षा लहान करा',
+    'सर्व आकडे मराठी अंकांत (१२३) लिहा',
+    'भाषा आणखी सोपी करा',
+    'शेवटी योग्य हॅशटॅग जोडा',
+  ],
+
   // Poster version history (every render is kept; the strip lets users compare/download)
   posterVersionsTitle: 'आधीच्या आवृत्त्या',
   posterVersionLabel: 'आवृत्ती',
@@ -258,16 +468,29 @@ export const STR = {
     'निवडलेल्या मजकुरावरून X (ट्विटर) साठी मराठी पोस्टर + कॅप्शन तयार होईल.',
   nextSourceLabel: 'कोणता मजकूर वापरायचा?',
   sourceArticle: 'तयार झालेला लेख',
-  sourceArticleDesc: 'या कामात तयार झालेला लेख पोस्टसाठी आधार म्हणून वापरला जाईल.',
+  sourceArticleDesc:
+    'या कामात तयार झालेला लेख पोस्टसाठी आधार म्हणून वापरला जाईल.',
   sourceNote: 'मूळ टिपणी',
   sourceNoteDesc: 'तुम्ही दिलेली मूळ टिपणी वापरली जाईल.',
   nextTwitterCta: 'ट्विटर पोस्ट तयार करा',
   nextTwitterStarted:
     'ट्विटर पोस्ट तयार होत आहे — प्रगती वरील "सुरू असलेली कामे" मध्ये पाहा.',
+  nextFacebookTitle: 'याच टिपणीवरून फेसबुक पोस्ट तयार करा',
+  nextFacebookHint:
+    'निवडलेल्या मजकुरावरून फेसबुकसाठी मराठी पोस्टर + कॅप्शन तयार होईल.',
+  nextFacebookCta: 'फेसबुक पोस्ट तयार करा',
+  nextFacebookStarted:
+    'फेसबुक पोस्ट तयार होत आहे — प्रगती वरील "सुरू असलेली कामे" मध्ये पाहा.',
   nextArticleTitle: 'याच टिपणीवरून लेख तयार करा',
   nextArticleHint:
     'हीच टिपणी वापरून महासंवाद शैलीतील लेख (हवे असल्यास पोस्टरसह) तयार होईल.',
   nextArticleCta: 'लेख तयार करा',
+  nextPosterTitle: 'या लेखासाठी पोस्टर तयार करा',
+  nextPosterHint:
+    'तयार झालेल्या लेखावरून महासंवाद शैलीतील पोस्टर याच कामात तयार होईल — नवीन काम सुरू होणार नाही.',
+  nextPosterRetryHint:
+    'मागील वेळी पोस्टर तयार होऊ शकले नाही. खालील बटणावर क्लिक करून पुन्हा प्रयत्न करा.',
+  nextPosterCta: 'पोस्टर तयार करा',
   editNoteTitle: 'टिपणी बदलून पुन्हा तयार करा',
   editNoteHint:
     'टिपणीत हवे ते बदल करा — त्याच सेटिंग्जसह नवीन काम सुरू होईल; हे काम जसेच्या तसे राहील.',
@@ -282,6 +505,18 @@ export const STR = {
   taskRegenerate: 'पुन्हा तयार करा',
   taskViewFull: 'पूर्ण पाहा',
 
+  // Direct publish to the official social accounts (detail page, social runs)
+  publishToX: 'X वर पोस्ट करा',
+  publishToFacebook: 'फेसबुकवर पोस्ट करा',
+  publishAgain: 'पुन्हा पोस्ट करा',
+  publishConfirmHint:
+    'ही पोस्ट अधिकृत खात्यावर लगेच प्रकाशित होईल आणि ती इथून मागे घेता येणार नाही. पुढे जायचे?',
+  publishConfirmYes: 'होय, प्रकाशित करा',
+  publishCancel: 'रद्द करा',
+  publishing: 'पोस्ट होत आहे…',
+  publishSuccess: 'पोस्ट प्रकाशित झाली!',
+  publishedViewPost: 'प्रकाशित पोस्ट पाहा',
+
   // Glossary (नाव-शब्दकोश) admin/review page
   glossaryTitle: 'नाव-शब्दकोश (मराठी → इंग्रजी)',
   glossaryIntro:
@@ -289,6 +524,7 @@ export const STR = {
   glossaryAddTitle: 'नवीन नाव जोडा',
   glossaryMarathi: 'मराठी',
   glossaryEnglish: 'इंग्रजी',
+  glossaryHindi: 'हिंदी',
   glossaryType: 'प्रकार',
   glossaryNotes: 'टीप',
   glossaryAdd: 'जोडा',
@@ -308,6 +544,7 @@ export const STR = {
   glossaryEmpty: 'अजून एकही नाव नाही.',
   glossaryMarathiPlaceholder: 'उदा. जिल्हाधिकारी',
   glossaryEnglishPlaceholder: 'उदा. District Collector',
+  glossaryHindiPlaceholder: 'उदा. कोल्हापुर (ऐच्छिक)',
   glossaryCount: 'एकूण नावे',
 
   // History
@@ -341,6 +578,13 @@ export const STR = {
   refFileTypeError: 'कृपया PNG, JPEG किंवा WebP चित्र निवडा.',
   refUploadedOn: 'अपलोड',
   refCustomChip: 'नवीन प्रकार',
+  // Template brand family. A type tagged CMO renders the मंत्रिमंडळ निर्णय lockup
+  // (code-stamped leader header + DGIPR footer) and is kept out of the DGIPR
+  // classifier pool — it appears only when a run picks विभाग = CMO.
+  refBrandLabel: 'विभाग',
+  refBrandDgipr: 'DGIPR',
+  refBrandCmo: 'CMO (मंत्रिमंडळ निर्णय)',
+  refBrandChip: 'CMO',
 
   // Template layout, read off the master's pixels. This — not the type
   // description — decides whether the generated poster may carry a photo at all,
@@ -400,7 +644,128 @@ export const STR = {
   // Errors
   genericError: 'काहीतरी चुकले. कृपया पुन्हा प्रयत्न करा.',
   busyError: 'एक काम आधीच सुरू आहे. ते पूर्ण होईपर्यंत थांबा.',
+
+  // Explainer videos (/video)
+  navVideo: 'व्हिडिओ',
+  videoTitle: 'माहिती समजावणारा व्हिडिओ तयार करा',
+  videoIntro:
+    'टिपणीवरून दृश्यनिहाय संहिता तयार होईल. आधी संहिता, मग प्रत्येक दृश्याचे नमुना चित्र तपासा — व्हिडिओ तयार करण्याचा खर्च फक्त तुमच्या मंजुरीनंतरच होतो.',
+  videoNoteLabel: 'टिपणी येथे लिहा किंवा चिकटवा',
+  videoHeadingLabel: 'शीर्षक / मुख्य मुद्दा (ऐच्छिक)',
+  videoDurationLabel: 'लांबीची पसंती',
+  videoDurationShort: 'लहान (~१५–३० सेकंद)',
+  videoDurationShortHint: 'साधारण २–४ दृश्ये — AI टिपणीनुसार ठरवते',
+  videoDurationLong: 'मध्यम (~३०–६० सेकंद)',
+  videoDurationLongHint: 'साधारण ४–८ दृश्ये — AI टिपणीनुसार ठरवते',
+  videoOrientationLabel: 'आकार',
+  videoOrientationLandscape: 'आडवा (16:9)',
+  videoOrientationLandscapeHint: 'YouTube, वेबसाईट',
+  videoOrientationVertical: 'उभा (9:16)',
+  videoOrientationVerticalHint: 'रील्स, स्टेटस, शॉर्ट्स',
+  videoTierLabel: 'दर्जा',
+  videoTierFast: 'संतुलित',
+  videoTierFastHint: 'शिफारस केलेला — दर्जा व खर्चाचा समतोल',
+  videoTierLite: 'हलका',
+  videoTierLiteHint: 'सर्वात स्वस्त — चाचणीसाठी',
+  videoTierStandard: 'सर्वोत्तम',
+  videoTierStandardHint: 'सर्वोच्च दर्जा — सुमारे अडीचपट खर्च',
+  videoCreate: 'संहिता तयार करा',
+  videoCreateHint: 'या टप्प्यावर व्हिडिओचा खर्च होत नाही.',
+  videoEstimateApprox:
+    'खर्च अंदाजे आहे — नक्की खर्च स्टोरीबोर्ड मंजुरीच्या वेळी दिसेल.',
+  videoActiveBlocked:
+    'दुसरा व्हिडिओ प्रकल्प सध्या तयार होत आहे. तो पूर्ण झाल्यावर नवीन सुरू करता येईल.',
+  videoRecent: 'मागील व्हिडिओ',
+  videoNoteTooShort: 'टिपणी किमान २० अक्षरांची हवी.',
+
+  // Script gate (gate 1)
+  videoScriptTitle: 'संहिता तपासा व संपादित करा',
+  videoScriptIntro:
+    'प्रत्येक दृश्याचे निवेदन (व्हिडिओत ऐकू येणारा मजकूर) आणि दृश्य-वर्णन तपासा. निवेदनातील नावे, आकडे व तारखा टिपणीशी जुळतात का ते पाहा.',
+  videoSceneLabel: 'दृश्य',
+  videoSceneBeatLabel: 'मुद्दा',
+  videoNarrationLabel: 'निवेदन (मराठी)',
+  videoNarrationHint:
+    'क्लिपची लांबी निवेदनाच्या लांबीनुसार आपोआप ठरते (प्रति दृश्य ४–८ सेकंद).',
+  videoNarrationTooFast: 'निवेदन थोडे वेगाने वाजेल — हवे असल्यास लहान करा.',
+  videoNarrationListen: 'निवेदनाचा आवाज ऐका',
+  videoBriefLabel: 'दृश्य-वर्णन (इंग्रजी)',
+  videoBriefHint: 'चित्रात मजकूर/अक्षरे दिसणार नाहीत — शब्द निवेदनात असतात.',
+  videoAddScene: 'दृश्य जोडा',
+  videoRemoveScene: 'हे दृश्य काढा',
+  videoToStoryboard: 'स्टोरीबोर्ड तयार करा',
+  videoToStoryboardHint:
+    'प्रत्येक दृश्याचे नमुना चित्र तयार होईल (अल्प खर्च, व्हिडिओ नाही).',
+
+  // Storyboard gate (gate 2)
+  videoStoryboardTitle: 'स्टोरीबोर्ड तपासा',
+  videoStoryboardIntro:
+    'ही चित्रे व्हिडिओतील दृश्यांची सुरुवात असतील. एखादे चित्र पटत नसेल तर वर्णन बदलून पुन्हा काढा — त्याचा खर्च अगदी थोडा आहे.',
+  videoRedrawStill: 'चित्र पुन्हा काढा',
+  videoEditBrief: 'वर्णन बदला',
+  videoAnimate: 'व्हिडिओ तयार करा',
+  videoAnimateEstimate: 'अंदाजे खर्च',
+  videoAnimateConfirm: 'नक्की तयार करायचा? हा खर्च परत मिळत नाही.',
+  videoAnimateConfirmYes: 'होय, व्हिडिओ तयार करा',
+  videoAnimateCancel: 'रद्द करा',
+  videoBackToScript: 'संहितेकडे परत जा',
+
+  // Rendering + result
+  videoAnimatingHint:
+    'व्हिडिओ तयार होण्यास काही मिनिटे लागतात. हे पान बंद केले तरी काम सुरू राहते.',
+  videoResultTitle: 'तयार व्हिडिओ',
+  videoDownload: 'व्हिडिओ डाउनलोड करा',
+  videoSrtDownload: 'SRT (निवेदन वेळेसह) डाउनलोड करा',
+  videoSrtHint:
+    'व्हिडिओ मुका आहे. खालील बटणाने निवेदनाचा मराठी आवाज जोडा — SRT फाईलमध्ये प्रत्येक दृश्याची वेळ आहे.',
+  videoSrtHintVoiced:
+    'व्हिडिओत मराठी निवेदनाचा आवाज जोडला आहे. SRT फाईलमध्ये प्रत्येक दृश्याची वेळ आहे.',
+  videoAddNarration: 'निवेदनाचा आवाज जोडा',
+  videoReNarration: 'आवाज पुन्हा तयार करा',
+  videoNarrationHintCta:
+    'प्रत्येक दृश्याचे मराठी निवेदन Sarvam आवाजात तयार होऊन व्हिडिओत जोडले जाईल.',
+  videoNarratingHint:
+    'निवेदनाचा आवाज तयार होत आहे. हे पान बंद केले तरी काम सुरू राहते.',
+  videoTimedScript: 'वेळेसह निवेदन',
+  videoFixScene: 'एखादे दृश्य सुधारायचे?',
+  videoReanimateScene: 'फक्त हे दृश्य पुन्हा तयार करा',
+  videoReanimateHint: 'फक्त या दृश्याचा खर्च होईल; बाकीचा व्हिडिओ तसाच राहतो.',
+  videoRetryAnimate: 'पुन्हा प्रयत्न करा',
+  videoResumeHint: 'आधी तयार झालेली दृश्ये पुन्हा वापरली जातील.',
+  videoStillPending: 'चित्र अजून काढलेले नाही',
+  videoSceneFailed: 'हे दृश्य अयशस्वी झाले',
 } as const;
+
+// Marathi labels + chip colors for a video project's statuses. The two gates
+// are the USER's turn (not the server's), so they get the queued color, not
+// the running one.
+export const VIDEO_STATUS_LABELS: Record<
+  string,
+  { label: string; chip: 'queued' | 'running' | 'completed' | 'failed' }
+> = {
+  scripting: { label: 'संहिता तयार होत आहे', chip: 'running' },
+  script_ready: { label: 'संहिता तपासणीच्या प्रतीक्षेत', chip: 'queued' },
+  storyboarding: { label: 'चित्रे तयार होत आहेत', chip: 'running' },
+  storyboard_ready: {
+    label: 'स्टोरीबोर्ड मंजुरीच्या प्रतीक्षेत',
+    chip: 'queued',
+  },
+  animating: { label: 'व्हिडिओ तयार होत आहे', chip: 'running' },
+  completed: { label: 'पूर्ण झाले', chip: 'completed' },
+  failed: { label: 'अयशस्वी', chip: 'failed' },
+};
+
+// Marathi labels for the video project's machine step keys (the working
+// statuses' progress lines).
+export const VIDEO_STEP_LABELS: Record<string, string> = {
+  script: 'संहिता लिहित आहोत…',
+  stills: 'दृश्यांची नमुना चित्रे काढत आहोत…',
+  animate: 'दृश्ये ॲनिमेट होत आहेत…',
+  narrate: 'निवेदनाचा आवाज तयार होत आहे…',
+  stitch: 'दृश्ये जोडत आहोत…',
+  upload: 'व्हिडिओ जतन होत आहे…',
+  done: 'पूर्ण झाले',
+};
 
 // Marathi labels for the DLO intake job's machine step keys.
 export const DLO_INTAKE_STEP_LABELS: Record<DloIntakeStep, string> = {
@@ -429,7 +794,7 @@ export const STEP_LABELS: Record<GenerationStep, string> = {
   revise_copy: 'अभिप्रायानुसार मजकूर सुधारत आहोत…',
   revise_scene: 'नवीन चित्र तयार करत आहोत…',
   revise_image: 'चित्र पुन्हा तयार करत आहोत…',
-  translate: 'इंग्रजी भाषांतर',
+  translate: 'भाषांतर',
   done: 'पूर्ण झाले',
 };
 
@@ -443,6 +808,15 @@ export const TERM_TYPE_LABELS: Record<TermType, string> = {
   other: 'इतर',
 };
 
+// Marathi labels for the proofread issue categories (/proofread issue chips).
+export const PROOFREAD_TYPE_LABELS: Record<ProofreadIssueType, string> = {
+  grammar: 'व्याकरण',
+  spelling: 'शुद्धलेखन',
+  punctuation: 'विरामचिन्हे',
+  name: 'नाव',
+  style: 'शैली',
+};
+
 export const REF_CATEGORY_LABELS: Record<ReferenceCategory, string> = {
   twitter: 'ट्विटर पोस्टर टेम्पलेट',
   article: 'लेख पोस्टर टेम्पलेट',
@@ -454,6 +828,7 @@ export const CATEGORY_LABELS: Record<Category, string> = {
   scheme: 'योजना',
   news: 'बातमी',
   twitter: 'ट्विटर',
+  facebook: 'फेसबुक',
 };
 
 export const STATUS_LABELS: Record<GenerationStatus, string> = {
@@ -491,4 +866,20 @@ export function formatDateShort(iso: string): string {
 export function formatCost(usd: number | null): string {
   if (usd === null || Number.isNaN(usd)) return '—';
   return `$${usd.toFixed(2)}`;
+}
+
+// Gate-2 scene chip: the clip window plus (when audio exists) the measured
+// narration length, e.g. "क्लिप ६ से. · निवेदन ४.८ से.".
+export function videoSceneTiming(
+  clipSeconds: number,
+  narrationSeconds?: number,
+): string {
+  const clip = `क्लिप ${clipSeconds} से.`;
+  if (narrationSeconds === undefined) return clip;
+  return `${clip} · निवेदन ${narrationSeconds.toFixed(1)} से.`;
+}
+
+// Gate-1 live hint under the narration textarea: the estimated spoken length.
+export function videoNarrationEstimate(seconds: number): string {
+  return `अंदाजे ${seconds.toFixed(0)} से. बोलणे`;
 }

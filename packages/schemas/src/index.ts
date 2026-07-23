@@ -19,3 +19,15 @@ export * from './api.js';
 
 // DLO intake API schemas (file transcription/extraction → reviewed note).
 export * from './dlo.js';
+
+// PDF translation on /translate (page-wise OCR job; nothing stored).
+export * from './translate-document.js';
+
+// Ad-hoc proofread API schemas (issues + corrected text; nothing stored).
+export * from './proofread.js';
+
+// X post-length rules, shared by the API's publish guard and the web's caption counter.
+export * from './tweet.js';
+
+// AI explainer-video API schemas + shared tier pricing / SRT builder.
+export * from './video.js';

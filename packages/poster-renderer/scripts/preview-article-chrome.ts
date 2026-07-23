@@ -20,14 +20,14 @@ const DEFAULT_OUT_DIR = resolve(here, '../../content-engine/data/output');
 
 // Flat landscape stand-in for an n8n render: curved orange headline panel on the
 // left, plain sky on the right, with faint outlines marking the reserved zones the
-// prompt asks the model to keep clear (top-left ~560x220, bottom ~150px).
+// prompt asks the model to keep clear (top-left ~420x180, bottom ~150px).
 async function placeholderPoster(): Promise<Buffer> {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1536" height="1024">
     <rect width="1536" height="1024" fill="#bcd9ef"/>
     <path d="M0 0 H640 Q760 512 640 1024 H0 Z" fill="#e8762d"/>
     <text x="320" y="540" font-family="sans-serif" font-size="44" fill="#ffffff"
       text-anchor="middle">HEADLINE PANEL</text>
-    <rect x="0" y="0" width="560" height="220" fill="none"
+    <rect x="0" y="0" width="420" height="180" fill="none"
       stroke="#ff0000" stroke-opacity="0.4" stroke-width="3" stroke-dasharray="12 8"/>
     <rect x="0" y="874" width="1536" height="150" fill="none"
       stroke="#ff0000" stroke-opacity="0.4" stroke-width="3" stroke-dasharray="12 8"/>

@@ -8,9 +8,27 @@ export const OutputTypeSchema = z.enum(['article', 'poster', 'both']);
 export type OutputType = z.infer<typeof OutputTypeSchema>;
 
 // Which Mahasamvad voice to write in: 'scheme' (योजना-लेख feature), 'news' (बातमी
-// report), or 'twitter' (n8n-backed poster + X caption, background task).
-export const CategorySchema = z.enum(['news', 'scheme', 'twitter']);
+// report), or the social lanes 'twitter'/'facebook' (n8n-backed poster + caption,
+// background task).
+export const CategorySchema = z.enum(['news', 'scheme', 'twitter', 'facebook']);
 export type Category = z.infer<typeof CategorySchema>;
+
+// Categories rendered by the external social-post n8n workflow (poster + caption,
+// background task, twitter master library) rather than the in-process article
+// pipeline. 'facebook' runs the identical workflow today and exists as its own
+// value so the two can diverge later; every social/article branch in apps/api and
+// apps/web routes through this predicate.
+export function isSocialCategory(category: Category): boolean {
+  return category === 'twitter' || category === 'facebook';
+}
+
+// Template brand family for the social-poster flow, orthogonal to the platform lane
+// (twitter/facebook). 'dgipr' is the default department; 'cmo' renders the
+// मंत्रिमंडळ निर्णय template family (a fixed 3-leader header stamped in code, the DGIPR
+// footer reused, 2 topic images painted by the model). The runner branches catalog
+// selection, the n8n image prompt, and the chrome overlay on this; migration 0024.
+export const TemplateBrandSchema = z.enum(['dgipr', 'cmo']);
+export type TemplateBrand = z.infer<typeof TemplateBrandSchema>;
 
 // Poster design mode for the Twitter flow ('onbrand'/'adaptive' reuse master
 // templates, 'fresh' paints a new background) is imported from copy.ts above —
@@ -48,8 +66,8 @@ export const GenerationStepSchema = z.enum([
   'revise_copy',
   'revise_scene',
   'revise_image',
-  // On-demand English translation of a completed article (Sarvam + locked
-  // glossary). A post-completion action, not part of the main pipeline.
+  // On-demand translation of a completed article (Sarvam + locked glossary).
+  // A post-completion action, not part of the main pipeline.
   'translate',
   'done',
 ]);
@@ -61,8 +79,20 @@ export const RevisionTargetSchema = z.enum([
   'poster_scene',
   'manual_copy',
   'poster_image',
+  // A social run's caption (stored in the same `article` column): 'caption' is an AI
+  // revision from the feedback box, 'manual_caption' a hand edit — the same pair as
+  // poster_copy / manual_copy. Migration 0023.
+  'caption',
+  'manual_caption',
 ]);
 export type RevisionTarget = z.infer<typeof RevisionTargetSchema>;
+
+// Languages a Marathi article/text can be translated into on demand. Marathi itself is
+// never a target — it is always the source of record. Both targets share one engine and
+// one नाव-शब्दकोश; Hindi locks the glossary's Devanagari forms verbatim rather than
+// mapping them to English (see translate-article.ts).
+export const TranslationLanguageSchema = z.enum(['en', 'hi']);
+export type TranslationLanguage = z.infer<typeof TranslationLanguageSchema>;
 
 export const CreateGenerationRequestSchema = z
   .object({
@@ -74,6 +104,9 @@ export const CreateGenerationRequestSchema = z
     // Poster design mode for the Twitter flow (ignored for news/scheme). The runner
     // defaults it to 'onbrand' when absent for a twitter request.
     designMode: DesignModeSchema.optional(),
+    // Template brand for a social run (ignored for news/scheme, and for a CMO run the
+    // design mode is inert — CMO just follows its template). Absent ⇒ 'dgipr'.
+    templateBrand: TemplateBrandSchema.optional(),
     // Optional editorial angle / title directive supplied by the user. NOT a fact
     // source — only steers emphasis + heading. Empty/absent ⇒ the model picks its
     // own angle (today's behaviour). Consumed by the engine in later parts.
@@ -115,6 +148,36 @@ export const ArticleFeedbackRequestSchema = z.object({
 });
 export type ArticleFeedbackRequest = z.infer<
   typeof ArticleFeedbackRequestSchema
+>;
+
+// Feedback on a social run's caption. Same shape as the article's, but a different
+// engine (a caption is one short social post, not a Mahasamvad article) and a
+// different route — the article pipeline rejects social categories by design.
+export const CaptionFeedbackRequestSchema = z.object({
+  feedback: z.string().trim().min(3).max(4_000),
+});
+export type CaptionFeedbackRequest = z.infer<
+  typeof CaptionFeedbackRequestSchema
+>;
+
+// Hand edit of a social run's caption: the officer typed it themselves, so it is
+// stored verbatim with no model call.
+export const UpdateCaptionRequestSchema = z.object({
+  caption: z.string().trim().min(1).max(4_000),
+});
+export type UpdateCaptionRequest = z.infer<typeof UpdateCaptionRequestSchema>;
+
+export const UpdateCaptionResponseSchema = z.object({ caption: z.string() });
+export type UpdateCaptionResponse = z.infer<typeof UpdateCaptionResponseSchema>;
+
+// Attach a poster to an existing article run (same row, no new generation) —
+// article-only and DLO runs, plus the retry after a failed poster phase.
+// Optional pin: use exactly this article-category reference image.
+export const CreateArticlePosterRequestSchema = z.object({
+  referenceImageId: z.string().uuid().optional(),
+});
+export type CreateArticlePosterRequest = z.infer<
+  typeof CreateArticlePosterRequestSchema
 >;
 
 // Poster feedback is routed explicitly by the user: 'copy' revises the Marathi
@@ -201,6 +264,16 @@ export const UpdateCopyResponseSchema = z.object({
 });
 export type UpdateCopyResponse = z.infer<typeof UpdateCopyResponseSchema>;
 
+// POST /api/generations/:id/publish — posts the poster + caption to the official
+// account of the run's own platform (twitter → X, facebook → Page). No request
+// body; returns the live post's URL.
+export const PublishGenerationResponseSchema = z.object({
+  postUrl: z.string(),
+});
+export type PublishGenerationResponse = z.infer<
+  typeof PublishGenerationResponseSchema
+>;
+
 // History card. `category` + `step` let the web tasks panel filter to twitter
 // runs and drive the staged progress bar from the list endpoint on refresh.
 export const GenerationSummarySchema = z.object({
@@ -267,6 +340,9 @@ export const GenerationDetailSchema = z.object({
   category: CategorySchema,
   // Poster design mode the run was created with (null for non-twitter rows).
   designMode: DesignModeSchema.nullable(),
+  // Template brand the run was created with. Defaulted so a pre-0024 row (no column)
+  // still parses; 'dgipr' for every non-social row.
+  templateBrand: TemplateBrandSchema.default('dgipr'),
   note: z.string(),
   // Optional editorial angle the run was created with (null for pre-heading rows).
   heading: z.string().nullable(),
@@ -276,8 +352,10 @@ export const GenerationDetailSchema = z.object({
   // The Twitter reference type pinned at creation (null = classifier chooses).
   referenceTypeId: z.string().nullable(),
   article: z.string().nullable(),
-  // On-demand English translation of `article`; null until the user requests it.
+  // On-demand translations of `article`; each null until the user requests it. The two
+  // are independent — translating to Hindi never touches the English text or vice versa.
   articleEnglish: z.string().nullable(),
+  articleHindi: z.string().nullable(),
   factCheck: z.string().nullable(),
   copy: CopySchema.nullable(),
   fiveWOneH: FiveWOneHSchema.nullable(),
@@ -286,19 +364,38 @@ export const GenerationDetailSchema = z.object({
   // Every poster render of this generation, oldest→newest (empty when the run has
   // no poster). The last entry always matches `posterUrl`.
   posterVersions: z.array(PosterVersionSchema),
+  // Latest live social post of this run (social categories only; null = never
+  // published). Re-publishing after a poster re-render overwrites both.
+  publishedUrl: z.string().nullable(),
+  publishedAt: z.string().nullable(),
   error: z.string().nullable(),
-  // The on-demand English translation runs alongside the main job (the article is
+  // The on-demand translation runs alongside the main job (the article is
   // final before the poster phase starts), so it cannot own status/step/error —
   // those belong to the main job. Its liveness and failure are reported here
   // instead, from the API's in-process job registry (both reset on restart).
+  // Only one translation runs at a time per row; `translatingLanguage` names which
+  // one, so a reload mid-run still labels the spinner correctly (null when idle).
   translating: z.boolean(),
+  translatingLanguage: TranslationLanguageSchema.nullable(),
   translateError: z.string().nullable(),
+  // Locked names the most recent Hindi translation could not preserve. The translation
+  // still succeeded and is stored on the row; this is a review prompt, not a failure.
+  // Transient like translateError — from the in-process registry, lost on restart and on
+  // a reload long after the run — because the doubt matters when the officer reads the
+  // fresh output. Empty array = translated cleanly; null = no translation attempted.
+  translateWarnings: z.array(z.string()).nullable(),
   // Article revision can also run alongside the main job: while the poster is still
   // rendering the article is already final, so the user may refine it without waiting
   // out the render. Like `translating`, it can't own status/step/error and is reported
   // here from the API's in-process registry (both reset on restart).
   articleRevising: z.boolean(),
   articleReviseError: z.string().nullable(),
+  // A social run's caption revision is reported the same way, and for the same reason:
+  // it must NOT own status/step, or the finished post would be replaced by a progress
+  // bar (and a caption edit could not run beside a poster re-render). Also from the
+  // API's in-process registry, so both reset on restart.
+  captionRevising: z.boolean(),
+  captionReviseError: z.string().nullable(),
   // Total USD the run has cost so far (null for pre-feature rows). `costBreakdown` carries
   // the audit detail (token counts + text-vs-image split); shape is intentionally loose.
   costUsd: z.number().nullable(),
@@ -331,6 +428,8 @@ export const GlossaryTermSchema = z.object({
   id: z.string(),
   marathi: z.string(),
   english: z.string(),
+  // Optional corrected Hindi spelling; null = the Hindi lock keeps the Marathi form.
+  hindi: z.string().nullable(),
   termType: TermTypeSchema,
   verified: z.boolean(),
   source: TermSourceSchema,
@@ -344,6 +443,7 @@ export type GlossaryTerm = z.infer<typeof GlossaryTermSchema>;
 export const CreateGlossaryTermRequestSchema = z.object({
   marathi: z.string().trim().min(1).max(200),
   english: z.string().trim().min(1).max(200),
+  hindi: z.string().trim().max(200).optional(),
   termType: TermTypeSchema.optional(),
   verified: z.boolean().optional(),
   notes: z.string().trim().max(1_000).optional(),
@@ -356,6 +456,7 @@ export type CreateGlossaryTermRequest = z.infer<
 // here — changing it is a delete + re-add concern. At least one field should be present.
 export const UpdateGlossaryTermRequestSchema = z.object({
   english: z.string().trim().min(1).max(200).optional(),
+  hindi: z.string().trim().max(200).nullable().optional(),
   termType: TermTypeSchema.optional(),
   verified: z.boolean().optional(),
   notes: z.string().trim().max(1_000).nullable().optional(),
@@ -370,23 +471,31 @@ export type UpdateGlossaryTermRequest = z.infer<
 // the English spellings IN PLACE before translating. Confirmed terms are saved as verified
 // glossary rows and locked into the translation — so a wrong name (संवाद वारी → "dialogue
 // van") never reaches the English output, and the dictionary grows verified as a side
-// effect instead of via a separate /glossary visit.
+// effect instead of via a separate /glossary visit. The check runs before a HINDI
+// translation too: there the confirmed `hindi` spelling is used as the identity lock (it
+// defaults to the Marathi Devanagari form, and the officer can correct it where the Hindi
+// spelling should differ, e.g. कोल्हापूर → कोल्हापुर), so the same review keeps names right
+// in both languages and keeps growing one shared dictionary.
 
-// One user-confirmed Marathi→English mapping sent along with a translate request.
+// One user-confirmed name mapping sent along with a translate request. `english` feeds the
+// English lock; `hindi` (optional) feeds the Hindi lock, falling back to the Marathi form.
 export const TranslationTermInputSchema = z.object({
   marathi: z.string().trim().min(1).max(200),
   english: z.string().trim().min(1).max(200),
+  hindi: z.string().trim().max(200).optional(),
   termType: TermTypeSchema.optional(),
 });
 export type TranslationTermInput = z.infer<typeof TranslationTermInputSchema>;
 
 // A term proposed for review: extracted from the text and/or already in the glossary.
-// `verified` renders the reassurance badge — those rows arrive pre-locked.
+// `verified` renders the reassurance badge — those rows arrive pre-locked. `hindi` is the
+// pre-filled Hindi spelling shown on a Hindi run (prepare defaults it to the Marathi form).
 export const PrepareTranslationResponseSchema = z.object({
   terms: z.array(
     z.object({
       marathi: z.string(),
       english: z.string(),
+      hindi: z.string(),
       termType: TermTypeSchema,
       verified: z.boolean(),
     }),
@@ -397,9 +506,11 @@ export type PrepareTranslationResponse = z.infer<
 >;
 
 // Body of POST /generations/:id/translate. `terms` is the user-confirmed name list from
-// the review step; optional so a bare request (older client) still translates.
+// the review step; optional so a bare request (older client) still translates. `language`
+// defaults to 'en' for the same reason — a bare body means the original English path.
 export const TranslateGenerationRequestSchema = z.object({
   terms: z.array(TranslationTermInputSchema).max(200).optional(),
+  language: TranslationLanguageSchema.default('en'),
 });
 export type TranslateGenerationRequest = z.infer<
   typeof TranslateGenerationRequestSchema
@@ -425,16 +536,26 @@ export const TranslateTextRequestSchema = z.object({
   // glossary rows and locked into this translation; when absent the legacy path mines
   // candidates into the review queue instead.
   terms: z.array(TranslationTermInputSchema).max(200).optional(),
+  language: TranslationLanguageSchema.default('en'),
 });
 export type TranslateTextRequest = z.infer<typeof TranslateTextRequestSchema>;
 
 export const TranslateTextResponseSchema = z.object({
-  english: z.string(),
+  // The translation, in `language`. Read this, not `english`.
+  translated: z.string(),
+  language: TranslationLanguageSchema,
+  // Legacy mirror of `translated`, sent only for language 'en'. Kept (optional) so a web
+  // build deployed ahead of the API still parses the response; drop once both are current.
+  english: z.string().optional(),
   // Transparency for the UI: how many verified glossary terms were locked, and how many new
   // candidates were mined (always 0 when `terms` was sent — the confirmed-names path skips
   // mining; nonzero only on the legacy no-terms path, and 0 there too if mining failed).
   lockedTermCount: z.number().int().nonnegative(),
   minedTermCount: z.number().int().nonnegative(),
+  // Locked names the Hindi output could not be made to carry (see translate-article.ts).
+  // The translation is still returned; the UI flags these for a human check. Empty for
+  // English and for a clean Hindi run.
+  unpreservedNames: z.array(z.string()),
 });
 export type TranslateTextResponse = z.infer<typeof TranslateTextResponseSchema>;
 
@@ -466,6 +587,10 @@ export const ReferenceTypeSchema = z.object({
   labelMr: z.string(),
   description: z.string(),
   copyStyle: CopyStyleSchema,
+  // Template brand family (migration 0024). Defaulted so pre-0024 rows (no column)
+  // parse; the home template picker filters on it so CMO types never appear in the
+  // DGIPR flow and vice versa.
+  brand: TemplateBrandSchema.default('dgipr'),
   isBuiltin: z.boolean(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -484,6 +609,8 @@ export type CreateReferenceTypeRequest = z.infer<
 export const UpdateReferenceTypeRequestSchema = z.object({
   labelMr: z.string().trim().min(1).max(60).optional(),
   description: z.string().trim().min(3).max(300).optional(),
+  // Flip a type between the DGIPR pool and the CMO template family (migration 0024).
+  brand: TemplateBrandSchema.optional(),
 });
 export type UpdateReferenceTypeRequest = z.infer<
   typeof UpdateReferenceTypeRequestSchema

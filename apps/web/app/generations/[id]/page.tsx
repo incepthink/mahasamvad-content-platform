@@ -2,6 +2,7 @@
 
 import { use } from 'react';
 import { useRouter } from 'next/navigation';
+import { isSocialCategory } from '@dgipr/schemas';
 import { useGeneration } from '../../../lib/useGeneration';
 import { useGenerationThread } from '../../../lib/useGenerationThread';
 import { createGeneration } from '../../../lib/api';
@@ -42,8 +43,8 @@ export default function GenerationDetailPage({
       designMode: detail.designMode ?? undefined,
       sourceGenerationId: detail.id,
     });
-    // Twitter reruns are background tasks: track + surface them in the panel.
-    if (detail.category === 'twitter') {
+    // Social reruns are background tasks: track + surface them in the panel.
+    if (isSocialCategory(detail.category)) {
       addTask(newId);
       openPanel();
     }
@@ -88,7 +89,7 @@ export default function GenerationDetailPage({
   // of the step list. Step-scoped so a revise_article run keeps its existing
   // path; posterBusy can't overlap because it requires posterUrl.
   const posterPending =
-    detail.category !== 'twitter' &&
+    !isSocialCategory(detail.category) &&
     detail.outputType !== 'article' &&
     (detail.status === 'queued' || detail.status === 'running') &&
     !!detail.article &&
@@ -115,7 +116,7 @@ export default function GenerationDetailPage({
       {(detail.status === 'queued' || detail.status === 'running') &&
         !posterBusy &&
         !posterPending &&
-        (detail.category === 'twitter' ? (
+        (isSocialCategory(detail.category) ? (
           <section className="card" aria-live="polite">
             <h2>{STR.progressTitle}</h2>
             <p className="hint">{STR.progressHint}</p>
@@ -145,7 +146,7 @@ export default function GenerationDetailPage({
         // A poster-phase failure must not hide an already-good article: keep
         // the failed card above and the article content below it.
         (detail.status === 'failed' && !!detail.article)) &&
-        (detail.category === 'twitter' ? (
+        (isSocialCategory(detail.category) ? (
           <SocialPostView
             detail={detail}
             onRegenerate={retry}
@@ -176,7 +177,11 @@ export default function GenerationDetailPage({
 
       {/* "Next step": cross-format generation from the same note + edit-note
           re-run. Renders nothing while the run (or a revision) is in flight. */}
-      <NextActions detail={detail} onSpawned={() => void refreshThread()} />
+      <NextActions
+        detail={detail}
+        onSpawned={() => void refreshThread()}
+        onPosterStarted={() => void refresh()}
+      />
     </main>
   );
 }

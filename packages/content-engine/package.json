@@ -38,8 +38,11 @@
     "adm-zip": "^0.6.0",
     "jsdom": "^29.1.1",
     "mammoth": "^1.12.0",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^6.1.200",
     "sarvamai": "^1.1.7",
-    "sharp": "^0.34.4"
+    "sharp": "^0.34.4",
+    "zod": "^4.0.15"
   },
   "devDependencies": {
     "@types/adm-zip": "^0.5.8",

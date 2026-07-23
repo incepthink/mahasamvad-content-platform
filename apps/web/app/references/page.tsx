@@ -202,6 +202,7 @@ function TypeCard({
   const [editing, setEditing] = useState(false);
   const [labelDraft, setLabelDraft] = useState(type.labelMr);
   const [descDraft, setDescDraft] = useState(type.description);
+  const [brandDraft, setBrandDraft] = useState(type.brand);
 
   const run = async (fn: () => Promise<unknown>) => {
     setBusy(true);
@@ -230,6 +231,7 @@ function TypeCard({
       await updateReferenceType(type.id, {
         labelMr: labelDraft.trim(),
         description: descDraft.trim(),
+        brand: brandDraft,
       });
       setEditing(false);
     });
@@ -254,6 +256,9 @@ function TypeCard({
           <h3>{type.labelMr}</h3>
           {!type.isBuiltin ? (
             <span className="chip chip-running">{STR.refCustomChip}</span>
+          ) : null}
+          {type.brand === 'cmo' ? (
+            <span className="chip chip-completed">{STR.refBrandChip}</span>
           ) : null}
           {enabledCount > 0 ? (
             <span className="chip chip-completed">
@@ -313,6 +318,21 @@ function TypeCard({
               onChange={(event) => setDescDraft(event.target.value)}
             />
           </div>
+          <div>
+            <label className="field-label" htmlFor={`brand-${type.id}`}>
+              {STR.refBrandLabel}
+            </label>
+            <select
+              id={`brand-${type.id}`}
+              value={brandDraft}
+              onChange={(event) =>
+                setBrandDraft(event.target.value as ReferenceType['brand'])
+              }
+            >
+              <option value="dgipr">{STR.refBrandDgipr}</option>
+              <option value="cmo">{STR.refBrandCmo}</option>
+            </select>
+          </div>
           <div className="btn-row">
             <button
               type="button"
@@ -334,6 +354,7 @@ function TypeCard({
                 setEditing(false);
                 setLabelDraft(type.labelMr);
                 setDescDraft(type.description);
+                setBrandDraft(type.brand);
               }}
             >
               {STR.refTypeCancel}

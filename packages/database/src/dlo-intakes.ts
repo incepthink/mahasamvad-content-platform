@@ -9,18 +9,27 @@ export const DLO_INTAKES_TABLE = 'dlo_intakes';
 
 export type DloIntakeStatus = 'queued' | 'running' | 'ready' | 'failed';
 export type DloIntakeStep =
-  | 'upload'
-  | 'transcribe'
-  | 'extract'
-  | 'combine'
-  | 'done';
+  'upload' | 'transcribe' | 'extract' | 'combine' | 'done';
 export type DloIntakeFileKind = 'audio' | 'pdf' | 'docx';
-export type DloIntakeFileStatus = 'pending' | 'done' | 'failed';
+// 'needs-selection' is a PDF that was probed but deliberately NOT read: its text layer was
+// unusable, so reading it means paid OCR, and the officer chooses which pages are worth it
+// before a single one is sent. Only PDFs ever hold this status.
+export type DloIntakeFileStatus =
+  'pending' | 'needs-selection' | 'done' | 'failed';
 export type DloIntakeCategory = 'news' | 'scheme';
+
+// One extracted PDF page, stored on its file's entry. `page` is the ORIGINAL
+// document's page number — after OCR chunking, past blank pages, always — because
+// the review step lists and selects by it.
+export type DloIntakePageEntry = Readonly<{ page: number; text: string }>;
 
 // One uploaded file's intake state, stored inside the files jsonb array. A failed
 // file carries its (Marathi) error so the review step can show which source
 // dropped out without failing the whole intake.
+//
+// The extracted text lives here per source (rather than only inside the combined
+// text) so the review step can edit each source on its own and select PDF pages.
+// jsonb has no column schema, so these fields needed no migration.
 export type DloIntakeFileEntry = Readonly<{
   name: string;
   storagePath: string;
@@ -28,6 +37,17 @@ export type DloIntakeFileEntry = Readonly<{
   status: DloIntakeFileStatus;
   chars?: number;
   error?: string;
+  // Audio/DOCX carry their whole text; PDFs carry `pages` instead. A PDF's `pages`
+  // hold only what was actually read, which on a scanned file is only what the
+  // officer selected and paid to OCR.
+  text?: string;
+  pages?: readonly DloIntakePageEntry[];
+  // How many pages this PDF has in total, from the free probe. Known before anything
+  // is read, because it is what the page picker lists.
+  pageCount?: number;
+  // Which backend read this PDF — OCR text deserves more scrutiny in review, and
+  // only a text-layer read is worth offering to re-read with OCR.
+  pdfSource?: 'text-layer' | 'ocr';
 }>;
 
 export type DloIntakeRow = Readonly<{

@@ -2,7 +2,7 @@
 
 // Sidebar "ongoing tasks" button + centered modal. Tracks every generation started this
 // session from TasksProvider and lists them compactly: a one-line heading + a status
-// dot/label, with a small poster thumbnail for twitter runs. Each row is a link to its
+// dot/label, with a small poster thumbnail for social runs. Each row is a link to its
 // detail page (/generations/{id}), where the full result and all actions already live.
 // Styled as a sidebar link; `collapsed` hides the label like the nav links (CSS) while
 // the count badge stays overlaid on the icon.
@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { ListTodo } from 'lucide-react';
+import { isSocialCategory } from '@dgipr/schemas';
 import type { GenerationDetail } from '@dgipr/schemas';
 import { useTasks } from '../lib/TasksProvider';
 import { STATUS_LABELS, STEP_LABELS, STR } from '../lib/strings';
@@ -97,7 +98,7 @@ export function TasksMenu({ collapsed = false }: { collapsed?: boolean }) {
                   <ul className="task-list">
                     {tasks.map((task) => {
                       const failed = task.status === 'failed';
-                      const isTwitter = task.category === 'twitter';
+                      const isSocial = isSocialCategory(task.category);
                       const active =
                         task.status === 'queued' || task.status === 'running';
                       // Active runs show the fine-grained step; otherwise the status.
@@ -112,7 +113,7 @@ export function TasksMenu({ collapsed = false }: { collapsed?: boolean }) {
                             href={`/generations/${task.id}`}
                             onClick={closePanel}
                           >
-                            {isTwitter ? (
+                            {isSocial ? (
                               task.posterUrl ? (
                                 <img
                                   src={task.posterUrl}

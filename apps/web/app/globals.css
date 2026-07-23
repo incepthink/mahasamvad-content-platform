@@ -524,6 +524,18 @@ textarea.note-input {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+/* Four choices (the home form's category row: योजना / बातमी / ट्विटर / फेसबुक).
+   Falls back to 2x2 before the single-column mobile rule below kicks in. */
+.output-picker-four {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+@media (max-width: 1100px) {
+  .output-picker-four {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .output-option {
   border: 2px solid var(--border);
   border-radius: 16px;
@@ -880,6 +892,56 @@ textarea.note-input {
   background: #fffdfa;
 }
 
+/* The caption is read-only until "कॅप्शन बदला" swaps in a textarea wearing the same look. */
+.caption-label {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.social-caption-edit {
+  width: 100%;
+  display: block;
+  font-family: inherit;
+  font-size: 1rem;
+  line-height: 1.75;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #fffdfa;
+  resize: vertical;
+}
+
+.social-caption-edit:disabled {
+  opacity: 0.65;
+}
+
+.caption-meta {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.caption-meta .hint {
+  margin: 0;
+  flex: 1;
+  min-width: 200px;
+}
+
+/* Plain character count of the caption. X's 280-character limit is enforced (and
+   explained) at publish time, not here. */
+.caption-counter {
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
 /* ---------- progress ---------- */
 
 .progress-list {
@@ -974,6 +1036,42 @@ textarea.note-input {
 .chip-failed {
   background: var(--err-soft);
   color: var(--err);
+}
+
+/* ---------- proofread issue list ---------- */
+
+.issue-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 0;
+  border-top: 1px solid var(--border);
+}
+
+.issue-row:first-of-type {
+  border-top: none;
+}
+
+.issue-line {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* Background tints only — no strikethrough, Devanagari stays legible. */
+.issue-excerpt {
+  background: var(--err-soft);
+  border-radius: 6px;
+  padding: 2px 8px;
+  white-space: pre-wrap;
+}
+
+.issue-suggestion {
+  background: var(--ok-soft);
+  border-radius: 6px;
+  padding: 2px 8px;
+  white-space: pre-wrap;
 }
 
 /* ---------- article view ---------- */
@@ -1529,7 +1627,7 @@ select.glossary-select:focus {
 
 .glossary-add {
   display: grid;
-  grid-template-columns: 1fr 1fr 160px auto;
+  grid-template-columns: 1fr 1fr 1fr 160px auto;
   gap: 12px;
   align-items: end;
   margin-top: 8px;
@@ -1587,7 +1685,10 @@ select.glossary-select:focus {
 
 .glossary-row {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) minmax(160px, 1.4fr) 150px auto;
+  grid-template-columns: minmax(120px, 1fr) minmax(160px, 1.4fr) minmax(
+      150px,
+      1.3fr
+    ) 150px auto;
   gap: 12px;
   align-items: center;
   padding: 14px;
@@ -1652,9 +1753,12 @@ select.glossary-select:focus {
   font-size: 1.05rem;
 }
 
+/* Flex (not a fixed grid) because the column count varies: one spelling column for a
+   single-language run, two when both English and Hindi run at once, plus an optional
+   Hindi lock toggle. Wrapping keeps it readable when they don't all fit. */
 .names-review-row {
-  display: grid;
-  grid-template-columns: minmax(120px, 1fr) minmax(160px, 1.6fr) 110px;
+  display: flex;
+  flex-wrap: wrap;
   gap: 12px;
   align-items: center;
   padding: 10px 12px;
@@ -1664,9 +1768,41 @@ select.glossary-select:focus {
   background: #fff;
 }
 
+.names-review-row .glossary-cell {
+  flex: 1 1 150px;
+}
+
+/* Push the verified/unverified chip to the far right, whatever precedes it. */
+.names-review-row > .chip {
+  margin-left: auto;
+}
+
 .names-review-row.is-unverified {
   border-left: 4px solid var(--warn);
   background: var(--warn-soft);
+}
+
+/* Per-row "keep verbatim in Hindi" toggle. */
+.names-lock-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  font-size: 0.85rem;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.names-lock-toggle input {
+  cursor: pointer;
+}
+
+/* Warning variant of the info callout — used for the "check these names" banner over a
+   Hindi translation whose output could not carry some locked names. */
+.info-callout.warn {
+  color: var(--text);
+  background: var(--warn-soft);
+  border-color: var(--warn);
 }
 
 /* ---------- poster master references ---------- */
@@ -2502,6 +2638,56 @@ a.thread-node:hover {
   gap: 12px;
   padding: 40px 20px;
   text-align: center;
+}
+
+/* ---------- PDF translation: page picker + per-language result ---------- */
+
+.page-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.page-row {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fffdfa;
+  padding: 10px 14px;
+}
+
+.page-row-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.page-row-head input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+}
+
+.page-row-name {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.page-row-chars {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.doc-result-page {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--border);
 }
 
 .dlo-processing-title {

@@ -21,27 +21,45 @@ import {
 } from '@dgipr/database';
 import { generateArticlePoster } from '@dgipr/poster-renderer';
 import {
+  SocialPublishError,
+  publishFacebookPhotoPost,
+  publishTweet,
+  type PublishResult,
+} from '@dgipr/social-publisher';
+import {
   ArticleFeedbackRequestSchema,
+  CaptionFeedbackRequestSchema,
   CopySchema,
+  CreateArticlePosterRequestSchema,
   CreateGenerationRequestSchema,
   FiveWOneHSchema,
   GenerationStepSchema,
   PosterFeedbackRequestSchema,
   PosterImageFeedbackRequestSchema,
+  TWEET_MAX_LENGTH,
   TranslateGenerationRequestSchema,
+  UpdateCaptionRequestSchema,
   UpdateCopyRequestSchema,
+  isSocialCategory,
+  tweetWeightedLength,
   type GenerationDetail,
   type GenerationStep,
   type GenerationSummary,
   type ThreadItem,
 } from '@dgipr/schemas';
 import {
+  getCaptionReviseError,
   getReviseArticleError,
   getTranslateError,
+  getTranslateWarnings,
+  getTranslatingLanguage,
   isJobRunning,
   isRevisingArticle,
+  isRevisingCaption,
   isTranslating,
   startArticleFeedbackJob,
+  startArticlePosterJob,
+  startCaptionFeedbackJob,
   startConcurrentArticleFeedbackJob,
   startGenerationJob,
   startPosterFeedbackJob,
@@ -53,6 +71,37 @@ import { prepareTranslationTerms } from '../jobs/translation-terms.js';
 
 // Stage ping n8n POSTs to /generations/:id/progress after each social-post stage.
 const ProgressPingSchema = z.object({ step: GenerationStepSchema });
+
+// In-flight publish guard: posting to the official account is irreversible, so a
+// double click must never produce two live posts. In-process only (like the
+// runner's job registry) — resets on restart, fine for a seconds-long call.
+const publishing = new Set<string>();
+
+// Official-account credentials, read from env at point of use (repo pattern).
+// Empty/missing values → null so the route can 503 with a setup message.
+function twitterCredentialsFromEnv(): {
+  apiKey: string;
+  apiSecret: string;
+  accessToken: string;
+  accessSecret: string;
+} | null {
+  const apiKey = process.env.TWITTER_API_KEY?.trim();
+  const apiSecret = process.env.TWITTER_API_SECRET?.trim();
+  const accessToken = process.env.TWITTER_ACCESS_TOKEN?.trim();
+  const accessSecret = process.env.TWITTER_ACCESS_SECRET?.trim();
+  if (!apiKey || !apiSecret || !accessToken || !accessSecret) return null;
+  return { apiKey, apiSecret, accessToken, accessSecret };
+}
+
+function facebookCredentialsFromEnv(): {
+  pageId: string;
+  accessToken: string;
+} | null {
+  const pageId = process.env.FACEBOOK_PAGE_ID?.trim();
+  const accessToken = process.env.FACEBOOK_PAGE_ACCESS_TOKEN?.trim();
+  if (!pageId || !accessToken) return null;
+  return { pageId, accessToken };
+}
 
 // First non-empty line of the article, as a headline for history cards.
 function articleHeadline(article: string | null): string | null {
@@ -122,27 +171,37 @@ async function toDetail(
     outputType: row.outputType,
     category: row.category,
     designMode: row.designMode,
+    templateBrand: row.templateBrand,
     heading: row.heading,
     referenceImageId: row.referenceImageId,
     referenceTypeId: row.referenceTypeId,
     note: row.note,
     article: row.article,
     articleEnglish: row.articleEnglish,
+    articleHindi: row.articleHindi,
     factCheck: row.factCheck,
     copy: copy.success ? copy.data : null,
     fiveWOneH: fiveWOneH.success ? fiveWOneH.data : null,
     posterUrl: row.posterPath ? publicUrl(client, row.posterPath) : null,
     sceneUrl: row.scenePath ? publicUrl(client, row.scenePath) : null,
     posterVersions,
+    publishedUrl: row.publishedUrl,
+    publishedAt: row.publishedAt,
     error: row.error,
     // Translation runs beside the main job, so its state lives in the runner's
     // in-process registry rather than on the row (see startTranslateJob).
     translating: isTranslating(row.id),
+    translatingLanguage: getTranslatingLanguage(row.id),
     translateError: getTranslateError(row.id),
+    translateWarnings: getTranslateWarnings(row.id),
     // Article revision can run beside the poster render (same registry pattern as
     // translation), so its liveness/failure also come from the runner, not the row.
     articleRevising: isRevisingArticle(row.id),
     articleReviseError: getReviseArticleError(row.id),
+    // A social caption revision is likewise off the row's status (it edits a settled
+    // run and may overlap a poster re-render), so it reports from the same registry.
+    captionRevising: isRevisingCaption(row.id),
+    captionReviseError: getCaptionReviseError(row.id),
     costUsd: row.costUsd,
     costBreakdown: row.costBreakdown ?? null,
     createdAt: row.createdAt,
@@ -162,16 +221,21 @@ export function registerGenerationRoutes(
 ): void {
   app.post('/generations', async (request, reply) => {
     const body = CreateGenerationRequestSchema.parse(request.body);
-    // Twitter runs always need a design mode; default to 'onbrand' when absent.
-    const designMode =
-      body.category === 'twitter'
-        ? (body.designMode ?? 'onbrand')
-        : body.designMode;
+    // Social runs (twitter/facebook) always need a design mode; default to
+    // 'onbrand' when absent.
+    const designMode = isSocialCategory(body.category)
+      ? (body.designMode ?? 'onbrand')
+      : body.designMode;
+    // Template brand is a social-only concept; force 'dgipr' for news/scheme so a
+    // stray value can never route an article run into the CMO chrome branch.
+    const templateBrand = isSocialCategory(body.category)
+      ? (body.templateBrand ?? 'dgipr')
+      : 'dgipr';
     // Optional pin: must reference an existing library image of the matching
-    // category (twitter↔twitter, news/scheme↔article), and only for runs that
-    // actually render a poster.
+    // category (social↔twitter library, news/scheme↔article), and only for runs
+    // that actually render a poster.
     if (body.referenceImageId) {
-      if (body.category !== 'twitter' && body.outputType === 'article') {
+      if (!isSocialCategory(body.category) && body.outputType === 'article') {
         return reply.code(400).send({
           error: {
             message:
@@ -180,8 +244,9 @@ export function registerGenerationRoutes(
         });
       }
       const image = await getReferenceImageRow(client, body.referenceImageId);
-      const expectedCategory =
-        body.category === 'twitter' ? 'twitter' : 'article';
+      const expectedCategory = isSocialCategory(body.category)
+        ? 'twitter'
+        : 'article';
       if (!image || image.category !== expectedCategory) {
         return reply.code(400).send({
           error: { message: 'Unknown or mismatched reference image.' },
@@ -189,10 +254,10 @@ export function registerGenerationRoutes(
       }
     }
     if (body.referenceTypeId) {
-      if (body.category !== 'twitter') {
+      if (!isSocialCategory(body.category)) {
         return reply.code(400).send({
           error: {
-            message: 'A reference type can only be pinned for a Twitter run.',
+            message: 'A reference type can only be pinned for a social post.',
           },
         });
       }
@@ -200,6 +265,15 @@ export function registerGenerationRoutes(
       if (!type || type.category !== 'twitter') {
         return reply.code(400).send({
           error: { message: 'Unknown or mismatched reference type.' },
+        });
+      }
+      // The pinned type's brand must match the run's विभाग, or a CMO template would
+      // render under DGIPR chrome (or vice versa).
+      if (type.brand !== templateBrand) {
+        return reply.code(400).send({
+          error: {
+            message: 'Pinned reference type does not match the selected विभाग.',
+          },
         });
       }
     }
@@ -221,14 +295,16 @@ export function registerGenerationRoutes(
       outputType: body.outputType,
       category: body.category,
       designMode,
+      templateBrand,
       heading: body.heading,
       referenceImageId: body.referenceImageId,
       referenceTypeId: body.referenceTypeId,
       sourceGenerationId: body.sourceGenerationId,
       threadRootId,
     });
-    // Twitter → external n8n social-post job; news/scheme → in-process article pipeline.
-    if (row.category === 'twitter') {
+    // Twitter/Facebook → external n8n social-post job; news/scheme → in-process
+    // article pipeline.
+    if (isSocialCategory(row.category)) {
       startSocialPostJob(client, row.id);
     } else {
       startGenerationJob(client, row.id);
@@ -300,17 +376,15 @@ export function registerGenerationRoutes(
       const rootId = row.threadRootId ?? row.id;
       const members = await listThreadGenerations(client, rootId);
       const byId = new Map(members.map((m) => [m.id, m]));
-      return members.map(
-        (m): ThreadItem => ({
-          ...toSummary(client, m),
-          sourceGenerationId: m.sourceGenerationId,
-          // An edit-note rerun: the note differs from the direct source's. A
-          // FK-nulled source degrades to false rather than guessing.
-          noteChanged:
-            m.sourceGenerationId !== null &&
-            (byId.get(m.sourceGenerationId)?.note ?? m.note) !== m.note,
-        }),
-      );
+      return members.map((m): ThreadItem => ({
+        ...toSummary(client, m),
+        sourceGenerationId: m.sourceGenerationId,
+        // An edit-note rerun: the note differs from the direct source's. A
+        // FK-nulled source degrades to false rather than guessing.
+        noteChanged:
+          m.sourceGenerationId !== null &&
+          (byId.get(m.sourceGenerationId)?.note ?? m.note) !== m.note,
+      }));
     },
   );
 
@@ -369,6 +443,83 @@ export function registerGenerationRoutes(
     },
   );
 
+  // Feedback on a social run's caption. Separate from the article route above because
+  // the article pipeline rejects social categories by design (articleCategoryOf throws);
+  // this runs the caption editor instead. The job owns no status/step — it reports
+  // through the detail payload's captionRevising — so the finished post stays on screen
+  // and a poster re-render may be in flight at the same time. Guards, in order: the run
+  // must be social, must already have a caption (which also excludes an initial run
+  // still in flight — startSocialPostJob writes the caption last), and only one caption
+  // revision at a time.
+  app.post<{ Params: { id: string } }>(
+    '/generations/:id/caption/feedback',
+    async (request, reply) => {
+      const body = CaptionFeedbackRequestSchema.parse(request.body);
+      const row = await getGeneration(client, request.params.id);
+      if (!row) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'Generation not found.' } });
+      }
+      if (!isSocialCategory(row.category)) {
+        return reply.code(400).send({
+          error: { message: 'Only social-post runs have a caption.' },
+        });
+      }
+      if (!row.article) {
+        return reply
+          .code(409)
+          .send({ error: { message: 'No caption to revise yet.' } });
+      }
+      if (isRevisingCaption(row.id)) {
+        return reply.code(409).send({
+          error: { message: 'A caption revision is already running.' },
+        });
+      }
+      startCaptionFeedbackJob(client, row.id, body.feedback);
+      return reply.code(202).send({});
+    },
+  );
+
+  // Hand edit of a social run's caption: the officer typed it, so it is stored verbatim.
+  // Synchronous — no model call (same shape as the manual poster-copy edit below). Same
+  // guards as the feedback route, so a hand edit can't race the AI revision of the very
+  // text it replaces.
+  app.put<{ Params: { id: string } }>(
+    '/generations/:id/caption',
+    async (request, reply) => {
+      const body = UpdateCaptionRequestSchema.parse(request.body);
+      const row = await getGeneration(client, request.params.id);
+      if (!row) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'Generation not found.' } });
+      }
+      if (!isSocialCategory(row.category)) {
+        return reply.code(400).send({
+          error: { message: 'Only social-post runs have a caption.' },
+        });
+      }
+      if (!row.article) {
+        return reply
+          .code(409)
+          .send({ error: { message: 'No caption to edit yet.' } });
+      }
+      if (isRevisingCaption(row.id)) {
+        return reply.code(409).send({
+          error: { message: 'A caption revision is already running.' },
+        });
+      }
+      await updateGeneration(client, row.id, { article: body.caption });
+      await insertRevision(client, {
+        generationId: row.id,
+        target: 'manual_caption',
+        article: body.caption,
+      });
+      return reply.send({ caption: body.caption });
+    },
+  );
+
   // Pre-translation name check: extracts the article's proper nouns (merged with
   // glossary rows found in the text) so the user confirms/corrects the English
   // spellings BEFORE translating — the confirmed set then arrives on the translate
@@ -393,15 +544,17 @@ export function registerGenerationRoutes(
     },
   );
 
-  // On-demand English translation. Unlike the other jobs this one may run while the
-  // main job is still going — the article is persisted before the poster phase, so
+  // On-demand translation into `language` (English or Hindi; defaults to English so an
+  // older client's bare body still works). Unlike the other jobs this one may run while
+  // the main job is still going — the article is persisted before the poster phase, so
   // the UI offers Translate as soon as the article appears rather than making the
   // user wait out the poster render. It never touches status/step, so there is no
   // transition to flip here; the detail payload's `translating` flag keeps the client
   // polling. Re-translatable (e.g. after a name correction), so the only guards
-  // are: an article must exist, one translation at a time, and not while a revision
-  // is rewriting the very article we would translate. The body carries the
-  // user-confirmed names from the prepare step (optional for older clients).
+  // are: an article must exist, one translation at a time (either language — they share
+  // the Sarvam lane), and not while a revision is rewriting the very article we would
+  // translate. The body carries the user-confirmed names from the prepare step
+  // (optional for older clients).
   app.post<{ Params: { id: string } }>(
     '/generations/:id/translate',
     async (request, reply) => {
@@ -427,7 +580,63 @@ export function registerGenerationRoutes(
           .code(409)
           .send({ error: { message: 'The article is being revised.' } });
       }
-      startTranslateJob(client, row.id, body.terms);
+      startTranslateJob(client, row.id, body.language, body.terms);
+      return reply.code(202).send({});
+    },
+  );
+
+  // Attach a poster to an article run that has none (article-only runs, DLO
+  // runs, and poster-phase-failure retries). Same row — no new generation; the
+  // job reuses the stored article, so this costs one copy call + one render.
+  app.post<{ Params: { id: string } }>(
+    '/generations/:id/poster',
+    async (request, reply) => {
+      const body = CreateArticlePosterRequestSchema.parse(request.body ?? {});
+      const row = await getGeneration(client, request.params.id);
+      if (!row) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'Generation not found.' } });
+      }
+      if (isJobRunning(row.id)) {
+        return reply
+          .code(409)
+          .send({ error: { message: 'A job is already running.' } });
+      }
+      if (isSocialCategory(row.category)) {
+        return reply.code(400).send({
+          error: { message: 'Social posts always include a poster.' },
+        });
+      }
+      if (!row.article) {
+        return reply.code(409).send({
+          error: { message: 'No article to make a poster from yet.' },
+        });
+      }
+      if (row.posterPath) {
+        return reply.code(409).send({
+          error: { message: 'This generation already has a poster.' },
+        });
+      }
+      if (body.referenceImageId) {
+        const image = await getReferenceImageRow(client, body.referenceImageId);
+        if (!image || image.category !== 'article') {
+          return reply.code(400).send({
+            error: { message: 'Unknown or mismatched reference image.' },
+          });
+        }
+      }
+      // Flip BEFORE returning (same stale-poll race note as /poster/feedback).
+      // outputType 'both' is what engages the detail page's posterPending
+      // skeleton; a later edit-note rerun / failed-card retry then creates a
+      // 'both' run too — accepted.
+      await updateGeneration(client, row.id, {
+        status: 'running',
+        step: 'copy',
+        error: null,
+        outputType: 'both',
+      });
+      startArticlePosterJob(client, row.id, body.referenceImageId);
       return reply.code(202).send({});
     },
   );
@@ -570,6 +779,124 @@ export function registerGenerationRoutes(
           `attachment; filename="dgipr-poster-${row.id}.png"`,
         )
         .send(png);
+    },
+  );
+
+  // Post the poster + caption to the official account of the run's own platform
+  // (twitter → X, facebook → the Facebook Page). Synchronous — a publish is one
+  // media upload + one create (~3-10s). The latest live post URL is persisted on
+  // the row (migration 0021); re-publishing after a poster re-render overwrites it.
+  app.post<{ Params: { id: string } }>(
+    '/generations/:id/publish',
+    async (request, reply) => {
+      const row = await getGeneration(client, request.params.id);
+      if (!row) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'Generation not found.' } });
+      }
+      if (!isSocialCategory(row.category)) {
+        return reply.code(400).send({
+          error: { message: 'Only social-post runs can be published.' },
+        });
+      }
+      if (publishing.has(row.id)) {
+        return reply
+          .code(409)
+          .send({ error: { message: 'प्रकाशन आधीच सुरू आहे.' } });
+      }
+      if (isJobRunning(row.id)) {
+        return reply
+          .code(409)
+          .send({ error: { message: 'A job is already running.' } });
+      }
+      if (row.status !== 'completed') {
+        return reply
+          .code(409)
+          .send({ error: { message: 'The run has not completed yet.' } });
+      }
+      if (!row.posterPath || !row.article) {
+        return reply.code(409).send({
+          error: { message: 'No poster and caption to publish yet.' },
+        });
+      }
+      // Within-social platform branch — the legitimate divergence point the
+      // isSocialCategory() rule funnels toward (it guards social-vs-article
+      // routing; X and the Facebook Page genuinely need different APIs here).
+      const platform = row.category;
+      const twitterCredentials =
+        platform === 'twitter' ? twitterCredentialsFromEnv() : null;
+      const facebookCredentials =
+        platform === 'facebook' ? facebookCredentialsFromEnv() : null;
+      if (platform === 'twitter' && !twitterCredentials) {
+        return reply.code(503).send({
+          error: {
+            message:
+              'X (ट्विटर) खात्याची क्रेडेन्शियल्स कॉन्फिगर केलेली नाहीत — सर्व्हरच्या .env मध्ये TWITTER_API_KEY, TWITTER_API_SECRET, TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_SECRET सेट करा.',
+          },
+        });
+      }
+      if (platform === 'facebook' && !facebookCredentials) {
+        return reply.code(503).send({
+          error: {
+            message:
+              'फेसबुक पेजची क्रेडेन्शियल्स कॉन्फिगर केलेली नाहीत — सर्व्हरच्या .env मध्ये FACEBOOK_PAGE_ID व FACEBOOK_PAGE_ACCESS_TOKEN सेट करा.',
+          },
+        });
+      }
+      // Reject, never auto-truncate: silently shortening a Marathi caption and
+      // posting it to an official account irreversibly is worse than an error.
+      if (
+        platform === 'twitter' &&
+        tweetWeightedLength(row.article) > TWEET_MAX_LENGTH
+      ) {
+        return reply.code(422).send({
+          error: {
+            message:
+              'कॅप्शन X च्या २८० अक्षरांच्या मर्यादेपेक्षा मोठी आहे — फीडबॅक देऊन ती लहान करा आणि पुन्हा प्रयत्न करा.',
+          },
+        });
+      }
+
+      publishing.add(row.id);
+      try {
+        let result: PublishResult;
+        if (twitterCredentials) {
+          const imagePng = await downloadPng(client, row.posterPath);
+          result = await publishTweet({
+            credentials: twitterCredentials,
+            text: row.article,
+            imagePng,
+          });
+        } else if (facebookCredentials) {
+          result = await publishFacebookPhotoPost({
+            pageId: facebookCredentials.pageId,
+            accessToken: facebookCredentials.accessToken,
+            caption: row.article,
+            // Meta fetches the image itself — the public poster URL suffices.
+            imageUrl: publicUrl(client, row.posterPath),
+            apiVersion: process.env.FACEBOOK_GRAPH_API_VERSION,
+          });
+        } else {
+          // Unreachable: one of the credential guards above has already returned.
+          return reply.code(500).send({ error: { message: 'Unreachable.' } });
+        }
+        await updateGeneration(client, row.id, {
+          publishedUrl: result.postUrl,
+          publishedAt: new Date().toISOString(),
+        });
+        return reply.send({ postUrl: result.postUrl });
+      } catch (error) {
+        // Upstream platform failures (duplicate tweet, expired token, …) carry a
+        // readable message; 502 keeps the status honest vs the handler's 500.
+        if (error instanceof SocialPublishError) {
+          request.log.error({ err: error }, 'social publish failed');
+          return reply.code(502).send({ error: { message: error.message } });
+        }
+        throw error;
+      } finally {
+        publishing.delete(row.id);
+      }
     },
   );
 }

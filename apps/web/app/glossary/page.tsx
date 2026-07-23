@@ -38,12 +38,15 @@ function GlossaryRow({
   onChanged: () => void;
 }) {
   const [english, setEnglish] = useState(term.english);
+  const [hindi, setHindi] = useState(term.hindi ?? '');
   const [termType, setTermType] = useState<TermType>(term.termType);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const dirty =
-    english.trim() !== term.english || termType !== term.termType;
+    english.trim() !== term.english ||
+    hindi.trim() !== (term.hindi ?? '') ||
+    termType !== term.termType;
 
   const run = async (fn: () => Promise<unknown>) => {
     setBusy(true);
@@ -60,7 +63,11 @@ function GlossaryRow({
 
   const save = () =>
     run(() =>
-      updateGlossaryTerm(term.id, { english: english.trim(), termType }),
+      updateGlossaryTerm(term.id, {
+        english: english.trim(),
+        hindi: hindi.trim() || null,
+        termType,
+      }),
     );
   const toggleVerified = () =>
     run(() => updateGlossaryTerm(term.id, { verified: !term.verified }));
@@ -70,7 +77,9 @@ function GlossaryRow({
   };
 
   return (
-    <div className={`glossary-row ${term.verified ? 'is-verified' : 'is-unverified'}`}>
+    <div
+      className={`glossary-row ${term.verified ? 'is-verified' : 'is-unverified'}`}
+    >
       <div className="glossary-cell">
         <span className="glossary-field-label">{STR.glossaryMarathi}</span>
         <span className="glossary-marathi">{term.marathi}</span>
@@ -82,6 +91,16 @@ function GlossaryRow({
           type="text"
           value={english}
           onChange={(e) => setEnglish(e.target.value)}
+          disabled={busy}
+        />
+      </div>
+
+      <div className="glossary-cell">
+        <span className="glossary-field-label">{STR.glossaryHindi}</span>
+        <input
+          type="text"
+          value={hindi}
+          onChange={(e) => setHindi(e.target.value)}
           disabled={busy}
         />
       </div>
@@ -143,6 +162,7 @@ function GlossaryRow({
 function AddTermForm({ onAdded }: { onAdded: () => void }) {
   const [marathi, setMarathi] = useState('');
   const [english, setEnglish] = useState('');
+  const [hindi, setHindi] = useState('');
   const [termType, setTermType] = useState<TermType>('person');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -157,11 +177,13 @@ function AddTermForm({ onAdded }: { onAdded: () => void }) {
       await createGlossaryTerm({
         marathi: marathi.trim(),
         english: english.trim(),
+        hindi: hindi.trim() || undefined,
         termType,
         verified: true,
       });
       setMarathi('');
       setEnglish('');
+      setHindi('');
       setTermType('person');
       onAdded();
     } catch (e) {
@@ -192,6 +214,16 @@ function AddTermForm({ onAdded }: { onAdded: () => void }) {
             value={english}
             placeholder={STR.glossaryEnglishPlaceholder}
             onChange={(e) => setEnglish(e.target.value)}
+            disabled={busy}
+          />
+        </div>
+        <div className="glossary-cell">
+          <span className="glossary-field-label">{STR.glossaryHindi}</span>
+          <input
+            type="text"
+            value={hindi}
+            placeholder={STR.glossaryHindiPlaceholder}
+            onChange={(e) => setHindi(e.target.value)}
             disabled={busy}
           />
         </div>

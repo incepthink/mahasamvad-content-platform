@@ -19,10 +19,17 @@ import {
 } from '@dgipr/database';
 import {
   DloCategorySchema,
+  DloExtractRequestSchema,
   DloGenerateRequestSchema,
+  DloReextractFileRequestSchema,
   type DloIntakeDetail,
 } from '@dgipr/schemas';
-import { isIntakeJobRunning, startDloIntakeJob } from '../jobs/dlo-runner.js';
+import {
+  isIntakeJobRunning,
+  startDloExtractionJob,
+  startDloFileReextractionJob,
+  startDloIntakeJob,
+} from '../jobs/dlo-runner.js';
 import { startGenerationJob } from '../jobs/runner.js';
 
 // Meeting recordings are big (a 2h mp3 @128kbps ≈ 115 MB — the Sarvam batch
@@ -56,7 +63,10 @@ function storagePathFor(intakeId: string, index: number, name: string): string {
   return `intakes/${intakeId}/${index}-${safe || 'file'}`;
 }
 
-function toDetail(row: DloIntakeRow): DloIntakeDetail {
+// `includeText` carries the extracted text (per source, and page by page for
+// PDFs) plus the combined text. It is opt-in because the review step needs a whole
+// meeting transcript exactly once, while the 2.5 s poll behind it runs for minutes.
+function toDetail(row: DloIntakeRow, includeText: boolean): DloIntakeDetail {
   return {
     id: row.id,
     status: row.status,
@@ -71,8 +81,16 @@ function toDetail(row: DloIntakeRow): DloIntakeDetail {
       status: entry.status,
       ...(entry.chars !== undefined ? { chars: entry.chars } : {}),
       ...(entry.error !== undefined ? { error: entry.error } : {}),
+      // Lean on purpose: the page picker only needs the COUNT, so a scanned PDF
+      // awaiting selection costs the poll nothing.
+      ...(entry.pageCount !== undefined ? { pageCount: entry.pageCount } : {}),
+      ...(entry.pdfSource !== undefined ? { pdfSource: entry.pdfSource } : {}),
+      ...(includeText && entry.text !== undefined ? { text: entry.text } : {}),
+      ...(includeText && entry.pages !== undefined
+        ? { pages: [...entry.pages] }
+        : {}),
     })),
-    combinedText: row.combinedText,
+    combinedText: includeText ? row.combinedText : null,
     error: row.error,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -139,9 +157,7 @@ export function registerDloRoutes(
 
     const parsedCategory = DloCategorySchema.safeParse(category);
     if (!parsedCategory.success) {
-      return reply
-        .code(400)
-        .send({ error: { message: 'Unknown category.' } });
+      return reply.code(400).send({ error: { message: 'Unknown category.' } });
     }
     if (notes.trim().length === 0 && uploads.length === 0) {
       return reply.code(400).send({
@@ -180,7 +196,7 @@ export function registerDloRoutes(
     return reply.code(202).send({ id: row.id });
   });
 
-  app.get<{ Params: { id: string } }>(
+  app.get<{ Params: { id: string }; Querystring: { text?: string } }>(
     '/dlo/intakes/:id',
     async (request, reply) => {
       const row = await getDloIntake(client, request.params.id);
@@ -189,6 +205,7 @@ export function registerDloRoutes(
           .code(404)
           .send({ error: { message: 'Intake not found.' } });
       }
+      const includeText = request.query.text === '1';
       // Orphan check, same as the generation detail route: a row stuck in
       // queued/running whose job is not in this process died with a previous
       // server; fail it so the UI stops spinning.
@@ -198,9 +215,102 @@ export function registerDloRoutes(
       ) {
         const error = 'Server restarted while this job was running.';
         await updateDloIntake(client, row.id, { status: 'failed', error });
-        return toDetail({ ...row, status: 'failed', error });
+        return toDetail({ ...row, status: 'failed', error }, includeText);
       }
-      return toDetail(row);
+      return toDetail(row, includeText);
+    },
+  );
+
+  // "Read these pages." The officer's page choice for every scanned PDF in this intake —
+  // the one call that spends OCR credits, bounded to exactly what was ticked.
+  app.post<{ Params: { id: string } }>(
+    '/dlo/intakes/:id/extract',
+    async (request, reply) => {
+      const body = DloExtractRequestSchema.parse(request.body);
+      const row = await getDloIntake(client, request.params.id);
+      if (!row) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'Intake not found.' } });
+      }
+      if (row.status !== 'ready' || isIntakeJobRunning(row.id)) {
+        return reply
+          .code(409)
+          .send({ error: { message: 'या फाईलवर आधीच काम सुरू आहे.' } });
+      }
+      for (const selection of body.selections) {
+        const entry = row.files[selection.index];
+        if (!entry || entry.kind !== 'pdf') {
+          return reply
+            .code(404)
+            .send({ error: { message: 'File not found.' } });
+        }
+        const total = entry.pageCount;
+        if (total !== undefined) {
+          const outOfRange = selection.pages.filter(
+            (page) => page < 1 || page > total,
+          );
+          if (outOfRange.length > 0) {
+            return reply.code(400).send({
+              error: {
+                message: `निवडलेली पृष्ठे ${entry.name} मध्ये नाहीत: ${outOfRange.join(
+                  ', ',
+                )} (एकूण ${total} पृष्ठे).`,
+              },
+            });
+          }
+        }
+      }
+      // Flip the row BEFORE returning, for the same reason as the re-read below.
+      await updateDloIntake(client, row.id, {
+        status: 'running',
+        step: 'extract',
+        error: null,
+      });
+      startDloExtractionJob(client, row.id, body.selections);
+      return reply.code(202).send({ id: row.id });
+    },
+  );
+
+  // "This PDF came out wrong — read it with OCR instead." Re-reads ONE file of a
+  // ready intake; the officer's edits to the other sources live client-side and
+  // are untouched. The intake goes back to running, so the review step's existing
+  // poll shows the progress and picks up the new pages.
+  app.post<{ Params: { id: string; index: string } }>(
+    '/dlo/intakes/:id/files/:index/reextract',
+    async (request, reply) => {
+      const body = DloReextractFileRequestSchema.parse(request.body);
+      const row = await getDloIntake(client, request.params.id);
+      if (!row) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'Intake not found.' } });
+      }
+      const index = Number(request.params.index);
+      const entry = Number.isInteger(index) ? row.files[index] : undefined;
+      if (!entry) {
+        return reply.code(404).send({ error: { message: 'File not found.' } });
+      }
+      if (entry.kind !== 'pdf') {
+        return reply.code(400).send({
+          error: { message: 'फक्त PDF फाईल पुन्हा वाचता येते.' },
+        });
+      }
+      if (row.status !== 'ready' || isIntakeJobRunning(row.id)) {
+        return reply
+          .code(409)
+          .send({ error: { message: 'या फाईलवर आधीच काम सुरू आहे.' } });
+      }
+      // Flip the row BEFORE returning, not inside the job: the client refreshes
+      // the moment this 202 lands, and a row still reading 'ready' would stop its
+      // poll and sit there while the OCR ran.
+      await updateDloIntake(client, row.id, {
+        status: 'running',
+        step: 'extract',
+        error: null,
+      });
+      startDloFileReextractionJob(client, row.id, index, body.pages);
+      return reply.code(202).send({ id: row.id });
     },
   );
 

@@ -10,6 +10,11 @@ export const REFERENCE_TYPES_TABLE = 'reference_types';
 export type CopyStyle =
   'alert' | 'campaign' | 'info_bullets' | 'quote' | 'timeline' | 'generic';
 
+// Template brand family (migration 0024): 'dgipr' (the default classifier pool) or
+// 'cmo' (the मंत्रिमंडळ निर्णय family). Kept as a plain string union so this package
+// stays dependency-free; mirrors TemplateBrandSchema in @dgipr/schemas.
+export type TemplateBrand = 'dgipr' | 'cmo';
+
 export type ReferenceTypeRow = Readonly<{
   id: string;
   category: ReferenceCategory;
@@ -17,6 +22,7 @@ export type ReferenceTypeRow = Readonly<{
   labelMr: string;
   description: string;
   copyStyle: CopyStyle;
+  brand: TemplateBrand;
   isBuiltin: boolean;
   createdAt: string;
   updatedAt: string;
@@ -29,6 +35,7 @@ type ReferenceTypeDbRow = {
   label_mr: string;
   description: string;
   copy_style: CopyStyle;
+  brand: TemplateBrand | null;
   is_builtin: boolean;
   created_at: string;
   updated_at: string;
@@ -42,6 +49,9 @@ function fromDbRow(row: ReferenceTypeDbRow): ReferenceTypeRow {
     labelMr: row.label_mr,
     description: row.description,
     copyStyle: row.copy_style,
+    // ?? 'dgipr': a pre-0024 database has no such column (undefined), which would
+    // otherwise strip from payloads and break the web's default.
+    brand: row.brand ?? 'dgipr',
     isBuiltin: row.is_builtin,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -128,6 +138,7 @@ export async function insertReferenceTypeRow(
 export type ReferenceTypePatch = Readonly<{
   labelMr?: string | undefined;
   description?: string | undefined;
+  brand?: TemplateBrand | undefined;
 }>;
 
 export async function updateReferenceTypeRow(
@@ -138,6 +149,7 @@ export async function updateReferenceTypeRow(
   const row: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (patch.labelMr !== undefined) row.label_mr = patch.labelMr;
   if (patch.description !== undefined) row.description = patch.description;
+  if (patch.brand !== undefined) row.brand = patch.brand;
   const { data, error } = await client
     .from(REFERENCE_TYPES_TABLE)
     .update(row)
