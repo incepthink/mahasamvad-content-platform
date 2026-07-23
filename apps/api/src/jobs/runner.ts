@@ -288,6 +288,24 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
     const row = await getGeneration(client, id);
     if (!row) throw new Error(`Generation ${id} not found.`);
 
+    // Media-room flow: the note IS the finished article. Skip retrieval + article
+    // generation entirely — persist the note verbatim as the article and derive the
+    // poster copy straight from it. (No factCheck/5W1H/brief is produced; those
+    // columns stay null and the detail page treats them as optional.)
+    if (row.articleProvided) {
+      await updateGeneration(client, id, {
+        status: 'running',
+        step: 'copy',
+        article: row.note,
+        error: null,
+      });
+      // Defensive — the media-room page never sends outputType 'article', but if
+      // it did there is no poster to render.
+      if (row.outputType === 'article') return;
+      await runArticlePosterPhase(client, id, row.note, row.referenceImageId);
+      return;
+    }
+
     await updateGeneration(client, id, {
       status: 'running',
       step: 'retrieve',

@@ -123,6 +123,11 @@ export const CreateGenerationRequestSchema = z
     // derives the thread root server-side. Absent = a new thread root (the
     // home form).
     sourceGenerationId: z.string().uuid().optional(),
+    // The media-room flow: the note IS a finished article (article/poster path
+    // only). When true the runner uses it verbatim as the article and skips
+    // generateArticle, deriving the poster copy straight from it. Inert for
+    // social runs (twitter/facebook), whose caption is always written fresh.
+    providedArticle: z.boolean().optional(),
   })
   .superRefine((value, ctx) => {
     if (value.referenceImageId && value.referenceTypeId) {

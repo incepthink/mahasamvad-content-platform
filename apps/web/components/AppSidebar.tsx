@@ -14,6 +14,7 @@ import {
   BookOpen,
   Clapperboard,
   History,
+  ImagePlus,
   Languages,
   LayoutTemplate,
   Menu,
@@ -21,7 +22,6 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   SpellCheck,
-  SquarePen,
   X,
 } from 'lucide-react';
 import { STR } from '../lib/strings';
@@ -30,13 +30,13 @@ import { TasksMenu } from './TasksMenu';
 const COLLAPSED_KEY = 'sidebar-collapsed';
 
 const NAV_LINKS = [
-  { href: '/', label: STR.navNew, Icon: SquarePen },
+  { href: '/', label: STR.navNew, Icon: ImagePlus },
+  { href: '/dlo', label: STR.navDlo, Icon: Mic },
   { href: '/generations', label: STR.navHistory, Icon: History },
   { href: '/translate', label: STR.navTranslate, Icon: Languages },
   { href: '/proofread', label: STR.navProofread, Icon: SpellCheck },
   { href: '/glossary', label: STR.navGlossary, Icon: BookOpen },
   { href: '/references', label: STR.navReferences, Icon: LayoutTemplate },
-  { href: '/dlo', label: STR.navDlo, Icon: Mic },
   { href: '/video', label: STR.navVideo, Icon: Clapperboard },
 ] as const;
 

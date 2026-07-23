@@ -50,6 +50,10 @@ export type GenerationRow = Readonly<{
   // Lineage/audit: the DLO intake this run's note came from (null = home form
   // or detail-page follow-up). Insert-only, like the pins.
   dloIntakeId: string | null;
+  // The media-room flow (migration 0027): the note IS a finished article, so the
+  // runner uses it verbatim and skips generateArticle. false for every ordinary
+  // run and for rows created before this feature.
+  articleProvided: boolean;
   status: GenerationStatus;
   step: string | null;
   error: string | null;
@@ -120,6 +124,7 @@ type GenerationDbRow = {
   source_generation_id: string | null;
   thread_root_id: string | null;
   dlo_intake_id: string | null;
+  article_provided: boolean | null;
   status: GenerationStatus;
   step: string | null;
   error: string | null;
@@ -158,6 +163,9 @@ function fromDbRow(row: GenerationDbRow): GenerationRow {
     sourceGenerationId: row.source_generation_id,
     threadRootId: row.thread_root_id,
     dloIntakeId: row.dlo_intake_id,
+    // ?? false: a pre-0027 database returns no such column (undefined), and an
+    // ordinary run is not article-provided anyway.
+    articleProvided: row.article_provided ?? false,
     status: row.status,
     step: row.step,
     error: row.error,
@@ -257,6 +265,8 @@ export async function insertGeneration(
     sourceGenerationId?: string | undefined;
     threadRootId?: string | undefined;
     dloIntakeId?: string | undefined;
+    // Insert-only: the note is a finished article; the runner skips generation.
+    articleProvided?: boolean | undefined;
   }>,
 ): Promise<GenerationRow> {
   const { data, error } = await client
@@ -273,6 +283,7 @@ export async function insertGeneration(
       source_generation_id: input.sourceGenerationId ?? null,
       thread_root_id: input.threadRootId ?? null,
       dlo_intake_id: input.dloIntakeId ?? null,
+      article_provided: input.articleProvided ?? false,
     })
     .select()
     .single();

@@ -15,7 +15,7 @@ import type {
 export const STR = {
   appName: 'महासंवाद मजकूर मंच',
   appSubtitle: 'माहिती व जनसंपर्क महासंचालनालय, महाराष्ट्र शासन',
-  navNew: 'नवीन मजकूर',
+  navNew: 'मीडिया रूम',
   navHistory: 'मागील काम',
   navTranslate: 'भाषांतर',
   navProofread: 'मुद्रितशोधन',
@@ -31,6 +31,18 @@ export const STR = {
   newTitle: 'नवीन लेख / पोस्टर तयार करा',
   noteLabel: 'टिपणी येथे लिहा किंवा चिकटवा',
   noteHint: 'Paste your official note (टिपणी) here',
+
+  // Media-room home page: paste a FINISHED article, then make a poster / social post
+  // from it (no article is written here — the pasted text is used as-is).
+  mediaRoomTitle: 'पोस्टर व सोशल पोस्ट तयार करा',
+  articlePasteLabel: 'पूर्ण लेख येथे चिकटवा',
+  articlePasteHint:
+    'तयार झालेला लेख येथे चिकटवा — त्यावरून पोस्टर व सोशल पोस्ट तयार होईल.',
+  articlePastePlaceholder:
+    'उदा. पूर्ण तयार झालेला मराठी लेख येथे चिकटवा… हाच लेख पोस्टर व सोशल पोस्टचा आधार असेल.',
+  mediaOutputLabel: 'काय तयार करायचे?',
+  categoryPoster: 'पोस्टर',
+  categoryPosterDesc: 'लेखावर आधारित मराठी पोस्टर',
   notePlaceholder:
     'उदा. शासन निर्णय, बैठकीची टिपणी, योजनेची माहिती… ही टिपणीच लेखाचा एकमेव आधार असेल.',
   uploadTxt: 'किंवा .txt फाईल निवडा',

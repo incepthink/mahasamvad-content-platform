@@ -301,6 +301,12 @@ export function registerGenerationRoutes(
       referenceTypeId: body.referenceTypeId,
       sourceGenerationId: body.sourceGenerationId,
       threadRootId,
+      // Media-room flow: the note is a finished article the runner should use
+      // verbatim. Only meaningful on the article/poster path — inert for social.
+      articleProvided:
+        body.providedArticle && !isSocialCategory(body.category)
+          ? true
+          : undefined,
     });
     // Twitter/Facebook → external n8n social-post job; news/scheme → in-process
     // article pipeline.

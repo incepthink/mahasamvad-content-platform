@@ -1,38 +1,58 @@
 'use client';
 
-// New generation: paste/upload the note (टिपणी), pick article/poster/both, one
-// primary action. Redirects to the generation's progress page on success.
+// Media-room page: paste a FINISHED article, then turn it into a poster, a
+// Facebook post, or a Twitter post. No article is written here — the pasted text
+// is the sole source and is used as-is (providedArticle) for the poster path.
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Bird, Image as ImageIcon, ThumbsUp } from 'lucide-react';
 import { isSocialCategory } from '@dgipr/schemas';
-import type {
-  Category,
-  DesignMode,
-  OutputType,
-  TemplateBrand,
-} from '@dgipr/schemas';
+import type { Category, DesignMode, TemplateBrand } from '@dgipr/schemas';
 import { createGeneration } from '../lib/api';
-import {
-  BRAND_OPTIONS,
-  CATEGORY_OPTIONS,
-  DESIGN_OPTIONS,
-  OUTPUT_OPTIONS,
-} from '../lib/generationOptions';
+import { BRAND_OPTIONS, DESIGN_OPTIONS } from '../lib/generationOptions';
 import { useTasks } from '../lib/TasksProvider';
 import { STR } from '../lib/strings';
 import ReferencePicker, {
   type ReferenceSelection,
 } from '../components/ReferencePicker';
 
+// The three outputs this page offers. "पोस्टर" runs the article-poster path
+// (category 'scheme') on the pasted article verbatim; the other two are the
+// existing social lanes. Built locally so the shared CATEGORY_OPTIONS (reused by
+// the detail-page "next step" panel) is left untouched.
+const OUTPUT_CHOICES = [
+  {
+    value: 'scheme',
+    icon: ImageIcon,
+    name: STR.categoryPoster,
+    desc: STR.categoryPosterDesc,
+  },
+  {
+    value: 'twitter',
+    icon: Bird,
+    name: STR.categoryTwitter,
+    desc: STR.categoryTwitterDesc,
+  },
+  {
+    value: 'facebook',
+    icon: ThumbsUp,
+    name: STR.categoryFacebook,
+    desc: STR.categoryFacebookDesc,
+  },
+] as const satisfies ReadonlyArray<{
+  value: Category;
+  icon: typeof ImageIcon;
+  name: string;
+  desc: string;
+}>;
+
 export default function NewGenerationPage() {
   const router = useRouter();
   const { addTask, openPanel, hasActiveSocialTask, hasActiveArticleTask } =
     useTasks();
   const [note, setNote] = useState('');
-  const [heading, setHeading] = useState('');
   const [category, setCategory] = useState<Category>('scheme');
-  const [outputType, setOutputType] = useState<OutputType>('both');
   const [designMode, setDesignMode] = useState<DesignMode>('onbrand');
   const [templateBrand, setTemplateBrand] = useState<TemplateBrand>('dgipr');
   const [reference, setReference] = useState<ReferenceSelection | null>(null);
@@ -48,17 +68,15 @@ export default function NewGenerationPage() {
   const isCmo = isSocial && templateBrand === 'cmo';
 
   // Which library the template picker shows: twitter masters for the social flows
-  // (except 'fresh' — no master is edited; CMO always edits a master), article masters
-  // for news/scheme runs that render a poster. null hides the picker entirely.
+  // (except 'fresh' — no master is edited; CMO always edits a master), article
+  // masters for the पोस्टर path (which always renders a poster). null hides it.
   const pickerCategory: 'twitter' | 'article' | null = isSocial
     ? isCmo
       ? 'twitter'
       : designMode === 'fresh'
         ? null
         : 'twitter'
-    : outputType !== 'article'
-      ? 'article'
-      : null;
+    : 'article';
   // CMO templates live under the twitter category but the 'cmo' brand; every other
   // social/article poster is DGIPR.
   const pickerBrand: TemplateBrand = isCmo ? 'cmo' : 'dgipr';
@@ -66,7 +84,7 @@ export default function NewGenerationPage() {
   // A pin is only meaningful for the combination it was chosen under.
   useEffect(() => {
     setReference(null);
-  }, [category, designMode, outputType, templateBrand]);
+  }, [category, designMode, templateBrand]);
 
   // विभाग is a social-only concept; snap it back to DGIPR whenever the run is not a
   // social post, so switching category can never leave a stray CMO brand set.
@@ -106,10 +124,12 @@ export default function NewGenerationPage() {
     try {
       const id = await createGeneration({
         note: note.trim(),
-        heading: heading.trim(),
         category,
-        // Social posts always produce a poster + caption; outputType is ignored by the runner.
-        outputType: isSocial ? 'poster' : outputType,
+        // Always a poster here (the runner ignores outputType for social).
+        outputType: 'poster',
+        // The पोस्टर path uses the pasted article verbatim (skip generateArticle);
+        // inert for social, whose caption is always written fresh by n8n.
+        providedArticle: !isSocial,
         designMode: isSocial ? designMode : undefined,
         templateBrand: isSocial ? templateBrand : undefined,
         referenceImageId:
@@ -118,7 +138,7 @@ export default function NewGenerationPage() {
       });
       if (isSocial) {
         // Background task: don't navigate. Track it, open the panel, reset the form
-        // to a non-social default so the now-disabled social cards read clearly.
+        // to the poster default so the now-disabled social cards read clearly.
         addTask(id);
         openPanel();
         setNote('');
@@ -138,17 +158,17 @@ export default function NewGenerationPage() {
 
   return (
     <main className="page">
-      <h1 className="page-title">{STR.newTitle}</h1>
+      <h1 className="page-title">{STR.mediaRoomTitle}</h1>
 
       <section className="card">
         <label className="field-label" htmlFor="note">
-          {STR.noteLabel}
+          {STR.articlePasteLabel}
         </label>
-        <p className="hint">{STR.noteHint}</p>
+        <p className="hint">{STR.articlePasteHint}</p>
         <textarea
           id="note"
           className="note-input"
-          placeholder={STR.notePlaceholder}
+          placeholder={STR.articlePastePlaceholder}
           value={note}
           onChange={(e) => setNote(e.target.value)}
           style={{ marginTop: 10 }}
@@ -172,28 +192,13 @@ export default function NewGenerationPage() {
       </section>
 
       <section className="card">
-        <label className="field-label" htmlFor="heading">
-          {STR.headingLabel}
-        </label>
-        <p className="hint">{STR.headingHint}</p>
-        <input
-          id="heading"
-          type="text"
-          placeholder={STR.headingPlaceholder}
-          value={heading}
-          onChange={(e) => setHeading(e.target.value)}
-          style={{ marginTop: 10 }}
-        />
-      </section>
-
-      <section className="card">
-        <h2>{STR.categoryLabel}</h2>
-        <div className="output-picker output-picker-four">
-          {CATEGORY_OPTIONS.map((option) => {
+        <h2>{STR.mediaOutputLabel}</h2>
+        <div className="output-picker">
+          {OUTPUT_CHOICES.map((option) => {
             // v1 allows one active task per lane at a time: the ट्विटर/फेसबुक cards
             // are gated by an in-flight social run (they share one n8n workflow),
-            // the news/scheme cards by an in-flight article run (the lanes don't
-            // block each other).
+            // the पोस्टर card by an in-flight article run (the lanes don't block
+            // each other).
             const disabled = isSocialCategory(option.value)
               ? hasActiveSocialTask
               : hasActiveArticleTask;
@@ -271,28 +276,7 @@ export default function NewGenerationPage() {
             </section>
           ) : null}
         </>
-      ) : (
-        <section className="card">
-          <h2>{STR.outputTypeLabel}</h2>
-          <div className="output-picker">
-            {OUTPUT_OPTIONS.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                className="output-option"
-                aria-pressed={outputType === option.value}
-                onClick={() => setOutputType(option.value)}
-              >
-                <span className="icon" aria-hidden="true">
-                  <option.icon size={30} strokeWidth={1.75} />
-                </span>
-                <span className="name">{option.name}</span>
-                <span className="desc">{option.desc}</span>
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
+      ) : null}
 
       {pickerCategory ? (
         // Keyed by category+brand so switching either remounts the picker: the reset
