@@ -12,6 +12,10 @@ import {
   ReferenceImageSchema,
   ReferenceTypeSchema,
   ThreadItemSchema,
+  CreateDocumentResponseSchema,
+  DocumentDetailSchema,
+  type CreateDocumentResponse,
+  type DocumentDetail,
   CreateTranslateDocumentResponseSchema,
   InterpretDocumentInstructionResponseSchema,
   TranslateDocumentDetailSchema,
@@ -216,6 +220,14 @@ export async function sendCaptionFeedback(
   });
 }
 
+// Write the first caption for a social run created poster-only. 202 — the job reports
+// through the detail payload's captionRevising, like the feedback path.
+export async function generateCaption(id: string): Promise<void> {
+  await requestJson(`/api/generations/${id}/caption/generate`, {
+    method: 'POST',
+  });
+}
+
 // Hand edit of a social run's caption — stored verbatim, no model call, returns once
 // saved.
 export async function updateCaption(
@@ -293,6 +305,24 @@ export async function sendPosterImageFeedback(
   });
 }
 
+// Regenerate a social run's poster as a brand-new, differently-designed version (the
+// fully-AI path re-designs from scratch). The escape hatch for a garbled-text render; the
+// row flips to running and the caller just refreshes to start polling the new poster.
+//
+// `recolour` is the "different colours" redo: it additionally bars the run's current palette
+// family, so the new version cannot come back in the colours just rejected. It is still a full
+// re-render, not a recolour of the existing pixels — the copy is rewritten too.
+export async function regeneratePoster(
+  id: string,
+  options: { recolour?: boolean } = {},
+): Promise<void> {
+  await requestJson(`/api/generations/${id}/poster/regenerate`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ recolour: options.recolour === true }),
+  });
+}
+
 export async function updatePosterCopy(
   id: string,
   copy: Copy,
@@ -340,6 +370,64 @@ export async function translateText(
     body: JSON.stringify(input),
   });
   return TranslateTextResponseSchema.parse(body);
+}
+
+// ---------- generic document intake (/api/documents) ----------
+//
+// Upload a PDF/DOCX/TXT and get its pages back. Used by every surface that takes a file
+// but does not persist one (the media room, /proofread). The job lives in the API's memory
+// only, so every call here can legitimately 404 once its TTL passes or the API restarts;
+// the server's Marathi message says so and the UI sends the user back to the upload step.
+
+// Uploads one file and returns the job id plus what the free probe learned: its kind, how
+// many pages it has, and whether reading them will cost OCR credits. NOTHING has been read
+// yet on a scanned PDF — extractDocumentIntakePages decides what gets paid for. No
+// content-type header: the browser sets the multipart boundary.
+export async function createDocumentIntake(
+  form: FormData,
+): Promise<CreateDocumentResponse> {
+  const response = await fetch(`${API_URL}/api/documents`, {
+    method: 'POST',
+    body: form,
+  });
+  const body = await readJsonResponse(response);
+  return CreateDocumentResponseSchema.parse(body);
+}
+
+// `includeText` is opt-in because the payload carries the whole document: poll without it
+// and fetch once with it when a phase finishes.
+export async function getDocumentIntake(
+  id: string,
+  includeText = false,
+): Promise<DocumentDetail> {
+  const body = await requestJson(
+    `/api/documents/${id}${includeText ? '?text=1' : ''}`,
+  );
+  return DocumentDetailSchema.parse(body);
+}
+
+// "Read these pages." The request that actually spends OCR credits on a scanned document,
+// and it spends them only on the pages listed here.
+export async function extractDocumentIntakePages(
+  id: string,
+  pages: number[],
+): Promise<void> {
+  await requestJson(`/api/documents/${id}/extract`, {
+    method: 'POST',
+    body: JSON.stringify({ pages }),
+  });
+}
+
+// "The text came out wrong — read it with OCR instead." Carries the page selection because
+// overruling the QUALITY gate is not a reason to re-OCR pages the user already excluded.
+export async function reextractDocumentIntake(
+  id: string,
+  pages: number[],
+): Promise<void> {
+  await requestJson(`/api/documents/${id}/reextract`, {
+    method: 'POST',
+    body: JSON.stringify({ source: 'ocr', pages }),
+  });
 }
 
 // ---------- PDF translation (/translate document path) ----------

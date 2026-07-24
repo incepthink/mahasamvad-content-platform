@@ -13,7 +13,7 @@
 // with coarse grid positions — still numbered, so the n8n prompt's "apply the
 // correspondingly numbered change" wording keeps working either way.
 
-import { chatCompleteVision } from './openai-chat.js';
+import { chatCompleteVision, VISION_MODEL } from './openai-chat.js';
 
 export type FeedbackAnnotationInput = Readonly<{
   // 1-based, matching the badge drawn on the poster.
@@ -39,9 +39,10 @@ export type InterpretedImageFeedback = Readonly<{
   source: 'vision' | 'fallback';
 }>;
 
-// Spatial reasoning over a full poster + Devanagari reading needs the full
-// model, not the gpt-4o-mini default the analyzer uses.
-const INTERPRETER_MODEL = 'gpt-4o';
+// Spatial reasoning over a full poster + Devanagari reading needs the authoring tier.
+// VISION_MODEL (gpt-5.6-terra) is that tier and is env-overridable, so this no longer
+// pins its own id.
+const INTERPRETER_MODEL = VISION_MODEL;
 const MAX_INSTRUCTION_CHARS = 1_500;
 
 // Coarse position words from a 3x3 grid over the region's center — used both in

@@ -51,16 +51,22 @@ reference_url, layout_summary, has_photo_zone }` to the `article-poster-v1-api`
     `generateImage`+`generateArticlePoster` Chromium path (kept as fallback). Job state
     of record is the `generations` row (status/step/error), so polling clients survive
     refreshes.
-  - `startSocialPostJob` (both social categories — see below) sends the note plus the
-    full reference-type catalog
-    (`types` built by `buildTwitterCatalog`; `forced_type`/`forced_reference_url`
-    non-empty when the run pinned an image or a whole type) to `social-post-v2-api`,
-    along with `platform` (the row's category — currently inert, the hook for a future
-    per-platform branch).
-    The workflow paints only the poster body (its prompts erase the master's
-    emblem/footer and reserve those zones); the API stamps `poster-logo.png`
-    (top-right) + `poster-footer.png` (bottom) in code (`overlayTwitterChrome`) on
-    every returned PNG — initial and image-feedback renders alike.
+  - `startSocialPostJob` (both social categories) now runs classify → pick master → copy
+    → build image prompt **in the API** (`@dgipr/content-engine`), and the thin
+    `social-post-v2-api` workflow (5 nodes) only EDITS the chosen image with the API-built
+    prompt (see the 2026-07-24 milestone in AGENTS.md — supersedes the older "workflow
+    classifies/copies" notes). Sequence: `resolveSocialReference` (pin/CMO/`classifyPosterType`)
+    → `selectMaster` (content-aware, seeded — not random) → `generatePosterCopy` (gpt-5.6-luna,
+    env `OPENAI_COPY_MODEL`; applies `lockSchemeNames` so a scheme name stays full/verbatim) →
+    `buildPosterPrompt` → `renderSocialPosterViaN8n(id, imageUrl, prompt)`. `step` is set
+    directly at each stage (`classify`/`copy`/`image`) — the old n8n Ping nodes fired after the
+    response and never reached the UI. `design_mode: 'fresh'` calls `generateImage` directly
+    (no master). The API stamps `poster-logo.png` (top-right) + `poster-footer.png` (bottom) in
+    code (`overlayTwitterChrome`) on every returned PNG — initial and image-feedback alike.
+    The **caption is written by the API** (`generateSocialCaption`), **opt-in** — a social run
+    is poster-only unless `generateCaption` was set, produced AFTER the poster row-write so a
+    caption failure never costs the paid render. A run that skipped it gets one later via
+    `startGenerateCaptionJob`.
   - `startArticleFeedbackJob`, `startPosterFeedbackJob` (`copy` re-renders with the
     **cached** scene; `scene` regenerates the background image).
   - `startPosterImageFeedbackJob` (pixel feedback, both poster kinds): with marker
@@ -68,7 +74,7 @@ reference_url, layout_summary, has_photo_zone }` to the `article-poster-v1-api`
     (`annotateFeedbackRegions`), uploads `feedback-marked-v{n}-{ts}.png` (timestamped
     per attempt — the version counter only advances on success, so a failed round +
     resubmit would otherwise collide on the same path), turns marks +
-    notes into one element-aware instruction via a gpt-4o vision pass
+    notes into one element-aware instruction via a `VISION_MODEL` vision pass
     (`interpretImageFeedback`, raw-notes fallback), and sends the marked URL +
     `marker_count` to n8n — whose feedback prompts branch on it (0 = legacy prompt
     byte-for-byte, so plain text feedback is unchanged). Web side:
@@ -146,8 +152,8 @@ reference_url, layout_summary, has_photo_zone }` to the `article-poster-v1-api`
   `packages/content-engine/src/video/*` (`plan-video-scenes.ts` — the planner that
   decides scene count (2-8, bucket = preference only) + per-scene Marathi `beat` +
   English `shotHint` + target window, citizen-first tiering; `generate-video-script.ts`
-  gpt-4o JSON+repair writing narration AGAINST that plan with code-computed word
-  budgets, then ONE bounded coverage round (gpt-4o-mini check + at most one repair,
+  JSON+repair writing narration AGAINST that plan with code-computed word
+  budgets, then ONE bounded coverage round (a coverage check + at most one repair,
   accepted either way); narration char cap = `VIDEO_NARRATION_MAX_CHARS` in schemas,
   the single source shared with the script-save schema;
   `video-prompts.ts` — every visual prompt HARD-FORBIDS on-screen text since video
@@ -187,13 +193,26 @@ reference_url, layout_summary, has_photo_zone }` to the `article-poster-v1-api`
   web button + two-step confirm in `apps/web/components/SocialPostView.tsx`.
   Env `TWITTER_*` + `FACEBOOK_PAGE_*`; credential walkthrough in
   `docs/social-publishing-setup.md`.
-- Caption editing on a social run (the caption is `generations.article`): two paths on
+- Social captions (the caption is `generations.article`) — **written by the API, opt-in,
+  and separable from the poster.** The engine is
+  `packages/content-engine/src/generation/generate-caption.ts` (`generateSocialCaption`;
+  the retired n8n `Build Caption Request` node's house style ported verbatim — 📍 place
+  line, inline hashtags only, `@MahaDGIPR` last, note as sole fact source — with X's 280
+  stated as a rule only for `twitter`). Three ways in, all on `SocialPostView`:
+  at creation (`generateCaption` on `POST /generations`, default **false**, toggle under
+  the format cards); on demand for a poster-only run
+  (`POST /api/generations/:id/caption/generate` → `startGenerateCaptionJob`, guarded on
+  completed + no existing caption); or typed by hand (`PUT …/caption`, whose "no caption
+  yet" 409 now only fires on an unfinished run, so a first caption can be typed).
+  `startGenerateCaptionJob` inserts **no** revision row — nothing was revised, and an
+  extra row would advance `nextVersion()` and misnumber the next poster.
+- Caption editing on a social run: two paths on
   the same detail-page card (`SocialPostView`) — a **hand edit** (the caption is a
   read-only `.social-caption` block until "कॅप्शन बदला" swaps in a textarea;
   `PUT /api/generations/:id/caption`, synchronous, no model call) and an **AI
   revision** (`POST /api/generations/:id/caption/feedback` → `startCaptionFeedbackJob` →
   `reviseCaption` in `packages/content-engine/src/generation/revise-caption.ts`; one
-  gpt-4o call + one repair, note-as-sole-fact-source guardrails, numerals re-scriptable
+  chat call + one repair, note-as-sole-fact-source guardrails, numerals re-scriptable
   but never re-valued). The article feedback route cannot serve this — `reviseArticle`
   goes through `articleCategoryOf`, which hard-fails on a social category. Like
   translation, the job owns **no** status/step and reports through the detail payload's
@@ -238,7 +257,52 @@ reference_url, layout_summary, has_photo_zone }` to the `article-poster-v1-api`
   `startTranslateJob` in `apps/api/src/jobs/runner.ts`; web → `ArticleView` toggle +
   `apps/web/app/translate/page.tsx` selector. Harness:
   `tsx --env-file=../../.env src/generation/translate-article.ts [en|hi]`.
-- **PDF text extraction (both PDF surfaces — `/translate`'s PDF mode and DLO intake).**
+- **Shared document intake (pdf/docx/txt) — the layer every upload surface sits on.**
+  Engine dispatcher → `packages/content-engine/src/intake/document.ts`
+  (`documentKindOf` / `probeDocument` / `extractDocument`; PDFs delegate to `pdf-pages.ts`
+  unchanged, DOCX to `docx.ts`, TXT to the new `text-file.ts` — which deliberately does NOT
+  run `unwrapSoftLineBreaks`, that being a fix for PDF line-wrapping, not for authored
+  text). The property the whole stack rests on: **a non-PDF always returns its pages at
+  PROBE time** (reading it was local and free), so the page-selection step disappears for
+  txt/docx with no branch in the UI — there is nothing to choose because nothing is being
+  bought. Shared shapes → `packages/schemas/src/document.ts` (`DocumentDetail`,
+  `DocumentPage`, `ExtractDocumentRequest`, …; `translate-document.ts` IMPORTS these rather
+  than redefining them, and the index exports `document.js` first, so each name has one
+  definition). Generic ephemeral service → `apps/api/src/jobs/document-intake.ts` +
+  `apps/api/src/routes/documents.ts` (`POST /api/documents` probes only, `GET /:id?text=1`,
+  `POST /:id/extract`, `POST /:id/reextract`; in-memory, 60-min TTL, bytes held for the
+  job's life). Web → `apps/web/components/DocumentPages.tsx` (**the** page list:
+  text-layer/OCR badge, per-page editor, OCR-override confirm — used by all four surfaces),
+  `components/PageRangeSelector.tsx` (**the** page picker — see below),
+  `components/DocumentIntake.tsx` (the whole ephemeral upload→pick→review flow, for surfaces
+  that just want a string — in two modes: **handoff** (`onText`, the default) commits only
+  when "हा मजकूर वापरा" is pressed, right for a surface whose one box the file REPLACES
+  (/translate, /proofread); **live** (`onTextChange`) streams the current text as it changes
+  and hides the button, for a surface that keeps the file BESIDE its own box (the media
+  room), where an unpressed button silently discarded the whole upload),
+  `lib/useDocumentIntake.ts`,
+  `lib/documentSelection.ts`. Neither `DocumentPages` nor `PageRangeSelector` holds selection
+  state, on purpose — the surfaces disagree about how to store one (/translate tracks pages
+  it WANTS, /dlo tracks keys the officer EXCLUDED across several files), so they ask a
+  predicate and report events.
+  **Page selection is a RANGE FIELD, not a row of checkboxes** (`PageRangeSelector`): a
+  checkbox per page is unusable at the 20-50 pages a real scanned booklet has. The field
+  takes "1-5, 8, 10-12" (Devanagari digits accepted) and an expand toggle reveals a grid of
+  numbered chips, animated open by transitioning the grid's own `0fr → 1fr` height so it fits
+  any page count with no magic max-height. `parsePageRanges`/`formatPageRanges` in
+  `lib/documentSelection.ts` are the pure two-way conversion. The load-bearing trick: a typed
+  range is applied by **toggling only the pages that differ** from the current selection,
+  never by setting a set — that is what keeps one component compatible with both a "wanted"
+  and an "excluded" model, since every parent's `onToggle` is a functional update.
+  A document that has NOT been read shows the selector alone (its text does not exist yet);
+  a read one shows the selector folded above the editable rows. `showSelectAll={false}`
+  (/dlo, whose card header is already the file's select-all) and `showRangeSelector={false}`
+  are the escape hatches. Adopted by ALL FOUR surfaces inline — the "फाईलमधून मजकूर घ्या"
+  fold is gone everywhere, so the capability looks identical on every page. `/dlo`'s backend
+  is still its own (`dlo-runner.ts` owns its job state; converging it onto
+  `document-intake.ts` — which would also give DLO `.txt` — is the named follow-up).
+  Harness: `tsx --env-file=../../.env src/intake/document.ts <file> [--probe] [--pages=2,5]`.
+- **PDF text extraction (every surface that takes a PDF — the shared intake and DLO).**
   **Nothing is read until the user has picked pages.** Upload runs `probePdf` only (page
   count + a local text-layer attempt + verdict — free, never calls Sarvam); the pages the
   user then selects arrive as `ExtractPdfOptions.pages` and are the ONLY pages sent to OCR.
@@ -268,30 +332,51 @@ reference_url, layout_summary, has_photo_zone }` to the `article-poster-v1-api`
   them one at a time. Page numbers are the DOCUMENT's throughout — blank pages are kept,
   never renumbered away. Harness:
   `tsx --env-file=../../.env src/intake/pdf-pages.ts <file.pdf> [--ocr|--text] [--pages=2,5,9] [--probe]`.
-- PDF translation (`/translate` → **PDF फाईल** mode; the pasted-text mode is unchanged and
-  still synchronous): background job → `apps/api/src/jobs/translate-document.ts` (IN-MEMORY
-  registry, 60-min TTL, the PDF held only in that registry — nothing is stored, so a 404 =
-  "expired or API restarted, upload again"). Upload only PROBES (`startDocument`, awaited so
-  the 202 carries `pageCount`/`needsOcr` and an unreadable PDF fails the upload rather than
-  becoming a job that exists to report its own failure). A born-digital file lands straight
-  in `ready` with its free text-layer pages — behaviourally unchanged, the review list is
-  its page picker. A scanned one stops at the new **`selecting`** status with only a page
-  count, and `POST /translate/documents/:id/extract { pages }` reads exactly what was ticked.
-  `selecting` is idle like `ready`, so it must stay OUT of `useTranslateDocument`'s `active`
-  poll set. Routes → the `/translate/documents*` block in
-  `apps/api/src/routes/translate.ts` (upload 202 / poll / extract / reextract / interpret /
-  prepare / translate; `GET ?text=1` for the heavy payload, the 2.5 s poll goes lean);
-  per-page text →
-  the extraction policy above, with the detail payload carrying `source` (`text-layer` |
-  `ocr`, badged in the review card) and `extractProgress` (pages, for chunked OCR);
-  per-page routing → `packages/content-engine/src/generation/translate-document.ts`
-  (English page + English target = **verbatim passthrough**, never re-written; English page +
-  Hindi target = `sourceLanguage: 'en'` on the Sarvam endpoint); page instruction →
-  `interpret-document-instruction.ts` (**structural only** — resolves to page numbers, regex
-  first incl. Devanagari digits, gpt-4o-mini only for content-based asks; never reaches the
-  translator); schemas → `packages/schemas/src/translate-document.ts`; web →
-  `apps/web/components/TranslateDocumentPanel.tsx` + `lib/useTranslateDocument.ts`. Harness:
-  `tsx --env-file=../../.env src/generation/interpret-document-instruction.ts "<सूचना>"`.
+- **`/translate` has ONE flow — there is no PDF mode.** A file (pdf/docx/txt) is read by the
+  shared `<DocumentIntake>` and its text lands in the SAME box the user could have pasted
+  into; from there it is the pasted-text path exactly, synchronous, name check and all
+  (`apps/web/app/translate/page.tsx`). `TRANSLATE_TEXT_MAX_CHARS` is therefore 60,000, not
+  10,000 — a whole document has to fit — and `translateArticle` already chunks internally, so
+  the cap bounds how LONG one synchronous request runs, not whether it works. The intake is
+  given that cap as `maxChars`, which is what makes page selection the way to trim an
+  over-long booklet.
+  The **dead** per-page/per-language document path (background job, `selecting` status, AI
+  page instruction, separate English/Hindi page-by-page results) still exists server-side and
+  is deliberately left intact but UNUSED: `apps/api/src/jobs/translate-document.ts`, the
+  `/translate/documents*` routes in `apps/api/src/routes/translate.ts`,
+  `packages/content-engine/src/generation/translate-document.ts`,
+  `interpret-document-instruction.ts`, `packages/schemas/src/translate-document.ts` (whose
+  shared shapes ARE still imported by `document.ts`). Its web half
+  (`TranslateDocumentPanel.tsx`, `useTranslateDocument.ts`) is deleted. Restore from git if
+  per-page translation is ever wanted back; do not assume the routes are live. Harness (still
+  works): `tsx --env-file=../../.env src/generation/interpret-document-instruction.ts "<सूचना>"`.
+- **Social poster look = TWO assigned rotations, not the model's taste.** A fresh (fully-AI)
+  social poster gets a **colour palette** (`generation/poster-palettes.ts` — 18 entries, 3 per
+  family across `cool|teal|green|purple|neutral|warm`, each with 4 exact **hex** values and a
+  family-tinted light ground; only `warm` may be cream) and a **composition archetype**
+  (`generation/poster-layouts.ts` — 11 archetypes with a `coverage` tag, a hard photo filter and
+  a copyStyle filter). Both are picked per run by a seeded, recency-aware picker that drops
+  recent FAMILIES/coverages first, then ids. `art-direction.ts` designs WITHIN both and chooses
+  neither — with a palette assigned, `palette` is not even in its json_schema.
+  **The one thing that must never regress:** `build-poster-prompt.ts` emits the assigned hexes as
+  a `COLOUR SPECIFICATION` block whenever a palette is present. It used to emit the art director's
+  paraphrase INSTEAD, which made the whole rotation nearly inert (see the 2026-07-24 diversity
+  milestone in AGENTS.md). Colour is also stripped out of the master's `layoutSummary`
+  (`generation/strip-colour-words.ts`) and out of the ranking criterion
+  (`rankMasterByNote(..., { ignoreColour })`), because the master library is overwhelmingly
+  saffron/maroon/cream and those were live leak channels.
+  What a run was assigned + what it MEASURED is persisted as `generations.poster_style` (0028,
+  shape + parser in `generation/poster-style.ts`); `listRecentPosterStyles` feeds the next run's
+  avoid set, using the **measured** hue buckets as well as the assigned families — if the image
+  model ignores the spec, avoiding intentions achieves nothing. Measurement is
+  `measurePosterColours` (`packages/poster-renderer/src/poster-colours.ts`, **chroma not HSL
+  saturation** — HSL rates a pale cream at 0.84 and would report a poster's background as its
+  dominant colour), run on the RAW poster before chrome. A mismatch is logged, never retried.
+  The style write is a SEPARATE best-effort update after the poster write, so a database missing
+  0028 loses the rotation memory rather than the paid render. Harnesses (all free):
+  `tsx src/generation/{poster-palettes,poster-layouts,poster-style,strip-colour-words,build-poster-prompt}.ts`;
+  `pnpm --filter @dgipr/poster-renderer poster:preview:colours <poster.png|url> …` measures
+  finished posters (accepts URLs, so a set of live posters can be checked for sameness).
 - Article gen / coverage / faithfulness / revisions →
   `packages/content-engine/src/generation/*`
   (`generate-article.ts`, `verify-coverage.ts`, `generate-copy.ts`, `revise-*.ts`,
@@ -316,7 +401,16 @@ reference_url, layout_summary, has_photo_zone }` to the `article-poster-v1-api`
 
 **Web flow (user journey starts here):**
 
-- Entry / create a generation → `apps/web/app/page.tsx`
+- Entry / create a generation (the media room: paste a finished article, upload a file, or
+  **both** — the upload runs `DocumentIntake` in **live** mode, so the file's text is a
+  SECOND source held beside the textarea (`docText`) and joined with it at submit
+  (`combinedNote`), never pushed into it. That is what makes "either one or both" true with
+  no extra click: the earlier append-on-button-press meant an upload nobody handed over was
+  dropped and the submit answered `कृपया किमान २० अक्षरांची टिपणी लिहा`. A run consumes the
+  document — `clearDocument()` drops the sessionStorage job id and remounts the card on BOTH
+  submit paths, or navigating back would silently re-attach it to the next run. The caption
+  toggle for a social run lives in the same `काय तयार करायचे?` card) →
+  `apps/web/app/page.tsx`
 - Generation detail (progress, article, poster, feedback) →
   `apps/web/app/generations/[id]/page.tsx`; history list →
   `apps/web/app/generations/page.tsx`
@@ -356,7 +450,11 @@ after it, so without the constraint value the save lands and the request still 5
 `0025` — `glossary_terms.hindi` (optional per-name Hindi spelling; additive + nullable,
 null = the Hindi lock keeps the Marathi form, so an old API is unaffected — apply before
 the API deploy). `0026` — `video_projects` table + public `videos` bucket (explainer
-videos; new table, apply before the API deploy).
+videos; new table, apply before the API deploy). `0028` —
+`generations.poster_style` (jsonb: the colour palette + composition a social poster run was
+assigned, and what its render measured; feeds the next run's avoid set). Additive + nullable, so
+an older API is unaffected — and the runner writes it in a SEPARATE best-effort update after the
+poster write, so an un-applied 0028 costs the rotation memory rather than a paid render.
 
 **Aux / not on the main request path:**
 
@@ -514,7 +612,7 @@ Chromium): `pnpm --filter @dgipr/poster-renderer exec playwright install chromiu
     (API first, then `pnpm n8n:push`): new API + old workflow degrades to a generic-subject
     photo, while new workflow + old API would leave the circle empty.
 - **Whether a poster may contain a photo comes from the master's PIXELS, not its type
-  description.** A vision pass (`references/analyze-template.ts`, gpt-4o-mini) runs once
+  description.** A vision pass (`references/analyze-template.ts`, `VISION_MODEL`) runs once
   per uploaded master and caches `{ hasPhotoZone, bulletSlots, layoutSummary }` on
   `reference_images.layout_spec` (migration 0016); `buildTwitterCatalog` ships it to n8n
   as the picked image's `layout_spec`. `social-post-v2-api` branches on it: with
@@ -569,11 +667,34 @@ Chromium): `pnpm --filter @dgipr/poster-renderer exec playwright install chromiu
 - **All OpenAI traffic goes through `packages/content-engine/src/http/openai-request.ts`**
   (`openAiFetch`) — never `fetch` `api.openai.com` directly. It serializes calls process-wide
   (`OPENAI_MAX_CONCURRENCY`, default 1) and retries 429/5xx using the wait OpenAI names in its
-  `retry-after` / `x-ratelimit-reset-*` headers. One article is 8-15 gpt-4o calls of ~5-8k
-  tokens each, so on a 30k-TPM org concurrency > 1 reliably 429s; a `429 insufficient_quota`
+  `retry-after` / `x-ratelimit-reset-*` headers. One article is 8-15 calls of ~5-8k
+  tokens each — plus gpt-5.6 reasoning tokens, which count toward the same TPM budget — so
+  on a 30k-TPM org concurrency > 1 reliably 429s; a `429 insufficient_quota`
   (billing, not rate) fails fast instead of backing off. Retry warnings in the log are the
   mechanism working, not a fault. `poster-renderer`'s image call and `sarvam-chat.ts` are not
   yet covered.
+- **Every OpenAI text/vision call runs on gpt-5.6, in two env-configurable tiers**
+  (`packages/content-engine/src/generation/openai-chat.ts`): `CHAT_MODEL`
+  (`OPENAI_CHAT_MODEL`, default `gpt-5.6-terra`) is authoring + judgement and the default
+  for any caller that doesn't name a model; `UTILITY_MODEL` (`OPENAI_UTILITY_MODEL`,
+  `gpt-5.6-luna`) is mechanical work a deterministic step re-checks (rank-master's
+  tie-break, page-instruction parsing, offline finetune prep); `VISION_MODEL`
+  (`OPENAI_VISION_MODEL`, `gpt-5.6-terra`) is the image-input calls. `POSTER_COPY_MODEL`
+  (`OPENAI_COPY_MODEL`) and `ANALYZE_MODEL` (`OPENAI_ANALYZE_MODEL`) stay as separate pins
+  for the poster path and the must-be-vision-capable master analysis. Two consequences the
+  whole codebase depends on: **`temperature` is rejected by gpt-5**, so the temperature-0
+  determinism ~24 call sites passed is silently inert — the deterministic post-filters
+  (proof-read's verbatim-excerpt/digit guards, `lock-scheme-names`, the translate name
+  repair, the video `fact_index` grounding) are the real guard, and `reasoningEffort`
+  (default `'medium'`) is the quality lever that replaced it; and **`max_completion_tokens`
+  is shared between reasoning and the answer**, so `chatComplete` adds `REASONING_HEADROOM`
+  on top of the caller's `maxTokens` — a caller's `maxTokens` still means "room for the
+  answer", and an exhausted budget now reports `finish_reason: 'length'` in the error
+  rather than a bare "no content". Image (`gpt-image-2`) and embeddings
+  (`text-embedding-3-large`) are deliberately NOT on 5.6 — different model families, and
+  changing the embedding model would invalidate every stored vector (0019's
+  `halfvec(1024)`). Rollback is env-only: the pre-gpt-5 request body is preserved
+  byte-for-byte, so `OPENAI_CHAT_MODEL=gpt-4o` restores the old behaviour exactly.
 - **Env & secrets:** config comes from the root `.env` (see `.env.example`:
   Supabase + OpenAI, optional Sarvam). Never commit secrets.
 - **Scraped output** under `packages/content-engine/data/` is gitignored — don't

@@ -20,6 +20,11 @@ export * from './api.js';
 // DLO intake API schemas (file transcription/extraction → reviewed note).
 export * from './dlo.js';
 
+// Uploaded documents (pdf/docx/txt) becoming pages of text — shared by /translate, /dlo,
+// the media room and /proofread. Exported BEFORE translate-document.js, which imports
+// from it, so each name has exactly one definition in this barrel.
+export * from './document.js';
+
 // PDF translation on /translate (page-wise OCR job; nothing stored).
 export * from './translate-document.js';
 

@@ -1,8 +1,11 @@
 // OpenAI chat completions for article generation (PROJECT_CONTEXT step 12).
 //
-// gpt-4o is a strong multilingual model and handles long-form Marathi (Devanagari)
-// prose well. We call the REST API directly — same style as
-// embedding/openai-embeddings.ts — to avoid pulling in the OpenAI SDK.
+// Every OpenAI text/vision call in this repo runs on the gpt-5.6 family: terra for
+// authoring and judgement (long-form Marathi prose, coverage/faithfulness, poster copy,
+// reading a poster's pixels), luna for mechanical work (tie-breaks, offline data prep).
+// Both handle Devanagari without the Latin-script leakage gpt-4o-mini showed. We call the
+// REST API directly — same style as embedding/openai-embeddings.ts — to avoid pulling in
+// the OpenAI SDK.
 //
 // Every request goes through openAiFetch, which serializes calls process-wide and retries
 // transient failures (429/5xx). Do not call fetch against api.openai.com directly.
@@ -12,12 +15,28 @@ import { recordChatUsage, type ChatUsage } from '../cost/cost-meter.js';
 
 const CHAT_URL = 'https://api.openai.com/v1/chat/completions';
 
-export const CHAT_MODEL = 'gpt-4o';
+// The three model tiers, all env-configurable so a future model swap is an .env edit and
+// not a code change. Setting all three back to their gpt-4o predecessors
+// (OPENAI_CHAT_MODEL=gpt-4o, OPENAI_UTILITY_MODEL=gpt-4o-mini,
+// OPENAI_VISION_MODEL=gpt-4o-mini) restores the pre-5.6 behaviour exactly, because the
+// pre-gpt-5 request body below is preserved byte-for-byte.
+
+// Authoring + judgement: anything that writes or grades Marathi prose. The default for
+// every caller that does not pass `model`.
+export const CHAT_MODEL = process.env.OPENAI_CHAT_MODEL ?? 'gpt-5.6-terra';
+
+// Mechanical work whose output is a short structured answer a later deterministic step
+// re-checks anyway — ranking tie-breaks, page-instruction parsing, offline corpus prep.
+export const UTILITY_MODEL = process.env.OPENAI_UTILITY_MODEL ?? 'gpt-5.6-luna';
 
 // Bound the completion so one runaway generation can't silently cost several times a
-// normal run (unbounded, gpt-4o defaults to its 16,384-token ceiling). 4096 is ~2x the
+// normal run (unbounded, the model defaults to its own ceiling). 4096 is ~2x the
 // largest current output (~2,000 tk draft), so it never truncates normal output. Callers
 // with a known-tighter (short JSON verifiers) or longer need can override via maxTokens.
+//
+// NOTE: maxTokens means "room for the ANSWER" at every call site. On gpt-5 the wire field
+// max_completion_tokens covers reasoning tokens too, so the request adds REASONING_HEADROOM
+// on top rather than making every caller pad its own number.
 const DEFAULT_MAX_TOKENS = 4096;
 
 // Headroom for the passes that emit a whole article body (draft, sectioned assembly,
@@ -32,10 +51,68 @@ export type ChatMessage = Readonly<{
   content: string;
 }>;
 
+// gpt-5.x reasoning effort. Only consulted for gpt-5* models; ignored on gpt-4o.
+export type ReasoningEffort = 'none' | 'low' | 'medium' | 'high';
+
+// Deliberation is the quality lever on gpt-5, and it replaces the one we lost: gpt-5
+// rejects `temperature`, so the temperature-0 determinism that ~24 call sites relied on
+// is no longer available. 'medium' is therefore the default for every caller — this
+// pipeline's work is judgement-heavy (write Marathi prose, grade coverage, decide whether
+// a fact is preserved), not lookup. Callers whose answer is a short mechanical choice
+// pass 'low' explicitly.
+const DEFAULT_REASONING_EFFORT: ReasoningEffort = 'medium';
+
+// Extra max_completion_tokens granted purely for reasoning, so a caller's maxTokens keeps
+// meaning "room for the answer". Without this, a tight cap (rank-master asks for 200
+// tokens of JSON) is consumed entirely by reasoning and the call returns EMPTY content —
+// which surfaces as `finish_reason: 'length'` in the error below.
+const REASONING_HEADROOM: Readonly<Record<ReasoningEffort, number>> = {
+  none: 0,
+  low: 2_048,
+  medium: 8_192,
+  high: 16_384,
+};
+
 type ChatResponse = {
-  choices: Array<{ message: { content: string | null } }>;
+  choices: Array<{ message: { content: string | null }; finish_reason?: string }>;
   usage?: ChatUsage;
 };
+
+// gpt-5 request params, shared by chatComplete and chatCompleteVision: no `temperature`
+// (a non-default value is a 400), `max_completion_tokens` instead of `max_tokens`, and a
+// reasoning budget added on top of the caller's answer budget.
+function gpt5Params(
+  maxTokens: number,
+  reasoningEffort: ReasoningEffort | undefined,
+): Record<string, unknown> {
+  const effort = reasoningEffort ?? DEFAULT_REASONING_EFFORT;
+  return {
+    max_completion_tokens: maxTokens + REASONING_HEADROOM[effort],
+    reasoning_effort: effort,
+  };
+}
+
+// An empty completion is almost always a budget miss on gpt-5 (reasoning ate the cap), and
+// "response contained no content" alone sends the reader looking in the wrong place.
+function noContentError(label: string, body: ChatResponse): Error {
+  const finish = body.choices[0]?.finish_reason;
+  const hint =
+    finish === 'length'
+      ? ' The completion budget was exhausted (finish_reason: length) — on gpt-5 that ' +
+        'usually means reasoning consumed it; raise maxTokens or lower reasoningEffort.'
+      : finish
+        ? ` (finish_reason: ${finish})`
+        : '';
+  return new Error(`OpenAI ${label} response contained no content.${hint}`);
+}
+
+// The gpt-5 family speaks a different request dialect than gpt-4o — verified against the
+// live API: `temperature` other than the default 1 is a 400, the completion cap is
+// `max_completion_tokens` (not `max_tokens`), and it accepts an optional `reasoning_effort`.
+// Everything before gpt-5 keeps the exact body it sent before, byte-for-byte.
+export function isGpt5Model(model: string): boolean {
+  return /^gpt-5/.test(model);
+}
 
 function requireApiKey(): string {
   const key = process.env.OPENAI_API_KEY;
@@ -58,22 +135,46 @@ export async function chatComplete(
   options?: {
     temperature?: number;
     responseFormat?: 'json_object';
+    // A strict json_schema (name + schema). Overrides responseFormat when both are
+    // given. The poster copy path uses this to force exactly-shaped output.
+    jsonSchema?: { name: string; schema: unknown };
     model?: string;
     maxTokens?: number;
+    // gpt-5* only; defaults to 'medium'. Ignored on gpt-4o (no reasoning stage).
+    reasoningEffort?: ReasoningEffort;
   },
 ): Promise<string> {
   const model = options?.model ?? CHAT_MODEL;
+  const maxTokens = options?.maxTokens ?? DEFAULT_MAX_TOKENS;
+  const responseFormat = options?.jsonSchema
+    ? {
+        response_format: {
+          type: 'json_schema' as const,
+          json_schema: {
+            name: options.jsonSchema.name,
+            strict: true,
+            schema: options.jsonSchema.schema,
+          },
+        },
+      }
+    : options?.responseFormat
+      ? { response_format: { type: options.responseFormat } }
+      : {};
+  // gpt-5* rejects `temperature` and `max_tokens`; gpt-4o keeps its exact prior body.
+  const modelParams = isGpt5Model(model)
+    ? gpt5Params(maxTokens, options?.reasoningEffort)
+    : {
+        temperature: options?.temperature ?? 0.4,
+        max_tokens: maxTokens,
+      };
   const response = await openAiFetch(CHAT_URL, {
     label: 'chat',
     apiKey: requireApiKey(),
     body: {
       model,
       messages,
-      temperature: options?.temperature ?? 0.4,
-      max_tokens: options?.maxTokens ?? DEFAULT_MAX_TOKENS,
-      ...(options?.responseFormat
-        ? { response_format: { type: options.responseFormat } }
-        : {}),
+      ...modelParams,
+      ...responseFormat,
     },
   });
 
@@ -82,7 +183,7 @@ export async function chatComplete(
   recordChatUsage(model, body.usage);
   const content = body.choices[0]?.message.content;
   if (!content) {
-    throw new Error('OpenAI chat response contained no content.');
+    throw noContentError('chat', body);
   }
   return content;
 }
@@ -90,10 +191,12 @@ export async function chatComplete(
 // Vision variant: one user turn carrying a prompt plus one image. chatComplete's
 // ChatMessage.content is a plain string and cannot express the multimodal content
 // array, and this is the only caller that needs one — so it lives here rather than
-// widening every text call site. Used to read a master template's layout off its
-// pixels (references/analyze-template.ts). Cheap model by default: the answer is a
-// three-field JSON description, not prose.
-export const VISION_MODEL = 'gpt-4o-mini';
+// widening every text call site. Used to read a master template's layout off its pixels
+// (references/analyze-template.ts) and to locate the element a feedback marker points at
+// (generation/interpret-image-feedback.ts). Both are careful reads of a dense Devanagari
+// poster, so the default is the authoring tier, not a cheap one — gpt-4o-mini used to sit
+// here and leaked Latin script into Marathi readings.
+export const VISION_MODEL = process.env.OPENAI_VISION_MODEL ?? 'gpt-5.6-terra';
 
 export async function chatCompleteVision(
   prompt: string,
@@ -103,9 +206,20 @@ export async function chatCompleteVision(
     responseFormat?: 'json_object';
     model?: string;
     maxTokens?: number;
+    // gpt-5* only; defaults to 'medium'. Ignored on gpt-4o/gpt-4o-mini (no reasoning stage).
+    reasoningEffort?: ReasoningEffort;
   },
 ): Promise<string> {
   const model = options?.model ?? VISION_MODEL;
+  const maxTokens = options?.maxTokens ?? 600;
+  // gpt-5* rejects `temperature` and `max_tokens`, exactly as in chatComplete; a pre-gpt-5
+  // vision model (gpt-4o-mini) keeps the exact body it sent before.
+  const modelParams = isGpt5Model(model)
+    ? gpt5Params(maxTokens, options?.reasoningEffort)
+    : {
+        temperature: options?.temperature ?? 0,
+        max_tokens: maxTokens,
+      };
   const response = await openAiFetch(CHAT_URL, {
     label: 'vision',
     apiKey: requireApiKey(),
@@ -120,8 +234,7 @@ export async function chatCompleteVision(
           ],
         },
       ],
-      temperature: options?.temperature ?? 0,
-      max_tokens: options?.maxTokens ?? 600,
+      ...modelParams,
       ...(options?.responseFormat
         ? { response_format: { type: options.responseFormat } }
         : {}),
@@ -132,7 +245,7 @@ export async function chatCompleteVision(
   recordChatUsage(model, body.usage);
   const content = body.choices[0]?.message.content;
   if (!content) {
-    throw new Error('OpenAI vision response contained no content.');
+    throw noContentError('vision', body);
   }
   return content;
 }

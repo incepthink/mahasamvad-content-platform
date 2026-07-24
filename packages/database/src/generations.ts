@@ -54,6 +54,11 @@ export type GenerationRow = Readonly<{
   // runner uses it verbatim and skips generateArticle. false for every ordinary
   // run and for rows created before this feature.
   articleProvided: boolean;
+  // The visual style this social poster run was assigned, plus what its render actually
+  // measured (migration 0028). `unknown` here for the same reason as `copy`: the database
+  // package does not depend on the shape, and the runner validates it. null on every
+  // non-social run and on rows created before 0028.
+  posterStyle: unknown;
   status: GenerationStatus;
   step: string | null;
   error: string | null;
@@ -125,6 +130,7 @@ type GenerationDbRow = {
   thread_root_id: string | null;
   dlo_intake_id: string | null;
   article_provided: boolean | null;
+  poster_style: unknown;
   status: GenerationStatus;
   step: string | null;
   error: string | null;
@@ -166,6 +172,9 @@ function fromDbRow(row: GenerationDbRow): GenerationRow {
     // ?? false: a pre-0027 database returns no such column (undefined), and an
     // ordinary run is not article-provided anyway.
     articleProvided: row.article_provided ?? false,
+    // ?? null: a pre-0028 database returns no such column (undefined), which callers
+    // must see as "no assigned style" rather than as undefined.
+    posterStyle: row.poster_style ?? null,
     status: row.status,
     step: row.step,
     error: row.error,
@@ -218,6 +227,7 @@ export type GenerationPatch = Partial<
     | 'scenePrompt'
     | 'scenePath'
     | 'posterPath'
+    | 'posterStyle'
     | 'publishedUrl'
     | 'publishedAt'
   >
@@ -242,6 +252,7 @@ function patchToDbRow(patch: GenerationPatch): Record<string, unknown> {
   if (patch.scenePrompt !== undefined) row.scene_prompt = patch.scenePrompt;
   if (patch.scenePath !== undefined) row.scene_path = patch.scenePath;
   if (patch.posterPath !== undefined) row.poster_path = patch.posterPath;
+  if (patch.posterStyle !== undefined) row.poster_style = patch.posterStyle;
   if (patch.publishedUrl !== undefined) row.published_url = patch.publishedUrl;
   if (patch.publishedAt !== undefined) row.published_at = patch.publishedAt;
   return row;
@@ -400,6 +411,30 @@ export async function listGenerations(
     throw new Error(`Failed to list generations: ${error.message}`);
   }
   return ((data ?? []) as GenerationDbRow[]).map(fromDbRow);
+}
+
+// The visual styles the most recent social poster runs were assigned, newest first
+// (migration 0028). Feeds the palette/composition recency rings so consecutive posters
+// differ — replacing the in-process Map that reset on every API restart and could not be
+// seen by a second process.
+//
+// Returns the raw jsonb values; the caller validates and reads what it needs. Rows without a
+// style (pre-0028, or a run whose render failed) are excluded by the query rather than
+// returned as nulls, so `limit` always means "the last N styles that exist".
+export async function listRecentPosterStyles(
+  client: SupabaseClient,
+  limit = 8,
+): Promise<unknown[]> {
+  const { data, error } = await client
+    .from(GENERATIONS_TABLE)
+    .select('poster_style')
+    .not('poster_style', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) {
+    throw new Error(`Failed to list recent poster styles: ${error.message}`);
+  }
+  return ((data ?? []) as Array<{ poster_style: unknown }>).map((r) => r.poster_style);
 }
 
 // All members of a thread (the root itself + every follow-up), oldest first.

@@ -519,6 +519,47 @@ textarea.note-input {
   margin-top: 8px;
 }
 
+/* An opt-in that belongs WITH a card row rather than beside it — the caption toggle
+   under the social format cards. Deliberately not another card: it is a modifier of the
+   choice above, not a fourth choice. */
+.option-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 2px solid var(--border);
+  border-radius: 14px;
+  cursor: pointer;
+}
+
+.option-toggle:hover {
+  border-color: var(--accent);
+}
+
+.option-toggle input {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.option-toggle-name {
+  display: block;
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.option-toggle-desc {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
 /* Same cards, two choices (e.g. the poster-template auto/manual switch). */
 .output-picker-two {
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -890,6 +931,24 @@ textarea.note-input {
   border: 1px solid var(--border);
   border-radius: 14px;
   background: #fffdfa;
+}
+
+/* A finished post that was created poster-only. Occupies the caption's slot so the card
+   reads as complete-but-missing-a-part rather than broken. */
+.caption-empty {
+  padding: 14px 16px;
+  border: 1px dashed var(--border);
+  border-radius: 14px;
+  background: #fffdfa;
+}
+
+.caption-empty-title {
+  margin: 0 0 4px;
+  font-weight: 700;
+}
+
+.caption-empty .hint {
+  margin: 0;
 }
 
 /* The caption is read-only until "कॅप्शन बदला" swaps in a textarea wearing the same look. */
@@ -1322,6 +1381,19 @@ details.fold[aria-disabled='true'] summary {
   background: var(--bg-accent);
 }
 
+/* The assigned colour palette + composition of a social poster, and the two redo buttons
+   beneath it ("different design" / "different colours"). The label wraps on narrow screens
+   and the buttons wrap rather than overflow. */
+.poster-style-label {
+  font-weight: 600;
+}
+
+.poster-redesign-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 /* Poster placeholder while the render is still in flight: landscape 3:2 box
    (matches the 1536×1024 n8n poster) with a soft pulse + centered spinner. */
 .poster-skeleton {
@@ -1685,10 +1757,9 @@ select.glossary-select:focus {
 
 .glossary-row {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) minmax(160px, 1.4fr) minmax(
-      150px,
-      1.3fr
-    ) 150px auto;
+  grid-template-columns:
+    minmax(120px, 1fr) minmax(160px, 1.4fr) minmax(150px, 1.3fr)
+    150px auto;
   gap: 12px;
   align-items: center;
   padding: 14px;
@@ -2026,6 +2097,16 @@ textarea.ref-desc-input {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+/* The subject line ("what this master is about") — distinguished from the structural
+   layout summary above it by the accent-tinted label and a touch more contrast. */
+.ref-layout-about {
+  color: var(--text);
+}
+.ref-layout-about strong {
+  color: var(--accent);
+  font-weight: 600;
 }
 
 /* Escape hatch for a wrong vision reading — quiet, but always reachable. */
@@ -2682,6 +2763,136 @@ a.thread-node:hover {
   color: var(--muted);
   font-size: 0.85rem;
   white-space: nowrap;
+}
+
+/* ---------- page range selector (PageRangeSelector) ---------- */
+
+.page-range {
+  margin-top: 12px;
+}
+
+.page-range-row {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+  margin-top: 10px;
+}
+
+.page-range-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.page-range-row .btn {
+  flex-shrink: 0;
+}
+
+.page-range-expand {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.page-range-caret {
+  display: inline-block;
+  transition: transform 0.2s ease;
+}
+
+.page-range-caret.open {
+  transform: rotate(180deg);
+}
+
+/* The reveal animates the grid's own height (0fr → 1fr) so it fits exactly however many
+   chips there are — no magic max-height to clip a 50-page scan. */
+.page-grid-wrap {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  margin-top: 0;
+  transition:
+    grid-template-rows 0.28s ease,
+    opacity 0.28s ease,
+    margin-top 0.28s ease;
+}
+
+.page-grid-wrap.open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  margin-top: 12px;
+}
+
+.page-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  overflow: hidden;
+  min-height: 0;
+  padding: 2px; /* room for focus rings so they are not clipped by overflow:hidden */
+}
+
+.page-chip {
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.9rem;
+  min-width: 44px;
+  min-height: 40px;
+  padding: 6px 10px;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  background: #fffdfa;
+  color: var(--text);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease,
+    transform 0.12s ease;
+  animation: chip-in 0.25s ease both;
+}
+
+.page-chip:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: var(--accent);
+}
+
+.page-chip:active:not(:disabled) {
+  transform: translateY(0) scale(0.96);
+}
+
+.page-chip[aria-pressed='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.page-chip:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.page-chip:focus-visible {
+  outline: 3px solid var(--accent-soft);
+  outline-offset: 1px;
+}
+
+@keyframes chip-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-grid-wrap,
+  .page-range-caret,
+  .page-chip {
+    transition: none;
+    animation: none;
+  }
 }
 
 .doc-result-page {

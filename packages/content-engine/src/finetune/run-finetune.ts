@@ -13,7 +13,11 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const API = 'https://api.openai.com/v1';
-// gpt-4o-mini fine-tuning base snapshot.
+// gpt-4o-mini fine-tuning base snapshot. Deliberately NOT migrated to gpt-5.6 with the
+// rest of the repo: this is a *fine-tuning base*, a different list from the inference
+// models, and self-serve fine-tuning is unavailable on this account anyway
+// (403 training_not_available) — so the whole script is data-prep-only today. Pick a
+// supported base from OpenAI's fine-tuning docs if it ever reopens.
 const BASE_MODEL = 'gpt-4o-mini-2024-07-18';
 
 function apiKey(): string {

@@ -11,7 +11,7 @@
 // Two passes, cheapest first:
 //   1. A deterministic parse of page numbers (Latin AND Devanagari digits). This is the
 //      instruction users actually type, and it costs nothing and cannot hallucinate.
-//   2. Only if that yields nothing: one gpt-4o-mini call with a short preview of each page,
+//   2. Only if that yields nothing: one utility-tier call with a short preview of each page,
 //      so content-based asks ("only the article about crop loans") can resolve too.
 //
 // Whatever comes back is clamped to real page numbers in code, so a model that invents
@@ -19,7 +19,7 @@
 // an empty selection — the caller shows an error and leaves the user's checkboxes alone.
 
 import { pathToFileURL } from 'node:url';
-import { chatComplete } from './openai-chat.js';
+import { chatComplete, UTILITY_MODEL } from './openai-chat.js';
 
 // What the caller knows about each page. `preview` is a short leading excerpt — enough for
 // the model to recognize a topic, small enough that a 20-page document stays one cheap call.
@@ -39,7 +39,9 @@ export type InterpretedDocumentInstruction = Readonly<{
   explanation: string;
 }>;
 
-const MODEL = 'gpt-4o-mini';
+// Utility tier: the answer is a page-number list the deterministic parser already tried
+// to produce, and the officer edits it as checkboxes afterwards.
+const MODEL = UTILITY_MODEL;
 const PREVIEW_CHARS = 150;
 export const INSTRUCTION_MAX_CHARS = 500;
 

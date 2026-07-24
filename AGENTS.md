@@ -143,7 +143,10 @@ it are implemented and working end-to-end:
   Verified offline (the per-word repair against the exact five failing names — no Sarvam
   spend), typecheck + lint green. No migration, no n8n; deploy is API + web (rebuild
   `@dgipr/content-engine` + `@dgipr/schemas` dist first).
-- **PDF translation** (2026-07-21): `/translate` gained a second mode, **PDF फाईल**, for
+- **PDF translation** (2026-07-21) — **RETIRED from the UI on 2026-07-24; see the
+  "One upload UI everywhere" milestone at the end. The server code described below still
+  exists but nothing calls it, and the PDF फाईल tab is gone.** `/translate` gained a second
+  mode, **PDF फाईल**, for
   translating a whole document (the real ask: a 20-page Marathi booklet, 3 of its pages
   English, needed in BOTH Hindi and English). The pasted-text mode is untouched — it stays
   synchronous with its 10,000-char cap — because a document is a different shape of problem:
@@ -254,6 +257,152 @@ it are implemented and working end-to-end:
   reads unchanged) plus the verdict-floor cases incl. visual-order Devanagari; the paid path
   still wants one real scanned document to confirm a 3-page pick runs ONE 3-page Sarvam job.
   No migration, no n8n; deploy is API + web.
+
+- **Shared document intake: one upload layer for pdf/docx/txt** (2026-07-24, no migration):
+  four surfaces need "upload a file, get Marathi text out", and the capability was built
+  twice and missing twice — `/translate` (PDF only, in-memory job) and `/dlo` (pdf/mp3/docx,
+  persisted) each had their OWN probe→select→OCR→review implementation, backend and UI,
+  while the media room read `.txt` with a browser `FileReader` and `/proofread` took no file
+  at all. The extraction ENGINE was already shared (`intake/pdf-pages.ts`); what was
+  duplicated was the job state machine, the page-review markup (`TranslateDocumentPanel`
+  and `DloSourceReview` were copies — the latter imported the former's `STR.translateDoc*`
+  strings, which the naming admitted) and the client-side selection bookkeeping. Adding
+  upload to two more surfaces would have made a third copy.
+  Three new layers. (1) **Engine dispatcher** `intake/document.ts` —
+  `documentKindOf`/`probeDocument`/`extractDocument`, PDFs delegating to the unchanged
+  policy, DOCX to mammoth, TXT to a new `text-file.ts`. The load-bearing property is that a
+  **non-PDF always returns its pages at probe time**, so the page picker disappears for
+  txt/docx with no branch in the UI — nothing to choose because nothing is being bought.
+  Audio is deliberately OUT: a transcript has no pages, no picker and no per-page spend
+  decision, so it would widen every type to fit one caller. (2) **Generic ephemeral
+  service** `apps/api/src/jobs/document-intake.ts` + `routes/documents.ts` — the /translate
+  registry minus its translation half (TTL, MAX_JOBS, bytes held for the job's life so the
+  OCR override has something to re-read). (3) **Shared web components** `DocumentPages`
+  (the page list, incl. the text-layer/OCR badge and the OCR-override confirm) and
+  `DocumentIntake` (the whole upload→pick→review→"हा मजकूर वापरा" flow), plus
+  `useDocumentIntake` + `documentSelection`. `DocumentPages` holds **no selection state**:
+  the surfaces disagree about how to store one for good reasons (/translate tracks the
+  pages it wants; /dlo tracks the keys the officer excluded, across several files plus the
+  notes), so it asks a predicate and reports events rather than forcing either to invert.
+  The **spend gate is preserved everywhere**, including the new surfaces: uploading probes
+  and nothing more, and no page reaches OCR unless it was ticked.
+  Adoption was deliberately asymmetric to keep the blast radius small: the media room and
+  `/proofread` are wired end-to-end onto the new service (behind a "फाईलमधून मजकूर घ्या"
+  fold — pasting stays primary), while `/translate` and `/dlo` adopt the shared **UI only**
+  and keep their existing backends, so nothing that works today (OCR billing, the name
+  check, DLO lineage) was rewritten in the same change. 13 now-duplicate `translateDoc*`
+  strings were deleted once the component owned them. Named follow-ups: `/translate` and
+  `/dlo` backends delegate to `document-intake.ts` (which also gives DLO `.txt` free), then
+  page-image preview beside the OCR text — one change in `DocumentPages`, four surfaces.
+  Verified 2026-07-24: typecheck + lint green; the engine harness on a BOM+CRLF Marathi
+  `.txt` (BOM stripped, ५०० intact) and on a synthetic 12-page PDF where a scattered
+  `--pages=2,5,11` returns pages numbered **2, 5, 11** with matching per-page markers; the
+  live API for upload/lean-poll (`text: ''` but `chars` preserved)/`?text=1`/extract, and
+  every guard (out-of-range 400 with the Marathi page list, empty selection 400, reextract
+  without `pages` 400, reextract of a `.txt` 400, unknown job 404, unsupported type 400); a
+  text-free 6-page PDF stops at `selecting` with `pages: 0`, and `probePdf` provably never
+  reaches `extractPdfPagesViaOcr`. Still unproven and left for a real document: that a
+  3-page pick of a genuinely scanned PDF runs ONE 3-page Sarvam job (the only path that
+  costs money). No migration, no n8n; deploy is API + web (rebuild `@dgipr/schemas` +
+  `@dgipr/content-engine` dists first).
+
+- **Optional caption, written by the API instead of n8n** (2026-07-24, no migration):
+  three media-room complaints with one root. (1) Uploading a document **replaced** what was
+  typed (`onText={(text) => setNote(text)}`), so an officer who wrote context and then
+  attached the GR lost the context — either source alone was already a complete note, only
+  the combination was broken. The media room now **appends** (blank-line separated) and
+  says so on its button (`DocumentIntake` gained an `actionLabel` prop; every other surface
+  keeps replace semantics, which are right for them). **[Superseded 2026-07-24 — see the
+  live-mode milestone at the end: the button and `actionLabel` are gone from this surface;
+  the file's text is a second source combined at submit.]** A `NOTE_MAX_CHARS` guard moved the
+  API's inline 60,000 cap into `@dgipr/schemas` so the client warns instead of eating a 400.
+  (2) Every social run paid for a gpt-4o caption whether or not anyone wanted one. There is
+  now a **"कॅप्शनही तयार करा" toggle, default OFF**, in the same `काय तयार करायचे?` card
+  (and in `NextActions`' cross-format fold), carried as `generateCaption` on
+  `POST /generations` — a **job parameter, not a column**, so no migration; a re-run infers
+  it from whether the source run ended up with a caption.
+  (3) The reason it *couldn't* be optional: the prompt lived inside `social-post-v2-api` as
+  four nodes welded between the image render and the webhook response, so a caption was
+  whatever the poster render happened to produce. It now lives in
+  `packages/content-engine/src/generation/generate-caption.ts` (`generateSocialCaption`,
+  the node's house style ported **verbatim** so captions do not change character; the
+  `revise-caption.ts` shape — chatComplete + json_object + one repair + hand-written
+  validator, no zod in this package), and the workflow drops to **22 nodes**
+  (`Build Caption Request`, `Generate Caption L3`, `Make Caption File`, `Ping Caption`
+  deleted; `Decode Image` → `Ping Image` → `Respond to Webhook`, response minus `caption`).
+  Three consequences worth knowing. The caption is generated **after** the poster row-write,
+  so a caption failure fails the run with the already-paid poster safely on the row rather
+  than costing a re-render. A poster-only run can be captioned later —
+  `POST /generations/:id/caption/generate` → `startGenerateCaptionJob`, the
+  `startCaptionFeedbackJob` shape exactly (off status/step, reports via `captionRevising`,
+  and **inserts no revision row**: nothing was revised, and an extra row would advance
+  `nextVersion()` and misnumber the next poster) — or typed by hand, which needed the PUT's
+  "no caption yet" 409 narrowed to unfinished runs only. And `cost_usd` stops
+  under-reporting: the caption now runs through `chatComplete` inside the job's cost scope,
+  where n8n's text calls were never metered.
+  Verified 2026-07-24: typecheck green; the engine harness on both branches (twitter 273
+  chars under the 280 rule, facebook 338 with the full multi-paragraph prose — 📍पुणे first
+  line, ५०० / २ कोटी / ३१ ऑगस्ट २०२६ intact, one inline hashtag, `@MahaDGIPR` last, nothing
+  invented); the live API guards (article run 400, already-captioned run 409, unknown id
+  404); `n8n:push --dry-run` resolves credentials and reports 26 → 22 nodes. Left for a real
+  run (needs n8n + OpenAI spend): a poster-only render followed by the on-demand caption.
+  **Deploy order is the NORMAL one — API first, then `pnpm n8n:push`**: new API + old
+  workflow merely wastes the n8n caption call (the API ignores it), while new workflow + old
+  API throws `returned no caption or poster`. No migration; deploy is API + web (rebuild
+  `@dgipr/schemas` + `@dgipr/content-engine` dists first).
+
+- **One upload UI everywhere, and page selection by RANGE** (2026-07-24, no migration):
+  the previous milestone shared the upload *plumbing* but left each surface presenting it
+  differently — `/translate` behind a **"PDF फाईल" tab** wired to its own parallel backend,
+  the media room and `/proofread` behind a **"फाईलमधून मजकूर घ्या" fold**, `/dlo` behind one
+  combined `.pdf,.mp3,.docx` picker. Same capability, four appearances. Worse, the page
+  picker was **one full-width checkbox row per page**, which is fine for three pages and
+  unusable for the 20-50 a real scanned booklet has (the screenshot that prompted this
+  showed 20 rows scrolling off the fold).
+  Two changes. (1) **`PageRangeSelector`** replaces the row list as the picker: a text field
+  taking `"1-5, 8, 10-12"` — **Devanagari digits accepted**, since the officers type ५ not 5
+  — with an expand toggle revealing a grid of numbered chips. The reveal animates the grid's
+  own height (`grid-template-rows: 0fr → 1fr`) so it fits any page count without a magic
+  max-height that would clip a 50-page scan, chips fade in on a capped stagger, and
+  `prefers-reduced-motion` turns all of it off. `parsePageRanges`/`formatPageRanges`
+  (`lib/documentSelection.ts`) are the pure two-way conversion, so the field always reflects
+  what the grid shows and vice versa. The load-bearing decision: a typed range is applied by
+  **toggling only the pages that DIFFER** from the current selection, never by assigning a
+  set — that is what lets one component serve both selection models in the product
+  (/translate's "pages I want", /dlo's "keys I excluded"), because every parent's `onToggle`
+  is already a functional update. A document that has not been read shows the selector alone;
+  a read one shows it folded above the editable rows, which stay (text has to be read to be
+  corrected). (2) **All four surfaces present upload identically and inline** — the fold is
+  gone from the media room and `/proofread`, `/dlo`'s single picker splits into an **MP3**
+  control and a **document** control (a recording is transcribed whole and has no pages to
+  pick; a document does — same list underneath, `.txt` still needs the backend follow-up),
+  and `/translate` loses its PDF tab entirely.
+  **`/translate` is now one flow**: an uploaded pdf/docx/txt is read by the shared intake and
+  its text lands in the same box the user could have pasted into, then follows the pasted-text
+  path — one synchronous submit, the same mandatory name check. `TRANSLATE_TEXT_MAX_CHARS`
+  goes 10,000 → **60,000** so a whole document fits; this is safe because `translateArticle`
+  already chunks internally, so the cap bounds how long one request RUNS rather than whether
+  it works, and the intake is handed that cap as `maxChars` so page selection is how an
+  over-long booklet is trimmed. The **cost** is deliberate and should be understood before
+  anyone "fixes" it: the retired per-page path also gave per-page progress, separate
+  English/Hindi page-by-page output, English-page passthrough and the AI page instruction. All
+  of that server code is left INTACT but unused (`jobs/translate-document.ts`, the
+  `/translate/documents*` routes, `generation/translate-document.ts`,
+  `interpret-document-instruction.ts`) — only the web half was deleted
+  (`TranslateDocumentPanel.tsx`, `useTranslateDocument.ts`), so it is a git revert away.
+  A very large document now translates as one long synchronous request; if that becomes a
+  timeout in practice, restoring the background job is the fix, not raising the cap further.
+  Verified 2026-07-24: typecheck + lint green; 19 offline assertions on the range helpers
+  (mixed ranges, Devanagari in → Latin out, reversed ranges, out-of-range clamping, junk
+  ignored, non-contiguous listed sets, round-trip); and a real browser run against the live
+  app — a text-free 20-page PDF stops at the picker showing `1-20`, the grid renders 20 chips
+  in two rows, applying `"2-4, 9, 15-17"` selects 7 and canonicalises the field, tapping a
+  chip updates the field (`1-4, 9, 15-17`), `"१-३, ८"` parses to `1-3, 8`; a born-digital
+  15-page PDF skips the picker to the review list with the selector folded, where `"1-3"`
+  narrows the row checkboxes to 3; `/dlo` renders exactly two file inputs
+  (`.mp3,audio/mpeg` and `.pdf,.docx`); no page errors on any surface. 9 now-dead strings and
+  the whole `translateDoc*` block were removed. No migration, no n8n; deploy is web + API
+  (rebuild `@dgipr/schemas` dist first — the cap is shared).
 
 - **Pre-translation name check** (2026-07-20): every translation — generation detail
   page and `/translate` alike — starts with an in-page "check the names" step instead
@@ -687,6 +836,241 @@ it are implemented and working end-to-end:
   `--file=note.txt`; prefer it for anything longer than one line. No migration, no n8n;
   deploy is API only (rebuild `@dgipr/content-engine` dist).
 
+- **An uploaded file is a source, not a clipboard action** (2026-07-24, no migration):
+  uploading a PDF on the media room and pressing तयार करा answered
+  `कृपया किमान २० अक्षरांची टिपणी लिहा` — the document had been read, its pages reviewed, and
+  it still counted for nothing. The cause was that `DocumentIntake` only ever handed its text
+  over on a **button press inside its own card** ("हा मजकूर लेखात जोडा"), so an officer who
+  treated the upload as the note — which the page's own hint invites: *"चिकटवा किंवा
+  फाईलमधून घ्या — दोन्ही एकत्रही करता येईल"* — got a form that silently ignored their file.
+  A confirm-then-commit step is right where the file REPLACES a surface's single text box
+  (/translate, /proofread — the click authorises the overwrite), and wrong where the file is
+  a second source beside a box that may also be empty.
+  So `DocumentIntake` now has two modes. **Handoff** (`onText`, unchanged default) is the old
+  behaviour. **Live** (`onTextChange`) streams the current selection's text to the caller
+  whenever it changes — including `''` when the file is dropped or re-read — and hides the
+  hand-over button, replacing it with a line saying the text is already in use. The callback
+  is held in a ref so an inline arrow from the caller cannot re-fire the effect on every
+  render. The media room takes live mode and keeps the text in `docText` **beside** `note`,
+  joining them blank-line-separated at submit (`combinedNote`, typed text first), which is
+  what the 20-char and `NOTE_MAX_CHARS` guards now measure and what the API receives. The
+  now-unused `actionLabel` prop and `docAddToArticle` string are deleted.
+  One consequence worth keeping: a run **consumes** the document. `clearDocument()` removes
+  the sessionStorage job id and remounts the card on BOTH submit paths — including the
+  article path that navigates away, where the id would otherwise outlive the navigation and
+  silently re-attach the same file to the next run. Verified 2026-07-24: typecheck + lint
+  green, the media room renders on the dev server. No migration, no n8n; deploy is web only.
+
+- **Social poster: classify/copy/prompt into the API, content-aware master selection,
+  gpt-5.6-luna, thin n8n** (2026-07-24, no migration — SUPERSEDES the "workflow
+  classifies/copies/composes the image prompt" notes for `social-post-v2-api`): the social
+  (twitter/facebook) poster's whole text pipeline moved OUT of n8n and INTO
+  `@dgipr/content-engine` (per the package-boundary rule), and the workflow dropped from 22 to
+  **5 nodes** that only edit the chosen image with an API-built prompt. Three problems drove
+  it. (1) The master template was chosen by `pickRandom(enabled)` — before the note was even
+  classified — so `info_bullets`'s 13 masters (0-8 body slots) landed a 6-bullet note on a
+  3-slot template as often as not. (2) The copy ran on gpt-4o-mini inside n8n and leaked Latin
+  script into Marathi headlines (`मुंबईतील नवीन MRI केंद्रे`). (3) 22 nodes with the business
+  logic in n8n, against this file's own rule; the `Ping*` progress nodes fired AFTER
+  `Respond to Webhook` so `classify`/`copy` progress could never reach the UI (and were
+  ECONNREFUSED locally besides), and `Decode Image` duplicated the 6.4MB poster into a
+  never-read binary (12.8MB/run).
+  Measured first (n8n exec 200, 84.5s): `Edit Image` (gpt-image-2) was **77.4s = 91.5%**, so
+  trimming nodes buys ~7% at most — this rework is for correctness, cost-metering and
+  maintainability, not a big speedup; the image call is left at gpt-image-2 `medium` (benchmark
+  `high` — ~4x cost — at deploy if wanted).
+  New engine modules, ports of the retired Code nodes then improved:
+  `generation/classify-poster-type.ts` (adds `point_count` + `wants_photo` to the same strict
+  call — the selection signals — for free), `generation/generate-poster-copy.ts` (the six-style
+  REG registry, slot-pinning and text-only scene_brief strip verbatim), `generation/build-poster-prompt.ts`
+  (the initial + feedback image prompts, whose reserved-zone geometry now lives beside the
+  chrome overlays it must stay in sync with — `twitter-chrome.ts`/`cmo-geometry.ts`),
+  `references/select-master.ts` and the rewritten `references/catalog.ts`.
+  **Content-aware master selection** (`selectMaster`): score each enabled master against the
+  note's need (slot-count distance, overflow penalised 2x; `hasPhotoZone` match +3; un-analysed
+  = -2), keep the top band (within 1 point), pick by `hash(generationId)` — reproducible per run
+  (a retry re-renders the same template), varied across runs, never a structurally wrong fit.
+  Pins/CMO skip classification and select by seed only. **The master's `layout_spec` (0016) is
+  the cache the user asked to reuse** — most of the library is null-spec, so a picked null-spec
+  master is analysed ON DEMAND and PERSISTED (`setReferenceImageLayoutSpec`), ≤1 analysis/job;
+  run the `analyze:references` backfill at deploy to fill it in bulk.
+  **Copy on gpt-5.6-luna** (env `OPENAI_COPY_MODEL`): faster than gpt-4o-mini (~2.5s vs ~3.9s)
+  and keeps Devanagari. The gpt-5.x family rejects `temperature` and `max_tokens`, so
+  `generation/openai-chat.ts` branches on `/^gpt-5/` to send `max_completion_tokens` +
+  `reasoning_effort` (gpt-4o body unchanged byte-for-byte); `chatComplete` gained `jsonSchema`
+  and `reasoningEffort`. gpt-5.6 price rows added to `cost/pricing.ts`; the copy call is now
+  metered inside the job's cost scope (n8n's text calls never were).
+  **Scheme names verbatim and in full** (the second half of the user ask): a scheme name written
+  on a poster must match the note character-for-character — the old `3-8 word headline` rule was
+  itself TRUNCATING `मुख्यमंत्री माझी लाडकी बहीण योजना` to `लाडकी बहीण योजना`.
+  `generation/lock-scheme-names.ts` follows the "structural, not instructed" pattern
+  (proof-read's verbatim filter, translate's locked-name repair): the full names come free from
+  `findGlossaryTermsInText(note)` filtered to `scheme`/`org`; a `LOCKED NAMES` block + word-count
+  relaxation steer the model; a `scheme_names_used` json_schema field is validated against the
+  note (inflection-tolerant — Marathi declines the head noun as a suffix, योजना→योजनेच्या, so an
+  (n-1)-word prefix match counts as present); and a truncation is deterministically expanded to
+  the full form (only ever LENGTHENS toward the source, so it can't invent a name or change a
+  digit). Reported, never fatal. `apps/api/src/jobs/runner.ts` sequences it all and sets `step`
+  directly; the feedback path builds its prompt with `buildFeedbackPrompt` and shares one
+  `renderSocialPosterViaN8n(id, imageUrl, prompt)` with the initial run; `design_mode: 'fresh'`
+  calls `generateImage` directly. The 5-node workflow (Webhook → Set → Read Image → Edit Image →
+  Respond) takes `{ generation_id, image_url, prompt, quality }` and returns
+  `{ poster_png_base64 }`; `quality` is now API-owned (one source of truth vs the old three-way
+  sync). **Deploy order is the NORMAL one — API first, then `pnpm n8n:push`** (opposite of the
+  marker-feedback rule): new API + old workflow still works (old workflow ignores the extra
+  `prompt`), old API + new workflow sends no prompt and fails; run `analyze:references` BEFORE
+  the API deploy. Verified 2026-07-24: full typecheck + lint green (my files; the pre-existing
+  `intake/text-file.ts` lint error is untracked), 13 offline scheme-lock checks, n8n
+  validate + `n8n:push --dry-run` (5 nodes, credential resolved), and live cheap harnesses —
+  classify (`point_count`/`wants_photo`, Devanagari) and copy (full scheme name in the headline,
+  `unpreserved: []`, digits intact) on gpt-5.6-luna. Live E2E of the 5-node workflow pending.
+  Known operator gaps: the CMO type `custom_14b90655`'s only image is DISABLED (a CMO run throws
+  until it's enabled on `/references`).
+
+- **Every OpenAI call on gpt-5.6, in two env-configurable tiers** (2026-07-24, no
+  migration): the repo was split down the middle — the social-poster rework earlier the
+  same day had moved five call sites to `gpt-5.6-luna`/`gpt-5.6-terra` behind env vars,
+  while **~40 calls still ran on `gpt-4o`/`gpt-4o-mini`**, pinned by the hardcoded
+  `CHAT_MODEL`/`VISION_MODEL` constants in `openai-chat.ts` and four local overrides. This
+  was NOT an id swap, because the gpt-5 request dialect differs in two load-bearing ways
+  the repo had already discovered piecemeal and now handles centrally.
+  (1) **`temperature` is rejected.** ~24 call sites passed `temperature: 0` for
+  determinism; on gpt-5 that value is dropped and the model runs at its default. Nothing
+  restores it — so `reasoningEffort` becomes the quality lever in its place (defaulted to
+  **`'medium'`**, because this pipeline's work is judgement — write Marathi prose, grade
+  coverage, decide whether a fact survived — not lookup), and the guarantee that actually
+  held the line all along is the **deterministic post-filter** each precision path already
+  stacks: proof-read's verbatim-excerpt + digit-preservation gates, `lock-scheme-names`,
+  the translate per-word name repair, the video planner's `fact_index` grounding. Those are
+  unchanged and are what to check if quality regresses, not the temperature.
+  (2) **`max_completion_tokens` is a SHARED budget** for reasoning tokens and the visible
+  answer, while every call site had sized its cap assuming the whole thing was answer text.
+  A naive swap makes the tight ones (`maxTokens: 200` in rank-master, `400` in classify,
+  `500` in interpret-image-feedback) return EMPTY content, surfacing as the useless
+  `OpenAI chat response contained no content.` So `chatComplete`/`chatCompleteVision` now
+  add `REASONING_HEADROOM[effort]` (none 0 / low 2k / medium 8k / high 16k) ON TOP of the
+  caller's `maxTokens` — `maxTokens` keeps meaning "room for the answer" at every call
+  site, and `analyze-template.ts`'s hand-rolled 600→1200 padding was reverted now that the
+  transport does it. An exhausted budget reports `finish_reason: 'length'` with a pointer
+  to the two knobs.
+  Tiering: `CHAT_MODEL` (`OPENAI_CHAT_MODEL`, `gpt-5.6-terra`) = authoring + judgement and
+  the default for any caller that names no model, so the ~36 default-model calls
+  (generate-article, verify-coverage, revise-*, editorial-brief, proof-read, captions,
+  extract-*, the video plan/script) migrate with no per-file edit; `UTILITY_MODEL`
+  (`OPENAI_UTILITY_MODEL`, `gpt-5.6-luna`) = mechanical work a deterministic step
+  re-checks (rank-master's tie-break inside an already-filtered band, page-instruction
+  parsing, offline finetune prep); `VISION_MODEL` (`OPENAI_VISION_MODEL`, `gpt-5.6-terra`)
+  = image input. `POSTER_COPY_MODEL` moved **luna → terra** (it writes the poster
+  headline — the most-read text the product ships) but keeps `OPENAI_COPY_MODEL` so the
+  poster path can be traded back for latency in one env line. `run-finetune.ts`'s
+  `BASE_MODEL` deliberately stays gpt-4o-mini: it is a *fine-tuning base*, a different
+  list, and self-serve fine-tuning is 403 on this account anyway. **Image (`gpt-image-2`)
+  and embeddings (`text-embedding-3-large`) are deliberately untouched** — different model
+  families, and re-embedding would invalidate every stored vector (0019 `halfvec(1024)`).
+  Two operational consequences to expect, not to debug: **cost is up** (terra output is
+  $15/1M vs gpt-4o's $10, and reasoning tokens bill at that output rate inside
+  `completion_tokens`, so `generations.cost_usd` will jump — the unknown-model fallback
+  price moved to terra so an unpriced id errs high), and **latency is up** (calls are
+  serialized at `OPENAI_MAX_CONCURRENCY=1`; `OPENAI_REQUEST_TIMEOUT_MS`'s default was
+  raised 180s → 300s because a full-length Marathi article body at medium reasoning can
+  otherwise be aborted mid-generation by its own release valve).
+  **Rollback is env-only**: the pre-gpt-5 request body is preserved byte-for-byte, so
+  `OPENAI_CHAT_MODEL=gpt-4o OPENAI_UTILITY_MODEL=gpt-4o-mini OPENAI_VISION_MODEL=gpt-4o-mini`
+  restores the old behaviour exactly.
+  **Trap for the next agent: `proof-read.ts` is invisible to ripgrep.** It contains a
+  literal NUL byte at offset 21693 (an intentional dedupe-key separator,
+  `` `${excerpt}\0${suggestion}` ``), so rg classifies it as binary and silently skips it —
+  any grep-driven sweep of model ids, prompts or call sites will miss two chat calls. Open
+  it by path.
+  Verified 2026-07-24: full workspace typecheck green (7/7 projects), lint green on every
+  touched file (the only error is the pre-existing untracked `intake/text-file.ts`
+  irregular-whitespace). No migration, no n8n (both workflows call `gpt-image-2` only —
+  checked); deploy is API + web after rebuilding `@dgipr/content-engine` dist.
+
+- **Poster diversity: the assignment is now authoritative, and there are two axes**
+  (2026-07-24, migration 0028): four of five consecutive social posters came back the same
+  warm orange/red/gold on the same cream ground, despite a palette rotation having been added
+  earlier the same day "which helped a little". Measuring the last eight live posters
+  (`measurePosterColours`, below) put a number on it: **5/8 warm cream grounds, 5/8
+  orange-or-red dominants**. Six independent causes, only ONE of which was the image model
+  ignoring instructions — the rest were ours:
+  (1) **The assigned palette never reached the image prompt.** `build-poster-prompt.ts` emitted
+  `fmtArtDirection(artDirection)` when art direction succeeded — the normal path — with
+  `assignedPalette` only in the `else`. So the rotation's choice arrived as the art director's
+  *paraphrase*, produced by a model explicitly told it "may refine within this family". The
+  forcing function was laundered before use. **This one bug made the whole rotation nearly
+  inert**, and is the thing to check first if colours ever converge again.
+  (2) **The library was itself low-variance**: all 12 entries were "light warm-neutral ground +
+  one dark band" (ivory, cream, dove grey, blush, sand, off-white…) with warm-skewed accents, so
+  even perfect obedience gave warm-on-cream most of the time and a near-constant BACKGROUND —
+  which is what "same background colour as well" actually meant.
+  (3) **Colour leaked back in from the master**: `analyze-template.ts` asks `layoutSummary` to
+  state "the dominant colour theme", that string was injected as structure inspiration under a
+  soft "IGNORE any colours it mentions", and `rank-master.ts` *selected* the master on "mood,
+  **colour theme** and topic" — from a library that is overwhelmingly saffron/maroon/cream.
+  (4) **Colours were adjectives, never hex.** (5) **The recency ring was in-process and
+  id-only** — reset on every restart (constant under `tsx watch`), and
+  `terracotta → dgipr_saffron → deep_burgundy → wine_maroon` was four legal picks and one look.
+  (6) **Nothing measured the output**, so non-compliance was invisible.
+  The fixes, in the order they matter:
+  - **`poster-palettes.ts` rewritten**: 18 palettes, THREE per family across SIX families
+    (`cool|teal|green|purple|neutral|warm`), each carrying four exact **hex** values
+    (`ground/panel/ink/accent`) and a Marathi `label`. The ground is **tinted to its family** —
+    only `warm` may use cream — which is what makes backgrounds differ at all while posters stay
+    light-ground (the product decision: no dark or saturated grounds). The DGIPR house look is
+    ONE entry of eighteen in a family of three of six. `pickPalette(seed, { ids, families })`
+    drops recent FAMILIES first, then ids, skipping either filter only if it would empty the pool.
+  - **`build-poster-prompt.ts`**: a `COLOUR SPECIFICATION` block of hex values leads the fresh
+    prompt and is emitted **whenever a palette is assigned**, with art direction BELOW it as
+    treatment. Plus a `COMPOSITION` block that outranks the master's structure hint.
+  - **`art-direction.ts`**: when a palette is assigned, `palette` is dropped from the json_schema
+    entirely — colour is not the art director's to choose, only to use — and it is given the
+    assigned hexes as fact plus a **negative memory** of what the last few posters looked like
+    (real signal, unlike the opaque creative seed it had before).
+  - **`poster-layouts.ts` (new)**: the second axis — 11 composition archetypes with a `coverage`
+    tag (`band|column|field|cards|wedge`), a hard `photo` filter and a `copyStyles` filter,
+    rotated by the same seeded recency-aware picker. Two posters in different palettes still read
+    alike when both are a top band over bullet rows; 18 palettes x 11 layouts do not.
+  - **`strip-colour-words.ts` (new)**: deterministically removes colour language from a
+    `layoutSummary` before it is used as structure inspiration — "structural, not instructed",
+    the `lock-scheme-names.ts` move. Clause-aware (a real analysis puts its colour theme in a
+    trailing clause, not a sentence), and a recognised colour clause abandons the rest of its
+    sentence. `rankMasterByNote(..., { ignoreColour })` likewise drops colour from the ranking
+    criterion on fresh runs. Verified against **25 real `layout_spec` rows: zero colour leaks,
+    zero summaries emptied**, structure intact.
+  - **`poster-colours.ts` (new, poster-renderer)**: `measurePosterColours(png)` reports the
+    ground, whether it is warm cream, the dominant colour and its hue bucket. **Uses CHROMA
+    (max-min), not HSL saturation** — this is load-bearing: HSL rates a pale cream `#FDF2DC` at
+    0.84 because it is nearly white, so a saturation-weighted vote hands a poster's cream
+    BACKGROUND back as its "dominant colour" and reports 96% of pixels as colourful. Measured on
+    the RAW poster before chrome, since the footer band and emblem are identical on every render.
+  - **Migration 0028 `generations.poster_style` (jsonb)** + `listRecentPosterStyles` replace the
+    in-process ring, so the spread survives restarts and multiple processes. The avoid set is
+    built from the **measured** hue buckets as well as the assigned families — if the model
+    ignores the spec, avoiding intentions achieves nothing. A mismatch is logged
+    (`familyHonoured`), **never retried**: a re-render is another paid image call.
+  - **UI**: the detail page shows the Marathi style label and gains a second redo button,
+    **"वेगळ्या रंगात तयार करा"** (`recolour: true`), which bars the run's current family — a plain
+    re-roll could legitimately land back in the family just rejected, since the recency ring only
+    knows about OTHER runs.
+  **The style write is deliberately NOT bundled with the poster write**: it is a separate
+  best-effort update, because bundling them would mean that on a database without 0028 the whole
+  update fails and the already-paid poster never lands on the row. Losing rotation memory for one
+  run is acceptable; losing a render is not. Same principle as the caption ordering.
+  Verified 2026-07-24: full workspace typecheck green (7/7), lint green on every touched file;
+  five offline harnesses with assertions (palette rotation — no family repeat within 3, warm at
+  4/30, no back-to-back ground repeat, non-warm families provably not warm-grounded; layout
+  rotation — photo filter absolute both ways, quote-capable archetype for quote runs, determinism;
+  colour strip — 7 synthetic + 25 real rows; poster-style round trip incl. junk/empty; prompt
+  assembly — hexes present, spec before art direction, composition before structure hint, no
+  master colour word in the hint); and a LIVE art-direction run of five seeds which returned
+  `palette: ""` every time and **named no colour at all** across all five (it says "the dominant
+  assigned tone"), each realising its assigned archetype. **Not yet done: 0028 is NOT applied**
+  (applied by hand in Supabase; the code degrades cleanly without it — verified, the read throws
+  and falls back to empty history), and the six-consecutive-run spread test needs it. Deploy:
+  0028 → API → web (rebuild `@dgipr/schemas` + `@dgipr/database` + `@dgipr/content-engine` +
+  `@dgipr/poster-renderer` dists first). No n8n — the fresh path calls `generateImage` directly.
+
 Two n8n workflows are implemented and host-independent for deployment; their master
 templates arrive as immutable `references/library/...` public URLs inside each webhook
 payload (fetched over HTTPS — never local disk, no hardcoded storage paths):
@@ -697,7 +1081,9 @@ payload (fetched over HTTPS — never local disk, no hardcoded storage paths):
   `forced_type`/`forced_reference_url` (empty strings unless pinned). The
   classify/copy/image nodes are data-driven from that catalog; a forced type skips the
   classify LLM call, and custom types render with the generic (headline + points) copy
-  layout. Like the article path, the brand chrome is no longer painted by the image
+  layout. It renders the **poster only** — the caption nodes were removed in the
+  optional-caption milestone (2026-07-24) and the caption is now written by the API —
+  so the webhook response carries no `caption` field. Like the article path, the brand chrome is no longer painted by the image
   model: the workflow's prompts erase the master's महाराष्ट्र शासन emblem (top-right)
   and footer band/social-handle strip and declare them reserved zones (~220x180
   top-right, ~130px bottom at 1280x1600), and the API composites

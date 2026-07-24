@@ -1,4 +1,4 @@
-// In-process job runner for explainer-video projects: per-scene script (gpt-4o),
+// In-process job runner for explainer-video projects: per-scene script (the chat tier),
 // storyboard keyframe stills (gpt-image), Veo clip renders, ffmpeg stitch, SRT.
 // Sequencing and persistence only — script/prompt/Veo logic lives in
 // @dgipr/content-engine and assembly in @dgipr/poster-renderer (same boundary

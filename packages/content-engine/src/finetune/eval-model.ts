@@ -12,7 +12,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { chatComplete } from '../generation/openai-chat.js';
+import { chatComplete, CHAT_MODEL } from '../generation/openai-chat.js';
 import { findUnsupportedClaims } from '../generation/verify-coverage.js';
 import type { FinetuneCategory } from './build-corpus.js';
 import type { NotePair } from './extract-notes.js';
@@ -110,7 +110,7 @@ if (
   process.argv[1] &&
   import.meta.url === pathToFileURL(process.argv[1]).href
 ) {
-  const model = process.argv[2] ?? 'gpt-4o';
+  const model = process.argv[2] ?? CHAT_MODEL;
   const dataDir = resolve(
     dirname(fileURLToPath(import.meta.url)),
     '../../data/finetune',

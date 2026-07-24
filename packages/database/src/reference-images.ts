@@ -14,6 +14,9 @@ export type ReferenceLayoutSpec = Readonly<{
   hasPhotoZone: boolean;
   bulletSlots: number;
   layoutSummary: string;
+  // What this master is about (subject/scheme). Display-only; absent on rows
+  // analysed before this field existed.
+  contentSummary?: string | undefined;
 }>;
 
 export type ReferenceImageRow = Readonly<{

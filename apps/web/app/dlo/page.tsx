@@ -45,7 +45,20 @@ import { DLO_INTAKE_STEP_LABELS, STR } from '../../lib/strings';
 
 type DloStep = 'input' | 'processing' | 'review' | 'generating' | 'output';
 
-const ACCEPTED_EXTENSIONS = ['.pdf', '.mp3', '.docx'] as const;
+// Audio and documents are picked through SEPARATE controls, because they are separate
+// kinds of thing: a recording is transcribed whole and has no pages to choose, while a
+// document is read page by page. They still travel to the intake as one list — the split
+// is about what the officer is being asked for, not about how it is sent.
+const AUDIO_EXTENSIONS = ['.mp3'] as const;
+const DOCUMENT_EXTENSIONS = ['.pdf', '.docx'] as const;
+const ACCEPTED_EXTENSIONS = [
+  ...AUDIO_EXTENSIONS,
+  ...DOCUMENT_EXTENSIONS,
+] as const;
+
+function isAudioFile(name: string): boolean {
+  return AUDIO_EXTENSIONS.some((ext) => name.toLowerCase().endsWith(ext));
+}
 
 // Bounds of the generation note the reviewed text becomes (see
 // DloGenerateRequestSchema / CreateGenerationRequestSchema).
@@ -55,6 +68,49 @@ const TEXT_MAX_CHARS = 60_000;
 function formatSize(bytes: number): string {
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+// One of the two picked-file lists on the input step. Entries carry their index in the
+// single `files` array, so removing from either list still addresses the right file — the
+// split is presentational, the state underneath stays one list.
+function SelectedFileList({
+  title,
+  entries,
+  onRemove,
+}: {
+  title: string;
+  entries: ReadonlyArray<{ file: File; index: number }>;
+  onRemove: (index: number) => void;
+}) {
+  if (entries.length === 0) return null;
+  return (
+    <>
+      <p className="field-label" style={{ marginTop: 16 }}>
+        {title}
+      </p>
+      <ul className="file-list">
+        {entries.map(({ file, index }) => (
+          <li key={`${file.name}-${file.size}`} className="file-row">
+            {isAudioFile(file.name) ? (
+              <Music size={20} aria-hidden="true" />
+            ) : (
+              <FileText size={20} aria-hidden="true" />
+            )}
+            <span className="file-name">{file.name}</span>
+            <span className="file-size">{formatSize(file.size)}</span>
+            <button
+              type="button"
+              className="file-remove"
+              aria-label={`${STR.dloRemoveFile}: ${file.name}`}
+              onClick={() => onRemove(index)}
+            >
+              <X size={16} aria-hidden="true" />
+            </button>
+          </li>
+        ))}
+      </ul>
+    </>
+  );
 }
 
 // Per-file transcription/extraction status rows (processing + review steps).
@@ -194,7 +250,8 @@ export default function DloPage() {
   const [combinedText, setCombinedText] = useState('');
   const [generationId, setGenerationId] = useState<string | null>(null);
   const [article, setArticle] = useState<string | null>(null);
-  const fileInput = useRef<HTMLInputElement>(null);
+  const audioInput = useRef<HTMLInputElement>(null);
+  const docsInput = useRef<HTMLInputElement>(null);
 
   // Review-step state, keyed per source (see lib/dloReview): the officer's edits
   // and the sources/pages left out of the article. Everything is included until
@@ -301,6 +358,14 @@ export default function DloPage() {
   const removeFile = (index: number) => {
     setFiles((prev) => prev.filter((_, i) => i !== index));
   };
+
+  // The two input-step lists. Both index into the same `files` array — splitting is how
+  // the picked files are SHOWN, not how they are stored or sent.
+  const indexedFiles = files.map((file, index) => ({ file, index }));
+  const audioFiles = indexedFiles.filter(({ file }) => isAudioFile(file.name));
+  const documentFiles = indexedFiles.filter(
+    ({ file }) => !isAudioFile(file.name),
+  );
 
   const submit = async () => {
     if (notes.trim().length === 0 && files.length === 0) {
@@ -511,18 +576,27 @@ export default function DloPage() {
               onChange={(event) => setNotes(event.target.value)}
               style={{ marginTop: 10 }}
             />
-            <div className="btn-row" style={{ marginTop: 14 }}>
+          </section>
+
+          {/* Recordings and documents get a control each. A recording is transcribed whole
+              and has nothing to pick; a document is read page by page and, if it is a scan,
+              its pages are chosen at review before any OCR is paid for. Asking for them
+              together made one picker stand for two different jobs. */}
+          <section className="card">
+            <p className="field-label">{STR.dloAudioTitle}</p>
+            <p className="hint">{STR.dloAudioHint}</p>
+            <div className="btn-row" style={{ marginTop: 12 }}>
               <button
                 type="button"
                 className="btn btn-small"
-                onClick={() => fileInput.current?.click()}
+                onClick={() => audioInput.current?.click()}
               >
-                {STR.dloUpload}
+                {STR.dloAudioUpload}
               </button>
               <input
-                ref={fileInput}
+                ref={audioInput}
                 type="file"
-                accept=".pdf,.mp3,.docx"
+                accept=".mp3,audio/mpeg"
                 multiple
                 hidden
                 onChange={(event) => {
@@ -531,35 +605,41 @@ export default function DloPage() {
                 }}
               />
             </div>
-            <p className="hint">{STR.dloUploadHint}</p>
-            {files.length > 0 ? (
-              <>
-                <p className="field-label" style={{ marginTop: 16 }}>
-                  {STR.dloFilesTitle}
-                </p>
-                <ul className="file-list">
-                  {files.map((file, index) => (
-                    <li key={`${file.name}-${file.size}`} className="file-row">
-                      {file.name.toLowerCase().endsWith('.mp3') ? (
-                        <Music size={20} aria-hidden="true" />
-                      ) : (
-                        <FileText size={20} aria-hidden="true" />
-                      )}
-                      <span className="file-name">{file.name}</span>
-                      <span className="file-size">{formatSize(file.size)}</span>
-                      <button
-                        type="button"
-                        className="file-remove"
-                        aria-label={`${STR.dloRemoveFile}: ${file.name}`}
-                        onClick={() => removeFile(index)}
-                      >
-                        <X size={16} aria-hidden="true" />
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </>
-            ) : null}
+            <SelectedFileList
+              title={STR.dloAudioFilesTitle}
+              entries={audioFiles}
+              onRemove={removeFile}
+            />
+          </section>
+
+          <section className="card">
+            <p className="field-label">{STR.dloDocsTitle}</p>
+            <p className="hint">{STR.dloDocsHint}</p>
+            <div className="btn-row" style={{ marginTop: 12 }}>
+              <button
+                type="button"
+                className="btn btn-small"
+                onClick={() => docsInput.current?.click()}
+              >
+                {STR.dloDocsUpload}
+              </button>
+              <input
+                ref={docsInput}
+                type="file"
+                accept=".pdf,.docx"
+                multiple
+                hidden
+                onChange={(event) => {
+                  addFiles(event.target.files);
+                  event.target.value = '';
+                }}
+              />
+            </div>
+            <SelectedFileList
+              title={STR.dloDocsFilesTitle}
+              entries={documentFiles}
+              onRemove={removeFile}
+            />
           </section>
 
           <section className="card">

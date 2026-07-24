@@ -10,8 +10,10 @@
 import { useState } from 'react';
 import type { GenerationDetail } from '@dgipr/schemas';
 import {
+  generateCaption,
   posterDownloadUrl,
   publishGeneration,
+  regeneratePoster,
   sendCaptionFeedback,
   sendPosterImageFeedback,
   updateCaption,
@@ -69,6 +71,9 @@ export function SocialPostView({
   const [savingCaption, setSavingCaption] = useState(false);
   const [captionSaved, setCaptionSaved] = useState(false);
   const [captionError, setCaptionError] = useState<string | null>(null);
+  // Asking for the first caption on a run created poster-only. Local only until the
+  // 202 lands; after that detail.captionRevising drives the state, like the AI revision.
+  const [startingCaption, setStartingCaption] = useState(false);
   if (
     !editingCaption &&
     detail.article !== null &&
@@ -118,6 +123,23 @@ export function SocialPostView({
       );
     } finally {
       setSavingCaption(false);
+    }
+  };
+
+  // First caption for a poster-only run. The job reports through captionRevising, so
+  // this only has to survive the gap until the next poll.
+  const startCaption = async () => {
+    setStartingCaption(true);
+    setCaptionError(null);
+    try {
+      await generateCaption(detail.id);
+      await onChanged();
+    } catch (error) {
+      setCaptionError(
+        error instanceof Error ? error.message : STR.genericError,
+      );
+    } finally {
+      setStartingCaption(false);
     }
   };
 
@@ -191,7 +213,9 @@ export function SocialPostView({
           </div>
         ) : null}
         <div>
-          {detail.article ? (
+          {/* Also mounted when the caption is still empty and the user chose to type one
+              — the hand editor is how a poster-only run gets its first caption. */}
+          {detail.article !== null || editingCaption ? (
             <div className="caption-editor">
               {editingCaption ? (
                 <>
@@ -214,7 +238,7 @@ export function SocialPostView({
               ) : (
                 <>
                   <span className="caption-label">{STR.captionLabel}</span>
-                  <p className="social-caption">{detail.article}</p>
+                  <p className="social-caption">{detail.article ?? ''}</p>
                 </>
               )}
               <div className="caption-meta">
@@ -266,6 +290,48 @@ export function SocialPostView({
               ) : null}
               {captionSaved ? (
                 <p className="form-success">{STR.captionSaved}</p>
+              ) : null}
+              {captionError ? (
+                <p className="form-error">{captionError}</p>
+              ) : null}
+            </div>
+          ) : detail.status === 'completed' && !showSpinner ? (
+            // Created poster-only (the create form's caption toggle is off by default).
+            // Offer both ways to fill it: have one written, or type it.
+            <div className="caption-empty">
+              {captionRevising || startingCaption ? (
+                <span className="translating-note">
+                  <span className="spinner" aria-hidden="true" />
+                  {STR.captionGenerating}
+                </span>
+              ) : (
+                <>
+                  <p className="caption-empty-title">{STR.captionNoneTitle}</p>
+                  <p className="hint">{STR.captionNoneHint}</p>
+                  <div className="btn-row" style={{ marginTop: 12 }}>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-small"
+                      onClick={startCaption}
+                    >
+                      {STR.captionGenerate}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-small"
+                      onClick={() => {
+                        setCaptionDraft('');
+                        setCaptionError(null);
+                        setEditingCaption(true);
+                      }}
+                    >
+                      {STR.captionWriteOwn}
+                    </button>
+                  </div>
+                </>
+              )}
+              {detail.captionReviseError ? (
+                <p className="form-error">{detail.captionReviseError}</p>
               ) : null}
               {captionError ? (
                 <p className="form-error">{captionError}</p>
@@ -376,6 +442,53 @@ export function SocialPostView({
               {detail.captionReviseError ? (
                 <p className="form-error">{detail.captionReviseError}</p>
               ) : null}
+            </div>
+          ) : null}
+          {detail.posterUrl && detail.status === 'completed' ? (
+            <div className="poster-feedback">
+              {detail.posterStyleLabel ? (
+                <p className="hint poster-style-label">
+                  {STR.posterStyleLabelPrefix} {detail.posterStyleLabel}
+                </p>
+              ) : null}
+              <p className="hint">{STR.posterRedesignHint}</p>
+              <div className="poster-redesign-actions">
+                {/* Both buttons re-render the poster as a new version; the row flips to
+                    running server-side, so refresh to resume polling. `recolour` additionally
+                    bars the family shown above, for when only the colours are wrong. */}
+                <button
+                  type="button"
+                  className="btn btn-small"
+                  disabled={showSpinner}
+                  onClick={async () => {
+                    setPending(true);
+                    try {
+                      await regeneratePoster(detail.id);
+                      await onChanged();
+                    } finally {
+                      setPending(false);
+                    }
+                  }}
+                >
+                  {STR.posterRedesign}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-small"
+                  disabled={showSpinner}
+                  onClick={async () => {
+                    setPending(true);
+                    try {
+                      await regeneratePoster(detail.id, { recolour: true });
+                      await onChanged();
+                    } finally {
+                      setPending(false);
+                    }
+                  }}
+                >
+                  {STR.posterRecolour}
+                </button>
+              </div>
             </div>
           ) : null}
           {detail.posterUrl ? (

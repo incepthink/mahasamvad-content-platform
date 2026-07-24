@@ -42,6 +42,11 @@ export default function GenerationDetailPage({
       outputType: detail.outputType,
       designMode: detail.designMode ?? undefined,
       sourceGenerationId: detail.id,
+      // Captions are opt-in per run and not stored as a flag, so infer the intent from
+      // the run being re-made: one that ended up with a caption gets one again.
+      ...(isSocialCategory(detail.category)
+        ? { generateCaption: detail.article !== null }
+        : {}),
     });
     // Social reruns are background tasks: track + surface them in the panel.
     if (isSocialCategory(detail.category)) {
@@ -67,9 +72,11 @@ export default function GenerationDetailPage({
     );
   }
 
-  // A poster re-render (text/scene feedback) keeps the finished poster on screen
-  // with a spinner overlay instead of swapping to the step list. Scoped to
-  // poster-affecting steps so an article-only revision still shows ProgressSteps.
+  // A poster re-render (text/scene feedback, or a social redesign) keeps the finished
+  // poster on screen with a spinner overlay instead of swapping to the step list.
+  // Scoped to poster-affecting steps so an article-only revision still shows ProgressSteps.
+  // The social-redesign steps (classify/copy/image) only count here when a poster already
+  // exists — an INITIAL run has no posterUrl during them, so it still shows the step list.
   const posterBusy =
     !!detail.posterUrl &&
     (detail.status === 'queued' || detail.status === 'running') &&
@@ -77,7 +84,10 @@ export default function GenerationDetailPage({
       detail.step === 'revise_scene' ||
       detail.step === 'revise_image' ||
       detail.step === 'scene' ||
-      detail.step === 'render');
+      detail.step === 'render' ||
+      detail.step === 'classify' ||
+      detail.step === 'copy' ||
+      detail.step === 'image');
 
   // A translation no longer takes over the row's status/step (it can run beside the
   // poster render), so it needs no branch here: the article card stays mounted by

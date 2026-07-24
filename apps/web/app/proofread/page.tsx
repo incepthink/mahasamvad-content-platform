@@ -14,6 +14,7 @@ import {
 import { proofreadText } from '../../lib/api';
 import { downloadBlob } from '../../lib/download';
 import { PROOFREAD_TYPE_LABELS, STR } from '../../lib/strings';
+import { DocumentIntake } from '../../components/DocumentIntake';
 
 // Display order for error-severity issues; style advisories render separately.
 const ERROR_TYPE_ORDER = [
@@ -122,6 +123,21 @@ export default function ProofreadPage() {
           {overLimit ? ` — ${STR.proofreadOverLimit}` : ''}
         </p>
       </section>
+
+      {/* The text to check usually exists as a file — a draft press note, a scanned GR.
+          The page picker is also how a long document gets under the 10,000-character cap:
+          untick pages rather than hand-delete text, which is why the component is given
+          the same limit the counter above enforces. Inline, like every other upload
+          surface in the product. */}
+      <DocumentIntake
+        storageKey="dgipr.proofread.document"
+        maxChars={PROOFREAD_TEXT_MAX_CHARS}
+        onText={(value) => {
+          setText(value);
+          setResult(null);
+          setError(null);
+        }}
+      />
 
       <section className="card">
         <div className="btn-row">

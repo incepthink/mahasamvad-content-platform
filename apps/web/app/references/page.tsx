@@ -109,6 +109,14 @@ function LayoutBadge({
       <p className="ref-layout-summary" title={spec.layoutSummary}>
         {spec.layoutSummary}
       </p>
+      {spec.contentSummary ? (
+        <p
+          className="ref-layout-summary ref-layout-about"
+          title={spec.contentSummary}
+        >
+          <strong>{STR.refLayoutAbout}</strong> {spec.contentSummary}
+        </p>
+      ) : null}
       <button
         type="button"
         className="ref-layout-flip"

@@ -20,6 +20,7 @@ import {
   type SupabaseClient,
 } from '@dgipr/database';
 import { generateArticlePoster } from '@dgipr/poster-renderer';
+import { posterStyleLabel } from '@dgipr/content-engine';
 import {
   SocialPublishError,
   publishFacebookPhotoPost,
@@ -36,6 +37,7 @@ import {
   GenerationStepSchema,
   PosterFeedbackRequestSchema,
   PosterImageFeedbackRequestSchema,
+  RegeneratePosterRequestSchema,
   TWEET_MAX_LENGTH,
   TranslateGenerationRequestSchema,
   UpdateCaptionRequestSchema,
@@ -61,9 +63,11 @@ import {
   startArticlePosterJob,
   startCaptionFeedbackJob,
   startConcurrentArticleFeedbackJob,
+  startGenerateCaptionJob,
   startGenerationJob,
   startPosterFeedbackJob,
   startPosterImageFeedbackJob,
+  startPosterRegenerateJob,
   startSocialPostJob,
   startTranslateJob,
 } from '../jobs/runner.js';
@@ -185,6 +189,10 @@ async function toDetail(
     posterUrl: row.posterPath ? publicUrl(client, row.posterPath) : null,
     sceneUrl: row.scenePath ? publicUrl(client, row.scenePath) : null,
     posterVersions,
+    // The colour + composition this poster was assigned, flattened to one Marathi line for the
+    // UI. Resolved server-side because the libraries live in @dgipr/content-engine and apps/web
+    // must not import it (the same rule that moved tweetWeightedLength into @dgipr/schemas).
+    posterStyleLabel: posterStyleLabel(row.posterStyle),
     publishedUrl: row.publishedUrl,
     publishedAt: row.publishedAt,
     error: row.error,
@@ -309,9 +317,13 @@ export function registerGenerationRoutes(
           : undefined,
     });
     // Twitter/Facebook → external n8n social-post job; news/scheme → in-process
-    // article pipeline.
+    // article pipeline. A social run is poster-only unless the caller asked for a
+    // caption; the flag rides as a job parameter (no column — a re-run infers it from
+    // whether the source run ended up with a caption).
     if (isSocialCategory(row.category)) {
-      startSocialPostJob(client, row.id);
+      startSocialPostJob(client, row.id, {
+        generateCaption: body.generateCaption === true,
+      });
     } else {
       startGenerationJob(client, row.id);
     }
@@ -487,6 +499,50 @@ export function registerGenerationRoutes(
     },
   );
 
+  // Write the FIRST caption for a social run that has none — the run was created
+  // poster-only (the create form's caption toggle is off by default) and the officer has
+  // now asked for one. Separate from the feedback route above, which revises an existing
+  // caption; here there is nothing to revise. Like that route the job owns no status/step,
+  // so the finished poster stays on screen while the caption is written.
+  app.post<{ Params: { id: string } }>(
+    '/generations/:id/caption/generate',
+    async (request, reply) => {
+      const row = await getGeneration(client, request.params.id);
+      if (!row) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'Generation not found.' } });
+      }
+      if (!isSocialCategory(row.category)) {
+        return reply.code(400).send({
+          error: { message: 'Only social-post runs have a caption.' },
+        });
+      }
+      // The run must have settled: its own job writes the same column, and a caption
+      // written mid-render would be overwritten (or overwrite) without warning.
+      if (row.status !== 'completed') {
+        return reply
+          .code(409)
+          .send({ error: { message: 'The run has not completed yet.' } });
+      }
+      if (row.article) {
+        return reply.code(409).send({
+          error: {
+            message:
+              'This post already has a caption — use feedback to change it.',
+          },
+        });
+      }
+      if (isRevisingCaption(row.id)) {
+        return reply.code(409).send({
+          error: { message: 'A caption job is already running.' },
+        });
+      }
+      startGenerateCaptionJob(client, row.id);
+      return reply.code(202).send({});
+    },
+  );
+
   // Hand edit of a social run's caption: the officer typed it, so it is stored verbatim.
   // Synchronous — no model call (same shape as the manual poster-copy edit below). Same
   // guards as the feedback route, so a hand edit can't race the AI revision of the very
@@ -506,7 +562,10 @@ export function registerGenerationRoutes(
           error: { message: 'Only social-post runs have a caption.' },
         });
       }
-      if (!row.article) {
+      // A poster-only run legitimately has no caption yet — typing one is how the
+      // officer adds it. Only an unfinished run is rejected: its own job writes this
+      // very column.
+      if (!row.article && row.status !== 'completed') {
         return reply
           .code(409)
           .send({ error: { message: 'No caption to edit yet.' } });
@@ -713,6 +772,51 @@ export function registerGenerationRoutes(
         error: null,
       });
       startPosterImageFeedbackJob(client, row.id, body);
+      return reply.code(202).send({});
+    },
+  );
+
+  // Regenerate a social run's poster as a brand-new, differently-designed version (fully-AI
+  // path: re-classify, re-select avoiding the recent master, rewrite copy, fresh palette +
+  // composition assignment). Serves two buttons: the plain redo — the text-legibility escape
+  // hatch, since the image model paints Devanagari and can garble it — and `recolour: true`,
+  // which additionally bars the run's CURRENT colour family so the redo cannot come back in the
+  // colours the officer just rejected. Social runs only (article posters have their own
+  // scene/copy feedback); writes a new poster version either way.
+  app.post<{ Params: { id: string } }>(
+    '/generations/:id/poster/regenerate',
+    async (request, reply) => {
+      const body = RegeneratePosterRequestSchema.parse(request.body ?? {});
+      const row = await getGeneration(client, request.params.id);
+      if (!row) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'Generation not found.' } });
+      }
+      if (!isSocialCategory(row.category)) {
+        return reply
+          .code(400)
+          .send({ error: { message: 'Regenerate is only for social posts.' } });
+      }
+      if (isJobRunning(row.id)) {
+        return reply
+          .code(409)
+          .send({ error: { message: 'A job is already running.' } });
+      }
+      if (!row.posterPath) {
+        return reply
+          .code(409)
+          .send({ error: { message: 'No poster to regenerate yet.' } });
+      }
+
+      // Flip BEFORE returning so the first client poll cannot observe a stale completed
+      // row and stop before the new poster is stored (same race note as image-feedback).
+      await updateGeneration(client, row.id, {
+        status: 'running',
+        step: null,
+        error: null,
+      });
+      startPosterRegenerateJob(client, row.id, { recolour: body.recolour === true });
       return reply.code(202).send({});
     },
   );

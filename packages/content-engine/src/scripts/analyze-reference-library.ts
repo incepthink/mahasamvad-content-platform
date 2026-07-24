@@ -51,7 +51,8 @@ export async function analyzeReferenceLibrary(
       }
       console.log(
         `${label}\n  photo zone: ${spec.hasPhotoZone ? 'YES' : 'no (text-only)'}` +
-          `  |  body slots: ${spec.bulletSlots}\n  ${spec.layoutSummary}\n`,
+          `  |  body slots: ${spec.bulletSlots}\n  layout: ${spec.layoutSummary}` +
+          `${spec.contentSummary ? `\n  about: ${spec.contentSummary}` : ''}\n`,
       );
     } catch (error) {
       // One bad master must not abandon the rest of the backfill.

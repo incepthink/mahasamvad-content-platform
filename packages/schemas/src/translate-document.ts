@@ -12,10 +12,20 @@ import {
   TranslationLanguageSchema,
   TranslationTermInputSchema,
 } from './api.js';
+// The generic half of this flow — status-independent page shapes, the extract/re-extract
+// requests, the text-source enum — lives in document.ts and is shared with every other
+// upload surface. Imported (not re-exported) so the package index has one definition of
+// each name; callers keep importing them from '@dgipr/schemas' exactly as before.
+import {
+  DOCUMENT_MAX_BYTES,
+  DocumentExtractProgressSchema,
+  PdfTextSourceSchema,
+} from './document.js';
 
-// 25 MiB is generous for a scanned 20-page government PDF and keeps the in-memory job
-// bounded; the route sets the same value as its multipart limit.
-export const TRANSLATE_DOCUMENT_MAX_BYTES = 25 * 1024 * 1024;
+// Kept as its own name because the /translate route and its web panel read it, but it is
+// deliberately the SAME number as every other upload surface's cap — one file-size limit
+// across the product, not four that drift.
+export const TRANSLATE_DOCUMENT_MAX_BYTES = DOCUMENT_MAX_BYTES;
 
 // Ceiling on the SELECTED text of one translation run. Unlike the pasted-text route's
 // 10,000 (which is a synchronous-request budget), this one only exists to bound a
@@ -66,45 +76,9 @@ export type TranslateDocumentProgress = z.infer<
   typeof TranslateDocumentProgressSchema
 >;
 
-// Which backend produced the page text. Shown to the user because it changes how hard the
-// review step has to work: OCR misreads names and amounts, a text layer is exact.
-export const PdfTextSourceSchema = z.enum(['text-layer', 'ocr']);
-export type PdfTextSourceValue = z.infer<typeof PdfTextSourceSchema>;
-
-// OCR progress, in pages. Null on the text-layer path, which returns in one step, and
-// null once extraction is over.
-export const DocumentExtractProgressSchema = z.object({
-  pagesDone: z.number().int().nonnegative(),
-  pageCount: z.number().int().nonnegative(),
-});
-export type DocumentExtractProgress = z.infer<
-  typeof DocumentExtractProgressSchema
->;
-
-// The user's page choice, sent once from the 'selecting' step. Only these pages are read,
-// and on a scanned document that means only these pages are billed.
-export const ExtractDocumentRequestSchema = z.object({
-  pages: z.array(z.number().int().positive()).min(1),
-});
-export type ExtractDocumentRequest = z.infer<
-  typeof ExtractDocumentRequestSchema
->;
-
-// "The text looks wrong — read it with OCR instead." The quality gate cannot catch every
-// broken PDF font, and the user is already looking at the extracted text, so the override
-// is theirs to make. Only 'ocr' is offered: re-reading a text layer that was already
-// rejected would return the same characters.
-//
-// `pages` is required, not optional: the override is a request to re-read, not a licence to
-// bill for pages the user already excluded. Omitting it would silently OCR the whole
-// document, which is the exact behaviour this feature exists to remove.
-export const ReextractDocumentRequestSchema = z.object({
-  source: z.literal('ocr'),
-  pages: z.array(z.number().int().positive()).min(1),
-});
-export type ReextractDocumentRequest = z.infer<
-  typeof ReextractDocumentRequestSchema
->;
+// PdfTextSourceSchema, DocumentExtractProgressSchema, ExtractDocumentRequestSchema and
+// ReextractDocumentRequestSchema now live in document.ts — they describe reading a file,
+// not translating one, and every upload surface needs them.
 
 export const TranslatedDocumentPageSchema = z.object({
   page: z.number().int().positive(),

@@ -18,14 +18,24 @@ export type TextPrice = Readonly<{
 }>;
 
 export const TEXT_PRICES_PER_1M: Readonly<Record<string, TextPrice>> = {
+  // gpt-5.6 (OpenAI pricing page, captured 2026-07-24). terra is CHAT_MODEL/VISION_MODEL
+  // (authoring + judgement), luna is UTILITY_MODEL (mechanical work); sol is the
+  // env-overridable step-up. NOTE: on gpt-5 the completion_tokens these are billed
+  // against INCLUDE reasoning tokens, so `output` is the price of thinking too — which is
+  // why a medium-reasoning run costs visibly more than the gpt-4o it replaced.
+  'gpt-5.6-luna': { input: 1.0, cachedInput: 0.1, output: 6.0 },
+  'gpt-5.6-terra': { input: 2.5, cachedInput: 0.25, output: 15.0 },
+  'gpt-5.6-sol': { input: 5.0, cachedInput: 0.5, output: 30.0 },
+  // Retained for the env-only rollback path (OPENAI_CHAT_MODEL=gpt-4o etc.).
   'gpt-4o': { input: 2.5, cachedInput: 1.25, output: 10.0 },
   'gpt-4o-mini': { input: 0.15, cachedInput: 0.075, output: 0.6 },
   // Embeddings have no cached/output dimension; only `input` is used.
   'text-embedding-3-large': { input: 0.13, cachedInput: 0.13, output: 0 },
 };
 
-// Unknown / future model ids fall back to gpt-4o so cost is never silently $0.
-const FALLBACK_TEXT_PRICE = TEXT_PRICES_PER_1M['gpt-4o'] as TextPrice;
+// Unknown / future model ids fall back to the default authoring model so cost is never
+// silently $0 — and so an unpriced id errs high rather than low.
+const FALLBACK_TEXT_PRICE = TEXT_PRICES_PER_1M['gpt-5.6-terra'] as TextPrice;
 
 // USD for one chat/embedding call given its token usage. OpenAI's prompt_tokens
 // already includes the cached tokens, so the uncached portion is (input - cached).

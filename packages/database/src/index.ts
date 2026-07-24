@@ -26,6 +26,7 @@ export {
   addGenerationCost,
   getGeneration,
   listGenerations,
+  listRecentPosterStyles,
   listThreadGenerations,
   insertRevision,
   listRevisions,

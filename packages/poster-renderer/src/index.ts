@@ -33,6 +33,10 @@ export { overlayTwitterChrome } from './twitter-chrome.js';
 export { overlayCmoChrome } from './cmo-chrome.js';
 export { annotateFeedbackRegions } from './feedback-marker.js';
 export type { NormalizedRegion } from './feedback-marker.js';
+// Measures what colours a rendered poster actually uses, so the palette rotation can spread away
+// from what SHIPPED rather than from what was merely assigned (see poster-colours.ts).
+export { measurePosterColours, hueBucketOf } from './poster-colours.js';
+export type { PosterColours, HueBucket } from './poster-colours.js';
 export { renderHtmlToPng } from './render-html.js';
 export type { RenderOptions } from './render-html.js';
 export { generatePoster } from './generate-poster.js';

@@ -2,11 +2,11 @@
 // pipeline). The scene BREAKDOWN comes first from the planner
 // (plan-video-scenes.ts — citizen-first beats, scene count, per-scene target
 // window + shot hint); this module then writes narration/visual briefs
-// AGAINST that plan (one gpt-4o JSON call + one repair — the generate-copy.ts
-// pattern), and runs ONE bounded coverage round: a gpt-4o-mini check listing
-// plan beats the narrations fail to convey, and if any, ONE gpt-4o repair of
-// only the flagged scenes. Accepted either way — gate 1's human review is the
-// real gate, this pass just catches the obvious drops cheaply.
+// AGAINST that plan (one JSON call + one repair — the generate-copy.ts
+// pattern), and runs ONE bounded coverage round: a check listing plan beats the
+// narrations fail to convey, and if any, ONE repair of only the flagged scenes.
+// Accepted either way — gate 1's human review is the real gate, this pass just
+// catches the obvious drops.
 //
 // Guardrails mirror generate-article.ts: the note is the SOLE factual source
 // (never invent names/dates/amounts/designations/schemes/locations), the RAG
@@ -188,9 +188,12 @@ function parseJson(raw: string): unknown {
 
 type ScriptShape = z.infer<ReturnType<typeof scriptSchemaFor>>;
 
-// One cheap check: which plan beats do the narrations fail to convey? Returns
-// 1-based scene numbers. Any failure here returns [] — the coverage round is
-// best-effort by design and must never sink a script that already validated.
+// One check: which plan beats do the narrations fail to convey? Returns 1-based scene
+// numbers. Any failure here returns [] — the coverage round is best-effort by design and
+// must never sink a script that already validated. It runs on the authoring tier (not a
+// cheap model as it once did): judging whether a Marathi narration conveys a beat without
+// demanding verbatim overlap is exactly the call a weak model gets wrong in both
+// directions, and it decides whether a repair round is spent.
 async function findUncoveredBeats(
   plan: VideoScenePlan,
   script: ScriptShape,
@@ -216,7 +219,7 @@ async function findUncoveredBeats(
         },
         { role: 'user', content: JSON.stringify(pairs, null, 2) },
       ],
-      { temperature: 0, responseFormat: 'json_object', model: 'gpt-4o-mini' },
+      { temperature: 0, responseFormat: 'json_object' },
     );
     const parsed = z
       .object({ uncovered: z.array(z.number().int().min(1)) })

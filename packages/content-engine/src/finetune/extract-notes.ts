@@ -15,12 +15,17 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { extractParagraphs } from '../chunking/chunk-articles.js';
-import { chatComplete } from '../generation/openai-chat.js';
+import {
+  chatComplete,
+  CHAT_MODEL,
+  UTILITY_MODEL,
+} from '../generation/openai-chat.js';
 import type { FinetuneCategory, LabeledPost } from './build-corpus.js';
 
-// Cheap model for the bulk extraction/repair; the leak GATE stays on the default (gpt-4o)
-// for accurate recall since it is the safety check.
-const EXTRACT_MODEL = 'gpt-4o-mini';
+// Utility tier for the bulk extraction/repair (offline data prep over hundreds of
+// articles); the leak GATE stays on the default authoring tier for accurate recall since
+// it is the safety check.
+const EXTRACT_MODEL = UTILITY_MODEL;
 
 // Marker the gate prints when nothing leaked. Kept distinct so it can't collide with a
 // real reported line.
@@ -65,7 +70,8 @@ async function extractNote(articleText: string): Promise<string> {
 // scheme or body name / place) present in the article but missing from the note. Unlike a
 // full coverage check we deliberately IGNORE framing/rhetoric/opinion — the note is meant
 // to be framing-free, so only leaked *facts* matter (a leaked fact is what would teach the
-// model to invent that class of specific). Runs on gpt-4o (default) for accurate recall.
+// model to invent that class of specific). Runs on the default authoring tier for
+// accurate recall.
 const LEAK_SYSTEM_PROMPT = [
   'तुम्हाला एक "टिपणी" (NOTES) आणि त्यावरून विस्तारित "लेख" (ARTICLE) दिला आहे. लेखात असे',
   'कोणते ठोस तथ्यात्मक घटक आहेत — नाव, आकडा/रक्कम, तारीख/वर्ष, टक्केवारी, पदनाम,',
@@ -173,7 +179,7 @@ if (
       : corpus;
 
     console.log(
-      `Extracting notes for ${selected.length} articles (${EXTRACT_MODEL}, gate=gpt-4o)…`,
+      `Extracting notes for ${selected.length} articles (${EXTRACT_MODEL}, gate=${CHAT_MODEL})…`,
     );
     const pairs: NotePair[] = [];
     for (const [i, item] of selected.entries()) {

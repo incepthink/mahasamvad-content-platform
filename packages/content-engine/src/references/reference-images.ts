@@ -76,6 +76,10 @@ export async function uploadReferenceImage(
     category,
     subtype,
     storagePath,
+    // Uploaded masters join the rotation immediately — the operator no longer
+    // has to click वापरा. The old "one active per (category, subtype)" unique
+    // index was dropped in 0013, so many active images per type are fine.
+    isActive: true,
     // The normalized buffer is already in hand, so the vision pass costs no
     // extra download. Best-effort: a null spec makes the workflow fall back to
     // its old behaviour, which is a worse poster — never a failed upload.

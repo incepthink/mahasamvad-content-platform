@@ -129,8 +129,10 @@ function CreateSocialBlock({
   const [source, setSource] = useState<SocialSource>(
     canUseArticle ? 'article' : 'note',
   );
-  const [designMode, setDesignMode] = useState<DesignMode>('onbrand');
+  const [designMode, setDesignMode] = useState<DesignMode>('fresh');
   const [reference, setReference] = useState<ReferenceSelection | null>(null);
+  // Opt-in, matching the home form: a social post is poster-only unless asked otherwise.
+  const [wantCaption, setWantCaption] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [started, setStarted] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -153,6 +155,7 @@ function CreateSocialBlock({
         heading: detail.heading ?? undefined,
         category: platform,
         outputType: 'poster',
+        generateCaption: wantCaption,
         designMode,
         referenceImageId:
           reference?.kind === 'image' ? reference.id : undefined,
@@ -184,6 +187,17 @@ function CreateSocialBlock({
             onSelect={setSource}
           />
         ) : null}
+        <label className="option-toggle">
+          <input
+            type="checkbox"
+            checked={wantCaption}
+            onChange={(e) => setWantCaption(e.target.checked)}
+          />
+          <span>
+            <span className="option-toggle-name">{STR.captionToggleLabel}</span>
+            <span className="option-toggle-desc">{STR.captionToggleHint}</span>
+          </span>
+        </label>
         <OptionCards
           label={STR.designModeLabel}
           options={DESIGN_OPTIONS}
@@ -403,6 +417,9 @@ function EditNoteBlock({ detail, onSpawned }: BlockProps) {
         outputType: detail.outputType,
         designMode: detail.designMode ?? undefined,
         sourceGenerationId: detail.id,
+        // Same inference as the detail page's retry: a social run that ended up with a
+        // caption gets one again (the preference is per run, not stored).
+        ...(isSocial ? { generateCaption: detail.article !== null } : {}),
       });
       addTask(id);
       onSpawned?.();

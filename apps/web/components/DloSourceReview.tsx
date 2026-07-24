@@ -9,13 +9,19 @@
 // page list so pages that do not belong in the article (annexures, signature
 // pages, tabular accounting) can simply be unchecked.
 //
-// Two deliberate differences from /translate's page picker, which this otherwise
-// mirrors (down to reusing its .page-list markup and Marathi labels):
+// The PDF half of a card is <DocumentPages>, the shared page list every upload surface
+// uses — so a PDF here looks and behaves exactly as it does on /translate, and the next
+// improvement to it arrives here for free. What stays local to this file is what is
+// genuinely DLO's: the per-source card, the include checkbox that spans notes/recordings/
+// documents alike, and the needs-selection messaging.
+//
+// Two deliberate differences from /translate's page picker:
 //   - recordings and DOCX text are shown EXPANDED. They have to be read to be
 //     checked, and there is usually one of them; a 20-page PDF is the opposite
 //     case, so its pages stay collapsed.
 //   - the whole-file checkbox on a PDF card is its select-all: unchecking clears
-//     every page, checking restores them.
+//     every page, checking restores them. (Which is why the shared list's own
+//     select-all row is switched off here — two controls for one thing reads as a bug.)
 //
 // A PDF has TWO shapes here. A file that has been read lists its pages with their text,
 // editable, as above. A SCANNED file that has not (status 'needs-selection') lists page
@@ -24,7 +30,6 @@
 // contributes nothing to the assembled note, which is why generate is blocked while one is
 // outstanding.
 
-import { useState } from 'react';
 import { FileText, Music } from 'lucide-react';
 import type { DloIntakeDetail, DloIntakeFile } from '@dgipr/schemas';
 import {
@@ -35,6 +40,7 @@ import {
   sourceText,
 } from '../lib/dloReview';
 import { STR } from '../lib/strings';
+import { DocumentPages } from './DocumentPages';
 
 function marathiNumber(value: number): string {
   return value.toLocaleString('mr-IN');
@@ -67,11 +73,6 @@ export function DloSourceReview({
   onToggleFilePages: (index: number, include: boolean) => void;
   onReextract: (index: number) => void;
 }) {
-  const [openPage, setOpenPage] = useState<string | null>(null);
-  const [confirmingReextract, setConfirmingReextract] = useState<number | null>(
-    null,
-  );
-
   return (
     <>
       {intake.notes.trim().length > 0 ? (
@@ -161,27 +162,6 @@ export function DloSourceReview({
               </div>
             ) : null}
 
-            {/* Which backend read this PDF changes how hard the text should be
-                looked at, so it is stated rather than left to be guessed. */}
-            {file.pdfSource ? (
-              <p className="hint" style={{ marginTop: 8 }}>
-                <span
-                  className={
-                    file.pdfSource === 'ocr'
-                      ? 'chip chip-queued'
-                      : 'chip chip-completed'
-                  }
-                >
-                  {file.pdfSource === 'ocr'
-                    ? STR.translateDocSourceOcr
-                    : STR.translateDocSourceTextLayer}
-                </span>{' '}
-                {file.pdfSource === 'ocr'
-                  ? STR.translateDocSourceOcrHint
-                  : STR.translateDocSourceTextLayerHint}
-              </p>
-            ) : null}
-
             {reextracting ? (
               <p className="translating-note" style={{ marginTop: 10 }}>
                 <span className="spinner" aria-hidden="true" />
@@ -189,142 +169,29 @@ export function DloSourceReview({
               </p>
             ) : null}
 
-            {/* The automatic text-layer/OCR gate cannot catch every broken PDF
-                font, so the officer can overrule it. Offered only on a text-layer
-                read — re-running OCR on OCR output just spends the minutes again. */}
-            {file.pdfSource === 'text-layer' &&
-            !reextracting &&
-            confirmingReextract !== index ? (
-              <div className="btn-row" style={{ marginTop: 10 }}>
-                <button
-                  type="button"
-                  className="btn btn-small"
-                  disabled={busy}
-                  onClick={() => setConfirmingReextract(index)}
-                >
-                  {STR.translateDocReextract}
-                </button>
-              </div>
-            ) : null}
-            {confirmingReextract === index ? (
-              <div className="info-callout" style={{ marginTop: 10 }}>
-                <p>{STR.translateDocReextractHint}</p>
-                <div className="btn-row" style={{ marginTop: 8 }}>
-                  <button
-                    type="button"
-                    className="btn btn-primary btn-small"
-                    disabled={busy}
-                    onClick={() => {
-                      setConfirmingReextract(null);
-                      onReextract(index);
-                    }}
-                  >
-                    {STR.translateDocReextractYes}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-small"
-                    onClick={() => setConfirmingReextract(null)}
-                  >
-                    {STR.translateDocReextractCancel}
-                  </button>
-                </div>
-              </div>
-            ) : null}
-
-            {/* Numbers only — this PDF has not been read, so there is no text to show
-                and no per-page editing to offer until there is. */}
-            {needsSelection && pageNumbers ? (
-              <>
-                <ul className="page-list">
-                  {pageNumbers.map((page) => {
-                    const itemKey = pageKey(index, page);
-                    return (
-                      <li key={page} className="page-row">
-                        <label className="page-row-head">
-                          <input
-                            type="checkbox"
-                            checked={!excluded.has(itemKey)}
-                            disabled={busy}
-                            onChange={() => onToggle(itemKey)}
-                          />
-                          <span className="page-row-name">
-                            {STR.translateDocPage} {marathiNumber(page)}
-                          </span>
-                        </label>
-                      </li>
-                    );
-                  })}
-                </ul>
-                {selectedNumbers.length === 0 ? (
-                  <p className="hint" style={{ marginTop: 10 }}>
-                    {STR.dloReviewNoPages}
-                  </p>
-                ) : null}
-              </>
-            ) : null}
-
-            {pages ? (
-              <>
-                <ul className="page-list">
-                  {pages.map((page) => {
-                    const itemKey = pageKey(index, page.page);
-                    const text = edits[itemKey] ?? page.text;
-                    const isOpen = openPage === itemKey;
-                    return (
-                      <li key={page.page} className="page-row">
-                        <label className="page-row-head">
-                          <input
-                            type="checkbox"
-                            checked={!excluded.has(itemKey)}
-                            disabled={busy || reextracting}
-                            onChange={() => onToggle(itemKey)}
-                          />
-                          <span className="page-row-name">
-                            {STR.translateDocPage} {marathiNumber(page.page)}
-                          </span>
-                          {edits[itemKey] !== undefined ? (
-                            <span className="chip chip-completed">
-                              {STR.translateDocEdited}
-                            </span>
-                          ) : null}
-                          <span className="page-row-chars">
-                            {marathiNumber(text.length)} {STR.translateDocChars}
-                          </span>
-                          <button
-                            type="button"
-                            className="btn btn-small"
-                            onClick={(event) => {
-                              event.preventDefault();
-                              setOpenPage(isOpen ? null : itemKey);
-                            }}
-                          >
-                            {isOpen
-                              ? STR.translateDocEditClose
-                              : STR.translateDocEdit}
-                          </button>
-                        </label>
-                        {isOpen ? (
-                          <textarea
-                            className="note-input"
-                            value={text}
-                            disabled={busy || reextracting}
-                            onChange={(event) =>
-                              onEdit(itemKey, event.target.value)
-                            }
-                            style={{ marginTop: 10, minHeight: 220 }}
-                          />
-                        ) : null}
-                      </li>
-                    );
-                  })}
-                </ul>
-                {selectedNumbers.length === 0 ? (
-                  <p className="hint" style={{ marginTop: 10 }}>
-                    {STR.dloReviewNoPages}
-                  </p>
-                ) : null}
-              </>
+            {/* One list for both PDF shapes: `pages` when the file has been read,
+                `pageNumbers` when it has not (its text is exactly what the officer is
+                deciding whether to buy). The shared component also owns the OCR-override
+                confirm and the text-layer/OCR badge. */}
+            {pageNumbers ? (
+              <DocumentPages
+                {...(needsSelection
+                  ? { pageNumbers }
+                  : { pages: pages ?? undefined })}
+                isSelected={(page) => !excluded.has(pageKey(index, page))}
+                edits={edits}
+                keyOf={(page) => pageKey(index, page)}
+                source={file.pdfSource ?? null}
+                busy={busy || reextracting}
+                // The card header's checkbox is already this file's select-all.
+                showSelectAll={false}
+                onToggle={(page) => onToggle(pageKey(index, page))}
+                onSetAll={(_, include) => onToggleFilePages(index, include)}
+                onEdit={onEdit}
+                {...(reextracting
+                  ? {}
+                  : { onReextract: () => onReextract(index) })}
+              />
             ) : null}
 
             {!pages && !needsSelection && file.status !== 'failed' ? (

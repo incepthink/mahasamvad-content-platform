@@ -2,7 +2,7 @@
 
 // Explainer-video entry: the create form (note + duration bucket + orientation
 // + Veo quality tier) and the recent-project list. Submitting only writes the
-// script (gpt-4o — no video spend); the expensive steps sit behind the two
+// script (a text call — no video spend); the expensive steps sit behind the two
 // review gates on the project page. One project renders at a time (the API
 // enforces it server-side; the form reads the same fact from the list and says
 // so instead of letting the submit bounce).

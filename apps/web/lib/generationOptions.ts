@@ -126,12 +126,14 @@ export const BRAND_OPTIONS: ReadonlyArray<GenerationOption<TemplateBrand>> = [
   },
 ];
 
+// 'fresh' (a unique AI-designed poster from scratch) is the default and the primary option,
+// so it leads; 'adaptive'/'onbrand' still edit a template for a run that wants to follow one.
 export const DESIGN_OPTIONS: ReadonlyArray<GenerationOption<DesignMode>> = [
   {
-    value: 'onbrand',
-    icon: Target,
-    name: STR.designOnbrand,
-    desc: STR.designOnbrandDesc,
+    value: 'fresh',
+    icon: Sparkles,
+    name: STR.designFresh,
+    desc: STR.designFreshDesc,
   },
   {
     value: 'adaptive',
@@ -140,9 +142,9 @@ export const DESIGN_OPTIONS: ReadonlyArray<GenerationOption<DesignMode>> = [
     desc: STR.designAdaptiveDesc,
   },
   {
-    value: 'fresh',
-    icon: Sparkles,
-    name: STR.designFresh,
-    desc: STR.designFreshDesc,
+    value: 'onbrand',
+    icon: Target,
+    name: STR.designOnbrand,
+    desc: STR.designOnbrandDesc,
   },
 ];

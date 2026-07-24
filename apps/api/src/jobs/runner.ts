@@ -9,18 +9,31 @@
 
 import {
   FACT_CHECK_DELIMITER,
-  buildTwitterCatalog,
+  buildFeedbackPrompt,
+  buildPosterPrompt,
+  classifyPosterType,
   createCostAccumulator,
   extractGlossaryCandidates,
+  generateArtDirection,
   generateArticle,
   generateCopy,
+  generatePosterCopy,
+  generateSocialCaption,
   interpretImageFeedback,
+  listSocialTypes,
+  buildPosterStyle,
+  familyHonoured,
+  parsePosterStyle,
   pickArticlePosterTheme,
   pickArticleReference,
-  pickCmoReference,
+  pickLayout,
+  pickPalette,
+  toStyleHistory,
   recordImageCost,
-  resolvePinnedReference,
-  resolvePinnedTypeReference,
+  resolveCmoReference,
+  resolvePinnedImage,
+  resolvePinnedType,
+  selectMaster,
   reviseArticle,
   reviseCaption,
   reviseCopy,
@@ -29,8 +42,12 @@ import {
   translateArticle,
   type ArticlePosterTheme,
   type ImageQuality,
-  type PinnedReference,
+  type PaletteFamily,
+  type PosterDesignMode,
+  type PosterStyle,
   type ReferenceLayoutSpec,
+  type ResolvedReference,
+  type StyleHistory,
 } from '@dgipr/content-engine';
 import {
   annotateFeedbackRegions,
@@ -39,6 +56,7 @@ import {
   generateImage,
   generateArticlePoster,
   headStrings,
+  measurePosterColours,
   overlayArticleChrome,
   overlayCmoChrome,
   overlayTwitterChrome,
@@ -49,6 +67,7 @@ import {
   getGeneration,
   insertGlossaryCandidates,
   insertRevision,
+  listRecentPosterStyles,
   listRevisions,
   publicUrl,
   updateGeneration,
@@ -97,11 +116,12 @@ const translateWarnings = new Map<string, string[]>();
 const revisingArticle = new Set<string>();
 const reviseArticleErrors = new Map<string, string>();
 
-// A social run's caption revision reports itself the same way, for the same reason:
-// the caption lives on a *settled* row (status 'completed'), and flipping that row to
-// running would swap the finished poster + caption for a progress bar in the UI. Keeping
-// it out of status/step also lets a caption edit run beside a poster re-render — the two
-// write disjoint columns (article vs posterPath).
+// A social run's caption work — an AI revision, or writing the first caption for a run
+// created poster-only — reports itself the same way, for the same reason: the caption
+// lives on a *settled* row (status 'completed'), and flipping that row to running would
+// swap the finished poster + caption for a progress bar in the UI. Keeping it out of
+// status/step also lets a caption edit run beside a poster re-render — the two write
+// disjoint columns (article vs posterPath). One caption job at a time per row, either kind.
 const revisingCaption = new Set<string>();
 const captionReviseErrors = new Map<string, string>();
 
@@ -402,9 +422,11 @@ async function runArticlePosterPhase(
   // even if meanwhile disabled; a deleted pin falls back), else a random pick
   // among the enabled article masters.
   const pinned = pinnedReferenceImageId
-    ? await resolvePinnedReference(client, pinnedReferenceImageId)
+    ? await resolvePinnedImage(client, pinnedReferenceImageId, id)
     : null;
-  const reference = pinned ?? (await pickArticleReference(client));
+  const reference = pinned
+    ? pinned.master
+    : await pickArticleReference(client, id, article);
   // Rotate the headline-panel color per render so posters stop always being orange.
   // The workflow applies it conditionally (only masters that actually have a solid
   // headline panel are recoloured — the library is a mix of layouts); the
@@ -552,40 +574,26 @@ async function renderArticlePosterViaN8n(
   return overlayArticleChrome(Buffer.from(result.poster_png_base64, 'base64'));
 }
 
-// Shape n8n's social-post-v2-api workflow returns from its Respond-to-Webhook node.
+// Shape the thin social-post-v2-api workflow returns from its Respond-to-Webhook node.
+// The workflow now ONLY edits an image with an API-built prompt — classify/copy/prompt all
+// run in the API — so the response carries just the rendered poster.
 type SocialPostResult = {
-  post_type?: string;
-  title?: string;
-  caption?: string;
   poster_png_base64?: string;
-  // The single-circle subject (CMO only). The API generates the circle photograph from
-  // this and composites it in code; the workflow leaves the circle zone quiet.
-  scene_brief?: string;
 };
 
-// Re-edit a completed Twitter poster without rerunning classify/copy/caption.
-// The workflow's dedicated feedback branch accepts only the latest poster URL
-// plus the user's requested visual change and returns a replacement PNG.
-async function renderSocialPosterFeedbackViaN8n(
+// POST an already-built image-edit request to the thin n8n workflow: it fetches `imageUrl`,
+// edits it with `prompt` at `quality`, and returns the poster PNG. Used by BOTH the initial
+// render (edit the chosen master) and the pixel-feedback render (edit the current poster) —
+// they differ only in which image and which prompt. Chrome is stamped by the caller.
+async function renderSocialPosterViaN8n(
   id: string,
-  currentPosterUrl: string,
-  feedback: string,
-  // > 0 when currentPosterUrl carries numbered marker boxes (see the article
-  // renderer's note above).
-  markerCount = 0,
-  // The run's template brand, so the workflow's feedback prompt keeps the right
-  // reserved zones and the re-stamp uses the matching chrome.
-  brand: TemplateBrand = 'dgipr',
-  // CMO only: the cached circle photograph (cmoPhotoPath), re-composited so a text/layout
-  // feedback edit never changes the photo. Required when brand === 'cmo'.
-  cmoPhoto?: Buffer,
+  imageUrl: string,
+  prompt: string,
 ): Promise<Buffer> {
   const webhookUrl = requireEnv('N8N_SOCIAL_POST_WEBHOOK_URL');
   const webhookSecret = process.env.N8N_WEBHOOK_SECRET;
 
-  const headers: Record<string, string> = {
-    'content-type': 'application/json',
-  };
+  const headers: Record<string, string> = { 'content-type': 'application/json' };
   if (webhookSecret) headers['x-n8n-webhook-secret'] = webhookSecret;
 
   const response = await fetch(webhookUrl, {
@@ -593,63 +601,414 @@ async function renderSocialPosterFeedbackViaN8n(
     headers,
     body: JSON.stringify({
       generation_id: id,
-      image_feedback: feedback,
-      current_poster_url: currentPosterUrl,
-      marker_count: markerCount,
-      brand,
-      // Always-present placeholders keep the shared Set node deterministic;
-      // the feedback branch bypasses every consumer of these initial-run fields.
-      meeting_notes: '',
-      design_mode: 'onbrand',
-      progress_url: '',
-      types: [],
-      forced_type: '',
-      forced_reference_url: '',
+      image_url: imageUrl,
+      prompt,
+      quality: imageQuality(),
     }),
     signal: AbortSignal.timeout(420_000),
   });
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
     throw new Error(
-      `n8n social-poster feedback webhook failed (${response.status}): ${detail.slice(0, 500)}`,
+      `n8n social-post webhook failed (${response.status}): ${detail.slice(0, 500)}`,
     );
   }
-
   const result = (await response.json()) as SocialPostResult;
   if (!result.poster_png_base64) {
-    throw new Error('n8n social-poster feedback webhook returned no poster.');
+    throw new Error('n8n social-post webhook returned no poster.');
   }
+  return Buffer.from(result.poster_png_base64, 'base64');
+}
+
+// Which caption rule the platform imposes. X caps a post at 280 weighted characters;
+// a Facebook post has no comparable limit. (A within-social branch, like the publish
+// route's — not an isSocialCategory() violation.)
+function captionMaxLength(
+  category: GenerationRow['category'],
+): number | undefined {
+  return category === 'twitter' ? TWEET_MAX_LENGTH : undefined;
+}
+
+// The social lane the caption is being written for. The row's category already is one
+// of the two, but the runner's GenerationRow['category'] is the widened union.
+function socialPlatformOf(
+  category: GenerationRow['category'],
+): 'twitter' | 'facebook' {
+  if (category === 'twitter' || category === 'facebook') return category;
+  throw new Error(`Caption requested for non-social category: ${category}`);
+}
+
+// Re-edit a completed poster without rerunning classify/copy. The feedback PROMPT is now
+// built in the API (buildFeedbackPrompt) and the thin workflow just edits the current poster
+// with it — the same render path as the initial run, differing only in image + prompt.
+async function renderSocialPosterFeedbackViaN8n(
+  id: string,
+  currentPosterUrl: string,
+  feedback: string,
+  // > 0 when currentPosterUrl carries numbered marker boxes (see the article
+  // renderer's note above).
+  markerCount = 0,
+  // The run's template brand, so the feedback prompt keeps the right reserved zones and the
+  // re-stamp uses the matching chrome.
+  brand: TemplateBrand = 'dgipr',
+  // CMO only: the cached circle photograph (cmoPhotoPath), re-composited so a text/layout
+  // feedback edit never changes the photo. Required when brand === 'cmo'.
+  cmoPhoto?: Buffer,
+): Promise<Buffer> {
+  const prompt = buildFeedbackPrompt({ imageFeedback: feedback, brand, markerCount });
+  const rawPoster = await renderSocialPosterViaN8n(id, currentPosterUrl, prompt);
   // The workflow leaves the reserved chrome zones untouched; re-stamp the chrome so
   // any drift from the edit is corrected (mirrors the article path). CMO re-stamps
   // its full-width leader header + the DGIPR footer, and re-composites the SAME cached
   // circle photograph (the workflow leaves the circle zone quiet on feedback too).
-  const rawPoster = Buffer.from(result.poster_png_base64, 'base64');
   if (brand === 'cmo') {
     if (!cmoPhoto) {
-      throw new Error(
-        'CMO feedback re-render requires the cached circle photo.',
-      );
+      throw new Error('CMO feedback re-render requires the cached circle photo.');
     }
     return overlayCmoChrome(rawPoster, cmoPhoto);
   }
   return overlayTwitterChrome(rawPoster);
 }
 
-// Social pipeline (twitter + facebook, identical today): the heavy lifting (classify →
-// copy → image → caption) runs in the external n8n `social-post-v2-api` workflow —
-// the row's category rides along as `platform`. This job is a thin orchestrator — it
-// POSTs the note to the webhook, awaits the JSON result, then uploads the returned PNG
-// to Supabase Storage (Supabase creds stay in the API, never in n8n, per AGENTS.md).
-// n8n reports stage progress out-of-band via the /progress endpoint (progress_url),
-// so this function only sets the initial running state and persists the final result.
-export function startSocialPostJob(client: SupabaseClient, id: string): void {
+// In-process recency ring: the master ids the last few DGIPR runs of a given type used, so
+// selectMaster can avoid landing on the same template again (across-run variety). Keyed by
+// `dgipr:${typeSlug}`, capped small. Deliberately in-process — social renders are serial (one
+// n8n workflow / one busy gate) in a single API process, so consecutive runs reliably see it;
+// it degrades to today's behaviour on restart. Matches the in-flight / translateWarnings
+// registries rather than persisting a per-run selection column.
+const SOCIAL_MASTER_RECENCY_CAP = 3;
+const socialMasterRecency = new Map<string, string[]>();
+function recentMasters(key: string): readonly string[] {
+  return socialMasterRecency.get(key) ?? [];
+}
+function rememberMaster(key: string, masterId: string, enabledCount: number): void {
+  // Never avoid so many that the band could empty; leave at least one template pickable.
+  const cap = Math.max(0, Math.min(SOCIAL_MASTER_RECENCY_CAP, enabledCount - 1));
+  if (cap === 0) return;
+  const prior = socialMasterRecency.get(key) ?? [];
+  socialMasterRecency.set(
+    key,
+    [masterId, ...prior.filter((mid) => mid !== masterId)].slice(0, cap),
+  );
+}
+
+// What the last few social posters looked like — colour family, composition, and what their
+// renders actually MEASURED — read from generations.poster_style (migration 0028).
+//
+// This used to be an in-process Map, which was the wrong place for it. Social renders are serial,
+// so a Map looked sufficient, but it reset on every API restart (constant under `tsx watch`) and
+// a second process could not see it — so after any restart a run could be assigned the same
+// colour family as the one before it, which is precisely the failure the rotation exists to
+// prevent. One small indexed query per social run buys a spread that actually holds.
+//
+// Best-effort: a failure here degrades to "no history", which is exactly the pre-0028 behaviour,
+// and must never sink a paid render.
+const STYLE_HISTORY_DEPTH = 8;
+
+async function recentStyleHistory(client: SupabaseClient): Promise<StyleHistory> {
+  try {
+    return toStyleHistory(await listRecentPosterStyles(client, STYLE_HISTORY_DEPTH));
+  } catch (error) {
+    console.warn('[job] could not read recent poster styles (rendering unspread):', error);
+    return toStyleHistory([]);
+  }
+}
+
+// Resolve which poster type + master template a social run uses, and (for a normal run)
+// classify the note. The precedence is exactly the old workflow's: an exact-image pin wins,
+// then a type pin, then the CMO brand — all three FORCE the type and skip classification.
+// Only an ordinary DGIPR run classifies, then picks the best-fit master within the chosen
+// type (content-aware selection replaces the old random roll). A deleted pin falls through
+// to the next rule, matching the previous nullable-pin behaviour. `id` is the selection seed.
+async function resolveSocialReference(
+  client: SupabaseClient,
+  id: string,
+  row: GenerationRow,
+  brand: TemplateBrand,
+  // On a from-scratch render the master contributes STRUCTURE only and the palette is assigned
+  // separately, so colour must play no part in choosing it — the master library is
+  // overwhelmingly saffron/maroon/cream, and ranking on colour theme is one of the ways the
+  // house look kept re-entering a poster that was supposed to be in a different family.
+  ignoreColour = false,
+): Promise<ResolvedReference> {
+  if (row.referenceImageId) {
+    const pinned = await resolvePinnedImage(client, row.referenceImageId, id);
+    if (pinned) return pinned;
+  }
+  if (row.referenceTypeId) {
+    const pinned = await resolvePinnedType(client, row.referenceTypeId, id, row.note);
+    if (pinned) return pinned;
+  }
+  if (brand === 'cmo') {
+    return resolveCmoReference(client, id, row.note);
+  }
+
+  // Ordinary run: classify the note against the DGIPR type catalog (which excludes CMO), then
+  // select the best-fit master within the chosen type.
+  const types = await listSocialTypes(client, 'dgipr');
+  const classification = await classifyPosterType(
+    row.note,
+    types.map((t) => ({ slug: t.slug, description: t.description })),
+  );
+  const type =
+    types.find((t) => t.slug === classification.postType) ??
+    (types[0] as (typeof types)[number]);
+  const recencyKey = `dgipr:${type.slug}`;
+  const master = await selectMaster(
+    client,
+    type.images,
+    { points: classification.pointCount, wantsPhoto: classification.wantsPhoto },
+    id,
+    row.note,
+    recentMasters(recencyKey),
+    { ignoreColour },
+  );
+  rememberMaster(recencyKey, master.id, type.images.length);
+  return {
+    type: {
+      slug: type.slug,
+      label: type.label,
+      description: type.description,
+      copyStyle: type.copyStyle,
+      brand: type.brand,
+    },
+    master,
+    forced: false,
+    title: classification.title,
+  };
+}
+
+// Render ONE social poster and store it at posterPath(id, version), updating referenceTitle +
+// posterPath. Shared by the initial job (version 1) and the regenerate action (next version).
+//
+// The default DGIPR path GENERATES the poster from scratch: the selected master is used only as a
+// loose STRUCTURAL idea, never as pixels to clone. Two independent rotations decide how it looks —
+// a colour palette (poster-palettes.ts) and a composition archetype (poster-layouts.ts), each
+// assigned per run and each spread away from what the last few runs used. The art director then
+// designs WITHIN both; it chooses neither. The legacy edit modes ('onbrand'/'adaptive') still edit
+// the master via the thin n8n workflow; CMO keeps its own template-following render.
+async function renderAndStoreSocialPoster(
+  client: SupabaseClient,
+  id: string,
+  row: GenerationRow,
+  brand: TemplateBrand,
+  designMode: PosterDesignMode,
+  version: number,
+  // Diversifies the assignment per run (id on a first render, `${id}:v${n}` on a regenerate, so a
+  // redo looks new rather than repeating the previous poster).
+  seed: string,
+  // Extra colour families this render must avoid, on top of the recent history — set by the
+  // "different colours" redo so the new version cannot land back in the family being rejected.
+  avoidFamilies: readonly PaletteFamily[] = [],
+): Promise<{ postType: string; title: string | null }> {
+  // 1. Resolve the poster type + the master. A pin (image or type) or the CMO brand forces the
+  //    type and skips classification; otherwise classify the note and pick the best-fit master
+  //    within the chosen type (content-aware, seeded, recency-spread across runs).
+  await updateGeneration(client, id, { step: 'classify' });
+  const resolved = await resolveSocialReference(
+    client,
+    id,
+    row,
+    brand,
+    brand !== 'cmo' && designMode === 'fresh',
+  );
+
+  console.log(
+    `[job ${id}] social poster reference: ${JSON.stringify({
+      id,
+      brand,
+      forced: resolved.forced,
+      type: resolved.type.slug,
+      analyzed: Boolean(resolved.master.layoutSpec),
+      pick: resolved.master.reason,
+    })}`,
+  );
+
+  // 2. Scheme-name lock source: verified glossary scheme/org names present in the note.
+  //    These must survive in the copy in full (lock-scheme-names). Free — a substring
+  //    match over the small verified set, no model call.
+  const glossaryTerms = await findGlossaryTermsInText(client, row.note);
+  const lockedSchemeNames = glossaryTerms
+    .filter((t) => t.termType === 'scheme' || t.termType === 'org')
+    .map((t) => t.marathi);
+
+  // 3. Copy (gpt-5.6-luna, metered inside this job's cost scope).
+  await updateGeneration(client, id, { step: 'copy' });
+  const copyResult = await generatePosterCopy({
+    note: row.note,
+    postType: resolved.type.slug,
+    copyStyle: resolved.type.copyStyle,
+    description: resolved.type.description,
+    brand,
+    layoutSpec: resolved.master.layoutSpec,
+    lockedSchemeNames,
+  });
+
+  // 3a. Colour palette + composition — only the fully-AI-generated DGIPR path uses them. Both are
+  //     rotated per run away from what the last few runs used (families and coverages first, then
+  //     exact ids), so consecutive posters differ in hue AND in shape. The avoid set includes the
+  //     hue families the last few renders were MEASURED to be, not only the ones they were
+  //     assigned — if the image model ignores a spec, avoiding intentions would achieve nothing.
+  //     Seeded, so a retry reproduces the same assignment rather than redesigning.
+  const isFresh = brand !== 'cmo' && designMode === 'fresh';
+  const history = isFresh ? await recentStyleHistory(client) : undefined;
+  const assignedPalette = isFresh
+    ? pickPalette(seed, {
+        ids: history?.paletteIds,
+        families: [...(history?.families ?? []), ...avoidFamilies],
+      })
+    : undefined;
+  const assignedLayout = isFresh
+    ? pickLayout(
+        seed,
+        { hasPhoto: copyResult.hasPhoto, copyStyle: copyResult.copyStyle },
+        { ids: history?.layoutIds, coverages: history?.coverages },
+      )
+    : undefined;
+
+  // 3b. Art direction — only the fully-AI-generated DGIPR path consumes it; edit modes and CMO
+  //     ignore it, so don't spend the call there. It describes HOW the assigned colours and
+  //     composition are used and chooses neither. Best-effort: null → render from the assignment
+  //     alone, which carries the colours and the layout and is deliberately sufficient.
+  const artDirection = isFresh
+    ? await generateArtDirection({
+        note: row.note,
+        copyStyle: copyResult.copyStyle,
+        // Colour words are stripped from this hint inside buildPosterPrompt; the art director
+        // gets the raw summary but is told the palette is not its call.
+        referenceHint: resolved.master.layoutSpec?.layoutSummary,
+        seed,
+        assignedPalette,
+        assignedLayout,
+        recentTreatments: history?.treatments,
+      })
+    : null;
+  if (assignedPalette && assignedLayout) {
+    console.log(
+      `[job ${id}] style: palette=${assignedPalette.id} (${assignedPalette.family}) layout=${assignedLayout.id} (${assignedLayout.coverage})` +
+        ` | avoided families=[${(history?.families ?? []).join(',')}${avoidFamilies.length ? `+${avoidFamilies.join(',')}` : ''}]` +
+        ` measured=[${(history?.measuredBuckets ?? []).join(',')}]` +
+        `${artDirection ? '' : ' (undirected)'}`,
+    );
+  }
+
+  // 4. Image prompt (pure string assembly, no model call).
+  const prompt = buildPosterPrompt({
+    copy: copyResult.copy,
+    copyStyle: copyResult.copyStyle,
+    designMode,
+    brand,
+    masterUrl: resolved.master.url,
+    layoutSummary: resolved.master.layoutSpec?.layoutSummary,
+    hasPhoto: copyResult.hasPhoto,
+    artDirection: artDirection ?? undefined,
+    assignedPalette,
+    assignedLayout,
+  });
+
+  // 5. Render. 'fresh' generates from scratch (the master is only inspiration in the prompt)
+  //    via the direct image call; the edit modes edit the chosen master through n8n.
+  await updateGeneration(client, id, { step: 'image' });
+  const rawPoster =
+    designMode === 'fresh' && brand !== 'cmo'
+      ? await generateImage(prompt, { size: '1280x1600' })
+      : await renderSocialPosterViaN8n(id, resolved.master.url, prompt);
+  // gpt-image-2 @ 1280x1600 — attribute the fixed tier price (image usage isn't measurable
+  // whether it ran in n8n or the direct call). The copy above is metered by chatComplete.
+  recordImageCost('twitter', imageQuality());
+
+  // 5a. Measure what the render ACTUALLY came out as, BEFORE the chrome is stamped — the footer
+  //     band and emblem are the same colours on every poster, so measuring after them biases
+  //     every measurement identically and makes the comparison across runs worthless.
+  //
+  //     A mismatch against the assignment is logged, never retried: a re-render is another paid
+  //     image call, and the honest fix for systematic non-compliance is a better prompt. What the
+  //     measurement is FOR is the next run's avoid set (see recentStyleHistory).
+  let posterStyle: PosterStyle | undefined;
+  if (assignedPalette && assignedLayout) {
+    let measured;
+    try {
+      measured = await measurePosterColours(rawPoster);
+    } catch (error) {
+      console.warn(`[job ${id}] could not measure poster colours:`, error);
+    }
+    posterStyle = buildPosterStyle(assignedPalette, assignedLayout, measured);
+    if (measured) {
+      const complied = familyHonoured(assignedPalette.family, measured.hueBucket);
+      console.log(
+        `[job ${id}] measured: ground=${measured.groundHex}${measured.groundIsWarm ? ' (warm cream)' : ''}` +
+          ` dominant=${measured.dominantHex} bucket=${measured.hueBucket}` +
+          `${complied ? '' : ` — MISMATCH, assigned ${assignedPalette.family}`}`,
+      );
+    }
+  }
+
+  // 6. Chrome (+ the CMO circle photo). The workflow/prompt leaves the reserved zones quiet;
+  //    the crisp brand chrome is stamped here. CMO also GENERATES its single circle photograph
+  //    (a clean crop the model could never paint reliably), caches it for feedback, composites.
+  let posterPng: Buffer;
+  if (brand === 'cmo') {
+    const sceneBrief =
+      (typeof copyResult.copy.scene_brief === 'string'
+        ? copyResult.copy.scene_brief.trim()
+        : '') || row.note;
+    const photo = await generateImage(buildCmoCirclePhotoPrompt(sceneBrief), {
+      size: '1024x1024',
+    });
+    recordImageCost('twitter', imageQuality());
+    await uploadPng(client, cmoPhotoPath(id), photo, true);
+    posterPng = await overlayCmoChrome(rawPoster, photo);
+  } else {
+    posterPng = await overlayTwitterChrome(rawPoster);
+  }
+  const posterObjectPath = posterPath(id, version);
+  await uploadPng(client, posterObjectPath, posterPng);
+
+  // Working title → referenceTitle (surfaced in UI). Persisted with the poster so a later
+  // caption failure never loses the paid render.
+  await updateGeneration(client, id, {
+    referenceTitle: resolved.title ?? null,
+    posterPath: posterObjectPath,
+  });
+
+  // The assigned style is written SEPARATELY and best-effort, deliberately not bundled into the
+  // write above. It targets a column added by migration 0028, and bundling them would mean that
+  // on a database where 0028 has not been applied the whole update fails and the already-paid
+  // poster never lands on the row. Losing the rotation memory for one run is a cost worth paying;
+  // losing the render is not. Same ordering principle as the caption step.
+  if (posterStyle) {
+    try {
+      await updateGeneration(client, id, { posterStyle });
+    } catch (error) {
+      console.warn(
+        `[job ${id}] could not persist poster style (is migration 0028 applied?):`,
+        error,
+      );
+    }
+  }
+
+  return { postType: resolved.type.slug, title: resolved.title ?? null };
+}
+
+// Social pipeline (twitter + facebook, identical today). The POSTER pipeline — classify →
+// select master → copy → art direction → generate — now runs HERE in the API (per AGENTS.md's
+// package boundary). By default the poster is generated from scratch (design_mode 'fresh'); the
+// selected master steers the concept, not the pixels. Progress is written directly to the row at
+// each stage. The row's category rides along as the caption's platform.
+//
+// The CAPTION is written here, only when the run asked for one (`options.generateCaption`) —
+// a social run is poster-only by default — and a run that skipped it can be given a caption
+// later without re-rendering (startGenerateCaptionJob). Ordering matters: the poster is
+// persisted BEFORE the caption call, so a caption failure fails the run with the already-paid
+// poster safely on the row rather than costing a re-render.
+export function startSocialPostJob(
+  client: SupabaseClient,
+  id: string,
+  options: Readonly<{ generateCaption?: boolean }> = {},
+): void {
   runJob(client, id, async () => {
     const row = await getGeneration(client, id);
     if (!row) throw new Error(`Generation ${id} not found.`);
-
-    const webhookUrl = requireEnv('N8N_SOCIAL_POST_WEBHOOK_URL');
-    const apiPublicUrl = requireEnv('API_PUBLIC_URL');
-    const webhookSecret = process.env.N8N_WEBHOOK_SECRET;
 
     await updateGeneration(client, id, {
       status: 'running',
@@ -657,112 +1016,141 @@ export function startSocialPostJob(client: SupabaseClient, id: string): void {
       error: null,
     });
 
-    // The type catalog the workflow's classify/copy/image nodes run on. Sent even
-    // in 'fresh' mode (classification still needs the type descriptions; the
-    // reference URLs just go unused) so the empty-catalog failure applies
-    // uniformly. A pin forces the type + master and skips classification.
     const brand = row.templateBrand;
-    let pinned: PinnedReference | null = row.referenceImageId
-      ? await resolvePinnedReference(client, row.referenceImageId)
-      : row.referenceTypeId
-        ? await resolvePinnedTypeReference(client, row.referenceTypeId)
-        : null;
-    // A CMO run has no classifier — the brand IS the template choice. Roll one of the
-    // enabled CMO masters unless the user pinned a specific CMO image/type, then treat
-    // it exactly like a pinned run (forced type + url, classification skipped).
-    if (brand === 'cmo' && !pinned) {
-      pinned = await pickCmoReference(client);
-    }
-    const types = await buildTwitterCatalog(client, pinned ?? undefined, brand);
-    const forcedType = pinned?.subtype ?? '';
-    const forcedReferenceUrl = pinned?.url ?? '';
-    console.log(
-      `[job ${id}] social poster reference: ${JSON.stringify({ id, brand, referenceImageId: row.referenceImageId, referenceTypeId: row.referenceTypeId, forced_type: forcedType, forced_reference_url: forcedReferenceUrl })}`,
+    // Default is now 'fresh' — a unique, AI-designed poster each run. 'onbrand'/'adaptive'
+    // remain available for a run that explicitly wants to follow a template.
+    const designMode = (row.designMode ?? 'fresh') as PosterDesignMode;
+
+    const { postType } = await renderAndStoreSocialPoster(
+      client,
+      id,
+      row,
+      brand,
+      designMode,
+      1,
+      id,
     );
 
-    const headers: Record<string, string> = {
-      'content-type': 'application/json',
-    };
-    if (webhookSecret) headers['x-n8n-webhook-secret'] = webhookSecret;
+    if (!options.generateCaption) return;
 
-    // Generous timeout to outlast the workflow's ~6-min image generation stage.
-    const response = await fetch(webhookUrl, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        meeting_notes: row.note,
-        design_mode: row.designMode ?? 'onbrand',
-        // Template brand ('dgipr' | 'cmo'). The workflow branches its image prompt on
-        // this: a CMO run reserves the top header band + footer (code-stamped chrome) AND
-        // the upper-right circle photo zone (left quiet — the API generates the single
-        // circle photograph and composites it in code), painting only the Marathi text.
-        brand,
-        // Which social lane asked for this poster ('twitter' | 'facebook'). Both
-        // render identically today — the workflow ignores this field — but it is
-        // the hook a future per-platform branch reads, and it makes the job log
-        // self-explanatory. Inert in either deploy order.
-        platform: row.category,
-        generation_id: id,
-        progress_url: `${apiPublicUrl}/api/generations/${id}/progress`,
-        types,
-        // Always-present strings (empty = not pinned) so the workflow's IF node
-        // sees a definite value.
-        forced_type: forcedType,
-        forced_reference_url: forcedReferenceUrl,
-        // Markers only exist on annotated feedback edits; keep the Set node's
-        // number field deterministic on initial runs too.
-        marker_count: 0,
-      }),
-      signal: AbortSignal.timeout(420_000),
+    // Caption → article column (the social lane's convention). The note stays the sole
+    // fact source; the poster copy is not fed in, exactly as the retired n8n node had it
+    // ("base the caption on the notes, not the poster copy").
+    await updateGeneration(client, id, { step: 'caption' });
+    const caption = await generateSocialCaption({
+      note: row.note,
+      platform: socialPlatformOf(row.category),
+      postType,
+      maxLength: captionMaxLength(row.category),
     });
-    if (!response.ok) {
-      const detail = await response.text().catch(() => '');
-      throw new Error(
-        `n8n social-post webhook failed (${response.status}): ${detail.slice(0, 500)}`,
-      );
-    }
+    await updateGeneration(client, id, { article: caption });
+  });
+}
 
-    const result = (await response.json()) as SocialPostResult;
-    if (!result.caption || !result.poster_png_base64) {
-      throw new Error('n8n social-post webhook returned no caption or poster.');
+// Regenerate a completed social run's poster as a brand-new, differently-designed version. The
+// fully-AI path re-classifies, re-selects (avoiding the recently-used master), rewrites the copy
+// and invents a FRESH art direction seeded on this version, so the redo does not resemble the
+// previous poster. This is the text-legibility escape hatch: the image model paints Devanagari,
+// which occasionally garbles, and one click gets a clean, distinct alternative. Like poster
+// image-feedback it goes through runJob (a re-render legitimately shows progress) and writes a
+// new immutable poster version; the caption is NOT touched (it is about the note, not this
+// poster). Logged as a poster_image revision to avoid a new revision-target migration.
+export function startPosterRegenerateJob(
+  client: SupabaseClient,
+  id: string,
+  options: Readonly<{ recolour?: boolean }> = {},
+): void {
+  runJob(client, id, async () => {
+    const row = await getGeneration(client, id);
+    if (!row) throw new Error(`Generation ${id} not found.`);
+    if (!isSocialCategory(row.category)) {
+      throw new Error(`Generation ${id} is not a social run.`);
     }
-    // The whole twitter pipeline (classify/copy/caption text + image) runs inside n8n;
-    // only the image (gpt-image-2 @ 1280x1600) is attributed here. The gpt-4o-mini text
-    // is external and not measured (negligible, <$0.001), so the stored cost is image-only.
-    recordImageCost('twitter', imageQuality());
+    if (!row.posterPath) throw new Error(`Generation ${id} has no poster yet.`);
 
-    // The workflow paints the poster body only (the prompt erases the master's
-    // emblem/footer and reserves those zones); the crisp brand chrome is stamped
-    // here in code, exactly like the article path's overlayArticleChrome. CMO stamps
-    // its full-width leader header + the DGIPR footer — and its single circle photograph,
-    // which the workflow leaves as a quiet zone: we GENERATE it here (a clean, correctly
-    // cropped photo the master-edit model could never paint reliably), cache it for the
-    // feedback path, then composite it.
-    const rawPoster = Buffer.from(result.poster_png_base64, 'base64');
-    let posterPng: Buffer;
-    if (brand === 'cmo') {
-      // scene_brief describes the single circle's subject; fall back to the note if the
-      // (older) workflow did not return one.
-      const sceneBrief = result.scene_brief?.trim() || row.note;
-      const photo = await generateImage(buildCmoCirclePhotoPrompt(sceneBrief), {
-        size: '1024x1024',
-      });
-      recordImageCost('twitter', imageQuality());
-      await uploadPng(client, cmoPhotoPath(id), photo, true);
-      posterPng = await overlayCmoChrome(rawPoster, photo);
-    } else {
-      posterPng = await overlayTwitterChrome(rawPoster);
-    }
-    const posterObjectPath = posterPath(id, 1);
-    await uploadPng(client, posterObjectPath, posterPng);
-
-    // Caption → article column; classifier title → referenceTitle (surfaced in UI).
     await updateGeneration(client, id, {
-      article: result.caption,
-      referenceTitle: result.title ?? null,
-      posterPath: posterObjectPath,
+      status: 'running',
+      step: null,
+      error: null,
+    });
+
+    const brand = row.templateBrand;
+    const designMode = (row.designMode ?? 'fresh') as PosterDesignMode;
+    const version = await nextVersion(client, id);
+
+    // A "different colours" redo bars THIS run's current family outright, on top of the usual
+    // recent-history spread. Without it the new seed could legitimately re-pick the very family
+    // the officer just rejected — the recency ring only knows about other runs, and a redo of
+    // this row is not yet in it.
+    const current = options.recolour ? parsePosterStyle(row.posterStyle) : null;
+    const avoidFamilies: PaletteFamily[] = current ? [current.family] : [];
+
+    await renderAndStoreSocialPoster(
+      client,
+      id,
+      row,
+      brand,
+      designMode,
+      version,
+      `${id}:v${version}`,
+      avoidFamilies,
+    );
+
+    await insertRevision(client, {
+      generationId: id,
+      target: 'poster_image',
+      feedback: options.recolour
+        ? 'पुन्हा तयार केले (वेगळे रंग)'
+        : 'पुन्हा तयार केले (नवीन रचना)',
+      posterPath: posterPath(id, version),
     });
   });
+}
+
+// Write a caption for a settled social run that has none — the run was created
+// poster-only (the create form's toggle is off by default) and the officer has now asked
+// for one on the detail page. Same non-runJob shape as startCaptionFeedbackJob and for
+// the same reason: the row is already 'completed', so flipping it to running would swap
+// the finished post for a progress bar, and staying off status lets this run beside a
+// poster re-render (disjoint columns).
+//
+// No revision row is inserted: nothing was revised, and an extra revision would advance
+// nextVersion() and misnumber the next poster render.
+export function startGenerateCaptionJob(
+  client: SupabaseClient,
+  id: string,
+): void {
+  revisingCaption.add(id);
+  captionReviseErrors.delete(id);
+  void (async () => {
+    const cost = createCostAccumulator();
+    try {
+      await runInCostScope(cost, async () => {
+        const row = await getGeneration(client, id);
+        if (!row) throw new Error(`Generation ${id} not found.`);
+
+        const caption = await generateSocialCaption({
+          note: row.note,
+          platform: socialPlatformOf(row.category),
+          maxLength: captionMaxLength(row.category),
+        });
+        await updateGeneration(client, id, { article: caption });
+      });
+    } catch (error) {
+      console.error(`[generate-caption ${id}] failed:`, error);
+      captionReviseErrors.set(id, errorMessage(error));
+    } finally {
+      try {
+        await persistCost(client, id, cost);
+      } catch (costError) {
+        console.error(
+          `[generate-caption ${id}] could not persist cost:`,
+          costError,
+        );
+      }
+      revisingCaption.delete(id);
+    }
+  })();
 }
 
 // Feedback loop for the article: revise under the original guardrails (note stays
@@ -904,14 +1292,11 @@ export function startCaptionFeedbackJob(
         if (!row.article)
           throw new Error(`Generation ${id} has no caption yet.`);
 
-        // Within-social platform branch (like the publish route's X-vs-Page split), NOT
-        // an isSocialCategory() violation: X caps a post at 280 weighted characters and
-        // a Facebook post has no comparable limit, so only X gets a length rule.
         const revised = await reviseCaption({
           caption: row.article,
           feedback,
           note: row.note,
-          maxLength: row.category === 'twitter' ? TWEET_MAX_LENGTH : undefined,
+          maxLength: captionMaxLength(row.category),
         });
 
         await updateGeneration(client, id, { article: revised });

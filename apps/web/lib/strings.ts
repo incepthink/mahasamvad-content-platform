@@ -37,7 +37,7 @@ export const STR = {
   mediaRoomTitle: 'पोस्टर व सोशल पोस्ट तयार करा',
   articlePasteLabel: 'पूर्ण लेख येथे चिकटवा',
   articlePasteHint:
-    'तयार झालेला लेख येथे चिकटवा — त्यावरून पोस्टर व सोशल पोस्ट तयार होईल.',
+    'तयार झालेला लेख येथे चिकटवा किंवा खालून फाईलमधून घ्या — दोन्ही एकत्रही करता येईल. त्यावरून पोस्टर व सोशल पोस्ट तयार होईल.',
   articlePastePlaceholder:
     'उदा. पूर्ण तयार झालेला मराठी लेख येथे चिकटवा… हाच लेख पोस्टर व सोशल पोस्टचा आधार असेल.',
   mediaOutputLabel: 'काय तयार करायचे?',
@@ -45,7 +45,6 @@ export const STR = {
   categoryPosterDesc: 'लेखावर आधारित मराठी पोस्टर',
   notePlaceholder:
     'उदा. शासन निर्णय, बैठकीची टिपणी, योजनेची माहिती… ही टिपणीच लेखाचा एकमेव आधार असेल.',
-  uploadTxt: 'किंवा .txt फाईल निवडा',
   headingLabel: 'शीर्षक किंवा लेखाचा रोख (ऐच्छिक)',
   headingHint:
     'शीर्षक द्या, किंवा लेखाचा रोख थोडक्यात सांगा — रिकामे ठेवल्यास मंच स्वतः रोख ठरवेल.',
@@ -62,12 +61,12 @@ export const STR = {
 
   // Design-mode selector (shown only for the समाजमाध्यम — ट्विटर/फेसबुक — flows)
   designModeLabel: 'पोस्टरची रचना-शैली?',
-  designOnbrand: 'ब्रँडनुसार',
-  designOnbrandDesc: 'DGIPR ठरलेल्या टेम्पलेटनुसार पोस्टर',
-  designAdaptive: 'अनुकूल',
-  designAdaptiveDesc: 'टेम्पलेटचा आधार, पण विषयानुसार बदल',
-  designFresh: 'नवीन',
-  designFreshDesc: 'विषयानुसार पूर्णपणे नवे चित्र',
+  designFresh: 'AI रचना (शिफारस)',
+  designFreshDesc: 'प्रत्येक वेळी पूर्णपणे नवे, वेगळे पोस्टर — रंग व रचना AI ठरवते',
+  designAdaptive: 'टेम्पलेटवर आधारित',
+  designAdaptiveDesc: 'निवडलेल्या टेम्पलेटचा आधार, विषयानुसार थोडा बदल',
+  designOnbrand: 'ठरलेले टेम्पलेट',
+  designOnbrandDesc: 'निवडलेल्या टेम्पलेटनुसार तसेच पोस्टर',
 
   // विभाग (template brand) selector — shown only for the social flows. Picks which
   // department's template family the poster follows. CMO just follows its template,
@@ -97,7 +96,10 @@ export const STR = {
   submit: 'तयार करा →',
   submitting: 'पाठवत आहोत…',
   noteTooShort: 'कृपया किमान २० अक्षरांची टिपणी लिहा.',
-  txtOnly: 'कृपया फक्त .txt फाईल निवडा.',
+  // Chiefly for the media room, where a pasted article plus a file's text can add up
+  // past the API's cap.
+  noteTooLong:
+    'मजकूर ६०,००० अक्षरांच्या मर्यादेपेक्षा मोठा आहे — नको असलेला भाग वगळा.',
 
   // DLO (Digital Liaison Officer) interface — meeting notes + recordings +
   // documents → transcription/extraction → editable review → article.
@@ -113,10 +115,17 @@ export const STR = {
     'बैठकीत जे ऐकले, ठरले किंवा आठवते ते सर्व येथे लिहा — मुद्दे, निर्णय, घोषणा, आकडेवारी.',
   dloNotesPlaceholder:
     'उदा. आजच्या बैठकीत मा. मंत्री महोदयांनी… असे जाहीर केले; योजनेसाठी … कोटी रुपयांची तरतूद…',
-  dloUpload: 'फाईल जोडा (PDF / MP3 / DOCX)',
-  dloUploadHint:
-    'बैठकीचे ध्वनिमुद्रण (.mp3) आणि कागदपत्रे (.pdf, .docx) — एकावेळी अनेक फाईल जोडता येतील.',
-  dloFilesTitle: 'जोडलेल्या फाईल',
+  // Audio and documents are added through separate controls (audio has no pages to pick),
+  // but both go into the same intake.
+  dloAudioTitle: 'ध्वनिमुद्रण (MP3)',
+  dloAudioUpload: 'ध्वनिफीत जोडा (.mp3)',
+  dloAudioHint: 'बैठकीचे ध्वनिमुद्रण — एकावेळी अनेक फाईल जोडता येतील.',
+  dloAudioFilesTitle: 'जोडलेली ध्वनिमुद्रणे',
+  dloDocsTitle: 'कागदपत्रे (PDF / DOCX)',
+  dloDocsUpload: 'कागदपत्र जोडा (.pdf, .docx)',
+  dloDocsHint:
+    'शासन निर्णय, टिपणी किंवा इतर कागदपत्रे — एकावेळी अनेक फाईल जोडता येतील.',
+  dloDocsFilesTitle: 'जोडलेली कागदपत्रे',
   dloRemoveFile: 'फाईल काढा',
   dloFileTypeError: 'कृपया फक्त .pdf, .mp3 किंवा .docx फाईल निवडा.',
   dloNeedInput: 'कृपया टिपणी लिहा किंवा किमान एक फाईल जोडा.',
@@ -230,89 +239,80 @@ export const STR = {
   retranslateFold: 'नावे सुधारून पुन्हा इंग्रजी भाषांतर करा',
   retranslateFoldHindi: 'नावे सुधारून पुन्हा हिंदी भाषांतर करा',
 
-  // PDF translation (/translate → PDF mode). The uploaded file and its मजकूर are held
-  // only while the काम सुरू आहे — nothing is saved.
-  translateModeText: 'मजकूर',
-  translateModePdf: 'PDF फाईल',
-  translateDocUploadTitle: 'PDF फाईल अपलोड करा',
-  translateDocUploadHint:
-    'लेख असलेली PDF निवडा (कमाल २५ MB). स्कॅन केलेली PDF देखील चालते. फाईल जतन केली जाणार नाही.',
-  translateDocUpload: 'PDF निवडा',
-  translateDocPdfOnly: 'कृपया फक्त .pdf फाईल निवडा.',
-  translateDocTooLarge: 'फाईल २५ MB पेक्षा मोठी आहे.',
-  translateDocExtracting: 'PDF मधील मजकूर वाचत आहोत…',
-  translateDocExtractingHint:
-    'PDF मध्येच मजकूर असेल तर हे काही सेकंदांत होते; स्कॅन केलेली फाईल OCR ने वाचावी लागते आणि त्यास काही मिनिटे लागतात. हे पान उघडे ठेवा.',
-  // OCR runs one ≤10-page Sarvam job at a time, so long scans need a page counter rather
-  // than a spinner that looks stuck.
-  translateDocExtractProgress: 'OCR: पृष्ठ',
-  translateDocGone: 'ही फाईल आता उपलब्ध नाही. कृपया PDF पुन्हा अपलोड करा.',
-  // The pre-OCR selection step. Only reached for a SCANNED PDF: a document whose text can
-  // be read directly costs nothing, so its pages are read at once and picked in the normal
-  // review list. Here the text does not exist yet — showing it would mean running the very
-  // OCR the user is being asked to approve — so the choice is by page number alone.
-  translateDocSelectTitle: 'कोणती पृष्ठे वाचायची?',
-  translateDocSelectHint:
+  // ---------- shared document upload (<DocumentIntake> / <DocumentPages>) ----------
+  //
+  // Used by every surface that takes a PDF/DOCX/TXT. Wording is deliberately
+  // format-neutral ("फाईल", not "PDF"): the same card serves a scanned booklet and a
+  // one-line .txt, and the steps it shows follow the file rather than the page it is on.
+  // The card sits inline on every surface — it used to hide behind a "show upload" fold,
+  // which made the same capability look different on each page.
+  docUploadTitle: 'फाईलमधून मजकूर घ्या',
+  docUploadHint:
+    'PDF, DOCX किंवा TXT फाईल निवडा (कमाल २५ MB). स्कॅन केलेली PDF देखील चालते. फाईल जतन केली जाणार नाही.',
+  docUpload: 'फाईल निवडा',
+  docUploadOther: 'दुसरी फाईल निवडा',
+  docUnsupported: 'फक्त PDF, DOCX आणि TXT फाईल्स चालतात.',
+  docGone: 'ही फाईल आता उपलब्ध नाही. कृपया पुन्हा अपलोड करा.',
+  // The pre-OCR selection step. Only a SCANNED PDF reaches it: a file whose text can be
+  // read directly costs nothing, so it is read at once. Here the text does not exist yet —
+  // showing it would mean running the very OCR being approved — so the choice is by page
+  // number alone.
+  docSelectTitle: 'कोणती पृष्ठे वाचायची?',
+  docSelectHint:
     'ही स्कॅन केलेली PDF आहे, त्यामुळे प्रत्येक पृष्ठ OCR ने वाचावे लागेल. फक्त निवडलेलीच पृष्ठे वाचली जातील, म्हणून नको असलेली पृष्ठे आताच वगळा.',
-  translateDocSelectTotal: 'एकूण पृष्ठे',
-  translateDocSelectCount: 'पृष्ठे निवडली',
-  translateDocReadSelected: 'निवडलेली पृष्ठे वाचा',
-  translateDocChangeSelection: 'पृष्ठ निवड बदला',
-  translateDocChangeSelectionHint:
-    'वेगळी पृष्ठे निवडल्यास ती पुन्हा वाचावी लागतील, आणि सध्याचा मजकूर व भाषांतर पुन्हा तयार होईल.',
-  translateDocPagesTitle: 'कोणती पृष्ठे भाषांतरित करायची?',
-  translateDocPagesHint:
-    'वाचलेला मजकूर तपासा. चूक असल्यास पृष्ठ उघडून दुरुस्त करा — भाषांतर याच मजकुरावर होईल.',
+  docSelectTotal: 'एकूण पृष्ठे',
+  docSelectCount: 'पृष्ठे निवडली',
+  docReadSelected: 'निवडलेली पृष्ठे वाचा',
+  docChangeSelection: 'पृष्ठ निवड बदला',
+  docChangeSelectionHint:
+    'वेगळी पृष्ठे निवडल्यास ती पुन्हा वाचावी लागतील आणि सध्याचा मजकूर पुन्हा तयार होईल.',
+  docExtracting: 'फाईलमधील मजकूर वाचत आहोत…',
+  docExtractingHint:
+    'फाईलमध्येच मजकूर असेल तर हे काही सेकंदांत होते; स्कॅन केलेली PDF OCR ने वाचावी लागते आणि त्यास काही मिनिटे लागतात. हे पान उघडे ठेवा.',
+  docExtractProgress: 'OCR: पृष्ठ',
+  docReviewTitle: 'वाचलेला मजकूर तपासा',
+  docReviewHint:
+    'नको असलेली पृष्ठे वगळा आणि चूक असल्यास पृष्ठ उघडून दुरुस्त करा. निवडलेल्या पृष्ठांचा मजकूरच पुढे वापरला जाईल.',
+  docUseText: 'हा मजकूर वापरा',
+  docUsed: 'मजकूर घेतला',
+  // Live mode (the media room): the file's text is already counted alongside the box above,
+  // so there is no button to press and the card says as much.
+  docAutoUsed:
+    'निवडलेल्या पृष्ठांचा हा मजकूर वरील लेखासोबत आपोआप वापरला जाईल — वेगळे बटण दाबण्याची गरज नाही.',
+  docEmptySelection: 'निवडलेल्या पृष्ठांमध्ये मजकूर नाही.',
+  docNoPagesSelected: 'या फाईलमधून एकही पृष्ठ निवडलेले नाही.',
   // Which backend read the file. The text layer is exact; OCR guesses from pixels and can
   // misread names and आकडे, so the review matters more there.
-  translateDocSourceTextLayer: 'मजकूर थेट PDF मधून घेतला',
-  translateDocSourceOcr: 'मजकूर OCR ने वाचला',
-  translateDocSourceTextLayerHint:
+  docSourceTextLayer: 'मजकूर थेट फाईलमधून घेतला',
+  docSourceOcr: 'मजकूर OCR ने वाचला',
+  docSourceTextLayerHint:
     'नावे आणि आकडे जसेच्या तसे आले आहेत. तरीही एकदा नजर टाका.',
-  translateDocSourceOcrHint:
-    'OCR मध्ये नावे आणि आकडे चुकू शकतात — भाषांतरापूर्वी तपासा.',
-  translateDocReextract: 'मजकूर चुकीचा दिसतोय? OCR ने पुन्हा वाचा',
-  translateDocReextractHint:
-    'काही PDF मध्ये अक्षरे चुकीच्या क्रमाने साठवलेली असतात. OCR पानाचे चित्र वाचते, त्यामुळे असा मजकूर बरोबर येतो. यास काही मिनिटे लागतील आणि सध्याचा मजकूर व भाषांतर पुन्हा तयार होईल.',
-  translateDocReextractYes: 'होय, OCR ने वाचा',
-  translateDocReextractCancel: 'रद्द करा',
-  translateDocPage: 'पृष्ठ',
-  translateDocChars: 'अक्षरे',
-  translateDocSelectAll: 'सर्व निवडा',
-  translateDocClearAll: 'निवड काढा',
-  translateDocEdit: 'मजकूर पाहा / दुरुस्त करा',
-  translateDocEditClose: 'बंद करा',
-  translateDocEdited: 'दुरुस्त केले',
-  translateDocLangMr: 'मराठी',
-  translateDocLangEn: 'English',
-  translateDocSelectedSummary: 'पृष्ठे निवडली',
-  translateDocNoSelection: 'किमान एक पृष्ठ निवडा.',
-  translateDocEstimate: 'अंदाजे वेळ',
-  translateDocMinutes: 'मिनिटे',
-  translateDocInstructionLabel: 'AI सूचना (ऐच्छिक)',
-  translateDocInstructionHint:
-    'उदा. “फक्त पृष्ठ १ ते ९ भाषांतरित करा”, “शेवटची दोन पाने वगळा”. सूचनेवरून फक्त पृष्ठांची निवड ठरते — मजकूर बदलला जात नाही.',
-  translateDocInstructionPlaceholder: 'फक्त पृष्ठ १ ते ९ भाषांतरित करा',
-  translateDocInstructionApply: 'सूचना लागू करा',
-  translateDocInstructionWorking: 'सूचना समजून घेत आहोत…',
-  translateDocInstructionApplied: 'AI ने निवडलेली पृष्ठे:',
-  translateDocInstructionUnclear:
-    'सूचना समजली नाही. कृपया पृष्ठे स्वतः निवडा किंवा सूचना वेगळ्या शब्दांत लिहा.',
-  translateDocTargetsLabel: 'कोणत्या भाषांमध्ये भाषांतर हवे?',
-  translateDocTargetsHint: 'दोन्ही भाषा एकाच वेळी निवडता येतात.',
-  translateDocNoTargets: 'किमान एक भाषा निवडा.',
-  translateDocTranslating: 'भाषांतर सुरू आहे',
-  translateDocTranslatingHint:
-    'हे पान उघडे ठेवा. प्रत्येक पृष्ठाचे भाषांतर एकामागून एक होते.',
-  translateDocResultsTitle: 'भाषांतर तयार आहे',
-  translateDocPassthrough:
-    'हे पृष्ठ मुळातच इंग्रजीत आहे — जसेच्या तसे ठेवले आहे.',
-  translateDocDownload: 'संपूर्ण भाषांतर उतरवा (.txt)',
-  translateDocCopyAll: 'संपूर्ण मजकूर कॉपी करा',
-  translateDocRetranslate: 'पृष्ठे बदलून पुन्हा भाषांतर करा',
-  translateDocNewFile: 'दुसरी PDF अपलोड करा',
-  translateDocEnglishPagesNote:
-    'या फाईलमधील काही पृष्ठे इंग्रजीत आहेत. इंग्रजी भाषांतरात ती जशीच्या तशी राहतील; हिंदीसाठी त्यांचे भाषांतर केले जाईल.',
+  docSourceOcrHint:
+    'OCR मध्ये नावे आणि आकडे चुकू शकतात — पुढे जाण्यापूर्वी तपासा.',
+  docReextract: 'मजकूर चुकीचा दिसतोय? OCR ने पुन्हा वाचा',
+  docReextractHint:
+    'काही PDF मध्ये अक्षरे चुकीच्या क्रमाने साठवलेली असतात. OCR पानाचे चित्र वाचते, त्यामुळे असा मजकूर बरोबर येतो. यास काही मिनिटे लागतील आणि सध्याचा मजकूर पुन्हा तयार होईल.',
+  docReextractYes: 'होय, OCR ने वाचा',
+  docReextractCancel: 'रद्द करा',
+  docPage: 'पृष्ठ',
+  docChars: 'अक्षरे',
+  docSelectAll: 'सर्व निवडा',
+  docClearAll: 'निवड काढा',
+  docEdit: 'मजकूर पाहा / दुरुस्त करा',
+  docEditClose: 'बंद करा',
+  docEdited: 'दुरुस्त केले',
+  docLangMr: 'मराठी',
+  docLangEn: 'English',
+  // The range-input page selector (PageRangeSelector), shared by every page picker. A
+  // range field scales to a 50-page scan where a checkbox-per-row list does not; the grid
+  // is there for the occasional page you would rather tap than type.
+  docRangeLabel: 'पृष्ठे लिहा',
+  docRangeHint: 'उदा. १-५, ८, १०-१२ — किंवा खाली पृष्ठे टॅप करा.',
+  docRangePlaceholder: 'उदा. १-५, ८, १०-१२',
+  docRangeApply: 'लागू करा',
+  docRangeExpand: 'पृष्ठे निवडा',
+  docRangeCollapse: 'पृष्ठे लपवा',
+  docRangeSelected: 'निवडलेली पृष्ठे',
 
   // Proof read (ad-hoc grammar/name/style check of pasted text; nothing stored)
   proofreadPageTitle: 'मुद्रितशोधन (Proof Read)',
@@ -431,6 +431,20 @@ export const STR = {
     'मांडणी अधिक नीटनेटकी करा',
   ],
 
+  // Caption toggle on the create form — a social post is poster-only unless asked
+  // otherwise, so this is an opt-in shown once ट्विटर/फेसबुक is selected.
+  captionToggleLabel: 'कॅप्शनही तयार करा',
+  captionToggleHint:
+    'पोस्टरसोबत मराठी कॅप्शनही लिहिली जाईल. निवडले नाही तर फक्त पोस्टर तयार होईल — कॅप्शन नंतरही जोडता येते.',
+
+  // Shown on a finished social post that was created poster-only
+  captionNoneTitle: 'या पोस्टसाठी कॅप्शन तयार केलेली नाही',
+  captionNoneHint:
+    'आता कॅप्शन तयार करून घ्या, किंवा स्वतः लिहा. टिपणीत नसलेली माहिती जोडली जाणार नाही.',
+  captionGenerate: 'कॅप्शन तयार करा',
+  captionGenerating: 'कॅप्शन तयार होत आहे…',
+  captionWriteOwn: 'स्वतः कॅप्शन लिहा',
+
   // Caption of a social post (twitter/facebook): hand edit + AI feedback loop
   captionLabel: 'कॅप्शन',
   captionEdit: 'कॅप्शन बदला',
@@ -516,6 +530,18 @@ export const STR = {
   taskDownloadPoster: 'पोस्टर डाउनलोड करा',
   taskRegenerate: 'पुन्हा तयार करा',
   taskViewFull: 'पूर्ण पाहा',
+
+  // In-place poster redesign (social runs): re-render THIS post's poster in a completely
+  // new AI-designed look on the same run — the escape hatch when the Devanagari came out
+  // wrong, or you just want a different design.
+  posterRedesign: 'वेगळी रचना तयार करा',
+  posterRedesignHint:
+    'हेच पोस्टर AI कडून पूर्णपणे वेगळ्या रचनेत पुन्हा तयार करा (मजकूर चुकीचा आल्यास किंवा वेगळा लूक हवा असल्यास).',
+  // Same re-render, but the current colour family is barred — for when the design is fine and
+  // only the colours are wrong. Honest about being a fresh render, not a recolour: the poster
+  // copy is rewritten too, so the new version will not be the old one repainted.
+  posterRecolour: 'वेगळ्या रंगात तयार करा',
+  posterStyleLabelPrefix: 'रंगसंगती व रचना:',
 
   // Direct publish to the official social accounts (detail page, social runs)
   publishToX: 'X वर पोस्ट करा',
@@ -610,6 +636,8 @@ export const STR = {
   refLayoutSlots: 'मुद्दे',
   refLayoutFlipToTextOnly: '“फक्त मजकूर” म्हणून नोंदवा',
   refLayoutFlipToPhoto: '“छायाचित्रासह” म्हणून नोंदवा',
+  // The vision pass's read of what this master is ABOUT (subject/scheme), for library browsing.
+  refLayoutAbout: 'विषय:',
 
   // Custom reference types (create / edit / delete)
   refTypeNew: '+ नवीन प्रकार तयार करा',

@@ -23,6 +23,10 @@ export {
   type RevisedArticle,
 } from './generation/revise-article.js';
 export {
+  generateSocialCaption,
+  type GenerateCaptionInput,
+} from './generation/generate-caption.js';
+export {
   reviseCaption,
   type ReviseCaptionInput,
 } from './generation/revise-caption.js';
@@ -92,6 +96,20 @@ export {
 } from './intake/pdf-shared.js';
 export { countPdfPages, OCR_MAX_TOTAL_PAGES } from './intake/pdf-split.js';
 export { extractDocxText } from './intake/docx.js';
+export { extractTextFile } from './intake/text-file.js';
+// The kind-agnostic entry point every upload surface should use: probe for free, then
+// read only what the user selected. Wraps the PDF policy above rather than replacing it.
+export {
+  documentKindOf,
+  extractDocument,
+  probeDocument,
+  type DocumentExtraction,
+  type DocumentKind,
+  type DocumentPage,
+  type DocumentProbe,
+  type DocumentTextSource,
+  type ExtractDocumentOptions,
+} from './intake/document.js';
 
 // Explainer-video pipeline: per-scene script (gate 1), keyframe/motion prompt
 // builders, and the Veo clip client. ffmpeg assembly lives in
@@ -170,16 +188,100 @@ export {
   listReferenceTypes,
   updateReferenceType,
 } from './references/reference-types.js';
-// Per-generation catalog sent to the n8n workflows in the webhook payload.
+// Reference-template resolution for the social + article render paths. Classification, copy
+// and prompt-building now run in the API (see below); the master is chosen content-aware.
 export {
-  buildTwitterCatalog,
+  listSocialTypes,
   pickArticleReference,
-  pickCmoReference,
-  resolvePinnedReference,
-  resolvePinnedTypeReference,
-  type PinnedReference,
-  type ReferenceCatalogEntry,
+  resolveCmoReference,
+  resolvePinnedImage,
+  resolvePinnedType,
+  masterUrl,
+  type SocialTypeInfo,
+  type ResolvedType,
+  type ResolvedReference,
 } from './references/catalog.js';
+export {
+  selectMaster,
+  scoreMaster,
+  type MasterNeed,
+  type SelectedMaster,
+} from './references/select-master.js';
+// Social poster classify → copy → image-prompt, ported from the n8n workflow into code.
+export {
+  classifyPosterType,
+  POSTER_COPY_MODEL,
+  type PosterTypeOption,
+  type PosterClassification,
+} from './generation/classify-poster-type.js';
+export {
+  generatePosterCopy,
+  type PosterCopy,
+  type GeneratePosterCopyInput,
+  type GeneratePosterCopyResult,
+  type TemplateBrand as PosterTemplateBrand,
+} from './generation/generate-poster-copy.js';
+export {
+  buildPosterPrompt,
+  buildFeedbackPrompt,
+  type DesignMode as PosterDesignMode,
+  type BuildPosterPromptInput,
+  type BuildFeedbackPromptInput,
+} from './generation/build-poster-prompt.js';
+// Per-run AI art direction: the colours/background/composition the fully-AI-generated poster
+// uses, so every render looks different (the master is only a loose structural idea).
+export {
+  generateArtDirection,
+  type ArtDirection,
+  type GenerateArtDirectionInput,
+} from './generation/art-direction.js';
+// Curated palette library + seeded recency-aware picker: anchors each fully-AI-generated poster
+// to a distinct colour family so consecutive renders don't converge on the saffron/cream default.
+export {
+  POSTER_PALETTES,
+  PALETTE_FAMILIES,
+  pickPalette,
+  paletteById,
+  type PosterPalette,
+  type PaletteFamily,
+  type PaletteAvoid,
+} from './generation/poster-palettes.js';
+// The second diversity axis: which COMPOSITION a poster is built to. Rotated independently of
+// colour, because two posters in different palettes still read alike when both are a top band
+// over a column of bullet rows.
+export {
+  POSTER_LAYOUTS,
+  pickLayout,
+  layoutById,
+  type PosterLayout,
+  type LayoutCoverage,
+  type LayoutNeed,
+  type LayoutAvoid,
+} from './generation/poster-layouts.js';
+// What one run was assigned + what its render measured (generations.poster_style, migration
+// 0028), and the reader that turns the last few rows into the pickers' avoid sets.
+export {
+  buildPosterStyle,
+  parsePosterStyle,
+  toStyleHistory,
+  describePosterStyle,
+  posterStyleLabel,
+  familyHonoured,
+  FAMILY_HUES,
+  EMPTY_STYLE_HISTORY,
+  type PosterStyle,
+  type StyleHistory,
+  type MeasuredColours,
+} from './generation/poster-style.js';
+// Removes colour language from a master's layout description before it is used as structure
+// inspiration, so the master library's saffron/cream house look cannot leak past the assigned
+// palette. Deterministic — "structural, not instructed".
+export { stripColourMentions } from './generation/strip-colour-words.js';
+export {
+  lockSchemeNames,
+  validateDeclaredSchemeNames,
+  type SchemeLockResult,
+} from './generation/lock-scheme-names.js';
 // Rotating color palette for the article poster's headline panel (Part 2 of the
 // "stop always-orange posters" work); the picked theme is shipped to n8n.
 export {

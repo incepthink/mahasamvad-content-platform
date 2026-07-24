@@ -1,9 +1,11 @@
 // Shared transport for every OpenAI REST call in this package (chat + embeddings).
 //
 // It exists because a 429 is NOT a failure — it is the server telling us to wait. The
-// pipeline issues 8-15 gpt-4o calls per article, several carrying the full note AND the full
+// pipeline issues 8-15 calls per article, several carrying the full note AND the full
 // article (~5-8k tokens each), so on a 30,000 TPM org a single generation reliably trips the
 // token bucket. Before this module a bare `fetch` threw on the first 429 and killed the run.
+// gpt-5.6's reasoning tokens count toward the same TPM budget, so the pacing below matters
+// more now, not less.
 //
 // Two mechanisms, deliberately kept together:
 //
@@ -173,8 +175,11 @@ export async function openAiFetch(
 ): Promise<Response> {
   const attempts = readInt('OPENAI_MAX_RETRIES', 5) + 1;
   // Serialized calls queue behind one another, so a hung request would stall the whole
-  // pipeline rather than just itself. The timeout is the release valve.
-  const timeoutMs = readInt('OPENAI_REQUEST_TIMEOUT_MS', 180_000);
+  // pipeline rather than just itself. The timeout is the release valve. 5 minutes, not the
+  // original 3: on gpt-5.6 a full-length Marathi article body at 'medium' reasoning spends
+  // real time thinking before the first token, and a timeout here aborts paid work
+  // mid-generation — the failure mode this valve is least meant to cause.
+  const timeoutMs = readInt('OPENAI_REQUEST_TIMEOUT_MS', 300_000);
 
   return getLimiter()(async () => {
     for (let attempt = 1; attempt <= attempts; attempt++) {

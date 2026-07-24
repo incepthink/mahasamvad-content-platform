@@ -1,24 +1,32 @@
-// Per-generation reference catalog: which poster types exist and which enabled
-// library image each one uses for this run. The API sends this to the n8n
-// workflows in the webhook payload, so the workflows stay data-driven (no
-// hardcoded type lists or master URLs). Entries use snake_case keys because
-// this IS the wire shape n8n receives.
+// Reference-template resolution for the social + article render paths.
+//
+// The classify/copy/prompt steps now run in the API (content-engine), not in n8n, so this
+// module no longer builds an n8n wire catalog. Instead it surfaces, for a brand, the poster
+// types and their ENABLED master images, so the runner can:
+//   1. classify the note against the type descriptions (classify-poster-type.ts),
+//   2. pick the best-fit master within the chosen type (select-master.ts),
+//   3. build the copy + image prompt from that master's real layout_spec.
+//
+// pickRandom is gone: master selection is content-aware and seeded (see select-master.ts).
+// Pins short-circuit classification exactly as before — an exact-image pin fixes the master,
+// a type pin forces the type and rolls one of its enabled images by seed.
 
 import {
-  findReferenceTypeRow,
   getReferenceImageRow,
   getReferenceTypeRow,
   listReferenceImageRows,
   listReferenceTypeRows,
   publicUrl,
   type ReferenceImageRow,
-  type ReferenceLayoutSpec,
+  type ReferenceTypeRow,
   type SupabaseClient,
   type TemplateBrand,
 } from '@dgipr/database';
-import type { ReferenceCategory } from '@dgipr/schemas';
+import { selectMaster, type MasterNeed, type SelectedMaster } from './select-master.js';
 
-// generations.error is shown raw in the UI, so this user-facing failure is Marathi.
+export type { MasterNeed, SelectedMaster };
+
+// generations.error is shown raw in the UI, so these user-facing failures are Marathi.
 const EMPTY_CATALOG_ERROR =
   'एकही संदर्भ टेम्पलेट चित्र वापरात नाही. कृपया "मास्टर टेम्पलेट" पानावर किमान एक चित्र सुरू करा.';
 const EMPTY_TYPE_ERROR = (label: string) =>
@@ -26,200 +34,159 @@ const EMPTY_TYPE_ERROR = (label: string) =>
 const EMPTY_CMO_ERROR =
   'CMO विभागाचे एकही टेम्पलेट चित्र वापरात नाही. कृपया "मास्टर टेम्पलेट" पानावर CMO प्रकारात किमान एक चित्र सुरू करा.';
 
-// snake_case: this IS the wire shape. layout_spec describes the exact image at
-// reference_url (not the type), because two images of one type can have different
-// structures — it is what stops the workflow painting a photo onto a text-only
-// master. null = un-analyzed, and the workflow falls back to its old behaviour.
-export type ReferenceCatalogEntry = Readonly<{
+// A social poster type and its enabled master images. The classifier routes by `slug` +
+// `description`; the copy step reads `copyStyle` + `description`; `images` is the pool the
+// master selector picks from.
+export type SocialTypeInfo = Readonly<{
   slug: string;
   label: string;
   description: string;
-  copy_style: string;
-  reference_url: string;
-  layout_spec: ReferenceLayoutSpec | null;
+  copyStyle: string;
+  brand: TemplateBrand;
+  images: ReferenceImageRow[];
 }>;
 
-export type PinnedReference = Readonly<{
-  url: string;
-  category: ReferenceCategory;
-  subtype: string;
-  layoutSpec: ReferenceLayoutSpec | null;
+// The type context of a resolved master (for the copy step), without its image pool.
+export type ResolvedType = Readonly<{
+  slug: string;
+  label: string;
+  description: string;
+  copyStyle: string;
+  brand: TemplateBrand;
 }>;
 
-function pickRandom<T>(items: readonly T[]): T {
-  return items[Math.floor(Math.random() * items.length)] as T;
+function typeContext(type: ReferenceTypeRow): ResolvedType {
+  return {
+    slug: type.slug,
+    label: type.labelMr,
+    description: type.description,
+    copyStyle: type.copyStyle,
+    brand: type.brand,
+  };
 }
 
 function enabledImagesFor(
   images: readonly ReferenceImageRow[],
-  category: ReferenceCategory,
-  slug?: string,
+  slug: string,
 ): ReferenceImageRow[] {
   return images.filter(
-    (image) =>
-      image.category === category &&
-      image.isActive &&
-      (slug === undefined || image.subtype === slug),
+    (image) => image.category === 'twitter' && image.isActive && image.subtype === slug,
   );
 }
 
-// One enabled image is picked at random per type; types with zero enabled
-// images drop out of the catalog (the classifier then can't route to them).
-// With a pin the catalog may be empty apart from the pinned type — the pinned
-// entry is appended if its type was excluded, and classification is skipped
-// anyway. Without a pin an entirely empty catalog fails the job loudly.
-export async function buildTwitterCatalog(
+// Every social (twitter/facebook) type of `brand` that has at least one enabled image, with
+// its image pool. The DGIPR build is the classifier pool and MUST exclude CMO types so an
+// ordinary run never routes into a CMO template; the 'cmo' build includes only CMO types.
+export async function listSocialTypes(
   client: SupabaseClient,
-  pinned?: PinnedReference,
-  // Which brand family the catalog is for. The default (DGIPR) is the classifier
-  // pool and MUST exclude CMO types so an ordinary Twitter run never routes into a
-  // CMO template; a 'cmo' build includes only CMO types (classification is skipped —
-  // the brand forces the family, so the catalog is really just the forced entry).
   brand: TemplateBrand = 'dgipr',
-): Promise<ReferenceCatalogEntry[]> {
+): Promise<SocialTypeInfo[]> {
   const [types, images] = await Promise.all([
     listReferenceTypeRows(client),
     listReferenceImageRows(client),
   ]);
 
-  const entries: ReferenceCatalogEntry[] = [];
+  const out: SocialTypeInfo[] = [];
   for (const type of types) {
     if (type.category !== 'twitter' || type.brand !== brand) continue;
-    const enabled = enabledImagesFor(images, 'twitter', type.slug);
+    const enabled = enabledImagesFor(images, type.slug);
     if (enabled.length === 0) continue;
-    // The spec must describe the image we actually rolled, so pick once.
-    const image = pickRandom(enabled);
-    entries.push({
-      slug: type.slug,
-      label: type.labelMr,
-      description: type.description,
-      copy_style: type.copyStyle,
-      reference_url: publicUrl(client, image.storagePath),
-      layout_spec: image.layoutSpec,
-    });
+    out.push({ ...typeContext(type), images: enabled });
   }
-
-  if (pinned) {
-    // The pinned image — not the one this loop happened to roll for that type —
-    // is what gets rendered (n8n prefers forced_reference_url). Its entry must
-    // therefore carry the PINNED url and spec, or the workflow would branch on
-    // the layout of a different image than the one it edits.
-    const index = entries.findIndex((entry) => entry.slug === pinned.subtype);
-    if (index >= 0) {
-      const entry = entries[index] as ReferenceCatalogEntry;
-      entries[index] = {
-        ...entry,
-        reference_url: pinned.url,
-        layout_spec: pinned.layoutSpec,
-      };
-      return entries;
-    }
-
-    const type = await findReferenceTypeRow(client, 'twitter', pinned.subtype);
-    if (!type) {
-      // The composite FK makes this unreachable; fail loudly if it ever isn't.
-      throw new Error(`Reference type twitter/${pinned.subtype} not found.`);
-    }
-    entries.push({
-      slug: type.slug,
-      label: type.labelMr,
-      description: type.description,
-      copy_style: type.copyStyle,
-      reference_url: pinned.url,
-      layout_spec: pinned.layoutSpec,
-    });
-    return entries;
-  }
-
-  if (entries.length === 0) throw new Error(EMPTY_CATALOG_ERROR);
-  return entries;
+  if (out.length === 0) throw new Error(EMPTY_CATALOG_ERROR);
+  return out;
 }
 
-// Random pick among the enabled article masters (same rotation semantics).
-// Returns the picked image's layoutSpec too so the article workflow can be told
-// what THIS master actually looks like (null = un-analyzed, workflow falls back
-// to its generic prompt) — same contract as the twitter catalog entries.
-export async function pickArticleReference(
+// The resolution of a run's reference: which type it is, and which master to edit. `forced`
+// is true when a pin (image or type) or the CMO brand fixed the type, so classification is
+// skipped. `title` is set only on a classified run (the classifier's working title).
+export type ResolvedReference = Readonly<{
+  type: ResolvedType;
+  master: SelectedMaster;
+  forced: boolean;
+  title?: string | undefined;
+}>;
+
+// A pinned EXACT image: honored even if it was disabled after pinning (only a deleted row is
+// missing). Classification is skipped and this exact master is used. The pinned image may
+// still be un-analysed, so route it through selectMaster (over a one-image pool) to get the
+// analyse-on-demand + spec persistence for free.
+export async function resolvePinnedImage(
   client: SupabaseClient,
-): Promise<Readonly<{ url: string; layoutSpec: ReferenceLayoutSpec | null }>> {
+  imageId: string,
+  seed: string,
+): Promise<ResolvedReference | null> {
+  const image = await getReferenceImageRow(client, imageId);
+  if (!image) return null;
+  const types = await listReferenceTypeRows(client);
+  const type = types.find(
+    (t) => t.category === image.category && t.slug === image.subtype,
+  );
+  if (!type) return null;
+  const master = await selectMaster(client, [image], undefined, seed);
+  return { type: typeContext(type), master, forced: true };
+}
+
+// A pinned TYPE: forces the type, then picks one of its enabled images. With `note` the pick is
+// content-aware (best subject/tone fit); without it, seeded rotation. No classification either way.
+export async function resolvePinnedType(
+  client: SupabaseClient,
+  typeId: string,
+  seed: string,
+  note?: string,
+): Promise<ResolvedReference | null> {
+  const type = await getReferenceTypeRow(client, typeId);
+  if (!type || type.category !== 'twitter') return null;
   const images = await listReferenceImageRows(client);
-  const enabled = enabledImagesFor(images, 'article');
-  if (enabled.length === 0) throw new Error(EMPTY_CATALOG_ERROR);
-  const image = pickRandom(enabled);
-  return {
-    url: publicUrl(client, image.storagePath),
-    layoutSpec: image.layoutSpec,
-  };
+  const enabled = enabledImagesFor(images, type.slug);
+  if (enabled.length === 0) throw new Error(EMPTY_TYPE_ERROR(type.labelMr));
+  const master = await selectMaster(client, enabled, undefined, seed, note);
+  return { type: typeContext(type), master, forced: true };
 }
 
-// Roll a random enabled CMO master across every CMO-brand type. Returns a
-// PinnedReference so the runner reuses the exact pinned-run path (forced type +
-// url, no classification) — a CMO run has no classifier, the brand IS the choice.
-// CMO masters are category 'twitter' (they ride the social pipeline), distinguished
-// only by their type's brand flag.
-export async function pickCmoReference(
+// A CMO run has no classifier — the brand IS the choice. Pick one enabled master across every
+// CMO-brand type (content-aware when `note` is given, else seeded), then resolve that master's
+// own type for the copy step.
+export async function resolveCmoReference(
   client: SupabaseClient,
-): Promise<PinnedReference> {
+  seed: string,
+  note?: string,
+): Promise<ResolvedReference> {
   const [types, images] = await Promise.all([
     listReferenceTypeRows(client),
     listReferenceImageRows(client),
   ]);
-  const cmoSlugs = new Set(
-    types
-      .filter((type) => type.category === 'twitter' && type.brand === 'cmo')
-      .map((type) => type.slug),
-  );
+  const cmoTypes = types.filter((t) => t.category === 'twitter' && t.brand === 'cmo');
+  const cmoSlugs = new Set(cmoTypes.map((t) => t.slug));
   const enabled = images.filter(
     (image) =>
-      image.category === 'twitter' &&
-      image.isActive &&
-      cmoSlugs.has(image.subtype),
+      image.category === 'twitter' && image.isActive && cmoSlugs.has(image.subtype),
   );
   if (enabled.length === 0) throw new Error(EMPTY_CMO_ERROR);
-  const image = pickRandom(enabled);
-  return {
-    url: publicUrl(client, image.storagePath),
-    category: 'twitter',
-    subtype: image.subtype,
-    layoutSpec: image.layoutSpec,
-  };
+  const master = await selectMaster(client, enabled, undefined, seed, note);
+
+  const pickedImage = enabled.find((img) => img.id === master.id) as ReferenceImageRow;
+  const type = cmoTypes.find((t) => t.slug === pickedImage.subtype) as ReferenceTypeRow;
+  return { type: typeContext(type), master, forced: true };
 }
 
-// A pinned image is honored even if it was disabled after pinning; only a
-// deleted row returns null (callers fall back to the automatic rotation).
-export async function resolvePinnedReference(
+// The article path (news/scheme posters). There is no classification step here, so there is no
+// structural `need`; with `content` (the finished article prose, which is what the poster
+// depicts) the pick is content-aware over the enabled article masters, else seeded rotation.
+export async function pickArticleReference(
   client: SupabaseClient,
-  id: string,
-): Promise<PinnedReference | null> {
-  const row = await getReferenceImageRow(client, id);
-  if (!row) return null;
-  return {
-    url: publicUrl(client, row.storagePath),
-    category: row.category,
-    subtype: row.subtype,
-    layoutSpec: row.layoutSpec,
-  };
-}
-
-// A pinned section forces the Twitter type but rolls one of its enabled images
-// afresh at job start. Returning PinnedReference keeps every downstream caller
-// and the n8n webhook contract identical to an exact-image pin.
-export async function resolvePinnedTypeReference(
-  client: SupabaseClient,
-  typeId: string,
-): Promise<PinnedReference | null> {
-  const type = await getReferenceTypeRow(client, typeId);
-  if (!type || type.category !== 'twitter') return null;
-
+  seed: string,
+  content?: string,
+): Promise<SelectedMaster> {
   const images = await listReferenceImageRows(client);
-  const enabled = enabledImagesFor(images, 'twitter', type.slug);
-  if (enabled.length === 0) throw new Error(EMPTY_TYPE_ERROR(type.labelMr));
+  const enabled = images.filter(
+    (image) => image.category === 'article' && image.isActive,
+  );
+  if (enabled.length === 0) throw new Error(EMPTY_CATALOG_ERROR);
+  return selectMaster(client, enabled, undefined, seed, content);
+}
 
-  const image = pickRandom(enabled);
-  return {
-    url: publicUrl(client, image.storagePath),
-    category: 'twitter',
-    subtype: type.slug,
-    layoutSpec: image.layoutSpec,
-  };
+// Small helper kept for callers that only need a master's public URL.
+export function masterUrl(client: SupabaseClient, storagePath: string): string {
+  return publicUrl(client, storagePath);
 }

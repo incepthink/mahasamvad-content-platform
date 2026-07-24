@@ -1,13 +1,13 @@
 // Step 0 — few-shot validation spike (de-risk before building the FT pipeline).
 //
-// Question this answers: can the current gpt-4o, given only a category label + ONE real
+// Question this answers: can the current base model, given only a category label + ONE real
 // example article of that category as a style reference, already produce clearly distinct
 // news vs. scheme voices from the SAME set of facts? If yes, fine-tuning may be unnecessary
 // (or deferred). If close-but-inconsistent, fine-tuning is justified — and this script has
 // already given us the prompt/label format and a hand test note to reuse.
 //
 // Run: `tsx --env-file=../../.env src/finetune/spike-fewshot.ts`
-// Cost: two gpt-4o completions (a few cents). Writes both outputs to data/finetune/spike/.
+// Cost: two chat completions (a few cents). Writes both outputs to data/finetune/spike/.
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';

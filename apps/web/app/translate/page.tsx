@@ -1,21 +1,25 @@
 'use client';
 
-// Standalone Marathi→English/Hindi translation, in two modes.
+// Standalone Marathi→English/Hindi translation of pasted text OR an uploaded file.
 //
-// मजकूर (text): pasted text or a .txt file, translated synchronously. Same two-step flow as
-// the generation page: submitting first runs the name check (TranslationTermsReview) so the
-// user confirms/corrects every proper noun's English spelling in place, and only then does
-// the translation run — with those names locked and saved to the नाव-शब्दकोश for future
-// runs. The target language is chosen before translating; for Hindi the same confirmed
-// names are frozen in Devanagari rather than mapped to English.
+// ONE flow, deliberately. There used to be a second "PDF फाईल" tab running a parallel
+// background job (per-page, per-language, its own routes and its own page picker), which
+// meant two upload experiences, two page pickers and two shapes of result on one page. Now
+// the shared <DocumentIntake> reads any pdf/docx/txt — including a scanned PDF, whose pages
+// are picked before a single OCR credit is spent — and drops the text into the same box the
+// user could have pasted into. From there everything is the text path: one submit, the name
+// check, one translation.
 //
-// PDF: a whole document, which needs a different shape entirely — minutes of OCR and tens
-// of thousands of characters cannot live inside one request — so it runs as a background
-// job with page selection. All of that lives in TranslateDocumentPanel.
+// The two-step submit is the point of the page: submitting first runs the name check
+// (TranslationTermsReview) so the user confirms/corrects every proper noun's spelling in
+// place, and only then does the translation run — with those names locked and saved to the
+// नाव-शब्दकोश for future runs. The target language is chosen before translating; for Hindi
+// the confirmed names are frozen in Devanagari rather than mapped to English.
 //
-// Neither mode stores anything.
+// Nothing is stored — not the text, not the uploaded file (the intake job is in-memory with
+// a TTL).
 
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import {
   TRANSLATE_TEXT_MAX_CHARS,
   type PrepareTranslationResponse,
@@ -25,8 +29,8 @@ import {
 import { prepareTextTranslation, translateText } from '../../lib/api';
 import { downloadBlob } from '../../lib/download';
 import { STR } from '../../lib/strings';
+import { DocumentIntake } from '../../components/DocumentIntake';
 import { TranslationTermsReview } from '../../components/TranslationTermsReview';
-import { TranslateDocumentPanel } from '../../components/TranslateDocumentPanel';
 
 type TranslationResult = Readonly<{
   text: string;
@@ -36,10 +40,7 @@ type TranslationResult = Readonly<{
   unpreservedNames: readonly string[];
 }>;
 
-type TranslateMode = 'text' | 'pdf';
-
 export default function TranslatePage() {
-  const [mode, setMode] = useState<TranslateMode>('text');
   const [text, setText] = useState('');
   const [language, setLanguage] = useState<TranslationLanguage>('en');
   // Name-check flow: idle → preparing (extracting names) → review (card shown).
@@ -51,7 +52,6 @@ export default function TranslatePage() {
   const [submitting, setSubmitting] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const fileInput = useRef<HTMLInputElement>(null);
 
   const overLimit = text.length > TRANSLATE_TEXT_MAX_CHARS;
   const disabled =
@@ -63,20 +63,6 @@ export default function TranslatePage() {
     setPrep('idle');
     setPrepared(null);
     setError(null);
-  };
-
-  const onFile = (file: File | undefined) => {
-    if (!file) return;
-    if (!file.name.toLowerCase().endsWith('.txt')) {
-      setError(STR.txtOnly);
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      setText(String(reader.result ?? ''));
-      resetFlow();
-    };
-    reader.readAsText(file, 'utf-8');
   };
 
   // Step 1: extract the text's names for review. Failure returns to idle with a
@@ -130,167 +116,147 @@ export default function TranslatePage() {
     <main className="page">
       <h1 className="page-title">{STR.translatePageTitle}</h1>
 
-      <div className="lang-toggle" role="group" style={{ marginBottom: 18 }}>
-        {(['text', 'pdf'] as const).map((option) => (
-          <button
-            key={option}
-            type="button"
-            className="btn btn-small"
-            aria-pressed={mode === option}
-            onClick={() => setMode(option)}
-          >
-            {option === 'pdf' ? STR.translateModePdf : STR.translateModeText}
-          </button>
-        ))}
-      </div>
+      <section className="card">
+        <label className="field-label" htmlFor="translate-text">
+          {STR.translateInputLabel}
+        </label>
+        <p className="hint">{STR.translateInputHint}</p>
+        <textarea
+          id="translate-text"
+          className="note-input"
+          placeholder={STR.translateInputPlaceholder}
+          value={text}
+          onChange={(event) => {
+            setText(event.target.value);
+            resetFlow();
+          }}
+          style={{ marginTop: 10 }}
+        />
+        <p className={overLimit ? 'form-error' : 'hint'}>
+          {text.length.toLocaleString('en-IN')} /{' '}
+          {TRANSLATE_TEXT_MAX_CHARS.toLocaleString('en-IN')}
+          {overLimit ? ` — ${STR.translateOverLimit}` : ''}
+        </p>
+      </section>
 
-      {mode === 'pdf' ? <TranslateDocumentPanel /> : null}
+      {/* The document to translate usually arrives as a file, not in the clipboard.
+              The shared intake reads pdf/docx/txt and drops the text into the box above,
+              where it is edited and translated like anything else — a scanned PDF stops to
+              ask which pages are worth OCR'ing before a credit is spent, and the character
+              budget below is what makes that page picker the way to trim a long booklet
+              down to a translatable size. */}
+      <DocumentIntake
+        storageKey="dgipr.translate.document"
+        accept={['pdf', 'docx', 'txt']}
+        maxChars={TRANSLATE_TEXT_MAX_CHARS}
+        onText={(value) => {
+          setText(value);
+          resetFlow();
+        }}
+      />
 
-      {mode === 'text' ? (
-        <>
-          <section className="card">
-            <label className="field-label" htmlFor="translate-text">
-              {STR.translateInputLabel}
-            </label>
-            <p className="hint">{STR.translateInputHint}</p>
-            <textarea
-              id="translate-text"
-              className="note-input"
-              placeholder={STR.translateInputPlaceholder}
-              value={text}
-              onChange={(event) => {
-                setText(event.target.value);
+      <section className="card">
+        <span className="field-label">{STR.translateTargetLabel}</span>
+        <div className="lang-toggle" role="group" style={{ marginTop: 8 }}>
+          {(['en', 'hi'] as const).map((option) => (
+            <button
+              key={option}
+              type="button"
+              className="btn btn-small"
+              aria-pressed={language === option}
+              disabled={submitting || prep !== 'idle'}
+              onClick={() => {
+                setLanguage(option);
+                // A result belongs to the language it was made in; changing the
+                // target invalidates it exactly like editing the text does.
                 resetFlow();
               }}
-              style={{ marginTop: 10 }}
-            />
-            <p className={overLimit ? 'form-error' : 'hint'}>
-              {text.length.toLocaleString('en-IN')} /{' '}
-              {TRANSLATE_TEXT_MAX_CHARS.toLocaleString('en-IN')}
-              {overLimit ? ` — ${STR.translateOverLimit}` : ''}
-            </p>
-            <div className="btn-row" style={{ marginTop: 12 }}>
-              <button
-                type="button"
-                className="btn btn-small"
-                onClick={() => fileInput.current?.click()}
-              >
-                {STR.uploadTxt}
-              </button>
-              <input
-                ref={fileInput}
-                type="file"
-                accept=".txt,text/plain"
-                hidden
-                onChange={(event) => onFile(event.target.files?.[0])}
-              />
-            </div>
-          </section>
+            >
+              {option === 'hi'
+                ? STR.translateTargetHindi
+                : STR.translateTargetEnglish}
+            </button>
+          ))}
+        </div>
 
-          <section className="card">
-            <span className="field-label">{STR.translateTargetLabel}</span>
-            <div className="lang-toggle" role="group" style={{ marginTop: 8 }}>
-              {(['en', 'hi'] as const).map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  className="btn btn-small"
-                  aria-pressed={language === option}
-                  disabled={submitting || prep !== 'idle'}
-                  onClick={() => {
-                    setLanguage(option);
-                    // A result belongs to the language it was made in; changing the
-                    // target invalidates it exactly like editing the text does.
-                    resetFlow();
-                  }}
-                >
-                  {option === 'hi'
-                    ? STR.translateTargetHindi
-                    : STR.translateTargetEnglish}
-                </button>
-              ))}
-            </div>
-
-            <div className="btn-row" style={{ marginTop: 14 }}>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={startNameCheck}
-                disabled={disabled}
-              >
-                {STR.translateAction}
-              </button>
-              {prep === 'preparing' ? (
-                <span className="translating-note">
-                  <span className="spinner" aria-hidden="true" />
-                  {STR.namesChecking}
-                </span>
-              ) : null}
-              {submitting ? (
-                <span className="translating-note">
-                  <span className="spinner" aria-hidden="true" />
-                  {STR.translating} {STR.translateMayTakeTime}
-                </span>
-              ) : null}
-            </div>
-            {prep === 'review' && prepared ? (
-              <TranslationTermsReview
-                terms={prepared}
-                busy={submitting}
-                language={language}
-                onConfirm={confirmTranslate}
-                onCancel={() => {
-                  setPrep('idle');
-                  setPrepared(null);
-                }}
-              />
-            ) : null}
-            {error ? <p className="form-error">{error}</p> : null}
-          </section>
-
-          {result ? (
-            <section className="card">
-              <h2>
-                {result.language === 'hi'
-                  ? STR.translateOutputTitleHindi
-                  : STR.translateOutputTitle}
-              </h2>
-              {result.unpreservedNames.length > 0 ? (
-                <div className="info-callout warn" style={{ marginBottom: 12 }}>
-                  <p className="field-label">{STR.translateUnpreservedTitle}</p>
-                  <p className="hint">
-                    {STR.translateUnpreservedHint}{' '}
-                    {result.unpreservedNames.join(', ')}
-                  </p>
-                </div>
-              ) : null}
-              <div className="article-body">{result.text}</div>
-              <div className="btn-row" style={{ marginTop: 18 }}>
-                <button type="button" className="btn" onClick={copyToClipboard}>
-                  {copied ? STR.copied : STR.copyText}
-                </button>
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={() =>
-                    downloadBlob(
-                      result.language === 'hi'
-                        ? 'marathi-hindi-translation.txt'
-                        : 'marathi-english-translation.txt',
-                      result.text,
-                      'text/plain',
-                    )
-                  }
-                >
-                  {STR.downloadTxt}
-                </button>
-              </div>
-              <p className="hint">
-                {result.lockedTermCount} {STR.translateLockedTerms}
-              </p>
-            </section>
+        <div className="btn-row" style={{ marginTop: 14 }}>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={startNameCheck}
+            disabled={disabled}
+          >
+            {STR.translateAction}
+          </button>
+          {prep === 'preparing' ? (
+            <span className="translating-note">
+              <span className="spinner" aria-hidden="true" />
+              {STR.namesChecking}
+            </span>
           ) : null}
-        </>
+          {submitting ? (
+            <span className="translating-note">
+              <span className="spinner" aria-hidden="true" />
+              {STR.translating} {STR.translateMayTakeTime}
+            </span>
+          ) : null}
+        </div>
+        {prep === 'review' && prepared ? (
+          <TranslationTermsReview
+            terms={prepared}
+            busy={submitting}
+            language={language}
+            onConfirm={confirmTranslate}
+            onCancel={() => {
+              setPrep('idle');
+              setPrepared(null);
+            }}
+          />
+        ) : null}
+        {error ? <p className="form-error">{error}</p> : null}
+      </section>
+
+      {result ? (
+        <section className="card">
+          <h2>
+            {result.language === 'hi'
+              ? STR.translateOutputTitleHindi
+              : STR.translateOutputTitle}
+          </h2>
+          {result.unpreservedNames.length > 0 ? (
+            <div className="info-callout warn" style={{ marginBottom: 12 }}>
+              <p className="field-label">{STR.translateUnpreservedTitle}</p>
+              <p className="hint">
+                {STR.translateUnpreservedHint}{' '}
+                {result.unpreservedNames.join(', ')}
+              </p>
+            </div>
+          ) : null}
+          <div className="article-body">{result.text}</div>
+          <div className="btn-row" style={{ marginTop: 18 }}>
+            <button type="button" className="btn" onClick={copyToClipboard}>
+              {copied ? STR.copied : STR.copyText}
+            </button>
+            <button
+              type="button"
+              className="btn"
+              onClick={() =>
+                downloadBlob(
+                  result.language === 'hi'
+                    ? 'marathi-hindi-translation.txt'
+                    : 'marathi-english-translation.txt',
+                  result.text,
+                  'text/plain',
+                )
+              }
+            >
+              {STR.downloadTxt}
+            </button>
+          </div>
+          <p className="hint">
+            {result.lockedTermCount} {STR.translateLockedTerms}
+          </p>
+        </section>
       ) : null}
     </main>
   );
