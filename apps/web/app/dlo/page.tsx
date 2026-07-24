@@ -14,14 +14,28 @@
 // belong in the article can be unchecked. What the officer ends up with is
 // re-assembled here with the same combiner the intake job used, and that string
 // is what is sent as the generation's note.
+//
+// Recordings and documents take DIFFERENT routes into step 1, and the split is about what
+// each one costs to read. A recording has to be transcribed by Sarvam, so it is uploaded
+// with the intake and read by the job. A document is read RIGHT HERE, by the shared
+// ephemeral service every upload surface uses (<DocumentIntake>) — which is what puts the
+// page picker in front of the officer the moment a scanned PDF is attached, instead of
+// several minutes and one form-submit later. Those documents therefore arrive at the intake
+// already extracted, as `documents` on the create request, and the job leaves them alone.
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { FileText, Music, X } from 'lucide-react';
-import type { DloCategory, DloIntakeDetail } from '@dgipr/schemas';
+import type {
+  DloCategory,
+  DloIntakeDetail,
+  DloPreReadDocument,
+  PointerGroup,
+} from '@dgipr/schemas';
 import {
   createDloIntake,
   extractDloPages,
+  fetchPointers,
   generateFromDloIntake,
   reextractDloFile,
 } from '../../lib/api';
@@ -40,24 +54,61 @@ import { ARTICLE_CATEGORY_OPTIONS } from '../../lib/generationOptions';
 import { useDloIntake } from '../../lib/useDloIntake';
 import { useGeneration } from '../../lib/useGeneration';
 import { DloSourceReview } from '../../components/DloSourceReview';
+import { PointerSelector, pointerId } from '../../components/PointerSelector';
+import {
+  DocumentIntake,
+  type DocumentSnapshot,
+} from '../../components/DocumentIntake';
 import { ProgressSteps } from '../../components/ProgressSteps';
 import { DLO_INTAKE_STEP_LABELS, STR } from '../../lib/strings';
 
 type DloStep = 'input' | 'processing' | 'review' | 'generating' | 'output';
 
-// Audio and documents are picked through SEPARATE controls, because they are separate
-// kinds of thing: a recording is transcribed whole and has no pages to choose, while a
-// document is read page by page. They still travel to the intake as one list — the split
-// is about what the officer is being asked for, not about how it is sent.
+// This picker now takes recordings only; documents go through <DocumentIntake> and are read
+// before the intake is even created (see the file header).
 const AUDIO_EXTENSIONS = ['.mp3'] as const;
-const DOCUMENT_EXTENSIONS = ['.pdf', '.docx'] as const;
-const ACCEPTED_EXTENSIONS = [
-  ...AUDIO_EXTENSIONS,
-  ...DOCUMENT_EXTENSIONS,
-] as const;
 
 function isAudioFile(name: string): boolean {
   return AUDIO_EXTENSIONS.some((ext) => name.toLowerCase().endsWith(ext));
+}
+
+// One document upload card. Slots are identified by a counter rather than by array index so
+// that removing one cannot make the next card adopt its neighbour's in-flight job.
+type DocumentSlot = Readonly<{ id: number; snapshot: DocumentSnapshot | null }>;
+
+// Same ceiling the API puts on the documents array.
+const MAX_DOCUMENTS = 10;
+
+// Where each slot's card remembers its in-flight job across a refresh — a long OCR must
+// survive one. Cleared by hand when a slot is dropped or the run is submitted, or the card
+// would silently re-attach a document that has already been used.
+function documentStorageKey(id: number): string {
+  return `dgipr.dlo.document.${id}`;
+}
+
+// The wire shape: a PDF travels as the pages the officer kept (with their corrections), a
+// DOCX/TXT as one string. `jobId` lets the API archive the original from the ephemeral job
+// it is still holding, rather than making the browser upload the same bytes twice.
+function toPreReadDocument(snapshot: DocumentSnapshot): DloPreReadDocument {
+  return {
+    jobId: snapshot.jobId,
+    name: snapshot.fileName,
+    kind: snapshot.kind,
+    ...(snapshot.pageCount !== null ? { pageCount: snapshot.pageCount } : {}),
+    ...(snapshot.kind === 'pdf'
+      ? {
+          // Which backend read it is a PDF question — the review step badges it, and it
+          // gates the "read it with OCR instead" offer. A .txt has no second reader.
+          ...(snapshot.source !== null ? { pdfSource: snapshot.source } : {}),
+          pages: snapshot.pages.map((page) => ({ ...page })),
+        }
+      : {
+          text: snapshot.pages
+            .map((page) => page.text)
+            .filter((text) => text.trim().length > 0)
+            .join('\n\n'),
+        }),
+  };
 }
 
 // Bounds of the generation note the reviewed text becomes (see
@@ -70,9 +121,8 @@ function formatSize(bytes: number): string {
   return `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }
 
-// One of the two picked-file lists on the input step. Entries carry their index in the
-// single `files` array, so removing from either list still addresses the right file — the
-// split is presentational, the state underneath stays one list.
+// The picked recordings on the input step. Entries carry their index in the `files` array,
+// so removing one still addresses the right file.
 function SelectedFileList({
   title,
   entries,
@@ -241,6 +291,13 @@ export default function DloPage() {
   const [step, setStep] = useState<DloStep>('input');
   const [notes, setNotes] = useState('');
   const [files, setFiles] = useState<File[]>([]);
+  // One entry per document upload card. Each card reads its own file through the shared
+  // ephemeral service and reports back what it currently holds; a card that is still empty
+  // is a slot waiting for a file, which is why it starts with one.
+  const [documents, setDocuments] = useState<DocumentSlot[]>([
+    { id: 0, snapshot: null },
+  ]);
+  const nextSlotId = useRef(1);
   const [category, setCategory] = useState<DloCategory>('news');
   const [heading, setHeading] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -251,7 +308,6 @@ export default function DloPage() {
   const [generationId, setGenerationId] = useState<string | null>(null);
   const [article, setArticle] = useState<string | null>(null);
   const audioInput = useRef<HTMLInputElement>(null);
-  const docsInput = useRef<HTMLInputElement>(null);
 
   // Review-step state, keyed per source (see lib/dloReview): the officer's edits
   // and the sources/pages left out of the article. Everything is included until
@@ -267,6 +323,18 @@ export default function DloPage() {
   const [extracting, setExtracting] = useState(false);
   const sawExtractRunning = useRef(false);
   const [showPreview, setShowPreview] = useState(false);
+
+  // Pointers step: the note's facts as 5W1H-grouped bullets, plus the ids the officer
+  // deselected. `pointers === null` means "not fetched yet" (the initial spinner); an
+  // empty array means "fetched, nothing to show" (extraction found nothing or failed).
+  // The deselected set is cleared whenever a fresh extraction lands, so a stale id from a
+  // previous list can never leak into `excludedFacts`.
+  const [pointers, setPointers] = useState<PointerGroup[] | null>(null);
+  const [pointersLoading, setPointersLoading] = useState(false);
+  const [pointersError, setPointersError] = useState(false);
+  const [deselectedPointers, setDeselectedPointers] = useState<Set<string>>(
+    new Set(),
+  );
 
   const {
     detail: intake,
@@ -322,27 +390,62 @@ export default function DloPage() {
     [intake, perSource, edits, excluded, combinedText],
   );
 
-  const stepIndex =
-    step === 'input'
-      ? 0
-      : step === 'processing'
-        ? 1
-        : step === 'review'
-          ? 2
-          : 3;
-  const railSteps = [
-    STR.dloStepInput,
-    STR.dloStepProcessing,
-    STR.dloStepReview,
-    STR.dloStepOutput,
-  ];
+  // Extract the 5W1H pointers for the current text. Best-effort: a short/empty note or any
+  // failure leaves an empty (non-null) list so the officer can still generate. A fresh run
+  // always clears the deselected set — the previous list's ids no longer mean anything.
+  const runPointers = useCallback(
+    async (text: string) => {
+      setPointersError(false);
+      setDeselectedPointers(new Set());
+      const trimmed = text.trim();
+      if (trimmed.length < TEXT_MIN_CHARS) {
+        setPointers([]);
+        return;
+      }
+      setPointersLoading(true);
+      try {
+        const result = await fetchPointers({ text: trimmed, category });
+        setPointers(result.groups);
+      } catch {
+        setPointers([]);
+        setPointersError(true);
+      } finally {
+        setPointersLoading(false);
+      }
+    },
+    [category],
+  );
+
+  // Fire pointer extraction once the review step opens, from the note the intake just
+  // produced. Guarded on `pointers === null` so it runs exactly once per review session; the
+  // officer re-runs it by hand (with their edits) via the regenerate button.
+  useEffect(() => {
+    if (step !== 'review' || !intake) return;
+    if (pointers !== null || pointersLoading) return;
+    void runPointers(reviewText);
+  }, [step, intake, pointers, pointersLoading, reviewText, runPointers]);
+
+  // Toggle one pointer in/out of the article. Kept for an excluded pointer too, so
+  // re-checking is free.
+  const togglePointer = (id: string) => {
+    setDeselectedPointers((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  // Three visible steps now: input → the middle step (processing + pointers + review, all of
+  // which the officer moves through in place) → output. `processing`, `review` and
+  // `generating` therefore all map to the middle rail index.
+  const stepIndex = step === 'input' ? 0 : step === 'output' ? 2 : 1;
+  const railSteps = [STR.dloStepInput, STR.dloStepReview, STR.dloStepOutput];
 
   const addFiles = (list: FileList | null) => {
     if (!list || list.length === 0) return;
     const picked = Array.from(list);
-    const accepted = picked.filter((file) =>
-      ACCEPTED_EXTENSIONS.some((ext) => file.name.toLowerCase().endsWith(ext)),
-    );
+    const accepted = picked.filter((file) => isAudioFile(file.name));
     setError(accepted.length < picked.length ? STR.dloFileTypeError : null);
     if (accepted.length > 0) {
       setFiles((prev) => [
@@ -359,16 +462,47 @@ export default function DloPage() {
     setFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
-  // The two input-step lists. Both index into the same `files` array — splitting is how
-  // the picked files are SHOWN, not how they are stored or sent.
-  const indexedFiles = files.map((file, index) => ({ file, index }));
-  const audioFiles = indexedFiles.filter(({ file }) => isAudioFile(file.name));
-  const documentFiles = indexedFiles.filter(
-    ({ file }) => !isAudioFile(file.name),
+  const audioFiles = files.map((file, index) => ({ file, index }));
+
+  // Every document that has actually been read. A slot whose file is still being picked, or
+  // whose pages are all unticked, contributes nothing and is simply not sent.
+  const readDocuments = documents.flatMap((slot) =>
+    slot.snapshot && slot.snapshot.pages.length > 0 ? [slot.snapshot] : [],
   );
 
+  const addDocumentSlot = () => {
+    setDocuments((prev) =>
+      prev.length >= MAX_DOCUMENTS
+        ? prev
+        : [...prev, { id: nextSlotId.current++, snapshot: null }],
+    );
+    setError(null);
+  };
+
+  // Dropping a slot must take its stored job id with it, or the next card mounted under
+  // that key would re-attach the document that was just removed.
+  const removeDocumentSlot = (id: number) => {
+    window.sessionStorage.removeItem(documentStorageKey(id));
+    setDocuments((prev) => prev.filter((slot) => slot.id !== id));
+    setError(null);
+  };
+
+  // A submitted run CONSUMES its documents: the intake now owns their text, so the cards are
+  // emptied and their job ids forgotten. Called only after the create succeeds — a failed
+  // create must leave the officer's read documents exactly where they were.
+  const clearDocumentSlots = () => {
+    for (const slot of documents) {
+      window.sessionStorage.removeItem(documentStorageKey(slot.id));
+    }
+    setDocuments([]);
+  };
+
   const submit = async () => {
-    if (notes.trim().length === 0 && files.length === 0) {
+    if (
+      notes.trim().length === 0 &&
+      files.length === 0 &&
+      readDocuments.length === 0
+    ) {
       setError(STR.dloNeedInput);
       return;
     }
@@ -380,7 +514,16 @@ export default function DloPage() {
       form.append('category', category);
       form.append('heading', heading);
       for (const file of files) form.append('files', file, file.name);
+      // Documents were read here, at the input step, so they travel as text rather than as
+      // bytes — which is what stops a scanned PDF being OCR'd a second time by the job.
+      if (readDocuments.length > 0) {
+        form.append(
+          'documents',
+          JSON.stringify(readDocuments.map(toPreReadDocument)),
+        );
+      }
       const id = await createDloIntake(form);
+      clearDocumentSlots();
       setIntakeId(id);
       setStep('processing');
     } catch (e) {
@@ -485,6 +628,14 @@ export default function DloPage() {
       return;
     }
     if (!intakeId) return;
+    // The deselected pointers become the exclusion list — the article pipeline is told to
+    // leave these facts out (see extract-pointers.ts). Nothing deselected ⇒ omitted entirely,
+    // so the run is exactly what /dlo produced before this feature.
+    const excludedFacts = (pointers ?? []).flatMap((group) =>
+      group.points.filter((_point: string, index: number) =>
+        deselectedPointers.has(pointerId(group.dimension, index)),
+      ),
+    );
     setSubmitting(true);
     setError(null);
     try {
@@ -492,6 +643,7 @@ export default function DloPage() {
         combinedText: text,
         category,
         ...(heading.trim() ? { heading: heading.trim() } : {}),
+        ...(excludedFacts.length > 0 ? { excludedFacts } : {}),
       });
       setGenerationId(id);
       setStep('generating');
@@ -506,6 +658,10 @@ export default function DloPage() {
     setStep('input');
     setNotes('');
     setFiles([]);
+    // Starting over means starting over: a document left in sessionStorage would re-attach
+    // itself to the next run without the officer ever choosing it again.
+    clearDocumentSlots();
+    setDocuments([{ id: nextSlotId.current++, snapshot: null }]);
     setCategory('news');
     setHeading('');
     setError(null);
@@ -520,6 +676,10 @@ export default function DloPage() {
     setReextractingIndex(null);
     setExtracting(false);
     setShowPreview(false);
+    setPointers(null);
+    setPointersLoading(false);
+    setPointersError(false);
+    setDeselectedPointers(new Set());
   };
 
   const copyArticle = async () => {
@@ -612,34 +772,53 @@ export default function DloPage() {
             />
           </section>
 
+          {/* One card per document, each reading its own file HERE — so a scanned PDF asks
+              which pages are worth OCR'ing the moment it is attached, rather than after the
+              form is submitted and the intake job has run. By the time तयार करा is pressed
+              these documents are already text. */}
           <section className="card">
             <p className="field-label">{STR.dloDocsTitle}</p>
             <p className="hint">{STR.dloDocsHint}</p>
-            <div className="btn-row" style={{ marginTop: 12 }}>
+          </section>
+
+          {documents.map((slot) => (
+            <DocumentIntake
+              key={slot.id}
+              storageKey={documentStorageKey(slot.id)}
+              accept={['pdf', 'docx', 'txt']}
+              title={STR.dloDocsCardTitle}
+              hint={STR.dloDocsIntakeHint}
+              onTextChange={(_text, snapshot) => {
+                setDocuments((prev) =>
+                  // Every card reports once on mount with nothing loaded; rebuilding the
+                  // list for that would re-render the whole step for no change.
+                  prev.some(
+                    (entry) => entry.id === slot.id && entry.snapshot !== snapshot,
+                  )
+                    ? prev.map((entry) =>
+                        entry.id === slot.id ? { ...entry, snapshot } : entry,
+                      )
+                    : prev,
+                );
+                if (snapshot) setError(null);
+              }}
+              {...(documents.length > 1
+                ? { onRemove: () => removeDocumentSlot(slot.id) }
+                : {})}
+            />
+          ))}
+
+          <section className="card">
+            <div className="btn-row">
               <button
                 type="button"
                 className="btn btn-small"
-                onClick={() => docsInput.current?.click()}
+                disabled={documents.length >= MAX_DOCUMENTS}
+                onClick={addDocumentSlot}
               >
-                {STR.dloDocsUpload}
+                {STR.dloDocsAdd}
               </button>
-              <input
-                ref={docsInput}
-                type="file"
-                accept=".pdf,.docx"
-                multiple
-                hidden
-                onChange={(event) => {
-                  addFiles(event.target.files);
-                  event.target.value = '';
-                }}
-              />
             </div>
-            <SelectedFileList
-              title={STR.dloDocsFilesTitle}
-              entries={documentFiles}
-              onRemove={removeFile}
-            />
           </section>
 
           <section className="card">
@@ -713,6 +892,19 @@ export default function DloPage() {
 
       {step === 'review' ? (
         <>
+          {/* Pointers first (the facts the article will use), then the uploaded-source review
+              below — the officer picks what goes in up here and corrects OCR/STT errors down
+              there. */}
+          <PointerSelector
+            groups={pointers ?? []}
+            loading={pointersLoading}
+            error={pointersError}
+            deselected={deselectedPointers}
+            busy={submitting || extracting || reextractingIndex !== null}
+            onToggle={togglePointer}
+            onRegenerate={() => void runPointers(reviewText)}
+          />
+
           <section className="card">
             <h2>{STR.dloReviewTitle}</h2>
             <p className="hint">{STR.dloReviewHint}</p>

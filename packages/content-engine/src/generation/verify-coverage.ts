@@ -18,6 +18,31 @@ import type { EditorialBrief } from './editorial-brief.js';
 // Marker the checkers print when there is nothing to report.
 const NONE_MARKER = 'काही-नाही';
 
+// Facts the officer deselected in the /dlo Pointers step arrive here so the "what's missing?"
+// checkers do NOT report a deliberately-dropped fact as missing (which the coverage loop would
+// then re-add, undoing the exclusion). Rendered as an EXCLUDED_FACTS block + a task rule; empty
+// list ⇒ no block, i.e. today's behaviour. Only the two missing-checks consult it — the
+// faithfulness and overweight checks never re-add facts, so they are untouched.
+function excludedFactsBlock(excludeFacts: readonly string[] | undefined): string[] {
+  const facts = (excludeFacts ?? []).map((fact) => fact.trim()).filter(Boolean);
+  if (facts.length === 0) return [];
+  return [
+    '<EXCLUDED_FACTS purpose="deliberately_left_out_by_officer_never_report_as_missing">',
+    ...facts.map((fact) => `- ${fact}`),
+    '</EXCLUDED_FACTS>',
+    '',
+  ];
+}
+
+function excludedFactsRule(excludeFacts: readonly string[] | undefined): string[] {
+  const facts = (excludeFacts ?? []).filter((fact) => fact.trim().length > 0);
+  return facts.length === 0
+    ? []
+    : [
+        'EXCLUDED_FACTS यादीतील तथ्ये अधिकाऱ्याने जाणीवपूर्वक लेखातून वगळली आहेत — ती किंवा त्यांसारखी माहिती "गहाळ" म्हणून कधीही नोंदवू नका.',
+      ];
+}
+
 const MISSING_SYSTEM_PROMPT = [
   'तुम्ही एक काटेकोर मराठी तपासनीस आहात.',
   'तुम्हाला मूळ टिपणी (NOTES) आणि त्यावरून लिहिलेला लेख (ARTICLE) दिला जाईल.',
@@ -127,6 +152,8 @@ const CITIZEN_FACTS_SYSTEM_PROMPT = [
 export async function findMissingNoteFacts(
   article: string,
   note: string,
+  // Facts the officer deselected in the Pointers step: never report these as missing.
+  excludeFacts?: readonly string[],
 ): Promise<string[]> {
   if (note.trim().length === 0 || article.trim().length === 0) return [];
 
@@ -139,6 +166,7 @@ export async function findMissingNoteFacts(
         note.trim(),
         '</NOTES>',
         '',
+        ...excludedFactsBlock(excludeFacts),
         '<ARTICLE purpose="article_to_check">',
         article.trim(),
         '</ARTICLE>',
@@ -146,6 +174,7 @@ export async function findMissingNoteFacts(
         '<TASK>',
         'टिपणीत असलेली, पण लेखात न आलेली नागरिकाभिमुख तथ्ये (लाभ, रक्कम, पात्रता, अंतिम तारखा, नागरिकाच्या कृती, OTS, DBT, नवीन कर्ज, तक्रार निवारण, याद्यांची प्रसिद्धी) शोधा.',
         'प्रशासकीय यंत्रणेचा तपशील गहाळ म्हणून नोंदवू नका.',
+        ...excludedFactsRule(excludeFacts),
         `काहीही गहाळ नसेल तर फक्त "${NONE_MARKER}" लिहा.`,
         '</TASK>',
       ].join('\n'),
@@ -198,6 +227,8 @@ export async function findMissingInformation(
   note: string,
   heading?: string,
   brief?: EditorialBrief | null,
+  // Facts the officer deselected in the Pointers step: never report these as missing.
+  excludeFacts?: readonly string[],
 ): Promise<string[]> {
   if (note.trim().length === 0 || article.trim().length === 0) return [];
 
@@ -236,6 +267,7 @@ export async function findMissingInformation(
         note.trim(),
         '</NOTES>',
         '',
+        ...excludedFactsBlock(excludeFacts),
         '<ARTICLE purpose="article_to_check">',
         article.trim(),
         '</ARTICLE>',
@@ -251,6 +283,7 @@ export async function findMissingInformation(
                 ? 'HEADING मधील रोखासाठी महत्त्वाची असूनही ARTICLE मध्ये न आलेली NOTES मधील माहिती शोधा.'
                 : 'ARTICLE मध्ये न आलेली NOTES मधील महत्त्वाची माहिती शोधा.',
             ]),
+        ...excludedFactsRule(excludeFacts),
         `काहीही गहाळ नसेल तर फक्त "${NONE_MARKER}" लिहा.`,
         '</TASK>',
       ].join('\n'),

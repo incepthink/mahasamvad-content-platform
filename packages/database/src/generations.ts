@@ -36,6 +36,11 @@ export type GenerationRow = Readonly<{
   // non-social row and for social rows created before the CMO feature.
   templateBrand: TemplateBrand;
   heading: string | null;
+  // The exact text to print on an ARTICLE poster, typed by the officer (migration 0029).
+  // When set it wins outright over both the automatic named-subject resolution and the
+  // editorial headline. Null/empty = resolve it automatically. Updatable, so a poster whose
+  // heading came out wrong can be corrected and re-rendered.
+  posterHeading: string | null;
   // Optional pin: the exact reference image the run was asked to use (null =
   // automatic rotation; the FK sets null if the image is later deleted).
   referenceImageId: string | null;
@@ -50,6 +55,11 @@ export type GenerationRow = Readonly<{
   // Lineage/audit: the DLO intake this run's note came from (null = home form
   // or detail-page follow-up). Insert-only, like the pins.
   dloIntakeId: string | null;
+  // Facts the officer deselected in the /dlo Pointers step (migration 0030). Each is one
+  // AI-summarized 5W1H bullet the article must leave out; the runner passes them to
+  // generateArticle, which threads them into drafting + the coverage checkers. Insert-only;
+  // null on every non-DLO run and on rows created before 0030.
+  excludedFacts: string[] | null;
   // The media-room flow (migration 0027): the note IS a finished article, so the
   // runner uses it verbatim and skips generateArticle. false for every ordinary
   // run and for rows created before this feature.
@@ -124,11 +134,13 @@ type GenerationDbRow = {
   design_mode: string | null;
   template_brand: string | null;
   heading: string | null;
+  poster_heading: string | null;
   reference_image_id: string | null;
   reference_type_id: string | null;
   source_generation_id: string | null;
   thread_root_id: string | null;
   dlo_intake_id: string | null;
+  excluded_facts: unknown;
   article_provided: boolean | null;
   poster_style: unknown;
   status: GenerationStatus;
@@ -164,11 +176,20 @@ function fromDbRow(row: GenerationDbRow): GenerationRow {
     // ?? 'dgipr': pre-0024 databases have no such column (undefined).
     templateBrand: (row.template_brand as TemplateBrand | null) ?? 'dgipr',
     heading: row.heading,
+    // ?? null: a pre-0029 database has no such column (undefined), which every reader
+    // already treats as "resolve the heading automatically".
+    posterHeading: row.poster_heading ?? null,
     referenceImageId: row.reference_image_id,
     referenceTypeId: row.reference_type_id,
     sourceGenerationId: row.source_generation_id,
     threadRootId: row.thread_root_id,
     dloIntakeId: row.dlo_intake_id,
+    // ?? null: a pre-0030 database returns no such column (undefined), and jsonb round-trips
+    // as an array; anything else (a legacy null, a stray shape) collapses to null so readers
+    // always see "no exclusions" rather than a malformed value.
+    excludedFacts: Array.isArray(row.excluded_facts)
+      ? (row.excluded_facts as string[])
+      : null,
     // ?? false: a pre-0027 database returns no such column (undefined), and an
     // ordinary run is not article-provided anyway.
     articleProvided: row.article_provided ?? false,
@@ -228,6 +249,7 @@ export type GenerationPatch = Partial<
     | 'scenePath'
     | 'posterPath'
     | 'posterStyle'
+    | 'posterHeading'
     | 'publishedUrl'
     | 'publishedAt'
   >
@@ -253,6 +275,8 @@ function patchToDbRow(patch: GenerationPatch): Record<string, unknown> {
   if (patch.scenePath !== undefined) row.scene_path = patch.scenePath;
   if (patch.posterPath !== undefined) row.poster_path = patch.posterPath;
   if (patch.posterStyle !== undefined) row.poster_style = patch.posterStyle;
+  if (patch.posterHeading !== undefined)
+    row.poster_heading = patch.posterHeading;
   if (patch.publishedUrl !== undefined) row.published_url = patch.publishedUrl;
   if (patch.publishedAt !== undefined) row.published_at = patch.publishedAt;
   return row;
@@ -269,6 +293,10 @@ export async function insertGeneration(
     // विभाग = CMO social run.
     templateBrand?: TemplateBrand | undefined;
     heading?: string | undefined;
+    // The hand-typed article-poster text. Unlike the pins this IS updatable (it is in
+    // GenerationPatch too) — the officer usually discovers the heading is wrong only after
+    // seeing the poster, and fixes it from the detail page.
+    posterHeading?: string | undefined;
     // Insert-only (not in GenerationPatch): a pin never changes after creation.
     referenceImageId?: string | undefined;
     referenceTypeId?: string | undefined;
@@ -276,6 +304,9 @@ export async function insertGeneration(
     sourceGenerationId?: string | undefined;
     threadRootId?: string | undefined;
     dloIntakeId?: string | undefined;
+    // Insert-only (migration 0030): facts the officer deselected in the /dlo Pointers step.
+    // Consumed once at draft time, never edited — so, unlike posterHeading, not in GenerationPatch.
+    excludedFacts?: readonly string[] | undefined;
     // Insert-only: the note is a finished article; the runner skips generation.
     articleProvided?: boolean | undefined;
   }>,
@@ -289,11 +320,24 @@ export async function insertGeneration(
       design_mode: input.designMode ?? null,
       template_brand: input.templateBrand ?? 'dgipr',
       heading: input.heading ?? null,
+      // Sent ONLY when a heading was actually typed. PostgREST rejects an insert naming a
+      // column the table does not have, so writing `poster_heading: null` unconditionally
+      // would make EVERY generation fail on a database where 0029 has not been applied yet.
+      // Omitting it keeps ordinary runs working there and confines the migration's blast
+      // radius to the one feature that needs it — the same reasoning that keeps 0028's style
+      // write in its own best-effort update.
+      ...(input.posterHeading ? { poster_heading: input.posterHeading } : {}),
       reference_image_id: input.referenceImageId ?? null,
       reference_type_id: input.referenceTypeId ?? null,
       source_generation_id: input.sourceGenerationId ?? null,
       thread_root_id: input.threadRootId ?? null,
       dlo_intake_id: input.dloIntakeId ?? null,
+      // Sent ONLY when facts were actually deselected — same reasoning as poster_heading above:
+      // naming excluded_facts unconditionally would fail EVERY insert on a database where 0030
+      // has not been applied. Omitting it confines the migration's blast radius to this feature.
+      ...(input.excludedFacts && input.excludedFacts.length > 0
+        ? { excluded_facts: input.excludedFacts }
+        : {}),
       article_provided: input.articleProvided ?? false,
     })
     .select()
@@ -413,10 +457,17 @@ export async function listGenerations(
   return ((data ?? []) as GenerationDbRow[]).map(fromDbRow);
 }
 
-// The visual styles the most recent social poster runs were assigned, newest first
-// (migration 0028). Feeds the palette/composition recency rings so consecutive posters
-// differ — replacing the in-process Map that reset on every API restart and could not be
-// seen by a second process.
+// The visual styles the most recent poster runs were assigned, newest first (migration 0028).
+// Feeds the palette/composition recency rings so consecutive posters differ — replacing the
+// in-process Map that reset on every API restart and could not be seen by a second process.
+//
+// `categories` scopes the history to one poster KIND, and callers should always pass it. The
+// social and article paths draw their compositions from two different libraries (portrait
+// archetypes in poster-layouts.ts, landscape ones in article-poster-layouts.ts), so an
+// unscoped read would let a social `cards` coverage bar an article pick and vice versa —
+// spreading each rotation against a vocabulary the other cannot even produce. Colour families
+// are shared, but scoping those too is the right call: each kind should spread against its own
+// recent output, which is what an officer actually sees side by side in that lane.
 //
 // Returns the raw jsonb values; the caller validates and reads what it needs. Rows without a
 // style (pre-0028, or a run whose render failed) are excluded by the query rather than
@@ -424,11 +475,16 @@ export async function listGenerations(
 export async function listRecentPosterStyles(
   client: SupabaseClient,
   limit = 8,
+  categories?: readonly string[],
 ): Promise<unknown[]> {
-  const { data, error } = await client
+  let query = client
     .from(GENERATIONS_TABLE)
     .select('poster_style')
-    .not('poster_style', 'is', null)
+    .not('poster_style', 'is', null);
+  if (categories && categories.length > 0) {
+    query = query.in('category', [...categories]);
+  }
+  const { data, error } = await query
     .order('created_at', { ascending: false })
     .limit(limit);
   if (error) {

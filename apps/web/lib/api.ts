@@ -6,6 +6,7 @@ import {
   GenerationDetailSchema,
   GenerationSummarySchema,
   GlossaryTermSchema,
+  PointersResultSchema,
   PrepareTranslationResponseSchema,
   ProofreadResponseSchema,
   PublishGenerationResponseSchema,
@@ -30,6 +31,8 @@ import {
   type GenerationDetail,
   type GenerationSummary,
   type GlossaryTerm,
+  type PointersRequest,
+  type PointersResult,
   type PosterFeedbackRequest,
   type PosterImageFeedbackRequest,
   type PrepareTranslationResponse,
@@ -165,6 +168,19 @@ export async function reextractDloFile(
     method: 'POST',
     body: JSON.stringify({ source: 'ocr', pages }),
   });
+}
+
+// Extract the 5W1H-grouped "pointers" (fact bullets) from the current assembled note, so
+// the officer can deselect what the article should leave out. Synchronous + ad-hoc — nothing
+// is stored; on failure the engine returns { groups: [] } and the officer generates as usual.
+export async function fetchPointers(
+  input: PointersRequest,
+): Promise<PointersResult> {
+  const body = await requestJson('/api/pointers', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  return PointersResultSchema.parse(body);
 }
 
 // The review step's submit: the (edited) combined text becomes a normal
@@ -312,14 +328,24 @@ export async function sendPosterImageFeedback(
 // `recolour` is the "different colours" redo: it additionally bars the run's current palette
 // family, so the new version cannot come back in the colours just rejected. It is still a full
 // re-render, not a recolour of the existing pixels — the copy is rewritten too.
+//
+// `posterHeading` (article runs only) re-renders with EXACTLY that text on the poster and
+// remembers it on the run, so later redos keep it; '' clears it back to automatic. Omit the
+// key entirely to leave whatever the run already has alone — `undefined` and `''` mean
+// different things here.
 export async function regeneratePoster(
   id: string,
-  options: { recolour?: boolean } = {},
+  options: { recolour?: boolean; posterHeading?: string } = {},
 ): Promise<void> {
   await requestJson(`/api/generations/${id}/poster/regenerate`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ recolour: options.recolour === true }),
+    body: JSON.stringify({
+      recolour: options.recolour === true,
+      ...(options.posterHeading === undefined
+        ? {}
+        : { posterHeading: options.posterHeading }),
+    }),
   });
 }
 

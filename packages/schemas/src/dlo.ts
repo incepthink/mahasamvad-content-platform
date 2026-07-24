@@ -3,6 +3,7 @@
 // combined text → (after the officer's review) a normal generation.
 
 import { z } from 'zod';
+import { PdfTextSourceSchema } from './document.js';
 
 export const DloIntakeStatusSchema = z.enum([
   'queued',
@@ -44,7 +45,9 @@ export type DloIntakePage = z.infer<typeof DloIntakePageSchema>;
 // whole meeting transcript on every tick.
 export const DloIntakeFileSchema = z.object({
   name: z.string(),
-  kind: z.enum(['audio', 'pdf', 'docx']),
+  // 'txt' arrives only through the pre-read document path below — the intake job has no
+  // reader for it, because a .txt is read locally and free at upload time.
+  kind: z.enum(['audio', 'pdf', 'docx', 'txt']),
   // 'needs-selection': a scanned PDF that was probed but deliberately NOT read, because
   // reading it costs OCR credits per page. It waits here until the officer picks pages.
   status: z.enum(['pending', 'needs-selection', 'done', 'failed']),
@@ -61,8 +64,41 @@ export const DloIntakeFileSchema = z.object({
   // Which backend read this PDF. Surfaced because OCR misreads names and amounts
   // while a text layer is exact — and it gates the "read it with OCR instead" offer.
   pdfSource: z.enum(['text-layer', 'ocr']).optional(),
+  // Whether this file can still be re-read with OCR, i.e. its original bytes are in the
+  // private bucket. False for a document whose ephemeral upload job had already expired
+  // when the intake was created — there is nothing left to re-read, so the review step
+  // hides the override rather than offering a button that can only fail.
+  canReextract: z.boolean().optional(),
 });
 export type DloIntakeFile = z.infer<typeof DloIntakeFileSchema>;
+
+// A document the officer uploaded and READ at the input step, through the shared ephemeral
+// document service, before this intake existed. It arrives already extracted, so the intake
+// job has nothing to do with it — the route stores it as a finished file entry and every
+// downstream step (review cards, assembly, generation) treats it like any other source.
+//
+// `jobId` is the ephemeral job the text came from. The API looks it up IN PROCESS to archive
+// the original bytes into the private bucket; an expired job simply means the archive (and
+// with it the per-file OCR re-read) is skipped, never that the text is lost — the text is
+// right here in the payload.
+export const DloPreReadDocumentSchema = z.object({
+  jobId: z.string().optional(),
+  name: z.string().min(1),
+  kind: z.enum(['pdf', 'docx', 'txt']),
+  // Total pages in the source document, for the record. Not the number of pages read: a
+  // scanned PDF ships only the pages the officer chose to pay for.
+  pageCount: z.number().int().nonnegative().optional(),
+  pdfSource: PdfTextSourceSchema.optional(),
+  // PDFs carry the SELECTED pages, with the officer's corrections already applied, so the
+  // review card lists exactly what was kept. DOCX/TXT carry one string.
+  pages: z.array(DloIntakePageSchema).optional(),
+  text: z.string().optional(),
+});
+export type DloPreReadDocument = z.infer<typeof DloPreReadDocumentSchema>;
+
+// Same ceiling as the multipart file limit — an intake is a meeting's worth of material,
+// not a document library.
+export const DloCreateDocumentsSchema = z.array(DloPreReadDocumentSchema).max(10);
 
 export const DloIntakeDetailSchema = z.object({
   id: z.string(),
@@ -92,6 +128,10 @@ export const DloGenerateRequestSchema = z.object({
   combinedText: z.string().trim().min(20).max(60_000),
   category: DloCategorySchema,
   heading: z.string().trim().max(200).optional(),
+  // Facts the officer deselected in the Pointers step (their AI-summarized bullet text).
+  // The generation pipeline is instructed to leave these out — see pointers.ts. Absent/empty
+  // ⇒ nothing excluded ⇒ the article the intake would have produced before this feature.
+  excludedFacts: z.array(z.string().trim().min(1).max(500)).max(60).optional(),
 });
 export type DloGenerateRequest = z.infer<typeof DloGenerateRequestSchema>;
 

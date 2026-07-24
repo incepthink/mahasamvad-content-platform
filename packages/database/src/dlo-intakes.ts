@@ -10,7 +10,10 @@ export const DLO_INTAKES_TABLE = 'dlo_intakes';
 export type DloIntakeStatus = 'queued' | 'running' | 'ready' | 'failed';
 export type DloIntakeStep =
   'upload' | 'transcribe' | 'extract' | 'combine' | 'done';
-export type DloIntakeFileKind = 'audio' | 'pdf' | 'docx';
+// 'txt' only ever reaches here through a document the officer uploaded and read at the
+// input step (the shared ephemeral service reads a .txt locally and for free); the intake
+// job itself has no .txt reader and never needs one.
+export type DloIntakeFileKind = 'audio' | 'pdf' | 'docx' | 'txt';
 // 'needs-selection' is a PDF that was probed but deliberately NOT read: its text layer was
 // unusable, so reading it means paid OCR, and the officer chooses which pages are worth it
 // before a single one is sent. Only PDFs ever hold this status.
@@ -32,7 +35,12 @@ export type DloIntakePageEntry = Readonly<{ page: number; text: string }>;
 // jsonb has no column schema, so these fields needed no migration.
 export type DloIntakeFileEntry = Readonly<{
   name: string;
-  storagePath: string;
+  // Where the original is archived in the private dlo-uploads bucket. Absent only for a
+  // document that was read at the input step and whose ephemeral upload job had already
+  // expired by the time the intake was created — the text survived (it travelled in the
+  // request), the bytes did not, so that file cannot be re-read. Explicitly `| undefined`
+  // (exactOptionalPropertyTypes) so the job's entry builders can carry it straight through.
+  storagePath?: string | undefined;
   kind: DloIntakeFileKind;
   status: DloIntakeFileStatus;
   chars?: number;

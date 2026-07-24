@@ -14,6 +14,7 @@ export {
 export { polishArticleWithSarvam } from './generation/polish-article.js';
 export { generateCopy } from './generation/generate-copy.js';
 export { extractFiveWOneH } from './generation/extract-5w1h.js';
+export { extractPointers } from './generation/extract-pointers.js';
 export {
   deriveEditorialBrief,
   type EditorialBrief,
@@ -282,13 +283,38 @@ export {
   validateDeclaredSchemeNames,
   type SchemeLockResult,
 } from './generation/lock-scheme-names.js';
-// Rotating color palette for the article poster's headline panel (Part 2 of the
-// "stop always-orange posters" work); the picked theme is shipped to n8n.
+// The LANDSCAPE composition rotation for article posters — the article twin of POSTER_LAYOUTS.
+// A separate library because the canvas, the copy shape (one headline, no body list) and the
+// reserved zones all differ; the colour palettes above are shared verbatim.
 export {
-  ARTICLE_POSTER_THEMES,
-  pickArticlePosterTheme,
-  type ArticlePosterTheme,
-} from './references/article-poster-theme.js';
+  ARTICLE_POSTER_LAYOUTS,
+  pickArticleLayout,
+  articleLayoutById,
+  type ArticlePosterLayout,
+  type ArticleLayoutNeed,
+  type ArticleLayoutAvoid,
+} from './generation/article-poster-layouts.js';
+// The article poster's image prompts, moved out of the n8n `Build Prompt` Code node so the
+// reserved-zone geometry lives beside the chrome overlay it must stay in sync with.
+export {
+  buildArticlePosterPrompt,
+  buildArticleFeedbackPrompt,
+  type ArticleDesignMode,
+  type BuildArticlePosterPromptInput,
+  type BuildArticleFeedbackPromptInput,
+} from './generation/build-article-poster-prompt.js';
+// Does the news have a NAMED SUBJECT — a scheme, award, campaign, service, portal or project?
+// If so the poster's entire text is that name, in full. The model only nominates and must cite
+// the sentence it read it from; a deterministic verbatim check decides.
+export {
+  resolvePosterSubject,
+  validatePosterSubject,
+  isProminent,
+  stripEdgePunctuation,
+  SUBJECT_KINDS,
+  type PosterSubject,
+  type SubjectKind,
+} from './generation/resolve-poster-subject.js';
 
 export type ContentChunk = Readonly<{
   id: string; // `${articleId}-${chunkIndex}`

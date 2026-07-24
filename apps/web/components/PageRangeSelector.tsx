@@ -12,7 +12,7 @@
 // parent's onToggle is a functional update, so a diff of taps composes correctly whichever
 // way the parent stores the set.
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { formatPageRanges, parsePageRanges } from '../lib/documentSelection';
 import { STR } from '../lib/strings';
 
@@ -41,6 +41,10 @@ export function PageRangeSelector({
   // with the range field primary. Callers can force either.
   defaultExpanded?: boolean | undefined;
 }) {
+  // /dlo shows one of these per document, so a fixed id would put several inputs under the
+  // same name and make every label focus the first one.
+  const inputId = useId();
+
   const selectedListed = listed.filter(isSelected);
   const canonical = formatPageRanges(selectedListed);
 
@@ -71,13 +75,13 @@ export function PageRangeSelector({
 
   return (
     <div className="page-range">
-      <label className="field-label" htmlFor="page-range-input">
+      <label className="field-label" htmlFor={inputId}>
         {STR.docRangeLabel}
       </label>
       <p className="hint">{STR.docRangeHint}</p>
       <div className="page-range-row">
         <input
-          id="page-range-input"
+          id={inputId}
           type="text"
           className="page-range-input"
           placeholder={STR.docRangePlaceholder}

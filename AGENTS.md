@@ -23,18 +23,26 @@ it are implemented and working end-to-end:
   (`packages/content-engine/src/{scraping,chunking,embedding,retrieval}`)
 - Article generation with coverage + faithfulness verification
   (`packages/content-engine/src/generation/generate-article.ts`)
-- Poster generation, two modes selected by `ARTICLE_POSTER_MODE`:
-  - `n8n` (default): the `article-poster-v1-api` workflow paints the landscape
-    article poster body (incl. the single Marathi headline) by editing a master
-    template — same external-render pattern as the twitter path
-    (`renderArticlePosterViaN8n`). The logo/footer chrome is no longer painted by
-    the image model: the prompt erases the master's branding and reserves those
-    zones, and the API composites `article-logo.png` (top-left) +
-    `poster-footer.png` (full-width bottom) in code after the webhook returns
-    (`overlayArticleChrome`, `packages/poster-renderer/src/article-chrome.ts`) —
-    on initial renders and image-feedback re-renders alike.
+- Poster generation, three modes selected by `ARTICLE_POSTER_MODE`:
+  - `fresh` (default, 2026-07-24): the API builds the entire image prompt
+    (`build-article-poster-prompt.ts`) and generates the landscape article poster
+    from scratch at 1536x1024 — **no n8n**. An assigned colour palette (shared with
+    the social path) and a landscape composition archetype
+    (`article-poster-layouts.ts`) decide how it looks; the selected master is
+    colour-stripped STRUCTURE inspiration only. If the news has one NAMED SUBJECT —
+    a scheme, campaign, mission, award, service, portal, fund or project — the
+    poster's entire text is that name in full (`resolve-poster-subject.ts`), and an
+    officer may override it outright with `generations.poster_heading` (0029).
+  - `n8n`: the legacy path — the `article-poster-v1-api` workflow (now a thin 5-node
+    image-EDIT service) repaints a master template in place.
   - `html`: a text-free AI background photo typeset in HTML and screenshotted with
     Chromium so Devanagari is never mangled (`packages/poster-renderer`) — kept as fallback.
+
+  In every mode the logo/footer chrome is composited by the API rather than painted
+  by the image model: the prompt reserves those zones and
+  `overlayArticleChrome` (`packages/poster-renderer/src/article-chrome.ts`) stamps
+  `article-logo.png` (top-left) + `poster-footer.png` (full-width bottom) — on
+  initial renders and image-feedback re-renders alike.
 - Feedback/revision loops for the article and poster text/scene
   (`packages/content-engine/src/generation/revise-*.ts`), plus iterative pixel-level
   image feedback for n8n-rendered article and twitter posters: each edit uses the
@@ -1071,6 +1079,240 @@ it are implemented and working end-to-end:
   0028 → API → web (rebuild `@dgipr/schemas` + `@dgipr/database` + `@dgipr/content-engine` +
   `@dgipr/poster-renderer` dists first). No n8n — the fresh path calls `generateImage` directly.
 
+- **The ARTICLE poster gets the same treatment: fresh generation, two rotations, and a scheme-name
+  lock** (2026-07-24, no migration — SUPERSEDES the "Article poster via n8n" notes and retires
+  `ARTICLE_POSTER_THEMES`): the two same-day social reworks (thin n8n + the diversity fix) left the
+  news/scheme poster path untouched, so it still had every problem they had just solved, plus one
+  of its own. It built its whole image prompt inside an n8n **Code node** (against this file's own
+  package-boundary rule); it **edited the picked master in place**, so the master's saffron/cream
+  pixels survived into every render — the precise mechanism that made social posters look alike;
+  its colour "rotation" was `ARTICLE_POSTER_THEMES`, 7 entries picked by a bare `Math.random()`
+  with no recency memory, applied only as a CONDITIONAL "recolour the headline panel **if** the
+  master has one", which left the *background* — the thing actually complained about — untouched on
+  every master that had no solid panel. And when the article was about one named scheme it still
+  wrote an editorial headline, so
+  `पुण्यश्लोक अहिल्यादेवी होळकर शेतकरी कर्जमुक्ती योजना २०२६` shipped as `शेतकऱ्यांना कर्जमुक्ती`.
+  On an official government poster a shortened scheme name is a factual error, not an editorial
+  choice — and the trailing year is exactly the token a rewrite drops first.
+  - **`ARTICLE_POSTER_MODE` now defaults to `fresh`**: the API builds the prompt and calls
+    `generateImage` at 1536x1024 directly, **no n8n on the creation path**. `n8n` (edit the master,
+    the old behaviour) and `html` (Chromium) remain, so rollback is one env line.
+    `article-poster-v1-api` drops 6 → **5 nodes** — the twin of `social-post-v2-api`, taking
+    `{ generation_id, image_url, prompt, quality }` — and now serves only pixel/marker FEEDBACK
+    re-renders. `renderArticlePosterViaN8n` became `renderArticlePosterEditViaN8n(id, imageUrl,
+    prompt)`.
+  - **The palette library is SHARED, the composition library is NOT.** `poster-palettes.ts` is
+    reused verbatim (colour is aspect-agnostic, and one rotation across everything the department
+    publishes is the point). Compositions could not be: the canvas is landscape not 4:5, the copy is
+    ONE headline with no body list, and the reserved chrome is top-LEFT + bottom rather than
+    top-right + bottom. So `article-poster-layouts.ts` holds 11 **landscape** archetypes
+    (`art_`-prefixed ids, `coverage` gaining `panel`/`split` in the shared vocabulary), and every
+    instruction states the headline-only rule and the reserved zones — asserted by the harness,
+    which caught two archetypes that had silently omitted the zones.
+  - **The scheme rule is CONTENT-driven, not category-gated** (`resolve-scheme-subject.ts` —
+    **SUPERSEDED the same day; see the named-subject milestone at the end of this file, which
+    deletes the pre-filter described here and generalises the rule past schemes**). A
+    `news` article about one scheme gets the lock too; what matters is whether the article's
+    SUBJECT is a named scheme. Structure, in the repo's usual order: a **free pre-filter** (no
+    `योजना`/`अभियान`/`कार्यक्रम`/`मिशन`/`उपक्रम`/`धोरण` anywhere → return without a model call, which
+    is most news runs), then one call that only **nominates** a name, then a **deterministic
+    verdict** — the name must be accountable in the article, via `validateDeclaredSchemeNames`'s
+    inflection tolerance (योजना → योजनेच्या) or by `lockSchemeNames` expanding a truncation against
+    verified glossary rows, a repair that can only ever LENGTHEN toward the source. Unaccountable →
+    discarded, and the poster falls back to its editorial headline; the pipeline never invents, so
+    the failure mode is a plain headline, never a fabricated scheme. When it fires, the prompt
+    carries a `TEXT LOCK` block: reproduce this exact string, year included, and add no subtitle,
+    tagline, department name, date or English version.
+    **Tier note:** this call runs on `POSTER_COPY_MODEL` (gpt-5.6-terra), NOT the utility tier —
+    only its name output is code-checked; the *judgement* ("about a scheme" vs "mentions one") is
+    not re-checkable and decides a poster's entire visible text, the same reasoning that moved
+    `POSTER_COPY_MODEL` luna → terra.
+  - **Style history is now SCOPED by poster kind** (`listRecentPosterStyles(client, limit,
+    categories)`). Both lanes share `generations.poster_style` (0028) but draw compositions from
+    different libraries, so an unscoped read let a social `cards` coverage bar an article pick —
+    spreading each rotation against a vocabulary the other cannot produce. `poster-style.ts`
+    resolves a layout id through BOTH libraries (`anyLayoutById`); `art_` namespacing keeps that
+    unambiguous.
+  - Both **redo buttons** (`वेगळी रचना तयार करा`, `वेगळ्या रंगात तयार करा`) and the Marathi style
+    label come to `PosterPanel`; `/generations/:id/poster/regenerate` now serves both lanes (an
+    article run re-derives copy from the stored, possibly feedback-revised article and re-runs the
+    scheme check, so a redo after an article edit picks up the change; `html` mode is refused,
+    having no assignment to re-roll). The style write stays a SEPARATE best-effort update after the
+    poster write — on a database without 0028, losing rotation memory is acceptable, losing a paid
+    render is not.
+  Verified 2026-07-24: full workspace typecheck green (7/7), lint clean on every touched file, and
+  8 offline harnesses green — the 4 new/changed ones plus `poster-palettes`/`poster-layouts`/
+  `strip-colour-words`/`lock-scheme-names` unchanged. New assertions worth knowing: the article
+  prompt carries the assigned hexes with COLOUR SPEC before ART DIRECTION and COMPOSITION before
+  the master's structure hint (the social bug, which was emitting the art director's paraphrase
+  INSTEAD of the assignment — check this FIRST if article colours ever converge); no master colour
+  word survives into the hint; the scheme lock preserves `२०२६` and refuses an invented name; the
+  photo filter is absolute both ways. n8n `validate_workflow` returns 0 errors and
+  `n8n:push --dry-run` reports 6 → 5 nodes with the credential resolved by name.
+  **Not yet done** (needs spend/a live instance): 0028 is still unapplied, the
+  `analyze:references` backfill for article masters, and the six-consecutive-run spread test +
+  a real scheme-note E2E. **Deploy order is the NORMAL one — API first, then `pnpm n8n:push`** —
+  and the window between them is safe because the API still sends the legacy
+  `reference_url`/`image_feedback`/`marker_count` fields, so a new API against an un-pushed
+  workflow degrades article-poster FEEDBACK to the old in-workflow prompt instead of throwing
+  "No reference_url received". Initial renders never touch n8n at all. No migration; rebuild
+  `@dgipr/database` + `@dgipr/content-engine` dists first.
+
+- **The article poster's heading: named SUBJECT, not just schemes — and a hand override**
+  (2026-07-24, migration 0029 — SUPERSEDES the scheme-lock half of the milestone above): the
+  scheme lock shipped that morning almost never fired. Three real posters, three different
+  failures, and the machinery downstream (`TEXT LOCK`) was fine in all three — only the flag
+  turning it on was wrong:
+  - `‘दिव्यांग सशक्तीकरण राष्ट्रीय पुरस्कार-२०२६’` → `राष्ट्रीय पुरस्कारासाठी ऑनलाईन अर्ज करा`. The **free
+    token pre-filter** (`mentionsScheme`: योजना/अभियान/कार्यक्रम/मिशन/उपक्रम/धोरण) returned `null`
+    before spending a token, because an AWARD contains none of those words. No token list ever
+    could: the pre-filter is **deleted**. One `POSTER_COPY_MODEL` call per article poster is
+    nothing beside the ~$0.08 image render it guards, and the saving was buying wrong posters.
+  - `‘भारत टॅक्सी’` → `सहकाराची नवी क्रांती`. A named **service/model** was not a
+    "scheme, programme or campaign" as the prompt defined the question.
+  - `'पुण्यश्लोक अहिल्यादेवी होळकर शेतकरी कर्जमुक्ती योजना'` → `५० हजारांची अट रद्द; २ लाखांपर्यंत कर्जमाफी`.
+    The prompt explicitly answered **false** for "an announcement that merely MENTIONS a scheme"
+    and for "several different schemes" — and this note is a विधानसभा announcement naming two
+    (the older ज्योतिराव फुले… as comparison). It hit both exclusions while being exactly the
+    shape of a DGIPR press note.
+  `resolve-scheme-subject.ts` → **`resolve-poster-subject.ts`** (`resolvePosterSubject` /
+  `validatePosterSubject` / `PosterSubject`; `schemeLocked` → `textLocked` at every call site).
+  What changed, in order of importance:
+  (1) **The question is broader**: any NAMED subject — scheme, campaign, mission, **award**,
+  **service/model**, **portal**, fund, project (`SUBJECT_KINDS`, reported for the log). The accept
+  rules now name the three failing shapes directly: a statement/announcement/launch/review ABOUT
+  a named thing counts (the thing is the subject, not the meeting); an invitation for
+  applications counts; and where several are named, pick the one the news **acts on** — a change
+  to A that cites older B for background has subject **A**. False stays for a genuine roundup, a
+  passing mention, and generic wording with no proper name.
+  (2) **Grounding is structural, per the repo's usual move**: the model must return an `evidence`
+  sentence copied verbatim from the source, checked (whitespace-normalised) to occur in it and to
+  contain the name. Reported, not fatal — the name check is strictly stronger.
+  (3) **Quotes come off** (`stripEdgePunctuation`): these notes mark official names with ‘…’, and
+  the model returns them attached, which nothing downstream can match. That is also why quoting
+  is now given to the model as a positive SIGNAL.
+  (4) **It reads the NOTE, not only the article** — the officer's expectation is expressed
+  against their own text, and a note→article run can reword. The name is nominated from the note
+  and must be accountable in note ∪ article; on a media-room run they are the same string, so
+  nothing is paid twice.
+  (5) **A lenient false-positive backstop** (`isProminent`), needed because broadening the rule
+  risks putting a passing mention on a poster: reject only when the name occurs exactly ONCE and
+  after the 75% mark of a source longer than 800 chars. Short sources exempt.
+  (6) The `TEXT LOCK` block no longer says "scheme" — telling the model it is looking at a scheme
+  name invites it to correct an award name into scheme-shaped wording.
+  **Plus the escape hatch the operator asked for: `generations.poster_heading` (0029)** — type
+  the exact poster text. On the media room it appears only when the **पोस्टर** output is selected
+  (a social poster's headline lives inside a multi-field copy object with no single line to lock,
+  so the API 400s a social run that sends one); on `PosterPanel` it is a third redo beside the two
+  style ones, which is where it actually gets used — you only learn the heading is wrong once the
+  poster exists. It wins outright and skips the model call entirely. It is a **column, not a job
+  parameter** (the `generateCaption` precedent does not apply): `startPosterRegenerateJob`
+  re-derives everything from the row, so a heading held only in the request would vanish on the
+  first "वेगळ्या रंगात तयार करा". Deliberately NOT `generations.heading`, which is the article's
+  editorial ANGLE and is already surfaced in the edit-and-re-run fold — an angle is not poster
+  text. `insertGeneration` **omits the column unless a heading was typed**, so a database without
+  0029 loses only this feature instead of failing every create (the 0028 principle), and the
+  regenerate job persists it BEFORE rendering so a failed render does not lose the typed text.
+  Verified 2026-07-24: full workspace typecheck green (7/7), lint clean on all 11 touched files,
+  18 offline assertions (quote stripping incl. the ‘भारत टॅक्सी’ and hyphenated-year
+  `पुरस्कार-२०२६` cases, glossary truncation expansion, invented-name refusal, all four prominence
+  cases, name found in the note half); the article prompt harness still green; **live on all three
+  real notes** — `भारत टॅक्सी` (service), `दिव्यांग सशक्तीकरण राष्ट्रीय पुरस्कार-२०२६` (award),
+  `पुण्यश्लोक अहिल्यादेवी होळकर शेतकरी कर्जमुक्ती योजना` (scheme), each `model+verbatim` with its
+  evidence matched — and **two negative controls returning `null`** (a flood-inspection note, and
+  a planning-committee review that names three schemes in passing), so ordinary news keeps its
+  editorial headline. Live API guards: social+heading 400, unknown id 404, >120-char heading 400.
+  **E2E**: re-rendering the real भारत टॅक्सी run produced `poster-v2.png` reading exactly
+  `भारत टॅक्सी` and nothing else, chrome and reserved zones intact. Deploy: **0029 → API → web**
+  (rebuild `@dgipr/schemas` + `@dgipr/database` + `@dgipr/content-engine` dists first); no n8n —
+  the fresh path calls `generateImage` directly.
+
+- **/dlo reads its documents at the INPUT step, and takes `.txt`** (2026-07-25, no
+  migration): every other upload surface probes a file the moment it is attached — the media
+  room shows the `PageRangeSelector` picker inline, and a scanned PDF stops there until the
+  officer says which pages are worth OCR'ing. `/dlo` alone made them fill in the whole form,
+  press पुढे जा, and wait out the intake job before the same picker appeared, buried in the
+  review step. The picker markup was already shared (`DocumentPages` → `PageRangeSelector`);
+  what differed was WHEN the selection happened, which is a backend question, not a styling
+  one. It also could not read `.txt`, which the shared intake has handled since the
+  unified-upload milestone.
+  Documents now go through the shared ephemeral service (`POST /api/documents`,
+  `jobs/document-intake.ts`) as one `<DocumentIntake>` card per document, in live mode.
+  **Recordings deliberately do not**: an MP3 is transcribed whole, has no pages to pick and
+  no per-page spend decision, so it still travels as a multipart file and is read by the job —
+  the same reason audio was excluded from the shared engine in the first place.
+  The load-bearing decision is what happens at submit. Rather than keeping the documents
+  client-side (a refresh would lose them) or appending them to the notes (which destroys the
+  per-source review), each is handed to `POST /dlo/intakes` as a `documents` JSON field
+  (`DloPreReadDocumentSchema`: `jobId`, name, kind, and the SELECTED pages carrying the
+  officer's corrections) and the route stores it as an **ordinary `files` entry with
+  `status: 'done'`**. A pre-read document is then indistinguishable from one the job read, so
+  `DloSourceReview`, `assembleDloText`, `combineIntakeSources`, the `dlo_intake_id` lineage
+  and `POST /:id/generate` needed **no changes at all** — the review step still shows one card
+  per source and a PDF still lists its pages.
+  Three consequences worth keeping. (1) **No double spend**: the intake job's extract phase
+  skips `status: 'done'` entries, or a scanned PDF would be OCR'd a second time AND the
+  officer's corrections replaced by the re-read. (2) **The archive survives**: the payload
+  carries the ephemeral `jobId`, and the route copies `getDocumentIntakeJob(jobId).data` into
+  the private `dlo-uploads` bucket **in process** — no second upload from the browser, and the
+  review-step per-file OCR re-read keeps working. An expired job (60-min TTL) simply yields an
+  entry with no `storagePath`: the text still lands (it travelled in the request), and the new
+  `canReextract` flag on the detail payload hides a re-read button that could only fail, with
+  the route 400ing it as a backstop. (3) A run **consumes** its documents — both the slots and
+  their sessionStorage job ids are cleared on a successful create and on पुन्हा सुरुवात करा,
+  or the next run would silently re-attach the last one (the media room's `clearDocument()`
+  rule).
+  `.txt` came almost free with the move: a new `'txt'` value on `DloIntakeFileKind` /
+  `DloIntakeFileSchema.kind` plus a review-card label. `files` is jsonb, and
+  `DloIntakeFileEntry.storagePath` became optional the same way — **no migration**.
+  Also fixed in passing: `PageRangeSelector` hardcoded `id="page-range-input"`, which was
+  invisible while one picker existed per page and makes every label focus the first input now
+  that /dlo shows several — it uses `useId()`. The `files` multipart path still accepts
+  pdf/docx for back-compat, so the job's probe/`needs-selection`/`POST /:id/extract`
+  machinery is intact but unreachable from the web.
+  Verified 2026-07-25: full workspace typecheck green (7/7), lint clean on all nine touched
+  files (only the pre-existing `intake/text-file.ts` irregular-whitespace error and two
+  poster-renderer warnings remain, all untouched). Live API: a `.txt` probes to one page with
+  its BOM stripped and ५०० intact, and lands as a `done` source under its
+  `=== स्रोत: … ===` header; a 6-page PDF whose text layer is unusable stops at `selecting`
+  with `pages: []` and **provably never reaches Sarvam**; submitting that same PDF as a
+  pre-read document with pages 2 and 5 comes back with **exactly those two pages, the
+  page-5 correction intact and `canReextract: true`** — the decisive check, since a job that
+  had re-read it would have returned `needs-selection` and wiped them. Guards: create with
+  nothing → 400, malformed `documents` → 400, re-read of an unarchived file → Marathi 400.
+  Browser (Playwright, 17 assertions): the picker appears inline on attach with 6 chips and
+  no page text, `२, ५` canonicalises to `2, 5` selecting 2 chips, two documents get
+  independent pickers with unique input ids, a `.txt` skips the picker entirely, removing a
+  slot leaves the others untouched, and a full submit sends the text (not the file), reaches
+  the review step with both sources, and does not re-attach after a reset. Not covered
+  (needs a genuinely scanned document and real spend): that a 3-page pick runs ONE 3-page
+  Sarvam job from `/dlo`'s new path — the same gap the shared-intake milestone left open.
+  No migration, no n8n; deploy is API + web (rebuild `@dgipr/schemas` + `@dgipr/database`
+  dists first).
+
+- **Meeting recordings are transcribed once, then cached by content** (2026-07-25, migration
+  0031): re-uploading the same MP3 on `/dlo` used to re-run the slow, paid Sarvam batch STT job
+  from scratch. The transcript is now **content-addressed**: the intake job's transcribe phase
+  hashes each recording's bytes (`hashAudioContent`, SHA-256 — byte-exact, so a re-export is a
+  correct miss rather than a wrong hit) and reads `audio_transcript_cache`
+  (`getCachedTranscripts`, one batched `.in()` query) BEFORE calling Sarvam. Hits fill the file
+  entry straight away; only the misses go to `transcribeAudioFiles`; each fresh transcript is
+  written back (`putCachedTranscript`, upsert with `ignoreDuplicates` so concurrent identical
+  uploads never error). If every recording is a hit, Sarvam is not called at all. **Server-side
+  only** — no client change, and the MP3 is still archived to the private `dlo-uploads` bucket.
+  Deliberate stances: only **successful, non-empty** transcripts are cached (a transient Sarvam
+  failure can't poison it); a **cache-read failure degrades to "empty cache = transcribe
+  everything"** (logged, non-fatal), so an un-applied 0031 disables only the optimization, never
+  intake (the 0028/0029/0030 blast-radius principle); and the job-level failure branch now marks
+  failed **only recordings still awaiting a result**, leaving cache hits `done`. New:
+  `packages/database/src/stt-cache.ts` (+ its four exports) and
+  `supabase/migrations/0031_audio_transcript_cache.sql`; the only orchestration change is the
+  `if (audioIndexes.length > 0)` block in `apps/api/src/jobs/dlo-runner.ts` — `sarvam-stt.ts` is
+  untouched. Verified 2026-07-25: full workspace typecheck green (7/7), lint clean on the touched
+  files. Left for a real run (needs Sarvam spend): a second intake of the same MP3 reaching review
+  with no `[sarvam-stt] batch job:` log line, and a cached+new pair sending only the new file.
+  No n8n; deploy is API only after rebuilding `@dgipr/database` dist, with 0031 applied first.
+
 Two n8n workflows are implemented and host-independent for deployment; their master
 templates arrive as immutable `references/library/...` public URLs inside each webhook
 payload (fetched over HTTPS — never local disk, no hardcoded storage paths):
@@ -1092,19 +1334,17 @@ payload (fetched over HTTPS — never local disk, no hardcoded storage paths):
   initial renders and image-feedback re-renders alike. Deploy order for this is the
   NORMAL one (API first, then workflows): the new workflow with the old API would
   ship unbranded posters.
-- `article-poster-v1-api` (the default news/scheme poster path) — the API sends
-  `{ headline, scene_brief, reference_url, layout_summary, has_photo_zone }` and the
-  workflow edits that master with gpt-image-2 (it fails loudly if `reference_url` is
-  missing). Its Build Prompt is **layout-agnostic** (2026-07-20): it used to hardcode
-  the original master's anatomy ("curved left headline panel + right-hand photo
-  zone"), which made the image model reshape EVERY rotated master into that one look —
-  the whole article-master rotation produced visually identical posters. Structure now
-  comes only from the picked master's own vision-derived `layout_spec`
-  (`pickArticleReference` returns it; the API flattens it to `layout_summary` +
-  tri-state `has_photo_zone` strings, '' = un-analyzed → generic conditional prompt).
-  `has_photo_zone: 'false'` emits a hard no-imagery lock, and the rotating panel-colour
-  theme is applied conditionally (only if the master actually has a solid headline
-  panel). Run the `analyze:references` backfill so article masters carry specs.
+- `article-poster-v1-api` — **no longer on the creation path** (2026-07-24). The article poster
+  is now GENERATED by the API (`ARTICLE_POSTER_MODE=fresh`, the default), so this workflow is a
+  thin **5-node** image-EDIT service, identical in shape to `social-post-v2-api`: it takes
+  `{ generation_id, image_url, prompt, quality }`, edits that image with gpt-image-2 at
+  1536x1024, and returns `{ poster_png_base64 }`. It serves pixel/marker FEEDBACK re-renders and
+  the legacy `ARTICLE_POSTER_MODE=n8n` master-edit mode. Its `Build Prompt` Code node is gone —
+  prompts now live in `content-engine/src/generation/build-article-poster-prompt.ts`, beside the
+  chrome geometry they must stay in sync with. The `image_url` Set expression falls back to
+  `reference_url` so an old API payload still resolves an image. Run the `analyze:references`
+  backfill so article masters carry `layout_spec`: in fresh mode that spec is what supplies the
+  colour-stripped structure hint and the real `hasPhotoZone`.
   Both are committed under `n8n/workflow-exports/` (`social-post-v2-api.json`,
   `article-poster-v1-api.json`).
 

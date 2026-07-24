@@ -68,6 +68,7 @@ export function buildMessages(
   heading?: string,
   fiveW1H?: FiveWOneH,
   brief?: EditorialBrief | null,
+  excludeFacts?: readonly string[],
 ): ChatMessage[] {
   // The reference is a style/structure exemplar only (never a fact source), so cap it the
   // same way the brief does (editorial-brief.ts) — the tail adds tokens to the largest
@@ -89,6 +90,7 @@ export function buildMessages(
         heading,
         fiveW1H,
         brief,
+        excludeFacts,
       ),
     },
   ];
@@ -247,6 +249,7 @@ async function generateSectioned(
   heading?: string,
   fiveW1H?: FiveWOneH,
   brief?: EditorialBrief | null,
+  excludeFacts?: readonly string[],
 ): Promise<string> {
   const sections = splitNoteIntoSections(note);
   const passages: string[] = [];
@@ -261,6 +264,7 @@ async function generateSectioned(
     heading,
     fiveW1H,
     brief,
+    excludeFacts,
   );
   messages.push({
     role: 'user',
@@ -320,7 +324,17 @@ function buildCoverageRevisionMessages(
   category: ArticleCategory = 'scheme',
   brief?: EditorialBrief | null,
   overweighted: string[] = [],
+  excludeFacts: readonly string[] = [],
 ): ChatMessage[] {
+  const excluded = excludeFacts.map((fact) => fact.trim()).filter(Boolean);
+  const excludeBlock =
+    excluded.length > 0
+      ? [
+          '## अधिकाऱ्याने वगळलेली तथ्ये (EXCLUDE — लेखात आणू नका):',
+          ...excluded.map((fact) => `- ${fact}`),
+          '',
+        ]
+      : [];
   const planBlock = brief
     ? [
         '## संपादकीय आराखडा (EDITORIAL BRIEF — मांडणीची योजना, तथ्य-स्रोत नाही):',
@@ -383,7 +397,13 @@ function buildCoverageRevisionMessages(
     ...planBlock,
     ...missingBlock,
     ...overweightBlock,
+    ...excludeBlock,
     '## कार्य:',
+    ...(excluded.length > 0
+      ? [
+          'EXCLUDE यादीतील तथ्ये लेखात आणू नका आणि पुन्हा जोडू नका — ती अधिकाऱ्याने जाणीवपूर्वक वगळली आहेत. (MISSING INFORMATION मध्ये असे तथ्य आलेच, तरी ते जोडू नका.)',
+        ]
+      : []),
     ...task,
   ].join('\n');
   return [
@@ -488,6 +508,10 @@ export type GenerateArticleOptions = Readonly<{
   // Empty/absent ⇒ the model picks its own angle. Consumed for angle-aware retrieval
   // (Part B) and editorial prompting + angle-scoped coverage (Part C).
   heading?: string | undefined;
+  // Facts the officer deselected in the /dlo Pointers step (extract-pointers.ts). Threaded
+  // into the drafting prompt AND the two missing-fact coverage checkers so the loop cannot
+  // re-add a deliberately-dropped fact. NOT a fact source. Empty/absent ⇒ today's behaviour.
+  excludeFacts?: readonly string[] | undefined;
 }>;
 
 export async function generateArticle(
@@ -497,6 +521,7 @@ export async function generateArticle(
   const onProgress = options?.onProgress ?? (() => {});
   const category = options?.category ?? 'scheme';
   const heading = options?.heading;
+  const excludeFacts = options?.excludeFacts;
 
   // Style reference: both voices pull a topic-matched article from the vector store, scoped
   // to their own style bucket so news references never leak into scheme and vice versa. News
@@ -546,9 +571,24 @@ export async function generateArticle(
   onProgress('draft');
   let content =
     category === 'scheme' && note.length > SECTION_THRESHOLD_CHARS
-      ? await generateSectioned(note, reference, heading, fiveWOneH, brief)
+      ? await generateSectioned(
+          note,
+          reference,
+          heading,
+          fiveWOneH,
+          brief,
+          excludeFacts,
+        )
       : await chatComplete(
-          buildMessages(note, reference, category, heading, fiveWOneH, brief),
+          buildMessages(
+            note,
+            reference,
+            category,
+            heading,
+            fiveWOneH,
+            brief,
+            excludeFacts,
+          ),
           { maxTokens: ARTICLE_BODY_MAX_TOKENS },
         );
 
@@ -562,8 +602,8 @@ export async function generateArticle(
   for (let pass = 0; pass < MAX_COVERAGE_REVISIONS; pass++) {
     const { article } = splitContent(content);
     const [tieredMissing, citizenMissing, overweighted] = await Promise.all([
-      findMissingInformation(article, note, angleForChecks, brief),
-      findMissingNoteFacts(article, note),
+      findMissingInformation(article, note, angleForChecks, brief, excludeFacts),
+      findMissingNoteFacts(article, note, excludeFacts),
       findOverweightedDetails(article, brief),
     ]);
     // The citizen-fact guard is brief-independent, so it catches benefits/eligibility/actions
@@ -590,6 +630,7 @@ export async function generateArticle(
         category,
         brief,
         overweighted,
+        excludeFacts,
       ),
       { maxTokens: ARTICLE_BODY_MAX_TOKENS },
     );

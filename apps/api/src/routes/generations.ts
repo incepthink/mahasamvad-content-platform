@@ -177,6 +177,7 @@ async function toDetail(
     designMode: row.designMode,
     templateBrand: row.templateBrand,
     heading: row.heading,
+    posterHeading: row.posterHeading,
     referenceImageId: row.referenceImageId,
     referenceTypeId: row.referenceTypeId,
     note: row.note,
@@ -305,6 +306,12 @@ export function registerGenerationRoutes(
       designMode,
       templateBrand,
       heading: body.heading,
+      // Hand-typed poster text — article/poster runs only. A social poster's headline is
+      // written by generatePosterCopy and has no equivalent lock, so accepting it there would
+      // silently do nothing.
+      posterHeading: isSocialCategory(body.category)
+        ? undefined
+        : body.posterHeading,
       referenceImageId: body.referenceImageId,
       referenceTypeId: body.referenceTypeId,
       sourceGenerationId: body.sourceGenerationId,
@@ -776,13 +783,19 @@ export function registerGenerationRoutes(
     },
   );
 
-  // Regenerate a social run's poster as a brand-new, differently-designed version (fully-AI
-  // path: re-classify, re-select avoiding the recent master, rewrite copy, fresh palette +
-  // composition assignment). Serves two buttons: the plain redo — the text-legibility escape
-  // hatch, since the image model paints Devanagari and can garble it — and `recolour: true`,
-  // which additionally bars the run's CURRENT colour family so the redo cannot come back in the
-  // colours the officer just rejected. Social runs only (article posters have their own
-  // scene/copy feedback); writes a new poster version either way.
+  // Regenerate a run's poster as a brand-new, differently-designed version (fully-AI path:
+  // re-select avoiding the recent master, rewrite copy, fresh palette + composition
+  // assignment). Serves two buttons: the plain redo — the text-legibility escape hatch, since
+  // the image model paints Devanagari and can garble it — and `recolour: true`, which
+  // additionally bars the run's CURRENT colour family so the redo cannot come back in the
+  // colours the officer just rejected. Writes a new poster version either way.
+  //
+  // Serves BOTH lanes: social runs re-classify as well, article runs re-derive their copy and
+  // re-run the named-subject check from the stored article (so a redo after an article edit
+  // picks up the change). An article run therefore also needs its article to still be there.
+  //
+  // An article run may also carry `posterHeading` — the third button: print EXACTLY this text.
+  // It is persisted by the job so later redos keep it; '' clears it back to automatic.
   app.post<{ Params: { id: string } }>(
     '/generations/:id/poster/regenerate',
     async (request, reply) => {
@@ -793,10 +806,18 @@ export function registerGenerationRoutes(
           .code(404)
           .send({ error: { message: 'Generation not found.' } });
       }
-      if (!isSocialCategory(row.category)) {
+      if (body.posterHeading !== undefined && isSocialCategory(row.category)) {
+        return reply.code(400).send({
+          error: {
+            message:
+              'पोस्टरवरील मजकूर फक्त लेख-पोस्टरसाठी बदलता येतो (सोशल पोस्टसाठी नाही).',
+          },
+        });
+      }
+      if (!isSocialCategory(row.category) && !row.article) {
         return reply
-          .code(400)
-          .send({ error: { message: 'Regenerate is only for social posts.' } });
+          .code(409)
+          .send({ error: { message: 'No article to regenerate the poster from.' } });
       }
       if (isJobRunning(row.id)) {
         return reply
@@ -816,7 +837,14 @@ export function registerGenerationRoutes(
         step: null,
         error: null,
       });
-      startPosterRegenerateJob(client, row.id, { recolour: body.recolour === true });
+      startPosterRegenerateJob(client, row.id, {
+        recolour: body.recolour === true,
+        // Forwarded only when the request actually carried it — `undefined` means "leave the
+        // row's heading alone", which is not the same as "clear it".
+        ...(body.posterHeading === undefined
+          ? {}
+          : { posterHeading: body.posterHeading }),
+      });
       return reply.code(202).send({});
     },
   );

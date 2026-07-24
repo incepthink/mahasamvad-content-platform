@@ -105,29 +105,36 @@ export const STR = {
   // documents → transcription/extraction → editable review → article.
   dloTitle: 'DLO — बैठकीतून लेख',
   dloIntro:
-    'बैठकीतील टिपणी, ध्वनिमुद्रण (MP3) आणि कागदपत्रे (PDF/DOCX) येथे द्या — या सर्व माहितीतून लेख तयार होईल.',
+    'बैठकीतील टिपणी, ध्वनिमुद्रण (MP3) आणि कागदपत्रे (PDF/DOCX/TXT) येथे द्या — या सर्व माहितीतून लेख तयार होईल.',
   dloStepInput: 'माहिती द्या',
   dloStepProcessing: 'प्रक्रिया',
-  dloStepReview: 'तपासणी व संपादन',
+  // The middle rail step now covers processing + the Pointers selection + the source review,
+  // so its label names the two things the officer does there.
+  dloStepReview: 'मुद्दे व तपासणी',
   dloStepOutput: 'तयार लेख',
   dloNotesLabel: 'बैठकीतील टिपणी येथे लिहा',
   dloNotesHint:
     'बैठकीत जे ऐकले, ठरले किंवा आठवते ते सर्व येथे लिहा — मुद्दे, निर्णय, घोषणा, आकडेवारी.',
   dloNotesPlaceholder:
     'उदा. आजच्या बैठकीत मा. मंत्री महोदयांनी… असे जाहीर केले; योजनेसाठी … कोटी रुपयांची तरतूद…',
-  // Audio and documents are added through separate controls (audio has no pages to pick),
-  // but both go into the same intake.
+  // Audio and documents are added through separate controls, and the difference is real: a
+  // recording is transcribed whole and has nothing to choose, while a document is read here
+  // and now — page by page, with the scanned ones stopping to ask which pages are worth
+  // OCR'ing before a single credit is spent.
   dloAudioTitle: 'ध्वनिमुद्रण (MP3)',
   dloAudioUpload: 'ध्वनिफीत जोडा (.mp3)',
   dloAudioHint: 'बैठकीचे ध्वनिमुद्रण — एकावेळी अनेक फाईल जोडता येतील.',
   dloAudioFilesTitle: 'जोडलेली ध्वनिमुद्रणे',
-  dloDocsTitle: 'कागदपत्रे (PDF / DOCX)',
-  dloDocsUpload: 'कागदपत्र जोडा (.pdf, .docx)',
+  dloDocsTitle: 'कागदपत्रे (PDF / DOCX / TXT)',
   dloDocsHint:
-    'शासन निर्णय, टिपणी किंवा इतर कागदपत्रे — एकावेळी अनेक फाईल जोडता येतील.',
-  dloDocsFilesTitle: 'जोडलेली कागदपत्रे',
+    'शासन निर्णय, टिपणी किंवा इतर कागदपत्रे. प्रत्येक फाईल येथेच वाचली जाते — स्कॅन केलेल्या PDF मधून कोणती पृष्ठे वाचायची ते तुम्ही निवडाल.',
+  // One upload card's own heading; the section above it explains what documents are for.
+  dloDocsCardTitle: 'कागदपत्र',
+  dloDocsIntakeHint:
+    'PDF, DOCX किंवा TXT फाईल निवडा (कमाल २५ MB). स्कॅन केलेली PDF देखील चालते. फाईल या बैठकीसोबत जतन केली जाईल.',
+  dloDocsAdd: 'आणखी कागदपत्र जोडा',
   dloRemoveFile: 'फाईल काढा',
-  dloFileTypeError: 'कृपया फक्त .pdf, .mp3 किंवा .docx फाईल निवडा.',
+  dloFileTypeError: 'कृपया फक्त .mp3 फाईल निवडा.',
   dloNeedInput: 'कृपया टिपणी लिहा किंवा किमान एक फाईल जोडा.',
   dloSubmit: 'पुढे जा →',
   dloProcessingTitle: 'माहितीवर प्रक्रिया सुरू आहे…',
@@ -155,6 +162,7 @@ export const STR = {
   dloReviewKindAudio: 'ध्वनिमुद्रण',
   dloReviewKindPdf: 'PDF कागदपत्र',
   dloReviewKindDocx: 'DOCX कागदपत्र',
+  dloReviewKindTxt: 'TXT फाईल',
   dloReviewPagesSuffix: 'पृष्ठे',
   dloReviewPagesSelected: 'पृष्ठे निवडली',
   dloReviewNoPages: 'या PDF मधून एकही पान निवडलेले नाही.',
@@ -176,6 +184,25 @@ export const STR = {
   dloReviewPreviewHide: 'पूर्ण मजकूर लपवा',
   dloReviewEmpty: 'कोणताही मजकूर निवडलेला नाही — किमान एक स्रोत निवडा.',
   dloReviewRereading: 'OCR ने पुन्हा वाचत आहे…',
+  // Pointers (मुद्दे): the 5W1H-grouped fact bullets shown at the top of the review step.
+  // Every bullet is checked by default; unchecking one drops that fact from the article.
+  dloPointersTitle: 'लेखात कोणते मुद्दे वापरायचे?',
+  dloPointersHint:
+    'खालील मुद्दे तुमच्या माहितीतून काढले आहेत. जे मुद्दे लेखात नको असतील त्यांची खूण काढा — निवडलेले मुद्देच लेखात वापरले जातील.',
+  dloPointersLoading: 'मुद्दे तयार करत आहोत…',
+  dloPointersEmpty:
+    'मुद्दे तयार करता आले नाहीत. काही हरकत नाही — तुम्ही थेट खालील मजकुरावरून लेख तयार करू शकता.',
+  dloPointersError:
+    'मुद्दे तयार करताना अडचण आली. पुन्हा प्रयत्न करा किंवा थेट लेख तयार करा.',
+  dloPointersRegenerate: 'मुद्दे पुन्हा तयार करा',
+  dloPointersExcludedCount: 'मुद्दे वगळले आहेत',
+  // 5W1H group headings for the pointer sections (कोण/काय/केव्हा/कुठे/का/कसे).
+  dloPointerDimWho: 'कोण',
+  dloPointerDimWhat: 'काय',
+  dloPointerDimWhen: 'केव्हा',
+  dloPointerDimWhere: 'कुठे',
+  dloPointerDimWhy: 'का',
+  dloPointerDimHow: 'कसे',
   dloGenerate: 'लेख तयार करा →',
   dloOutputTitle: 'तयार झालेला लेख',
   dloViewDetail: 'सविस्तर पाहा (अभिप्राय, भाषांतर, पोस्टर)',
@@ -251,6 +278,9 @@ export const STR = {
     'PDF, DOCX किंवा TXT फाईल निवडा (कमाल २५ MB). स्कॅन केलेली PDF देखील चालते. फाईल जतन केली जाणार नाही.',
   docUpload: 'फाईल निवडा',
   docUploadOther: 'दुसरी फाईल निवडा',
+  // Only on a surface that shows several upload cards at once (/dlo), where one document
+  // has to be droppable without touching the rest.
+  docRemove: 'हे कागदपत्र काढा',
   docUnsupported: 'फक्त PDF, DOCX आणि TXT फाईल्स चालतात.',
   docGone: 'ही फाईल आता उपलब्ध नाही. कृपया पुन्हा अपलोड करा.',
   // The pre-OCR selection step. Only a SCANNED PDF reaches it: a file whose text can be
@@ -542,6 +572,23 @@ export const STR = {
   // copy is rewritten too, so the new version will not be the old one repainted.
   posterRecolour: 'वेगळ्या रंगात तयार करा',
   posterStyleLabelPrefix: 'रंगसंगती व रचना:',
+
+  // The hand-typed article-poster heading. On the create form it is optional and pre-empts the
+  // automatic choice; on the detail page it is how a wrong heading is corrected, since the
+  // officer only sees the text once the poster exists. Both say the same thing: leave it blank
+  // and the system decides.
+  posterHeadingLabel: 'पोस्टरवरील मजकूर (ऐच्छिक)',
+  posterHeadingPlaceholder: 'उदा. भारत टॅक्सी',
+  posterHeadingHint:
+    'पोस्टरवर नेमका हाच मजकूर छापला जाईल. रिकामे ठेवल्यास टिपणीतील योजना / पुरस्कार / उपक्रमाचे नाव आपोआप शोधून वापरले जाईल.',
+  posterHeadingTooLong: 'पोस्टरवरील मजकूर १२० अक्षरांपेक्षा कमी ठेवा.',
+  // Detail page: the edit fold under the poster.
+  posterHeadingEdit: 'पोस्टरवरील मजकूर बदला',
+  posterHeadingApply: 'हा मजकूर वापरून पुन्हा तयार करा',
+  posterHeadingClear: 'आपोआप ठरवू द्या',
+  posterHeadingCurrentPrefix: 'सध्याचा मजकूर:',
+  posterHeadingAuto: 'आपोआप ठरवला जात आहे',
+  posterHeadingCancel: 'रद्द करा',
 
   // Direct publish to the official social accounts (detail page, social runs)
   publishToX: 'X वर पोस्ट करा',

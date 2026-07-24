@@ -27,7 +27,21 @@ import { pathToFileURL } from 'node:url';
 
 // How much of the canvas the dominant colour occupies. The recency ring spreads across these as
 // well as across ids, because two `cards` layouts read alike even when their ids differ.
-export type LayoutCoverage = 'band' | 'column' | 'field' | 'cards' | 'wedge';
+//
+// This is the SHARED vocabulary for both composition libraries — the portrait social archetypes
+// below and the landscape article ones in article-poster-layouts.ts — because one
+// `generations.poster_style` column (migration 0028) stores whichever a run was assigned. The
+// social library uses band/column/field/cards/wedge; `panel` and `split` exist for the article
+// library's landscape anatomies (a full-height side colour panel, an exact 50/50 split) and are
+// deliberately unused here.
+export type LayoutCoverage =
+  | 'band'
+  | 'column'
+  | 'field'
+  | 'cards'
+  | 'wedge'
+  | 'panel'
+  | 'split';
 
 // Whether the archetype needs a photograph. A text-only note must never be handed a layout whose
 // whole point is a hero image, and vice versa — this is a hard filter, not a preference.

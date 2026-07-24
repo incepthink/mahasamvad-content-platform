@@ -24,6 +24,21 @@ import {
   type LayoutCoverage,
   type PosterLayout,
 } from './poster-layouts.js';
+import {
+  articleLayoutById,
+  type ArticlePosterLayout,
+} from './article-poster-layouts.js';
+
+// Both poster kinds store their assigned composition in the SAME `generations.poster_style`
+// column, and they draw from two different libraries — portrait social archetypes
+// (poster-layouts.ts) and landscape article ones (article-poster-layouts.ts). Article ids are
+// namespaced `art_`, so one lookup across both is unambiguous, and everything below can stay
+// kind-agnostic: it only ever needs an id's coverage, name and Marathi label.
+type AnyLayout = PosterLayout | ArticlePosterLayout;
+
+function anyLayoutById(id: string | null | undefined): AnyLayout | null {
+  return layoutById(id) ?? articleLayoutById(id);
+}
 
 // What the rendered poster measured (poster-renderer's `measurePosterColours`). Redeclared
 // structurally rather than imported because content-engine does not depend on poster-renderer —
@@ -94,7 +109,7 @@ export function parsePosterStyle(value: unknown): PosterStyle | null {
   if (typeof value !== 'object' || value === null) return null;
   const raw = value as Record<string, unknown>;
   const palette = paletteById(str(raw.paletteId));
-  const layout = layoutById(str(raw.layoutId));
+  const layout = anyLayoutById(str(raw.layoutId));
   if (!palette || !layout) return null;
   const measured = parseMeasured(raw.measured);
   return {
@@ -111,7 +126,8 @@ export function parsePosterStyle(value: unknown): PosterStyle | null {
 // Build the style a run is about to render with. `measured` is folded in after the render.
 export function buildPosterStyle(
   palette: PosterPalette,
-  layout: PosterLayout,
+  // Either library's archetype — the social and article paths both call this.
+  layout: AnyLayout,
   measured?: MeasuredColours | undefined,
 ): PosterStyle {
   return {
@@ -154,7 +170,7 @@ export function familyHonoured(family: PaletteFamily, hueBucket: string): boolea
 // was assigned a cool palette and came out warm should be avoided as WARM.
 export function describePosterStyle(style: PosterStyle): string {
   const palette = paletteById(style.paletteId);
-  const layout = layoutById(style.layoutId);
+  const layout = anyLayoutById(style.layoutId);
   const parts = [palette?.palette ?? style.paletteId, layout?.name ?? style.layoutId];
   if (style.measured && style.measured.groundIsWarm) {
     parts.push('rendered with a warm cream background');
@@ -218,7 +234,7 @@ export function posterStyleLabel(value: unknown): string | null {
   const style = parsePosterStyle(value);
   if (!style) return null;
   const palette = paletteById(style.paletteId);
-  const layout = layoutById(style.layoutId);
+  const layout = anyLayoutById(style.layoutId);
   const parts = [palette?.label, layout?.label].filter(
     (p): p is string => typeof p === 'string' && p.length > 0,
   );
@@ -288,6 +304,36 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   console.log(`\nlabel: ${label}`);
   if (posterStyleLabel({ paletteId: 'gone' }) !== null) {
     failures.push('an unresolvable style produced a label');
+  }
+
+  // 6. An ARTICLE run's style resolves through the same functions — the layout id comes from the
+  //    landscape library, and one column stores both kinds.
+  {
+    const { ARTICLE_POSTER_LAYOUTS } = await import('./article-poster-layouts.js');
+    const articleLayout = ARTICLE_POSTER_LAYOUTS[0] as ArticlePosterLayout;
+    const articleStyle = buildPosterStyle(palette, articleLayout, {
+      groundHex: '#EEF1F7',
+      groundIsWarm: false,
+      dominantHex: '#26356B',
+      hueBucket: 'blue',
+      colourfulness: 0.4,
+    });
+    const back = parsePosterStyle(JSON.parse(JSON.stringify(articleStyle)));
+    if (!back) failures.push('an article style failed to parse back');
+    if (back && back.layoutId !== articleLayout.id) {
+      failures.push(`article layout id lost in the round trip: ${back.layoutId}`);
+    }
+    const articleLabel = posterStyleLabel(articleStyle);
+    if (!articleLabel || !articleLabel.includes(articleLayout.label)) {
+      failures.push(`article style produced no Marathi label: ${articleLabel}`);
+    }
+    console.log(`article label: ${articleLabel}`);
+    // The history helper must work over a MIXED list too (both kinds share the column, even if
+    // the API queries them apart by category).
+    const mixed = toStyleHistory([articleStyle, built]);
+    if (mixed.layoutIds.length !== 2) {
+      failures.push(`mixed history lost a layout: ${JSON.stringify(mixed.layoutIds)}`);
+    }
   }
 
   if (failures.length > 0) {

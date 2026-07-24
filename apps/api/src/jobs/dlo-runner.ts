@@ -23,7 +23,10 @@ import {
 import {
   DLO_UPLOADS_BUCKET,
   downloadFile,
+  getCachedTranscripts,
   getDloIntake,
+  hashAudioContent,
+  putCachedTranscript,
   updateDloIntake,
   type DloIntakeFileEntry,
   type SupabaseClient,
@@ -103,10 +106,18 @@ function runIntakeJob(
   })();
 }
 
+// The original bytes out of the private bucket. A document read at the input step whose
+// ephemeral upload job had already expired carries no storagePath — its text made it into
+// the row, its bytes did not — so nothing can be re-read from it.
 async function downloadEntry(
   client: SupabaseClient,
   entry: DloIntakeFileEntry,
 ): Promise<Buffer> {
+  if (!entry.storagePath) {
+    throw new Error(
+      `या फाईलची मूळ प्रत उपलब्ध नाही: ${entry.name}`,
+    );
+  }
   return downloadFile(client, DLO_UPLOADS_BUCKET, entry.storagePath);
 }
 
@@ -173,11 +184,7 @@ async function extractDocxEntry(
   client: SupabaseClient,
   entry: DloIntakeFileEntry,
 ): Promise<DloIntakeFileEntry> {
-  const data = await downloadFile(
-    client,
-    DLO_UPLOADS_BUCKET,
-    entry.storagePath,
-  );
+  const data = await downloadEntry(client, entry);
   const text = await extractDocxText(entry.name, data);
   return { ...entry, status: 'done', chars: text.length, text };
 }
@@ -208,37 +215,89 @@ export function startDloIntakeJob(client: SupabaseClient, id: string): void {
     );
     if (audioIndexes.length > 0) {
       try {
+        // Download every recording (needed for the batch anyway) and hash its bytes.
+        // The hash is a cache key: an MP3 seen before — in this or any past intake —
+        // already has a transcript, so it skips the slow, paid Sarvam job entirely.
         const inputs = await Promise.all(
           audioIndexes.map(async (index) => ({
             name: entries[index]!.name,
-            data: await downloadFile(
-              client,
-              DLO_UPLOADS_BUCKET,
-              entries[index]!.storagePath,
-            ),
+            data: await downloadEntry(client, entries[index]!),
           })),
         );
-        const results = await transcribeAudioFiles(inputs);
-        results.forEach((result, position) => {
-          const index = audioIndexes[position]!;
-          if ('text' in result) {
+        const hashes = inputs.map((input) => hashAudioContent(input.data));
+
+        // A cache read failure (e.g. an un-applied 0031) must not sink transcription:
+        // treat it as an empty cache and transcribe everything, exactly as before.
+        let cached: Map<string, string>;
+        try {
+          cached = await getCachedTranscripts(client, hashes);
+        } catch (error) {
+          console.error(`[dlo-intake ${id}] transcript cache read failed:`, error);
+          cached = new Map();
+        }
+
+        // Fill cache hits immediately; collect the misses for one Sarvam batch,
+        // remembering each miss's position so a result maps back to its file.
+        const missPositions: number[] = [];
+        for (const [position, index] of audioIndexes.entries()) {
+          const hit = cached.get(hashes[position]!);
+          if (hit !== undefined) {
             entries[index] = {
               ...entries[index]!,
               status: 'done',
-              chars: result.text.length,
-              text: result.text,
+              chars: hit.length,
+              text: hit,
             };
           } else {
-            entries[index] = {
-              ...entries[index]!,
-              status: 'failed',
-              error: result.error,
-            };
+            missPositions.push(position);
           }
-        });
+        }
+
+        if (missPositions.length > 0) {
+          const results = await transcribeAudioFiles(
+            missPositions.map((position) => inputs[position]!),
+          );
+          await Promise.all(
+            results.map(async (result, resultIndex) => {
+              const position = missPositions[resultIndex]!;
+              const index = audioIndexes[position]!;
+              if ('text' in result) {
+                entries[index] = {
+                  ...entries[index]!,
+                  status: 'done',
+                  chars: result.text.length,
+                  text: result.text,
+                };
+                // Cache the fresh transcript for next time. Best-effort: a write
+                // failure must not fail a file that just transcribed fine.
+                try {
+                  await putCachedTranscript(
+                    client,
+                    hashes[position]!,
+                    result.text,
+                  );
+                } catch (error) {
+                  console.error(
+                    `[dlo-intake ${id}] transcript cache write failed:`,
+                    error,
+                  );
+                }
+              } else {
+                entries[index] = {
+                  ...entries[index]!,
+                  status: 'failed',
+                  error: result.error,
+                };
+              }
+            }),
+          );
+        }
       } catch (error) {
         const message = errorMessage(error);
         for (const index of audioIndexes) {
+          // A job-level failure (download/auth/timeout) fails only the recordings
+          // still awaiting a result — files already resolved from cache stay done.
+          if (entries[index]!.status === 'done') continue;
           entries[index] = {
             ...entries[index]!,
             status: 'failed',
@@ -255,6 +314,10 @@ export function startDloIntakeJob(client: SupabaseClient, id: string): void {
     // asked for. DOCX is local and free, so it is simply read.
     await updateDloIntake(client, id, { step: 'extract' });
     for (const [index, entry] of entries.entries()) {
+      // A document the officer uploaded and read at the INPUT step arrives already
+      // extracted, pages picked and corrections made. Re-reading it here would OCR a
+      // scanned PDF a second time and throw away those corrections — so it is left alone.
+      if (entry.status === 'done') continue;
       if (entry.kind !== 'pdf' && entry.kind !== 'docx') continue;
       try {
         entries[index] =

@@ -101,6 +101,13 @@ export type TranslationLanguage = z.infer<typeof TranslationLanguageSchema>;
 // realistically overflow the cap, so the client warns before the API has to 400.
 export const NOTE_MAX_CHARS = 60_000;
 
+// Hard ceiling on a hand-typed article-poster heading. A poster carries ONE Marathi line and
+// the image model has to set it legibly at display size, so this is deliberately short — long
+// enough for the longest real scheme name ("पुण्यश्लोक अहिल्यादेवी होळकर शेतकरी कर्जमुक्ती योजना २०२६"
+// is 56 characters), short enough that nobody pastes a paragraph onto a poster. Shared with the
+// web form so it can warn instead of eating a 400.
+export const POSTER_HEADING_MAX_CHARS = 120;
+
 export const CreateGenerationRequestSchema = z
   .object({
     // The Marathi note (टिपणी) — sole factual source for everything generated.
@@ -118,6 +125,12 @@ export const CreateGenerationRequestSchema = z
     // source — only steers emphasis + heading. Empty/absent ⇒ the model picks its
     // own angle (today's behaviour). Consumed by the engine in later parts.
     heading: z.string().trim().max(200).optional(),
+    // Optional: the EXACT text to print on an article poster (news/scheme runs). Distinct
+    // from `heading`, which is an editorial angle for the article body — this is poster
+    // pixels. When present it wins over the automatic named-subject resolution and over the
+    // editorial headline, and is reproduced character for character. Empty/absent ⇒ resolve
+    // it automatically (resolve-poster-subject.ts). Migration 0029; inert for social runs.
+    posterHeading: z.string().trim().max(POSTER_HEADING_MAX_CHARS).optional(),
     // Optional pin: use exactly this reference image (from the master-template
     // library) for the run's poster instead of the per-type random rotation.
     // Pinning a twitter image also pins the post type (classification is skipped).
@@ -251,8 +264,14 @@ export type PosterFeedbackAnnotation = z.infer<
 // merely re-rolling — a fresh seed alone could legitimately land back in the family being
 // rejected, since the recency ring only knows about OTHER runs. Absent/false = the plain
 // "different design" redo, which was the only behaviour before.
+//
+// `posterHeading` (article runs only) re-renders with EXACTLY this text on the poster and
+// persists it on the row, so it survives later redos too. An empty string CLEARS a previously
+// typed heading and returns the run to automatic resolution; absent leaves it as it is. This is
+// where a wrong heading is realistically fixed — you only see it once the poster exists.
 export const RegeneratePosterRequestSchema = z.object({
   recolour: z.boolean().optional(),
+  posterHeading: z.string().trim().max(POSTER_HEADING_MAX_CHARS).optional(),
 });
 export type RegeneratePosterRequest = z.infer<
   typeof RegeneratePosterRequestSchema
@@ -376,6 +395,9 @@ export const GenerationDetailSchema = z.object({
   note: z.string(),
   // Optional editorial angle the run was created with (null for pre-heading rows).
   heading: z.string().nullable(),
+  // The hand-typed article-poster text in force for this run (null = the heading is
+  // resolved automatically). Defaulted so a pre-0029 row still parses.
+  posterHeading: z.string().nullable().default(null),
   // The reference image the run was pinned to (null = automatic rotation, or the
   // image was later deleted — the FK sets null).
   referenceImageId: z.string().nullable(),

@@ -20,6 +20,10 @@ export * from './api.js';
 // DLO intake API schemas (file transcription/extraction → reviewed note).
 export * from './dlo.js';
 
+// "Pointers": the 5W1H fact-selection layer on /dlo (imports DloCategorySchema, so it is
+// exported AFTER dlo.js to keep each name defined once in this barrel).
+export * from './pointers.js';
+
 // Uploaded documents (pdf/docx/txt) becoming pages of text — shared by /translate, /dlo,
 // the media room and /proofread. Exported BEFORE translate-document.js, which imports
 // from it, so each name has exactly one definition in this barrel.

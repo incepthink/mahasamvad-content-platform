@@ -9,6 +9,8 @@
 
 import {
   FACT_CHECK_DELIMITER,
+  buildArticleFeedbackPrompt,
+  buildArticlePosterPrompt,
   buildFeedbackPrompt,
   buildPosterPrompt,
   classifyPosterType,
@@ -24,10 +26,11 @@ import {
   buildPosterStyle,
   familyHonoured,
   parsePosterStyle,
-  pickArticlePosterTheme,
+  pickArticleLayout,
   pickArticleReference,
   pickLayout,
   pickPalette,
+  resolvePosterSubject,
   toStyleHistory,
   recordImageCost,
   resolveCmoReference,
@@ -40,12 +43,12 @@ import {
   reviseSceneBrief,
   runInCostScope,
   translateArticle,
-  type ArticlePosterTheme,
+  type ArticleDesignMode,
   type ImageQuality,
   type PaletteFamily,
   type PosterDesignMode,
   type PosterStyle,
-  type ReferenceLayoutSpec,
+  type PosterSubject,
   type ResolvedReference,
   type StyleHistory,
 } from '@dgipr/content-engine';
@@ -322,7 +325,10 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
       // Defensive — the media-room page never sends outputType 'article', but if
       // it did there is no poster to render.
       if (row.outputType === 'article') return;
-      await runArticlePosterPhase(client, id, row.note, row.referenceImageId);
+      await runArticlePosterPhase(client, id, row.note, row.referenceImageId, {
+        note: row.note,
+        posterHeading: row.posterHeading,
+      });
       return;
     }
 
@@ -335,6 +341,10 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
     const result = await generateArticle(row.note, {
       category: articleCategoryOf(row.category),
       heading: row.heading ?? undefined,
+      // Facts the officer deselected in the /dlo Pointers step (migration 0030). Threaded
+      // into drafting + the coverage checkers so a dropped fact is not re-added. Null on
+      // every non-DLO run, which generateArticle treats as "exclude nothing".
+      excludeFacts: row.excludedFacts ?? undefined,
       onProgress: (phase) => {
         void updateGeneration(client, id, { step: phase }).catch((error) => {
           console.error(`[job ${id}] progress update failed:`, error);
@@ -363,6 +373,7 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
       id,
       result.article,
       row.referenceImageId,
+      { note: row.note, posterHeading: row.posterHeading },
     );
   });
 }
@@ -371,30 +382,39 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
 // job (startArticlePosterJob): copy from the (already final) article, render,
 // upload poster-v1, persist { copy, posterPath }. Callers own status; this
 // writes only step + content fields.
+//
+// The v1 uploads pass upsert:true — not because v1 is ever legitimately
+// re-rendered, but because a crash between upload and the posterPath row-write
+// would otherwise brick every attach-poster retry on "already exists". Safe:
+// the v1 URL is never served before posterPath is set, so no CDN cache entry
+// can hold a stale copy.
 async function runArticlePosterPhase(
   client: SupabaseClient,
   id: string,
   article: string,
   pinnedReferenceImageId: string | null,
+  // The officer's original note and hand-typed poster text. The note is where the poster's
+  // named subject is read from (it holds the authoritative spelling of every name; the article
+  // may have reworded it), and a non-empty heading skips that resolution entirely. On a
+  // media-room run the note IS the article, so passing both costs nothing.
+  source: Readonly<{ note: string; posterHeading: string | null }>,
 ): Promise<void> {
-  await updateGeneration(client, id, { step: 'copy' });
-  const copy = await generateCopy(article);
+  // ARTICLE_POSTER_MODE selects the poster renderer:
+  //   'fresh'   — DEFAULT. The API builds the whole prompt and generates the poster from
+  //               scratch (gpt-image-2 @ 1536x1024, no n8n). The selected master is loose
+  //               STRUCTURE inspiration only, its colours stripped; a rotated palette +
+  //               landscape composition decide how the poster looks.
+  //   'n8n'     — the legacy path: the external article-poster-v1-api workflow edits the
+  //               picked master in place. Kept as a one-env-line rollback.
+  //   'html'    — the original local image + HTML/Playwright path.
+  // Neither n8n mode writes a scenePath, so poster feedback + manual copy-edit (which
+  // require row.scenePath) stay unavailable outside 'html' — accepted trade-off.
+  const mode = process.env.ARTICLE_POSTER_MODE ?? 'fresh';
 
-  // The v1 uploads pass upsert:true — not because v1 is ever legitimately
-  // re-rendered, but because a crash between upload and the posterPath row-write
-  // would otherwise brick every attach-poster retry on "already exists". Safe:
-  // the v1 URL is never served before posterPath is set, so no CDN cache entry
-  // can hold a stale copy.
+  if (mode === 'html') {
+    await updateGeneration(client, id, { step: 'copy' });
+    const copy = await generateCopy(article);
 
-  // ARTICLE_POSTER_MODE selects the poster renderer (default 'n8n'):
-  //   'n8n'  — the external article-poster-v1-api workflow paints the whole poster,
-  //            including the single Marathi headline, by editing the master template
-  //            whose library URL we send as reference_url. No local scene image /
-  //            HTML+Chromium render, so no scenePath is written (poster feedback +
-  //            manual copy-edit, which require row.scenePath, are unavailable in
-  //            this mode — accepted trade-off).
-  //   'html' — the original local image + HTML/Playwright path, kept as a fallback.
-  if (process.env.ARTICLE_POSTER_MODE === 'html') {
     await updateGeneration(client, id, { step: 'scene' });
     const scenePrompt = buildArticleScenePrompt(copy);
     const sceneImage = await generateImage(scenePrompt);
@@ -417,42 +437,243 @@ async function runArticlePosterPhase(
     return;
   }
 
+  await renderAndStoreArticlePoster(client, id, article, {
+    designMode: mode === 'n8n' ? 'onbrand' : 'fresh',
+    pinnedReferenceImageId,
+    version: 1,
+    seed: id,
+    upsert: true,
+    note: source.note,
+    posterHeading: source.posterHeading,
+  });
+}
+
+// Render ONE article poster and store it at posterPath(id, version), persisting { copy,
+// posterPath } and (best-effort) the assigned style. Shared by the initial run, the
+// attach-poster job and the regenerate action — the article twin of
+// renderAndStoreSocialPoster, and deliberately built the same way.
+//
+// The DEFAULT path GENERATES the poster from scratch: the selected master contributes only a
+// colour-stripped structure hint, never pixels. Two independent rotations decide how it looks —
+// a colour palette (shared with the social path, poster-palettes.ts) and a LANDSCAPE composition
+// archetype (article-poster-layouts.ts) — each assigned per run and spread away from what the
+// last few ARTICLE runs used. The art director then designs within both; it chooses neither.
+async function renderAndStoreArticlePoster(
+  client: SupabaseClient,
+  id: string,
+  article: string,
+  options: Readonly<{
+    designMode: ArticleDesignMode;
+    pinnedReferenceImageId: string | null;
+    version: number;
+    // Diversifies the assignment per run: the id on a first render, `${id}:v${n}` on a
+    // regenerate, so a redo looks new rather than repeating the previous poster.
+    seed: string;
+    // Extra colour families this render must avoid, on top of the recent history — set by the
+    // "different colours" redo so the new version cannot land back in the rejected family.
+    avoidFamilies?: readonly PaletteFamily[];
+    // Only the v1 write upserts (see the note above renderArticlePosterPhase).
+    upsert?: boolean;
+    // The officer's original note: the authoritative spelling of every name and what the
+    // subject is read from. Equal to `article` on a media-room run.
+    note: string;
+    // Hand-typed poster text (generations.poster_heading, migration 0029). Non-empty ⇒ it IS
+    // the poster's text, verbatim, and no subject-resolution call is made.
+    posterHeading: string | null;
+  }>,
+): Promise<void> {
+  const { designMode, version, seed } = options;
+
+  // 1. Copy. The article poster shows ONE headline, but generateCopy also yields the
+  //    scene_brief the imagery is painted from, so the whole object is still produced (and
+  //    persisted, so a later manual copy-edit in 'html' mode still has something to edit).
+  await updateGeneration(client, id, { step: 'copy' });
+  const copy = await generateCopy(article);
+  const editorialHeadline = headStrings(copy).headline;
+
+  // 2. What text goes on the poster? Three sources, in strict order of authority.
+  //
+  //    a) A HAND-TYPED heading wins outright and costs nothing — the officer has said exactly
+  //       what the poster must say, so neither a model call nor a validation is appropriate.
+  //    b) Otherwise: does this news have a NAMED SUBJECT (a scheme, award, campaign, service,
+  //       portal, project)? If so the poster's entire text becomes that name in full — a
+  //       truncated or paraphrased official name on a government poster is a factual error, and
+  //       the editorial headline is a paraphrase by construction. The name is read from the
+  //       NOTE (the officer's own spelling; the article may have reworded it) and must be
+  //       accountable in note ∪ article. The verified glossary rows present in either are
+  //       handed over so a nominated truncation can be deterministically expanded: the model
+  //       only nominates, code decides.
+  //    c) Otherwise the editorial headline generateCopy just wrote.
+  const typedHeading = (options.posterHeading ?? '').trim();
+  const note = options.note.trim();
+  let subject: PosterSubject | null = null;
+  if (typedHeading.length === 0) {
+    const glossarySource = note && note !== article ? `${note}\n\n${article}` : article;
+    const glossaryTerms = await findGlossaryTermsInText(client, glossarySource);
+    const knownSchemeNames = glossaryTerms
+      .filter((t) => t.termType === 'scheme' || t.termType === 'org')
+      .map((t) => t.marathi);
+    subject = await resolvePosterSubject({
+      note: note || article,
+      article,
+      knownSchemeNames,
+    });
+  }
+
+  const headline = typedHeading || subject?.name || editorialHeadline;
+  // A typed heading and a resolved name are both reproduced character for character (the
+  // prompt's TEXT LOCK block); an editorial headline is a designed line the model may set as
+  // it sees fit.
+  const textLocked = typedHeading.length > 0 || subject !== null;
+  if (typedHeading) {
+    console.log(
+      `[job ${id}] poster text typed by the officer: «${typedHeading}» — editorial headline «${editorialHeadline}» dropped`,
+    );
+  } else if (subject) {
+    console.log(
+      `[job ${id}] poster subject ${subject.kind} (${subject.source}): «${subject.name}» — poster text is that name, editorial headline «${editorialHeadline}» dropped`,
+    );
+  }
+
+  // 3. The reference master: the pinned image if the run has one (honored even if meanwhile
+  //    disabled; a deleted pin falls back), else a content-aware pick among the enabled
+  //    article masters. In 'fresh' mode this only ever contributes its layoutSummary.
   await updateGeneration(client, id, { step: 'render' });
-  // The master the workflow edits: the pinned image if the run has one (honored
-  // even if meanwhile disabled; a deleted pin falls back), else a random pick
-  // among the enabled article masters.
-  const pinned = pinnedReferenceImageId
-    ? await resolvePinnedImage(client, pinnedReferenceImageId, id)
+  const pinned = options.pinnedReferenceImageId
+    ? await resolvePinnedImage(client, options.pinnedReferenceImageId, seed)
     : null;
   const reference = pinned
     ? pinned.master
-    : await pickArticleReference(client, id, article);
-  // Rotate the headline-panel color per render so posters stop always being orange.
-  // The workflow applies it conditionally (only masters that actually have a solid
-  // headline panel are recoloured — the library is a mix of layouts); the
-  // logo/footer chrome is code-stamped after the render (overlayArticleChrome).
-  const theme = pickArticlePosterTheme();
+    : await pickArticleReference(client, seed, article);
+  const hasPhoto = reference.layoutSpec?.hasPhotoZone !== false;
+
+  // 4. The two rotations. Only the from-scratch path uses them — an 'onbrand' edit repaints a
+  //    master whose own colours are the point, so assigning it a palette it cannot honour would
+  //    just be noise. The avoid set includes the hue families recent renders were MEASURED to
+  //    be, not only the ones they were assigned: if the image model ignores a spec, avoiding
+  //    intentions achieves nothing.
+  const isFresh = designMode === 'fresh';
+  const history = isFresh
+    ? await recentStyleHistory(client, ARTICLE_STYLE_CATEGORIES)
+    : undefined;
+  const assignedPalette = isFresh
+    ? pickPalette(seed, {
+        ids: history?.paletteIds,
+        families: [...(history?.families ?? []), ...(options.avoidFamilies ?? [])],
+      })
+    : undefined;
+  const assignedLayout = isFresh
+    ? pickArticleLayout(
+        seed,
+        { hasPhoto },
+        { ids: history?.layoutIds, coverages: history?.coverages },
+      )
+    : undefined;
+
+  // 5. Art direction — how the assigned colours and composition are handled. Best-effort:
+  //    null renders from the assignment alone, which carries the colours and the layout and is
+  //    deliberately sufficient.
+  const artDirection = isFresh
+    ? await generateArtDirection({
+        note: article,
+        copyStyle: 'article',
+        // Colour words are stripped from this hint inside the prompt builder; the art director
+        // gets the raw summary but is told the palette is not its call.
+        referenceHint: reference.layoutSpec?.layoutSummary,
+        seed,
+        assignedPalette,
+        assignedLayout,
+        recentTreatments: history?.treatments,
+      })
+    : null;
+
   console.log(
-    `[job ${id}] article poster reference: ${JSON.stringify({ id, referenceImageId: pinnedReferenceImageId, pinned: Boolean(pinned), referenceUrl: reference.url, analyzed: Boolean(reference.layoutSpec), theme: theme.name })}`,
+    `[job ${id}] article poster: ${JSON.stringify({
+      mode: designMode,
+      pinned: Boolean(pinned),
+      referenceUrl: reference.url,
+      analyzed: Boolean(reference.layoutSpec),
+      hasPhoto,
+      textLocked,
+      headlineSource: typedHeading ? 'typed' : subject ? subject.kind : 'editorial',
+      palette: assignedPalette ? `${assignedPalette.id} (${assignedPalette.family})` : null,
+      layout: assignedLayout ? `${assignedLayout.id} (${assignedLayout.coverage})` : null,
+      avoidedFamilies: [
+        ...(history?.families ?? []),
+        ...(options.avoidFamilies ?? []),
+      ],
+      measuredBuckets: history?.measuredBuckets ?? [],
+      directed: Boolean(artDirection),
+    })}`,
   );
-  const posterPng = await renderArticlePosterViaN8n(
-    id,
-    copy,
-    reference.url,
-    '',
-    theme,
-    reference.layoutSpec,
-  );
-  // Image is painted inside n8n (gpt-image-2 @ 1536x1024); attribute the fixed tier price.
+
+  // 6. Prompt (pure string assembly, no model call) → render.
+  const prompt = buildArticlePosterPrompt({
+    headline,
+    sceneBrief: typeof copy.scene_brief === 'string' ? copy.scene_brief : undefined,
+    designMode,
+    masterUrl: reference.url,
+    layoutSummary: reference.layoutSpec?.layoutSummary,
+    hasPhoto,
+    assignedPalette,
+    assignedLayout,
+    artDirection: artDirection ?? undefined,
+    textLocked,
+  });
+
+  const rawPoster = isFresh
+    ? await generateImage(prompt, { size: '1536x1024' })
+    : await renderArticlePosterEditViaN8n(id, reference.url, prompt);
+  // gpt-image-2 @ 1536x1024 — attribute the fixed tier price (image usage isn't measurable
+  // whether it ran in n8n or the direct call).
   recordImageCost('article', imageQuality());
 
-  const posterObjectPath = posterPath(id, 1);
-  await uploadPng(client, posterObjectPath, posterPng, true);
+  // 7. Measure what the render ACTUALLY came out as, BEFORE the chrome is stamped — the footer
+  //    band and logo are identical on every poster, so measuring after them biases every
+  //    measurement the same way and makes the comparison across runs worthless. A mismatch is
+  //    logged, never retried: a re-render is another paid image call.
+  let posterStyle: PosterStyle | undefined;
+  if (assignedPalette && assignedLayout) {
+    let measured;
+    try {
+      measured = await measurePosterColours(rawPoster);
+    } catch (error) {
+      console.warn(`[job ${id}] could not measure poster colours:`, error);
+    }
+    posterStyle = buildPosterStyle(assignedPalette, assignedLayout, measured);
+    if (measured) {
+      const complied = familyHonoured(assignedPalette.family, measured.hueBucket);
+      console.log(
+        `[job ${id}] measured: ground=${measured.groundHex}${measured.groundIsWarm ? ' (warm cream)' : ''}` +
+          ` dominant=${measured.dominantHex} bucket=${measured.hueBucket}` +
+          `${complied ? '' : ` — MISMATCH, assigned ${assignedPalette.family}`}`,
+      );
+    }
+  }
 
-  await updateGeneration(client, id, {
-    copy,
-    posterPath: posterObjectPath,
-  });
+  // 8. Chrome: the crisp महासंवाद logo + department footer, which the image model cannot render
+  //    (the prompt leaves those zones quiet).
+  const posterPng = await overlayArticleChrome(rawPoster);
+  const posterObjectPath = posterPath(id, version);
+  await uploadPng(client, posterObjectPath, posterPng, options.upsert ?? false);
+
+  await updateGeneration(client, id, { copy, posterPath: posterObjectPath });
+
+  // 9. The assigned style is written SEPARATELY and best-effort, deliberately not bundled into
+  //    the write above. It targets a column added by migration 0028, and bundling them would
+  //    mean that on a database where 0028 has not been applied the whole update fails and the
+  //    already-paid poster never lands on the row. Losing the rotation memory for one run is a
+  //    cost worth paying; losing the render is not.
+  if (posterStyle) {
+    try {
+      await updateGeneration(client, id, { posterStyle });
+    } catch (error) {
+      console.warn(
+        `[job ${id}] could not persist poster style (is migration 0028 applied?):`,
+        error,
+      );
+    }
+  }
 }
 
 // Attach a poster to a settled article run on the SAME row: article-only and DLO
@@ -484,6 +705,7 @@ export function startArticlePosterJob(
       id,
       row.article,
       referenceImageId ?? row.referenceImageId,
+      { note: row.note, posterHeading: row.posterHeading },
     );
   });
 }
@@ -493,33 +715,26 @@ type ArticlePosterResult = {
   poster_png_base64?: string;
 };
 
-// Render an article poster via the external n8n `article-poster-v1-api` workflow
-// (the ARTICLE_POSTER_MODE=n8n path). The verified article and its Copy are still
-// produced locally by @dgipr/content-engine — facts stay source-of-truth per
-// AGENTS.md — so we send only the resolved { headline, scene_brief } plus the
-// immutable library URL of the master to edit (referenceUrl), and n8n *only
-// renders*: its image model paints the poster body (panel, headline, photo) by
-// editing that master, leaving the logo/footer reserved zones as plain background.
-// The crisp brand chrome (महासंवाद logo top-left + department footer strip) is then
-// composited here in code (overlayArticleChrome) — the image model can't render
-// those Devanagari lockups reliably. headline is resolved here via headStrings so
-// n8n stays dumb. Mirrors startSocialPostJob's fetch/timeout/error handling;
-// returns the chrome-stamped poster PNG.
-async function renderArticlePosterViaN8n(
+// POST an already-built image-edit request to the thin n8n `article-poster-v1-api` workflow:
+// it fetches `imageUrl`, edits it with `prompt` at 1536x1024, and returns the poster PNG. The
+// exact twin of renderSocialPosterViaN8n, and used for the same two things: the pixel/marker
+// FEEDBACK re-render (edit the current poster) and the legacy ARTICLE_POSTER_MODE=n8n initial
+// render (edit the chosen master). The default 'fresh' path never comes here at all.
+//
+// The prompt is built in the API now (build-article-poster-prompt.ts) rather than in the
+// workflow's Code node, so the reserved-zone geometry lives beside the chrome overlay it must
+// stay in sync with. The crisp brand chrome (महासंवाद logo top-left + department footer strip)
+// is composited here in code — the image model can't render those Devanagari lockups reliably.
+//
+// LEGACY FIELDS: `reference_url` / `image_feedback` / `marker_count` are still sent, duplicating
+// `image_url`, purely so a newly-deployed API talking to a not-yet-pushed workflow degrades to
+// the OLD in-workflow prompt instead of throwing "No reference_url received". They can be
+// dropped once every instance is on the 5-node workflow.
+async function renderArticlePosterEditViaN8n(
   id: string,
-  copy: Copy,
-  referenceUrl: string,
-  imageFeedback = '',
-  theme?: ArticlePosterTheme,
-  // The picked master's vision-derived layout (migration 0016). null on
-  // un-analyzed masters AND on feedback edits (which edit the latest poster,
-  // not a master) — the workflow then falls back to its generic layout-agnostic
-  // prompt instead of asserting structure the master may not have.
-  layoutSpec: ReferenceLayoutSpec | null = null,
-  // > 0 only on annotated feedback edits: the referenced image then carries that
-  // many numbered marker boxes and the workflow prompt switches to marker
-  // semantics (apply each numbered change at its marker, then erase the marks).
-  markerCount = 0,
+  imageUrl: string,
+  prompt: string,
+  legacy: Readonly<{ imageFeedback?: string; markerCount?: number }> = {},
 ): Promise<Buffer> {
   const webhookUrl = requireEnv('N8N_ARTICLE_POSTER_WEBHOOK_URL');
   const webhookSecret = process.env.N8N_WEBHOOK_SECRET;
@@ -529,31 +744,19 @@ async function renderArticlePosterViaN8n(
   };
   if (webhookSecret) headers['x-n8n-webhook-secret'] = webhookSecret;
 
-  const { headline } = headStrings(copy);
-
   // Generous timeout to outlast the workflow's ~1-2 min gpt-image-2 edit stage.
   const response = await fetch(webhookUrl, {
     method: 'POST',
     headers,
     body: JSON.stringify({
-      headline,
-      scene_brief: copy.scene_brief,
       generation_id: id,
-      reference_url: referenceUrl,
-      image_feedback: imageFeedback,
-      marker_count: markerCount,
-      // Panel/headline color for this render (initial renders only). Empty on the
-      // image-feedback edit path so the workflow preserves the current poster's
-      // colors; empty also makes the workflow fall back to its original orange.
-      panel_color: theme?.panelHex ?? '',
-      panel_color_name: theme?.name ?? '',
-      headline_color: theme?.headlineHex ?? '',
-      // The master's own structure, so the workflow prompt describes THIS master
-      // instead of a hardcoded anatomy. Flattened to strings (the workflow's Set
-      // node stays all-primitive); has_photo_zone is tri-state 'true'/'false'/''
-      // where '' = unknown (un-analyzed master or feedback edit).
-      layout_summary: layoutSpec?.layoutSummary ?? '',
-      has_photo_zone: layoutSpec ? String(layoutSpec.hasPhotoZone) : '',
+      image_url: imageUrl,
+      prompt,
+      quality: imageQuality(),
+      // --- legacy compatibility, see the note above ---
+      reference_url: imageUrl,
+      image_feedback: legacy.imageFeedback ?? '',
+      marker_count: legacy.markerCount ?? 0,
     }),
     signal: AbortSignal.timeout(420_000),
   });
@@ -692,22 +895,33 @@ function rememberMaster(key: string, masterId: string, enabledCount: number): vo
   );
 }
 
-// What the last few social posters looked like — colour family, composition, and what their
-// renders actually MEASURED — read from generations.poster_style (migration 0028).
+// What the last few posters looked like — colour family, composition, and what their renders
+// actually MEASURED — read from generations.poster_style (migration 0028).
 //
 // This used to be an in-process Map, which was the wrong place for it. Social renders are serial,
 // so a Map looked sufficient, but it reset on every API restart (constant under `tsx watch`) and
 // a second process could not see it — so after any restart a run could be assigned the same
 // colour family as the one before it, which is precisely the failure the rotation exists to
-// prevent. One small indexed query per social run buys a spread that actually holds.
+// prevent. One small indexed query per run buys a spread that actually holds.
+//
+// The history is SCOPED to one poster kind. Social and article runs share the column but draw
+// their compositions from different libraries (portrait vs landscape archetypes), so an unscoped
+// read would spread each rotation against coverages the other cannot produce.
 //
 // Best-effort: a failure here degrades to "no history", which is exactly the pre-0028 behaviour,
 // and must never sink a paid render.
 const STYLE_HISTORY_DEPTH = 8;
+const SOCIAL_STYLE_CATEGORIES = ['twitter', 'facebook'] as const;
+const ARTICLE_STYLE_CATEGORIES = ['news', 'scheme'] as const;
 
-async function recentStyleHistory(client: SupabaseClient): Promise<StyleHistory> {
+async function recentStyleHistory(
+  client: SupabaseClient,
+  categories: readonly string[],
+): Promise<StyleHistory> {
   try {
-    return toStyleHistory(await listRecentPosterStyles(client, STYLE_HISTORY_DEPTH));
+    return toStyleHistory(
+      await listRecentPosterStyles(client, STYLE_HISTORY_DEPTH, categories),
+    );
   } catch (error) {
     console.warn('[job] could not read recent poster styles (rendering unspread):', error);
     return toStyleHistory([]);
@@ -851,7 +1065,9 @@ async function renderAndStoreSocialPoster(
   //     assigned — if the image model ignores a spec, avoiding intentions would achieve nothing.
   //     Seeded, so a retry reproduces the same assignment rather than redesigning.
   const isFresh = brand !== 'cmo' && designMode === 'fresh';
-  const history = isFresh ? await recentStyleHistory(client) : undefined;
+  const history = isFresh
+    ? await recentStyleHistory(client, SOCIAL_STYLE_CATEGORIES)
+    : undefined;
   const assignedPalette = isFresh
     ? pickPalette(seed, {
         ids: history?.paletteIds,
@@ -1047,25 +1263,31 @@ export function startSocialPostJob(
   });
 }
 
-// Regenerate a completed social run's poster as a brand-new, differently-designed version. The
-// fully-AI path re-classifies, re-selects (avoiding the recently-used master), rewrites the copy
-// and invents a FRESH art direction seeded on this version, so the redo does not resemble the
+// Regenerate a completed run's poster as a brand-new, differently-designed version. On the
+// fully-AI path this re-selects (avoiding the recently-used master), rewrites the copy and
+// invents a FRESH art direction seeded on this version, so the redo does not resemble the
 // previous poster. This is the text-legibility escape hatch: the image model paints Devanagari,
 // which occasionally garbles, and one click gets a clean, distinct alternative. Like poster
 // image-feedback it goes through runJob (a re-render legitimately shows progress) and writes a
 // new immutable poster version; the caption is NOT touched (it is about the note, not this
 // poster). Logged as a poster_image revision to avoid a new revision-target migration.
+//
+// Serves BOTH lanes. A social run re-classifies as well; an article run re-derives its copy from
+// the stored (possibly feedback-revised) article and re-runs the named-subject check, so a redo
+// after an article edit picks up the change.
+//
+// `posterHeading` (article lane) is how a wrong poster heading is actually FIXED — the officer
+// only finds out the automatic text is wrong once the poster exists. It is PERSISTED before the
+// render, not merely passed down, so every later redo keeps it too; an empty string clears it and
+// returns the run to automatic resolution.
 export function startPosterRegenerateJob(
   client: SupabaseClient,
   id: string,
-  options: Readonly<{ recolour?: boolean }> = {},
+  options: Readonly<{ recolour?: boolean; posterHeading?: string }> = {},
 ): void {
   runJob(client, id, async () => {
     const row = await getGeneration(client, id);
     if (!row) throw new Error(`Generation ${id} not found.`);
-    if (!isSocialCategory(row.category)) {
-      throw new Error(`Generation ${id} is not a social run.`);
-    }
     if (!row.posterPath) throw new Error(`Generation ${id} has no poster yet.`);
 
     await updateGeneration(client, id, {
@@ -1074,8 +1296,6 @@ export function startPosterRegenerateJob(
       error: null,
     });
 
-    const brand = row.templateBrand;
-    const designMode = (row.designMode ?? 'fresh') as PosterDesignMode;
     const version = await nextVersion(client, id);
 
     // A "different colours" redo bars THIS run's current family outright, on top of the usual
@@ -1084,6 +1304,58 @@ export function startPosterRegenerateJob(
     // this row is not yet in it.
     const current = options.recolour ? parsePosterStyle(row.posterStyle) : null;
     const avoidFamilies: PaletteFamily[] = current ? [current.family] : [];
+
+    if (!isSocialCategory(row.category)) {
+      // Article lane. 'html' mode has its own copy/scene feedback loop and no assignment to
+      // re-roll, so a redo there would be a plain re-render at a new version — refuse instead of
+      // silently doing something else.
+      const mode = process.env.ARTICLE_POSTER_MODE ?? 'fresh';
+      if (mode === 'html') {
+        throw new Error(
+          'ARTICLE_POSTER_MODE=html posters are revised through poster feedback, not regenerated.',
+        );
+      }
+      if (!row.article) throw new Error(`Generation ${id} has no article yet.`);
+
+      // Persist a corrected heading BEFORE rendering, so it survives every later redo — and so
+      // that if the render then fails, the officer's typed text is not lost with it. An empty
+      // string means "go back to automatic"; `undefined` means the request said nothing about
+      // the heading, so whatever the row already holds stands.
+      const posterHeading =
+        options.posterHeading === undefined
+          ? row.posterHeading
+          : options.posterHeading.trim() || null;
+      if (options.posterHeading !== undefined) {
+        await updateGeneration(client, id, { posterHeading });
+      }
+
+      await renderAndStoreArticlePoster(client, id, row.article, {
+        designMode: mode === 'n8n' ? 'onbrand' : 'fresh',
+        pinnedReferenceImageId: row.referenceImageId,
+        version,
+        seed: `${id}:v${version}`,
+        avoidFamilies,
+        note: row.note,
+        posterHeading,
+      });
+
+      await insertRevision(client, {
+        generationId: id,
+        target: 'poster_image',
+        // Only a request that actually CARRIED a heading is logged as a text change — a plain
+        // redo of a run that already had one must not read as an edit.
+        feedback: options.posterHeading !== undefined
+          ? `पोस्टरवरील मजकूर: ${posterHeading ?? 'आपोआप'}`
+          : options.recolour
+            ? 'पुन्हा तयार केले (वेगळे रंग)'
+            : 'पुन्हा तयार केले (नवीन रचना)',
+        posterPath: posterPath(id, version),
+      });
+      return;
+    }
+
+    const brand = row.templateBrand;
+    const designMode = (row.designMode ?? 'fresh') as PosterDesignMode;
 
     await renderAndStoreSocialPoster(
       client,
@@ -1624,16 +1896,18 @@ export function startPosterImageFeedbackJob(
       );
       recordImageCost('twitter', imageQuality());
     } else {
-      const copy = requireCopy(row);
-      posterPng = await renderArticlePosterViaN8n(
-        id,
-        copy,
-        inputUrl,
-        feedbackText,
-        undefined,
-        null,
-        annotations.length,
-      );
+      // The article poster's feedback prompt is built here too now (it used to live in the
+      // workflow's Code node). It edits the CURRENT poster, so it carries no palette or
+      // composition — the assignment belongs to the render that produced this poster, and a
+      // feedback edit must change only what was asked for.
+      const prompt = buildArticleFeedbackPrompt({
+        imageFeedback: feedbackText,
+        markerCount: annotations.length,
+      });
+      posterPng = await renderArticlePosterEditViaN8n(id, inputUrl, prompt, {
+        imageFeedback: feedbackText,
+        markerCount: annotations.length,
+      });
       recordImageCost('article', imageQuality());
     }
 

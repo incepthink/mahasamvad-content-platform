@@ -26,7 +26,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { FileText } from 'lucide-react';
-import type { DocumentKind } from '@dgipr/schemas';
+import type { DocumentKind, PdfTextSourceValue } from '@dgipr/schemas';
 import {
   createDocumentIntake,
   extractDocumentIntakePages,
@@ -35,6 +35,7 @@ import {
 import {
   joinPageTexts,
   numberedPages,
+  pageText,
   setPages,
   togglePage,
 } from '../lib/documentSelection';
@@ -52,12 +53,28 @@ function marathiNumber(value: number): string {
   return value.toLocaleString('mr-IN');
 }
 
+// Everything a caller needs to describe the file behind the text it just received: which
+// ephemeral job it came from (so an API-side caller can still reach the original bytes),
+// what it was called, and — for a surface that keeps documents page by page rather than as
+// one string — the SELECTED pages with the user's corrections already applied.
+export type DocumentSnapshot = Readonly<{
+  jobId: string;
+  fileName: string;
+  kind: DocumentKind;
+  source: PdfTextSourceValue | null;
+  pageCount: number | null;
+  pages: ReadonlyArray<{ page: number; text: string }>;
+}>;
+
 export function DocumentIntake({
   storageKey,
   accept = ['pdf', 'docx', 'txt'],
   maxChars,
+  title,
+  hint,
   onText,
   onTextChange,
+  onRemove,
 }: {
   // Where this surface remembers its in-flight job across a refresh. Must be unique per
   // surface, or two pages would fight over one job.
@@ -66,6 +83,10 @@ export function DocumentIntake({
   // The caller's character budget, if it has one (/proofread caps at 10,000). Shown against
   // the running total so the page checkboxes become the way to get under it.
   maxChars?: number | undefined;
+  // Card heading + hint, when the shared copy does not fit. /dlo needs its own: the default
+  // hint promises the file is not stored, and a DLO document IS archived with the intake.
+  title?: string | undefined;
+  hint?: string | undefined;
   // HANDOFF mode: the text reaches the caller only when the button is pressed. Right for a
   // surface whose single text box the file REPLACES (/translate, /proofread) — the click is
   // what authorises overwriting whatever is in it.
@@ -75,7 +96,16 @@ export function DocumentIntake({
   // that keeps the file's text BESIDE its own box rather than in it — there is nothing to
   // overwrite, so a button that has to be found and pressed only ever silently discards the
   // whole upload, which is exactly what it did on the media room.
-  onTextChange?: ((text: string) => void) | undefined;
+  //
+  // The second argument describes the file the text came from (null while nothing is
+  // loaded). A caller that only wants a string ignores it — which is why it is a second
+  // parameter rather than a change to the first.
+  onTextChange?:
+    | ((text: string, snapshot: DocumentSnapshot | null) => void)
+    | undefined;
+  // Offered by a surface that shows SEVERAL of these at once (/dlo), where dropping one
+  // document has to be possible without dropping the others.
+  onRemove?: (() => void) | undefined;
 }) {
   const [jobId, setJobId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -150,6 +180,22 @@ export function DocumentIntake({
   const overLimit = maxChars !== undefined && text.length > maxChars;
   const live = onTextChange !== undefined;
 
+  // The same selection `text` was built from, kept page by page for a caller that stores
+  // documents that way. Null until there is a read file to describe.
+  const snapshot = useMemo<DocumentSnapshot | null>(() => {
+    if (!jobId || !detail || pages.length === 0) return null;
+    return {
+      jobId,
+      fileName: detail.fileName,
+      kind: detail.kind,
+      source: detail.source,
+      pageCount: detail.pageCount,
+      pages: pages
+        .filter((page) => selected.has(page.page))
+        .map((page) => ({ page: page.page, text: pageText(page, edits) })),
+    };
+  }, [jobId, detail, pages, selected, edits]);
+
   const acceptAttr = accept.map((kind) => EXTENSIONS[kind]).join(',');
 
   // Live mode: publish the current text on every change. Held in a ref so an inline arrow
@@ -160,8 +206,8 @@ export function DocumentIntake({
     onTextChangeRef.current = onTextChange;
   });
   useEffect(() => {
-    onTextChangeRef.current?.(text);
-  }, [text]);
+    onTextChangeRef.current?.(text, snapshot);
+  }, [text, snapshot]);
 
   // "हा मजकूर वापरा" hands over a snapshot, so any later change to the selection or the
   // text means the caller is now holding something stale — say so rather than leave a
@@ -263,6 +309,9 @@ export function DocumentIntake({
     );
   }
 
+  // The upload control, plus the remove control when the surface offers one. Built once and
+  // dropped into every render branch below, so "choose another file" and "remove this
+  // document" are reachable from whichever state the card is in.
   const fileButton = (
     <>
       <button
@@ -277,6 +326,16 @@ export function DocumentIntake({
             ? STR.docUploadOther
             : STR.docUpload}
       </button>
+      {onRemove ? (
+        <button
+          type="button"
+          className="btn btn-small"
+          onClick={onRemove}
+          disabled={uploading || extracting}
+        >
+          {STR.docRemove}
+        </button>
+      ) : null}
       <input
         ref={fileInput}
         type="file"
@@ -293,8 +352,8 @@ export function DocumentIntake({
   if (!jobId) {
     return (
       <section className="card">
-        <p className="field-label">{STR.docUploadTitle}</p>
-        <p className="hint">{STR.docUploadHint}</p>
+        <p className="field-label">{title ?? STR.docUploadTitle}</p>
+        <p className="hint">{hint ?? STR.docUploadHint}</p>
         <div className="btn-row" style={{ marginTop: 12 }}>
           {fileButton}
         </div>

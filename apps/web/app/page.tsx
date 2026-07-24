@@ -7,7 +7,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Bird, Image as ImageIcon, ThumbsUp } from 'lucide-react';
-import { NOTE_MAX_CHARS, isSocialCategory } from '@dgipr/schemas';
+import {
+  NOTE_MAX_CHARS,
+  POSTER_HEADING_MAX_CHARS,
+  isSocialCategory,
+} from '@dgipr/schemas';
 import type { Category, DesignMode, TemplateBrand } from '@dgipr/schemas';
 import { createGeneration } from '../lib/api';
 import { BRAND_OPTIONS, DESIGN_OPTIONS } from '../lib/generationOptions';
@@ -71,6 +75,10 @@ export default function NewGenerationPage() {
   // paid model call, and plenty of posts are published as an image. It can also be added
   // afterwards from the detail page, so off is a cheap default rather than a lossy one.
   const [wantCaption, setWantCaption] = useState(false);
+  // पोस्टर runs only: the exact line to print on the poster. Blank (the default) leaves it to
+  // the automatic named-subject resolution, which is what most runs want — this is the
+  // override for when the officer already knows the poster must say a particular thing.
+  const [posterHeading, setPosterHeading] = useState('');
   const [reference, setReference] = useState<ReferenceSelection | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -133,6 +141,10 @@ export default function NewGenerationPage() {
       setError(STR.noteTooLong);
       return;
     }
+    if (!isSocial && posterHeading.trim().length > POSTER_HEADING_MAX_CHARS) {
+      setError(STR.posterHeadingTooLong);
+      return;
+    }
     if (isSocial && hasActiveSocialTask) {
       setError(STR.busyError);
       return;
@@ -155,6 +167,10 @@ export default function NewGenerationPage() {
         // Social only: the caption is opt-in (see wantCaption above). Absent on the
         // पोस्टर path, where the pasted article already IS the text.
         generateCaption: isSocial ? wantCaption : undefined,
+        // पोस्टर only, and only when actually typed — an empty string would be a
+        // meaningless "clear" on a run that has nothing to clear.
+        posterHeading:
+          !isSocial && posterHeading.trim() ? posterHeading.trim() : undefined,
         designMode: isSocial ? designMode : undefined,
         templateBrand: isSocial ? templateBrand : undefined,
         referenceImageId:
@@ -169,6 +185,7 @@ export default function NewGenerationPage() {
         setNote('');
         clearDocument();
         setCategory('scheme');
+        setPosterHeading('');
         setSubmitting(false);
       } else {
         // Navigate to the progress page, but also register a session row so the
@@ -271,6 +288,28 @@ export default function NewGenerationPage() {
               </span>
             </span>
           </label>
+        ) : null}
+        {/* The पोस्टर twin of the caption toggle, and in the same card for the same reason:
+            what the poster SAYS is part of choosing what to make. Only the article-poster lane
+            has it — a social poster's headline is written into a multi-field copy object and
+            has no single line to lock. Left blank (the normal case) the run reads the योजना /
+            पुरस्कार / उपक्रम name out of the note itself. */}
+        {!isSocial ? (
+          <div className="option-field">
+            <label className="field-label" htmlFor="poster-heading">
+              {STR.posterHeadingLabel}
+            </label>
+            <p className="hint">{STR.posterHeadingHint}</p>
+            <input
+              id="poster-heading"
+              type="text"
+              maxLength={POSTER_HEADING_MAX_CHARS}
+              placeholder={STR.posterHeadingPlaceholder}
+              value={posterHeading}
+              onChange={(e) => setPosterHeading(e.target.value)}
+              style={{ marginTop: 10 }}
+            />
+          </div>
         ) : null}
         {hasActiveSocialTask ? (
           <p className="info-callout">{STR.socialBusyInfo}</p>

@@ -19,10 +19,12 @@ import {
 } from '@dgipr/database';
 import {
   DloCategorySchema,
+  DloCreateDocumentsSchema,
   DloExtractRequestSchema,
   DloGenerateRequestSchema,
   DloReextractFileRequestSchema,
   type DloIntakeDetail,
+  type DloPreReadDocument,
 } from '@dgipr/schemas';
 import {
   isIntakeJobRunning,
@@ -30,6 +32,7 @@ import {
   startDloFileReextractionJob,
   startDloIntakeJob,
 } from '../jobs/dlo-runner.js';
+import { getDocumentIntakeJob } from '../jobs/document-intake.js';
 import { startGenerationJob } from '../jobs/runner.js';
 
 // Meeting recordings are big (a 2h mp3 @128kbps ≈ 115 MB — the Sarvam batch
@@ -37,6 +40,10 @@ import { startGenerationJob } from '../jobs/runner.js';
 // (10 MiB / 1 file, sized for reference-image uploads) per request.
 const MAX_FILE_BYTES = 120 * 1024 * 1024;
 const MAX_FILES = 10;
+// The `documents` field carries whole documents' worth of extracted Marathi text, and
+// busboy defaults a field to 1 MiB — which a couple of GRs in Devanagari (3 bytes a
+// character) will pass straight through.
+const MAX_FIELD_BYTES = 8 * 1024 * 1024;
 
 const KIND_BY_EXTENSION: Record<string, DloIntakeFileKind> = {
   '.mp3': 'audio',
@@ -48,6 +55,7 @@ const CONTENT_TYPE_BY_KIND: Record<DloIntakeFileKind, string> = {
   audio: 'audio/mpeg',
   pdf: 'application/pdf',
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  txt: 'text/plain',
 };
 
 function kindOf(fileName: string): DloIntakeFileKind | null {
@@ -85,6 +93,12 @@ function toDetail(row: DloIntakeRow, includeText: boolean): DloIntakeDetail {
       // awaiting selection costs the poll nothing.
       ...(entry.pageCount !== undefined ? { pageCount: entry.pageCount } : {}),
       ...(entry.pdfSource !== undefined ? { pdfSource: entry.pdfSource } : {}),
+      // Only a PDF whose original is still archived can be re-read; a document read at
+      // the input step after its ephemeral job expired has no bytes left, so the review
+      // step must not offer an override that could only fail.
+      ...(entry.kind === 'pdf' && entry.storagePath !== undefined
+        ? { canReextract: true }
+        : {}),
       ...(includeText && entry.text !== undefined ? { text: entry.text } : {}),
       ...(includeText && entry.pages !== undefined
         ? { pages: [...entry.pages] }
@@ -110,9 +124,16 @@ export function registerDloRoutes(
     let notes = '';
     let category = 'news';
     let heading = '';
+    // Documents the officer uploaded and READ at the input step, through the shared
+    // ephemeral service. They arrive already extracted — see the entry-building loop below.
+    let documents: DloPreReadDocument[] = [];
 
     const parts = request.parts({
-      limits: { fileSize: MAX_FILE_BYTES, files: MAX_FILES },
+      limits: {
+        fileSize: MAX_FILE_BYTES,
+        files: MAX_FILES,
+        fieldSize: MAX_FIELD_BYTES,
+      },
     });
     try {
       for await (const part of parts) {
@@ -121,6 +142,15 @@ export function registerDloRoutes(
           if (part.fieldname === 'notes') notes = value;
           if (part.fieldname === 'category') category = value;
           if (part.fieldname === 'heading') heading = value;
+          if (part.fieldname === 'documents' && value.trim().length > 0) {
+            try {
+              documents = DloCreateDocumentsSchema.parse(JSON.parse(value));
+            } catch {
+              return reply.code(400).send({
+                error: { message: 'कागदपत्रांची माहिती वाचता आली नाही.' },
+              });
+            }
+          }
           continue;
         }
         const kind = kindOf(part.filename ?? '');
@@ -159,7 +189,11 @@ export function registerDloRoutes(
     if (!parsedCategory.success) {
       return reply.code(400).send({ error: { message: 'Unknown category.' } });
     }
-    if (notes.trim().length === 0 && uploads.length === 0) {
+    if (
+      notes.trim().length === 0 &&
+      uploads.length === 0 &&
+      documents.length === 0
+    ) {
       return reply.code(400).send({
         error: { message: 'टिपणी लिहा किंवा किमान एक फाईल जोडा.' },
       });
@@ -191,6 +225,59 @@ export function registerDloRoutes(
         status: 'pending',
       });
     }
+
+    // Then the documents, which are already READ — the officer picked their pages and
+    // corrected their text at the input step, so they land as finished entries and the
+    // intake job skips them. That is what keeps a scanned PDF from being OCR'd twice.
+    //
+    // Their bytes are still held by the ephemeral job in THIS process, so the archive is a
+    // copy rather than a second upload from the browser. An expired job (60-min TTL) simply
+    // means no archive: the text already travelled in the request, and the only thing lost
+    // is the ability to re-read that file later.
+    const documentBase = entries.length;
+    for (const [offset, document] of documents.entries()) {
+      const source = document.jobId
+        ? getDocumentIntakeJob(document.jobId)
+        : null;
+      let storagePath: string | undefined;
+      if (source) {
+        storagePath = storagePathFor(
+          row.id,
+          documentBase + offset,
+          document.name,
+        );
+        await uploadFile(
+          client,
+          DLO_UPLOADS_BUCKET,
+          storagePath,
+          source.data,
+          CONTENT_TYPE_BY_KIND[document.kind],
+        );
+      }
+      const text = document.pages
+        ? document.pages
+            .map((page) => page.text)
+            .filter((value) => value.length > 0)
+            .join('\n\n')
+        : (document.text ?? '');
+      entries.push({
+        name: document.name,
+        ...(storagePath !== undefined ? { storagePath } : {}),
+        kind: document.kind,
+        status: 'done',
+        chars: text.length,
+        ...(document.pages !== undefined
+          ? { pages: document.pages }
+          : { text: document.text ?? '' }),
+        ...(document.pageCount !== undefined
+          ? { pageCount: document.pageCount }
+          : {}),
+        ...(document.pdfSource !== undefined
+          ? { pdfSource: document.pdfSource }
+          : {}),
+      });
+    }
+
     await updateDloIntake(client, row.id, { files: entries });
     startDloIntakeJob(client, row.id);
     return reply.code(202).send({ id: row.id });
@@ -296,6 +383,15 @@ export function registerDloRoutes(
           error: { message: 'फक्त PDF फाईल पुन्हा वाचता येते.' },
         });
       }
+      // A document read at the input step whose ephemeral job had expired by the time
+      // this intake was created: its text is here, its bytes are not.
+      if (entry.storagePath === undefined) {
+        return reply.code(400).send({
+          error: {
+            message: 'या फाईलची मूळ प्रत उपलब्ध नाही, त्यामुळे ती पुन्हा वाचता येत नाही.',
+          },
+        });
+      }
       if (row.status !== 'ready' || isIntakeJobRunning(row.id)) {
         return reply
           .code(409)
@@ -338,6 +434,10 @@ export function registerDloRoutes(
         category: body.category,
         heading: body.heading,
         dloIntakeId: row.id,
+        // Facts the officer deselected in the Pointers step (migration 0030). insertGeneration
+        // omits the column when this is empty/absent, so an un-applied 0030 only disables the
+        // feature rather than failing the create.
+        excludedFacts: body.excludedFacts,
       });
       startGenerationJob(client, generation.id);
       return reply.code(202).send({ generationId: generation.id });

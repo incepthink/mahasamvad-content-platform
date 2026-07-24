@@ -50,6 +50,7 @@ const KIND_LABEL: Record<DloIntakeFile['kind'], string> = {
   audio: STR.dloReviewKindAudio,
   pdf: STR.dloReviewKindPdf,
   docx: STR.dloReviewKindDocx,
+  txt: STR.dloReviewKindTxt,
 };
 
 export function DloSourceReview({
@@ -188,7 +189,10 @@ export function DloSourceReview({
                 onToggle={(page) => onToggle(pageKey(index, page))}
                 onSetAll={(_, include) => onToggleFilePages(index, include)}
                 onEdit={onEdit}
-                {...(reextracting
+                // The OCR override is offered only while the original is still in the
+                // private bucket: a document read at the input step whose upload job had
+                // expired by then kept its text but not its bytes.
+                {...(reextracting || file.canReextract !== true
                   ? {}
                   : { onReextract: () => onReextract(index) })}
               />

@@ -560,6 +560,19 @@ textarea.note-input {
   line-height: 1.5;
 }
 
+/* The typed sibling of .option-toggle: an optional input that modifies the choice made in
+   the card above rather than being a choice of its own (the पोस्टर heading override). */
+.option-field {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 2px solid var(--border);
+  border-radius: 14px;
+}
+
+.option-field .hint {
+  margin-top: 4px;
+}
+
 /* Same cards, two choices (e.g. the poster-template auto/manual switch). */
 .output-picker-two {
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1392,6 +1405,21 @@ details.fold[aria-disabled='true'] summary {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+/* "Print exactly this line" — the third redo, under the two style ones (article runs). */
+.poster-heading-editor {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1.5px solid var(--border);
+}
+
+.poster-heading-editor .hint {
+  margin-bottom: 8px;
+}
+
+.poster-heading-editor input[type='text'] {
+  margin-bottom: 6px;
 }
 
 /* Poster placeholder while the render is still in flight: landscape 3:2 box
@@ -2719,6 +2747,52 @@ a.thread-node:hover {
   gap: 12px;
   padding: 40px 20px;
   text-align: center;
+}
+
+/* ---------- pointers (5W1H fact selection on /dlo) ---------- */
+
+.pointer-group {
+  margin-top: 16px;
+}
+
+.pointer-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pointer-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fffdfa;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+
+.pointer-row input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  margin-top: 2px;
+  accent-color: var(--accent);
+}
+
+.pointer-row.excluded {
+  opacity: 0.55;
+}
+
+.pointer-row.excluded .pointer-text {
+  text-decoration: line-through;
+}
+
+.pointer-text {
+  line-height: 1.5;
 }
 
 /* ---------- PDF translation: page picker + per-language result ---------- */

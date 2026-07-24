@@ -10,6 +10,7 @@ import { registerGenerationRoutes } from './routes/generations.js';
 import { registerGlossaryRoutes } from './routes/glossary.js';
 import { registerTranslateRoutes } from './routes/translate.js';
 import { registerProofreadRoutes } from './routes/proofread.js';
+import { registerPointerRoutes } from './routes/pointers.js';
 import { registerReferenceRoutes } from './routes/references.js';
 import { registerVideoRoutes } from './routes/video.js';
 
@@ -62,6 +63,7 @@ export async function createServer() {
       // Generic file upload → pages of text. No Supabase client: it persists nothing.
       registerDocumentRoutes(instance);
       registerProofreadRoutes(instance, client);
+      registerPointerRoutes(instance);
       registerReferenceRoutes(instance, client);
       registerDloRoutes(instance, client);
       registerVideoRoutes(instance, client);

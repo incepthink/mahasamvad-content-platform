@@ -38,19 +38,27 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
 - Fastify boot / CORS / error handler / `/health` → `apps/api/src/index.ts`
 - HTTP routes under `/api/generations` (thin) → `apps/api/src/routes/generations.ts`
 - Job orchestration + sequencing (the real pipeline) → `apps/api/src/jobs/runner.ts`
-  - `startGenerationJob`: retrieve → `generateArticle` → (if poster) `generateCopy`
-    → render poster → upload PNG(s) to Supabase Storage. The poster render forks on
-    `ARTICLE_POSTER_MODE` (default `n8n`): `n8n` sends `{ headline, scene_brief,
-reference_url, layout_summary, has_photo_zone }` to the `article-poster-v1-api`
-    webhook (`renderArticlePosterViaN8n`; `reference_url` = the pinned image, else a
-    random enabled article master via `pickArticleReference`, which also returns the
-    picked master's `layout_spec` — flattened to the two layout strings), which
-    paints the poster body (headline + photo, following THAT master's layout) while
-    leaving the logo/footer reserved zones blank; the API then code-stamps the crisp
-    chrome (`overlayArticleChrome`) before upload — no scene image, no scenePath; `html` is the original `buildArticleScenePrompt`+
-    `generateImage`+`generateArticlePoster` Chromium path (kept as fallback). Job state
-    of record is the `generations` row (status/step/error), so polling clients survive
-    refreshes.
+  - `startGenerationJob`: retrieve → `generateArticle` → (if poster) the article poster
+    phase → upload PNG(s) to Supabase Storage. Job state of record is the `generations`
+    row (status/step/error), so polling clients survive refreshes.
+  - **Article poster = `renderAndStoreArticlePoster`, the twin of
+    `renderAndStoreSocialPoster`.** `ARTICLE_POSTER_MODE` (default **`fresh`**) forks it:
+    `fresh` builds the whole prompt in the API (`buildArticlePosterPrompt`) and calls
+    `generateImage` at 1536x1024 — **no n8n**; `n8n` edits the picked master through the now
+    thin 5-node `article-poster-v1-api` (`renderArticlePosterEditViaN8n`); `html` is the
+    original `buildArticleScenePrompt`+`generateImage`+`generateArticlePoster` Chromium path.
+    Sequence: `generateCopy` → **the poster's text** (`row.posterHeading` if the officer typed
+    one, else `resolvePosterSubject` — if the news has ONE named subject the poster's entire text
+    becomes that name in full; see the named-subject bullet below) → `pickArticleReference` (pin wins; the master is colour-stripped STRUCTURE
+    inspiration in fresh mode, never pixels) → `pickPalette` + **`pickArticleLayout`** (two
+    rotations, seeded, spread against `recentStyleHistory(client, ARTICLE_STYLE_CATEGORIES)`)
+    → `generateArtDirection` → render → `measurePosterColours` on the RAW poster →
+    `overlayArticleChrome` → upload → persist `copy`+`posterPath`, then `posterStyle` as a
+    SEPARATE best-effort update (an un-applied 0028 must cost the rotation memory, not the
+    paid render). Feedback re-renders build their prompt with `buildArticleFeedbackPrompt`
+    and are the only article path still touching n8n. `ARTICLE_POSTER_THEMES` is deleted —
+    the shared palette rotation supersedes it. Neither n8n mode writes a `scenePath`, so
+    poster copy/scene feedback stay `html`-only.
   - `startSocialPostJob` (both social categories) now runs classify → pick master → copy
     → build image prompt **in the API** (`@dgipr/content-engine`), and the thin
     `social-post-v2-api` workflow (5 nodes) only EDITS the chosen image with the API-built
@@ -81,12 +89,41 @@ reference_url, layout_summary, has_photo_zone }` to the `article-poster-v1-api`
     `PosterAnnotator` + `PosterImageFeedbackBox`. Deploy ordering is INVERTED for
     this feature: `pnpm n8n:push` first, API second (old workflow + new API can
     leave the red marker boxes in the output).
-- DLO intake (meeting MP3s/PDFs/DOCX → reviewed Marathi text → normal generation):
+- DLO intake (meeting MP3s/PDFs/DOCX/TXT → reviewed Marathi text → normal generation):
   routes → `apps/api/src/routes/dlo.ts` (multipart with per-request 120 MiB/10-file
-  limits; `/api/dlo/intakes` + `/:id` poll + `/:id/generate` +
-  `/:id/files/:index/reextract`); job → `apps/api/src/jobs/dlo-runner.ts`
+  limits + an 8 MiB `fieldSize` for the `documents` field; `/api/dlo/intakes` + `/:id`
+  poll + `/:id/generate` + `/:id/files/:index/reextract`); job →
+  `apps/api/src/jobs/dlo-runner.ts`
   (`startDloIntakeJob`: one Sarvam batch STT job for ALL audio, per-file doc
   extraction, per-file failures don't sink the intake);
+  - **Audio transcripts are cached content-addressed** (2026-07-25, migration 0031). The
+    transcribe phase hashes each MP3's bytes (`hashAudioContent`, SHA-256) and reads
+    `audio_transcript_cache` (`getCachedTranscripts`) BEFORE Sarvam: a hit reuses the
+    transcript, only misses go to `transcribeAudioFiles`, and a fresh transcript is written
+    back (`putCachedTranscript`, best-effort). So re-uploading the SAME recording in any
+    intake never re-transcribes. Server-side only — no client change; the MP3 is still
+    archived to the private bucket. Only successful non-empty transcripts are cached, and a
+    cache-read error (e.g. an un-applied 0031) degrades to "empty cache = transcribe all",
+    so the optimization is disabled, never the intake. Cache access →
+    `packages/database/src/stt-cache.ts`.
+  - **Documents are read at the INPUT step, not by the job** (2026-07-25). `/dlo`'s
+    document control is the shared `<DocumentIntake>` (one card per document, live mode),
+    so attaching a scanned PDF shows the page picker immediately — the media room's
+    behaviour — instead of after a form submit and a minutes-long job. Those documents
+    reach `POST /dlo/intakes` as a `documents` JSON field (`DloPreReadDocumentSchema`:
+    `jobId` + name + kind + the SELECTED pages with the officer's corrections) and the
+    route stores each as an ordinary `files` entry with `status: 'done'` — which is why
+    the review step, `assembleDloText`, lineage and `/:id/generate` needed NO changes.
+    Two invariants: the job's extract phase **skips `status: 'done'` entries** (or a
+    scanned PDF would be OCR'd a second time and the corrections lost), and the route
+    archives the original by reading `getDocumentIntakeJob(jobId).data` **in process**
+    rather than making the browser upload the same bytes twice. An expired ephemeral job
+    (60-min TTL) yields an entry with no `storagePath`: the text still lands, only the
+    re-read is lost, and `canReextract` on the detail payload is what hides that button.
+    MP3s are unchanged — a recording has no pages to pick, so it still travels as a file
+    and is transcribed by the job. The `files` multipart path still accepts pdf/docx
+    (back-compat); the web no longer uses it, so the job's probe/`needs-selection`
+    machinery below is now reachable only through it.
   Sarvam/extraction logic → `packages/content-engine/src/intake/*`
   (`sarvam-stt.ts`, `sarvam-doc.ts`, `docx.ts`; official `sarvamai`
   SDK, key `SARVAM_API_KEY`); rows/bucket → `packages/database/src/dlo-intakes.ts`
@@ -297,10 +334,16 @@ reference_url, layout_summary, has_photo_zone }` to the `article-poster-v1-api`
   A document that has NOT been read shows the selector alone (its text does not exist yet);
   a read one shows the selector folded above the editable rows. `showSelectAll={false}`
   (/dlo, whose card header is already the file's select-all) and `showRangeSelector={false}`
-  are the escape hatches. Adopted by ALL FOUR surfaces inline — the "फाईलमधून मजकूर घ्या"
-  fold is gone everywhere, so the capability looks identical on every page. `/dlo`'s backend
-  is still its own (`dlo-runner.ts` owns its job state; converging it onto
-  `document-intake.ts` — which would also give DLO `.txt` — is the named follow-up).
+  are the escape hatches. `PageRangeSelector`'s input id comes from `useId()` — /dlo shows
+  several pickers at once and a fixed id made every label focus the first one.
+  Adopted by ALL FOUR surfaces inline — the "फाईलमधून मजकूर घ्या"
+  fold is gone everywhere, so the capability looks identical on every page. **/dlo's
+  DOCUMENTS now go through this service too** (2026-07-25 — see the DLO bullet above; that
+  is also where `.txt` support came from), so `dlo-runner.ts` still owns intake job state
+  but no longer reads documents on the normal path. `<DocumentIntake>`'s live mode reports
+  a second `DocumentSnapshot` argument (jobId/fileName/kind/source/pageCount + the selected,
+  edited pages) for a caller that needs to describe the file rather than just hold its text;
+  `title`/`hint`/`onRemove` are the other /dlo-driven additions.
   Harness: `tsx --env-file=../../.env src/intake/document.ts <file> [--probe] [--pages=2,5]`.
 - **PDF text extraction (every surface that takes a PDF — the shared intake and DLO).**
   **Nothing is read until the user has picked pages.** Upload runs `probePdf` only (page
@@ -350,6 +393,46 @@ reference_url, layout_summary, has_photo_zone }` to the `article-poster-v1-api`
   (`TranslateDocumentPanel.tsx`, `useTranslateDocument.ts`) is deleted. Restore from git if
   per-page translation is ever wanted back; do not assume the routes are live. Harness (still
   works): `tsx --env-file=../../.env src/generation/interpret-document-instruction.ts "<सूचना>"`.
+- **An article poster whose news has a NAMED SUBJECT says only that name.**
+  `generation/resolve-poster-subject.ts` (was `resolve-scheme-subject.ts`) decides, per RUN and
+  per CONTENT — not per category, and no longer only for schemes: a scheme, campaign, mission,
+  **award**, **service/model**, portal, fund or project all qualify (`SUBJECT_KIND`). There is
+  **no pre-filter** — the old `mentionsScheme` token gate is deleted, because no token list
+  covers पुरस्कार or ‘भारत टॅक्सी’ and it was silently returning `null` before spending a token;
+  one `POSTER_COPY_MODEL` call per article poster is nothing beside the image render it guards.
+  The model only **nominates** and must cite a verbatim `evidence` sentence; then
+  `validatePosterSubject` is the **deterministic verdict** — quotes/edge punctuation stripped
+  (‘भारत टॅक्सी’ → भारत टॅक्सी), ≥2 words, and the name accountable in **note ∪ article** via
+  `validateDeclaredSchemeNames`'s inflection tolerance (योजना → योजनेच्या) or via `lockSchemeNames`
+  expanding a truncation against verified glossary rows (a repair that only ever LENGTHENS toward
+  the source), plus a lenient `isProminent` backstop that rejects a name occurring ONCE and late
+  in a long note (the shape of a passing mention). Unaccountable → `null` and the poster keeps its
+  editorial headline. The prompt's `TEXT LOCK` block (`textLocked`, was `schemeLocked`) then says
+  reproduce this exact string, **year included** — and deliberately does NOT call it a scheme, so
+  an award name is not "corrected" into scheme-shaped wording. Accept rules to keep: a
+  statement/announcement/launch ABOUT a named thing counts; an invitation for applications counts;
+  a change to scheme A that also cites older scheme B picks **A**. The terra tier is deliberate —
+  only the NAME is code-checked; the judgement is not, and it decides the poster's whole visible
+  text. Harness: `tsx src/generation/resolve-poster-subject.ts` (free, validation half) or
+  `--file=note.txt` for a live check (cents; always use `--file`, npx truncates multi-line argv
+  on Windows).
+- **The officer can override that text outright: `generations.poster_heading` (0029).** Typed on
+  the media room (shown only for the पोस्टर output) or on `PosterPanel` after seeing the poster
+  (`POST …/poster/regenerate { posterHeading }`, `''` clears it back to automatic). It wins over
+  both the subject resolution — which is then not even called — and the editorial headline, and is
+  reproduced through the same TEXT LOCK. It is PERSISTED (a job parameter would be lost on the
+  first redo) and written by the regenerate job BEFORE the render. `insertGeneration` omits the
+  column unless a heading was actually typed, so a database without 0029 loses only this feature
+  rather than failing every create — the 0028 principle.
+- **Article poster look = the SHARED palette rotation + its OWN landscape composition library.**
+  `generation/article-poster-layouts.ts` holds 11 landscape archetypes (`art_`-prefixed ids;
+  `coverage` values `panel`/`split`/`band`/`field`/`wedge`), each stating the **headline-only**
+  rule and the reserved zones (top-left ~420x180 logo, bottom ~150px footer — keep in sync with
+  `poster-renderer/src/article-chrome.ts` and web's `ARTICLE_RESERVED_ZONES`). Colours are NOT
+  duplicated: `poster-palettes.ts` is shared verbatim. `poster-style.ts` resolves an id through
+  BOTH libraries (`anyLayoutById`), and `listRecentPosterStyles(client, limit, categories)` is
+  SCOPED per lane so a social coverage can't bar an article pick. Harnesses (free):
+  `tsx src/generation/{article-poster-layouts,build-article-poster-prompt}.ts`.
 - **Social poster look = TWO assigned rotations, not the model's taste.** A fresh (fully-AI)
   social poster gets a **colour palette** (`generation/poster-palettes.ts` — 18 entries, 3 per
   family across `cool|teal|green|purple|neutral|warm`, each with 4 exact **hex** values and a
@@ -455,6 +538,14 @@ videos; new table, apply before the API deploy). `0028` —
 assigned, and what its render measured; feeds the next run's avoid set). Additive + nullable, so
 an older API is unaffected — and the runner writes it in a SEPARATE best-effort update after the
 poster write, so an un-applied 0028 costs the rotation memory rather than a paid render.
+`0029` — `generations.poster_heading` (text: the exact line an officer typed for an ARTICLE
+poster; null = resolve it automatically). Additive + nullable, and `insertGeneration` omits the
+column unless a heading was typed, so an un-applied 0029 disables only the override instead of
+breaking every create — but apply it before the API deploy anyway.
+`0031` — `audio_transcript_cache` (new table: SHA-256 of an MP3's bytes → its Sarvam transcript,
+so a re-uploaded recording is never re-transcribed on /dlo). Self-contained + additive; the
+intake job treats a cache-read error as an empty cache, so an un-applied 0031 disables only the
+optimization instead of breaking intake — apply it before the API deploy anyway.
 
 **Aux / not on the main request path:**
 
@@ -544,34 +635,33 @@ Chromium): `pnpm --filter @dgipr/poster-renderer exec playwright install chromiu
   photo and all Devanagari text, header, and footer are typeset in HTML and screenshotted
   with Chromium (this is what prevents garbled Marathi). Storage paths are versioned per
   render (public bucket is CDN-cached — never reuse a path).
-- **Article poster via n8n (default).** With `ARTICLE_POSTER_MODE=n8n` the article poster
-  is rendered by the `article-poster-v1-api` workflow, not Chromium: the API sends
-  `{ headline, scene_brief, reference_url, layout_summary, has_photo_zone }` and the
-  image model paints the **landscape** poster body (one Marathi headline, no
-  bullets/stats — deliberately simple, distinct from the Twitter posters) by editing the
-  master at `reference_url`. The workflow's Build Prompt is **layout-agnostic**: it never
-  names a specific anatomy (a hardcoded "curved left panel + right photo zone" once made
-  gpt-image-2 reshape every master into that one look, defeating the rotation's variety);
-  structure is asserted only from `layout_summary`/`has_photo_zone` — the picked master's
-  own `reference_images.layout_spec` (migration 0016) flattened to strings ('' = un-analyzed
-  → generic conditional prompt; `has_photo_zone: 'false'` = hard no-imagery lock; the
-  panel-colour theme is applied conditionally, only if the master actually has a solid
-  headline panel). Article masters therefore need the `analyze:references` backfill just
-  like twitter ones. This intentionally accepts image-model Devanagari for the single
-  headline (verified acceptable). The brand chrome is NOT painted by the model: the prompt erases the
-  master's logo/footer and declares those areas reserved zones (top-left ~420x180,
-  bottom ~150px at 1536x1024, quiet background only), and `renderArticlePosterViaN8n`
-  stamps `assets/article-logo.png` (~342x122 at left 31 / top 13 — the official frame
-  design's own 22.3%-of-width proportion) + `assets/poster-footer.png` in code
-  (`overlayArticleChrome` in `packages/poster-renderer/src/article-chrome.ts`; zone
-  numbers there, in `ARTICLE_RESERVED_ZONES` (web), and in the workflow's Build Prompt
-  node must stay in sync; tune for free with `poster:preview:chrome`). The Build Prompt
-  states the reserved zones **before** the erase instruction and repeats them as a
-  final check, and forbids reflowing the headline into the erased branding's space —
-  without that the model floated the headline up under the stamped logo, which then
-  clipped it. The overlay also runs on image-feedback
-  re-renders, re-stamping any chrome drift. No scene image is produced, so poster
-  feedback + manual copy-edit (which need `scenePath`) are unavailable in this mode.
+- **Article poster: GENERATED by the API, not edited from a master (default `fresh`).**
+  `buildArticlePosterPrompt` (`content-engine/src/generation/build-article-poster-prompt.ts`)
+  assembles the whole prompt and `generateImage(prompt, { size: '1536x1024' })` paints the
+  **landscape** poster — one Marathi headline, no bullets/stats, deliberately simple and
+  distinct from the Twitter posters. Block order is load-bearing and harness-asserted:
+  `COLOUR SPECIFICATION` (the assigned hexes, **whenever a palette exists** — never the art
+  director's paraphrase; that substitution is what made the social rotation inert) →
+  `COLOUR_MANDATE` → `ART DIRECTION` → `COMPOSITION` (the assigned archetype, which OUTRANKS
+  the master) → `RESERVED ZONES` → `STRUCTURE INSPIRATION` (the master's `layout_spec`
+  summary run through `stripColourMentions`) → the headline (+ `TEXT LOCK` on a scheme run) →
+  imagery. Article masters still need the `analyze:references` backfill: in fresh mode that
+  spec supplies the structure hint and the real `hasPhotoZone`. This intentionally accepts
+  image-model Devanagari for the single headline (verified acceptable), which is what the two
+  redo buttons on `PosterPanel` exist for.
+  The brand chrome is NOT painted by the model: the prompt declares the reserved zones
+  (top-left ~420x180, bottom ~150px at 1536x1024, quiet background only) FIRST and repeats
+  them as a final check, and forbids reflowing the headline upward into them — without that
+  the model floated the headline under the stamped logo, which then clipped it.
+  `overlayArticleChrome` (`packages/poster-renderer/src/article-chrome.ts`) stamps
+  `assets/article-logo.png` (~342x122 at left 31 / top 13 — the official frame design's own
+  22.3%-of-width proportion) + `assets/poster-footer.png` in code, on fresh renders and
+  image-feedback re-renders alike. Zone numbers there, in `ARTICLE_RESERVED_ZONES` (web), and
+  in `build-article-poster-prompt.ts` must stay in sync; tune for free with
+  `poster:preview:chrome`. `ARTICLE_POSTER_MODE=n8n` restores the old master-edit behaviour
+  (`buildArticlePosterPrompt` mode `onbrand` → the 5-node workflow); neither n8n mode produces
+  a scene image, so poster feedback + manual copy-edit (which need `scenePath`) stay
+  `html`-only.
 - **Twitter posters get the same code-stamped chrome.** `social-post-v2-api`'s prompts
   erase the master's महाराष्ट्र शासन emblem (top-right) + footer band/social strip and
   declare them reserved zones (top-right ~220x180, bottom ~130px at 1280x1600, quiet

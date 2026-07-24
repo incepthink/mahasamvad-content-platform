@@ -4,9 +4,11 @@
 // ("मजकूर सुधारा" cheap re-render vs "चित्र बदला" new background image).
 
 import { useState } from 'react';
+import { POSTER_HEADING_MAX_CHARS } from '@dgipr/schemas';
 import type { GenerationDetail } from '@dgipr/schemas';
 import {
   posterDownloadUrl,
+  regeneratePoster,
   sendPosterFeedback,
   sendPosterImageFeedback,
   updatePosterCopy,
@@ -169,6 +171,73 @@ export function PosterPanel({
             </div>
           ) : (
             <div className="poster-feedback">
+              {detail.status === 'completed' ? (
+                <div className="poster-feedback">
+                  {detail.posterStyleLabel ? (
+                    <p className="hint poster-style-label">
+                      {STR.posterStyleLabelPrefix} {detail.posterStyleLabel}
+                    </p>
+                  ) : null}
+                  <p className="hint">{STR.posterRedesignHint}</p>
+                  <div className="poster-redesign-actions">
+                    {/* Both buttons re-render the poster as a new version; the row flips to
+                        running server-side, so refresh to resume polling. `recolour`
+                        additionally bars the family shown above, for when only the colours
+                        are wrong. Same pair as SocialPostView. */}
+                    <button
+                      type="button"
+                      className="btn btn-small"
+                      disabled={showSpinner}
+                      onClick={async () => {
+                        setPending(true);
+                        try {
+                          await regeneratePoster(detail.id);
+                          await onChanged();
+                        } finally {
+                          setPending(false);
+                        }
+                      }}
+                    >
+                      {STR.posterRedesign}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-small"
+                      disabled={showSpinner}
+                      onClick={async () => {
+                        setPending(true);
+                        try {
+                          await regeneratePoster(detail.id, { recolour: true });
+                          await onChanged();
+                        } finally {
+                          setPending(false);
+                        }
+                      }}
+                    >
+                      {STR.posterRecolour}
+                    </button>
+                  </div>
+                  {/* The third redo, and the one that fixes a wrong heading: print exactly
+                      this text. It lives here rather than on the create form alone because
+                      the officer only discovers the automatic text is wrong once the poster
+                      exists. */}
+                  <PosterHeadingEditor
+                    current={detail.posterHeading}
+                    disabled={showSpinner}
+                    onApply={async (heading) => {
+                      setPending(true);
+                      try {
+                        await regeneratePoster(detail.id, {
+                          posterHeading: heading,
+                        });
+                        await onChanged();
+                      } finally {
+                        setPending(false);
+                      }
+                    }}
+                  />
+                </div>
+              ) : null}
               <PosterImageFeedbackBox
                 markers={markers}
                 onNoteChange={setNote}
@@ -198,5 +267,91 @@ export function PosterPanel({
       </div>
       <PosterVersionStrip detail={detail} />
     </section>
+  );
+}
+
+// Type the exact line the poster must carry, and re-render with it. Closed by default — a
+// finished poster should read as a finished poster, the same reasoning as the caption card's
+// read-only block. `current` is what the run already has stored (null = the heading is being
+// resolved automatically from the note), and applying an EMPTY string is a meaningful action:
+// it hands the decision back to the automatic resolver.
+function PosterHeadingEditor({
+  current,
+  disabled,
+  onApply,
+}: {
+  current: string | null;
+  disabled: boolean;
+  onApply: (heading: string) => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [value, setValue] = useState(current ?? '');
+
+  return (
+    <div className="poster-heading-editor">
+      <p className="hint">
+        {STR.posterHeadingCurrentPrefix}{' '}
+        {current ? <strong>{current}</strong> : STR.posterHeadingAuto}
+      </p>
+      {open ? (
+        <>
+          <input
+            type="text"
+            maxLength={POSTER_HEADING_MAX_CHARS}
+            placeholder={STR.posterHeadingPlaceholder}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            disabled={disabled}
+          />
+          <p className="hint">{STR.posterHeadingHint}</p>
+          <div className="poster-redesign-actions">
+            <button
+              type="button"
+              className="btn btn-small btn-primary"
+              disabled={disabled || value.trim().length === 0}
+              onClick={async () => {
+                await onApply(value.trim());
+                setOpen(false);
+              }}
+            >
+              {STR.posterHeadingApply}
+            </button>
+            {current ? (
+              <button
+                type="button"
+                className="btn btn-small"
+                disabled={disabled}
+                onClick={async () => {
+                  setValue('');
+                  await onApply('');
+                  setOpen(false);
+                }}
+              >
+                {STR.posterHeadingClear}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="btn btn-small"
+              onClick={() => {
+                setValue(current ?? '');
+                setOpen(false);
+              }}
+            >
+              {STR.posterHeadingCancel}
+            </button>
+          </div>
+        </>
+      ) : (
+        <button
+          type="button"
+          className="btn btn-small"
+          disabled={disabled}
+          onClick={() => setOpen(true)}
+        >
+          {STR.posterHeadingEdit}
+        </button>
+      )}
+    </div>
   );
 }

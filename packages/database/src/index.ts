@@ -104,6 +104,12 @@ export {
   type DloIntakePatch,
 } from './dlo-intakes.js';
 export {
+  AUDIO_TRANSCRIPT_CACHE_TABLE,
+  hashAudioContent,
+  getCachedTranscripts,
+  putCachedTranscript,
+} from './stt-cache.js';
+export {
   REFERENCE_IMAGES_TABLE,
   listReferenceImageRows,
   getReferenceImageRow,

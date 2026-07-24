@@ -202,6 +202,10 @@ export function buildUserPrompt(
   heading?: string | null,
   fiveW1H?: FiveWOneH | null,
   brief?: EditorialBrief | null,
+  // Facts the officer deselected in the /dlo Pointers step (extract-pointers.ts). NOT a fact
+  // source and NOT a length signal — a list of things to KEEP OUT. Empty/absent ⇒ nothing is
+  // excluded, i.e. today's behaviour.
+  excludeFacts?: readonly string[] | null,
 ): string {
   const parts: string[] = [];
 
@@ -257,6 +261,20 @@ export function buildUserPrompt(
     parts.push(...formatBriefBlock(brief));
   }
 
+  // Facts the officer deselected in the Pointers step. Deliberately placed right before the
+  // NOTES so it reads as a constraint on how to USE them: the notes remain the fact source,
+  // but everything listed here must be kept out of the article.
+  const excluded = (excludeFacts ?? []).map((fact) => fact.trim()).filter(Boolean);
+  const hasExcluded = excluded.length > 0;
+  if (hasExcluded) {
+    parts.push(
+      '<EXCLUDE purpose="facts_the_officer_chose_to_leave_out">',
+      ...excluded.map((fact) => `- ${fact}`),
+      '</EXCLUDE>',
+      '',
+    );
+  }
+
   parts.push(
     '<NOTES purpose="only_authoritative_fact_source">',
     note.trim(),
@@ -272,6 +290,11 @@ export function buildUserPrompt(
         ]
       : []),
     'NOTES मध्ये नसलेले कोणतेही ठोस तथ्य, नाव, पदनाम, तारीख, ठिकाण, आकडा, कायदा, योजना, quote किंवा byline जोडू नका.',
+    ...(hasExcluded
+      ? [
+          'EXCLUDE यादीतील तथ्ये अधिकाऱ्याने जाणीवपूर्वक वगळली आहेत — ती लेखात अजिबात आणू नका, ना थेट ना वेगळ्या शब्दांत. त्यांच्याशी थेट निगडित तपशीलही टाळा. EXCLUDE मध्ये नसलेली NOTES मधील इतर सर्व माहिती मात्र नेहमीप्रमाणे वापरा.',
+        ]
+      : []),
     ...(hasFiveW1H
       ? hasBrief
         ? [
