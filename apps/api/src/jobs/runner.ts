@@ -17,6 +17,7 @@ import {
   createCostAccumulator,
   extractGlossaryCandidates,
   generateArtDirection,
+  applyDesignations,
   generateArticle,
   generateCopy,
   generatePosterCopy,
@@ -83,14 +84,22 @@ import {
   type TemplateBrand,
 } from '@dgipr/database';
 import {
+  AttributedStatementsSchema,
   CopySchema,
+  NameDesignationsSchema,
+  SelectedFactsSchema,
   TWEET_MAX_LENGTH,
   isSocialCategory,
   type Copy,
+  type AttributedStatement,
+  type DesignationWarning,
+  type NameDesignation,
+  type SelectedFact,
   type PosterImageFeedbackRequest,
   type TranslationLanguage,
   type TranslationTermInput,
 } from '@dgipr/schemas';
+import { listKnownDesignations } from './translation-terms.js';
 
 const running = new Set<string>();
 
@@ -109,6 +118,13 @@ const translateErrors = new Map<string, string>();
 // the officer reads the fresh output, not forever: the translation itself is on the row.
 // A [] entry means "translated, nothing to flag"; absent means no translation this session.
 const translateWarnings = new Map<string, string[]>();
+
+// Approved पदनामे the article could not carry as approved — the full name never appeared, or a
+// different title was found in front of it and replaced. Transient for exactly the reason
+// translateWarnings is: the article is on the row, this is a "look at this" prompt that matters
+// while the officer is reading the fresh output. A [] entry means every designation applied
+// cleanly; absent means this run predates the session (or approved none).
+const designationWarnings = new Map<string, DesignationWarning[]>();
 
 // Article revision may likewise run *alongside* the poster render: the article is
 // final and persisted before the poster phase starts, so the user can refine it
@@ -148,6 +164,11 @@ export function getTranslateError(id: string): string | null {
 // Names the last Hindi translation could not preserve (null when none ran this session).
 export function getTranslateWarnings(id: string): string[] | null {
   return translateWarnings.get(id) ?? null;
+}
+
+// Approved designations the latest article/revision could not apply as approved.
+export function getDesignationWarnings(id: string): DesignationWarning[] {
+  return designationWarnings.get(id) ?? [];
 }
 
 export function isRevisingArticle(id: string): boolean {
@@ -303,6 +324,53 @@ function articleCategoryOf(
   );
 }
 
+// The row's approved person → पदनाम pairs (migration 0033). Stored as jsonb, so the shape is
+// validated here rather than trusted: a malformed or pre-0033 value degrades to "no
+// designations", which is exactly the article the note would have produced anyway.
+export function nameDesignationsOf(row: GenerationRow): NameDesignation[] {
+  const parsed = NameDesignationsSchema.safeParse(row.nameDesignations ?? []);
+  return parsed.success ? [...parsed.data] : [];
+}
+
+export function selectedFactsOf(row: GenerationRow): SelectedFact[] {
+  const parsed = SelectedFactsSchema.safeParse(row.selectedFacts ?? []);
+  return parsed.success ? [...parsed.data] : [];
+}
+
+export function statementsOf(row: GenerationRow): AttributedStatement[] {
+  const parsed = AttributedStatementsSchema.safeParse(row.statements ?? []);
+  return parsed.success ? [...parsed.data] : [];
+}
+
+// Everything the article pipeline needs to apply designations: the approved pairs plus the
+// dictionary's other titles, which are used ONLY to recognise a wrong one the model wrote in
+// front of an approved name. The known-title lookup is best-effort — losing it costs the
+// "replace a wrong title" repair, never the designation itself.
+async function designationContext(
+  client: SupabaseClient,
+  row: GenerationRow,
+): Promise<{
+  designations: NameDesignation[];
+  knownDesignations: string[];
+}> {
+  const designations = nameDesignationsOf(row);
+  if (designations.length === 0) {
+    return { designations, knownDesignations: [] };
+  }
+  try {
+    return {
+      designations,
+      knownDesignations: await listKnownDesignations(client),
+    };
+  } catch (error) {
+    console.warn(
+      `[designations] could not load known designations; continuing:`,
+      error,
+    );
+    return { designations, knownDesignations: [] };
+  }
+}
+
 // Full pipeline for a new generation: article (always — poster copy derives its
 // facts from the verified article even in poster-only mode), then optionally
 // copy -> scene image -> typeset poster.
@@ -316,19 +384,38 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
     // poster copy straight from it. (No factCheck/5W1H/brief is produced; those
     // columns stay null and the detail page treats them as optional.)
     if (row.articleProvided) {
+      // Designations still apply here, even though nothing is generated: the officer pasted an
+      // article and approved "this person is named with this title", so the same deterministic
+      // pass normalises the first mention. There is no prompt half on this path — the pass IS
+      // the feature — and with no approved pairs it returns the pasted text unchanged.
+      const provided = await designationContext(client, row);
+      const providedResult = applyDesignations(
+        row.note,
+        provided.designations,
+        { knownDesignations: provided.knownDesignations },
+      );
+      designationWarnings.set(id, [...providedResult.issues]);
+      const providedArticle = providedResult.text;
+
       await updateGeneration(client, id, {
         status: 'running',
         step: 'copy',
-        article: row.note,
+        article: providedArticle,
         error: null,
       });
       // Defensive — the media-room page never sends outputType 'article', but if
       // it did there is no poster to render.
       if (row.outputType === 'article') return;
-      await runArticlePosterPhase(client, id, row.note, row.referenceImageId, {
-        note: row.note,
-        posterHeading: row.posterHeading,
-      });
+      await runArticlePosterPhase(
+        client,
+        id,
+        providedArticle,
+        row.referenceImageId,
+        {
+          note: providedArticle,
+          posterHeading: row.posterHeading,
+        },
+      );
       return;
     }
 
@@ -338,6 +425,13 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
       error: null,
     });
 
+    // Person → पदनाम pairs the officer approved before generating (migration 0033), plus the
+    // dictionary's other titles so a wrong one in front of an approved name can be corrected.
+    const { designations, knownDesignations } = await designationContext(
+      client,
+      row,
+    );
+
     const result = await generateArticle(row.note, {
       category: articleCategoryOf(row.category),
       heading: row.heading ?? undefined,
@@ -345,6 +439,10 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
       // into drafting + the coverage checkers so a dropped fact is not re-added. Null on
       // every non-DLO run, which generateArticle treats as "exclude nothing".
       excludeFacts: row.excludedFacts ?? undefined,
+      includeFacts: selectedFactsOf(row),
+      statements: statementsOf(row),
+      designations,
+      knownDesignations,
       onProgress: (phase) => {
         void updateGeneration(client, id, { step: phase }).catch((error) => {
           console.error(`[job ${id}] progress update failed:`, error);
@@ -356,6 +454,9 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
     if (result.brief) {
       console.log(`[job ${id}] editorial angle: ${result.brief.angle}`);
     }
+    // Report, never fail: the article is about to be persisted either way, and an officer who
+    // can see "this designation did not apply" can fix it — one who cannot, cannot.
+    designationWarnings.set(id, [...result.designationIssues]);
     await updateGeneration(client, id, {
       article: result.article,
       factCheck: result.factCheck,
@@ -1448,13 +1549,23 @@ export function startArticleFeedbackJob(
     const currentContent = row.factCheck
       ? `${row.article}\n\n${FACT_CHECK_DELIMITER}\n${row.factCheck}`
       : row.article;
+    // The run's approved designations, re-read from the row: a feedback revision that lost a
+    // पदनाम would silently undo the officer's review, so the same pairs steer the revision AND
+    // are re-applied deterministically at the end of it.
+    const revisionDesignations = await designationContext(client, row);
     const revised = await reviseArticle(
       row.note,
       currentContent,
       feedback,
       articleCategoryOf(row.category),
       row.heading ?? undefined,
+      revisionDesignations.designations,
+      revisionDesignations.knownDesignations,
+      selectedFactsOf(row),
+      statementsOf(row),
+      row.excludedFacts ?? [],
     );
+    designationWarnings.set(id, [...revised.designationIssues]);
 
     await updateGeneration(client, id, {
       article: revised.article,
@@ -1500,13 +1611,22 @@ export function startConcurrentArticleFeedbackJob(
         const currentContent = row.factCheck
           ? `${row.article}\n\n${FACT_CHECK_DELIMITER}\n${row.factCheck}`
           : row.article;
+        // Same reasoning as the status-owning path above: the designations must survive a
+        // revision, so they steer it and are re-applied at the end.
+        const revisionDesignations = await designationContext(client, row);
         const revised = await reviseArticle(
           row.note,
           currentContent,
           feedback,
           articleCategoryOf(row.category),
           row.heading ?? undefined,
+          revisionDesignations.designations,
+          revisionDesignations.knownDesignations,
+          selectedFactsOf(row),
+          statementsOf(row),
+          row.excludedFacts ?? [],
         );
+        designationWarnings.set(id, [...revised.designationIssues]);
 
         await updateGeneration(client, id, {
           article: revised.article,

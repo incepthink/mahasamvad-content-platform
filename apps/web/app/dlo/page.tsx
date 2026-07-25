@@ -27,16 +27,21 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { FileText, Music, X } from 'lucide-react';
 import type {
+  AttributedStatement,
   DloCategory,
   DloIntakeDetail,
   DloPreReadDocument,
+  KnownDesignation,
   PointerGroup,
+  PreparedName,
 } from '@dgipr/schemas';
 import {
+  articlePdfDownloadUrl,
   createDloIntake,
   extractDloPages,
   fetchPointers,
   generateFromDloIntake,
+  prepareDesignations,
   reextractDloFile,
 } from '../../lib/api';
 import {
@@ -54,7 +59,17 @@ import { ARTICLE_CATEGORY_OPTIONS } from '../../lib/generationOptions';
 import { useDloIntake } from '../../lib/useDloIntake';
 import { useGeneration } from '../../lib/useGeneration';
 import { DloSourceReview } from '../../components/DloSourceReview';
-import { PointerSelector, pointerId } from '../../components/PointerSelector';
+import {
+  PointerSelector,
+  pointerId,
+  statementId,
+} from '../../components/PointerSelector';
+import {
+  DesignationReview,
+  collectDesignations,
+  type DesignationEdit,
+  type DesignationExtra,
+} from '../../components/DesignationReview';
 import {
   DocumentIntake,
   type DocumentSnapshot,
@@ -330,11 +345,34 @@ export default function DloPage() {
   // The deselected set is cleared whenever a fresh extraction lands, so a stale id from a
   // previous list can never leak into `excludedFacts`.
   const [pointers, setPointers] = useState<PointerGroup[] | null>(null);
+  const [statements, setStatements] = useState<AttributedStatement[]>([]);
   const [pointersLoading, setPointersLoading] = useState(false);
   const [pointersError, setPointersError] = useState(false);
   const [deselectedPointers, setDeselectedPointers] = useState<Set<string>>(
     new Set(),
   );
+  const [deselectedStatements, setDeselectedStatements] = useState<Set<string>>(
+    new Set(),
+  );
+
+  // व्यक्ती व पदनाम: the people the note names and the designation to print before each. Same
+  // three-state shape as pointers — `null` = not fetched, `[]` = fetched and nobody was named.
+  // Edits are keyed by the person's Marathi name so a re-fetch that returns the same people
+  // keeps what the officer typed; a name that disappears simply stops being collected.
+  const [designationNames, setDesignationNames] = useState<
+    PreparedName[] | null
+  >(null);
+  const [knownDesignations, setKnownDesignations] = useState<
+    KnownDesignation[]
+  >([]);
+  const [designationsLoading, setDesignationsLoading] = useState(false);
+  const [designationsError, setDesignationsError] = useState(false);
+  const [designationEdits, setDesignationEdits] = useState<
+    Record<string, DesignationEdit>
+  >({});
+  const [designationExtras, setDesignationExtras] = useState<
+    DesignationExtra[]
+  >([]);
 
   const {
     detail: intake,
@@ -397,17 +435,21 @@ export default function DloPage() {
     async (text: string) => {
       setPointersError(false);
       setDeselectedPointers(new Set());
+      setDeselectedStatements(new Set());
       const trimmed = text.trim();
       if (trimmed.length < TEXT_MIN_CHARS) {
         setPointers([]);
+        setStatements([]);
         return;
       }
       setPointersLoading(true);
       try {
         const result = await fetchPointers({ text: trimmed, category });
         setPointers(result.groups);
+        setStatements(result.statements);
       } catch {
         setPointers([]);
+        setStatements([]);
         setPointersError(true);
       } finally {
         setPointersLoading(false);
@@ -425,10 +467,89 @@ export default function DloPage() {
     void runPointers(reviewText);
   }, [step, intake, pointers, pointersLoading, reviewText, runPointers]);
 
+  // Find the people this note names and what पदनाम each should carry. Best-effort in exactly
+  // the way pointers are: any failure leaves an empty (non-null) list, so the officer can
+  // still generate — without designations, which is what happens today.
+  const runDesignations = useCallback(async (text: string) => {
+    setDesignationsError(false);
+    setDesignationEdits({});
+    setDesignationExtras([]);
+    const trimmed = text.trim();
+    if (trimmed.length < TEXT_MIN_CHARS) {
+      setDesignationNames([]);
+      return;
+    }
+    setDesignationsLoading(true);
+    try {
+      const result = await prepareDesignations({ text: trimmed });
+      setDesignationNames(result.names);
+      setKnownDesignations(result.knownDesignations);
+    } catch {
+      setDesignationNames([]);
+      setDesignationsError(true);
+    } finally {
+      setDesignationsLoading(false);
+    }
+  }, []);
+
+  // Same once-per-review-session guard as the pointer fetch above, and safe for the same
+  // reason: useDloIntake has already fetched the heavy ?text=1 shape before flipping to ready,
+  // so `reviewText` is populated the first time the review step renders.
+  useEffect(() => {
+    if (step !== 'review' || !intake) return;
+    if (designationNames !== null || designationsLoading) return;
+    void runDesignations(reviewText);
+  }, [
+    step,
+    intake,
+    designationNames,
+    designationsLoading,
+    reviewText,
+    runDesignations,
+  ]);
+
+  const editDesignation = (marathi: string, designation: string) => {
+    setDesignationEdits((prev) => ({
+      ...prev,
+      [marathi]: { designation, remember: prev[marathi]?.remember ?? false },
+    }));
+  };
+
+  const toggleRememberDesignation = (marathi: string, remember: boolean) => {
+    setDesignationEdits((prev) => ({
+      ...prev,
+      [marathi]: {
+        designation:
+          prev[marathi]?.designation ??
+          designationNames?.find((n) => n.marathi === marathi)?.designation ??
+          '',
+        remember,
+      },
+    }));
+  };
+
+  const changeDesignationExtra = (
+    index: number,
+    patch: Partial<DesignationExtra>,
+  ) => {
+    setDesignationExtras((prev) =>
+      prev.map((row, i) => (i === index ? { ...row, ...patch } : row)),
+    );
+  };
+
   // Toggle one pointer in/out of the article. Kept for an excluded pointer too, so
   // re-checking is free.
   const togglePointer = (id: string) => {
     setDeselectedPointers((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleStatement = (id: string) => {
+    setDeselectedStatements((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -636,6 +757,27 @@ export default function DloPage() {
         deselectedPointers.has(pointerId(group.dimension, index)),
       ),
     );
+    // Keep the 5W1H dimension with every approved pointer. The API persists this inventory
+    // and reuses it as both the completeness contract and the fact scaffold, eliminating a
+    // redundant second extraction call.
+    const selectedFacts = (pointers ?? []).flatMap((group) =>
+      group.points.flatMap((text: string, index: number) =>
+        deselectedPointers.has(pointerId(group.dimension, index))
+          ? []
+          : [{ dimension: group.dimension, text }],
+      ),
+    );
+    const selectedStatements = statements.filter(
+      (_statement, index) =>
+        !deselectedStatements.has(statementId(index)),
+    );
+    // The approved person → पदनाम pairs. A blank पदनाम is dropped, so "no designations" is
+    // the absence of the field and the article is exactly what /dlo produced before.
+    const designations = collectDesignations(
+      designationNames,
+      designationEdits,
+      designationExtras,
+    );
     setSubmitting(true);
     setError(null);
     try {
@@ -643,7 +785,12 @@ export default function DloPage() {
         combinedText: text,
         category,
         ...(heading.trim() ? { heading: heading.trim() } : {}),
+        ...(selectedFacts.length > 0 ? { selectedFacts } : {}),
+        ...(selectedStatements.length > 0
+          ? { statements: selectedStatements }
+          : {}),
         ...(excludedFacts.length > 0 ? { excludedFacts } : {}),
+        ...(designations.length > 0 ? { designations } : {}),
       });
       setGenerationId(id);
       setStep('generating');
@@ -677,9 +824,17 @@ export default function DloPage() {
     setExtracting(false);
     setShowPreview(false);
     setPointers(null);
+    setStatements([]);
     setPointersLoading(false);
     setPointersError(false);
     setDeselectedPointers(new Set());
+    setDeselectedStatements(new Set());
+    setDesignationNames(null);
+    setKnownDesignations([]);
+    setDesignationsLoading(false);
+    setDesignationsError(false);
+    setDesignationEdits({});
+    setDesignationExtras([]);
   };
 
   const copyArticle = async () => {
@@ -776,10 +931,10 @@ export default function DloPage() {
               which pages are worth OCR'ing the moment it is attached, rather than after the
               form is submitted and the intake job has run. By the time तयार करा is pressed
               these documents are already text. */}
-          <section className="card">
+          {/* <section className="card">
             <p className="field-label">{STR.dloDocsTitle}</p>
             <p className="hint">{STR.dloDocsHint}</p>
-          </section>
+          </section> */}
 
           {documents.map((slot) => (
             <DocumentIntake
@@ -793,7 +948,8 @@ export default function DloPage() {
                   // Every card reports once on mount with nothing loaded; rebuilding the
                   // list for that would re-render the whole step for no change.
                   prev.some(
-                    (entry) => entry.id === slot.id && entry.snapshot !== snapshot,
+                    (entry) =>
+                      entry.id === slot.id && entry.snapshot !== snapshot,
                   )
                     ? prev.map((entry) =>
                         entry.id === slot.id ? { ...entry, snapshot } : entry,
@@ -897,12 +1053,38 @@ export default function DloPage() {
               there. */}
           <PointerSelector
             groups={pointers ?? []}
+            statements={statements}
             loading={pointersLoading}
             error={pointersError}
             deselected={deselectedPointers}
+            deselectedStatements={deselectedStatements}
             busy={submitting || extracting || reextractingIndex !== null}
             onToggle={togglePointer}
+            onToggleStatement={toggleStatement}
             onRegenerate={() => void runPointers(reviewText)}
+          />
+
+          {/* Then the people the article will name, and the पदनाम each carries. Placed
+              between "what goes in" and "is the source text right" because it is the same
+              kind of decision as the former: what the article will SAY. */}
+          <DesignationReview
+            names={designationNames}
+            known={knownDesignations}
+            edits={designationEdits}
+            extras={designationExtras}
+            loading={designationsLoading}
+            error={designationsError ? STR.designationsError : null}
+            busy={submitting || extracting || reextractingIndex !== null}
+            onEditDesignation={editDesignation}
+            onToggleRemember={toggleRememberDesignation}
+            onChangeExtra={changeDesignationExtra}
+            onAddExtra={() =>
+              setDesignationExtras((prev) => [
+                ...prev,
+                { name: '', designation: '', remember: false },
+              ])
+            }
+            onRegenerate={() => void runDesignations(reviewText)}
           />
 
           <section className="card">
@@ -1096,9 +1278,17 @@ export default function DloPage() {
                 {STR.downloadTxt}
               </button>
               {generationId ? (
-                <Link className="btn" href={`/generations/${generationId}`}>
-                  {STR.dloViewDetail}
-                </Link>
+                <>
+                  {/* Rendered server-side by Chromium (a browser-side PDF library cannot
+                      shape Devanagari matras), so this is a link rather than a
+                      downloadBlob — only the API can force a cross-origin download. */}
+                  <a className="btn" href={articlePdfDownloadUrl(generationId)}>
+                    {STR.downloadPdf}
+                  </a>
+                  <Link className="btn" href={`/generations/${generationId}`}>
+                    {STR.dloViewDetail}
+                  </Link>
+                </>
               ) : null}
             </div>
           </section>

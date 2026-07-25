@@ -39,6 +39,7 @@ function GlossaryRow({
 }) {
   const [english, setEnglish] = useState(term.english);
   const [hindi, setHindi] = useState(term.hindi ?? '');
+  const [designation, setDesignation] = useState(term.designation ?? '');
   const [termType, setTermType] = useState<TermType>(term.termType);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -46,6 +47,7 @@ function GlossaryRow({
   const dirty =
     english.trim() !== term.english ||
     hindi.trim() !== (term.hindi ?? '') ||
+    designation.trim() !== (term.designation ?? '') ||
     termType !== term.termType;
 
   const run = async (fn: () => Promise<unknown>) => {
@@ -66,6 +68,7 @@ function GlossaryRow({
       updateGlossaryTerm(term.id, {
         english: english.trim(),
         hindi: hindi.trim() || null,
+        designation: designation.trim() || null,
         termType,
       }),
     );
@@ -104,6 +107,23 @@ function GlossaryRow({
           disabled={busy}
         />
       </div>
+
+      {/* Only a person carries a पदनाम — it is the title printed before THEIR name. Showing it
+          on a place or scheme row would just invite nonsense. */}
+      {termType === 'person' ? (
+        <div className="glossary-cell">
+          <span className="glossary-field-label">
+            {STR.designationsDesignation}
+          </span>
+          <input
+            type="text"
+            value={designation}
+            placeholder={STR.designationsPlaceholder}
+            onChange={(e) => setDesignation(e.target.value)}
+            disabled={busy}
+          />
+        </div>
+      ) : null}
 
       <div className="glossary-cell">
         <span className="glossary-field-label">{STR.glossaryType}</span>
@@ -163,6 +183,7 @@ function AddTermForm({ onAdded }: { onAdded: () => void }) {
   const [marathi, setMarathi] = useState('');
   const [english, setEnglish] = useState('');
   const [hindi, setHindi] = useState('');
+  const [designation, setDesignation] = useState('');
   const [termType, setTermType] = useState<TermType>('person');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -178,12 +199,18 @@ function AddTermForm({ onAdded }: { onAdded: () => void }) {
         marathi: marathi.trim(),
         english: english.trim(),
         hindi: hindi.trim() || undefined,
+        // Only sent for a person, and only when typed — the API omits the column otherwise,
+        // so an ordinary add still works on a database without 0032.
+        ...(termType === 'person' && designation.trim()
+          ? { designation: designation.trim() }
+          : {}),
         termType,
         verified: true,
       });
       setMarathi('');
       setEnglish('');
       setHindi('');
+      setDesignation('');
       setTermType('person');
       onAdded();
     } catch (e) {
@@ -227,6 +254,20 @@ function AddTermForm({ onAdded }: { onAdded: () => void }) {
             disabled={busy}
           />
         </div>
+        {termType === 'person' ? (
+          <div className="glossary-cell">
+            <span className="glossary-field-label">
+              {STR.designationsDesignation}
+            </span>
+            <input
+              type="text"
+              value={designation}
+              placeholder={STR.designationsPlaceholder}
+              onChange={(e) => setDesignation(e.target.value)}
+              disabled={busy}
+            />
+          </div>
+        ) : null}
         <div className="glossary-cell">
           <span className="glossary-field-label">{STR.glossaryType}</span>
           <select

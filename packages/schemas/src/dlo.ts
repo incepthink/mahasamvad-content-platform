@@ -4,6 +4,7 @@
 
 import { z } from 'zod';
 import { PdfTextSourceSchema } from './document.js';
+import { NameDesignationsSchema } from './designations.js';
 
 export const DloIntakeStatusSchema = z.enum([
   'queued',
@@ -128,10 +129,38 @@ export const DloGenerateRequestSchema = z.object({
   combinedText: z.string().trim().min(20).max(60_000),
   category: DloCategorySchema,
   heading: z.string().trim().max(200).optional(),
+  // Facts the officer kept in the Pointers step. The dimension is persisted with each
+  // bullet so the article pipeline can reuse the approved inventory as its 5W1H scaffold.
+  selectedFacts: z
+    .array(
+      z.object({
+        dimension: z.enum(['who', 'what', 'when', 'where', 'why', 'how']),
+        text: z.string().trim().min(1).max(500),
+      }),
+    )
+    .max(60)
+    .optional(),
+  // Attributed statements the officer kept. Empty designation/venue fields mean the note
+  // did not state them and are never filled by inference.
+  statements: z
+    .array(
+      z.object({
+        speaker: z.string().trim().min(1).max(200),
+        designation: z.string().trim().max(200),
+        venue: z.string().trim().max(300),
+        claim: z.string().trim().min(1).max(1000),
+      }),
+    )
+    .max(12)
+    .optional(),
   // Facts the officer deselected in the Pointers step (their AI-summarized bullet text).
   // The generation pipeline is instructed to leave these out — see pointers.ts. Absent/empty
   // ⇒ nothing excluded ⇒ the article the intake would have produced before this feature.
   excludedFacts: z.array(z.string().trim().min(1).max(500)).max(60).optional(),
+  // Person → पदनाम pairs the officer approved in the "व्यक्ती व पदनाम" step — see
+  // designations.ts. The designation is printed before the name on its first mention in the
+  // article, and both translations inherit it. Absent/empty ⇒ every name prints bare.
+  designations: NameDesignationsSchema.optional(),
 });
 export type DloGenerateRequest = z.infer<typeof DloGenerateRequestSchema>;
 

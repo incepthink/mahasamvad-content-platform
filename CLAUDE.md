@@ -261,6 +261,43 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
   X's limit lives in the publish-time 422 alone. `TWEET_MAX_LENGTH` +
   `tweetWeightedLength` still live in `@dgipr/schemas` (`packages/schemas/src/tweet.ts`)
   for the API — `apps/web` must not import `@dgipr/social-publisher` (twitter-api-v2).
+- **Person → designation (पदनाम) — the first time the name dictionary reaches the ARTICLE.**
+  A recording says `देवेंद्र फडणवीस`; the published article must say `मुख्यमंत्री देवेंद्र फडणवीस`.
+  Data: `glossary_terms.designation` (0032, person rows only, holds the MARATHI title) +
+  `generations.name_designations` (0033, the pairs approved for one run, insert-only,
+  omitted-unless-present). The title's English/Hindi are NOT stored on the person — they come
+  from that title's own `designation`-typed glossary row, which is why **`translate-article.ts`
+  needed no change at all**: English's `LOCKED TERMS` table already locks
+  `मुख्यमंत्री → Chief Minister` (seeded in 0010) and Hindi deliberately translates
+  `designation` rows (जिल्हाधिकारी → जिलाधिकारी) while freezing `person` rows. Insert the
+  designation into the Marathi article and both translations follow.
+  Review before generating: `POST /api/designations/prepare` →
+  `prepareDesignations` in `apps/api/src/jobs/translation-terms.ts`, which shares its merge
+  (`extractGlossaryCandidates` ∪ `findGlossaryTermsInText`) with the pre-translation name check
+  — one detector, two questions. Web → `apps/web/components/DesignationReview.tsx` (datalist of
+  known titles, per-row **"यापुढेही हेच वापरा"** write-back), shown in `/dlo`'s middle step beside
+  `PointerSelector` and as a submit-time gate on the media room that **auto-skips when the text
+  names nobody**. Write-back → `apps/api/src/jobs/designation-writeback.ts` (patches the person
+  row in place via `setPersonDesignation` — never `upsertGlossaryTerm`, which would clobber a
+  reviewed English spelling — and ensures the TITLE exists as its own row, the step that makes
+  English translation work).
+  Enforcement is instructed **and** structural, the repo's usual pair. Prompt: a
+  `<DESIGNATIONS>` block + `DESIGNATION_TASK_RULE` in `category-prompt.ts` (first mention in
+  full, later mentions bare). **The load-bearing part: `DESIGNATION_ALLOWED_RULE` must reach
+  every checker and revision prompt** — `findUnsupportedClaims` treats a पदनाम absent from the
+  note as an unsupported claim, and an approved designation is by definition absent from the
+  note, so without it the pipeline inserts the designation and then pays a repair call to strip
+  it. That is why it appears in `verify-coverage.ts`, `buildCoverageRevisionMessages`, and all
+  three revise-article builders. Guarantee: `applyDesignations`
+  (`content-engine/src/generation/apply-designations.ts`) — first exact occurrence only,
+  honorific-aware (inserts BEFORE `श्री.`), replaces a *different* known title rather than
+  duplicating it, never matches a bare surname (two people can share one), never touches digits.
+  It runs **after `generateFactCheck`** in both `generateArticle` and `reviseArticle`, so the
+  traceability appendix cannot emit a false `(टिपणीत आधार नाही)` for the officer's own title.
+  The media room's `articleProvided` branch applies it to the pasted article too. Unapplied
+  pairs are REPORTED (`designationWarnings`, in-process registry beside `translateWarnings`,
+  surfaced on `ArticleView`), never fatal. Free harness:
+  `tsx src/generation/apply-designations.ts`.
 - Translation (Marathi → English **or Hindi**) →
   `packages/content-engine/src/generation/translate-article.ts`; the two targets use
   DIFFERENT Sarvam APIs and that is deliberate: English = chat (`sarvam-chat.ts`) with a
@@ -471,6 +508,13 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
   `article-chrome.ts` / `twitter-chrome.ts` / `cmo-chrome.ts` + `cmo-geometry.ts` —
   sharp overlays of the brand chrome onto n8n article/twitter/CMO posters); public API in
   `packages/poster-renderer/src/index.ts`
+- **Article → PDF export** (the finished article as an official A4 document): template →
+  `packages/poster-renderer/src/article-pdf-template.ts` (letterhead + justified paragraphs
+  + `A4_MARGIN`), orchestrator → `generate-article-pdf.ts`, Chromium → `renderHtmlToPdf` in
+  `render-html.ts`; route → `GET /api/generations/:id/article.pdf?lang=mr|en|hi` in
+  `apps/api/src/routes/generations.ts` (beside the `poster.png` proxy); web → the
+  `articlePdfDownloadUrl` anchors in `ArticleView` and `/dlo`'s output step. Nothing is
+  stored — the PDF is rendered on demand and streamed. Free harness: `pdf:preview`.
 - Reference templates (type catalog + image rotation + per-run catalog for n8n) →
   `packages/content-engine/src/references/*` (`reference-types.ts`,
   `reference-images.ts`, `catalog.ts`, `analyze-template.ts`); routes →
@@ -542,6 +586,13 @@ poster write, so an un-applied 0028 costs the rotation memory rather than a paid
 poster; null = resolve it automatically). Additive + nullable, and `insertGeneration` omits the
 column unless a heading was typed, so an un-applied 0029 disables only the override instead of
 breaking every create — but apply it before the API deploy anyway.
+`0032` — `glossary_terms.designation` (the Marathi पदनाम printed before a person's name; person
+rows only, null = print it bare). `0033` — `generations.name_designations` (jsonb: the
+`[{name, designation}]` pairs approved for one run). Both additive + nullable, and both written
+omit-unless-present (`newTermToDbRow` / `insertGeneration`), so an un-applied migration disables
+only the designation feature instead of failing every glossary add or every create — verified
+live, the prepare route returns its names with `designation: ''` against a database with neither
+applied. Apply before the API deploy anyway.
 `0031` — `audio_transcript_cache` (new table: SHA-256 of an MP3's bytes → its Sarvam transcript,
 so a re-uploaded recording is never re-transcribed on /dlo). Self-contained + additive; the
 intake job treats a cache-read error as an empty cache, so an un-applied 0031 disables only the
@@ -590,6 +641,14 @@ PNG and optionally a circle-photo PNG to stamp a real render; a stand-in photo i
 otherwise). `assets:cmo-frame` regenerates `assets/cmo-photo-frame.png` after any change
 to `src/cmo-geometry.ts`.
 
+Article-PDF preview (free — no API, no OpenAI; the loop for tuning
+`src/article-pdf-template.ts`):
+`pnpm --filter @dgipr/poster-renderer pdf:preview [article.txt] [--heading="…"]
+[--lang=mr|en|hi] [--date=ISO] [--html] [--png]`. With no file it uses a built-in Marathi
+sample loaded with the hard conjuncts, so it works on a fresh clone. `--html` writes the
+raw document for a browser Ctrl+P (the fastest loop); `--png` rasterises page 1 on a box
+with no PDF viewer, re-applying the same `A4_MARGIN` as padding so it cannot drift.
+
 User-guide screenshots (`docs/user-guide/assets`):
 `pnpm --filter @dgipr/poster-renderer docs:shots <phase>` — phases
 `preflight|static|run-article|run-feedback|run-twitter|run-rerun|history|optimize|verify`
@@ -635,6 +694,24 @@ Chromium): `pnpm --filter @dgipr/poster-renderer exec playwright install chromiu
   photo and all Devanagari text, header, and footer are typeset in HTML and screenshotted
   with Chromium (this is what prevents garbled Marathi). Storage paths are versioned per
   render (public bucket is CDN-cached — never reuse a path).
+- **The article PDF is printed by Chromium, and that is not negotiable.** A browser-side PDF
+  library (jsPDF, pdf-lib) places glyphs but runs no Indic shaper, so Marathi conjuncts come
+  out decomposed and matras float off their consonants — the same failure the HTML poster
+  path exists to avoid. `renderHtmlToPdf` (`render-html.ts`) therefore shares
+  `launchChromium()` with the PNG renderer, and **the API image now ships Chromium**
+  (`deploy/api.Dockerfile` — it deliberately did not before). A missing browser surfaces as
+  `ChromiumUnavailableError` → a Marathi **503**, never a stack trace. Four more things to
+  know: the route is **GET** so the web side is a plain `<a href>` (only the server can force
+  a cross-origin download — the reason already documented on `poster.png`); the letterhead is
+  an ordinary block in **normal flow**, which is what puts it on page 1 only — never
+  `displayHeaderFooter`, whose separate render context does not inherit the `@font-face`; the
+  guard is the **article text, not `row.status`** (the article is final long before the
+  poster, so a `completed` check would break the main case); and `A4_MARGIN` is the single
+  source shared by `page.pdf()`, the template's `@page` block and the harness's `--png`
+  padding — keep it that way. **Expected, not a bug:** Chromium writes Marathi into the PDF's
+  text layer in **visual order**, so `probePdf` may call an exported article `garbled` and
+  copy-pasting Marathi out of it may reorder. The text is genuine vector text; nothing about
+  print or appearance is affected, and there is no fix at the `page.pdf()` layer.
 - **Article poster: GENERATED by the API, not edited from a master (default `fresh`).**
   `buildArticlePosterPrompt` (`content-engine/src/generation/build-article-poster-prompt.ts`)
   assembles the whole prompt and `generateImage(prompt, { size: '1536x1024' })` paints the

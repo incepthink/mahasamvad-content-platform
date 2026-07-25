@@ -21,6 +21,10 @@ export type GlossaryTerm = Readonly<{
   // Optional corrected Hindi spelling. Null = the Hindi translation locks the name
   // to its Marathi form (the default; see translate-article.ts).
   hindi: string | null;
+  // Marathi designation (पदनाम) to print before this person's name on first mention
+  // (migration 0032). Person rows only; null = print the name bare. The designation's own
+  // English/Hindi live on ITS row in this table, not here — see designations.ts.
+  designation: string | null;
   termType: TermType;
   verified: boolean;
   source: TermSource;
@@ -35,18 +39,21 @@ export type NewGlossaryTerm = Readonly<{
   marathi: string;
   english: string;
   hindi?: string | null;
+  designation?: string | null;
   termType?: TermType;
   verified?: boolean;
   source?: TermSource;
   notes?: string | null;
 }>;
 
-// Shape returned by selects (snake_case column names).
+// Shape returned by selects (snake_case column names). `designation` is optional on the
+// type because a database without 0032 simply does not return the column.
 type GlossaryDbRow = {
   id: string;
   marathi: string;
   english: string;
   hindi: string | null;
+  designation?: string | null;
   term_type: TermType;
   verified: boolean;
   source: TermSource;
@@ -61,6 +68,7 @@ function fromDbRow(row: GlossaryDbRow): GlossaryTerm {
     marathi: row.marathi,
     english: row.english,
     hindi: row.hindi,
+    designation: row.designation ?? null,
     termType: row.term_type,
     verified: row.verified,
     source: row.source,
@@ -72,11 +80,19 @@ function fromDbRow(row: GlossaryDbRow): GlossaryTerm {
 
 // Maps a NewGlossaryTerm to an insertable db row, applying the same defaults the
 // column definitions use so upserts are explicit and predictable.
+//
+// `designation` is the one field written ONLY when the caller supplied it: on a database
+// without 0032 an explicit `designation: null` would fail every insert, whereas omitting it
+// costs nothing (the 0028/0029/0030 blast-radius principle). Passing `null` explicitly is
+// still honoured — that is how the /glossary form clears a designation.
 function newTermToDbRow(term: NewGlossaryTerm): Record<string, unknown> {
   return {
     marathi: term.marathi,
     english: term.english,
     hindi: term.hindi ?? null,
+    ...(term.designation !== undefined
+      ? { designation: term.designation }
+      : {}),
     term_type: term.termType ?? 'other',
     verified: term.verified ?? false,
     source: term.source ?? 'auto',
@@ -89,7 +105,13 @@ function newTermToDbRow(term: NewGlossaryTerm): Record<string, unknown> {
 export type GlossaryTermPatch = Partial<
   Pick<
     GlossaryTerm,
-    'english' | 'hindi' | 'termType' | 'verified' | 'source' | 'notes'
+    | 'english'
+    | 'hindi'
+    | 'designation'
+    | 'termType'
+    | 'verified'
+    | 'source'
+    | 'notes'
   >
 >;
 
@@ -97,6 +119,7 @@ function patchToDbRow(patch: GlossaryTermPatch): Record<string, unknown> {
   const row: Record<string, unknown> = {};
   if (patch.english !== undefined) row.english = patch.english;
   if (patch.hindi !== undefined) row.hindi = patch.hindi;
+  if (patch.designation !== undefined) row.designation = patch.designation;
   if (patch.termType !== undefined) row.term_type = patch.termType;
   if (patch.verified !== undefined) row.verified = patch.verified;
   if (patch.source !== undefined) row.source = patch.source;
@@ -173,6 +196,47 @@ export async function insertGlossaryCandidates(
   if (error) {
     throw new Error(`Failed to insert glossary candidates: ${error.message}`);
   }
+}
+
+// Remembers "this person is named with this designation" without disturbing anything else on
+// their row. Used by the pre-generation name check when the officer ticks "यापुढेही हेच वापरा".
+//
+// Deliberately NOT upsertGlossaryTerm: that is a create-or-REPLACE and would overwrite a
+// human-reviewed English/Hindi spelling with whatever this caller happens to be holding. So an
+// existing row is patched in place (designation only), and only a person the dictionary has
+// never seen is inserted — as an UNVERIFIED row carrying the extractor's proposed English,
+// because the officer confirmed the पदनाम, not the English spelling. The pre-translation name
+// check still asks for that separately, which is exactly the intended division of labour.
+//
+// Pass `designation: null` to clear it back to "print this name bare".
+export async function setPersonDesignation(
+  client: SupabaseClient,
+  marathi: string,
+  designation: string | null,
+  fallbackEnglish: string,
+): Promise<void> {
+  const { data, error } = await client
+    .from(GLOSSARY_TERMS_TABLE)
+    .update({ designation, updated_at: new Date().toISOString() })
+    .eq('marathi', marathi)
+    .select('id');
+  if (error) {
+    throw new Error(
+      `Failed to set designation for "${marathi}": ${error.message}`,
+    );
+  }
+  if ((data ?? []).length > 0) return;
+
+  await insertGlossaryCandidates(client, [
+    {
+      marathi,
+      english: fallbackEnglish,
+      designation,
+      termType: 'person',
+      verified: false,
+      source: 'auto',
+    },
+  ]);
 }
 
 // Manual create-or-replace by Marathi key: overwrites english/type/verified/source/

@@ -55,6 +55,11 @@ export function registerGlossaryRoutes(
       marathi: body.marathi,
       english: body.english,
       hindi: body.hindi ?? null,
+      // Only sent when the form actually supplied one — newTermToDbRow omits the column
+      // otherwise, so a database without 0032 still accepts an ordinary glossary add.
+      ...(body.designation !== undefined
+        ? { designation: body.designation || null }
+        : {}),
       termType: body.termType ?? 'other',
       verified: body.verified ?? true,
       source: 'manual',
@@ -71,12 +76,16 @@ export function registerGlossaryRoutes(
       const patch: {
         english?: string;
         hindi?: string | null;
+        designation?: string | null;
         termType?: TermType;
         verified?: boolean;
         notes?: string | null;
       } = {};
       if (body.english !== undefined) patch.english = body.english;
       if (body.hindi !== undefined) patch.hindi = body.hindi;
+      // '' clears the designation back to "print this name bare".
+      if (body.designation !== undefined)
+        patch.designation = body.designation || null;
       if (body.termType !== undefined) patch.termType = body.termType;
       if (body.verified !== undefined) patch.verified = body.verified;
       if (body.notes !== undefined) patch.notes = body.notes;

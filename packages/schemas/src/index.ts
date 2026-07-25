@@ -14,6 +14,12 @@ export type ApiHealthResponse = Readonly<{
 // two modules never form an import cycle through this index.
 export * from './copy.js';
 
+// Person → designation (पदनाम): the official title printed before a person's name, reviewed
+// before generating and applied to the Marathi article (both translations inherit it).
+// Exported BEFORE api.js and dlo.js, which import from it, so each name has exactly one
+// definition in this barrel (the copy.js/document.js precedent).
+export * from './designations.js';
+
 // Generation API request/response schemas (apps/api + apps/web).
 export * from './api.js';
 

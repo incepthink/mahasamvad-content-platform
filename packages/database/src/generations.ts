@@ -60,6 +60,17 @@ export type GenerationRow = Readonly<{
   // generateArticle, which threads them into drafting + the coverage checkers. Insert-only;
   // null on every non-DLO run and on rows created before 0030.
   excludedFacts: string[] | null;
+  // Officer-approved pointer inventory + attributed statements (migration 0034). Both stay
+  // `unknown` here because their schemas belong to @dgipr/schemas; the API runner validates
+  // them before passing them to content-engine.
+  selectedFacts: unknown;
+  statements: unknown;
+  // Person → पदनाम pairs the officer approved before generating (migration 0033), shape
+  // [{ name, designation }] with both sides Marathi. The runner passes them to generateArticle
+  // AND back into reviseArticle, so a feedback revision cannot drop a designation. `unknown`
+  // for the same reason as `copy`/`posterStyle`: the database package does not own the shape.
+  // Insert-only; null on rows created before 0033 and on runs where none were approved.
+  nameDesignations: unknown;
   // The media-room flow (migration 0027): the note IS a finished article, so the
   // runner uses it verbatim and skips generateArticle. false for every ordinary
   // run and for rows created before this feature.
@@ -141,6 +152,9 @@ type GenerationDbRow = {
   thread_root_id: string | null;
   dlo_intake_id: string | null;
   excluded_facts: unknown;
+  selected_facts: unknown;
+  statements: unknown;
+  name_designations: unknown;
   article_provided: boolean | null;
   poster_style: unknown;
   status: GenerationStatus;
@@ -189,6 +203,15 @@ function fromDbRow(row: GenerationDbRow): GenerationRow {
     // always see "no exclusions" rather than a malformed value.
     excludedFacts: Array.isArray(row.excluded_facts)
       ? (row.excluded_facts as string[])
+      : null,
+    selectedFacts: Array.isArray(row.selected_facts)
+      ? row.selected_facts
+      : null,
+    statements: Array.isArray(row.statements) ? row.statements : null,
+    // ?? null for the same reason as excluded_facts above: a pre-0033 database returns no
+    // such column. The runner validates the shape before using it.
+    nameDesignations: Array.isArray(row.name_designations)
+      ? row.name_designations
       : null,
     // ?? false: a pre-0027 database returns no such column (undefined), and an
     // ordinary run is not article-provided anyway.
@@ -307,6 +330,25 @@ export async function insertGeneration(
     // Insert-only (migration 0030): facts the officer deselected in the /dlo Pointers step.
     // Consumed once at draft time, never edited — so, unlike posterHeading, not in GenerationPatch.
     excludedFacts?: readonly string[] | undefined;
+    // Insert-only (migration 0034): every pointer the officer kept, with its 5W1H
+    // dimension, and the attributed statements selected beside them.
+    selectedFacts?:
+      | readonly Readonly<{ dimension: string; text: string }>[]
+      | undefined;
+    statements?:
+      | readonly Readonly<{
+          speaker: string;
+          designation: string;
+          venue: string;
+          claim: string;
+        }>[]
+      | undefined;
+    // Insert-only (migration 0033): person → पदनाम pairs approved in the pre-generation name
+    // check. Read again by the feedback path, so it must live on the row rather than in the
+    // create request alone — a retry or a revision would otherwise lose the designations.
+    nameDesignations?:
+      | readonly Readonly<{ name: string; designation: string }>[]
+      | undefined;
     // Insert-only: the note is a finished article; the runner skips generation.
     articleProvided?: boolean | undefined;
   }>,
@@ -337,6 +379,19 @@ export async function insertGeneration(
       // has not been applied. Omitting it confines the migration's blast radius to this feature.
       ...(input.excludedFacts && input.excludedFacts.length > 0
         ? { excluded_facts: input.excludedFacts }
+        : {}),
+      // Omit both columns unless the inventory exists. This keeps every non-DLO create
+      // working against a database where 0034 has not yet been applied.
+      ...(input.selectedFacts && input.selectedFacts.length > 0
+        ? { selected_facts: input.selectedFacts }
+        : {}),
+      ...(input.statements && input.statements.length > 0
+        ? { statements: input.statements }
+        : {}),
+      // Sent ONLY when designations were actually approved — same reasoning again, so an
+      // un-applied 0033 costs this feature rather than every create.
+      ...(input.nameDesignations && input.nameDesignations.length > 0
+        ? { name_designations: input.nameDesignations }
         : {}),
       article_provided: input.articleProvided ?? false,
     })

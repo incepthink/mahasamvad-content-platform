@@ -14,15 +14,29 @@ import {
   chatComplete,
   type ChatMessage,
 } from './openai-chat.js';
+import type { AttributedStatement, SelectedFact } from '@dgipr/schemas';
 import {
   FACT_CHECK_DELIMITER,
   generateFactCheck,
   splitContent,
   systemPromptFor,
 } from './generate-article.js';
-import type { ArticleCategory } from './category-prompt.js';
+import {
+  DESIGNATION_ALLOWED_RULE,
+  STATEMENTS_ALLOWED_RULE,
+  designationBlock,
+  includedFactsBlock,
+  statementBlock,
+  type ArticleCategory,
+  type DesignationPair,
+} from './category-prompt.js';
+import {
+  applyDesignations,
+  type DesignationIssue,
+} from './apply-designations.js';
 import {
   findMissingInformation,
+  findMissingApprovedFacts,
   findMissingNoteFacts,
   findUnsupportedClaims,
 } from './verify-coverage.js';
@@ -49,6 +63,9 @@ export type RevisedArticle = Readonly<{
   content: string;
   article: string;
   factCheck: string | null;
+  // Approved designations the revised article could not carry as-is. Reported, never fatal —
+  // same contract as GeneratedArticle.designationIssues.
+  designationIssues: readonly DesignationIssue[];
 }>;
 
 function buildRevisionMessages(
@@ -57,9 +74,16 @@ function buildRevisionMessages(
   feedback: string,
   category: ArticleCategory,
   expand: boolean,
+  designations: readonly DesignationPair[] = [],
+  includeFacts: readonly string[] = [],
+  statements: readonly AttributedStatement[] = [],
+  excludeFacts: readonly string[] = [],
 ): ChatMessage[] {
   const { article: currentArticle, factCheck: currentFactCheck } =
     splitContent(currentContent);
+  const requiredRows = includedFactsBlock(includeFacts);
+  const statementRows = statementBlock(statements);
+  const excluded = excludeFacts.map((fact) => fact.trim()).filter(Boolean);
 
   const userPrompt = [
     '<NOTES purpose="only_authoritative_fact_source">',
@@ -78,12 +102,43 @@ function buildRevisionMessages(
           '',
         ]
       : []),
+    ...(designationBlock(designations).length > 0
+      ? [...designationBlock(designations), '']
+      : []),
+    ...(requiredRows.length > 0 ? [...requiredRows, ''] : []),
+    ...(statementRows.length > 0 ? [...statementRows, ''] : []),
+    ...(excluded.length > 0
+      ? [
+          '<EXCLUDED_FACTS purpose="officer_rejected_never_reintroduce">',
+          ...excluded.map((fact) => `- ${fact}`),
+          '</EXCLUDED_FACTS>',
+          '',
+        ]
+      : []),
     '<FEEDBACK purpose="style_structure_emphasis_only_not_fact_source">',
     feedback.trim(),
     '</FEEDBACK>',
     '',
     '<TASK>',
     'वरील FEEDBACK नुसार लेख सुधारून संपूर्ण लेख पुन्हा लिहा.',
+    // Rule 6 below forbids adding a पदनाम absent from NOTES; without this carve-out the
+    // revision reads that as licence to strip the designations it was just handed.
+    ...(designationBlock(designations).length > 0
+      ? [DESIGNATION_ALLOWED_RULE]
+      : []),
+    ...(requiredRows.length > 0
+      ? [
+          'REQUIRED_FACTS मधील प्रत्येक निवडलेले तथ्य अंतिम लेखात अर्थासह जपा.',
+        ]
+      : []),
+    ...(statementRows.length > 0
+      ? [STATEMENTS_ALLOWED_RULE, 'प्रत्येक ATTRIBUTED_STATEMENT योग्य वक्त्याशी जोडून जपा.']
+      : []),
+    ...(excluded.length > 0
+      ? [
+          'EXCLUDED_FACTS मधील तथ्ये अधिकाऱ्याने वगळली आहेत; feedback काहीही असला तरी ती पुन्हा आणू नका.',
+        ]
+      : []),
     ...(expand
       ? [
           'वापरकर्त्याने लेख अधिक मोठा व सविस्तर करण्यास सांगितले आहे. त्यामुळे NOTES मधील आजवर',
@@ -120,17 +175,23 @@ function buildRepairMessages(
   draftContent: string,
   unsupported: string[],
   category: ArticleCategory,
+  designations: readonly DesignationPair[] = [],
+  statements: readonly AttributedStatement[] = [],
 ): ChatMessage[] {
   const { article: draftArticle, factCheck: draftFactCheck } =
     splitContent(draftContent);
 
   const unsupportedBlock = unsupported.map((item) => `- ${item}`).join('\n');
+  const designationRows = designationBlock(designations);
+  const statementRows = statementBlock(statements);
 
   const userPrompt = [
     '<NOTES purpose="only_authoritative_fact_source">',
     note.trim(),
     '</NOTES>',
     '',
+    ...(designationRows.length > 0 ? [...designationRows, ''] : []),
+    ...(statementRows.length > 0 ? [...statementRows, ''] : []),
     '<DRAFT_ARTICLE purpose="draft_to_repair_not_fact_source">',
     draftArticle.trim(),
     '</DRAFT_ARTICLE>',
@@ -158,6 +219,10 @@ function buildRepairMessages(
     '4. नवीन तथ्य, नाव, तारीख, रक्कम, पदनाम, ठिकाण, योजना, कायदा, दावा, quote किंवा byline जोडू नका.',
     '5. असमर्थित विधान काढताना लेखाचा ओघ नैसर्गिक आणि महासंवाद-शैलीतील ठेवा.',
     '6. फक्त सुधारित लेख द्या; तथ्य-तपासणी यादी किंवा विभाजक जोडू नका.',
+    // Appended after the list rather than numbered into it: rule 4 says "no new पदनाम", and
+    // this is the one carve-out. It must read as an exception to that rule, not compete with it.
+    ...(designationRows.length > 0 ? ['', DESIGNATION_ALLOWED_RULE] : []),
+    ...(statementRows.length > 0 ? ['', STATEMENTS_ALLOWED_RULE] : []),
     '</TASK>',
   ].join('\n');
 
@@ -178,15 +243,21 @@ function buildInjectMessages(
   missing: string[],
   category: ArticleCategory,
   expand: boolean,
+  designations: readonly DesignationPair[] = [],
+  statements: readonly AttributedStatement[] = [],
 ): ChatMessage[] {
   const { article: draftArticle } = splitContent(draftContent);
   const missingBlock = missing.map((item) => `- ${item}`).join('\n');
+  const designationRows = designationBlock(designations);
+  const statementRows = statementBlock(statements);
 
   const userPrompt = [
     '<NOTES purpose="only_authoritative_fact_source">',
     note.trim(),
     '</NOTES>',
     '',
+    ...(designationRows.length > 0 ? [...designationRows, ''] : []),
+    ...(statementRows.length > 0 ? [...statementRows, ''] : []),
     '<CURRENT_ARTICLE purpose="draft_to_expand_not_fact_source">',
     draftArticle.trim(),
     '</CURRENT_ARTICLE>',
@@ -212,6 +283,10 @@ function buildInjectMessages(
     '4. समिती-सदस्य याद्या, अधिकाऱ्यांची नावे/पदनामे किंवा लेखाशीर्ष यांसारखा प्रशासकीय तपशील विनाकारण जोडू नका.',
     '5. अंतिम लेख category च्या मूळ महासंवाद-शैलीतच व देवनागरीत ठेवा.',
     '6. फक्त सुधारित लेख द्या; तथ्य-तपासणी यादी किंवा विभाजक जोडू नका.',
+    // Rules 2 and 4 both push against a designation — 2 as "no पदनाम absent from NOTES",
+    // 4 as "do not add officials' designations". This is the exception to both.
+    ...(designationRows.length > 0 ? ['', DESIGNATION_ALLOWED_RULE] : []),
+    ...(statementRows.length > 0 ? ['', STATEMENTS_ALLOWED_RULE] : []),
     '</TASK>',
   ].join('\n');
 
@@ -227,11 +302,36 @@ export async function reviseArticle(
   feedback: string,
   category: ArticleCategory = 'scheme',
   heading?: string,
+  // The run's approved person → पदनाम pairs, read back off the generation row. The feedback
+  // path needs these MORE than the first draft does: `currentContent` already carries the
+  // designations, so without them findUnsupportedClaims below flags each one as an unsourced
+  // पदनाम and buys a repair call to delete it. Re-applied deterministically at the end, so a
+  // revision can never ship an article that lost a designation.
+  designations: readonly DesignationPair[] = [],
+  knownDesignations: readonly string[] = [],
+  selectedFacts: readonly SelectedFact[] = [],
+  statements: readonly AttributedStatement[] = [],
+  excludeFacts: readonly string[] = [],
 ): Promise<RevisedArticle> {
   const expand = wantsExpansion(feedback);
+  const includeFacts = selectedFacts
+    .map((fact) => fact.text.trim())
+    .filter(Boolean);
+  const hasApprovedInventory =
+    includeFacts.length > 0 || statements.length > 0;
 
   let content = await chatComplete(
-    buildRevisionMessages(note, currentContent, feedback, category, expand),
+    buildRevisionMessages(
+      note,
+      currentContent,
+      feedback,
+      category,
+      expand,
+      designations,
+      includeFacts,
+      statements,
+      excludeFacts,
+    ),
     { maxTokens: ARTICLE_BODY_MAX_TOKENS },
   );
 
@@ -240,12 +340,27 @@ export async function reviseArticle(
   // expansion request additionally pulls broader missing note info. Run BEFORE faithfulness
   // so any drift the inject pass introduces is still stripped downstream.
   const { article: revisedArticle } = splitContent(content);
-  const [citizenMissing, broadMissing] = await Promise.all([
-    findMissingNoteFacts(revisedArticle, note),
-    expand
-      ? findMissingInformation(revisedArticle, note, heading)
-      : Promise.resolve<string[]>([]),
-  ]);
+  const approvedCoverage = hasApprovedInventory
+    ? await findMissingApprovedFacts(
+        revisedArticle,
+        includeFacts,
+        statements,
+      )
+    : null;
+  const [citizenMissing, broadMissing] = approvedCoverage
+    ? [approvedCoverage.missing, [] as string[]]
+    : await Promise.all([
+        findMissingNoteFacts(revisedArticle, note, excludeFacts),
+        expand
+          ? findMissingInformation(
+              revisedArticle,
+              note,
+              heading,
+              undefined,
+              excludeFacts,
+            )
+          : Promise.resolve<string[]>([]),
+      ]);
   const seen = new Set<string>();
   const missing = [...citizenMissing, ...broadMissing].filter((item) => {
     const key = item.trim();
@@ -259,18 +374,40 @@ export async function reviseArticle(
         `${expand ? ', विस्तार-विनंती' : ''}; समाविष्ट करत आहे...`,
     );
     content = await chatComplete(
-      buildInjectMessages(note, content, missing, category, expand),
+      buildInjectMessages(
+        note,
+        content,
+        missing,
+        category,
+        expand,
+        designations,
+        statements,
+      ),
       { maxTokens: ARTICLE_BODY_MAX_TOKENS },
     );
   }
 
   const { article: injectedArticle } = splitContent(content);
-  // Heading passed as allowed context so an angle-true title line isn't flagged.
-  const unsupported = await findUnsupportedClaims(injectedArticle, note, heading);
+  // Heading passed as allowed context so an angle-true title line isn't flagged; designations
+  // for the same reason — the article already carries them and they are not in the note.
+  const unsupported = await findUnsupportedClaims(
+    injectedArticle,
+    note,
+    heading,
+    designations,
+    statements,
+  );
 
   if (unsupported.length > 0) {
     content = await chatComplete(
-      buildRepairMessages(note, content, unsupported, category),
+      buildRepairMessages(
+        note,
+        content,
+        unsupported,
+        category,
+        designations,
+        statements,
+      ),
       { maxTokens: ARTICLE_BODY_MAX_TOKENS },
     );
   }
@@ -278,11 +415,30 @@ export async function reviseArticle(
   // The revision prompts no longer emit the traceability appendix inline, so rebuild it
   // from the final revised article (scheme only) and stitch it on with the delimiter —
   // keeping the { content, article, factCheck } contract unchanged. News has no appendix.
-  const { article } = splitContent(content);
+  const { article: rawArticle } = splitContent(content);
   const factCheck =
-    category === 'scheme' ? await generateFactCheck(article, note) : null;
+    category === 'scheme' ? await generateFactCheck(rawArticle, note) : null;
+
+  // Same placement as generateArticle: after the appendix, so it never reports the officer's
+  // designation as unsourced, and last of all, so no later pass can drop it.
+  const designationResult = applyDesignations(rawArticle, designations, {
+    knownDesignations,
+  });
+  const article = designationResult.text;
+  if (designationResult.issues.length > 0) {
+    console.warn(
+      `[designations] ${designationResult.issues.length} पदनाम सुधारित लेखात लागू करता आले नाही:`,
+      designationResult.issues,
+    );
+  }
+
   const finalContent = factCheck
     ? `${article}\n\n${FACT_CHECK_DELIMITER}\n${factCheck}`
     : article;
-  return { content: finalContent, article, factCheck };
+  return {
+    content: finalContent,
+    article,
+    factCheck,
+    designationIssues: designationResult.issues,
+  };
 }

@@ -8,7 +8,8 @@
 // They are never a source of facts. The user's NOTES remain the only authoritative
 // fact source during generation.
 //
-// For scheme articles, topical similarity is usually useful.
+// For scheme articles, topical similarity is usually useful; when the DLO inventory carries
+// an attributed statement, attribution-shaped exemplars receive a small conditional boost.
 // For news articles, style/structure matters more than exact topic similarity, because
 // a topic-similar article can still be the wrong Mahasamvad subtype. For example,
 // an administrative directive should not be guided by a scheme-benefit notice.
@@ -87,6 +88,18 @@ const NEWS_DIRECTIVE_STYLE_MARKERS = [
   'स्पष्ट केले',
 ];
 
+// Scheme features often place the minister/senior official's statement in the body rather
+// than the lead. Lightly favour exemplars that demonstrate that attribution shape so the
+// writer sees how Mahasamvad carries a named statement in a citizen-facing feature.
+const SCHEME_ATTRIBUTION_STYLE_MARKERS = [
+  'यांनी सांगितले',
+  'यांनी म्हटले',
+  'यांनी स्पष्ट केले',
+  'यांनी नमूद केले',
+  'असल्याचे त्यांनी सांगितले',
+  'यावर भर देण्यात आल्याचे',
+];
+
 // Scheme/information notice markers. These are not “bad”, but for the news/directive
 // category they often pull the model toward benefit-note / awareness-copy style.
 const NEWS_SCHEME_NOTICE_MARKERS = [
@@ -132,19 +145,30 @@ function countMarkers(text: string, markers: readonly string[]): number {
 function scoreReferenceCandidate(
   match: MatchRow,
   category: ArticleCategory | null,
+  preferAttribution = false,
 ): number {
   let score = match.similarity;
 
-  if (category !== 'news') {
-    return score;
+  const searchableText = `${match.title}\n${match.text}`;
+
+  if (category === 'scheme') {
+    if (!preferAttribution) return score;
+    const attributionHits = countMarkers(
+      searchableText,
+      SCHEME_ATTRIBUTION_STYLE_MARKERS,
+    );
+    return score + Math.min(attributionHits, 4) * 0.012;
   }
 
-  const searchableText = `${match.title}\n${match.text}`;
+  if (category !== 'news') return score;
 
   const directiveHits = countMarkers(
     searchableText,
     NEWS_DIRECTIVE_STYLE_MARKERS,
   );
+  const attributionHits = preferAttribution
+    ? countMarkers(searchableText, SCHEME_ATTRIBUTION_STYLE_MARKERS)
+    : 0;
   const schemeNoticeHits = countMarkers(
     searchableText,
     NEWS_SCHEME_NOTICE_MARKERS,
@@ -154,6 +178,7 @@ function scoreReferenceCandidate(
   // shape and away from scheme-benefit notice shape. The weights are deliberately
   // small so a clearly relevant article still wins.
   score += Math.min(directiveHits, 6) * 0.015;
+  score += Math.min(attributionHits, 4) * 0.012;
   score -= Math.min(schemeNoticeHits, 5) * 0.01;
 
   return score;
@@ -162,18 +187,19 @@ function scoreReferenceCandidate(
 function pickBestMatch(
   matches: MatchRow[],
   category: ArticleCategory | null,
+  preferAttribution = false,
 ): MatchRow | null {
   if (matches.length === 0) return null;
 
-  if (category !== 'news') {
+  if (category == null) {
     return matches[0] ?? null;
   }
 
   return (
     [...matches].sort((a, b) => {
       return (
-        scoreReferenceCandidate(b, category) -
-        scoreReferenceCandidate(a, category)
+        scoreReferenceCandidate(b, category, preferAttribution) -
+        scoreReferenceCandidate(a, category, preferAttribution)
       );
     })[0] ?? null
   );
@@ -198,7 +224,8 @@ export async function retrieveReferences(
 // Retrieve the ONE article most relevant to the query and return its full text.
 //
 // We first retrieve the closest chunks, then select the best article candidate.
-// For scheme, this is the top semantic match.
+// For scheme, this is the top semantic match unless statement-aware attribution boosting was
+// requested.
 // For news, we apply a small directive/report-style boost before choosing.
 // Then we stitch that article's chunks back together — a complete exemplar is a far
 // better structure/length template than a handful of disconnected chunks.
@@ -210,6 +237,7 @@ export async function retrieveReferenceArticle(
   query: string,
   category: ArticleCategory | null = null,
   angle?: string,
+  preferAttribution = false,
 ): Promise<ReferenceArticle | null> {
   const matches = await retrieveReferences(
     buildAngleWeightedQuery(query, angle),
@@ -217,7 +245,7 @@ export async function retrieveReferenceArticle(
     category,
   );
 
-  const best = pickBestMatch(matches, category);
+  const best = pickBestMatch(matches, category, preferAttribution);
   if (!best) return null;
 
   const client = createServiceRoleClient();
@@ -229,7 +257,11 @@ export async function retrieveReferenceArticle(
     title: best.title,
     url: best.url,
     similarity: best.similarity,
-    selectionScore: scoreReferenceCandidate(best, category),
+    selectionScore: scoreReferenceCandidate(
+      best,
+      category,
+      preferAttribution,
+    ),
     text: chunks.map((chunk) => chunk.text).join('\n\n'),
   };
 }

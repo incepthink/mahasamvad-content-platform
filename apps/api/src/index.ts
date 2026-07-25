@@ -11,6 +11,7 @@ import { registerGlossaryRoutes } from './routes/glossary.js';
 import { registerTranslateRoutes } from './routes/translate.js';
 import { registerProofreadRoutes } from './routes/proofread.js';
 import { registerPointerRoutes } from './routes/pointers.js';
+import { registerDesignationRoutes } from './routes/designations.js';
 import { registerReferenceRoutes } from './routes/references.js';
 import { registerVideoRoutes } from './routes/video.js';
 
@@ -64,6 +65,7 @@ export async function createServer() {
       registerDocumentRoutes(instance);
       registerProofreadRoutes(instance, client);
       registerPointerRoutes(instance);
+      registerDesignationRoutes(instance, client);
       registerReferenceRoutes(instance, client);
       registerDloRoutes(instance, client);
       registerVideoRoutes(instance, client);

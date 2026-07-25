@@ -47,6 +47,7 @@ export {
   listGlossaryTerms,
   findGlossaryTermsInText,
   insertGlossaryCandidates,
+  setPersonDesignation,
   upsertGlossaryTerm,
   updateGlossaryTerm,
   deleteGlossaryTerm,

@@ -18,6 +18,7 @@ import type {
   TranslationTermInput,
 } from '@dgipr/schemas';
 import {
+  articlePdfDownloadUrl,
   prepareGenerationTranslation,
   requestTranslation,
   sendArticleFeedback,
@@ -228,6 +229,34 @@ export function ArticleView({
         </div>
       ) : null}
 
+      {/* Approved designations the article could not carry as approved. Same in-process
+          registry as the translation warnings above, and shown for the same reason: a
+          designation that silently failed to apply is the one outcome this feature must never
+          produce quietly. Only on the Marathi text — the translations derive from it. */}
+      {shownLang === 'mr' && detail.designationWarnings.length > 0 ? (
+        <div className="info-callout warn" style={{ marginBottom: 12 }}>
+          <p className="field-label">{STR.designationWarnTitle}</p>
+          {detail.designationWarnings.some((w) => w.reason === 'not-found') ? (
+            <p className="hint">
+              {STR.designationWarnNotFound}{' '}
+              {detail.designationWarnings
+                .filter((w) => w.reason === 'not-found')
+                .map((w) => `${w.designation} ${w.name}`)
+                .join(', ')}
+            </p>
+          ) : null}
+          {detail.designationWarnings.some((w) => w.reason === 'corrected') ? (
+            <p className="hint">
+              {STR.designationWarnCorrected}{' '}
+              {detail.designationWarnings
+                .filter((w) => w.reason === 'corrected')
+                .map((w) => `${w.replaced ?? ''} → ${w.designation} (${w.name})`)
+                .join(', ')}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="article-body">{shown}</div>
 
       <div className="btn-row" style={{ marginTop: 18 }}>
@@ -260,6 +289,14 @@ export function ArticleView({
         >
           {STR.downloadMd}
         </button>
+        {/* Rendered server-side by Chromium — a browser-side PDF library cannot shape
+            Devanagari matras — so this is a link, not a downloadBlob: only the API can force
+            a cross-origin download. It follows the language toggle, and because shownLang
+            already falls back to 'mr' when a language has no text, it can never hit the
+            route's "translation not ready" 404. */}
+        <a className="btn" href={articlePdfDownloadUrl(detail.id, shownLang)}>
+          {STR.downloadPdf}
+        </a>
 
         {/* One button per language that has no translation yet; the one being
             translated right now shows the spinner in its place. */}

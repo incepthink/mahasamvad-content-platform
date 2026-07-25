@@ -34,6 +34,7 @@
     "poster:preview:chrome:cmo": "tsx scripts/preview-cmo-chrome.ts",
     "poster:preview:markers": "tsx scripts/preview-feedback-marker.ts",
     "poster:preview:colours": "tsx src/poster-colours.ts",
+    "pdf:preview": "tsx scripts/preview-article-pdf.ts",
     "video:preview:assemble": "tsx scripts/preview-video-assembly.ts",
     "video:preview:narrate": "tsx scripts/preview-video-narrate.ts",
     "docs:shots": "tsx scripts/docs-shots/cli.ts"

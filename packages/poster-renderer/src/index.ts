@@ -14,6 +14,8 @@ export { generateImage, IMAGE_MODEL } from './openai-image.js';
 export type { GenerateImageOptions } from './openai-image.js';
 export { loadBrandAssets, loadArticleAssets } from './assets.js';
 export type { BrandAssets } from './assets.js';
+export { loadArticlePdfAssets } from './assets.js';
+export type { ArticlePdfAssets } from './assets.js';
 export {
   buildPosterHtml,
   headStrings,
@@ -39,6 +41,23 @@ export { measurePosterColours, hueBucketOf } from './poster-colours.js';
 export type { PosterColours, HueBucket } from './poster-colours.js';
 export { renderHtmlToPng } from './render-html.js';
 export type { RenderOptions } from './render-html.js';
+export { renderHtmlToPdf, ChromiumUnavailableError } from './render-html.js';
+export type { PdfRenderOptions, PdfMargin } from './render-html.js';
+// The article as a printable A4 document: the same Chromium/HarfBuzz path the posters use,
+// emitted as a real PDF rather than a screenshot, so the Devanagari is shaped correctly AND
+// the text stays vector (selectable, sharp at any zoom) instead of rasterised.
+export {
+  buildArticlePdfHtml,
+  formatDocDate,
+  paragraphsOf,
+  A4_MARGIN,
+} from './article-pdf-template.js';
+export type {
+  BuildArticlePdfHtmlInput,
+  ArticlePdfLanguage,
+} from './article-pdf-template.js';
+export { generateArticlePdf } from './generate-article-pdf.js';
+export type { GenerateArticlePdfInput } from './generate-article-pdf.js';
 export { generatePoster } from './generate-poster.js';
 export type {
   GeneratePosterInput,

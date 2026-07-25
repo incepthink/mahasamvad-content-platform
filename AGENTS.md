@@ -1313,6 +1313,176 @@ it are implemented and working end-to-end:
   with no `[sarvam-stt] batch job:` log line, and a cached+new pair sending only the new file.
   No n8n; deploy is API only after rebuilding `@dgipr/database` dist, with 0031 applied first.
 
+- **A person is named with their designation — and the name dictionary finally reaches the
+  ARTICLE** (2026-07-25, migrations 0032 + 0033): a DLO's meeting recording says
+  `देवेंद्र फडणवीस`, but a published government article must say `मुख्यमंत्री देवेंद्र फडणवीस` — the
+  designation is part of how a person is officially named, not decoration. Nothing did this,
+  and three facts about the codebase shaped the whole design.
+  (1) **The article pipeline had no contact with the glossary at all.** `generateArticle` never
+  called `findGlossaryTermsInText`; the dictionary reached only translation, proof-read and
+  poster copy. Every name guarantee in the Marathi article was prompt text
+  (`category-prompt.ts` rule 3), never a check. This is the first feature to cross that line.
+  (2) **`glossary_terms` already modelled the pieces**: `term_type` includes `designation` and
+  0010 seeds the common titles verified (मुख्यमंत्री → Chief Minister, जिल्हाधिकारी → District
+  Collector). Persons are deliberately unseeded because office-holders are volatile — so what
+  was missing is exactly the volatile part, the LINK, which belongs on the person row plus a
+  per-run review rather than in seed data.
+  (3) **The faithfulness pass would have deleted the feature.** `findUnsupportedClaims` treats a
+  पदनाम absent from the note as an unsupported claim, and an officer-approved designation is by
+  definition absent from the note. Without an explicit allow-block the pipeline inserts the
+  designation and then buys a repair call to strip it again — worse on the FEEDBACK path, where
+  `reviseArticle` is handed a stored article that already carries it. Hence
+  `DESIGNATION_ALLOWED_RULE`, which must reach `findUnsupportedClaims`,
+  `buildCoverageRevisionMessages` and all three revise-article builders (two of whose rules —
+  "no new पदनाम" and "do not add officials' designations" — fight it directly).
+  **The design's payoff: translation needed ZERO engine changes.** The designation is inserted
+  into the MARATHI article and both targets inherit it, because the title's English/Hindi live
+  on its OWN `designation`-typed glossary row: English's `LOCKED TERMS` table already locks
+  `मुख्यमंत्री → Chief Minister`, and Hindi freezes `person` rows verbatim while deliberately
+  translating `designation` rows (जिल्हाधिकारी → जिलाधिकारी, which is correct). That is why the
+  write-back **must** ensure the title row exists (`designation-writeback.ts`) — skipping it is
+  the one thing that would silently break the English output. The person row is patched in place
+  by a new `setPersonDesignation`, never `upsertGlossaryTerm`, which is create-or-REPLACE and
+  would overwrite a human-reviewed English spelling; a person the dictionary has never met is
+  inserted UNVERIFIED, because the officer confirmed the पदनाम, not the spelling — the
+  pre-translation name check still owns that.
+  **UX** (the user's stated priority): a review card BEFORE any spend, never a post-hoc report.
+  `POST /api/designations/prepare` reuses the pre-translation name check's merge
+  (`prepareTranslationTerms` refactored to share `mergeTextTerms`) filtered to `person`, so
+  there is one detector and two questions rather than a second extractor. `DesignationReview`
+  renders one row per person with a `<datalist>` of the dictionary's verified titles — picking
+  over typing is what keeps मुख्यमंत्री spelled one way across every officer — plus an opt-in
+  **"यापुढेही हेच वापरा"**, because someone named in a one-off capacity should not rewrite their
+  permanent entry. `/dlo` shows it in the middle step beside Pointers; the media room, which
+  submits in one press, runs it as a submit-time gate that **auto-skips when the text names
+  nobody**, so the check is invisible when there is nothing to check. A blank पदनाम is a valid
+  answer meaning "print this name bare" — nothing is ever inferred from the note.
+  **The guarantee** is `apply-designations.ts`, following lock-scheme-names.ts's doctrine: only
+  ever inserts an officer-approved string or replaces one dictionary title with another, never
+  touches digits or prose. First mention only (Marathi news style); **honorific-aware** —
+  `श्री. देवेंद्र फडणवीस` becomes `मुख्यमंत्री श्री. देवेंद्र फडणवीस`, never `श्री. मुख्यमंत्री …`; pairs
+  processed longest-name-first with substrings dropped; and a bare surname is deliberately NOT
+  matched, because two people can share one — that case is REPORTED, not guessed. It runs
+  **after `generateFactCheck`** in both `generateArticle` and `reviseArticle`: the appendix
+  traces the article against the note, so computing it first is what stops a false
+  `(टिपणीत आधार नाही)` line with no change to `generateFactCheck`. The media room's
+  `articleProvided` branch (which skips generation entirely — that page posterizes a pasted
+  article) applies the same pass to the pasted text. Failures surface as `designationWarnings`,
+  an in-process registry beside `translateWarnings`, rendered on `ArticleView`.
+  Both migrations are written omit-unless-present (`newTermToDbRow`, `insertGeneration`), so an
+  un-applied one disables the feature rather than failing every glossary add or every create —
+  **verified live against a database with neither applied**: the prepare route returned both
+  people with `designation: ''` and the 8 verified title rows, rather than erroring.
+  Verified 2026-07-25: full workspace typecheck green (7/7); lint clean on all 21 touched files;
+  20 offline assertions in the `apply-designations` harness (first-mention-only, already-present
+  no-double-prefix, wrong-title correction, honorific incl. two stacked honorifics, surname-only
+  ⇒ not-found, substring safety, two people with digits intact, empty ⇒ byte-identical); and a
+  live API run — route registered, all three guard paths 400 **before** any model call, and a
+  real Marathi note returning both `देवेंद्र फडणवीस` and `अमित देशमुख` with
+  `मुख्यमंत्री → Chief Minister` among the known titles. **Left for a real run** (needs the
+  migrations applied + OpenAI spend): the end-to-end /dlo check that the first mention publishes
+  as `मुख्यमंत्री देवेंद्र फडणवीस`, survives the coverage and faithfulness passes, survives an
+  article-feedback revision, and translates to *Chief Minister Devendra Fadnavis* / Hindi with
+  no code change. **Deploy: 0032 + 0033 → API → web** (rebuild `@dgipr/schemas`,
+  `@dgipr/database`, `@dgipr/content-engine` dists first). No n8n.
+
+- **Export the article as a PDF** (2026-07-25, no migration): a finished article could be
+  copied or downloaded as `.txt` — neither of which a department can circulate. Both the
+  `/dlo` output step and the detail page's `ArticleView` now offer **PDF डाउनलोड**, producing
+  an A4 document with the DGIPR letterhead, the run's optional `heading` as a title, a date
+  line, and the article as justified paragraphs.
+  **The whole design turns on one constraint: only Chromium shapes Devanagari.** jsPDF and
+  pdf-lib place glyphs but run no Indic shaper, so क्ती / ऱ्या / विद्यार्थ्यांच्या come out
+  decomposed with matras floating off their consonants — precisely the failure the HTML
+  poster path was built to avoid ("Chromium is what makes the Devanagari correct",
+  `render-html.ts`). An html2canvas-style rasterisation would look right but ship a picture
+  of text: unselectable, unsearchable, and megabytes per page. So the PDF is printed
+  **server-side** by the same Playwright driver the posters use, with `page.pdf()` in place
+  of `page.screenshot()`, and the text stays vector.
+  New in `@dgipr/poster-renderer` (the package boundary put it there — it already owns the
+  webfont, the brand assets, every self-contained HTML template and the only Chromium in the
+  repo; no LLM call is involved, so content-engine is not): `article-pdf-template.ts`,
+  `generate-article-pdf.ts`, `loadArticlePdfAssets()`, and `renderHtmlToPdf` +
+  `ChromiumUnavailableError` + a shared `launchChromium()` in `render-html.ts`. The route is
+  `GET /api/generations/:id/article.pdf?lang=mr|en|hi`, beside the `poster.png` proxy.
+  Decisions worth keeping:
+  - **The letterhead is an ordinary block in normal flow**, not `displayHeaderFooter` — which
+    is what puts it on page 1 only (the press-note convention) and avoids that API's separate
+    render context, which does not inherit the `@font-face` and would need the 647 KB font
+    data URI duplicated into it for a Devanagari running header.
+  - **Its wording is sourced, not coined**: `assets/poster-footer.png` reads
+    "माहिती व जनसंपर्क महासंचालनालय, महाराष्ट्र शासन", byte-identical to the web's
+    `appSubtitle`; it is split across two lines. The emblem is `poster-logo-new.png`
+    (398×400, no baked-in wordmark) at 21 mm — ~5× oversampled, while every line beside it
+    stays Chromium-typeset vector. It stays **Marathi in all three languages**; only the date
+    line follows the body.
+  - **The guard is the article TEXT, not `row.status`.** The article is final long before the
+    poster is (`ArticleView` is on screen while the poster still renders — the reason
+    `translating`/`articleRevising` live off status), so a `status === 'completed'` check
+    would have broken the main case. A `failed` row that did produce an article can still be
+    exported: the officer keeps work already paid for. Social runs are refused through
+    `isSocialCategory()` — their `article` column holds the caption.
+  - **GET, so the web side is a plain `<a href>`** with no JavaScript. `content-disposition`
+    is the only way to force a cross-origin download (the reason already documented on
+    `poster.png`), and because the route is a real navigation its error bodies are what the
+    officer *sees* — hence Marathi, unlike the fetch-backed routes.
+  - **`A4_MARGIN` is one constant with three consumers** (`page.pdf()`, the template's
+    `@page` block, the harness's `--png` padding), so a browser Ctrl+P preview cannot drift
+    from the printed output.
+  - Dates pin `timeZone: 'Asia/Kolkata'` (the container is UTC — a 01:30 IST run would
+    otherwise be dated the previous day; proven on a real row created 20:39 UTC that
+    correctly prints २५ जुलै) and Hindi pins `hi-IN-u-nu-deva`, because `hi-IN` alone
+    resolves Latin digits beside a body Sarvam translated with `numerals_format: native`.
+  Free harness `pdf:preview` (built-in Marathi sample, `--html`, `--png`) — build the layout
+  there before touching the route; it costs nothing.
+  Verified 2026-07-25: typecheck green 7/7, lint clean on every touched file. Offline — all
+  hard conjuncts shape correctly (कर्जमुक्ती ऱ्या महाराष्ट्र विद्यार्थ्यांच्या ज्ञानज्योती हृदयरोग श्री),
+  Devanagari digits in the date line, the double rule renders, a 4-page article puts the
+  letterhead on page 1 and starts pages 2-4 straight into the body, English renders with no
+  tofu (the embedded font carries 551 codepoints incl. all of Basic Latin), and a text layer
+  is present on every page at ~350 KB — vector, not raster. Live API — 200 with correct
+  `content-type`/`content-disposition`/`no-store` on a real completed run in both मराठी and
+  English, plus every guard: bad lang 400, unknown id 404, twitter 400, **facebook 400**
+  (proving `isSocialCategory()` rather than `=== 'twitter'`), untranslated Hindi 404.
+  **The one genuinely new operational fact: the API image now ships Chromium**
+  (`deploy/api.Dockerfile`, which deliberately excluded it) — ~400-500 MB larger, ~200-300 MB
+  peak RSS per export; check the box's memory headroom, it also runs n8n. If that layer is
+  ever missing the route returns a Marathi 503 rather than crashing, and no env flag gates it
+  (a declaration can disagree with reality; the catch cannot — the "params are LEARNED, not
+  declared" reasoning). **Expected, not a defect:** Chromium writes Marathi into the text
+  layer in visual order, so `probePdf` may call an exported article `garbled`; appearance and
+  print are unaffected. No migration, no n8n; deploy is API + web (rebuild
+  `@dgipr/poster-renderer` dist first).
+
+- **DLO approved facts become the article contract, with attributed statements**
+  (2026-07-25, migration 0034): the Pointers call now returns both its existing 5W1H
+  groups and up to 12 explicitly attributed statements
+  (`{ speaker, designation, venue, claim }`). `/dlo` shows both as checked-by-default
+  rows and persists the kept inventory on the generation as `selected_facts` plus
+  `statements`; each selected fact is stored as `{ dimension, text }`, not a flat string,
+  because preserving the already-approved 5W1H dimension is what removes the redundant
+  `extract_5w1h` model call without guessing. Empty/absent fields retain the legacy path,
+  so media-room and other non-DLO generations keep the old raw-note pipeline.
+  On this DLO path, `generateArticle` builds `FiveWOneH` in code, skips the editorial
+  brief's second tier-audit call, and replaces the three raw-note coverage graders
+  (tiered missing + citizen missing + overweight) with one bounded
+  `findMissingApprovedFacts` call over the selected checklist, statements and optional
+  brief. Drafting and every coverage/faithfulness/feedback repair receives the same
+  REQUIRED_FACTS and ATTRIBUTED_STATEMENTS blocks; statement speaker/claim links are
+  therefore preserved through article feedback, while blank designation/venue fields
+  are never inferred. Feedback revisions also re-read `excluded_facts`, closing the old
+  path where a deliberately dropped pointer could return after revision.
+  Style support is conditional on statements: an attribution paragraph is appended to
+  the otherwise unchanged 1,500-character exemplar slice, and retrieval lightly boosts
+  attribution-shaped news/scheme references only for such runs. `fact_check` is now a
+  real progress phase instead of leaving the UI frozen on faithfulness during the
+  traceability call. The designation-duplication and poster-name-lock proposals from the
+  source plan were deliberately NOT implemented. Verified free: shared-package rebuilds,
+  full workspace typecheck 7/7, touched-file lint clean, selected-fact schema/default
+  compatibility checks, and deterministic 5W1H assembly. Root lint still reports only
+  the pre-existing `content-engine/src/intake/text-file.ts` irregular-whitespace error
+  (plus two poster-template warnings). Deploy: 0034 → API → web; no n8n.
+
 Two n8n workflows are implemented and host-independent for deployment; their master
 templates arrive as immutable `references/library/...` public URLs inside each webhook
 payload (fetched over HTTPS — never local disk, no hardcoded storage paths):

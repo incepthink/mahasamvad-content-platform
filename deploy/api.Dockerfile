@@ -9,19 +9,20 @@
 #
 #   docker build -f deploy/api.Dockerfile -t dgipr-api .
 #
-# NO CHROMIUM: posters are rendered by the n8n workflows (article-poster-v1-api /
-# social-post-v2-api) via the OpenAI image API — the default ARTICLE_POSTER_MODE
-# is 'n8n'. The in-container HTML/Playwright renderer (ARTICLE_POSTER_MODE=html)
-# is kept in the codebase but is NOT installed here, so this image is lean and
-# needs no browser system libs. To use html mode you must re-enable the Chromium
-# layer at the bottom of this file and rebuild.
+# CHROMIUM IS REQUIRED: the article-PDF export (GET /api/generations/:id/article.pdf)
+# renders through headless Chromium — the same HarfBuzz shaper that makes the posters'
+# Devanagari correct, and which no PDF library provides — so the browser ships in this
+# image (see the install layer after the build step below). Posters themselves do not
+# need it: ARTICLE_POSTER_MODE defaults to 'fresh' (the API builds the prompt and calls
+# the OpenAI image API directly), with 'n8n' handled by the workflows. The in-container
+# HTML poster renderer (ARTICLE_POSTER_MODE=html) now also works as a side effect.
 FROM node:22-bookworm-slim
 
 ENV PNPM_HOME=/pnpm
 ENV PATH="$PNPM_HOME:$PATH"
-# Skip Playwright's postinstall browser download — the npm module still installs
-# (imports resolve; launch is lazy), we just don't ship the ~150MB browser we
-# never launch in n8n mode.
+# Skip Playwright's postinstall browser download so the dependency layer below stays
+# lean and cacheable; the browser is installed explicitly, once, after the build step
+# (overriding this variable for that one RUN).
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 RUN corepack enable
 
@@ -45,6 +46,16 @@ RUN pnpm install --frozen-lockfile --filter "@dgipr/api..."
 COPY . .
 RUN pnpm --filter "@dgipr/api..." --if-present build
 
+# Chromium for the article-PDF export. --with-deps apt-installs the shared libraries it
+# needs (and fonts-liberation, which is the template's Latin fallback) and works fine on
+# -slim, which is still Debian bookworm with apt. PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD is
+# overridden for this RUN only, so the install layer above stays lean and cached.
+# Cost: ~400-500MB of image and ~200-300MB peak RSS per export — check the box's memory
+# headroom, since it also runs n8n.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=0 \
+    pnpm --filter @dgipr/poster-renderer exec playwright install --with-deps chromium
+
 # Bind to all interfaces inside the container (the app defaults to 127.0.0.1,
 # which would be unreachable from outside). PORT/CORS_ORIGIN/etc. come from the
 # runtime environment (docker-compose env_file), NOT a baked-in .env.
@@ -56,8 +67,8 @@ EXPOSE 3001
 # by the container runtime.
 CMD ["node", "apps/api/dist/index.js"]
 
-# --- OPTIONAL: enable ARTICLE_POSTER_MODE=html (in-container Chromium) ---
-# Requires the full (non-slim) base `FROM node:22-bookworm` above, then add:
-#   RUN pnpm --filter @dgipr/poster-renderer exec playwright install --with-deps chromium
-# and drop `ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`. This makes the image large
-# and raises the box's RAM needs — only do it if you actually use html mode.
+# --- Note on ARTICLE_POSTER_MODE=html ---
+# The Chromium layer above is installed for the article-PDF export, so html poster mode
+# now works too with no further change. It is still not the default (that is 'fresh').
+# If the PDF export is ever dropped and this image should go back to being lean, remove
+# that layer — the route then returns a Marathi 503 rather than crashing.

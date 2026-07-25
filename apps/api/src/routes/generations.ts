@@ -19,7 +19,11 @@ import {
   type GenerationRow,
   type SupabaseClient,
 } from '@dgipr/database';
-import { generateArticlePoster } from '@dgipr/poster-renderer';
+import {
+  ChromiumUnavailableError,
+  generateArticlePdf,
+  generateArticlePoster,
+} from '@dgipr/poster-renderer';
 import { posterStyleLabel } from '@dgipr/content-engine';
 import {
   SocialPublishError,
@@ -54,6 +58,8 @@ import {
   getReviseArticleError,
   getTranslateError,
   getTranslateWarnings,
+  getDesignationWarnings,
+  nameDesignationsOf,
   getTranslatingLanguage,
   isJobRunning,
   isRevisingArticle,
@@ -71,6 +77,7 @@ import {
   startSocialPostJob,
   startTranslateJob,
 } from '../jobs/runner.js';
+import { rememberDesignations } from '../jobs/designation-writeback.js';
 import { prepareTranslationTerms } from '../jobs/translation-terms.js';
 
 // Stage ping n8n POSTs to /generations/:id/progress after each social-post stage.
@@ -203,6 +210,11 @@ async function toDetail(
     translatingLanguage: getTranslatingLanguage(row.id),
     translateError: getTranslateError(row.id),
     translateWarnings: getTranslateWarnings(row.id),
+    // The पदनाम pairs this run was generated with (persisted, so a same-note re-run can carry
+    // forward an override the officer did not save to the dictionary) and — from the same
+    // in-process registry as translateWarnings — any that could not be applied.
+    nameDesignations: nameDesignationsOf(row),
+    designationWarnings: getDesignationWarnings(row.id),
     // Article revision can run beside the poster render (same registry pattern as
     // translation), so its liveness/failure also come from the runner, not the row.
     articleRevising: isRevisingArticle(row.id),
@@ -299,6 +311,17 @@ export function registerGenerationRoutes(
       }
       threadRootId = source.threadRootId ?? source.id;
     }
+    // Person → पदनाम pairs the officer approved in the pre-generation name check. Article runs
+    // only: a social poster's headline is written by generatePosterCopy and a caption is not
+    // the place for an official title, so accepting them there would silently do nothing —
+    // the posterHeading reasoning directly above.
+    const designations = isSocialCategory(body.category)
+      ? []
+      : (body.designations ?? []);
+    // Ticked pairs go to the dictionary before the insert, so the next article about the same
+    // person starts pre-filled even if this run later fails.
+    await rememberDesignations(client, designations);
+
     const row = await insertGeneration(client, {
       note: body.note,
       outputType: body.outputType,
@@ -306,6 +329,12 @@ export function registerGenerationRoutes(
       designMode,
       templateBrand,
       heading: body.heading,
+      // Stripped of the request-only `remember` flag; insertGeneration omits the column when
+      // empty, so an un-applied 0033 disables the feature rather than every create.
+      nameDesignations: designations.map((pair) => ({
+        name: pair.name,
+        designation: pair.designation,
+      })),
       // Hand-typed poster text — article/poster runs only. A social poster's headline is
       // written by generatePosterCopy and has no equivalent lock, so accepting it there would
       // silently do nothing.
@@ -917,6 +946,98 @@ export function registerGenerationRoutes(
           `attachment; filename="dgipr-poster-${row.id}.png"`,
         )
         .send(png);
+    },
+  );
+
+  // The article as a printable A4 PDF (DGIPR letterhead, Chromium-typeset Devanagari),
+  // rendered on demand and streamed — nothing is stored, since a saved copy would go stale
+  // the moment the article is revised.
+  //
+  // GET, like poster.png above and for the same reason: `content-disposition: attachment`
+  // is the only way to force a cross-origin download, so the frontend is a plain <a href>.
+  // Because this IS a plain navigation, the error bodies below are what the officer SEES in
+  // the tab — hence Marathi, unlike the fetch-backed routes.
+  app.get<{ Params: { id: string }; Querystring: { lang?: string } }>(
+    '/generations/:id/article.pdf',
+    // Fastify auto-exposes HEAD for a GET; without this a HEAD would launch Chromium and
+    // throw the PDF away.
+    { exposeHeadRoute: false },
+    async (request, reply) => {
+      const lang = request.query.lang ?? 'mr';
+      if (lang !== 'mr' && lang !== 'en' && lang !== 'hi') {
+        // Hand-checked rather than Zod-parsed: the global error handler serialises a whole
+        // ZodError, which is unreadable as a raw browser body.
+        return reply.code(400).send({ error: { message: 'अवैध भाषा.' } });
+      }
+
+      const row = await getGeneration(client, request.params.id);
+      if (!row) {
+        return reply.code(404).send({ error: { message: 'हे काम सापडले नाही.' } });
+      }
+      // A social run's `article` column holds the CAPTION, not an article — a letterhead PDF
+      // of a tweet is wrong. isSocialCategory(), never category === 'twitter', or the
+      // facebook lane slips through.
+      if (isSocialCategory(row.category)) {
+        return reply
+          .code(400)
+          .send({ error: { message: 'सोशल पोस्टसाठी PDF उपलब्ध नाही.' } });
+      }
+
+      // The gate is the TEXT, not row.status. The article is final long before the poster is
+      // (ArticleView is on screen while the poster still renders — the reason translating/
+      // articleRevising live off status), so a status === 'completed' check would break the
+      // main case. A queued/running row simply has no article and lands in the same 404;
+      // a FAILED row that did produce one can still be exported, which is deliberate — the
+      // officer keeps text that was already paid for.
+      const text =
+        lang === 'mr'
+          ? row.article
+          : lang === 'en'
+            ? row.articleEnglish
+            : row.articleHindi;
+      if (!text || text.trim() === '') {
+        return reply.code(404).send({
+          error: {
+            message:
+              lang === 'mr'
+                ? 'या कामाचा लेख अद्याप तयार नाही.'
+                : lang === 'en'
+                  ? 'या लेखाचे इंग्रजी भाषांतर अद्याप तयार नाही.'
+                  : 'या लेखाचे हिंदी भाषांतर अद्याप तयार नाही.',
+          },
+        });
+      }
+
+      try {
+        const pdf = await generateArticlePdf({
+          article: text,
+          heading: row.heading,
+          createdAt: row.createdAt,
+          language: lang,
+        });
+        return reply
+          .header('content-type', 'application/pdf')
+          .header(
+            'content-disposition',
+            `attachment; filename="dgipr-lekh-${row.id}-${lang}.pdf"`,
+          )
+          // The article is revisable, so a cached PDF would go stale behind a re-render.
+          .header('cache-control', 'no-store')
+          .send(pdf);
+      } catch (error) {
+        // deploy/api.Dockerfile installs Chromium for this route; if that layer is ever
+        // missing, this must read as a setup problem, not a 500 in a blank tab.
+        if (error instanceof ChromiumUnavailableError) {
+          request.log.error({ err: error }, 'article pdf: chromium unavailable');
+          return reply.code(503).send({
+            error: {
+              message:
+                'PDF सेवा सध्या या सर्व्हरवर उपलब्ध नाही. कृपया प्रशासकाशी संपर्क साधा.',
+            },
+          });
+        }
+        throw error;
+      }
     },
   );
 

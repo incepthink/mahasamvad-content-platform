@@ -15,6 +15,14 @@ export { polishArticleWithSarvam } from './generation/polish-article.js';
 export { generateCopy } from './generation/generate-copy.js';
 export { extractFiveWOneH } from './generation/extract-5w1h.js';
 export { extractPointers } from './generation/extract-pointers.js';
+// Person → पदनाम: the deterministic pass that guarantees an officer-approved designation
+// reaches the published article, plus its result/issue shapes.
+export {
+  applyDesignations,
+  type NameDesignation,
+  type DesignationIssue,
+  type DesignationResult,
+} from './generation/apply-designations.js';
 export {
   deriveEditorialBrief,
   type EditorialBrief,

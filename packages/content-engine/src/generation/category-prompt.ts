@@ -5,7 +5,7 @@
 // only for tone/structure/length/phrasing, never facts. The NOTES are the only
 // fact source.
 
-import type { FiveWOneH } from '@dgipr/schemas';
+import type { AttributedStatement, FiveWOneH } from '@dgipr/schemas';
 // Type-only import (erased at compile time), so this does not create a runtime import
 // cycle with editorial-brief.ts, which imports CATEGORY_LABEL/ArticleCategory from here.
 import type { EditorialBrief } from './editorial-brief.js';
@@ -16,6 +16,93 @@ export const CATEGORY_LABEL: Record<ArticleCategory, string> = {
   scheme: 'योजना-लेख',
   news: 'बातमी',
 };
+
+// ---------- approved person → पदनाम pairs ----------
+//
+// Shared by every prompt on the article path (drafting, the coverage revision, the feedback
+// revision, the faithfulness checker + its repair) because ALL of them must be told the same
+// thing: these designations are authorised even though the note does not contain them. Miss one
+// and that stage quietly deletes the designation — the faithfulness pass in particular treats an
+// unsourced पदनाम as an unsupported claim, which is precisely what an added designation is.
+//
+// The helpers return string[] so they splice into a `.join('\n')` array with no conditional at
+// the call site — the excludedFactsBlock/Rule shape in verify-coverage.ts.
+
+export type DesignationPair = Readonly<{ name: string; designation: string }>;
+
+export function designationLines(
+  designations: readonly DesignationPair[] | null | undefined,
+): string[] {
+  return (designations ?? [])
+    .map((pair) => ({
+      name: pair.name.trim(),
+      designation: pair.designation.trim(),
+    }))
+    .filter((pair) => pair.name.length > 0 && pair.designation.length > 0)
+    .map((pair) => `- ${pair.name} → ${pair.designation} ${pair.name}`);
+}
+
+export function designationBlock(
+  designations: readonly DesignationPair[] | null | undefined,
+): string[] {
+  const rows = designationLines(designations);
+  if (rows.length === 0) return [];
+  return [
+    '<DESIGNATIONS purpose="officer_approved_official_titles_authorised_even_though_absent_from_notes">',
+    ...rows,
+    '</DESIGNATIONS>',
+  ];
+}
+
+// The drafting/revision instruction. First mention in full, later mentions bare — standard
+// Marathi news style, and what the deterministic pass expects to find.
+export const DESIGNATION_TASK_RULE =
+  'DESIGNATIONS यादीतील व्यक्तींचा लेखातील पहिला उल्लेख "पदनाम + पूर्ण नाव" असाच करा (उदा. "मुख्यमंत्री देवेंद्र फडणवीस यांनी"). पुढील उल्लेखांत पदनाम पुन्हा लिहू नका, फक्त नाव वापरा. ही पदनामे अधिकाऱ्याने तपासून दिली आहेत, त्यामुळे टिपणीत नसली तरी ती वापरणे बरोबर आहे; यादीत नसलेले कोणतेही पदनाम मात्र स्वतःहून जोडू नका.';
+
+// The "do not strip this" instruction for the checkers/repair passes, which otherwise see an
+// unsourced designation and correctly (but wrongly, here) flag it.
+export const DESIGNATION_ALLOWED_RULE =
+  'DESIGNATIONS यादीतील पदनामे अधिकाऱ्याने तपासून मंजूर केली आहेत. ती टिपणीत नसली तरी असमर्थित मानू नका, काढून टाकू नका आणि बदलू नका.';
+
+// ---------- officer-approved fact inventory + attributed statements ----------
+
+export function includedFactsBlock(
+  includeFacts: readonly string[] | null | undefined,
+): string[] {
+  const facts = (includeFacts ?? []).map((fact) => fact.trim()).filter(Boolean);
+  if (facts.length === 0) return [];
+  return [
+    '<REQUIRED_FACTS purpose="officer_approved_completeness_contract_derived_from_notes">',
+    ...facts.map((fact) => `- ${fact}`),
+    '</REQUIRED_FACTS>',
+  ];
+}
+
+export function statementBlock(
+  statements: readonly AttributedStatement[] | null | undefined,
+): string[] {
+  const rows = (statements ?? []).filter(
+    (statement) => statement.speaker.trim() && statement.claim.trim(),
+  );
+  if (rows.length === 0) return [];
+  return [
+    '<ATTRIBUTED_STATEMENTS purpose="officer_approved_statements_extracted_from_notes">',
+    ...rows.flatMap((statement, index) => [
+      `[${index + 1}]`,
+      `speaker: ${statement.speaker.trim()}`,
+      `designation: ${statement.designation.trim()}`,
+      `venue: ${statement.venue.trim()}`,
+      `claim: ${statement.claim.trim()}`,
+    ]),
+    '</ATTRIBUTED_STATEMENTS>',
+  ];
+}
+
+export const STATEMENT_TASK_RULE =
+  'ATTRIBUTED_STATEMENTS मधील प्रत्येक विधान वक्त्याशी जोडून लेखात जपा. claim चा अर्थ अचूक ठेवून महासंवाद attribution शैली वापरा (उदा. “... असल्याचे [पदनाम] [नाव] यांनी [स्थळ] सांगितले”). designation किंवा venue रिकामे असेल तर ते स्वतःहून भरू नका. वक्ता, पदनाम, स्थळ किंवा दावा बदलू अथवा नवीन तयार करू नका.';
+
+export const STATEMENTS_ALLOWED_RULE =
+  'ATTRIBUTED_STATEMENTS मधील विधाने टिपणीतून काढून अधिकाऱ्याने मंजूर केली आहेत. त्यांचे वक्त्याशी केलेले attribution, नाव, टिपणीत असलेले पदनाम/स्थळ आणि claim असमर्थित quote म्हणून मानू नका, काढून टाकू नका किंवा दुसऱ्या व्यक्तीला जोडू नका.';
 
 const STYLE_DESCRIPTOR: Record<ArticleCategory, string> = {
   scheme:
@@ -206,6 +293,16 @@ export function buildUserPrompt(
   // source and NOT a length signal — a list of things to KEEP OUT. Empty/absent ⇒ nothing is
   // excluded, i.e. today's behaviour.
   excludeFacts?: readonly string[] | null,
+  // Person → पदनाम pairs the officer approved before generating (apply-designations.ts). These
+  // are AUTHORISED even though the note does not state them — that is the whole point, the
+  // recording says "देवेंद्र फडणवीस" and the article must say "मुख्यमंत्री देवेंद्र फडणवीस". They do
+  // NOT license any other addition. A deterministic pass enforces the same thing afterwards;
+  // this block is what makes the article read naturally rather than patched.
+  designations?: readonly DesignationPair[] | null,
+  // Checked pointers are the bounded completeness contract. Every item came from NOTES,
+  // but the list records the officer's explicit inclusion decision.
+  includeFacts?: readonly string[] | null,
+  statements?: readonly AttributedStatement[] | null,
 ): string {
   const parts: string[] = [];
 
@@ -275,6 +372,26 @@ export function buildUserPrompt(
     );
   }
 
+  // Approved designations, beside EXCLUDE and for the same reason: a constraint on how the
+  // NOTES are used, not an addition to them.
+  const designationRows = designationLines(designations);
+  const hasDesignations = designationRows.length > 0;
+  if (hasDesignations) {
+    parts.push(...designationBlock(designations), '');
+  }
+
+  const requiredFactRows = includedFactsBlock(includeFacts);
+  const hasRequiredFacts = requiredFactRows.length > 0;
+  if (hasRequiredFacts) {
+    parts.push(...requiredFactRows, '');
+  }
+
+  const statementRows = statementBlock(statements);
+  const hasStatements = statementRows.length > 0;
+  if (hasStatements) {
+    parts.push(...statementRows, '');
+  }
+
   parts.push(
     '<NOTES purpose="only_authoritative_fact_source">',
     note.trim(),
@@ -289,7 +406,25 @@ export function buildUserPrompt(
           'लेखाची लांबी STYLE_EXAMPLE च्या लांबीवरून ठरवू नका — ती NOTES मध्ये किती ठळक व आधारभूत नागरिकाभिमुख आशय आहे त्यावरून ठरवा. आशय जास्त असल्यास लेख अधिक सविस्तर असावा.',
         ]
       : []),
-    'NOTES मध्ये नसलेले कोणतेही ठोस तथ्य, नाव, पदनाम, तारीख, ठिकाण, आकडा, कायदा, योजना, quote किंवा byline जोडू नका.',
+    hasDesignations
+      ? 'NOTES मध्ये नसलेले कोणतेही ठोस तथ्य, नाव, तारीख, ठिकाण, आकडा, कायदा, योजना, quote किंवा byline जोडू नका. पदनामांबाबत एकच अपवाद — फक्त DESIGNATIONS यादीत दिलेली पदनामे वापरा; इतर कोणतेही पदनाम जोडू नका.'
+      : 'NOTES मध्ये नसलेले कोणतेही ठोस तथ्य, नाव, पदनाम, तारीख, ठिकाण, आकडा, कायदा, योजना, quote किंवा byline जोडू नका.',
+    ...(hasDesignations ? [DESIGNATION_TASK_RULE] : []),
+    ...(hasRequiredFacts
+      ? [
+          'REQUIRED_FACTS मधील प्रत्येक निवडलेले तथ्य लेखात अर्थासह आलेच पाहिजे. वेगळ्या शब्दांत मांडू शकता, पण कोणताही मुद्दा गाळू नका किंवा दुय्यम म्हणून वगळू नका.',
+        ]
+      : []),
+    ...(hasStatements ? [STATEMENT_TASK_RULE] : []),
+    ...(hasStatements
+      ? category === 'scheme'
+        ? [
+            'विधाने “... असल्याचे [पदनाम] [नाव] यांनी सांगितले” किंवा “... यावर भर देण्यात आल्याचे त्यांनी स्पष्ट केले” अशा योजना-फीचरला अनुरूप attribution मध्ये मांडा.',
+          ]
+        : [
+            'टिपणीत नावासह विधान असल्याने संस्थात्मक attribution ऐवजी त्या मंत्री/अधिकाऱ्याचे नाव आणि विधान योग्य ठिकाणी जपा.',
+          ]
+      : []),
     ...(hasExcluded
       ? [
           'EXCLUDE यादीतील तथ्ये अधिकाऱ्याने जाणीवपूर्वक वगळली आहेत — ती लेखात अजिबात आणू नका, ना थेट ना वेगळ्या शब्दांत. त्यांच्याशी थेट निगडित तपशीलही टाळा. EXCLUDE मध्ये नसलेली NOTES मधील इतर सर्व माहिती मात्र नेहमीप्रमाणे वापरा.',

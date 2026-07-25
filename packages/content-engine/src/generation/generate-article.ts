@@ -13,7 +13,11 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { generateArticlePoster } from '@dgipr/poster-renderer';
-import type { FiveWOneH } from '@dgipr/schemas';
+import type {
+  AttributedStatement,
+  FiveWOneH,
+  SelectedFact,
+} from '@dgipr/schemas';
 import {
   retrieveReferenceArticle,
   type ReferenceArticle,
@@ -30,13 +34,24 @@ import {
   type EditorialBrief,
 } from './editorial-brief.js';
 import {
+  DESIGNATION_ALLOWED_RULE,
+  STATEMENTS_ALLOWED_RULE,
   buildSystemPrompt,
   buildUserPrompt,
+  designationBlock,
+  includedFactsBlock,
+  statementBlock,
   type ArticleCategory,
+  type DesignationPair,
 } from './category-prompt.js';
+import {
+  applyDesignations,
+  type DesignationIssue,
+} from './apply-designations.js';
 import { NEWS_STYLE_EXEMPLAR } from './news-exemplar.js';
 import {
   findMissingInformation,
+  findMissingApprovedFacts,
   findMissingNoteFacts,
   findOverweightedDetails,
   findUnsupportedClaims,
@@ -69,12 +84,19 @@ export function buildMessages(
   fiveW1H?: FiveWOneH,
   brief?: EditorialBrief | null,
   excludeFacts?: readonly string[],
+  designations?: readonly DesignationPair[],
+  includeFacts?: readonly string[],
+  statements?: readonly AttributedStatement[],
 ): ChatMessage[] {
   // The reference is a style/structure exemplar only (never a fact source), so cap it the
   // same way the brief does (editorial-brief.ts) — the tail adds tokens to the largest
   // prompt without improving style guidance.
   const styleExample = reference
-    ? `शीर्षक: ${reference.title}\n\n${reference.text.slice(0, 1500)}`
+    ? `शीर्षक: ${reference.title}\n\n${
+        statements && statements.length > 0
+          ? referenceStyleExcerpt(reference.text)
+          : reference.text.slice(0, 1500)
+      }`
     : category === 'news'
       ? NEWS_STYLE_EXEMPLAR
       : null;
@@ -91,9 +113,58 @@ export function buildMessages(
         fiveW1H,
         brief,
         excludeFacts,
+        designations,
+        includeFacts,
+        statements,
       ),
     },
   ];
+}
+
+// Keep the compact head slice, but append one attributed-statement paragraph when the
+// exemplar places it later in the body. This preserves the Mahasamvad attribution shape
+// without feeding the full reference (whose facts remain forbidden).
+function referenceStyleExcerpt(text: string): string {
+  const head = text.slice(0, 1500);
+  const attribution =
+    text
+      .split(/\n\s*\n/u)
+      .map((paragraph) => paragraph.trim())
+      .find((paragraph) =>
+        /यांनी[\s\S]{0,180}(?:सांगितले|म्हणाले|स्पष्ट केले|नमूद केले)/u.test(
+          paragraph,
+        ),
+      ) ?? '';
+  if (!attribution || head.includes(attribution)) return head;
+  return `${head}\n\n${attribution}`;
+}
+
+// The selected pointers already carry their 5W1H dimension. Reusing that approved grouping
+// removes a redundant full-note extraction call and ensures the scaffold matches the facts
+// the officer actually kept.
+export function fiveWOneHFromPointers(
+  facts: readonly SelectedFact[],
+): FiveWOneH {
+  const values: Record<SelectedFact['dimension'], string[]> = {
+    who: [],
+    what: [],
+    when: [],
+    where: [],
+    why: [],
+    how: [],
+  };
+  for (const fact of facts) {
+    const text = fact.text.trim();
+    if (text) values[fact.dimension].push(text);
+  }
+  return {
+    who: values.who.join('; '),
+    what: values.what.join('; '),
+    when: values.when.join('; '),
+    where: values.where.join('; '),
+    why: values.why.join('; '),
+    how: values.how.join('; '),
+  };
 }
 
 export type GeneratedArticle = Readonly<{
@@ -112,6 +183,11 @@ export type GeneratedArticle = Readonly<{
   // before drafting. Best-effort: null when derivation failed, in which case the whole
   // pipeline falls back to total-coverage behaviour. A PLAN, never a fact source.
   brief: EditorialBrief | null;
+  // Approved designations that did NOT reach the article as-is — the full name never appeared,
+  // or a different title was found and replaced. Reported, never fatal: the article ships and
+  // the API surfaces these for the officer, because a SILENTLY unapplied designation is the
+  // failure this whole feature exists to prevent. Empty when all applied cleanly.
+  designationIssues: readonly DesignationIssue[];
 }>;
 
 // Notes longer than this (characters) are split into sections and generated
@@ -250,6 +326,9 @@ async function generateSectioned(
   fiveW1H?: FiveWOneH,
   brief?: EditorialBrief | null,
   excludeFacts?: readonly string[],
+  designations?: readonly DesignationPair[],
+  includeFacts?: readonly string[],
+  statements?: readonly AttributedStatement[],
 ): Promise<string> {
   const sections = splitNoteIntoSections(note);
   const passages: string[] = [];
@@ -257,6 +336,9 @@ async function generateSectioned(
     passages.push(await generatePassage(section, brief));
   }
   const draft = passages.join('\n\n');
+  // The per-section passages are raw material; the designations are applied by the ASSEMBLY
+  // pass (and guaranteed by the deterministic pass afterwards), so a section that happens not
+  // to name anyone needs no extra prompt weight.
   const messages = buildMessages(
     note,
     reference,
@@ -265,6 +347,9 @@ async function generateSectioned(
     fiveW1H,
     brief,
     excludeFacts,
+    designations,
+    includeFacts,
+    statements,
   );
   messages.push({
     role: 'user',
@@ -325,7 +410,13 @@ function buildCoverageRevisionMessages(
   brief?: EditorialBrief | null,
   overweighted: string[] = [],
   excludeFacts: readonly string[] = [],
+  designations: readonly DesignationPair[] = [],
+  includeFacts: readonly string[] = [],
+  statements: readonly AttributedStatement[] = [],
 ): ChatMessage[] {
+  const designationRows = designationBlock(designations);
+  const requiredFactRows = includedFactsBlock(includeFacts);
+  const statementRows = statementBlock(statements);
   const excluded = excludeFacts.map((fact) => fact.trim()).filter(Boolean);
   const excludeBlock =
     excluded.length > 0
@@ -398,11 +489,25 @@ function buildCoverageRevisionMessages(
     ...missingBlock,
     ...overweightBlock,
     ...excludeBlock,
+    ...(designationRows.length > 0 ? [...designationRows, ''] : []),
+    ...(requiredFactRows.length > 0 ? [...requiredFactRows, ''] : []),
+    ...(statementRows.length > 0 ? [...statementRows, ''] : []),
     '## कार्य:',
     ...(excluded.length > 0
       ? [
           'EXCLUDE यादीतील तथ्ये लेखात आणू नका आणि पुन्हा जोडू नका — ती अधिकाऱ्याने जाणीवपूर्वक वगळली आहेत. (MISSING INFORMATION मध्ये असे तथ्य आलेच, तरी ते जोडू नका.)',
         ]
+      : []),
+    // Without this the revision reads "टिपणीत नसलेले काहीही जोडू नका" in `task` and strips the
+    // designation it was just given.
+    ...(designationRows.length > 0 ? [DESIGNATION_ALLOWED_RULE] : []),
+    ...(requiredFactRows.length > 0
+      ? [
+          'REQUIRED_FACTS मधील प्रत्येक तथ्य अंतिम लेखात अर्थासह जपा; दुरुस्ती करताना आधी आलेला निवडलेला मुद्दा गाळू नका.',
+        ]
+      : []),
+    ...(statementRows.length > 0
+      ? [STATEMENTS_ALLOWED_RULE, 'प्रत्येक ATTRIBUTED_STATEMENT योग्य वक्त्याशी जोडून जपा.']
       : []),
     ...task,
   ].join('\n');
@@ -418,18 +523,26 @@ function buildFaithfulnessRevisionMessages(
   draft: string,
   unsupported: string[],
   category: ArticleCategory = 'scheme',
+  designations: readonly DesignationPair[] = [],
+  statements: readonly AttributedStatement[] = [],
 ): ChatMessage[] {
   const unsupportedBlock = unsupported.map((item) => `- ${item}`).join('\n');
+  const designationRows = designationBlock(designations);
+  const statementRows = statementBlock(statements);
   const userPrompt = [
     '## आधीचा लेख (DRAFT):',
     draft,
     '',
+    ...(designationRows.length > 0 ? [...designationRows, ''] : []),
+    ...(statementRows.length > 0 ? [...statementRows, ''] : []),
     '## टिपणीत नसलेली (असमर्थित) विधाने (UNSUPPORTED CLAIMS):',
     unsupportedBlock,
     '',
     '## कार्य:',
     'वरील विधाने टिपणीत नाहीत. तीच शैली, रचना व लांबी कायम ठेवून ही असमर्थित विधाने',
     'काढून टाका किंवा टिपणीशी सुसंगत करा. टिपणीतील खरी माहिती मात्र वगळू नका.',
+    ...(designationRows.length > 0 ? [DESIGNATION_ALLOWED_RULE] : []),
+    ...(statementRows.length > 0 ? [STATEMENTS_ALLOWED_RULE] : []),
     'फक्त सुधारित लेख द्या; तथ्य-तपासणी यादी किंवा विभाजक जोडू नका.',
   ].join('\n');
   return [
@@ -498,7 +611,8 @@ export type GenerateArticlePhase =
   | 'editorial_brief'
   | 'draft'
   | 'coverage'
-  | 'faithfulness';
+  | 'faithfulness'
+  | 'fact_check';
 
 export type GenerateArticleOptions = Readonly<{
   onProgress?: (phase: GenerateArticlePhase) => void;
@@ -512,6 +626,21 @@ export type GenerateArticleOptions = Readonly<{
   // into the drafting prompt AND the two missing-fact coverage checkers so the loop cannot
   // re-add a deliberately-dropped fact. NOT a fact source. Empty/absent ⇒ today's behaviour.
   excludeFacts?: readonly string[] | undefined;
+  // Every pointer the officer kept, with its original 5W1H dimension. When present this
+  // bounded inventory replaces the separate 5W1H extraction and the three-way raw-note
+  // coverage fan-out.
+  includeFacts?: readonly SelectedFact[] | undefined;
+  // Statements explicitly attributed in the note and selected by the officer.
+  statements?: readonly AttributedStatement[] | undefined;
+  // Person → पदनाम pairs the officer approved before generating (apply-designations.ts).
+  // Threaded into drafting + the coverage revision + the faithfulness checker (which would
+  // otherwise strip them as unsourced), then ENFORCED deterministically on the final article.
+  // NOT a fact source and not a licence to add any other designation. Empty/absent ⇒ every
+  // name prints bare, i.e. today's article.
+  designations?: readonly DesignationPair[] | undefined;
+  // Designations known to the dictionary, used only to recognise a WRONG title the model may
+  // have written in front of an approved name so it can be replaced rather than duplicated.
+  knownDesignations?: readonly string[] | undefined;
 }>;
 
 export async function generateArticle(
@@ -522,6 +651,14 @@ export async function generateArticle(
   const category = options?.category ?? 'scheme';
   const heading = options?.heading;
   const excludeFacts = options?.excludeFacts;
+  const designations = options?.designations;
+  const selectedFacts = options?.includeFacts ?? [];
+  const statements = options?.statements ?? [];
+  const includeFacts = selectedFacts
+    .map((fact) => fact.text.trim())
+    .filter(Boolean);
+  const hasApprovedInventory =
+    includeFacts.length > 0 || statements.length > 0;
 
   // Style reference: both voices pull a topic-matched article from the vector store, scoped
   // to their own style bucket so news references never leak into scheme and vice versa. News
@@ -529,13 +666,20 @@ export async function generateArticle(
   // When the user gave a heading, it biases retrieval toward that editorial angle (Part B),
   // so the exemplar matches the intended shape — the raw note still drives the facts.
   onProgress('retrieve');
-  const reference = await retrieveReferenceArticle(note, category, heading);
+  const reference = await retrieveReferenceArticle(
+    note,
+    category,
+    heading,
+    statements.length > 0,
+  );
 
   // 5W1H fact scaffold: extract कोण/काय/केव्हा/कुठे/का/कसे strictly from the note before
   // drafting, so the draft can lead in inverted-pyramid order. Best-effort (returns an
   // empty scaffold on failure) — never invents, and the note is the only fact source.
   onProgress('extract_5w1h');
-  const fiveWOneH = await extractFiveWOneH(note, category, heading);
+  const fiveWOneH = hasApprovedInventory
+    ? fiveWOneHFromPointers(selectedFacts)
+    : await extractFiveWOneH(note, category, heading);
 
   // Editorial brief: decide an angle, tier the note's facts, and plan the arc/subheads
   // BEFORE drafting, so the article reads as an edited piece rather than a linear
@@ -550,6 +694,8 @@ export async function generateArticle(
     reference,
     heading,
     fiveWOneH,
+    statements,
+    hasApprovedInventory,
   );
   if (brief) {
     console.log(
@@ -578,6 +724,9 @@ export async function generateArticle(
           fiveWOneH,
           brief,
           excludeFacts,
+          designations,
+          includeFacts,
+          statements,
         )
       : await chatComplete(
           buildMessages(
@@ -588,6 +737,9 @@ export async function generateArticle(
             fiveWOneH,
             brief,
             excludeFacts,
+            designations,
+            includeFacts,
+            statements,
           ),
           { maxTokens: ARTICLE_BODY_MAX_TOKENS },
         );
@@ -601,11 +753,31 @@ export async function generateArticle(
   onProgress('coverage');
   for (let pass = 0; pass < MAX_COVERAGE_REVISIONS; pass++) {
     const { article } = splitContent(content);
-    const [tieredMissing, citizenMissing, overweighted] = await Promise.all([
-      findMissingInformation(article, note, angleForChecks, brief, excludeFacts),
-      findMissingNoteFacts(article, note, excludeFacts),
-      findOverweightedDetails(article, brief),
-    ]);
+    const approvedCoverage = hasApprovedInventory
+      ? await findMissingApprovedFacts(
+          article,
+          includeFacts,
+          statements,
+          brief,
+        )
+      : null;
+    const [tieredMissing, citizenMissing, overweighted] = approvedCoverage
+      ? [
+          approvedCoverage.missing,
+          [] as string[],
+          approvedCoverage.overweighted,
+        ]
+      : await Promise.all([
+          findMissingInformation(
+            article,
+            note,
+            angleForChecks,
+            brief,
+            excludeFacts,
+          ),
+          findMissingNoteFacts(article, note, excludeFacts),
+          findOverweightedDetails(article, brief),
+        ]);
     // The citizen-fact guard is brief-independent, so it catches benefits/eligibility/actions
     // the brief may have buried in mention/omit (which the tiered check is told to leave
     // alone). Merge both missing lists, deduping exact repeats so the revision weaves each
@@ -631,6 +803,9 @@ export async function generateArticle(
         brief,
         overweighted,
         excludeFacts,
+        designations,
+        includeFacts,
+        statements,
       ),
       { maxTokens: ARTICLE_BODY_MAX_TOKENS },
     );
@@ -666,13 +841,21 @@ export async function generateArticle(
     coveredArticle,
     note,
     angleForChecks,
+    designations,
+    statements,
   );
   if (unsupported.length > 0) {
     console.log(
       `[faithfulness] ${unsupported.length} असमर्थित विधाने, सुधारित करत आहे...`,
     );
     content = await chatComplete(
-      buildFaithfulnessRevisionMessages(content, unsupported, category),
+      buildFaithfulnessRevisionMessages(
+        content,
+        unsupported,
+        category,
+        designations,
+        statements,
+      ),
       { maxTokens: ARTICLE_BODY_MAX_TOKENS },
     );
   }
@@ -680,9 +863,28 @@ export async function generateArticle(
   // Traceability appendix (scheme only), decoupled from drafting: build it from the FINAL
   // article and stitch it on with the delimiter so `content`/`factCheck` stay as the API
   // and UI expect. News never carried an appendix.
-  const { article } = splitContent(content);
+  const { article: rawArticle } = splitContent(content);
+  if (category === 'scheme') onProgress('fact_check');
   const factCheck =
-    category === 'scheme' ? await generateFactCheck(article, note) : null;
+    category === 'scheme' ? await generateFactCheck(rawArticle, note) : null;
+
+  // Designations LAST, and deliberately after the appendix has been produced: the appendix
+  // traces the article against the note, and an approved designation is by design NOT in the
+  // note — computing it first is what stops a false "(टिपणीत आधार नाही)" line, with no change
+  // to generateFactCheck. Everything before this is prompting; this is the guarantee.
+  const designationResult = applyDesignations(rawArticle, designations ?? [], {
+    ...(options?.knownDesignations
+      ? { knownDesignations: options.knownDesignations }
+      : {}),
+  });
+  const article = designationResult.text;
+  if (designationResult.issues.length > 0) {
+    console.warn(
+      `[designations] ${designationResult.issues.length} पदनाम लागू करता आले नाही:`,
+      designationResult.issues,
+    );
+  }
+
   const finalContent = factCheck
     ? `${article}\n\n${FACT_CHECK_DELIMITER}\n${factCheck}`
     : article;
@@ -693,6 +895,7 @@ export async function generateArticle(
     reference,
     fiveWOneH,
     brief,
+    designationIssues: designationResult.issues,
   };
 }
 

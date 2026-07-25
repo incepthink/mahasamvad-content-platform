@@ -22,9 +22,13 @@
 // (total coverage, no brief block) — generation can never break because of this stage.
 
 import { pathToFileURL } from 'node:url';
-import type { FiveWOneH } from '@dgipr/schemas';
+import type { AttributedStatement, FiveWOneH } from '@dgipr/schemas';
 import { chatComplete, type ChatMessage } from './openai-chat.js';
-import { CATEGORY_LABEL, type ArticleCategory } from './category-prompt.js';
+import {
+  CATEGORY_LABEL,
+  statementBlock,
+  type ArticleCategory,
+} from './category-prompt.js';
 import type { ReferenceArticle } from '../retrieval/retrieve-references.js';
 
 // The editorial plan for one article. Local to content-engine (NOT in @dgipr/schemas yet —
@@ -156,6 +160,7 @@ function buildMessages(
   reference: ReferenceArticle | null,
   heading?: string,
   fiveW1H?: FiveWOneH,
+  statements?: readonly AttributedStatement[],
 ): ChatMessage[] {
   const parts: string[] = [];
 
@@ -198,6 +203,11 @@ function buildMessages(
     );
   }
 
+  const statementRows = statementBlock(statements);
+  if (statementRows.length > 0) {
+    parts.push(...statementRows, '');
+  }
+
   parts.push(
     '<NOTES purpose="only_authoritative_fact_source">',
     note.trim(),
@@ -206,6 +216,11 @@ function buildMessages(
     '<TASK>',
     `वरील ${CATEGORY_LABEL[category]} टिपणीचा संपादकीय आराखडा (angle, leadHook, arc, subheadings, tiers) ठरवा.`,
     'प्रत्येक tier मधील घटक टिपणीतील तथ्याचे संक्षिप्त मराठी पुनर्कथन असावे; नवीन तथ्य जोडू नका.',
+    ...(statementRows.length > 0
+      ? [
+          'ATTRIBUTED_STATEMENTS मधील प्रत्येक विधान foreground किंवा supporting मध्ये योग्य प्राधान्याने जपा.',
+        ]
+      : []),
     'फक्त ठरवलेल्या आकाराचा वैध JSON object परत करा.',
     '</TASK>',
   );
@@ -384,17 +399,21 @@ export async function deriveEditorialBrief(
   reference: ReferenceArticle | null,
   heading?: string,
   fiveW1H?: FiveWOneH,
+  statements?: readonly AttributedStatement[],
+  skipAudit = false,
 ): Promise<EditorialBrief | null> {
   if (note.trim().length === 0) return null;
 
   try {
     const raw = await chatComplete(
-      buildMessages(note, category, reference, heading, fiveW1H),
+      buildMessages(note, category, reference, heading, fiveW1H, statements),
       { temperature: 0, responseFormat: 'json_object' },
     );
     const brief = coerceEditorialBrief(parseJsonObject(raw));
     if (!brief) return null;
-    return await auditEditorialBrief(brief, note, category, heading);
+    return skipAudit
+      ? brief
+      : await auditEditorialBrief(brief, note, category, heading);
   } catch (error) {
     console.warn(
       '[brief] editorial brief derivation failed; continuing without it:',

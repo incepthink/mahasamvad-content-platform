@@ -13,6 +13,7 @@ const ARTICLE_STEPS: GenerationStep[] = [
   'draft',
   'coverage',
   'faithfulness',
+  'fact_check',
 ];
 const POSTER_STEPS: GenerationStep[] = ['copy', 'scene', 'render'];
 

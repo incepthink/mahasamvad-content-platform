@@ -7,6 +7,7 @@ import {
   GenerationSummarySchema,
   GlossaryTermSchema,
   PointersResultSchema,
+  PrepareDesignationsResponseSchema,
   PrepareTranslationResponseSchema,
   ProofreadResponseSchema,
   PublishGenerationResponseSchema,
@@ -33,6 +34,8 @@ import {
   type GlossaryTerm,
   type PointersRequest,
   type PointersResult,
+  type PrepareDesignationsRequest,
+  type PrepareDesignationsResponse,
   type PosterFeedbackRequest,
   type PosterImageFeedbackRequest,
   type PrepareTranslationResponse,
@@ -181,6 +184,20 @@ export async function fetchPointers(
     body: JSON.stringify(input),
   });
   return PointersResultSchema.parse(body);
+}
+
+// Which people does this text name, and what पदनाम should the article print before each?
+// Synchronous + ad-hoc like fetchPointers — nothing is stored. A text naming nobody comes back
+// with `names: []`, and the caller submits straight through: the check is invisible when there
+// is nothing to check.
+export async function prepareDesignations(
+  input: PrepareDesignationsRequest,
+): Promise<PrepareDesignationsResponse> {
+  const body = await requestJson('/api/designations/prepare', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  return PrepareDesignationsResponseSchema.parse(body);
 }
 
 // The review step's submit: the (edited) combined text becomes a normal
@@ -362,6 +379,18 @@ export async function updatePosterCopy(
 
 export function posterDownloadUrl(id: string): string {
   return `${API_URL}/api/generations/${id}/poster.png`;
+}
+
+// The article as a printable A4 PDF (DGIPR letterhead, Chromium-typeset Devanagari — a
+// browser-side PDF library cannot shape Marathi conjuncts, so the API renders it).
+// A URL rather than a fetch for the same reason posterDownloadUrl is one: only the server
+// can force a cross-origin download, and a plain <a href> gets the browser's native
+// download for free.
+export function articlePdfDownloadUrl(
+  id: string,
+  language: 'mr' | TranslationLanguage = 'mr',
+): string {
+  return `${API_URL}/api/generations/${id}/article.pdf?lang=${language}`;
 }
 
 // Posts the poster + caption to the official account of the run's own platform

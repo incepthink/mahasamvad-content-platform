@@ -196,6 +196,9 @@ export const STR = {
     'मुद्दे तयार करताना अडचण आली. पुन्हा प्रयत्न करा किंवा थेट लेख तयार करा.',
   dloPointersRegenerate: 'मुद्दे पुन्हा तयार करा',
   dloPointersExcludedCount: 'मुद्दे वगळले आहेत',
+  dloStatementsTitle: 'वक्त्यांची महत्त्वाची विधाने',
+  dloStatementsHint:
+    'निवडलेली विधाने वक्त्याच्या नावासह लेखात जपली जातील. टिपणीत नसलेले पदनाम किंवा ठिकाण जोडले जाणार नाही.',
   // 5W1H group headings for the pointer sections (कोण/काय/केव्हा/कुठे/का/कसे).
   dloPointerDimWho: 'कोण',
   dloPointerDimWhat: 'काय',
@@ -203,6 +206,35 @@ export const STR = {
   dloPointerDimWhere: 'कुठे',
   dloPointerDimWhy: 'का',
   dloPointerDimHow: 'कसे',
+  // व्यक्ती व पदनाम: the designation the article will print before each person's name. A blank
+  // field means the name prints bare — a designation is never guessed from the note.
+  designationsTitle: 'व्यक्ती व पदनाम तपासा',
+  designationsHint:
+    'लेखात या व्यक्तींचा पहिला उल्लेख "पदनाम + नाव" असा होईल (उदा. मुख्यमंत्री देवेंद्र फडणवीस). पदनाम रिकामे ठेवल्यास फक्त नाव येईल. इंग्रजी व हिंदी भाषांतरातही हेच पदनाम वापरले जाईल.',
+  designationsLoading: 'व्यक्तींची नावे तपासत आहोत…',
+  designationsEmpty:
+    'या मजकुरात कोणत्याही व्यक्तीचे नाव आढळले नाही. पुढे जा — पदनामाची गरज नाही.',
+  designationsError:
+    'नावे तपासताना अडचण आली. पुन्हा प्रयत्न करा किंवा पदनामाशिवाय पुढे जा.',
+  designationsRegenerate: 'नावे पुन्हा तपासा',
+  designationsName: 'नाव',
+  designationsDesignation: 'पदनाम',
+  designationsPlaceholder: 'उदा. मुख्यमंत्री (ऐच्छिक)',
+  designationsRemember: 'यापुढेही हेच वापरा',
+  designationsRememberHint:
+    'खूण केल्यास हे पदनाम नाव-शब्दकोशात जतन होईल आणि पुढच्या लेखात आपोआप भरले जाईल.',
+  designationsAddName: '+ आणखी व्यक्ती जोडा',
+  designationsNamePlaceholder: 'उदा. देवेंद्र फडणवीस',
+  designationsKnown: 'शब्दकोशातील पदनाम',
+  designationsNew: 'नवीन नाव',
+  designationsSkip: 'पदनामाशिवाय पुढे जा',
+  designationsConfirm: 'पदनामे निश्चित करा व तयार करा →',
+  designationsChecking: 'नावे तपासत आहोत…',
+  // Shown on the finished article when an approved designation could not be applied.
+  designationWarnTitle: 'पदनामाबाबत लक्ष द्या',
+  designationWarnNotFound:
+    'यांचे पूर्ण नाव लेखात आढळले नाही, त्यामुळे पदनाम जोडता आले नाही:',
+  designationWarnCorrected: 'लेखातील चुकीचे पदनाम बदलले:',
   dloGenerate: 'लेख तयार करा →',
   dloOutputTitle: 'तयार झालेला लेख',
   dloViewDetail: 'सविस्तर पाहा (अभिप्राय, भाषांतर, पोस्टर)',
@@ -399,6 +431,7 @@ export const STR = {
   copied: 'कॉपी झाले ✓',
   downloadTxt: '.txt डाउनलोड',
   downloadMd: '.md डाउनलोड',
+  downloadPdf: 'PDF डाउनलोड',
   translateToEnglish: 'इंग्रजीत भाषांतर करा',
   translateToHindi: 'हिंदीत भाषांतर करा',
   showMarathi: 'मराठी',
@@ -871,6 +904,7 @@ export const STEP_LABELS: Record<GenerationStep, string> = {
   draft: 'लेख लिहित आहोत…',
   coverage: 'लेखाची पूर्णता तपासत आहोत…',
   faithfulness: 'तथ्यांची पडताळणी करत आहोत…',
+  fact_check: 'तथ्य-तपासणी यादी तयार करत आहोत…',
   classify: 'विषय ओळखत आहोत…',
   copy: 'पोस्टरचा मजकूर तयार करत आहोत…',
   image: 'पोस्टरचे चित्र तयार करत आहोत…',

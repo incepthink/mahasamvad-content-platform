@@ -43,3 +43,24 @@ export async function loadArticleAssets(): Promise<BrandAssets> {
   ]);
   return { fontDataUri, frameDataUri };
 }
+
+// The printable A4 article document (article-pdf-template.ts) needs the EMBLEM on its own,
+// not either poster frame — hence its own type rather than a widened BrandAssets.
+// poster-logo-new.png is the 398x400 gold राजमुद्रा with NO baked-in wordmark, which is what
+// makes it the right letterhead asset: at 21mm it is ~5x oversampled, while every Devanagari
+// line beside it stays Chromium-typeset vector. (article-logo.png / poster-logo.png bake
+// their Marathi into raster pixels and would print visibly soft next to real text.)
+export type ArticlePdfAssets = Readonly<{
+  // @font-face src for Noto Sans Devanagari (variable, weights 100–900).
+  fontDataUri: string;
+  // The राजमुद्रा state emblem, centred at the top of page 1.
+  emblemDataUri: string;
+}>;
+
+export async function loadArticlePdfAssets(): Promise<ArticlePdfAssets> {
+  const [fontDataUri, emblemDataUri] = await Promise.all([
+    dataUri('fonts/NotoSansDevanagari.ttf', 'font/ttf'),
+    dataUri('poster-logo-new.png', 'image/png'),
+  ]);
+  return { fontDataUri, emblemDataUri };
+}

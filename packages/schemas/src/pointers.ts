@@ -3,12 +3,13 @@
 // (कोण / काय / केव्हा / कुठे / का / कसे), each with a checkbox. Everything is checked by
 // default; UNchecking a pointer tells the article pipeline to leave that fact out.
 //
-// Deselection is carried to generation as `excludedFacts` (the deselected bullets' text),
-// threaded into the drafting prompt AND the coverage checkers so the loop cannot re-add a
-// fact the officer deliberately dropped. Deselect nothing ⇒ empty list ⇒ today's article.
+// Selection is carried to generation as `selectedFacts` ({ dimension, text }) and becomes the
+// bounded completeness contract; deselection is also carried as `excludedFacts` so no later
+// draft/revision can re-add a fact the officer deliberately dropped.
 //
-// Nothing here is persisted server-side: `POST /api/pointers` is synchronous and ad-hoc
-// (the /proofread shape). The web holds the groups + the deselected set in React state.
+// `POST /api/pointers` itself is synchronous and ad-hoc (the /proofread shape). Once the
+// officer generates, the checked inventory is persisted on that generation so retries and
+// article feedback use the same contract.
 
 import { z } from 'zod';
 import { DloCategorySchema } from './dlo.js';
@@ -34,8 +35,34 @@ export const PointerGroupSchema = z.object({
 });
 export type PointerGroup = z.infer<typeof PointerGroupSchema>;
 
+// One pointer the officer kept for the article. Keeping its dimension beside the text lets
+// the generation pipeline build the 5W1H scaffold deterministically instead of paying for a
+// second model to rediscover the grouping that this extraction already produced.
+export const SelectedFactSchema = z.object({
+  dimension: PointerDimensionSchema,
+  text: z.string().trim().min(1).max(500),
+});
+export type SelectedFact = z.infer<typeof SelectedFactSchema>;
+export const SelectedFactsSchema = z.array(SelectedFactSchema).max(60);
+
+// A statement the note explicitly attributes to a named speaker. It is kept separate from
+// the 5W1H bullets so the speaker/claim relationship cannot be lost during summarisation.
+// Empty designation/venue means the source did not state one; downstream prompts may never
+// infer either field.
+export const AttributedStatementSchema = z.object({
+  speaker: z.string().trim().min(1).max(200),
+  designation: z.string().trim().max(200),
+  venue: z.string().trim().max(300),
+  claim: z.string().trim().min(1).max(1000),
+});
+export type AttributedStatement = z.infer<typeof AttributedStatementSchema>;
+export const AttributedStatementsSchema = z
+  .array(AttributedStatementSchema)
+  .max(12);
+
 export const PointersResultSchema = z.object({
   groups: z.array(PointerGroupSchema).max(POINTER_DIMENSIONS.length),
+  statements: AttributedStatementsSchema.default([]),
 });
 export type PointersResult = z.infer<typeof PointersResultSchema>;
 

@@ -12,8 +12,20 @@ import {
   POSTER_HEADING_MAX_CHARS,
   isSocialCategory,
 } from '@dgipr/schemas';
-import type { Category, DesignMode, TemplateBrand } from '@dgipr/schemas';
-import { createGeneration } from '../lib/api';
+import type {
+  Category,
+  DesignMode,
+  KnownDesignation,
+  PreparedName,
+  TemplateBrand,
+} from '@dgipr/schemas';
+import { createGeneration, prepareDesignations } from '../lib/api';
+import {
+  DesignationReview,
+  collectDesignations,
+  type DesignationEdit,
+  type DesignationExtra,
+} from '../components/DesignationReview';
 import { BRAND_OPTIONS, DESIGN_OPTIONS } from '../lib/generationOptions';
 import { useTasks } from '../lib/TasksProvider';
 import { STR } from '../lib/strings';
@@ -83,6 +95,24 @@ export default function NewGenerationPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // व्यक्ती व पदनाम gate. Unlike /dlo — which has a natural review step — this page submits in
+  // one press, so the check runs ON submit: prepare, and if the text names nobody, go straight
+  // through. `names === null` therefore means "not checked yet", and the card only ever appears
+  // when there is genuinely something to decide. Article (पोस्टर) runs only.
+  const [designationNames, setDesignationNames] = useState<
+    PreparedName[] | null
+  >(null);
+  const [knownDesignations, setKnownDesignations] = useState<
+    KnownDesignation[]
+  >([]);
+  const [checkingNames, setCheckingNames] = useState(false);
+  const [designationEdits, setDesignationEdits] = useState<
+    Record<string, DesignationEdit>
+  >({});
+  const [designationExtras, setDesignationExtras] = useState<
+    DesignationExtra[]
+  >([]);
+
   // ट्विटर and फेसबुक are one lane: same n8n workflow, same design modes, same
   // master library — only the recorded category differs.
   const isSocial = isSocialCategory(category);
@@ -122,6 +152,15 @@ export default function NewGenerationPage() {
     [note, docText],
   );
 
+  // Editing the note after the check has run invalidates it: the people named may have
+  // changed, and silently reusing the previous list would apply a designation to a name the
+  // officer just removed. Clearing back to null means the next तयार करा re-checks.
+  useEffect(() => {
+    setDesignationNames(null);
+    setDesignationEdits({});
+    setDesignationExtras([]);
+  }, [combinedNote]);
+
   // Drop the attached document. A remount is what clears the card's internal state, and the
   // stored job id has to go with it or the mount effect would re-attach the same file.
   const clearDocument = () => {
@@ -130,7 +169,41 @@ export default function NewGenerationPage() {
     setDocKey((n) => n + 1);
   };
 
-  const submit = async () => {
+  // Press तयार करा → check the names first. A पोस्टर run whose text names somebody stops here
+  // and shows the card; a social run, or one naming nobody, goes straight through so the check
+  // is invisible when there is nothing to check. A prepare failure is NOT a blocker — the whole
+  // point is the article, and designations are an enhancement to it.
+  const startSubmit = async () => {
+    if (isSocial || designationNames !== null) {
+      await submit();
+      return;
+    }
+    if (combinedNote.length < 20) {
+      setError(STR.noteTooShort);
+      return;
+    }
+    setCheckingNames(true);
+    setError(null);
+    try {
+      const result = await prepareDesignations({ text: combinedNote });
+      setKnownDesignations(result.knownDesignations);
+      setDesignationNames(result.names);
+      if (result.names.length === 0) {
+        await submit();
+      }
+    } catch {
+      // Could not check — carry on rather than block the run on an optional step.
+      setDesignationNames([]);
+      await submit();
+    } finally {
+      setCheckingNames(false);
+    }
+  };
+
+  // `skipDesignations` is an explicit argument rather than a state flag because the "skip"
+  // button calls submit in the same tick it would clear the state — a setState would not have
+  // flushed, and the run would still carry the dictionary's pre-filled titles.
+  const submit = async (skipDesignations = false) => {
     if (combinedNote.length < 20) {
       setError(STR.noteTooShort);
       return;
@@ -153,12 +226,25 @@ export default function NewGenerationPage() {
       setError(STR.busyError);
       return;
     }
+    // Blank पदनामे are dropped, so an untouched card sends nothing and the run is exactly
+    // what this page produced before the feature.
+    const designations =
+      isSocial || skipDesignations
+        ? []
+        : collectDesignations(
+            designationNames,
+            designationEdits,
+            designationExtras,
+          );
     setSubmitting(true);
     setError(null);
     try {
       const id = await createGeneration({
         note: combinedNote,
         category,
+        // Approved पदनामे — पोस्टर runs only (the API rejects them on a social run anyway).
+        // Applied to the pasted article by the runner's articleProvided branch.
+        ...(designations.length > 0 ? { designations } : {}),
         // Always a poster here (the runner ignores outputType for social).
         outputType: 'poster',
         // The पोस्टर path uses the pasted article verbatim (skip generateArticle);
@@ -186,6 +272,11 @@ export default function NewGenerationPage() {
         clearDocument();
         setCategory('scheme');
         setPosterHeading('');
+        // The gate is per-note: a fresh note must be checked afresh, or the next run would
+        // inherit the last one's people.
+        setDesignationNames(null);
+        setDesignationEdits({});
+        setDesignationExtras([]);
         setSubmitting(false);
       } else {
         // Navigate to the progress page, but also register a session row so the
@@ -382,16 +473,86 @@ export default function NewGenerationPage() {
         />
       ) : null}
 
+      {/* The पदनाम gate. Appears only after तयार करा found people to ask about — a run naming
+          nobody, and every social run, never sees it. */}
+      {!isSocial && designationNames !== null && designationNames.length > 0 ? (
+        <DesignationReview
+          names={designationNames}
+          known={knownDesignations}
+          edits={designationEdits}
+          extras={designationExtras}
+          loading={false}
+          error={null}
+          busy={submitting}
+          onEditDesignation={(marathi, designation) =>
+            setDesignationEdits((prev) => ({
+              ...prev,
+              [marathi]: {
+                designation,
+                remember: prev[marathi]?.remember ?? false,
+              },
+            }))
+          }
+          onToggleRemember={(marathi, remember) =>
+            setDesignationEdits((prev) => ({
+              ...prev,
+              [marathi]: {
+                designation:
+                  prev[marathi]?.designation ??
+                  designationNames.find((n) => n.marathi === marathi)
+                    ?.designation ??
+                  '',
+                remember,
+              },
+            }))
+          }
+          onChangeExtra={(index, patch) =>
+            setDesignationExtras((prev) =>
+              prev.map((row, i) => (i === index ? { ...row, ...patch } : row)),
+            )
+          }
+          onAddExtra={() =>
+            setDesignationExtras((prev) => [
+              ...prev,
+              { name: '', designation: '', remember: false },
+            ])
+          }
+          onRegenerate={() => {
+            setDesignationNames(null);
+            void startSubmit();
+          }}
+        />
+      ) : null}
+
       <section className="card">
         <div className="btn-row">
           <button
             type="button"
             className="btn btn-primary"
-            onClick={submit}
-            disabled={submitting}
+            onClick={() => void startSubmit()}
+            disabled={submitting || checkingNames}
           >
-            {submitting ? STR.submitting : STR.submit}
+            {checkingNames
+              ? STR.designationsChecking
+              : submitting
+                ? STR.submitting
+                : designationNames !== null && designationNames.length > 0
+                  ? STR.designationsConfirm
+                  : STR.submit}
           </button>
+          {/* Escape hatch: generate with no designations at all, without clearing the card. */}
+          {!isSocial &&
+          designationNames !== null &&
+          designationNames.length > 0 ? (
+            <button
+              type="button"
+              className="btn"
+              onClick={() => void submit(true)}
+              disabled={submitting}
+            >
+              {STR.designationsSkip}
+            </button>
+          ) : null}
         </div>
         {error ? <p className="form-error">{error}</p> : null}
       </section>

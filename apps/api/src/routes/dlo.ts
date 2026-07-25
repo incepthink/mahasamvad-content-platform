@@ -34,6 +34,7 @@ import {
 } from '../jobs/dlo-runner.js';
 import { getDocumentIntakeJob } from '../jobs/document-intake.js';
 import { startGenerationJob } from '../jobs/runner.js';
+import { rememberDesignations } from '../jobs/designation-writeback.js';
 
 // Meeting recordings are big (a 2h mp3 @128kbps ≈ 115 MB — the Sarvam batch
 // ceiling), so this route overrides the conservative global multipart limits
@@ -428,6 +429,11 @@ export function registerDloRoutes(
           .code(409)
           .send({ error: { message: 'Intake is not ready yet.' } });
       }
+      // Save the pairings the officer ticked "यापुढेही हेच वापरा" BEFORE inserting, so the
+      // dictionary is right even if the generation itself later fails. Best-effort inside —
+      // the pairs travel on the row regardless, so this run is unaffected either way.
+      await rememberDesignations(client, body.designations ?? []);
+
       const generation = await insertGeneration(client, {
         note: body.combinedText,
         outputType: 'article',
@@ -438,6 +444,17 @@ export function registerDloRoutes(
         // omits the column when this is empty/absent, so an un-applied 0030 only disables the
         // feature rather than failing the create.
         excludedFacts: body.excludedFacts,
+        // The selected pointer inventory and attributed statements are persisted so initial
+        // generation, retries and article-feedback revisions all use the same officer-approved
+        // completeness contract. insertGeneration omits empty values for pre-0034 safety.
+        selectedFacts: body.selectedFacts,
+        statements: body.statements,
+        // Approved person → पदनाम pairs (migration 0033), minus the request-only `remember`
+        // flag. Same omit-when-empty treatment as excludedFacts.
+        nameDesignations: (body.designations ?? []).map((pair) => ({
+          name: pair.name,
+          designation: pair.designation,
+        })),
       });
       startGenerationJob(client, generation.id);
       return reply.code(202).send({ generationId: generation.id });
