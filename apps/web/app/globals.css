@@ -1805,80 +1805,224 @@ select.glossary-select:focus {
   border-color: var(--accent);
 }
 
-.glossary-add {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr 160px auto;
-  gap: 12px;
-  align-items: end;
-  margin-top: 8px;
+.gl-intro {
+  max-width: 760px;
+  margin-bottom: 20px;
 }
 
-.glossary-add-btn {
-  min-height: 52px;
+.gl-add-fold {
+  margin-top: 0;
 }
 
-.glossary-toolbar {
+details.fold .fold-body.gl-add-body {
+  color: inherit;
+  font-size: 1rem;
+  white-space: normal;
+}
+
+.gl-add-actions {
+  margin-top: 16px;
+}
+
+.gl-card {
+  margin-top: 24px;
+}
+
+.gl-toolbar {
   display: flex;
   gap: 12px;
   align-items: center;
   flex-wrap: wrap;
-  margin-bottom: 18px;
+  margin-bottom: 16px;
 }
 
-.glossary-toolbar .glossary-search {
-  flex: 1;
-  min-width: 200px;
+.gl-search {
+  flex: 1 1 220px;
+  min-width: 0;
 }
 
-.glossary-toolbar .glossary-select {
+.gl-toolbar select.glossary-select {
   width: auto;
   min-width: 150px;
 }
 
-.glossary-checkbox {
+.gl-status {
   display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 600;
-  font-size: 0.95rem;
-  cursor: pointer;
-  white-space: nowrap;
+  gap: 4px;
+  padding: 3px;
+  border: 1.5px solid var(--border);
+  border-radius: 999px;
+  background: #fffdfa;
 }
 
-.glossary-checkbox input {
-  width: 20px;
-  height: 20px;
+.gl-status button {
+  min-height: 40px;
+  padding: 6px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.gl-status button[aria-pressed='true'] {
+  background: var(--accent);
+  color: #fff;
+}
+
+.gl-count {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.gl-bulk-bar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+  padding: 12px 16px;
+  border: 1px solid var(--warn);
+  border-radius: 14px;
+  background: var(--warn-soft);
+}
+
+.gl-check-label {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.gl-check-label input,
+.gl-row-check {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
   accent-color: var(--accent);
 }
 
-.glossary-count {
-  color: var(--muted);
-  font-size: 0.9rem;
+.gl-bulk-actions {
   margin-left: auto;
 }
 
-.glossary-list {
+.gl-list {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
-.glossary-row {
-  display: grid;
-  grid-template-columns:
-    minmax(120px, 1fr) minmax(160px, 1.4fr) minmax(150px, 1.3fr)
-    150px auto;
-  gap: 12px;
-  align-items: center;
-  padding: 14px;
+.gl-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
   border: 1px solid var(--border);
   border-radius: 14px;
   background: #fffdfa;
 }
 
-.glossary-row.is-unverified {
+.gl-row.is-review {
   border-left: 4px solid var(--warn);
   background: var(--warn-soft);
+}
+
+.gl-row.is-verified {
+  background: var(--card);
+}
+
+.gl-row.is-open {
+  border-color: var(--accent);
+}
+
+.gl-row-head {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.gl-row-term {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.gl-term-sub {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+.gl-row-tags {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+}
+
+.gl-type-chip {
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+}
+
+.gl-row-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.gl-delete-btn {
+  min-width: 40px;
+  padding-inline: 10px;
+}
+
+.gl-row-form,
+.gl-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.gl-row-form {
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.gl-field {
+  min-width: 0;
+}
+
+.gl-row-form-actions,
+.gl-row-error {
+  grid-column: 1 / -1;
+}
+
+.gl-saved {
+  color: var(--ok);
+  font-weight: 700;
+}
+
+.gl-loading-label {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.gl-row-skeleton {
+  min-height: 84px;
 }
 
 .glossary-cell {
@@ -1902,19 +2046,9 @@ select.glossary-select:focus {
   word-break: break-word;
 }
 
-.glossary-row-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-.glossary-row-error {
-  color: var(--err);
-  font-size: 0.82rem;
-  flex-basis: 100%;
-  text-align: right;
+.pagination-gap {
+  padding: 0 4px;
+  color: var(--muted);
 }
 
 /* ---------- pre-translation name check ---------- */
@@ -3064,26 +3198,39 @@ a.thread-node:hover {
 /* ---------- responsive ---------- */
 
 @media (max-width: 860px) {
-  .glossary-add {
+  .gl-row-form,
+  .gl-form-grid {
     grid-template-columns: 1fr;
-    align-items: stretch;
   }
 
-  .glossary-row {
-    grid-template-columns: 1fr;
-    gap: 10px;
+  .gl-row-actions {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .gl-search {
+    flex-basis: 100%;
+  }
+
+  .gl-status {
+    width: 100%;
+  }
+
+  .gl-status button {
+    flex: 1;
+  }
+
+  .gl-count {
+    margin-left: 0;
+  }
+
+  .gl-bulk-actions {
+    width: 100%;
+    margin-left: 0;
   }
 
   .glossary-field-label {
     display: block;
-  }
-
-  .glossary-row-actions {
-    justify-content: flex-start;
-  }
-
-  .glossary-row-error {
-    text-align: left;
   }
 
   .poster-layout {

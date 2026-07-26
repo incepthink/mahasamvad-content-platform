@@ -7,6 +7,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
+  countGlossaryTerms,
   listGlossaryTerms,
   upsertGlossaryTerm,
   updateGlossaryTerm,
@@ -27,8 +28,15 @@ const ListQuerySchema = z.object({
     .union([z.literal('true'), z.literal('false')])
     .optional()
     .transform((v) => (v === undefined ? undefined : v === 'true')),
+  // Explicit tri-state review filter: omitted = all rows.
+  verified: z
+    .union([z.literal('true'), z.literal('false')])
+    .optional()
+    .transform((v) => (v === undefined ? undefined : v === 'true')),
   type: TermTypeSchema.optional(),
   search: z.string().trim().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  offset: z.coerce.number().int().min(0).optional(),
 });
 
 export function registerGlossaryRoutes(
@@ -39,12 +47,26 @@ export function registerGlossaryRoutes(
     const q = ListQuerySchema.parse(request.query);
     // Build the options conditionally so exactOptionalPropertyTypes never sees an
     // explicit `undefined` on a non-`| undefined` optional field.
-    const opts: { verifiedOnly?: boolean; type?: TermType; search?: string } =
-      {};
+    const opts: {
+      verifiedOnly?: boolean;
+      verified?: boolean;
+      type?: TermType;
+      search?: string;
+    } = {};
     if (q.verifiedOnly !== undefined) opts.verifiedOnly = q.verifiedOnly;
+    if (q.verified !== undefined) opts.verified = q.verified;
     if (q.type !== undefined) opts.type = q.type;
     if (q.search !== undefined) opts.search = q.search;
-    return listGlossaryTerms(client, opts);
+    const listOpts: typeof opts & { limit?: number; offset?: number } = {
+      ...opts,
+    };
+    if (q.limit !== undefined) listOpts.limit = q.limit;
+    if (q.offset !== undefined) listOpts.offset = q.offset;
+    const [items, total] = await Promise.all([
+      listGlossaryTerms(client, listOpts),
+      countGlossaryTerms(client, opts),
+    ]);
+    return { items, total };
   });
 
   app.post('/glossary', async (request, reply) => {

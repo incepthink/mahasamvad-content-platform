@@ -9,53 +9,9 @@ import {
   HistoryEmpty,
   HistorySkeletonGrid,
 } from '../../components/HistoryCard';
+import { Pagination } from '../../components/Pagination';
 
 const PAGE_SIZE = 9;
-
-// Numbered-page control (Prev / 1 2 3 / Next). Client-side only; rendered when
-// there is more than one page of results.
-function Pagination({
-  page,
-  pageCount,
-  onChange,
-}: {
-  page: number;
-  pageCount: number;
-  onChange: (next: number) => void;
-}) {
-  const pages = Array.from({ length: pageCount }, (_, i) => i + 1);
-  return (
-    <nav className="pagination" aria-label="pagination">
-      <button
-        type="button"
-        className="pagination-btn"
-        onClick={() => onChange(page - 1)}
-        disabled={page <= 1}
-      >
-        ‹ {STR.paginationPrev}
-      </button>
-      {pages.map((p) => (
-        <button
-          key={p}
-          type="button"
-          className={`pagination-btn pagination-num${p === page ? ' is-active' : ''}`}
-          onClick={() => onChange(p)}
-          aria-current={p === page ? 'page' : undefined}
-        >
-          {p}
-        </button>
-      ))}
-      <button
-        type="button"
-        className="pagination-btn"
-        onClick={() => onChange(page + 1)}
-        disabled={page >= pageCount}
-      >
-        {STR.paginationNext} ›
-      </button>
-    </nav>
-  );
-}
 
 export default function HistoryPage() {
   const [items, setItems] = useState<GenerationSummary[] | null>(null);
@@ -67,12 +23,17 @@ export default function HistoryPage() {
   useEffect(() => {
     listGenerations()
       .then(setItems)
-      .catch((e) => setError(e instanceof Error ? e.message : STR.genericError));
+      .catch((e) =>
+        setError(e instanceof Error ? e.message : STR.genericError),
+      );
   }, []);
 
   // Debounce the applied query so filtering/paging doesn't thrash on each keystroke.
   useEffect(() => {
-    const t = setTimeout(() => setAppliedQuery(query.trim().toLowerCase()), 200);
+    const t = setTimeout(
+      () => setAppliedQuery(query.trim().toLowerCase()),
+      200,
+    );
     return () => clearTimeout(t);
   }, [query]);
 

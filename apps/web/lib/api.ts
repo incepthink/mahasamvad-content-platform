@@ -5,6 +5,7 @@ import {
   DloIntakeDetailSchema,
   GenerationDetailSchema,
   GenerationSummarySchema,
+  GlossaryListResponseSchema,
   GlossaryTermSchema,
   PointersResultSchema,
   PrepareDesignationsResponseSchema,
@@ -31,6 +32,7 @@ import {
   type CreateReferenceTypeRequest,
   type GenerationDetail,
   type GenerationSummary,
+  type GlossaryListResponse,
   type GlossaryTerm,
   type PointersRequest,
   type PointersResult,
@@ -595,15 +597,32 @@ export async function proofreadText(
 // ---------- Glossary (Marathi->English name lock dictionary) ----------
 
 export async function listGlossaryTerms(
-  params: { verifiedOnly?: boolean; type?: TermType; search?: string } = {},
-): Promise<GlossaryTerm[]> {
+  params: {
+    verifiedOnly?: boolean;
+    verified?: boolean;
+    type?: TermType;
+    search?: string;
+    limit?: number;
+    offset?: number;
+  } = {},
+): Promise<GlossaryListResponse> {
   const qs = new URLSearchParams();
   if (params.verifiedOnly) qs.set('verifiedOnly', 'true');
+  if (params.verified !== undefined)
+    qs.set('verified', String(params.verified));
   if (params.type) qs.set('type', params.type);
   if (params.search) qs.set('search', params.search);
+  if (params.limit !== undefined) qs.set('limit', String(params.limit));
+  if (params.offset !== undefined) qs.set('offset', String(params.offset));
   const query = qs.toString();
   const body = await requestJson(`/api/glossary${query ? `?${query}` : ''}`);
-  return z.array(GlossaryTermSchema).parse(body);
+  // Tolerate the pre-envelope bare-array response: an older API just means no
+  // true total and no paging, not a crashed page.
+  if (Array.isArray(body)) {
+    const items = z.array(GlossaryTermSchema).parse(body);
+    return { items, total: items.length };
+  }
+  return GlossaryListResponseSchema.parse(body);
 }
 
 export async function createGlossaryTerm(

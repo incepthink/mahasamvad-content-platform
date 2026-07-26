@@ -522,6 +522,12 @@ export const GlossaryTermSchema = z.object({
 });
 export type GlossaryTerm = z.infer<typeof GlossaryTermSchema>;
 
+export const GlossaryListResponseSchema = z.object({
+  items: z.array(GlossaryTermSchema),
+  total: z.number().int().nonnegative(),
+});
+export type GlossaryListResponse = z.infer<typeof GlossaryListResponseSchema>;
+
 // Manual add of a term (the review form or a direct add). marathi is the conflict key.
 export const CreateGlossaryTermRequestSchema = z.object({
   marathi: z.string().trim().min(1).max(200),

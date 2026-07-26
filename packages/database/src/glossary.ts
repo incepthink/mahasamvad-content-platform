@@ -127,18 +127,26 @@ function patchToDbRow(patch: GlossaryTermPatch): Record<string, unknown> {
   return row;
 }
 
-export async function listGlossaryTerms(
-  client: SupabaseClient,
-  opts: Readonly<{
-    verifiedOnly?: boolean;
-    type?: TermType;
-    search?: string;
-    limit?: number;
-  }> = {},
-): Promise<GlossaryTerm[]> {
-  let query = client.from(GLOSSARY_TERMS_TABLE).select();
+type GlossaryFilters = Readonly<{
+  verifiedOnly?: boolean;
+  verified?: boolean;
+  type?: TermType;
+  search?: string;
+}>;
+
+// Keep list/count filtering in one place so the total always describes the rows
+// the corresponding list query can return.
+function applyGlossaryFilters<
+  Q extends {
+    eq(column: string, value: unknown): Q;
+    or(filter: string): Q;
+  },
+>(query: Q, opts: GlossaryFilters): Q {
   if (opts.verifiedOnly) {
     query = query.eq('verified', true);
+  }
+  if (opts.verified !== undefined) {
+    query = query.eq('verified', opts.verified);
   }
   if (opts.type) {
     query = query.eq('term_type', opts.type);
@@ -150,15 +158,50 @@ export async function listGlossaryTerms(
       `marathi.ilike.%${escaped}%,english.ilike.%${escaped}%,hindi.ilike.%${escaped}%`,
     );
   }
+  return query;
+}
+
+export async function listGlossaryTerms(
+  client: SupabaseClient,
+  opts: GlossaryFilters &
+    Readonly<{
+      limit?: number;
+      offset?: number;
+    }> = {},
+): Promise<GlossaryTerm[]> {
+  const baseQuery = client.from(GLOSSARY_TERMS_TABLE).select();
+  const query = applyGlossaryFilters(baseQuery, opts);
   // Unverified first (needs review), most recently touched first within each group.
-  const { data, error } = await query
+  const ordered = query
     .order('verified', { ascending: true })
-    .order('updated_at', { ascending: false })
-    .limit(opts.limit ?? 200);
+    .order('updated_at', { ascending: false });
+  const limit = opts.limit ?? 200;
+  const { data, error } =
+    opts.offset !== undefined
+      ? await ordered.range(opts.offset, opts.offset + limit - 1)
+      : await ordered.limit(limit);
   if (error) {
     throw new Error(`Failed to list glossary terms: ${error.message}`);
   }
   return ((data ?? []) as GlossaryDbRow[]).map(fromDbRow);
+}
+
+export async function countGlossaryTerms(
+  client: SupabaseClient,
+  opts: GlossaryFilters = {},
+): Promise<number> {
+  const baseQuery = client
+    .from(GLOSSARY_TERMS_TABLE)
+    .select('*', { count: 'exact', head: true });
+  const query = applyGlossaryFilters(
+    baseQuery,
+    opts,
+  );
+  const { count, error } = await query;
+  if (error) {
+    throw new Error(`Failed to count glossary terms: ${error.message}`);
+  }
+  return count ?? 0;
 }
 
 // Returns the glossary terms whose Marathi form appears verbatim in `text`, sorted

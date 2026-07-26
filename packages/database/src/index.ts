@@ -45,6 +45,7 @@ export {
 export {
   GLOSSARY_TERMS_TABLE,
   listGlossaryTerms,
+  countGlossaryTerms,
   findGlossaryTermsInText,
   insertGlossaryCandidates,
   setPersonDesignation,
