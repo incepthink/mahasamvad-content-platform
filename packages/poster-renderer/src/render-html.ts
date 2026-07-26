@@ -13,6 +13,10 @@ export type RenderOptions = Readonly<{
   height?: number;
   // Devicescale > 1 supersamples for extra-crisp text/edges (e.g. 2 → 2160×2700).
   deviceScaleFactor?: number;
+  // Keep the page's transparent pixels transparent instead of compositing onto
+  // white. Needed by the video caption overlay, which is a mostly-empty PNG
+  // laid over footage; a poster is opaque by construction and ignores this.
+  transparent?: boolean;
 }>;
 
 export type PdfMargin = Readonly<{
@@ -90,6 +94,7 @@ export async function renderHtmlToPng(
     return await page.screenshot({
       type: 'png',
       clip: { x: 0, y: 0, width, height },
+      ...(options.transparent ? { omitBackground: true } : {}),
     });
   } finally {
     await browser?.close();

@@ -23,13 +23,17 @@ export function VideoResultView({
   detail,
   busy,
   onRedrawStill,
+  onRedrawEndStill,
   onReanimateScene,
   onNarrate,
 }: {
   detail: VideoProjectDetail;
   // A job is in flight (re-still / re-animate / narrate) — actions disabled, note shown.
   busy: boolean;
+  // Redraws the frame PAIR from an edited start brief (the end frame derives
+  // from the start); onRedrawEndStill re-edits only the end frame.
   onRedrawStill: (index: number, brief: string) => void;
+  onRedrawEndStill: (index: number, endBrief: string) => void;
   onReanimateScene: (index: number) => void;
   // Add or refresh the Marathi TTS narration on the finished video.
   onNarrate: () => void;
@@ -148,6 +152,7 @@ export function VideoResultView({
               mode="review"
               busy={busy}
               onRedraw={(brief) => onRedrawStill(index, brief)}
+              onRedrawEnd={(endBrief) => onRedrawEndStill(index, endBrief)}
               onReanimate={
                 scene.stillUrl
                   ? () => {

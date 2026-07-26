@@ -62,7 +62,8 @@ export const STR = {
   // Design-mode selector (shown only for the समाजमाध्यम — ट्विटर/फेसबुक — flows)
   designModeLabel: 'पोस्टरची रचना-शैली?',
   designFresh: 'AI रचना (शिफारस)',
-  designFreshDesc: 'प्रत्येक वेळी पूर्णपणे नवे, वेगळे पोस्टर — रंग व रचना AI ठरवते',
+  designFreshDesc:
+    'प्रत्येक वेळी पूर्णपणे नवे, वेगळे पोस्टर — रंग व रचना AI ठरवते',
   designAdaptive: 'टेम्पलेटवर आधारित',
   designAdaptiveDesc: 'निवडलेल्या टेम्पलेटचा आधार, विषयानुसार थोडा बदल',
   designOnbrand: 'ठरलेले टेम्पलेट',
@@ -325,6 +326,16 @@ export const STR = {
   docSelectTotal: 'एकूण पृष्ठे',
   docSelectCount: 'पृष्ठे निवडली',
   docReadSelected: 'निवडलेली पृष्ठे वाचा',
+  // /dlo only: that page has an intake job of its own, so the officer can hand over the page
+  // selection and let the OCR run inside प्रक्रिया instead of waiting for it here. Every other
+  // surface needs the text in the browser now and never shows these.
+  docUsePagesUnread: 'न वाचता ही पृष्ठे वापरा',
+  docUsePagesUnreadHint:
+    'घाई असेल तर पृष्ठे निवडून थेट पुढे जा — ती प्रक्रियेच्या टप्प्यात वाचली जातील आणि तपासणीच्या टप्प्यावर मजकूर दुरुस्त करता येईल.',
+  docPagesDeferredTitle: 'पृष्ठे निवडली — पुढील टप्प्यात वाचली जातील',
+  docPagesDeferredHint:
+    'ही पृष्ठे आता वाचली जाणार नाहीत. “पुढे जा” दाबल्यावर प्रक्रियेच्या टप्प्यात ती OCR ने वाचली जातील आणि त्यानंतर तपासणीच्या टप्प्यावर मजकूर दुरुस्त करता येईल.',
+  docPagesDeferredSelection: 'निवडलेली पृष्ठे',
   docChangeSelection: 'पृष्ठ निवड बदला',
   docChangeSelectionHint:
     'वेगळी पृष्ठे निवडल्यास ती पुन्हा वाचावी लागतील आणि सध्याचा मजकूर पुन्हा तयार होईल.',
@@ -403,6 +414,16 @@ export const STR = {
   proofreadEnglishStyleNote:
     'महासंवाद-शैली तपासणी फक्त मराठी मजकुरासाठी उपलब्ध आहे; या इंग्रजी मजकुराची व्याकरण व नाव-पडताळणी केली आहे.',
   proofreadStyleRefNote: 'शैली-संदर्भ:',
+
+  // Highlighting the changed spans inside the corrected text
+  proofreadHighlightShow: 'दुरुस्त्या हायलाइट करा',
+  proofreadHighlightHide: 'हायलाइट बंद करा',
+  proofreadHighlightHint:
+    'हायलाइट केलेल्या मजकुरावर बोट ठेवा किंवा क्लिक करा — मूळ शब्द दिसेल.',
+  proofreadHighlightLegendFix: 'दुरुस्त केलेला मजकूर',
+  proofreadHighlightLegendStyle: 'शैली सूचना — मजकूर बदललेला नाही',
+  proofreadHighlightOriginal: 'मूळ:',
+  proofreadHighlightClose: 'बंद करा',
 
   // Progress
   progressTitle: 'तयार होत आहे…',
@@ -767,16 +788,16 @@ export const STR = {
 
   // Explainer videos (/video)
   navVideo: 'व्हिडिओ',
-  videoTitle: 'माहिती समजावणारा व्हिडिओ तयार करा',
+  videoTitle: 'नवीन व्हिडिओ तयार करा',
   videoIntro:
     'टिपणीवरून दृश्यनिहाय संहिता तयार होईल. आधी संहिता, मग प्रत्येक दृश्याचे नमुना चित्र तपासा — व्हिडिओ तयार करण्याचा खर्च फक्त तुमच्या मंजुरीनंतरच होतो.',
   videoNoteLabel: 'टिपणी येथे लिहा किंवा चिकटवा',
   videoHeadingLabel: 'शीर्षक / मुख्य मुद्दा (ऐच्छिक)',
-  videoDurationLabel: 'लांबीची पसंती',
-  videoDurationShort: 'लहान (~१५–३० सेकंद)',
-  videoDurationShortHint: 'साधारण २–४ दृश्ये — AI टिपणीनुसार ठरवते',
-  videoDurationLong: 'मध्यम (~३०–६० सेकंद)',
-  videoDurationLongHint: 'साधारण ४–८ दृश्ये — AI टिपणीनुसार ठरवते',
+  videoDurationLabel: 'व्हिडिओची लांबी',
+  videoDurationShort: '३० सेकंद',
+  videoDurationShortHint: 'निवेदन ३० सेकंदांत बसवले जाते — साधारण २–४ दृश्ये',
+  videoDurationLong: '१ मिनिट',
+  videoDurationLongHint: 'निवेदन १ मिनिटात बसवले जाते — साधारण ४–८ दृश्ये',
   videoOrientationLabel: 'आकार',
   videoOrientationLandscape: 'आडवा (16:9)',
   videoOrientationLandscapeHint: 'YouTube, वेबसाईट',
@@ -784,11 +805,13 @@ export const STR = {
   videoOrientationVerticalHint: 'रील्स, स्टेटस, शॉर्ट्स',
   videoTierLabel: 'दर्जा',
   videoTierFast: 'संतुलित',
-  videoTierFastHint: 'शिफारस केलेला — दर्जा व खर्चाचा समतोल',
-  videoTierLite: 'हलका',
-  videoTierLiteHint: 'सर्वात स्वस्त — चाचणीसाठी',
+  videoTierFastHint: 'शिफारस केलेला',
   videoTierStandard: 'सर्वोत्तम',
-  videoTierStandardHint: 'सर्वोच्च दर्जा — सुमारे अडीचपट खर्च',
+  // Deliberately NOT a cost claim any more. It used to read "सुमारे अडीचपट
+  // खर्च" (~2.5x the cost), which was Veo's ratio; on Kling 3.0 with the
+  // resolution pinned server-side the two tiers cost the same, and the estimate
+  // rendered beside each option now says so on its own.
+  videoTierStandardHint: 'उच्च दर्जा — सर्व्हर सेटिंगनुसार लागू',
   videoCreate: 'संहिता तयार करा',
   videoCreateHint: 'या टप्प्यावर व्हिडिओचा खर्च होत नाही.',
   videoEstimateApprox:
@@ -806,11 +829,24 @@ export const STR = {
   videoSceneBeatLabel: 'मुद्दा',
   videoNarrationLabel: 'निवेदन (मराठी)',
   videoNarrationHint:
-    'क्लिपची लांबी निवेदनाच्या लांबीनुसार आपोआप ठरते (प्रति दृश्य ४–८ सेकंद).',
+    'जेवढे निवेदन लिहाल तेवढी या दृश्याची क्लिप लांब होते (३–१५ सेकंद). सर्व दृश्यांचे निवेदन मिळून निवडलेल्या एकूण वेळेत बसवा.',
   videoNarrationTooFast: 'निवेदन थोडे वेगाने वाजेल — हवे असल्यास लहान करा.',
   videoNarrationListen: 'निवेदनाचा आवाज ऐका',
-  videoBriefLabel: 'दृश्य-वर्णन (इंग्रजी)',
-  videoBriefHint: 'चित्रात मजकूर/अक्षरे दिसणार नाहीत — शब्द निवेदनात असतात.',
+  videoNarrationTotalOver:
+    'निवेदन एकूण वेळेपेक्षा जास्त आहे — काही दृश्ये लहान करा, नाहीतर ती आपोआप लहान केली जातील.',
+  videoBriefLabel: 'प्रारंभ दृश्य-वर्णन (इंग्रजी)',
+  videoBriefHint:
+    'दृश्याची सुरुवात कशी दिसेल — 3D ॲनिमेशन चित्रपटासारखे दृश्य; चित्रात मजकूर/अक्षरे दिसणार नाहीत, शब्द निवेदनात असतात.',
+  videoEndBriefLabel: 'अंतिम दृश्य-वर्णन (इंग्रजी)',
+  videoEndBriefHint:
+    'तेच दृश्य काही सेकंदांनी कसे दिसेल — तेच ठिकाण व त्याच व्यक्ती; व्हिडिओ पहिल्या फ्रेमपासून या फ्रेमपर्यंत सलग जातो.',
+  videoKeyPointLabel: 'पडद्यावरील ठळक ओळ (मराठी)',
+  videoKeyPointHint:
+    'या दृश्यावर दिसणारा एकच ठोस तपशील — रक्कम, मुदत, संख्या, योजनेचे नाव. रिकामी ठेवली तर या दृश्यावर काहीही लिहिले जाणार नाही.',
+  videoKeyPointReviewLabel: 'पडद्यावरील ओळ',
+  videoStyleLabel: 'दृश्यशैली व स्थळ (इंग्रजी — सर्व दृश्यांना लागू)',
+  videoStyleHint:
+    'सर्व दृश्ये याच शैलीत व याच वातावरणात तयार होतात (stylized 3D ॲनिमेशन). चित्रात परदेशी माणसे किंवा ठिकाणे आली असतील तर इथे महाराष्ट्र/भारत स्पष्ट लिहा. ही ओळ बदलली की सर्व दृश्ये पुन्हा काढावी लागतात.',
   videoAddScene: 'दृश्य जोडा',
   videoRemoveScene: 'हे दृश्य काढा',
   videoToStoryboard: 'स्टोरीबोर्ड तयार करा',
@@ -820,8 +856,14 @@ export const STR = {
   // Storyboard gate (gate 2)
   videoStoryboardTitle: 'स्टोरीबोर्ड तपासा',
   videoStoryboardIntro:
-    'ही चित्रे व्हिडिओतील दृश्यांची सुरुवात असतील. एखादे चित्र पटत नसेल तर वर्णन बदलून पुन्हा काढा — त्याचा खर्च अगदी थोडा आहे.',
-  videoRedrawStill: 'चित्र पुन्हा काढा',
+    'प्रत्येक दृश्याची प्रारंभ व अंतिम फ्रेम — व्हिडिओ या दोन फ्रेममध्ये सलग हालचाल करेल. एखादी फ्रेम पटत नसेल तर वर्णन बदलून पुन्हा काढा — त्याचा खर्च अगदी थोडा आहे.',
+  videoStartFrameLabel: 'प्रारंभ फ्रेम',
+  videoEndFrameLabel: 'अंतिम फ्रेम',
+  videoRedrawStill: 'प्रारंभ फ्रेम पुन्हा काढा',
+  videoRedrawStillNote:
+    'प्रारंभ फ्रेम बदलली की अंतिम फ्रेमही तिच्यावरून नव्याने काढली जाते.',
+  videoRedrawEndStill: 'अंतिम फ्रेम पुन्हा काढा',
+  videoEndStillPending: 'अंतिम फ्रेम अजून काढलेली नाही',
   videoEditBrief: 'वर्णन बदला',
   videoAnimate: 'व्हिडिओ तयार करा',
   videoAnimateEstimate: 'अंदाजे खर्च',
@@ -1000,7 +1042,23 @@ export function videoSceneTiming(
   return `${clip} · निवेदन ${narrationSeconds.toFixed(1)} से.`;
 }
 
-// Gate-1 live hint under the narration textarea: the estimated spoken length.
-export function videoNarrationEstimate(seconds: number): string {
-  return `अंदाजे ${seconds.toFixed(0)} से. बोलणे`;
+// Gate-1 live hint under the narration textarea: the estimated spoken length
+// AND the clip it will produce, since the clip is now derived from the speech —
+// the officer's edit here is what decides how long this scene runs.
+export function videoNarrationEstimate(
+  seconds: number,
+  clipSeconds?: number,
+): string {
+  const spoken = `अंदाजे ${seconds.toFixed(0)} से. बोलणे`;
+  if (clipSeconds === undefined) return spoken;
+  return `${spoken} → क्लिप ~${clipSeconds} से.`;
+}
+
+// Gate-1 running total against the project's selected length. Advisory only:
+// the storyboard job measures the real audio and shortens what overruns.
+export function videoNarrationTotal(
+  estimatedSeconds: number,
+  targetSeconds: number,
+): string {
+  return `एकूण निवेदन: अंदाजे ${estimatedSeconds.toFixed(0)} से. / लक्ष्य ${targetSeconds} से.`;
 }

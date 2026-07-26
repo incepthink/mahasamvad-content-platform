@@ -227,9 +227,11 @@ export function registerDloRoutes(
       });
     }
 
-    // Then the documents, which are already READ — the officer picked their pages and
-    // corrected their text at the input step, so they land as finished entries and the
-    // intake job skips them. That is what keeps a scanned PDF from being OCR'd twice.
+    // Then the documents from the input step, in one of two shapes. Normally they are already
+    // READ — the officer picked their pages and corrected their text there — so they land as
+    // finished entries and the intake job skips them, which is what keeps a scanned PDF from
+    // being OCR'd twice. A scan the officer declined to wait for instead carries only its page
+    // SELECTION (`pendingPages`) and lands 'pending', for the job's extract phase to read.
     //
     // Their bytes are still held by the ephemeral job in THIS process, so the archive is a
     // copy rather than a second upload from the browser. An expired job (60-min TTL) simply
@@ -255,6 +257,40 @@ export function registerDloRoutes(
           CONTENT_TYPE_BY_KIND[document.kind],
         );
       }
+      // A document whose pages the officer picked but chose NOT to wait for. Nothing has been
+      // read, so there is no text to store: what travels is the SELECTION, and the intake job's
+      // extract phase reads exactly those pages out of the archive below.
+      if (document.pendingPages && document.pendingPages.length > 0) {
+        entries.push(
+          storagePath === undefined
+            ? {
+                // No text and no bytes — the ephemeral job expired (or the API restarted)
+                // between the upload and this submit, so nothing about this file can be
+                // recovered. Fail the file, not the intake: every other source still generates
+                // and the review step's warning names this one.
+                name: document.name,
+                kind: document.kind,
+                status: 'failed',
+                error:
+                  'या फाईलची मूळ प्रत उपलब्ध नाही, त्यामुळे ती वाचता आली नाही. कृपया ती पुन्हा जोडा.',
+                ...(document.pageCount !== undefined
+                  ? { pageCount: document.pageCount }
+                  : {}),
+              }
+            : {
+                name: document.name,
+                storagePath,
+                kind: document.kind,
+                status: 'pending',
+                pendingPages: document.pendingPages,
+                ...(document.pageCount !== undefined
+                  ? { pageCount: document.pageCount }
+                  : {}),
+              },
+        );
+        continue;
+      }
+
       const text = document.pages
         ? document.pages
             .map((page) => page.text)

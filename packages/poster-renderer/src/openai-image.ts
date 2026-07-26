@@ -1,15 +1,20 @@
-// OpenAI GPT-image call for the poster's background SCENE (PROJECT_CONTEXT step 14).
+// OpenAI GPT-image calls: generation for poster scenes / video keyframes, and
+// an EDIT call for the video pipeline's end frame (derive the last frame of a
+// scene from its first, so setting/people/light hold across the pair).
 // Same raw-fetch + OPENAI_API_KEY style as content-engine/openai-chat.ts (no SDK).
 //
-// We only ever generate a text-free photograph from scratch now (POST
+// Posters only ever generate a text-free photograph from scratch (POST
 // /v1/images/generations); the poster's text, header and footer are typeset later in
-// HTML (poster-template.ts), so the mangled-Devanagari image-edit path is gone.
+// HTML (poster-template.ts), so the mangled-Devanagari poster image-EDIT path is gone.
+// editImage below is NOT that path's return: it edits a text-free frame into another
+// text-free frame, no Devanagari involved.
 //
 // The scene fills a wide landscape band, so the default size is landscape. Model, size
 // and quality stay env-overridable (OPENAI_IMAGE_MODEL / OPENAI_IMAGE_SIZE /
 // OPENAI_IMAGE_QUALITY) as a fallback if an account can't request a given model or size.
 
 const GENERATIONS_URL = 'https://api.openai.com/v1/images/generations';
+const EDITS_URL = 'https://api.openai.com/v1/images/edits';
 
 // gpt-image-2 (gpt-image-1 is deprecated on OpenAI's model page); matches what both
 // n8n workflows use. Env-overridable if an account can't request it.
@@ -82,4 +87,34 @@ export async function generateImage(
     }),
   });
   return decode(response, 'image generation');
+}
+
+// Edits an existing PNG with a prompt (multipart POST /v1/images/edits — the
+// same endpoint the n8n poster workflows call). Used for the video pipeline's
+// END frame: editing the start frame instead of generating fresh is what keeps
+// the pair inside ONE shot, so Veo's interpolation reads as motion rather than
+// a crossfade between two different places.
+export async function editImage(
+  imagePng: Buffer,
+  prompt: string,
+  opts: GenerateImageOptions = {},
+): Promise<Buffer> {
+  const apiKey = requireApiKey();
+  const form = new FormData();
+  form.append('model', IMAGE_MODEL);
+  form.append('prompt', prompt);
+  form.append('size', opts.size ?? SIZE);
+  form.append('quality', QUALITY);
+  form.append('n', '1');
+  form.append(
+    'image',
+    new Blob([new Uint8Array(imagePng)], { type: 'image/png' }),
+    'frame.png',
+  );
+  const response = await fetch(EDITS_URL, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${apiKey}` },
+    body: form,
+  });
+  return decode(response, 'image edit');
 }

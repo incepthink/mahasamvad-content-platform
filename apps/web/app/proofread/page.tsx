@@ -5,9 +5,11 @@
 // genuine mistakes (grammar/spelling/punctuation/name/style) plus a corrected
 // text that is a deterministic patch of the input. Nothing is stored.
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
+  buildProofreadHighlights,
   PROOFREAD_TEXT_MAX_CHARS,
+  type ProofreadHighlight,
   type ProofreadIssue,
   type ProofreadResponse,
 } from '@dgipr/schemas';
@@ -39,6 +41,189 @@ function IssueRow({ issue }: { issue: ProofreadIssue }) {
       </div>
       {issue.explanation ? <p className="hint">{issue.explanation}</p> : null}
     </div>
+  );
+}
+
+// The corrected article with every patched span marked in place. The officer must be
+// able to SEE what the proofreader changed without hunting each excerpt from the list
+// above — and must equally be able to switch the marks off and read the finished text
+// as plain prose, which is what they will actually publish.
+//
+// Marks come from @dgipr/schemas' buildProofreadHighlights, which replays the engine's
+// own patcher. It returns null if that replay does not reproduce `corrected` byte for
+// byte; the text then renders unmarked. The corrected text is authoritative, the marks
+// are best-effort — never the other way round.
+function CorrectedArticle({
+  original,
+  corrected,
+  issues,
+}: {
+  original: string;
+  corrected: string;
+  issues: readonly ProofreadIssue[];
+}) {
+  const [highlightsOn, setHighlightsOn] = useState(true);
+  const [active, setActive] = useState<{ index: number; top: number; left: number } | null>(
+    null,
+  );
+
+  const marks = useMemo(
+    () => buildProofreadHighlights(original, corrected, issues),
+    [original, corrected, issues],
+  );
+  const markedCount = marks?.filter((mark) => mark.kind !== null).length ?? 0;
+
+  useEffect(() => {
+    if (!active) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setActive(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [active]);
+
+  if (!marks || markedCount === 0) {
+    return <div className="article-body">{corrected}</div>;
+  }
+
+  // Anchored to the viewport rather than to the span: a marked span can wrap across
+  // lines, which makes it a poor positioning context.
+  const open = (index: number, element: HTMLElement) => {
+    const box = element.getBoundingClientRect();
+    setActive({
+      index,
+      top: box.bottom + 8,
+      left: Math.min(Math.max(box.left, 12), window.innerWidth - 332),
+    });
+  };
+
+  const activeMark: ProofreadHighlight | null =
+    active !== null ? (marks[active.index] ?? null) : null;
+
+  return (
+    <>
+      <div className="proofread-highlight-bar">
+        <button
+          type="button"
+          className="btn"
+          aria-pressed={highlightsOn}
+          onClick={() => {
+            setHighlightsOn((on) => !on);
+            setActive(null);
+          }}
+        >
+          {highlightsOn
+            ? STR.proofreadHighlightHide
+            : STR.proofreadHighlightShow}
+        </button>
+        {highlightsOn ? (
+          <div className="proofread-legend">
+            <span>
+              <span className="proofread-legend-swatch" aria-hidden="true" />
+              {STR.proofreadHighlightLegendFix}
+            </span>
+            <span>
+              <span
+                className="proofread-legend-swatch proofread-legend-swatch-style"
+                aria-hidden="true"
+              />
+              {STR.proofreadHighlightLegendStyle}
+            </span>
+          </div>
+        ) : null}
+      </div>
+      {highlightsOn ? (
+        <p className="hint">{STR.proofreadHighlightHint}</p>
+      ) : null}
+
+      <div className="article-body">
+        {highlightsOn
+          ? marks.map((mark, index) =>
+              mark.kind === null || mark.issue === null ? (
+                mark.text
+              ) : (
+                <span
+                  key={index}
+                  className={
+                    mark.kind === 'style'
+                      ? 'proofread-mark proofread-mark-style'
+                      : 'proofread-mark'
+                  }
+                  role="button"
+                  tabIndex={0}
+                  aria-describedby={
+                    active?.index === index ? 'proofread-popover' : undefined
+                  }
+                  onMouseEnter={(event) => open(index, event.currentTarget)}
+                  onMouseLeave={() =>
+                    setActive((current) =>
+                      current?.index === index ? null : current,
+                    )
+                  }
+                  onFocus={(event) => open(index, event.currentTarget)}
+                  onBlur={() =>
+                    setActive((current) =>
+                      current?.index === index ? null : current,
+                    )
+                  }
+                  onClick={(event) => {
+                    if (active?.index === index) setActive(null);
+                    else open(index, event.currentTarget);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key !== 'Enter' && event.key !== ' ') return;
+                    event.preventDefault();
+                    if (active?.index === index) setActive(null);
+                    else open(index, event.currentTarget);
+                  }}
+                >
+                  {mark.text}
+                </span>
+              ),
+            )
+          : corrected}
+      </div>
+
+      {active && activeMark?.issue ? (
+        <div
+          id="proofread-popover"
+          className="proofread-popover"
+          role="tooltip"
+          style={{ top: active.top, left: active.left }}
+        >
+          <span
+            className={
+              activeMark.kind === 'style'
+                ? 'chip chip-queued'
+                : 'chip chip-failed'
+            }
+          >
+            {PROOFREAD_TYPE_LABELS[activeMark.issue.type]}
+          </span>
+          <p className="proofread-popover-line">
+            <span className="hint">
+              {activeMark.kind === 'style'
+                ? STR.proofreadSuggestionArrow
+                : STR.proofreadHighlightOriginal}
+            </span>{' '}
+            <span
+              className={
+                activeMark.kind === 'style'
+                  ? 'issue-suggestion'
+                  : 'issue-excerpt'
+              }
+            >
+              {activeMark.kind === 'style'
+                ? activeMark.issue.suggestion
+                : activeMark.issue.excerpt}
+            </span>
+          </p>
+          {activeMark.issue.explanation ? (
+            <p className="hint">{activeMark.issue.explanation}</p>
+          ) : null}
+        </div>
+      ) : null}
+    </>
   );
 }
 
@@ -210,7 +395,11 @@ export default function ProofreadPage() {
               {correctedUnchanged ? (
                 <p className="hint">{STR.proofreadCorrectedUnchanged}</p>
               ) : null}
-              <div className="article-body">{result.correctedText}</div>
+              <CorrectedArticle
+                original={text}
+                corrected={result.correctedText}
+                issues={result.issues}
+              />
               <div className="btn-row" style={{ marginTop: 18 }}>
                 <button type="button" className="btn" onClick={copyCorrected}>
                   {copied ? STR.copied : STR.copyText}

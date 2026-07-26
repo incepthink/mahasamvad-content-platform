@@ -29,6 +29,14 @@ export const CHAT_MODEL = process.env.OPENAI_CHAT_MODEL ?? 'gpt-5.6-terra';
 // re-checks anyway — ranking tie-breaks, page-instruction parsing, offline corpus prep.
 export const UTILITY_MODEL = process.env.OPENAI_UTILITY_MODEL ?? 'gpt-5.6-luna';
 
+// The explainer-video pipeline's authoring tier: planning scenes, writing/grading the
+// narration and shortening lines are the judgement-heaviest Marathi work in the repo, so
+// the /video TEXT calls are pinned one step up from CHAT_MODEL. TEXT only — the clips
+// stay on Kling (VIDEO_CLIP_PROVIDER) and the frames on Nano Banana/Gemini
+// (VIDEO_IMAGE_PROVIDER); sol just writes the plan/script/narration and the prompts those
+// renderers receive. Rollback is an .env edit (OPENAI_VIDEO_MODEL=gpt-5.6-terra).
+export const VIDEO_CHAT_MODEL = process.env.OPENAI_VIDEO_MODEL ?? 'gpt-5.6-sol';
+
 // Bound the completion so one runaway generation can't silently cost several times a
 // normal run (unbounded, the model defaults to its own ceiling). 4096 is ~2x the
 // largest current output (~2,000 tk draft), so it never truncates normal output. Callers

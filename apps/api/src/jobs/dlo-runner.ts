@@ -9,6 +9,13 @@
 // OCR is billed per page and the officer has not yet said which pages matter. The reading
 // happens later, in startDloExtractionJob, over exactly the pages they picked.
 //
+// Unless they picked them ALREADY. A document uploaded at the input step is normally read
+// there too, but the officer may hand over the page selection without waiting for it
+// ("न वाचता ही पृष्ठे वापरा"); that file arrives 'pending' carrying `pendingPages`, and the
+// extract phase below reads exactly those instead of probing. Same spend gate — the pages
+// were still chosen before anything was billed — just a wait folded into a job that was
+// going to run anyway.
+//
 // Job state of record is the dlo_intakes row (status/step/error + per-file
 // status inside the files jsonb), so polling clients survive refreshes. The
 // in-memory `running` set mirrors runner.ts: double-run guard + restart-orphan
@@ -318,11 +325,21 @@ export function startDloIntakeJob(client: SupabaseClient, id: string): void {
       // extracted, pages picked and corrections made. Re-reading it here would OCR a
       // scanned PDF a second time and throw away those corrections — so it is left alone.
       if (entry.status === 'done') continue;
+      // Already failed before this phase ran — the only way that happens is the route rejecting
+      // a document at create time (a deferred scan whose original could not be archived). Its
+      // message is the actionable one; probing it would only fail again, less usefully.
+      if (entry.status === 'failed') continue;
       if (entry.kind !== 'pdf' && entry.kind !== 'docx') continue;
       try {
         entries[index] =
           entry.kind === 'pdf'
-            ? await probePdfEntry(client, entry)
+            ? // A scan whose pages the officer already picked at the input step and chose not
+              // to wait for. Probing it again would only park it at 'needs-selection' and ask
+              // a question they have already answered, so it is read here instead — bounded to
+              // their selection, so the spend gate is exactly the one they authorised.
+              entry.pendingPages && entry.pendingPages.length > 0
+              ? await extractPdfEntry(client, entry, entry.pendingPages)
+              : await probePdfEntry(client, entry)
             : await extractDocxEntry(client, entry);
       } catch (error) {
         entries[index] = {

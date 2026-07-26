@@ -3,7 +3,9 @@
 // The page picker, as a range field first and a grid second. A checkbox-per-row list
 // (the old shape) is fine for three pages and unusable for fifty — a scanned booklet is
 // exactly the case that has to work — so the primary control is a text range ("1-5, 8,
-// 10-12", Marathi digits accepted) and the full grid of numbered chips is one tap away.
+// 10-12", Marathi digits accepted) sitting above a grid of numbered chips. The grid is always
+// open where it IS the control (the pre-read picker), and one tap away where it is a shortcut
+// over a list of page rows the user is already reading — see `collapsible`.
 //
 // Like <DocumentPages>, it holds no selection of its own: it asks a predicate and reports
 // events, so it fits either selection model in the product (the pages a surface WANTS, or
@@ -27,6 +29,7 @@ export function PageRangeSelector({
   onSetAll,
   busy = false,
   showSelectAll = true,
+  collapsible = true,
   defaultExpanded,
 }: {
   listed: readonly number[];
@@ -37,8 +40,12 @@ export function PageRangeSelector({
   // /dlo turns this off: its card header checkbox is already the file's select-all, and a
   // second one on the same card reads as a bug. The range field and grid stay.
   showSelectAll?: boolean | undefined;
+  // Off on the PRE-READ picker, where the grid IS the control the user came for and folding it
+  // costs a tap for nothing. Left on above an already-read document's text rows, which are
+  // themselves the visual list — there the grid is a shortcut and folds out of the way.
+  collapsible?: boolean | undefined;
   // Small documents open on the grid (nicer to tap than to type); large ones start folded
-  // with the range field primary. Callers can force either.
+  // with the range field primary. Callers can force either. Ignored when not collapsible.
   defaultExpanded?: boolean | undefined;
 }) {
   // /dlo shows one of these per document, so a fixed id would put several inputs under the
@@ -48,9 +55,8 @@ export function PageRangeSelector({
   const selectedListed = listed.filter(isSelected);
   const canonical = formatPageRanges(selectedListed);
 
-  const [expanded, setExpanded] = useState(
-    defaultExpanded ?? listed.length <= 12,
-  );
+  const [open, setOpen] = useState(defaultExpanded ?? listed.length <= 12);
+  const expanded = collapsible ? open : true;
   const [rangeText, setRangeText] = useState(canonical);
   // True while the field has focus, so selection changes made elsewhere (a grid tap,
   // select-all, a parent reset) refresh the text without fighting the typist.
@@ -109,42 +115,48 @@ export function PageRangeSelector({
         </button>
       </div>
 
-      <div className="btn-row" style={{ marginTop: 10 }}>
-        {showSelectAll ? (
-          <>
+      {/* Both controls are optional (/dlo's review cards hide the select-all, the pre-read
+          picker hides the fold), and an empty row would still take its margin. */}
+      {showSelectAll || collapsible ? (
+        <div className="btn-row" style={{ marginTop: 10 }}>
+          {showSelectAll ? (
+            <>
+              <button
+                type="button"
+                className="btn btn-small"
+                disabled={busy}
+                onClick={() => onSetAll([...listed], true)}
+              >
+                {STR.docSelectAll}
+              </button>
+              <button
+                type="button"
+                className="btn btn-small"
+                disabled={busy}
+                onClick={() => onSetAll([...listed], false)}
+              >
+                {STR.docClearAll}
+              </button>
+            </>
+          ) : null}
+          {collapsible ? (
             <button
               type="button"
-              className="btn btn-small"
-              disabled={busy}
-              onClick={() => onSetAll([...listed], true)}
+              className="btn btn-small page-range-expand"
+              aria-expanded={expanded}
+              onClick={() => setOpen((prev) => !prev)}
             >
-              {STR.docSelectAll}
+              {expanded ? STR.docRangeCollapse : STR.docRangeExpand}
+              <span
+                className={`page-range-caret ${expanded ? 'open' : ''}`}
+                aria-hidden="true"
+              >
+                ▾
+              </span>
             </button>
-            <button
-              type="button"
-              className="btn btn-small"
-              disabled={busy}
-              onClick={() => onSetAll([...listed], false)}
-            >
-              {STR.docClearAll}
-            </button>
-          </>
-        ) : null}
-        <button
-          type="button"
-          className="btn btn-small page-range-expand"
-          aria-expanded={expanded}
-          onClick={() => setExpanded((prev) => !prev)}
-        >
-          {expanded ? STR.docRangeCollapse : STR.docRangeExpand}
-          <span
-            className={`page-range-caret ${expanded ? 'open' : ''}`}
-            aria-hidden="true"
-          >
-            ▾
-          </span>
-        </button>
-      </div>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className={`page-grid-wrap ${expanded ? 'open' : ''}`}>
         {/* Keyed on `expanded` so the chips remount and replay their staggered fade each

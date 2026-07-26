@@ -4,10 +4,14 @@
 // directly — a base64-encoded WAV per input text — so this is a thin transport:
 // one call, decode, return the bytes.
 //
-// A scene's narration is capped at ~220 chars (UpdateVideoScriptRequestSchema),
+// A scene's narration is capped at VIDEO_NARRATION_MAX_CHARS (@dgipr/schemas),
 // well under bulbul:v3's 2500-char / bulbul:v2's 1500-char limit, so one scene =
-// one call. The voiceover is fit to the scene's fixed clip window downstream
-// (muxNarration in @dgipr/poster-renderer), not here — this file only synthesizes.
+// one call. This file only synthesizes: the caller MEASURES the returned WAV
+// (wavDurationSeconds) and, if the line overruns its 8s clip, shortens the text
+// and comes back — narration is never sped up to fit.
+//
+// This is the video's ONLY audio. Veo renders silent (generateAudio:false in
+// veo-client.ts), so nothing here competes with a model-generated track.
 //
 // Model + voice are env-overridable because the preview voices/model ids churn
 // and the "right" Marathi voice is a taste call best made without a redeploy.
@@ -20,8 +24,20 @@ import { recordTtsCost } from '../cost/cost-meter.js';
 // Defaults chosen for Marathi narration; override per deployment via .env.
 // bulbul:v3 is the latest model (better prosody, 30+ voices). If the account
 // lacks v3 access, set SARVAM_TTS_MODEL=bulbul:v2 + a v2 speaker (e.g. anushka).
+// `shubh` is v3's own default voice — a measured, authoritative read that suits
+// an official government explainer.
 const DEFAULT_TTS_MODEL = 'bulbul:v3';
-const DEFAULT_TTS_SPEAKER = 'ritu';
+const DEFAULT_TTS_SPEAKER = 'shubh';
+
+// 44.1 kHz because that is exactly what muxNarration's aformat filter resamples
+// every segment to: asking Sarvam for it removes an upsample that could only
+// ever invent detail, never restore it. v3 goes to 48 kHz over REST if wanted.
+const DEFAULT_TTS_SAMPLE_RATE = 44_100;
+
+// Sarvam's default is 0.6; lower is steadier. Official narration wants
+// consistency across eight scenes far more than it wants expressiveness, and
+// higher values are documented to introduce artifacts.
+const DEFAULT_TTS_TEMPERATURE = 0.5;
 
 export function ttsModel(): string {
   const model = process.env.SARVAM_TTS_MODEL;
@@ -31,6 +47,19 @@ export function ttsModel(): string {
 export function ttsSpeaker(): string {
   const speaker = process.env.SARVAM_TTS_SPEAKER;
   return speaker && speaker.trim() !== '' ? speaker.trim() : DEFAULT_TTS_SPEAKER;
+}
+
+function readNumber(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === '') return fallback;
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+// bulbul:v3 only. pitch / loudness / enable_preprocessing are v2-only per the
+// SDK's own docs and are deliberately never sent.
+function isV3(): boolean {
+  return ttsModel().startsWith('bulbul:v3');
 }
 
 export type NarrationOptions = Readonly<{
@@ -54,6 +83,10 @@ export async function synthesizeMarathiNarration(
     throw new Error('synthesizeMarathiNarration got empty text.');
   }
   const client = createSarvamClient();
+  const sampleRate = readNumber(
+    'SARVAM_TTS_SAMPLE_RATE',
+    DEFAULT_TTS_SAMPLE_RATE,
+  );
   const response = await client.textToSpeech.convert({
     text: trimmed,
     target_language_code: 'mr-IN',
@@ -62,6 +95,15 @@ export async function synthesizeMarathiNarration(
     // without a redeploy, so the string is passed through as-is.
     model: ttsModel() as SarvamAI.TextToSpeechModel,
     speaker: (options?.speaker ?? ttsSpeaker()) as SarvamAI.TextToSpeechSpeaker,
+    speech_sample_rate: sampleRate,
+    ...(isV3()
+      ? {
+          temperature: readNumber(
+            'SARVAM_TTS_TEMPERATURE',
+            DEFAULT_TTS_TEMPERATURE,
+          ),
+        }
+      : {}),
     ...(options?.pace !== undefined ? { pace: options.pace } : {}),
   });
 

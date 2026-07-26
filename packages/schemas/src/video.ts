@@ -1,7 +1,14 @@
 // Request/response schemas + shared helpers for the AI explainer-video API
 // (apps/api parsing + apps/web typed fetch wrappers): a user note → per-scene
-// Marathi script (gate 1) → storyboard keyframe stills (gate 2) → Veo-animated
-// clips stitched into one silent MP4 + SRT.
+// Marathi script (gate 1) → storyboard keyframe stills (gate 2) → provider-
+// rendered clips stitched into one voiced MP4 + SRT.
+//
+// AUDIO LEADS, CLIPS FOLLOW (2026-07-26): the narration is authored against the
+// project's TOTAL time (VIDEO_TOTAL_SECONDS — 30s or 60s), never against a clip
+// window. After TTS measures each scene's WAV, the clip duration is DERIVED
+// from the speech (clipSecondsForNarration: clamp(3, 15, ceil(seconds)) — Kling
+// takes integer 3-15s). Narration is never trimmed or sped up to fit a clip;
+// the clip stretches to fit the speech.
 //
 // The per-second tier prices and the SRT builder live HERE, not in
 // content-engine: the web renders the pre-spend cost estimate on gate 2 and
@@ -34,32 +41,63 @@ export const VideoProjectStepSchema = z.enum([
 ]);
 export type VideoProjectStep = z.infer<typeof VideoProjectStepSchema>;
 
-// short = ~15-30s (2-4 scenes), long = ~30-60s (4-8 scenes).
+// The officer's total-length pick: short = a ~30s video, long = ~1 minute
+// (VIDEO_TOTAL_SECONDS maps the values). The column keeps its historical
+// 'short'/'long' CHECK values so no migration was needed when the buckets
+// became exact totals.
 export const VideoDurationBucketSchema = z.enum(['short', 'long']);
 export type VideoDurationBucket = z.infer<typeof VideoDurationBucketSchema>;
 
 export const VideoOrientationSchema = z.enum(['landscape', 'vertical']);
 export type VideoOrientation = z.infer<typeof VideoOrientationSchema>;
 
-// Veo 3.1 quality tiers (model ids are an API-side concern, env-overridable).
+// Clip quality tiers. What a tier SELECTS is a provider concern, resolved by
+// the adapter: Veo maps it to a model id (env-overridable VEO_MODEL_*), Kling
+// 3.0 — one model — maps it to a RESOLUTION. Under KLING_RESOLUTION it selects
+// nothing at all, which is why the price table below is flat.
+//
+// 'lite' survives for legacy rows only; the web picker has not offered it since
+// Veo's lite preview turned out to ignore end frames.
 export const VideoTierSchema = z.enum(['fast', 'lite', 'standard']);
 export type VideoTier = z.infer<typeof VideoTierSchema>;
 
+// Kling 3.0 at 720p with audio off: 6 credits per second (the official rate).
+// USD per credit depends on which resource package the account bought, so this
+// is CONFIGURED, not discovered — public pay-as-you-go reference points sit at
+// $0.075-0.11/s, and 0.1 deliberately errs high.
+//
+// TO CALIBRATE: kling-client logs the `billing[]` Kling returns on every
+// successful render. Compare one against the console's deduction and replace
+// this number; there is nothing else to change.
+const KLING_720P_USD_PER_SECOND = 0.1;
+
 // USD per second of rendered video, per tier — the single source of truth for
-// both the API's cost metering and the web's pre-spend estimates. Approximate
-// public Gemini API prices (fetched 2026-07-22); if Google changes prices, edit
-// only this table.
+// both the API's cost metering and the web's pre-spend estimates.
+//
+// FLAT ACROSS TIERS on purpose: with VIDEO_CLIP_PROVIDER=kling and
+// KLING_RESOLUTION pinned to 720p there is one model at one resolution, so the
+// tier genuinely does not change the price and pretending otherwise would put a
+// false number in front of the officer approving the spend at gate 2.
+//
+// This table is PER-DEPLOYMENT truth: one repo state cannot price a Veo
+// deployment and a Kling one at once, and that was already the contract when
+// the numbers were Veo's (standard 0.40 / fast 0.15 / lite 0.08 — restore those
+// alongside VIDEO_CLIP_PROVIDER=veo). The web reads it directly, so keeping it
+// a single table is what stops the displayed estimate and the recorded
+// video_projects.cost_usd from drifting apart.
 export const VIDEO_TIER_PRICE_PER_SECOND_USD: Readonly<
   Record<VideoTier, number>
 > = {
-  standard: 0.4,
-  fast: 0.15,
-  lite: 0.08,
+  standard: KLING_720P_USD_PER_SECOND,
+  fast: KLING_720P_USD_PER_SECOND,
+  lite: KLING_720P_USD_PER_SECOND,
 };
 
 // Preferred scene counts per duration bucket. Since the AI planner took over
 // scene-count selection this is a PREFERENCE hint fed to the planner prompt,
 // not a validation rule — the only hard count rule is VIDEO_SCENE_LIMIT.
+// Against the 30/60s totals both ranges average 7.5-15s of speech per scene,
+// comfortably inside the 3-15s clip bounds.
 export const VIDEO_SCENE_BOUNDS: Readonly<
   Record<VideoDurationBucket, Readonly<{ min: number; max: number }>>
 > = {
@@ -68,37 +106,126 @@ export const VIDEO_SCENE_BOUNDS: Readonly<
 };
 
 // The hard scene-count rule (gate-1 save + the web's add/remove buttons).
-// 8 scenes × 8s is the ~1 min ceiling the product accepts.
 export const VIDEO_SCENE_LIMIT: Readonly<{ min: number; max: number }> = {
   min: 1,
   max: 8,
 };
 
-// A scene's Veo clip length. The storyboard job MEASURES each scene's
-// synthesized narration and assigns the smallest window that fits (see
-// fitSceneDurationSeconds), so clips no longer trail off into dead air.
-export const VideoSceneDurationSchema = z.union([
-  z.literal(4),
-  z.literal(6),
-  z.literal(8),
-]);
+// Kling 3.0's real clip bounds (whole seconds; kling-client validates the same
+// range at pre-flight). The MAX is also the per-scene SPEECH ceiling: a scene
+// whose narration measures past 15s is rewritten shorter, because no clip can
+// stretch further. Veo cannot do variable lengths (its start+end interpolation
+// exists only at 8s), so the veo adapter rejects anything outside {4, 6, 8} —
+// variable clips require VIDEO_CLIP_PROVIDER=kling, the deployed default.
+export const VIDEO_CLIP_MIN_SECONDS = 3;
+export const VIDEO_CLIP_MAX_SECONDS = 15;
+
+// The officer-selected TOTAL video length per bucket — the narration's budget.
+// A soft target: the narrate phase shortens the worst-offending scenes while
+// the measured total overruns it by more than VIDEO_TOTAL_FIT_TOLERANCE, then
+// delivers whatever it has (a video a few seconds long beats mutilated speech).
+export const VIDEO_TOTAL_SECONDS: Readonly<Record<VideoDurationBucket, number>> =
+  {
+    short: 30,
+    long: 60,
+  };
+
+// How far the measured narration total may overrun VIDEO_TOTAL_SECONDS before
+// the narrate phase spends shorten calls on the longest scenes.
+export const VIDEO_TOTAL_FIT_TOLERANCE = 1.15;
+
+// What a scene that busts the 15s clip ceiling is rewritten toward — 1s inside
+// the ceiling so ceil() still lands the derived clip at ≤ 15.
+export const VIDEO_SCENE_REWRITE_TARGET_SECONDS = 14;
+
+// A scene's clip length in whole seconds. Was the 4|6|8 Veo union; widened to
+// Kling's real 3-15 range when durations became audio-derived. Legacy 4/6/8
+// rows all pass (WINDOW FREEZE keeps their rendered clips valid).
+export const VideoSceneDurationSchema = z
+  .number()
+  .int()
+  .min(VIDEO_CLIP_MIN_SECONDS)
+  .max(VIDEO_CLIP_MAX_SECONDS);
 export type VideoSceneDuration = z.infer<typeof VideoSceneDurationSchema>;
 
-// Narration length cap per scene — the single source for BOTH the script
-// generator's schema (content-engine) and UpdateVideoScriptRequestSchema, so
-// the two can never drift apart. ~280 chars ≈ 8-9s of spoken Marathi.
-export const VIDEO_NARRATION_MAX_CHARS = 280;
+// THE duration derivation — one function shared by the runner (measured WAV),
+// the route (provisional estimate) and the web (display), so the three can
+// never disagree. ceil() guarantees the window is at least the speech, which
+// is what makes muxNarration's atempo unreachable on a newly derived scene.
+export function clipSecondsForNarration(narrationSeconds: number): number {
+  return Math.min(
+    VIDEO_CLIP_MAX_SECONDS,
+    Math.max(VIDEO_CLIP_MIN_SECONDS, Math.ceil(narrationSeconds)),
+  );
+}
 
-// A narration up to 8% over a window is played with an imperceptible atempo
-// speed-up rather than jumping to the next (2s bigger, dearer) window.
-export const VIDEO_FIT_TEMPO_ALLOWANCE = 1.08;
+// Spoken-Marathi rate: chars of Devanagari per second of bulbul speech.
+//
+// MEASURED, not guessed — 2026-07-26, `shubh` on bulbul:v3 at 44.1 kHz, over
+// four real narration lines of 72-195 chars: 16.0-17.5 chars/s, mean 16.5.
+// The previous value of 32 was ~2x too fast, which is why narration used to
+// overrun so badly: at 32 the old 280-char cap "fitted" 8.75s, when in truth
+// 280 chars is ~17 SECONDS of speech in an 8s clip. muxNarration's atempo caps
+// at 2.0, so the surplus was not sped up — it was TRIMMED, cutting words off the
+// end of scenes. Re-measure with the calibration harness if the voice, the model
+// or the pace ever changes; do not adjust this by intuition.
+export const DEFAULT_NARRATION_CHARS_PER_SECOND = 16.5;
 
-// Spoken-Marathi rate used ONLY when narration audio cannot be measured
-// (no SARVAM_API_KEY, or a per-scene TTS failure): chars of Devanagari per
-// second of bulbul speech. Env-overridable via VIDEO_NARRATION_CHARS_PER_SECOND
-// (API side); calibrate against real WAVs, not intuition — the original
-// "20 words ≈ 8s" guess was ~2× slower than the voice actually speaks.
-export const DEFAULT_NARRATION_CHARS_PER_SECOND = 32;
+// The hard per-scene ceiling: the LONGEST clip's worth of speech at the
+// measured rate (15s × 16.5 ≈ 248 chars). Feeds BOTH the script generator's
+// schema (content-engine) and UpdateVideoScriptRequestSchema, so the two can
+// never drift apart. A schema ceiling, not a target — the authoring target is
+// the TOTAL budget (videoNarrationBudgetChars); this only rejects a single
+// line no clip could ever hold, and the real guarantee is downstream anyway:
+// the storyboard job measures the actual WAV and shortens what still overruns.
+export const VIDEO_NARRATION_MAX_CHARS = Math.round(
+  VIDEO_CLIP_MAX_SECONDS * DEFAULT_NARRATION_CHARS_PER_SECOND,
+);
+
+// Spoken Marathi in words/second — the same budget expressed the way a writing
+// prompt can actually use it. MEASURED alongside the char rate above (mean 2.29
+// over the same four lines; the old 4.5 was the same 2x error). Lives here, not
+// in content-engine, because BOTH the scene planner (deciding whether a fact
+// fits one scene or needs two) and the script writer (filling a scene) must work
+// to the identical number; when they drifted, the planner packed scenes the
+// writer could not narrate in time.
+export const NARRATION_WORDS_PER_SECOND = 2.3;
+
+// The whole video's narration budget — what the planner and the script writer
+// author toward, and what the narrate phase's total-fit pass enforces with
+// real measurements. 30s → ~495 chars / ~69 words; 60s → ~990 / ~138.
+export function videoNarrationBudgetChars(bucket: VideoDurationBucket): number {
+  return Math.round(
+    VIDEO_TOTAL_SECONDS[bucket] * DEFAULT_NARRATION_CHARS_PER_SECOND,
+  );
+}
+
+export function videoNarrationBudgetWords(bucket: VideoDurationBucket): number {
+  return Math.round(VIDEO_TOTAL_SECONDS[bucket] * NARRATION_WORDS_PER_SECOND);
+}
+
+// The on-screen Marathi key point burned onto a scene (the amount, the
+// deadline, the count, the scheme name). A ceiling, not a target: this is one
+// readable line in the lower third at 1080p, and a second line would start
+// competing with the footage the scene exists to show. The text is typeset by
+// Chromium and composited AFTER Veo, so no image or video model ever renders
+// Devanagari — the poster path's rule, applied to video.
+export const VIDEO_KEY_POINT_MAX_CHARS = 48;
+
+// The project's visual style/setting paragraph. Raised from the script
+// generator's old inline 600 because the paragraph now has to carry the SETTING
+// (Maharashtra, India; who the people are) as well as the look, and because it
+// is officer-editable at gate 1. Lives here so the generator's schema
+// (content-engine) and UpdateVideoScriptRequestSchema cannot drift.
+export const VIDEO_STYLE_MAX_CHARS = 1200;
+
+// muxNarration only speeds a segment up past THIS much overrun; anything
+// smaller is absorbed by the trim and left at natural pace. Since durations
+// are DERIVED from the measured speech (clipSecondsForNarration ceils, so the
+// window is never smaller than the narration) this is unreachable on a new
+// scene — it survives purely as the backstop for legacy frozen windows, whose
+// clips are paid for and must never be invalidated by a narration edit.
+export const VIDEO_NARRATION_TEMPO_TOLERANCE = 1.02;
 
 // Estimated spoken seconds for a narration string (fallback + UI hint only —
 // measured WAV duration always wins when audio exists).
@@ -109,16 +236,6 @@ export function estimateNarrationSeconds(
   const chars = text.trim().length;
   if (chars === 0) return 0;
   return chars / Math.max(1, charsPerSecond);
-}
-
-// The smallest Veo window (4|6|8s) that holds `seconds` of narration, allowing
-// the ≤8% atempo speed-up before jumping a bucket. Anything longer than 8s
-// clamps to 8 — muxNarration's atempo (cap 2.0) absorbs the residue.
-export function fitSceneDurationSeconds(seconds: number): VideoSceneDuration {
-  for (const window of [4, 6, 8] as const) {
-    if (seconds <= window * VIDEO_FIT_TEMPO_ALLOWANCE) return window;
-  }
-  return 8;
 }
 
 export const VideoSceneStatusSchema = z.enum([
@@ -137,9 +254,17 @@ export const VideoSceneSchema = z.object({
   // Marathi voiceover text for this scene. Carries the information; the
   // visuals stay text-free (video models garble Devanagari).
   narration: z.string(),
-  // English visual description for the keyframe/motion prompts. Generic and
-  // symbolic — never a specific person/event the note doesn't name.
+  // English visual description of the scene's START frame (and the shot as a
+  // whole) for the image/motion prompts.
   visualBrief: z.string(),
+  // English description of how the SAME shot looks at its END — the second
+  // reviewed frame, edited from the start frame so setting/people/light hold,
+  // which Veo interpolates toward. Absent on legacy (single-frame) scenes.
+  endVisualBrief: z.string().optional(),
+  // Short Marathi line burned onto this scene's footage after Veo (the amount,
+  // the deadline, the count, the scheme name). Absent or empty ⇒ this scene
+  // gets no overlay, which is also how an officer turns the feature off.
+  keyPoint: z.string().optional(),
   durationSeconds: VideoSceneDurationSchema,
   status: VideoSceneStatusSchema,
   // Planner's Marathi one-liner: the information this scene must convey.
@@ -148,11 +273,13 @@ export const VideoSceneSchema = z.object({
   // push-in") — threaded into the keyframe + Veo motion prompts.
   shotHint: z.string().optional(),
   // Measured duration of the scene's synthesized narration WAV, when audio
-  // exists — what durationSeconds was fitted against.
+  // exists — what durationSeconds is derived from (clipSecondsForNarration).
   narrationSeconds: z.number().optional(),
   // Public URL of the scene's narration WAV (gate-2 audition).
   narrationAudioUrl: z.string().optional(),
   stillUrl: z.string().optional(),
+  // Public URL of the scene's END frame (reviewed beside the start frame).
+  endStillUrl: z.string().optional(),
   clipUrl: z.string().optional(),
   // True when this scene's clip was animated from an OLDER still than the one
   // shown — the per-scene re-animate affordance keys off it.
@@ -228,11 +355,23 @@ export type CreateVideoProjectResponse = z.infer<
 // drift). durationSeconds is accepted for back-compat but IGNORED by the
 // route: windows are server-assigned from the measured narration audio.
 export const UpdateVideoScriptRequestSchema = z.object({
+  // The project's visual style/setting paragraph, editable at gate 1 — the
+  // officer's escape hatch when a frame comes back with the wrong setting or
+  // the wrong people. Optional: a client that does not send it leaves the
+  // stored paragraph alone. CHANGING it invalidates every rendered frame (it
+  // is an input to all three prompts), which the route enforces.
+  style: z.string().trim().min(1).max(VIDEO_STYLE_MAX_CHARS).optional(),
   scenes: z
     .array(
       z.object({
         narration: z.string().trim().min(1).max(VIDEO_NARRATION_MAX_CHARS),
         visualBrief: z.string().trim().min(1).max(600),
+        // The end-frame description. Optional for back-compat with pre-feature
+        // drafts; a scene saved without one renders first-frame-only.
+        endVisualBrief: z.string().trim().min(1).max(600).optional(),
+        // Empty string is meaningful and must survive: it CLEARS the overlay
+        // for this scene, so it cannot be min(1) like the briefs.
+        keyPoint: z.string().trim().max(VIDEO_KEY_POINT_MAX_CHARS).optional(),
         durationSeconds: VideoSceneDurationSchema.optional(),
       }),
     )
@@ -243,10 +382,15 @@ export type UpdateVideoScriptRequest = z.infer<
   typeof UpdateVideoScriptRequestSchema
 >;
 
-// Per-scene still regeneration; an edited brief rides along so "change the
-// description and redraw" is one call.
+// Per-scene frame regeneration; an edited brief rides along so "change the
+// description and redraw" is one call. `frame` picks which frame to redraw
+// (default start). Redrawing the START also regenerates the end frame — the
+// end is an EDIT of the start, so a new start orphans it; redrawing the END
+// alone re-edits from the current start (one image call).
 export const RegenerateStillRequestSchema = z.object({
+  frame: z.enum(['start', 'end']).optional(),
   visualBrief: z.string().trim().min(1).max(600).optional(),
+  endVisualBrief: z.string().trim().min(1).max(600).optional(),
 });
 export type RegenerateStillRequest = z.infer<
   typeof RegenerateStillRequestSchema
@@ -254,9 +398,10 @@ export type RegenerateStillRequest = z.infer<
 
 // ---------- deterministic timing + SRT ----------
 //
-// Cue boundaries come from the scenes' own durationSeconds (Veo returns exactly
-// the requested length), so both the on-page timing list and the downloaded SRT
-// are derived from one place and always agree with the stitched video.
+// Cue boundaries come from the scenes' own durationSeconds (the clip providers
+// return exactly the requested length), so both the on-page timing list and the
+// downloaded SRT are derived from one place and always agree with the stitched
+// video.
 
 export type SceneTiming = Readonly<{
   startSeconds: number;

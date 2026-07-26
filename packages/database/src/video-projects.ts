@@ -43,7 +43,18 @@ export type VideoSceneStatus =
 export type VideoSceneEntry = Readonly<{
   narration: string;
   visualBrief: string;
-  durationSeconds: 4 | 6 | 8;
+  // The end-frame description (realistic start+end interpolation flow). The
+  // end frame is EDITED from the start frame so the shot's setting holds;
+  // absent on legacy single-frame scenes, which animate first-frame-only.
+  endVisualBrief?: string;
+  // Short Marathi line burned onto this scene's footage after the clip is
+  // rendered (Chromium-typeset, never model-painted). Absent or empty ⇒ no
+  // overlay for this scene.
+  keyPoint?: string;
+  // Whole seconds, 3-15 (Kling's bounds) — DERIVED from the scene's measured
+  // narration audio (clipSecondsForNarration). Legacy rows carry 4/6/8 from
+  // the fixed-window era; WINDOW FREEZE keeps their rendered clips valid.
+  durationSeconds: number;
   status: VideoSceneStatus;
   // Planner lineage (plan-video-scenes.ts): the Marathi information beat this
   // scene must convey and the English shot/camera hint threaded into the
@@ -52,11 +63,18 @@ export type VideoSceneEntry = Readonly<{
   shotHint?: string;
   stillPath?: string;
   stillVersion?: number;
+  // The scene's END frame (second reviewed still, Veo's lastFrame input).
+  endStillPath?: string;
+  endStillVersion?: number;
   clipPath?: string;
   clipVersion?: number;
   // Which stillVersion the clip was animated FROM — the staleness check that
-  // decides whether the animate job may skip this scene.
+  // decides whether the animate job may skip this scene. Since the two-frame
+  // flow, clipEndStillVersion carries the same lineage for the END frame:
+  // clipIsCurrent requires BOTH to match (an end-frame redraw must invalidate
+  // the clip exactly as a start-frame redraw always has).
   clipStillVersion?: number;
+  clipEndStillVersion?: number;
   // The durationSeconds this clip was RENDERED at. clipIsCurrent also requires
   // it to match the scene's current window (undefined = legacy clip = current),
   // so a window change can never silently desync clip and SRT.
@@ -70,7 +88,7 @@ export type VideoSceneEntry = Readonly<{
   narrationAudioText?: string;
   narrationAudioVoice?: string;
   // Measured duration of the cached WAV (RIFF header, at synth time) — what
-  // the scene's durationSeconds window was fitted against.
+  // the scene's durationSeconds is derived from.
   narrationAudioSeconds?: number;
   // Per-scene (Marathi) failure; does not sink the whole project.
   error?: string;

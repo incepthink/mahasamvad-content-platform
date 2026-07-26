@@ -17,7 +17,15 @@
 import { use, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { VideoProjectDetail, VideoScene } from '@dgipr/schemas';
-import { VIDEO_SCENE_LIMIT, estimateVideoRenderCostUsd } from '@dgipr/schemas';
+import {
+  VIDEO_SCENE_LIMIT,
+  VIDEO_STYLE_MAX_CHARS,
+  VIDEO_TOTAL_FIT_TOLERANCE,
+  VIDEO_TOTAL_SECONDS,
+  clipSecondsForNarration,
+  estimateNarrationSeconds,
+  estimateVideoRenderCostUsd,
+} from '@dgipr/schemas';
 import {
   narrateVideo,
   reanimateVideoScene,
@@ -27,16 +35,26 @@ import {
   startVideoStoryboard,
 } from '../../../lib/api';
 import { useVideoProject } from '../../../lib/useVideoProject';
-import { formatCost, STR, VIDEO_STEP_LABELS } from '../../../lib/strings';
+import {
+  formatCost,
+  videoNarrationTotal,
+  STR,
+  VIDEO_STEP_LABELS,
+} from '../../../lib/strings';
 import { VideoSceneCard } from '../../../components/VideoSceneCard';
 import { VideoStatusChip } from '../../../components/VideoStatusChip';
 import { VideoResultView } from '../../../components/VideoResultView';
 
-// No durationSeconds: clip windows are server-assigned from the measured
-// narration audio (the storyboard job's voice phase), never hand-picked.
+// No durationSeconds: clip windows are server-assigned — DERIVED from each
+// scene's measured narration audio — never hand-picked. Editing the narration
+// here is how a scene's length changes.
 type SceneDraft = {
   narration: string;
   visualBrief: string;
+  endVisualBrief: string;
+  // The on-screen Marathi line. Blank is a real answer meaning "no overlay on
+  // this scene", so it is stored as '' rather than undefined.
+  keyPoint: string;
   beat?: string | undefined;
 };
 
@@ -44,6 +62,8 @@ function draftsFrom(scenes: readonly VideoScene[]): SceneDraft[] {
   return scenes.map((scene) => ({
     narration: scene.narration,
     visualBrief: scene.visualBrief,
+    endVisualBrief: scene.endVisualBrief ?? '',
+    keyPoint: scene.keyPoint ?? '',
     beat: scene.beat,
   }));
 }
@@ -95,6 +115,10 @@ export default function VideoProjectPage({
   const { detail, error, refresh } = useVideoProject(id);
 
   const [drafts, setDrafts] = useState<SceneDraft[] | null>(null);
+  // The project's visual style/setting paragraph, editable here because it is
+  // an input to every frame prompt — without this an officer whose frames came
+  // back with the wrong setting could only regenerate the whole script.
+  const [styleDraft, setStyleDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   // Two-step confirm for the full animate (irreversible spend).
@@ -110,6 +134,7 @@ export default function VideoProjectPage({
       lastStatus.current !== 'script_ready'
     ) {
       setDrafts(draftsFrom(detail.scenes));
+      setStyleDraft(detail.style ?? '');
     }
     if (detail.status !== 'storyboard_ready') setAnimateArmed(false);
     lastStatus.current = detail.status;
@@ -151,9 +176,26 @@ export default function VideoProjectPage({
   const estimate = formatCost(
     estimateVideoRenderCostUsd(detail.tier, detail.scenes),
   );
+  // Gate-1 budget line: what the edited drafts are estimated to speak, against
+  // the project's selected total. Estimated from characters, so it is a guide,
+  // not a verdict — the storyboard job measures the real WAVs.
+  const narrationTarget = VIDEO_TOTAL_SECONDS[detail.durationBucket];
+  const totalNarrationSeconds = (drafts ?? []).reduce(
+    (sum, draft) => sum + estimateNarrationSeconds(draft.narration),
+    0,
+  );
+  const narrationOverBudget =
+    totalNarrationSeconds > narrationTarget * VIDEO_TOTAL_FIT_TOLERANCE;
+  // A scene that declared an end frame must have rendered it too — animate
+  // would otherwise buy a clip whose reviewed ending never existed.
   const allStillsReady =
     detail.scenes.length > 0 &&
-    detail.scenes.every((scene) => scene.stillUrl !== undefined);
+    detail.scenes.every(
+      (scene) =>
+        scene.stillUrl !== undefined &&
+        (scene.endVisualBrief === undefined ||
+          scene.endStillUrl !== undefined),
+    );
   // A per-scene re-render on a finished video: keep showing the result view.
   const reRendering = detail.status === 'animating' && detail.videoUrl !== null;
 
@@ -161,16 +203,38 @@ export default function VideoProjectPage({
     act(async () => {
       if (!drafts) return;
       await saveVideoScript(id, {
+        // Sent only when it says something: the schema rejects an empty style,
+        // and omitting it leaves the stored paragraph alone.
+        ...(styleDraft.trim() !== '' ? { style: styleDraft.trim() } : {}),
         scenes: drafts.map((draft) => ({
           narration: draft.narration,
           visualBrief: draft.visualBrief,
+          // Blank = single-frame scene (legacy semantics); the schema takes
+          // the field only when it says something.
+          ...(draft.endVisualBrief.trim() !== ''
+            ? { endVisualBrief: draft.endVisualBrief.trim() }
+            : {}),
+          // Always sent, INCLUDING blank — an officer clearing this line means
+          // "drop the overlay on this scene", which omitting the field would
+          // silently discard.
+          keyPoint: draft.keyPoint.trim(),
         })),
       });
       await startVideoStoryboard(id);
     });
 
   const redrawStill = (index: number, brief: string) =>
-    act(() => regenerateVideoStill(id, index, { visualBrief: brief }));
+    act(() =>
+      regenerateVideoStill(id, index, { frame: 'start', visualBrief: brief }),
+    );
+
+  const redrawEndStill = (index: number, endBrief: string) =>
+    act(() =>
+      regenerateVideoStill(id, index, {
+        frame: 'end',
+        endVisualBrief: endBrief,
+      }),
+    );
 
   return (
     <main className="page">
@@ -191,6 +255,23 @@ export default function VideoProjectPage({
             <h2>{STR.videoScriptTitle}</h2>
             <p className="hint">{STR.videoScriptIntro}</p>
           </section>
+          <section className="card">
+            <label className="field-label" htmlFor="video-style">
+              {STR.videoStyleLabel}
+            </label>
+            <p className="hint" style={{ marginTop: 4 }}>
+              {STR.videoStyleHint}
+            </p>
+            <textarea
+              id="video-style"
+              className="textarea"
+              style={{ marginTop: 6, minHeight: 90 }}
+              value={styleDraft}
+              maxLength={VIDEO_STYLE_MAX_CHARS}
+              disabled={busy}
+              onChange={(event) => setStyleDraft(event.target.value)}
+            />
+          </section>
           {drafts.map((draft, index) => (
             <VideoSceneCard
               key={index}
@@ -198,9 +279,14 @@ export default function VideoProjectPage({
               scene={{
                 narration: draft.narration,
                 visualBrief: draft.visualBrief,
-                // Display placeholder only — the real window is assigned by
-                // the storyboard job's voice phase and never edited here.
-                durationSeconds: 8,
+                endVisualBrief: draft.endVisualBrief,
+                keyPoint: draft.keyPoint,
+                // Provisional, from this draft's own narration — the same
+                // derivation the server applies to the MEASURED audio, so the
+                // number the officer sees while editing is the one they get.
+                durationSeconds: clipSecondsForNarration(
+                  estimateNarrationSeconds(draft.narration),
+                ),
                 status: 'pending',
                 ...(draft.beat !== undefined ? { beat: draft.beat } : {}),
               }}
@@ -220,6 +306,24 @@ export default function VideoProjectPage({
                   prev
                     ? prev.map((d, i) =>
                         i === index ? { ...d, visualBrief: value } : d,
+                      )
+                    : prev,
+                )
+              }
+              onEndBriefChange={(value) =>
+                setDrafts((prev) =>
+                  prev
+                    ? prev.map((d, i) =>
+                        i === index ? { ...d, endVisualBrief: value } : d,
+                      )
+                    : prev,
+                )
+              }
+              onKeyPointChange={(value) =>
+                setDrafts((prev) =>
+                  prev
+                    ? prev.map((d, i) =>
+                        i === index ? { ...d, keyPoint: value } : d,
                       )
                     : prev,
                 )
@@ -244,7 +348,15 @@ export default function VideoProjectPage({
                   onClick={() =>
                     setDrafts((prev) =>
                       prev
-                        ? [...prev, { narration: '', visualBrief: '' }]
+                        ? [
+                            ...prev,
+                            {
+                              narration: '',
+                              visualBrief: '',
+                              endVisualBrief: '',
+                              keyPoint: '',
+                            },
+                          ]
                         : prev,
                     )
                   }
@@ -268,6 +380,18 @@ export default function VideoProjectPage({
                 {busy ? STR.submitting : STR.videoToStoryboard}
               </button>
             </div>
+            {/* The running narration total against the project's selected
+                length. Advisory ONLY — it never blocks the submit, because the
+                storyboard job measures the real audio and shortens whatever
+                still overruns; a character estimate must not veto a script the
+                voice might well fit. */}
+            <p
+              className={narrationOverBudget ? 'form-error' : 'hint'}
+              style={{ marginTop: 8 }}
+            >
+              {videoNarrationTotal(totalNarrationSeconds, narrationTarget)}
+              {narrationOverBudget ? ` ${STR.videoNarrationTotalOver}` : ''}
+            </p>
             <p className="hint" style={{ marginTop: 8 }}>
               {STR.videoToStoryboardHint}
             </p>
@@ -290,6 +414,7 @@ export default function VideoProjectPage({
               mode="review"
               busy={busy}
               onRedraw={(brief) => void redrawStill(index, brief)}
+              onRedrawEnd={(endBrief) => void redrawEndStill(index, endBrief)}
             />
           ))}
           <section className="card">
@@ -352,6 +477,9 @@ export default function VideoProjectPage({
           detail={detail}
           busy={busy || reRendering}
           onRedrawStill={(index, brief) => void redrawStill(index, brief)}
+          onRedrawEndStill={(index, endBrief) =>
+            void redrawEndStill(index, endBrief)
+          }
           onReanimateScene={(index) =>
             void act(() => reanimateVideoScene(id, index))
           }

@@ -147,7 +147,8 @@ export function DocumentPages({
 
       {/* A document nobody has read yet has nothing to show but its page numbers, so the
           range selector IS the picker — no row list at all. This is the shape that has to
-          survive a 50-page scan. */}
+          survive a 50-page scan, and the one place the chip grid stays open: it is the whole
+          control here, not a shortcut over something already on screen. */}
       {!pages ? (
         <PageRangeSelector
           listed={listed}
@@ -156,6 +157,7 @@ export function DocumentPages({
           onSetAll={onSetAll}
           busy={busy}
           showSelectAll={showSelectAll}
+          collapsible={false}
         />
       ) : (
         <>

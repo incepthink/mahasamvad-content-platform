@@ -121,8 +121,9 @@ export {
 } from './intake/document.js';
 
 // Explainer-video pipeline: per-scene script (gate 1), keyframe/motion prompt
-// builders, and the Veo clip client. ffmpeg assembly lives in
-// @dgipr/poster-renderer; the SRT builder + tier pricing in @dgipr/schemas.
+// builders, and the clip clients (Veo and Kling, behind clip-provider).
+// ffmpeg assembly lives in @dgipr/poster-renderer; the SRT builder + tier
+// pricing in @dgipr/schemas.
 export {
   generateVideoScript,
   type GeneratedVideoScript,
@@ -137,8 +138,11 @@ export {
 } from './video/plan-video-scenes.js';
 export {
   buildKeyframePrompt,
-  buildVeoMotionPrompt,
-  VEO_NEGATIVE_PROMPT,
+  buildEndFramePrompt,
+  buildClipMotionPrompt,
+  buildAvoidClause,
+  fitClipPrompt,
+  CLIP_NEGATIVE_PROMPT,
 } from './video/video-prompts.js';
 export {
   generateVeoClip,
@@ -148,17 +152,48 @@ export {
   type VeoDurationSeconds,
 } from './video/veo-client.js';
 export {
+  generateKlingClip,
+  klingModel,
+  klingResolution,
+  type KlingClipInput,
+  type KlingTier,
+  type KlingAspectRatio,
+  type KlingResolution,
+} from './video/kling-client.js';
+export {
+  renderClip,
+  clipProviderName,
+  clipProviderApiKeyEnv,
+  type ClipRenderInput,
+} from './video/clip-provider.js';
+export {
+  generateGeminiImage,
+  geminiImageModel,
+  type GeminiImageInput,
+  type GeminiImageAspect,
+} from './video/gemini-image-client.js';
+export {
+  renderFrame,
+  type FrameRenderInput,
+  type FrameAspect,
+} from './video/frame-provider.js';
+export {
   synthesizeMarathiNarration,
   ttsModel,
   ttsSpeaker,
   type NarrationOptions,
 } from './video/sarvam-tts.js';
+export {
+  shortenNarration,
+  type ShortenNarrationOptions,
+} from './video/shorten-narration.js';
 
 // Cost metering — the runner opens a scope per job and reads the accumulator back.
 export {
   createCostAccumulator,
   runInCostScope,
   recordImageCost,
+  recordGeminiImageCost,
   recordVideoCost,
   recordTtsCost,
   totalCostUsd,
@@ -167,6 +202,7 @@ export {
 export {
   priceText,
   estimateImageCostUsd,
+  estimateGeminiImageCostUsd,
   estimateVideoCostUsd,
   estimateTtsCostUsd,
   type ImageKind,

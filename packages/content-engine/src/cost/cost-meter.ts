@@ -8,6 +8,7 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import {
+  estimateGeminiImageCostUsd,
   estimateImageCostUsd,
   estimateTtsCostUsd,
   estimateVideoCostUsd,
@@ -115,6 +116,17 @@ export function recordImageCost(kind: ImageKind, quality: ImageQuality): void {
   if (!acc) return;
   acc.imageCount += 1;
   acc.imageCostUsd += estimateImageCostUsd(kind, quality);
+}
+
+// Record one Gemini (Nano Banana) image render — the video pipeline's frame
+// provider when VIDEO_IMAGE_PROVIDER=gemini. Flat per-image price, no tier, so
+// it lands in the same imageCount/imageCostUsd line as a gpt-image render and
+// the two providers stay comparable on a project's cost breakdown.
+export function recordGeminiImageCost(): void {
+  const acc = storage.getStore();
+  if (!acc) return;
+  acc.imageCount += 1;
+  acc.imageCostUsd += estimateGeminiImageCostUsd();
 }
 
 // Record one Veo clip render: billed per second of output at the tier price

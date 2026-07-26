@@ -1,8 +1,10 @@
 // Scene planner for the explainer-video pipeline: BEFORE any narration is
 // written, decide how many scenes the video needs (2-8), what each must convey,
-// how long it should run (4|6|8s), and how it should be shot.
-// generate-video-script.ts then writes narration/visual briefs AGAINST this
-// plan, so coverage is designed, not hoped for.
+// and how it should be shot. Durations are NOT planned here: the narration is
+// budgeted against the project's TOTAL time (VIDEO_TOTAL_SECONDS), and each
+// clip's length is later DERIVED from its measured narration audio — audio
+// leads, clips follow. generate-video-script.ts then writes narration/visual
+// briefs AGAINST this plan, so coverage is designed, not hoped for.
 //
 // TWO calls, deliberately:
 //   1. extractNoteFacts — list the note's citizen-relevant facts, verbatim.
@@ -35,12 +37,20 @@ import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import {
+  NARRATION_WORDS_PER_SECOND,
+  VIDEO_CLIP_MAX_SECONDS,
+  VIDEO_CLIP_MIN_SECONDS,
   VIDEO_SCENE_BOUNDS,
   VIDEO_SCENE_LIMIT,
+  VIDEO_TOTAL_SECONDS,
+  videoNarrationBudgetWords,
   type VideoDurationBucket,
-  type VideoSceneDuration,
 } from '@dgipr/schemas';
-import { chatComplete, type ChatMessage } from '../generation/openai-chat.js';
+import {
+  chatComplete,
+  VIDEO_CHAT_MODEL,
+  type ChatMessage,
+} from '../generation/openai-chat.js';
 
 // Step 1's output: the note's citizen-relevant facts, copied verbatim.
 const FactsSchema = z.object({
@@ -52,11 +62,14 @@ const FactsSchema = z.object({
 // extract, select, arrange and format at once produced 2-scene plans whose
 // middle scenes were invented benefit claims; the same model lists ten
 // accurate facts when that is the only thing it is asked to do.
+// No duration field: clip lengths are DERIVED from each scene's measured
+// narration audio (audio leads, clips follow), so the planner never chooses a
+// window — it only decides how the total narration budget is spread across
+// beats.
 const PlanSceneSchema = z.object({
   fact_index: z.number().int().min(1),
   beat: z.string().trim().min(1).max(300),
   shot_hint: z.string().trim().min(1).max(200),
-  target_duration_seconds: z.union([z.literal(4), z.literal(6), z.literal(8)]),
 });
 
 const PlanSchema = z.object({
@@ -71,7 +84,6 @@ export type VideoScenePlanScene = Readonly<{
   sourceQuote: string;
   // English shot/camera direction ("wide establishing shot, slow push-in").
   shotHint: string;
-  targetDurationSeconds: VideoSceneDuration;
 }>;
 
 export type VideoScenePlan = Readonly<{
@@ -109,6 +121,11 @@ function buildFactsSystemPrompt(): string {
 
 function buildPlannerSystemPrompt(bucket: VideoDurationBucket): string {
   const preferred = VIDEO_SCENE_BOUNDS[bucket];
+  const totalSeconds = VIDEO_TOTAL_SECONDS[bucket];
+  const totalWords = videoNarrationBudgetWords(bucket);
+  const maxSceneWords = Math.round(
+    VIDEO_CLIP_MAX_SECONDS * NARRATION_WORDS_PER_SECOND,
+  );
   return [
     'तुम्ही महाराष्ट्र शासनाच्या माहिती व जनसंपर्क महासंचालनालयासाठी (DGIPR / महासंवाद)',
     'explainer व्हिडिओंचे नियोजन करणारे अनुभवी दिग्दर्शक-संपादक आहात.',
@@ -116,8 +133,7 @@ function buildPlannerSystemPrompt(bucket: VideoDurationBucket): string {
     'तुम्हाला एक अधिकृत टिपणी आणि तिच्यातून काढलेल्या तथ्यांची क्रमांकित यादी (FACTS)',
     'दिली जाईल. त्या यादीतील तथ्ये निवडून व क्रमाने लावून व्हिडिओची दृश्य-आराखडा',
     '(scene plan) वैध JSON object स्वरूपात तयार करा:',
-    '{ "scenes": [ { "fact_index": 1, "beat": "...", "shot_hint": "...",',
-    '  "target_duration_seconds": 4 } ] }',
+    '{ "scenes": [ { "fact_index": 1, "beat": "...", "shot_hint": "..." } ] }',
     '',
     'कठोर नियम:',
     '1. प्रत्येक दृश्य FACTS यादीतील एका तथ्यावर बेतलेले असले पाहिजे आणि त्याचा',
@@ -127,20 +143,45 @@ function buildPlannerSystemPrompt(bucket: VideoDurationBucket): string {
     `2. दृश्यसंख्या: किमान 2, कमाल ${VIDEO_SCENE_LIMIT.max}; या व्हिडिओसाठी`,
     `   ${preferred.min} ते ${preferred.max} दृश्ये घ्या. यादीत पुरेशी तथ्ये असतील तर`,
     `   ${preferred.max} दृश्ये घ्या — प्रत्येक दृश्यासाठी वेगळे तथ्य.`,
-    '3. beat: मराठीत एक ओळ — त्या तथ्यातील माहिती नागरिकाला कशी सांगाल. त्या तथ्यातील',
-    '   नावे, ठिकाणे, आकडे व मुदती beat मध्ये तशाच लिहा; नावांची यादी नुसत्या आकड्यात',
-    '   गुंडाळू नका (चार रुग्णालयांची नावे असतील तर ती नावे द्या).',
+    '3. beat: मराठीत एक ओळ — त्या तथ्यातील माहिती नागरिकाला कशी सांगाल. जी नावे,',
+    '   ठिकाणे, आकडे व मुदती beat मध्ये घ्याल ती तथ्यातल्याप्रमाणे जशीच्या तशी लिहा —',
+    '   अर्धवट किंवा मोघम ("काही", "अनेक") लिहू नका. मात्र तथ्यातील सर्वच तपशील एका',
+    '   beat मध्ये कोंबण्याची गरज नाही: नागरिकाला थेट उपयोगी तपशील निवडा आणि उरलेले',
+    '   वगळा. लांब यादी असेल तर एकतर ती स्वतंत्र दृश्य करा, नाहीतर तिच्यातील',
+    '   महत्त्वाचे मोजकेच घटक नावानिशी द्या — मोघम गुंडाळणी मात्र करू नका.',
     '4. निवड व क्रम: पहिले दृश्य = घोषणा/निर्णय; मधली दृश्ये = ठोस तपशील (कुठे,',
     '   कोणासाठी, किती); अडचण/त्रुटी सांगणारे एकच दृश्य पुरे — व्हिडिओचा विषय सुधारणा',
     '   आहे, तक्रार नाही; शेवटचे दृश्य = नागरिकाला होणारा फायदा किंवा त्याच्यासाठी आज',
     '   उपलब्ध असलेली सुविधा. शेवटचे दृश्य पहिल्याचा पुनरुच्चार करू नये.',
-    '5. target_duration_seconds: त्या मुद्द्यातील माहितीच्या प्रमाणात 4, 6 किंवा 8 —',
-    '   छोटी घोषणा 4, मध्यम तपशील 6, भरगच्च मुद्दा 8. उगीच 8 देऊ नका: जितकी माहिती,',
-    '   तितकाच वेळ.',
-    '6. shot_hint: इंग्रजीत, shot type + camera movement (उदा. "wide establishing',
-    '   shot, slow push-in" / "medium shot of hands filling a form, gentle pan").',
+    `5. संपूर्ण व्हिडिओचे निवेदन मिळून सुमारे ${totalSeconds} सेकंदांचे (~${totalWords} शब्द) असते.`,
+    `   प्रत्येक दृश्याची क्लिप त्याच्या निवेदनाइतकी लांब होते — किमान ${VIDEO_CLIP_MIN_SECONDS}, कमाल`,
+    `   ${VIDEO_CLIP_MAX_SECONDS} सेकंद (सुमारे ${maxSceneWords} शब्द). महत्त्वाच्या तथ्याला जास्त वेळ द्या,`,
+    `   दुय्यमाला कमी. ${maxSceneWords} शब्दांत सांगता येणार नाही इतकी माहिती एका beat मध्ये`,
+    '   कोंबू नका — ती दोन दृश्यांत विभागा (म्हणूनच दृश्यसंख्या वाढवण्याची मुभा आहे);',
+    '   एकूण वेळेचे बजेट मात्र ओलांडू नका. याउलट एका ओळीत संपणारे तोकडे दृश्यही',
+    '   नको — क्लिप मुकी राहते.',
+    '6. shot_hint: इंग्रजीत — shot type + camera movement. हा stylized 3D animation',
+    '   चित्रपट आहे (Pixar/DreamWorks सारखा), खरे चित्रीकरण (live-action) नाही. दृश्य',
+    '   महाराष्ट्रात, भारतात घडते; shot मध्ये दिसणारे ठिकाण व पात्रे भारतीयच असतील',
+    '   (उदा. "wide establishing shot of a municipal hospital entrance in Mumbai,',
+    '   slow push-in" / "medium shot of a woman\'s hands filling a form at a taluka',
+    '   office counter, gentle pan").',
+    '   सर्वात महत्त्वाचे: shot मध्ये त्या तथ्यातली ठोस गोष्टच दिसली पाहिजे — विषयाशी',
+    '   संबंधित नुसते वातावरणदर्शक (mood) दृश्य नको. आवाज बंद करून पाहणाऱ्यालाही हे',
+    '   दृश्य कशाबद्दल आहे ते कळावे. त्यामुळे प्रत्येक दृश्याचे ठिकाण व कृती त्याच्या',
+    '   स्वतःच्या तथ्याला साजेशी निवडा — दोन दृश्ये एकाच ठिकाणची व एकाच कृतीची असू',
+    '   नयेत (उदा. शुल्काचे दृश्य शुल्क भरण्याच्या ठिकाणी, नोंदणीचे दृश्य नोंदणी',
+    '   कक्षात). संपूर्ण व्हिडिओ एकाच खोलीत घडता कामा नये.',
     '   कोणीही बोलताना किंवा कॅमेऱ्याशी संवाद साधताना दिसेल असे दृश्य योजू नका —',
-    '   निवेदन (voiceover) शब्द वाहून नेते. चेहऱ्याचा close-up टाळा.',
+    '   निवेदन (voiceover) शब्द वाहून नेते.',
+    '   प्रत्येक दृश्य म्हणजे एकाच ठिकाणचा, एकाच कॅमेऱ्याचा सलग shot असतो — montage,',
+    '   कट, किंवा अनेक ठिकाणे एका दृश्यात योजू नका. (क्लिप पहिल्या फ्रेमपासून शेवटच्या',
+    '   फ्रेमपर्यंत सलग तयार होते, त्यामुळे कट तांत्रिकदृष्ट्या शक्यच नाही.) अनेक ठिकाणे',
+    '   दाखवायची असतील तर त्यांतले एकच प्रातिनिधिक ठिकाण निवडा.',
+    '   पाटी, फलक, बॅनर, अर्जावरील मजकूर, पडद्यावरील आकडे — असे लिहिलेल्या मजकुरावरच',
+    '   बेतलेले shot कधीही योजू नका (उदा. "push-in toward the sign", "pan across the',
+    '   displayed charges"). फ्रेममध्ये कोणताही मजकूर दिसणार नाही; माहिती कृतीतून',
+    '   दाखवा — माणसे, जागा, वस्तू, घडणारी क्रिया.',
     '7. HEADING दिले असल्यास तो व्हिडिओचा मुख्य कोन (angle) माना.',
     '',
     'फक्त वैध JSON object परत करा. markdown, code fence, स्पष्टीकरण किंवा अतिरिक्त मजकूर देऊ नका.',
@@ -243,7 +284,7 @@ async function extractNoteFacts(note: string): Promise<string[]> {
         ].join('\n'),
       },
     ],
-    { temperature: 0, responseFormat: 'json_object' },
+    { model: VIDEO_CHAT_MODEL, temperature: 0, responseFormat: 'json_object' },
   );
   const result = FactsSchema.safeParse(parseJson(raw));
   if (!result.success) {
@@ -282,6 +323,7 @@ export async function planVideoScenes(
   ];
 
   const raw = await chatComplete(messages, {
+    model: VIDEO_CHAT_MODEL,
     temperature: 0,
     responseFormat: 'json_object',
   });
@@ -324,6 +366,7 @@ export async function planVideoScenes(
       },
     ];
     const repaired = await chatComplete(repairMessages, {
+      model: VIDEO_CHAT_MODEL,
       temperature: 0,
       responseFormat: 'json_object',
     });
@@ -351,7 +394,6 @@ export async function planVideoScenes(
       beat: scene.beat,
       sourceQuote: facts[scene.fact_index - 1]!,
       shotHint: scene.shot_hint,
-      targetDurationSeconds: scene.target_duration_seconds,
     })),
   };
 }

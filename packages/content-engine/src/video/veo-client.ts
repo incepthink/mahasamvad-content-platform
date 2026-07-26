@@ -81,8 +81,14 @@ function videoUriOf(operation: VeoOperation): string | null {
 
 export type VeoClipInput = Readonly<{
   prompt: string;
-  // The approved storyboard keyframe this clip animates (image-to-video).
+  // The approved START frame this clip animates from (image-to-video).
   imagePng: Buffer;
+  // The approved END frame (first+last-frame interpolation). Veo only accepts
+  // it at durationSeconds 8 — generateVeoClip throws early on 4/6, before any
+  // spend. Sent only to models that accept the field; a model that rejects it
+  // is rendered from the start frame alone (see modelsRejectingLastFrame),
+  // never failed.
+  lastFramePng?: Buffer;
   aspectRatio: VeoAspectRatio;
   durationSeconds: VeoDurationSeconds;
   tier: VeoTier;
@@ -119,12 +125,80 @@ function rejectsNegativePrompt(error: unknown): boolean {
   );
 }
 
+// lastFrame carries the same learned-capability treatment, twice over: the
+// docs disagree with the working raw-REST `image` shape on the field's JSON
+// encoding (inlineData vs bytesBase64Encoded), and the lite preview rejects
+// the field entirely. Both are learned from the API's own 400s and cached per
+// model id, so repointing VEO_MODEL_* needs no code change.
+type LastFrameShape = 'bytes' | 'inline';
+const modelsRejectingLastFrame = new Set<string>();
+const lastFrameShapeByModel = new Map<string, LastFrameShape>();
+
+function mentionsLastFrame(error: unknown): boolean {
+  if (!(error instanceof GeminiRequestError) || error.status !== 400) {
+    return false;
+  }
+  const detail = error.detail.toLowerCase();
+  return (
+    detail.includes('lastframe') ||
+    detail.includes('last_frame') ||
+    detail.includes('last frame')
+  );
+}
+
+function lastFramePayload(png: Buffer, shape: LastFrameShape): unknown {
+  const data = png.toString('base64');
+  return shape === 'bytes'
+    ? { bytesBase64Encoded: data, mimeType: 'image/png' }
+    : { inlineData: { data, mimeType: 'image/png' } };
+}
+
+// Veo 3.x generates NATIVE AUDIO unless told not to — and this pipeline throws
+// every frame of it away: assembleSilentVideo strips the track (-an) and
+// muxNarration lays the Sarvam Marathi voiceover over the result. So the audio
+// was pure cost, latency AND risk: Google runs a separate safety filter over the
+// generated audio, and a trip on it fails the whole clip
+// ("We encountered an issue with the audio for your prompt") after the render
+// has already been waited out. Asking for silence removes the entire failure
+// class. Learned, not declared, like every other Veo param: a model that
+// rejects the field is rendered without it.
+const modelsRejectingGenerateAudio = new Set<string>();
+
+// Output resolution. 1080p is a straight quality win on 16:9 at no extra cost
+// (Veo bills per second, not per pixel), but support varies by model and
+// aspect — vertical 9:16 is 720p-only on several preview ids. Requesting it and
+// learning from the rejection beats a per-model table that goes stale the
+// moment VEO_MODEL_* is repointed.
+const modelsRejectingResolution = new Set<string>();
+
+function resolutionSetting(): string {
+  const raw = process.env.VEO_RESOLUTION;
+  return raw && raw.trim() !== '' ? raw.trim() : '1080p';
+}
+
+// Both fields are OPTIONAL to us — silence and 1080p are improvements, not
+// requirements — so a 400 that merely NAMES the field is enough to drop it,
+// the looser `mentionsLastFrame` rule rather than the stricter
+// `rejectsNegativePrompt` one.
+function mentionsField(error: unknown, ...needles: string[]): boolean {
+  if (!(error instanceof GeminiRequestError) || error.status !== 400) {
+    return false;
+  }
+  const detail = error.detail.toLowerCase();
+  return needles.some((needle) => detail.includes(needle));
+}
+
 async function startVeoOperation(
   model: string,
   apiKey: string,
   input: VeoClipInput,
 ): Promise<VeoOperation> {
-  const buildBody = (withNegativePrompt: boolean): unknown => ({
+  const buildBody = (
+    withNegativePrompt: boolean,
+    lastFrameShape: LastFrameShape | null,
+    withGenerateAudio: boolean,
+    withResolution: boolean,
+  ): unknown => ({
     instances: [
       {
         prompt: input.prompt,
@@ -132,52 +206,148 @@ async function startVeoOperation(
           bytesBase64Encoded: input.imagePng.toString('base64'),
           mimeType: 'image/png',
         },
+        ...(lastFrameShape !== null && input.lastFramePng
+          ? { lastFrame: lastFramePayload(input.lastFramePng, lastFrameShape) }
+          : {}),
       },
     ],
     parameters: {
       aspectRatio: input.aspectRatio,
       durationSeconds: input.durationSeconds,
+      // Silence, deliberately: the voiceover is Sarvam's and the mux would
+      // discard anything Veo generated here anyway.
+      ...(withGenerateAudio ? { generateAudio: false } : {}),
+      ...(withResolution ? { resolution: resolutionSetting() } : {}),
       ...(withNegativePrompt && input.negativePrompt
         ? { negativePrompt: input.negativePrompt }
         : {}),
     },
   });
 
-  const send = async (withNegativePrompt: boolean): Promise<VeoOperation> => {
+  const send = async (
+    withNegativePrompt: boolean,
+    lastFrameShape: LastFrameShape | null,
+    withGenerateAudio: boolean,
+    withResolution: boolean,
+  ): Promise<VeoOperation> => {
     const response = await geminiFetch(`models/${model}:predictLongRunning`, {
       label: 'veo start',
       apiKey,
-      body: buildBody(withNegativePrompt),
+      body: buildBody(
+        withNegativePrompt,
+        lastFrameShape,
+        withGenerateAudio,
+        withResolution,
+      ),
     });
     return (await response.json()) as VeoOperation;
   };
 
-  const wanted =
+  const wantNegative =
     input.negativePrompt !== undefined && input.negativePrompt.trim() !== '';
-  const sending = wanted && !modelsRejectingNegativePrompt.has(model);
+  let sendingNegative = wantNegative && !modelsRejectingNegativePrompt.has(model);
+  let lastFrameShape: LastFrameShape | null =
+    input.lastFramePng !== undefined && !modelsRejectingLastFrame.has(model)
+      ? (lastFrameShapeByModel.get(model) ?? 'bytes')
+      : null;
+  let sendingGenerateAudio = !modelsRejectingGenerateAudio.has(model);
+  let sendingResolution = !modelsRejectingResolution.has(model);
 
-  try {
-    return await send(sending);
-  } catch (error) {
-    if (!sending || !rejectsNegativePrompt(error)) throw error;
-    modelsRejectingNegativePrompt.add(model);
-    // Worth a warning, not a silent downgrade: the no-text and no-talking rules
-    // remain in the motion prompt (video-prompts.ts hard-appends both), but
-    // their negative-prompt backup is gone for this model, and glitchy mouths
-    // plus on-screen Devanagari were the worst artifacts in real renders.
-    console.warn(
-      `[veo] ${model} rejects negativePrompt; retrying this and every later ` +
-        'clip without it. The motion prompt still forbids on-screen text and ' +
-        'talking, but watch the renders for both.',
-    );
-    return send(false);
+  // Downgrade ladder: each caught rejection strictly narrows the request
+  // (negativePrompt on→off; lastFrame bytes→inline→off; generateAudio on→off;
+  // resolution on→off), so this terminates in at most five extra round trips —
+  // and a rejected START is free, no render has begun. Anything unrecognised is
+  // rethrown untouched.
+  for (;;) {
+    try {
+      const operation = await send(
+        sendingNegative,
+        lastFrameShape,
+        sendingGenerateAudio,
+        sendingResolution,
+      );
+      if (lastFrameShape !== null) {
+        lastFrameShapeByModel.set(model, lastFrameShape);
+      }
+      return operation;
+    } catch (error) {
+      if (sendingNegative && rejectsNegativePrompt(error)) {
+        modelsRejectingNegativePrompt.add(model);
+        // Worth a warning, not a silent downgrade: the no-text and no-talking
+        // rules remain in the motion prompt (video-prompts.ts hard-appends
+        // both), but their negative-prompt backup is gone for this model, and
+        // glitchy mouths plus on-screen Devanagari were the worst artifacts in
+        // real renders.
+        console.warn(
+          `[veo] ${model} rejects negativePrompt; retrying this and every ` +
+            'later clip without it. The motion prompt still forbids on-screen ' +
+            'text and talking, but watch the renders for both.',
+        );
+        sendingNegative = false;
+        continue;
+      }
+      if (
+        lastFrameShape === 'bytes' &&
+        !lastFrameShapeByModel.has(model) &&
+        mentionsLastFrame(error)
+      ) {
+        // Possibly just the encoding: the docs show an inlineData wrapper
+        // where our image field uses bytesBase64Encoded. Try it once.
+        lastFrameShape = 'inline';
+        continue;
+      }
+      if (lastFrameShape !== null && mentionsLastFrame(error)) {
+        modelsRejectingLastFrame.add(model);
+        console.warn(
+          `[veo] ${model} rejects lastFrame; rendering this and every later ` +
+            'clip from the start frame only. The reviewed end frames are ' +
+            'ignored on this model — repoint VEO_MODEL_* at a 3.1/3.1-fast ' +
+            'id to restore interpolation.',
+        );
+        lastFrameShape = null;
+        continue;
+      }
+      if (sendingGenerateAudio && mentionsField(error, 'generateaudio', 'generate_audio')) {
+        modelsRejectingGenerateAudio.add(model);
+        // Not fatal, but worth saying out loud: this model will generate audio
+        // we then strip, and its audio safety filter can fail an otherwise good
+        // render. If clips start dying on "an issue with the audio", this is why.
+        console.warn(
+          `[veo] ${model} rejects generateAudio; rendering this and every ` +
+            'later clip WITH generated audio, which the assembly step strips. ' +
+            "Veo's audio safety filter can now fail a render on its own.",
+        );
+        sendingGenerateAudio = false;
+        continue;
+      }
+      if (sendingResolution && mentionsField(error, 'resolution')) {
+        modelsRejectingResolution.add(model);
+        console.warn(
+          `[veo] ${model} rejects resolution=${resolutionSetting()} at ` +
+            `${input.aspectRatio}; falling back to the model default for this ` +
+            'and every later clip.',
+        );
+        sendingResolution = false;
+        continue;
+      }
+      throw error;
+    }
   }
 }
 
-// Generate one scene clip. Returns the MP4 bytes (720p, WITH Veo's native
-// audio — the assembly step strips it) and records the per-second tier cost
-// into the ambient cost meter.
+// Generate one scene clip. Returns the MP4 bytes — SILENT (generateAudio:false;
+// the Marathi voiceover is muxed in later from Sarvam) and at VEO_RESOLUTION
+// where the model accepts it — and records the per-second tier cost into the
+// ambient cost meter.
 export async function generateVeoClip(input: VeoClipInput): Promise<Buffer> {
+  // Veo rejects interpolation at 4/6s with INVALID_ARGUMENT — fail here, free
+  // and with a message that names the rule, instead of at the API.
+  if (input.lastFramePng !== undefined && input.durationSeconds !== 8) {
+    throw new Error(
+      'Veo first+last-frame interpolation requires an 8s clip; got ' +
+        `${input.durationSeconds}s.`,
+    );
+  }
   const apiKey = requireApiKey();
   const model = modelFor(input.tier);
   const pollIntervalMs = readInt('VEO_POLL_INTERVAL_MS', 10_000);
@@ -247,10 +417,12 @@ export async function generateVeoClip(input: VeoClipInput): Promise<Buffer> {
   return bytes;
 }
 
-// Run directly to prove account access + the operation lifecycle with ONE cheap
-// clip before wiring the animate job (Veo spend — use --lite --4s):
+// Run directly to prove account access + the operation lifecycle with ONE
+// cheap clip before wiring the animate job (Veo spend). A second PNG becomes
+// the LAST frame (first+last interpolation — forces the 8s window; ~$1.20 on
+// fast). Without one, --lite --4s stays the cheapest smoke test.
 //
-//   tsx --env-file=../../.env src/video/veo-client.ts <still.png> [--lite|--standard] [--4s|--6s]
+//   tsx --env-file=../../.env src/video/veo-client.ts <start.png> [end.png] [--lite|--standard] [--4s|--6s]
 //
 // Writes veo-test.mp4 beside the input still.
 if (
@@ -258,10 +430,12 @@ if (
   import.meta.url === pathToFileURL(process.argv[1]).href
 ) {
   const args = process.argv.slice(2);
-  const stillPath = args.find((arg) => !arg.startsWith('--'));
+  const positional = args.filter((arg) => !arg.startsWith('--'));
+  const stillPath = positional[0];
+  const lastFramePath = positional[1];
   if (!stillPath) {
     console.error(
-      'Usage: tsx --env-file=../../.env src/video/veo-client.ts <still.png> [--lite|--standard] [--4s|--6s]',
+      'Usage: tsx --env-file=../../.env src/video/veo-client.ts <start.png> [end.png] [--lite|--standard] [--4s|--6s]',
     );
     process.exit(1);
   }
@@ -270,24 +444,40 @@ if (
     : args.includes('--standard')
       ? 'standard'
       : 'fast';
-  const durationSeconds: VeoDurationSeconds = args.includes('--4s')
+  // Interpolation only exists at 8s; a duration flag is ignored with a note
+  // rather than handed to the API to bounce.
+  let durationSeconds: VeoDurationSeconds = args.includes('--4s')
     ? 4
     : args.includes('--6s')
       ? 6
       : 8;
+  if (lastFramePath && durationSeconds !== 8) {
+    console.warn('Last frame provided — forcing the 8s interpolation window.');
+    durationSeconds = 8;
+  }
 
   void (async () => {
     const { writeFile } = await import('node:fs/promises');
     const { dirname, join } = await import('node:path');
     const imagePng = await readFile(stillPath);
+    const lastFramePng = lastFramePath
+      ? await readFile(lastFramePath)
+      : undefined;
     console.log(
-      `Rendering ${durationSeconds}s ${tier} clip from ${stillPath}…`,
+      `Rendering ${durationSeconds}s ${tier} clip from ${stillPath}` +
+        (lastFramePath ? ` → ${lastFramePath}` : '') +
+        '…',
     );
     const clip = await generateVeoClip({
       prompt:
-        'Gentle camera push-in on this illustrated scene; subtle ambient motion. ' +
+        'One continuous shot in stylized 3D animation; smooth, purposeful ' +
+        'camera motion. ' +
+        (lastFramePath
+          ? 'Move naturally from the first frame to the provided final frame. '
+          : '') +
         'Absolutely no on-screen text, letters, numerals, captions, signage or logos.',
       imagePng,
+      ...(lastFramePng ? { lastFramePng } : {}),
       aspectRatio: '16:9',
       durationSeconds,
       tier,

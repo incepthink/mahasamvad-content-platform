@@ -94,6 +94,13 @@ export const DloPreReadDocumentSchema = z.object({
   // review card lists exactly what was kept. DOCX/TXT carry one string.
   pages: z.array(DloIntakePageSchema).optional(),
   text: z.string().optional(),
+  // Pages the officer chose but chose NOT to wait for ("न वाचता ही पृष्ठे वापरा"). The intake job
+  // reads exactly these from the archived original during its extract phase, so the OCR wait
+  // folds into प्रक्रिया instead of standing in front of the form. Mutually exclusive with
+  // `pages`, and PDF-only — nothing else has pages to defer. It needs the original bytes, so a
+  // document whose ephemeral job has expired cannot be deferred: the route marks that file
+  // failed rather than dropping a source silently.
+  pendingPages: z.array(z.number().int().positive()).min(1).optional(),
 });
 export type DloPreReadDocument = z.infer<typeof DloPreReadDocumentSchema>;
 

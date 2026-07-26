@@ -77,6 +77,18 @@ export function estimateImageCostUsd(
   return IMAGE_COST_USD[kind][quality];
 }
 
+// Gemini image models (the video pipeline's frame provider) bill a FLAT price
+// per generated image, with no quality/size tier — so they do not fit the
+// (kind, quality) table above and get their own line rather than a fake tier.
+// Approximate public price for gemini-3-pro-image-preview at 1K/2K output,
+// captured 2026-07-26; edit here if Google changes it or GEMINI_IMAGE_MODEL is
+// repointed at a cheaper model.
+export const GEMINI_IMAGE_PRICE_USD = 0.134;
+
+export function estimateGeminiImageCostUsd(): number {
+  return GEMINI_IMAGE_PRICE_USD;
+}
+
 // Video cost is per second of rendered clip, per Veo tier. The price table
 // lives in @dgipr/schemas (VIDEO_TIER_PRICE_PER_SECOND_USD) because the web
 // renders the pre-spend estimate from the same numbers and cannot import this

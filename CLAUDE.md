@@ -115,11 +115,25 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
     route stores each as an ordinary `files` entry with `status: 'done'` — which is why
     the review step, `assembleDloText`, lineage and `/:id/generate` needed NO changes.
     Two invariants: the job's extract phase **skips `status: 'done'` entries** (or a
-    scanned PDF would be OCR'd a second time and the corrections lost), and the route
+    scanned PDF would be OCR'd a second time and the corrections lost) — and `'failed'`
+    ones, which are the route's verdict rather than a state to retry — and the route
     archives the original by reading `getDocumentIntakeJob(jobId).data` **in process**
     rather than making the browser upload the same bytes twice. An expired ephemeral job
     (60-min TTL) yields an entry with no `storagePath`: the text still lands, only the
     re-read is lost, and `canReextract` on the detail payload is what hides that button.
+    **Reading it there is OPTIONAL** (2026-07-26): a scan can be OCR'd for minutes, so the
+    picker also offers **"न वाचता ही पृष्ठे वापरा"** (`allowDeferredRead` on
+    `<DocumentIntake>` — /dlo only, being the one surface with a job downstream). That
+    hands over the page SELECTION instead of text: the snapshot carries `pendingPages` and
+    no `pages`, the create request sends the same field, the route stores a
+    `status: 'pending'` entry carrying it, and the intake job's extract phase calls
+    `extractPdfEntry(entry, entry.pendingPages)` instead of `probePdfEntry`. Same spend
+    gate — the pages were still chosen before anything was billed — with the wait folded
+    into प्रक्रिया, which the run was going to sit through anyway; the pages then show up at
+    review as an ordinary read PDF. Here the archive is **load-bearing, not a
+    convenience**: a deferred document carries no text at all, so an expired job means the
+    route stores that file `failed` with an actionable Marathi message rather than dropping
+    a whole source silently.
     MP3s are unchanged — a recording has no pages to pick, so it still travels as a file
     and is transcribed by the job. The `files` multipart path still accepts pdf/docx
     (back-compat); the web no longer uses it, so the job's probe/`needs-selection`
@@ -167,57 +181,214 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
   model rewrite; name fixes are glossary-gated; Marathi input gets one RAG style
   exemplar); schemas → `packages/schemas/src/proofread.ts`; web →
   `apps/web/app/proofread/page.tsx`.
+  - **The corrected text HIGHLIGHTS what changed, and the patcher therefore lives in
+    `@dgipr/schemas`** (`applyProofreadFixes` + `buildProofreadHighlights`), not in the
+    engine — `proof-read.ts`'s `applyFixes` is a one-line delegation to it. The web must
+    mark the patched spans inside that very string and `apps/web` cannot import
+    content-engine, so a second copy would drift; this is the `combineIntakeSources`
+    move. `applyProofreadFixes` returns the patched text **plus which run came from which
+    fix**, tracked through a per-code-unit owner array, because the patch is a
+    *cumulative global* `split/join`: one fix can own several runs, a later short fix can
+    match text an earlier one INSERTED (and across its boundary), and a swallowed fix
+    produces no run while still appearing in `issues` — so `issues.length` is NOT the
+    mark count and "search the output for the suggestion" is wrong. Style advisories are
+    not applied, so they are located by lookup and marked **only inside untouched runs**.
+    `buildProofreadHighlights` returns **null** when its replay does not reproduce
+    `correctedText` byte-for-byte; the page then renders plain text — the text is
+    authoritative, the marks best-effort. Free harness:
+    `tsx src/generation/proof-read.ts --check`. Web: the `CorrectedArticle` component in
+    `page.tsx` (one `--ok-soft` tint + solid underline for corrections, `--warn-soft` +
+    dotted for advisories, original wording in a viewport-anchored hover/tap popover, and
+    a default-on हायलाइट toggle); CSS block sits under the `.issue-*` one it borrows its
+    "background tints only, no strikethrough" rule from. Copy and .txt download still
+    emit `result.correctedText` untouched.
 - Explainer videos (`/video` — note → AI scene PLAN → per-scene Marathi script →
-  TTS voiceover + measured clip windows → storyboard stills → Veo-animated VOICED MP4 +
-  SRT): routes → `apps/api/src/routes/video.ts` (create/poll/
+  TTS voiceover → REALISTIC start+end frame pair per scene → provider-interpolated
+  VOICED MP4 + SRT. **2026-07-26: realistic live-action look, not illustration**, and
+  every scene is TWO reviewed frames: a photoreal START frame from gpt-image plus an
+  END frame **EDITED from it** (`editImage`, the poster-renderer's new
+  `/v1/images/edits` call — editing, not fresh generation, is what keeps the pair in
+  ONE shot so interpolation reads as motion, not a crossfade), and Veo animates
+  first→last): routes → `apps/api/src/routes/video.ts` (create/poll/
   script-save/storyboard/still/animate/scene-animate; the two review gates are idle
   statuses `script_ready`/`storyboard_ready`, and every route that leaves a gate flips
   the row BEFORE its 202 — the storyboard route flips step `narrate`, its job's first
-  phase); jobs → `apps/api/src/jobs/video-runner.ts` (script job,
-  storyboard job — whose TOP is the TTS-first voice phase `ensureNarrationAudio`:
-  synthesize per scene, MEASURE the WAV, fit `durationSeconds` to the smallest 4|6|8s
-  window via `fitSceneDurationSeconds` so clips carry no dead air and gate 2 prices the
-  real spend; WINDOW-FREEZE rule: a scene with a current clip keeps its window (atempo
-  absorbs drift, never invalidate a paid Veo clip; `clipIsCurrent` also checks
-  `clipDurationSeconds`); per-scene TTS failure → char-rate fallback
-  (`VIDEO_NARRATION_CHARS_PER_SECOND`, default 32) and a silent render, never a stuck
-  gate — then per-scene stills; RESUME-AWARE animate job — each Veo clip is
-  persisted the moment it lands, so a retry re-renders only missing scenes — and a
-  per-scene re-animate that restitches without touching other clips; the
-  post-completion narrate route is re-voice/recovery only, videos are voiced by
-  default); engine →
-  `packages/content-engine/src/video/*` (`plan-video-scenes.ts` — the planner that
-  decides scene count (2-8, bucket = preference only) + per-scene Marathi `beat` +
-  English `shotHint` + target window, citizen-first tiering; `generate-video-script.ts`
-  JSON+repair writing narration AGAINST that plan with code-computed word
-  budgets, then ONE bounded coverage round (a coverage check + at most one repair,
-  accepted either way); narration char cap = `VIDEO_NARRATION_MAX_CHARS` in schemas,
-  the single source shared with the script-save schema;
-  `video-prompts.ts` — every visual prompt HARD-FORBIDS on-screen text since video
-  models garble Devanagari AND talking/lip movement/close-up faces since Veo glitches
-  on mouths (people may appear, never speak; narration carries the words; `shotHint`
-  replaces the generic camera line when present) — `veo-client.ts` raw-REST
-  long-running-op client over `http/gemini-request.ts`, model ids env-overridable
-  `VEO_MODEL_*`, key `GEMINI_API_KEY`; **per-model params are LEARNED, not declared** —
-  the 3.1 lite preview 400s on `negativePrompt` where fast/standard accept it, so a
-  rejection (typed `GeminiRequestError`, matched on the field name) drops the field,
-  caches that per model id, and re-renders; repointing `VEO_MODEL_*` at a quota-fresh
-  model therefore needs no code change, and switching back restores the negative
-  prompt); assembly → `packages/poster-renderer/src/video/
-  assemble.ts` (ffmpeg-static, always re-encode `-an` yuv420p+faststart; `FFMPEG_PATH`
-  escape hatch; `wavDurationSeconds` is what the voice phase measures with);
-  rows/bucket → `packages/database/src/video-projects.ts` + the PUBLIC
-  `videos` bucket (migration 0026; scenes are jsonb — `beat`/`shotHint`/
-  `narrationAudioSeconds`/`clipDurationSeconds` were added WITHOUT migration); shared
-  tier pricing + `buildSrt` + the fit helpers
-  → `packages/schemas/src/video.ts` (web renders pre-spend estimates, must not import
-  content-engine). One active project at a time (DB-backed 409, not TasksProvider).
-  Harnesses: `video:preview:assemble` (free), `tsx --env-file=../../.env
-  src/video/plan-video-scenes.ts "<टिपणी>" [short|long]` (cents),
-  `tsx --env-file=../../.env src/video/generate-video-script.ts "<टिपणी>" [short|long]`
-  (cents),
-  `tsx --env-file=../../.env src/video/veo-client.ts <still.png> --lite --4s` (~$0.3 —
-  run this FIRST to prove Veo access). No n8n anywhere on this path.
+  phase; the still route takes `frame: 'start'|'end'` — a START redraw regenerates the
+  PAIR since the end derives from the start, an END redraw is one edit call; the
+  animate guard requires every scene's declared end frame to be rendered); jobs →
+  `apps/api/src/jobs/video-runner.ts` (script job,
+  storyboard job — whose TOP is the TTS voice phase `ensureNarrationAudio`:
+  synthesize per scene, MEASURE the WAV, and past `VIDEO_NARRATION_FIT_SECONDS`
+  **rewrite that line shorter** (`shorten-narration.ts`, ≤2 attempts) and
+  re-synthesize. **Narration is never sped up to fit** — the clip cannot grow, so the
+  text moves; `muxNarration`'s atempo is a backstop that warns when it fires. The
+  rates are MEASURED, not guessed (16.5 chars/s, 2.3 words/s for `shubh` on
+  bulbul:v3): the old 32/4.5 were ~2x too fast, so the old 280-char cap was really
+  ~17s of speech in an 8s clip and the surplus was being **hard-trimmed** — words cut
+  off scene ends. Re-run the calibration if the voice changes; never adjust by
+  intuition. Coverage is TIERED here too: the planner/writer/shortener prompts all
+  rank core point → citizen-actionable detail → the rest, and omitting a fact beats
+  stating it vaguely (never-invent stays absolute; anything kept stays verbatim).
+  **Every clip is a fixed 8s**
+  (`VIDEO_INTERPOLATION_SECONDS`, schemas) — Veo rejects interpolation at 4/6s with
+  INVALID_ARGUMENT, so the measured-window fit is RETIRED (the script writer fills
+  ~7.2s of it, ~17 words/scene; `fitSceneDurationSeconds` survives in schemas as
+  legacy/display, `VIDEO_NARRATION_CHARS_PER_SECOND` is unread). WINDOW-FREEZE rule
+  unchanged: a scene with a current clip keeps its window (atempo absorbs drift, never
+  invalidate a paid clip; `clipIsCurrent` checks `clipDurationSeconds` AND — the new
+  lineage — `clipEndStillVersion` against `endStillVersion`, so an end-frame redraw
+  invalidates the clip exactly like a start-frame redraw); per-scene TTS failure →
+  silent render, never a stuck gate — then per-scene frame PAIRS; RESUME-AWARE animate
+  job — each clip persisted the moment it lands, retry re-renders only missing
+  scenes — and a per-scene re-animate that restitches without touching other clips;
+  a legacy scene with no `endStillPath` animates first-frame-only, never blocked);
+  engine → `packages/content-engine/src/video/*` (`plan-video-scenes.ts` — the
+  planner picks scene count (2-8) + Marathi `beat` + live-action `shotHint`,
+  citizen-first tiering; it no longer picks durations; `generate-video-script.ts`
+  JSON+repair writing narration + `visual_brief` + `end_visual_brief` (the SAME
+  shot's end state — same place/people/light, by rule) AGAINST the plan, one bounded
+  coverage round, and a per-scene `key_point` — the short Marathi line burned on
+  screen, gated by a deterministic digit guard (`keyPointOf`: every digit run must
+  occur in the note, Devanagari and Latin compared in one script, failure DROPS the
+  line rather than failing the run); `video-prompts.ts` — **`SETTING_RULE`
+  (Maharashtra, India; Indian people, clothing, streets and offices) hard-appended to
+  ALL THREE prompts in code**, which is the fix for a pipeline that had never named a
+  country and returned a blonde Western woman: an instructed rule can be lost by the
+  model authoring the brief, a code-appended one cannot. REALISM_RULE (photoreal
+  live-action) in both frame prompts, `buildEndFramePrompt` is an images/EDITS
+  instruction ("same location, same people, a few seconds later") that also says
+  *remove any writing already visible*; every prompt HARD-FORBIDS on-screen text
+  (Devanagari garbling) and TALKING/lip movement (Veo's worst artifact; close-ups and
+  expressive faces are now allowed — `photorealistic faces`/`close-up face` came OUT
+  of `VEO_NEGATIVE_PROMPT`, anti-cartoon/CGI and `Western setting` terms went in).
+  **`NO_TEXT_RULE` is phrased POSITIVELY and stands as its own final block** — a bare
+  "no text" contradicts a scene containing forms or a door plate, so the model painted
+  them and filled them with gibberish (a real render read `मरी रूटूम`); it now says
+  signboards are plain painted panels, forms and files are blank sheets, screens are
+  off. `buildKeyframePrompt`'s 4th arg emits `WORLD_REFERENCE_RULE` when an earlier
+  scene's frame is attached; `buildClipMotionPrompt` +
+  `CLIP_NEGATIVE_PROMPT` are provider-neutral (renamed off `buildVeoMotionPrompt` /
+  `VEO_NEGATIVE_PROMPT`), and two helpers exist purely because **Kling has no
+  negative-prompt field and caps prompt length**: `buildAvoidClause` restates the
+  list as an instruction the prompt body can carry, and `fitClipPrompt` trims to a
+  budget in an order that NEVER touches `SETTING_RULE`/`NO_TALKING_MOTION_RULE`/
+  `NO_TEXT_RULE` — those sit last, exactly where a naive tail truncation would eat
+  them, so there is no blind `.slice()` in it (drop order: avoid clause → style
+  paragraph toward a floor → end brief → open brief → style dropped; overshoot +
+  warn beats mutilating a rule, since 2500 is Kling's *recommendation* and 3072 its
+  hard cap). Free: `tsx src/video/video-prompts.ts`;
+  **`clip-provider.ts` — the model-swap seam**: the runner calls neutral
+  `renderClip({startFramePng, endFramePng?, …})` dispatched on
+  `VIDEO_CLIP_PROVIDER` (default `veo`, **deployed as `kling`**), and
+  `clipProviderApiKeyEnv()` is what lets the animate route name the RIGHT key —
+  frames are already rendered by animate time, so a Kling-clips box needs no
+  `GEMINI_API_KEY` for that gate (it still needs one for the FRAMES). Free:
+  `tsx src/video/clip-provider.ts`;
+  **`kling-client.ts` — Kling 3.0 on the OFFICIAL `api-singapore.klingai.com`**
+  (model-specific endpoint `POST /image-to-video/kling-3.0`, poll
+  `GET /tasks?task_ids=`), over `http/kling-request.ts`. Five things to know before
+  touching it: auth is a **plain API key** (`KLING_API_KEY`, `Authorization:
+Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; **a
+  200 with `code !== 0` is a failure**, which `klingFetch` owns by returning the
+  envelope's `data` so no caller re-implements the check; **`multi_shot` defaults to
+  `true`** and is sent `false` explicitly (a single-shot interpolation prompt would
+  otherwise come back as a montage — the loudest rung on its downgrade ladder);
+  there is **no `aspect_ratio` field**, so the FRAMES decide the output shape and
+  the client fails free when start/end disagree; and `settings.audio: 'off'` +
+  `settings.resolution` (`KLING_RESOLUTION`, **pinned `720p`**; unset ⇒ tier-driven,
+  fast/lite 720p, standard 1080p — resolution is Kling's price axis, 6 credits/s at
+  720p vs 8 at 1080p). Frames travel as **q92 JPEG base64** (two inline PNGs would be
+  a ~10 MB body per clip); the raw-vs-`data:`-URI encoding is the one genuine unknown
+  and is LEARNED per model. Free: `tsx src/video/kling-client.ts --check`; paid:
+  `tsx --env-file=../../.env src/video/kling-client.ts <start.png> [end.png]`;
+  **`frame-provider.ts` — the same seam for the
+  FRAMES** (`renderFrame({prompt, aspect, sourceFramePng?, referenceFramePng?})` on
+  `VIDEO_IMAGE_PROVIDER`, default **`gemini`** = Nano Banana
+  (`gemini-3-pro-image-preview`) via `gemini-image-client.ts`, `openai` = gpt-image via
+  poster-renderer); it takes an
+  **aspect, not a pixel size**, which is what lets the Gemini path skip
+  `cropToAspect` entirely (native `imageConfig.aspectRatio`) while the OpenAI path
+  still renders 3:2 and crops. ONE `:generateContent` call serves both frames —
+  text-only generates the START, text+image EDITS it into the END.
+  **`referenceFramePng` is scene 1's approved frame, attached to scenes 2..N**
+  (`loadWorldReference` in the runner) so the video reads as one production — the
+  `style` paragraph alone let four scenes come back as four unrelated worlds. Passed
+  ONLY on a fresh generation, NEVER beside `sourceFramePng`: two inline images plus
+  "edit this" is ambiguous, and the client throws rather than send both. Best-effort
+  everywhere, and the `openai` branch drops it (`editImage` takes one buffer);
+  `veo-client.ts` raw-REST long-running-op client
+  over `http/gemini-request.ts`, model ids env-overridable `VEO_MODEL_*`, key
+  `GEMINI_API_KEY`; **per-model params are LEARNED, not declared** — `negativePrompt`
+  as before; `lastFrame` twice over: the field's JSON shape is learned
+  (bytesBase64Encoded first, docs' inlineData on a 400 naming the field, cached per
+  model) and a model rejecting the field outright (the lite preview) is cached and
+  rendered start-frame-only with a warning, never failed — which is why `lite` is
+  gone from the web tier picker but kept in the schema for legacy rows; and
+  **`generateAudio: false` + `resolution`** (`VEO_RESOLUTION`, default 1080p — free,
+  Veo bills per second not per pixel). **Veo renders SILENT on purpose**: the
+  voiceover is Sarvam's and the mux discarded Veo's track anyway, so generating it
+  only bought cost, latency and Google's separate **audio** safety filter — which
+  fails the whole clip after the full render wait ("an issue with the audio for your
+  prompt"). If that error ever returns, check this flag first; assembly →
+  `packages/poster-renderer/src/video/assemble.ts` (ffmpeg-static, `-an`
+  yuv420p+faststart, `FFMPEG_PATH`, `wavDurationSeconds`) — which now also **burns in
+  the on-screen Marathi key points**: `assembleSilentVideo(clips, overlays?)` chains a
+  `scale2ref` + `overlay=0:0:enable='between(t,s,e)'` pair per scene into its EXISTING
+  encode (one pass, not two; byte-for-byte the old behaviour when omitted), before
+  `muxNarration`, which copies the video stream and needed no change. **The `scale2ref`
+  is load-bearing and was a real silent bug**: `CAPTION_FRAME_SIZE` typesets at a fixed
+  1080p reference, so at Kling's 720p a 1920x1080 overlay composited at `0:0` put the
+  lower-third panel below the bottom edge and the key point VANISHED with no ffmpeg
+  error (measured: 0.00% panel pixels vs 14.7% after the fix). It resolves `w=iw:h=ih`
+  against the REFERENCE input, so no footage size is written down and it is a no-op at
+  1080p. `video:preview:captions --720p` is the regression test and asserts the panel is
+  on-frame rather than asking you to look. The PNGs are transparent full-frame
+  overlays typeset by **Chromium** (`video/caption-overlay.ts` → `renderHtmlToPng`'s new
+  `transparent` option → `omitBackground`) — the poster doctrine, so no image or video
+  model ever renders Devanagari and `NO_TEXT_RULE` stays absolute. Windows come from
+  `sceneTimings`, the same function the SRT uses, so caption/cue/footage cannot
+  disagree; a scene with an empty `keyPoint` gets no overlay (also how an officer turns
+  it off). Rendering is best-effort per scene — the clips are already paid for.
+  rows/bucket →
+  `packages/database/src/video-projects.ts` + the PUBLIC `videos` bucket (migration
+  0026; scenes are jsonb — `endVisualBrief`/`endStillPath`/`endStillVersion`/
+  `clipEndStillVersion`/`keyPoint` joined `beat`/`shotHint`/etc WITHOUT migration);
+  shared tier
+  pricing + `buildSrt` + `VIDEO_KEY_POINT_MAX_CHARS`/`VIDEO_STYLE_MAX_CHARS` →
+  `packages/schemas/src/video.ts` (web must not import
+  content-engine). **`style` is officer-editable at gate 1**
+  (`UpdateVideoScriptRequestSchema.style`, no migration — the column exists); changing
+  it skips the script route's keep-frames branch and returns every scene to `pending`,
+  since it feeds every frame prompt. `keyPoint` is deliberately NOT in that staleness
+  test — it is burned on at stitch time and no frame is rendered from it. One active
+  project at a time (DB-backed 409). Spend is 8s×scenes×`VIDEO_TIER_PRICE_PER_SECOND_USD`,
+  and that table is **per-deployment truth** — it is now FLAT at Kling 720p's ~$0.10/s
+  (tier changes nothing while `KLING_RESOLUTION` is pinned, and showing a fake tier
+  differential to the officer approving gate 2 would be worse than showing none). The
+  number is CONFIGURED, not discovered: `kling-client` logs Kling's returned `billing[]`
+  on every success, which is the calibration signal — reconcile once and edit the
+  constant. Restore standard 0.40 / fast 0.15 / lite 0.08 alongside
+  `VIDEO_CLIP_PROVIDER=veo`. **Switching provider or resolution changes the frame SIZE of
+  new clips**, so re-animate ALL scenes of any project you then touch or the stitch
+  concatenates mixed-size clips. Harnesses: `video:preview:assemble` (free),
+  `video:preview:captions [--vertical] [--720p]` (free — renders the caption overlays and
+  burns them onto light/dark stub clips, asserting the panel is on-frame; the loop for
+  tuning `caption-overlay.ts`, the decisive Devanagari-conjunct check, and the 720p
+  regression test), `tsx src/video/video-prompts.ts` (free — asserts the
+  setting/no-writing/no-talking rules reach all three prompts, plus the avoid clause and
+  the trim order), `tsx src/video/clip-provider.ts` (free — dispatch + which API key each
+  provider's gate names), `tsx src/video/kling-client.ts --check` (free — resolution
+  mapping and every pre-flight guard),
+  `tsx src/video/generate-video-script.ts --check` (free — the key-point digit guard),
+  `tsx --env-file=../../.env src/video/plan-video-scenes.ts --file=note.txt
+  [short|long]` (cents), `tsx --env-file=../../.env
+  src/video/generate-video-script.ts --file=note.txt [short|long]` (cents),
+  `tsx --env-file=../../.env src/video/kling-client.ts <start.png> [end.png]`
+  (~$0.80 at 720p — run FIRST to prove the base64 frame encoding on a live model,
+  and to read the real `billing[]`),
+  `tsx --env-file=../../.env src/video/veo-client.ts <start.png> [end.png]` (two
+  PNGs force the 8s interpolation window, ~$1.20 fast — the veo-path equivalent,
+  proving the lastFrame shape). No n8n anywhere on this path.
 - Direct social publishing (post a completed twitter/facebook run's poster +
   caption to the OFFICIAL accounts): synchronous `POST /api/generations/:id/publish`
   in `apps/api/src/routes/generations.ts` (platform = the row's category; guards:
@@ -361,9 +532,12 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
   predicate and report events.
   **Page selection is a RANGE FIELD, not a row of checkboxes** (`PageRangeSelector`): a
   checkbox per page is unusable at the 20-50 pages a real scanned booklet has. The field
-  takes "1-5, 8, 10-12" (Devanagari digits accepted) and an expand toggle reveals a grid of
-  numbered chips, animated open by transitioning the grid's own `0fr → 1fr` height so it fits
-  any page count with no magic max-height. `parsePageRanges`/`formatPageRanges` in
+  takes "1-5, 8, 10-12" (Devanagari digits accepted) and sits above a grid of numbered chips,
+  animated open by transitioning the grid's own `0fr → 1fr` height so it fits any page count
+  with no magic max-height. **`collapsible={false}` on the pre-read picker** (2026-07-26): there
+  the grid IS the control the user came for, so it is always open and the toggle is not rendered
+  at all; above an already-read document's text rows it stays foldable (`defaultExpanded`),
+  being a shortcut over a list already on screen. `parsePageRanges`/`formatPageRanges` in
   `lib/documentSelection.ts` are the pure two-way conversion. The load-bearing trick: a typed
   range is applied by **toggling only the pages that differ** from the current selection,
   never by setting a set — that is what keeps one component compatible with both a "wanted"

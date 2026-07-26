@@ -1,7 +1,7 @@
 'use client';
 
-// Explainer-video entry: the create form (note + duration bucket + orientation
-// + Veo quality tier) and the recent-project list. Submitting only writes the
+// Explainer-video entry: the create form (note + total length + orientation
+// + quality tier) and the recent-project list. Submitting only writes the
 // script (a text call — no video spend); the expensive steps sit behind the two
 // review gates on the project page. One project renders at a time (the API
 // enforces it server-side; the form reads the same fact from the list and says
@@ -17,8 +17,8 @@ import type {
   VideoTier,
 } from '@dgipr/schemas';
 import {
-  VIDEO_SCENE_BOUNDS,
   VIDEO_TIER_PRICE_PER_SECOND_USD,
+  VIDEO_TOTAL_SECONDS,
 } from '@dgipr/schemas';
 import { createVideoProject, listVideoProjects } from '../../lib/api';
 import { formatCost, formatDate, STR } from '../../lib/strings';
@@ -61,13 +61,15 @@ const ORIENTATION_OPTIONS: ReadonlyArray<{
   },
 ];
 
+// No 'lite': Veo's lite preview cannot interpolate between a start and an end
+// frame — its reviewed end frames would be silently ignored. The schema keeps
+// the value for legacy rows.
 const TIER_OPTIONS: ReadonlyArray<{
   value: VideoTier;
   name: string;
   desc: string;
 }> = [
   { value: 'fast', name: STR.videoTierFast, desc: STR.videoTierFastHint },
-  { value: 'lite', name: STR.videoTierLite, desc: STR.videoTierLiteHint },
   {
     value: 'standard',
     name: STR.videoTierStandard,
@@ -75,14 +77,14 @@ const TIER_OPTIONS: ReadonlyArray<{
   },
 ];
 
-// Honest pre-create range: the AI planner picks the scene count and each
-// scene's clip window (4-8s) is fitted to its measured narration, so the only
-// truthful pre-create number is min-scenes×4s … max-scenes×8s. The exact cost
-// shows on gate 2, where the windows are real.
+// A single figure rather than the old scene-count range: clips are billed per
+// second and their lengths now add up to the selected TOTAL, so the total is
+// the estimate — however the planner splits it into scenes. Gate 2 still shows
+// the exact number, computed from the real per-scene windows.
 function tierEstimate(bucket: VideoDurationBucket, tier: VideoTier): string {
-  const bounds = VIDEO_SCENE_BOUNDS[bucket];
-  const price = VIDEO_TIER_PRICE_PER_SECOND_USD[tier];
-  return `${formatCost(bounds.min * 4 * price)}–${formatCost(bounds.max * 8 * price)}`;
+  return formatCost(
+    VIDEO_TOTAL_SECONDS[bucket] * VIDEO_TIER_PRICE_PER_SECOND_USD[tier],
+  );
 }
 
 function isWorking(status: VideoProjectSummary['status']): boolean {

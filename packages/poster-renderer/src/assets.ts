@@ -64,3 +64,14 @@ export async function loadArticlePdfAssets(): Promise<ArticlePdfAssets> {
   ]);
   return { fontDataUri, emblemDataUri };
 }
+
+// The explainer video's burned-in key-point overlay needs the webfont ALONE:
+// it is a transparent PNG laid over live footage, so any brand frame would
+// stamp a poster's chrome across somebody's video.
+export type CaptionAssets = Readonly<{ fontDataUri: string }>;
+
+export async function loadCaptionAssets(): Promise<CaptionAssets> {
+  return {
+    fontDataUri: await dataUri('fonts/NotoSansDevanagari.ttf', 'font/ttf'),
+  };
+}

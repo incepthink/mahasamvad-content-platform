@@ -1146,6 +1146,86 @@ textarea.note-input {
   white-space: pre-wrap;
 }
 
+/* ---------- proofread corrected-text highlights ---------- */
+
+/* Marks inside the corrected article. Same rule as the issue list above: pale
+   background tints only, never a strikethrough — Devanagari stays fully legible. The
+   underline, not the tint, is the load-bearing signal: it survives a washed-out screen,
+   and SOLID vs DOTTED separates "this text was changed" from "this text is unchanged,
+   a rewrite is merely suggested" without relying on colour at all. */
+.proofread-mark {
+  background: var(--ok-soft);
+  border-bottom: 2px solid var(--ok);
+  border-radius: 4px;
+  padding: 0 2px;
+  cursor: help;
+}
+
+.proofread-mark-style {
+  background: var(--warn-soft);
+  border-bottom: 2px dotted var(--warn);
+}
+
+.proofread-mark:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.proofread-highlight-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.proofread-legend {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.proofread-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.proofread-legend-swatch {
+  width: 20px;
+  height: 14px;
+  border-radius: 4px;
+  background: var(--ok-soft);
+  border-bottom: 2px solid var(--ok);
+}
+
+.proofread-legend-swatch-style {
+  background: var(--warn-soft);
+  border-bottom: 2px dotted var(--warn);
+}
+
+/* Viewport-anchored: a marked span can wrap across lines, so it is a poor
+   positioning context for an absolutely-placed panel. */
+.proofread-popover {
+  position: fixed;
+  z-index: 40;
+  max-width: 320px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  padding: 14px 16px;
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+.proofread-popover-line {
+  margin: 8px 0 0;
+}
+
 /* ---------- article view ---------- */
 
 .article-head {

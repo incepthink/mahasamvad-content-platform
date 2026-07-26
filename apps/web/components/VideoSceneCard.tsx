@@ -2,20 +2,27 @@
 
 // One scene of a video project, in one of two modes:
 //
-// - 'edit' (gate 1, script review): narration + visual brief are open
-//   textareas — the officer corrects names/amounts in the narration and can
-//   reshape the visual before anything is rendered.
-// - 'review' (gate 2 storyboard + the post-render fix panel): shows the
-//   keyframe still with the narration beside it; the brief opens in a fold for
-//   "change the description and redraw" (cents), and the fix panel adds the
-//   per-scene re-animate action (that scene's Veo cost only).
+// - 'edit' (gate 1, script review): narration + the two visual briefs (start
+//   and end frame of the same shot) are open textareas — the officer corrects
+//   names/amounts in the narration and can reshape either frame before
+//   anything is rendered.
+// - 'review' (gate 2 storyboard + the post-render fix panel): shows the START
+//   and END frames side by side with the narration beneath; each frame has its
+//   own redraw affordance (cents). Redrawing the start also redraws the end —
+//   the end frame is edited FROM the start, so a new start orphans it; the
+//   hint under the button says so. The fix panel adds the per-scene re-animate
+//   action (that scene's Veo cost only).
 //
 // Per-scene status/error chips render in both modes — a failed scene must say
 // so on ITS card, not sink the project.
 
 import { useState } from 'react';
 import type { VideoScene } from '@dgipr/schemas';
-import { estimateNarrationSeconds } from '@dgipr/schemas';
+import {
+  VIDEO_KEY_POINT_MAX_CHARS,
+  clipSecondsForNarration,
+  estimateNarrationSeconds,
+} from '@dgipr/schemas';
 import {
   STR,
   videoNarrationEstimate,
@@ -40,9 +47,38 @@ function SceneStatusChip({ scene }: { scene: VideoScene }) {
 }
 
 const VIDEO_SCENE_STATUS_LABELS = {
-  'still-rendering': 'चित्र तयार होत आहे…',
-  animating: 'दृश्य ॲनिमेट होत आहे…',
+  'still-rendering': 'चित्रे तयार होत आहेत…',
+  animating: 'दृश्य तयार होत आहे…',
 } as const;
+
+// One reviewed frame (start or end) with its label; the redraw button lives
+// with the frame it redraws.
+function FramePreview({
+  label,
+  url,
+  pendingLabel,
+}: {
+  label: string;
+  url: string | undefined;
+  pendingLabel: string;
+}) {
+  return (
+    <div style={{ flex: '1 1 220px', minWidth: 0 }}>
+      <p className="field-label" style={{ marginBottom: 6 }}>
+        {label}
+      </p>
+      {url ? (
+        <img
+          src={url}
+          alt={label}
+          style={{ width: '100%', borderRadius: 8 }}
+        />
+      ) : (
+        <p className="hint">{pendingLabel}</p>
+      )}
+    </div>
+  );
+}
 
 export function VideoSceneCard({
   index,
@@ -51,8 +87,11 @@ export function VideoSceneCard({
   busy,
   onNarrationChange,
   onBriefChange,
+  onEndBriefChange,
+  onKeyPointChange,
   onRemove,
   onRedraw,
+  onRedrawEnd,
   onReanimate,
   reanimateLabel,
 }: {
@@ -63,16 +102,23 @@ export function VideoSceneCard({
   // gate 1 (mode 'edit')
   onNarrationChange?: (value: string) => void;
   onBriefChange?: (value: string) => void;
+  onEndBriefChange?: (value: string) => void;
+  onKeyPointChange?: (value: string) => void;
   onRemove?: (() => void) | undefined;
-  // gate 2 / fix panel (mode 'review')
+  // gate 2 / fix panel (mode 'review'). onRedraw regenerates the PAIR from an
+  // edited start brief; onRedrawEnd re-edits only the end frame.
   onRedraw?: (brief: string) => void;
+  onRedrawEnd?: ((endBrief: string) => void) | undefined;
   onReanimate?: (() => void) | undefined;
   reanimateLabel?: string;
 }) {
-  const [briefOpen, setBriefOpen] = useState(false);
+  // Which brief the fold edits: the start brief redraws the pair, the end
+  // brief redraws only the end frame.
+  const [briefOpen, setBriefOpen] = useState<'start' | 'end' | null>(null);
   const [briefDraft, setBriefDraft] = useState(scene.visualBrief);
 
   const heading = `${STR.videoSceneLabel} ${index + 1}`;
+  const hasEndFrame = scene.endVisualBrief !== undefined;
 
   if (mode === 'edit') {
     return (
@@ -98,10 +144,18 @@ export function VideoSceneCard({
         <label className="field-label" htmlFor={`scene-narration-${index}`}>
           {STR.videoNarrationLabel}
         </label>
+        {/* The estimate now also names the CLIP the narration will buy, since
+            the window is derived from the speech — this line is the officer's
+            only feedback on how long the scene they are editing will run. */}
         <p className="hint">
           {STR.videoNarrationHint}
           {scene.narration.trim().length > 0
-            ? ` · ${videoNarrationEstimate(estimateNarrationSeconds(scene.narration))}`
+            ? ` · ${videoNarrationEstimate(
+                estimateNarrationSeconds(scene.narration),
+                clipSecondsForNarration(
+                  estimateNarrationSeconds(scene.narration),
+                ),
+              )}`
             : ''}
         </p>
         <textarea
@@ -111,6 +165,23 @@ export function VideoSceneCard({
           value={scene.narration}
           disabled={busy}
           onChange={(event) => onNarrationChange?.(event.target.value)}
+        />
+        <label
+          className="field-label"
+          htmlFor={`scene-key-point-${index}`}
+          style={{ marginTop: 12 }}
+        >
+          {STR.videoKeyPointLabel}
+        </label>
+        <p className="hint">{STR.videoKeyPointHint}</p>
+        <input
+          id={`scene-key-point-${index}`}
+          type="text"
+          className="note-input"
+          value={scene.keyPoint ?? ''}
+          maxLength={VIDEO_KEY_POINT_MAX_CHARS}
+          disabled={busy}
+          onChange={(event) => onKeyPointChange?.(event.target.value)}
         />
         <label
           className="field-label"
@@ -128,6 +199,22 @@ export function VideoSceneCard({
           disabled={busy}
           onChange={(event) => onBriefChange?.(event.target.value)}
         />
+        <label
+          className="field-label"
+          htmlFor={`scene-end-brief-${index}`}
+          style={{ marginTop: 12 }}
+        >
+          {STR.videoEndBriefLabel}
+        </label>
+        <p className="hint">{STR.videoEndBriefHint}</p>
+        <textarea
+          id={`scene-end-brief-${index}`}
+          className="note-input"
+          style={{ minHeight: 70 }}
+          value={scene.endVisualBrief ?? ''}
+          disabled={busy}
+          onChange={(event) => onEndBriefChange?.(event.target.value)}
+        />
       </section>
     );
   }
@@ -138,19 +225,40 @@ export function VideoSceneCard({
         <h2>{heading}</h2>
         <SceneStatusChip scene={scene} />
       </div>
-      {scene.stillUrl ? (
-        <img
-          src={scene.stillUrl}
-          alt={heading}
-          style={{ width: '100%', maxWidth: 480, borderRadius: 8 }}
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: 12,
+          maxWidth: hasEndFrame ? 720 : 480,
+        }}
+      >
+        <FramePreview
+          label={STR.videoStartFrameLabel}
+          url={scene.stillUrl}
+          pendingLabel={STR.videoStillPending}
         />
-      ) : (
-        <p className="hint">{STR.videoStillPending}</p>
-      )}
+        {hasEndFrame ? (
+          <FramePreview
+            label={STR.videoEndFrameLabel}
+            url={scene.endStillUrl}
+            pendingLabel={STR.videoEndStillPending}
+          />
+        ) : null}
+      </div>
       <p style={{ marginTop: 10 }}>{scene.narration}</p>
+      {scene.keyPoint && scene.keyPoint.trim() !== '' ? (
+        <p className="hint">
+          {STR.videoKeyPointReviewLabel}: {scene.keyPoint}
+        </p>
+      ) : null}
       <p className="hint">
         {videoSceneTiming(scene.durationSeconds, scene.narrationSeconds)}
       </p>
+      {/* Since windows are derived by ceil()ing the measured narration, a NEW
+          scene mathematically cannot trip this — it survives as the warning for
+          a LEGACY frozen window (a scene whose paid clip predates the change),
+          which is exactly when muxNarration's atempo will engage. */}
       {scene.narrationSeconds !== undefined &&
       scene.narrationSeconds > scene.durationSeconds * 1.1 ? (
         <p className="hint">{STR.videoNarrationTooFast}</p>
@@ -174,19 +282,22 @@ export function VideoSceneCard({
           disabled={busy}
           onClick={() => {
             setBriefDraft(scene.visualBrief);
-            setBriefOpen((open) => !open);
+            setBriefOpen((open) => (open === 'start' ? null : 'start'));
           }}
         >
-          {STR.videoEditBrief}
+          {STR.videoRedrawStill}
         </button>
-        {!briefOpen ? (
+        {hasEndFrame && onRedrawEnd ? (
           <button
             type="button"
             className="btn btn-small"
             disabled={busy}
-            onClick={() => onRedraw?.(scene.visualBrief)}
+            onClick={() => {
+              setBriefDraft(scene.endVisualBrief ?? '');
+              setBriefOpen((open) => (open === 'end' ? null : 'end'));
+            }}
           >
-            {STR.videoRedrawStill}
+            {STR.videoRedrawEndStill}
           </button>
         ) : null}
         {onReanimate ? (
@@ -203,9 +314,14 @@ export function VideoSceneCard({
 
       {briefOpen ? (
         <>
+          <p className="hint" style={{ marginTop: 10 }}>
+            {briefOpen === 'start'
+              ? STR.videoRedrawStillNote
+              : STR.videoEndBriefHint}
+          </p>
           <textarea
             className="note-input"
-            style={{ marginTop: 10, minHeight: 70 }}
+            style={{ marginTop: 6, minHeight: 70 }}
             value={briefDraft}
             disabled={busy}
             onChange={(event) => setBriefDraft(event.target.value)}
@@ -216,11 +332,16 @@ export function VideoSceneCard({
               className="btn btn-small btn-primary"
               disabled={busy || briefDraft.trim().length === 0}
               onClick={() => {
-                setBriefOpen(false);
-                onRedraw?.(briefDraft.trim());
+                const brief = briefDraft.trim();
+                const which = briefOpen;
+                setBriefOpen(null);
+                if (which === 'start') onRedraw?.(brief);
+                else onRedrawEnd?.(brief);
               }}
             >
-              {STR.videoRedrawStill}
+              {briefOpen === 'start'
+                ? STR.videoRedrawStill
+                : STR.videoRedrawEndStill}
             </button>
           </div>
         </>

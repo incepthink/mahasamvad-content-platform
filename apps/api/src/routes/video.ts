@@ -23,9 +23,12 @@ import {
   CreateVideoProjectRequestSchema,
   RegenerateStillRequestSchema,
   UpdateVideoScriptRequestSchema,
+  clipSecondsForNarration,
+  estimateNarrationSeconds,
   type VideoProjectDetail,
   type VideoProjectSummary,
 } from '@dgipr/schemas';
+import { clipProviderApiKeyEnv } from '@dgipr/content-engine';
 import {
   isVideoJobRunning,
   startNarrationJob,
@@ -36,16 +39,25 @@ import {
   startVideoScriptJob,
 } from '../jobs/video-runner.js';
 
-// Veo needs a paid Gemini API key; without one the animate gate must fail with
-// a setup message BEFORE the row is flipped, not mid-job (the
-// twitterCredentialsFromEnv pattern).
-function geminiKeyPresent(): boolean {
-  const key = process.env.GEMINI_API_KEY;
-  return typeof key === 'string' && key.trim() !== '';
+// Clip rendering needs the configured provider's paid API key; without one the
+// animate gate must fail with a setup message BEFORE the row is flipped, not
+// mid-job (the twitterCredentialsFromEnv pattern). Returns the missing env
+// var's NAME so the message can point at it, or null when all is well.
+//
+// It asks the seam rather than checking GEMINI_API_KEY directly, because the
+// animate step and the storyboard step need different keys: frames are already
+// rendered by the time this gate runs (VIDEO_IMAGE_PROVIDER, Gemini by
+// default), so under VIDEO_CLIP_PROVIDER=kling a box with no Gemini key
+// animates perfectly well.
+function clipProviderKeyMissing(): string | null {
+  const envName = clipProviderApiKeyEnv();
+  if (envName === null) return null;
+  const key = process.env[envName];
+  return typeof key === 'string' && key.trim() !== '' ? null : envName;
 }
 
 // Narration needs a Sarvam key (TTS); fail the narrate gate with a setup message
-// BEFORE the row is flipped, mirroring geminiKeyPresent for the animate gate.
+// BEFORE the row is flipped, mirroring clipProviderKeyMissing for animate.
 function sarvamKeyPresent(): boolean {
   const key = process.env.SARVAM_API_KEY;
   return typeof key === 'string' && key.trim() !== '';
@@ -76,6 +88,10 @@ function toDetail(
     scenes: row.scenes.map((scene) => ({
       narration: scene.narration,
       visualBrief: scene.visualBrief,
+      ...(scene.endVisualBrief !== undefined
+        ? { endVisualBrief: scene.endVisualBrief }
+        : {}),
+      ...(scene.keyPoint !== undefined ? { keyPoint: scene.keyPoint } : {}),
       durationSeconds: scene.durationSeconds,
       status: scene.status,
       ...(scene.beat !== undefined ? { beat: scene.beat } : {}),
@@ -95,14 +111,25 @@ function toDetail(
       ...(scene.stillPath
         ? { stillUrl: publicUrlIn(client, VIDEOS_BUCKET, scene.stillPath) }
         : {}),
+      ...(scene.endStillPath
+        ? {
+            endStillUrl: publicUrlIn(
+              client,
+              VIDEOS_BUCKET,
+              scene.endStillPath,
+            ),
+          }
+        : {}),
       ...(scene.clipPath
         ? { clipUrl: publicUrlIn(client, VIDEOS_BUCKET, scene.clipPath) }
         : {}),
-      // A clip animated from an older still than the one on screen — the fix
-      // panel's re-animate affordance keys off this.
+      // A clip animated from an older frame (start OR end) than the one on
+      // screen — the fix panel's re-animate affordance keys off this.
       ...(scene.clipPath !== undefined &&
-      scene.stillVersion !== undefined &&
-      scene.clipStillVersion !== scene.stillVersion
+      ((scene.stillVersion !== undefined &&
+        scene.clipStillVersion !== scene.stillVersion) ||
+        (scene.endStillPath !== undefined &&
+          scene.clipEndStillVersion !== scene.endStillVersion))
         ? { clipStale: true }
         : {}),
       ...(scene.error !== undefined ? { error: scene.error } : {}),
@@ -225,6 +252,14 @@ export function registerVideoRoutes(
       ) {
         return reply.code(409).send({ error: { message: BUSY_MESSAGE } });
       }
+      // The officer's edited style/setting paragraph. It is an input to EVERY
+      // frame prompt, so changing it makes every rendered frame stale — which
+      // matters because this route also accepts storyboard_ready, where frames
+      // exist. A changed style therefore skips the keep-frames branch below
+      // entirely and sends every scene back to pending.
+      const style = body.style ?? row.style;
+      const styleChanged = style !== row.style;
+
       // Scene count is governed by the schema's own VIDEO_SCENE_LIMIT bound
       // (the planner's bucket preference is not a validation rule — the
       // officer at gate 1 knows best). Incoming durationSeconds is IGNORED:
@@ -232,26 +267,49 @@ export function registerVideoRoutes(
       // the measured narration audio.
       const scenes: VideoSceneEntry[] = body.scenes.map((incoming, index) => {
         const existing = row.scenes[index];
-        // Same brief + an existing still ⇒ keep the still (and its clip
-        // lineage); anything else starts over as pending.
+        // Same BOTH briefs + an existing still ⇒ keep the frames (and their
+        // clip lineage); anything else starts over as pending. The end brief
+        // counts because the end frame is rendered from it — an edited end
+        // brief with a kept frame would show a frame of the old description.
+        // The key point is deliberately NOT in this test: it is burned on at
+        // stitch time and no frame is rendered from it, so editing one must
+        // never throw away a paid frame.
         if (
+          !styleChanged &&
           existing &&
           existing.visualBrief === incoming.visualBrief &&
+          existing.endVisualBrief === incoming.endVisualBrief &&
           existing.stillPath !== undefined
         ) {
           return {
             ...existing,
             narration: incoming.narration,
+            ...(incoming.keyPoint !== undefined
+              ? { keyPoint: incoming.keyPoint }
+              : {}),
           };
         }
-        // Brief changed (or new scene): the still starts over, but the plan
+        // A brief changed (or new scene): the frames start over, but the plan
         // lineage and the narration-audio cache ride along — audio depends
         // only on narration text + voice (narrationIsCurrent re-checks), so
         // dropping it here would re-bill TTS for a pure visual edit.
         return {
           narration: incoming.narration,
           visualBrief: incoming.visualBrief,
-          durationSeconds: existing?.durationSeconds ?? 8,
+          ...(incoming.endVisualBrief !== undefined
+            ? { endVisualBrief: incoming.endVisualBrief }
+            : {}),
+          ...(incoming.keyPoint !== undefined
+            ? { keyPoint: incoming.keyPoint }
+            : existing?.keyPoint !== undefined
+              ? { keyPoint: existing.keyPoint }
+              : {}),
+          // Provisional: a plausible window from the edited narration's
+          // length, so the gate-2 estimate is not wild before anything is
+          // synthesized. The voice phase re-derives it from the measured WAV.
+          durationSeconds: clipSecondsForNarration(
+            estimateNarrationSeconds(incoming.narration),
+          ),
           status: 'pending',
           ...(existing?.beat !== undefined ? { beat: existing.beat } : {}),
           ...(existing?.shotHint !== undefined
@@ -275,7 +333,10 @@ export function registerVideoRoutes(
         };
       });
 
-      await updateVideoProject(client, row.id, { scenes });
+      await updateVideoProject(client, row.id, {
+        scenes,
+        ...(styleChanged ? { style } : {}),
+      });
       const updated = await getVideoProject(client, row.id);
       return toDetail(client, updated!);
     },
@@ -318,8 +379,11 @@ export function registerVideoRoutes(
     },
   );
 
-  // One scene's still, re-drawn (gate-2 loop or the post-render fix panel). An
-  // edited brief rides along so "change the description and redraw" is one call.
+  // One scene's frame, re-drawn (gate-2 loop or the post-render fix panel).
+  // Edited briefs ride along so "change the description and redraw" is one
+  // call. frame='start' (default) regenerates the PAIR — the end frame is an
+  // edit of the start, so a new start orphans the old end; frame='end'
+  // re-edits only the end frame from the current start.
   app.post<{ Params: { id: string; index: string } }>(
     '/video/projects/:id/scenes/:index/still',
     async (request, reply) => {
@@ -341,10 +405,24 @@ export function registerVideoRoutes(
       ) {
         return reply.code(409).send({ error: { message: BUSY_MESSAGE } });
       }
+      const frame = body.frame ?? 'start';
+      if (frame === 'end' && scene.stillPath === undefined) {
+        return reply.code(409).send({
+          error: { message: 'आधी प्रारंभ फ्रेम तयार व्हायला हवी.' },
+        });
+      }
 
-      if (body.visualBrief !== undefined) {
+      if (body.visualBrief !== undefined || body.endVisualBrief !== undefined) {
         const scenes = [...row.scenes];
-        scenes[index] = { ...scene, visualBrief: body.visualBrief };
+        scenes[index] = {
+          ...scene,
+          ...(body.visualBrief !== undefined
+            ? { visualBrief: body.visualBrief }
+            : {}),
+          ...(body.endVisualBrief !== undefined
+            ? { endVisualBrief: body.endVisualBrief }
+            : {}),
+        };
         await updateVideoProject(client, row.id, { scenes });
       }
       const returnTo = row.status as 'storyboard_ready' | 'completed';
@@ -353,22 +431,22 @@ export function registerVideoRoutes(
         step: 'stills',
         error: null,
       });
-      startSceneStillJob(client, row.id, index, returnTo);
+      startSceneStillJob(client, row.id, index, returnTo, frame);
       return reply.code(202).send({ id: row.id });
     },
   );
 
-  // THE spend gate: Veo-animate every scene from its approved still. Guarded so
-  // it can only fire from a fully-stilled storyboard, and resume-aware on retry
+  // THE spend gate: animate every scene from its approved still. Guarded so it
+  // can only fire from a fully-stilled storyboard, and resume-aware on retry
   // after a failure (scenes with current clips are skipped by the job).
   app.post<{ Params: { id: string } }>(
     '/video/projects/:id/animate',
     async (request, reply) => {
-      if (!geminiKeyPresent()) {
+      const missingKey = clipProviderKeyMissing();
+      if (missingKey) {
         return reply.code(503).send({
           error: {
-            message:
-              'व्हिडिओ सेवा अजून जोडलेली नाही (GEMINI_API_KEY). प्रशासकाशी संपर्क साधा.',
+            message: `व्हिडिओ सेवा अजून जोडलेली नाही (${missingKey}). प्रशासकाशी संपर्क साधा.`,
           },
         });
       }
@@ -391,13 +469,21 @@ export function registerVideoRoutes(
           .code(409)
           .send({ error: { message: ANOTHER_ACTIVE_MESSAGE } });
       }
+      // Every scene needs its start frame; a scene that DECLARED an end frame
+      // (has the brief) must also have rendered it — otherwise the officer
+      // would be buying a clip whose reviewed ending never existed. A legacy
+      // scene without an end brief legitimately animates first-frame-only.
       const notReady = row.scenes.findIndex(
-        (scene) => scene.stillPath === undefined,
+        (scene) =>
+          scene.stillPath === undefined ||
+          (scene.endVisualBrief !== undefined &&
+            scene.endVisualBrief !== '' &&
+            scene.endStillPath === undefined),
       );
       if (row.scenes.length === 0 || notReady !== -1) {
         return reply.code(409).send({
           error: {
-            message: `दृश्य ${notReady + 1} चे चित्र अजून तयार नाही. आधी स्टोरीबोर्ड पूर्ण करा.`,
+            message: `दृश्य ${notReady + 1} ची चित्रे अजून तयार नाहीत. आधी स्टोरीबोर्ड पूर्ण करा.`,
           },
         });
       }
@@ -417,11 +503,11 @@ export function registerVideoRoutes(
   app.post<{ Params: { id: string; index: string } }>(
     '/video/projects/:id/scenes/:index/animate',
     async (request, reply) => {
-      if (!geminiKeyPresent()) {
+      const missingKey = clipProviderKeyMissing();
+      if (missingKey) {
         return reply.code(503).send({
           error: {
-            message:
-              'व्हिडिओ सेवा अजून जोडलेली नाही (GEMINI_API_KEY). प्रशासकाशी संपर्क साधा.',
+            message: `व्हिडिओ सेवा अजून जोडलेली नाही (${missingKey}). प्रशासकाशी संपर्क साधा.`,
           },
         });
       }

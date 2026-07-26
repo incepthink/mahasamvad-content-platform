@@ -15,11 +15,13 @@
 
 import { pathToFileURL } from 'node:url';
 import type { TermType } from '@dgipr/database';
-import type {
-  ProofreadIssue,
-  ProofreadIssueType,
-  ProofreadLanguage,
-  ProofreadResponse,
+import {
+  applyProofreadFixes,
+  buildProofreadHighlights,
+  type ProofreadIssue,
+  type ProofreadIssueType,
+  type ProofreadLanguage,
+  type ProofreadResponse,
 } from '@dgipr/schemas';
 import { chatComplete, type ChatMessage } from './openai-chat.js';
 import { editDistance } from './edit-distance.js';
@@ -396,17 +398,14 @@ function finalizeUnverifiedNames(
 // Deterministic patch: longer excerpts first so a word-level fix never clobbers a
 // sentence-level one; a fix whose excerpt no longer occurs (already covered by an
 // earlier, longer replacement) is skipped — the issue stays listed either way.
-// split/join is exact-string replacement with no regex-escaping pitfalls.
+// Exact-string replacement, no regex-escaping pitfalls.
+//
+// The algorithm lives in @dgipr/schemas because /proofread's web UI highlights the
+// patched spans inside this very string and must therefore derive them from the SAME
+// patcher (apps/web cannot import this package). It additionally returns which run of
+// the output came from which fix; only the text is wanted here.
 function applyFixes(text: string, fixes: readonly CandidateIssue[]): string {
-  let patched = text;
-  const ordered = [...fixes].sort(
-    (a, b) => b.excerpt.length - a.excerpt.length,
-  );
-  for (const fix of ordered) {
-    if (!patched.includes(fix.excerpt)) continue;
-    patched = patched.split(fix.excerpt).join(fix.suggestion);
-  }
-  return patched;
+  return applyProofreadFixes(text, fixes).text;
 }
 
 // Amounts and dates must never change (absolute project rule). A "fix" that alters
@@ -503,15 +502,215 @@ export async function proofreadText(
   };
 }
 
+// ---------- Offline checks (free, no model call): tsx src/generation/proof-read.ts --check ----------
+
+// The web highlights the corrected text by REPLAYING applyProofreadFixes and trusting
+// that the runs it reports are where the engine actually patched. These assertions pin
+// that contract: byte-identity with the original split/join patcher, and the four span
+// cases that a naive "search for the suggestion string" gets wrong.
+function runOfflineChecks(): void {
+  let failed = 0;
+  const check = (name: string, ok: boolean, detail = ''): void => {
+    if (!ok) failed += 1;
+    console.log(`${ok ? 'ok  ' : 'FAIL'}  ${name}${detail ? ` — ${detail}` : ''}`);
+  };
+
+  // The pre-delegation implementation, kept here as the reference oracle.
+  const referencePatch = (
+    text: string,
+    fixes: readonly ProofreadIssue[],
+  ): string => {
+    let patched = text;
+    const ordered = [...fixes].sort(
+      (a, b) => b.excerpt.length - a.excerpt.length,
+    );
+    for (const fix of ordered) {
+      if (!patched.includes(fix.excerpt)) continue;
+      patched = patched.split(fix.excerpt).join(fix.suggestion);
+    }
+    return patched;
+  };
+
+  const err = (excerpt: string, suggestion: string): ProofreadIssue => ({
+    type: 'spelling',
+    severity: 'error',
+    excerpt,
+    suggestion,
+    explanation: '',
+  });
+  const advice = (excerpt: string, suggestion: string): ProofreadIssue => ({
+    type: 'style',
+    severity: 'suggestion',
+    excerpt,
+    suggestion,
+    explanation: '',
+  });
+
+  type Fixture = { name: string; text: string; issues: ProofreadIssue[] };
+  const fixtures: Fixture[] = [
+    { name: 'no issues', text: 'मजकूर जसाच्या तसा', issues: [] },
+    {
+      name: 'single fix',
+      text: 'मुक्यमंत्री यांच्या हस्ते',
+      issues: [err('मुक्यमंत्री', 'मुख्यमंत्री')],
+    },
+    {
+      name: 'repeated excerpt',
+      text: 'अब अब अब',
+      issues: [err('अब', 'कड')],
+    },
+    {
+      name: 'swallowed by a longer fix',
+      text: 'एक दोन तीन',
+      issues: [err('एक दोन तीन', 'चार'), err('दोन', 'पाच')],
+    },
+    {
+      name: 'match across an insertion boundary',
+      text: 'अ आ इ ई',
+      issues: [err('अ आ इ', 'प र'), err('र ई', 'स')],
+    },
+    {
+      name: 'devanagari digits untouched',
+      text: '५०० कोटी निधि मंजूर',
+      issues: [err('निधि', 'निधी')],
+    },
+    {
+      name: 'fixes plus advisories',
+      text: 'मला हे आवडते',
+      issues: [
+        err('हे आवडते', 'ते चांगले'),
+        advice('मला', 'मी'),
+        advice('ते चांगले', 'ते उत्तम'),
+      ],
+    },
+    {
+      name: 'multi-line text',
+      text: 'पहिली ओळ चुक\nदुसरी ओळ',
+      issues: [err('चुक', 'चूक')],
+    },
+  ];
+
+  // The property the whole feature rests on: the shared patcher reproduces the engine's
+  // original output byte for byte, and the highlight runs re-join to exactly that text.
+  for (const fixture of fixtures) {
+    const fixes = fixture.issues.filter((issue) => issue.severity === 'error');
+    const expected = referencePatch(fixture.text, fixes);
+    const patched = applyProofreadFixes(fixture.text, fixes);
+    check(
+      `patch matches reference — ${fixture.name}`,
+      patched.text === expected,
+      patched.text === expected ? '' : `got ${JSON.stringify(patched.text)}`,
+    );
+
+    const marks = buildProofreadHighlights(
+      fixture.text,
+      expected,
+      fixture.issues,
+    );
+    const joined = marks?.map((mark) => mark.text).join('') ?? null;
+    check(
+      `highlights re-join to the corrected text — ${fixture.name}`,
+      joined === expected,
+      joined === expected ? '' : `got ${JSON.stringify(joined)}`,
+    );
+  }
+
+  const marksOf = (fixture: Fixture): ReturnType<
+    typeof buildProofreadHighlights
+  > =>
+    buildProofreadHighlights(
+      fixture.text,
+      referencePatch(
+        fixture.text,
+        fixture.issues.filter((issue) => issue.severity === 'error'),
+      ),
+      fixture.issues,
+    );
+  const byName = (name: string): Fixture => {
+    const found = fixtures.find((fixture) => fixture.name === name);
+    if (!found) throw new Error(`missing fixture: ${name}`);
+    return found;
+  };
+
+  const repeated = marksOf(byName('repeated excerpt')) ?? [];
+  check(
+    'an excerpt occurring 3x yields 3 marks',
+    repeated.filter((mark) => mark.kind === 'fix').length === 3,
+  );
+
+  const swallowed = byName('swallowed by a longer fix');
+  const swallowedMarks = marksOf(swallowed) ?? [];
+  check(
+    'a swallowed fix yields no mark while staying listed',
+    swallowedMarks.filter((mark) => mark.kind === 'fix').length === 1 &&
+      swallowedMarks.every((mark) => mark.issue?.suggestion !== 'पाच') &&
+      swallowed.issues.length === 2,
+  );
+
+  const boundary = marksOf(byName('match across an insertion boundary')) ?? [];
+  check(
+    'text matched across an insertion is owned by the later fix',
+    boundary.length === 2 &&
+      boundary[0]?.text === 'प ' &&
+      boundary[0]?.issue?.suggestion === 'प र' &&
+      boundary[1]?.text === 'स' &&
+      boundary[1]?.issue?.suggestion === 'स',
+    JSON.stringify(boundary.map((mark) => [mark.text, mark.kind])),
+  );
+
+  const mixed = marksOf(byName('fixes plus advisories')) ?? [];
+  const styleMarks = mixed.filter((mark) => mark.kind === 'style');
+  check(
+    'a style excerpt inside a changed span is not marked; one in untouched text is',
+    styleMarks.length === 1 && styleMarks[0]?.text === 'मला',
+    JSON.stringify(mixed.map((mark) => [mark.text, mark.kind])),
+  );
+
+  const digits = byName('devanagari digits untouched');
+  check(
+    'digit runs survive the patch',
+    (referencePatch(digits.text, digits.issues).match(/[0-9०-९]+/g) ?? []).join(
+      ',',
+    ) === '५००',
+  );
+
+  check(
+    'a corrected text the replay cannot reproduce returns null',
+    buildProofreadHighlights('मूळ मजकूर', 'भलताच मजकूर', [
+      err('मूळ', 'मुळ'),
+    ]) === null,
+  );
+
+  check(
+    'leading/trailing whitespace on the input is handled like the engine',
+    buildProofreadHighlights('  चुक  ', 'चूक', [err('चुक', 'चूक')])
+      ?.map((mark) => mark.text)
+      .join('') === 'चूक',
+  );
+
+  console.log(failed === 0 ? '\nall checks passed' : `\n${failed} FAILED`);
+  if (failed > 0) process.exitCode = 1;
+}
+
 // Run directly to eyeball proofreading in isolation (needs OPENAI_API_KEY +
 // Supabase env for the style-reference retrieval):
 //
 //   tsx --env-file=../../.env src/generation/proof-read.ts
 //   tsx --env-file=../../.env src/generation/proof-read.ts "तुमचा मजकूर…"
 //
+// Or free, with no model call, to check the corrected-text patcher + highlight spans:
+//
+//   tsx src/generation/proof-read.ts --check
+//
 // The built-in sample plants errors on purpose: मुक्यमंत्री (spelling), शिंदें
 // (near-miss of a verified name), मुबंईत (spelling), मिळणार आहे (agreement).
 if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href &&
+  process.argv.includes('--check')
+) {
+  runOfflineChecks();
+} else if (
   process.argv[1] &&
   import.meta.url === pathToFileURL(process.argv[1]).href
 ) {

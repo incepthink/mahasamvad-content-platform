@@ -22,6 +22,12 @@
 // page picker in front of the officer the moment a scanned PDF is attached, instead of
 // several minutes and one form-submit later. Those documents therefore arrive at the intake
 // already extracted, as `documents` on the create request, and the job leaves them alone.
+//
+// Reading them here is optional, though — a scanned PDF can be OCR'd for minutes, and the
+// officer may not need to see the text before the article exists. "न वाचता ही पृष्ठे वापरा"
+// hands over the page SELECTION instead, and the intake job reads exactly those pages during
+// प्रक्रिया, which the run was going to sit through anyway. The pages still turn up in the
+// review step, editable, like any other source.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
@@ -104,7 +110,21 @@ function documentStorageKey(id: number): string {
 // The wire shape: a PDF travels as the pages the officer kept (with their corrections), a
 // DOCX/TXT as one string. `jobId` lets the API archive the original from the ephemeral job
 // it is still holding, rather than making the browser upload the same bytes twice.
+//
+// A scan the officer declined to wait for is the exception: it has no text yet, so it travels
+// as the page SELECTION alone and the intake job reads exactly those pages out of that archive.
+// That makes the archive load-bearing rather than a convenience — without it there is nothing
+// to read, which is why the API fails such a file instead of dropping it quietly.
 function toPreReadDocument(snapshot: DocumentSnapshot): DloPreReadDocument {
+  if (snapshot.pendingPages.length > 0) {
+    return {
+      jobId: snapshot.jobId,
+      name: snapshot.fileName,
+      kind: snapshot.kind,
+      ...(snapshot.pageCount !== null ? { pageCount: snapshot.pageCount } : {}),
+      pendingPages: [...snapshot.pendingPages],
+    };
+  }
   return {
     jobId: snapshot.jobId,
     name: snapshot.fileName,
@@ -585,10 +605,15 @@ export default function DloPage() {
 
   const audioFiles = files.map((file, index) => ({ file, index }));
 
-  // Every document that has actually been read. A slot whose file is still being picked, or
-  // whose pages are all unticked, contributes nothing and is simply not sent.
-  const readDocuments = documents.flatMap((slot) =>
-    slot.snapshot && slot.snapshot.pages.length > 0 ? [slot.snapshot] : [],
+  // Every document with something to send: pages that were read, or — for a scan the officer
+  // chose not to wait for — the pages they picked for the intake job to read. A slot whose file
+  // is still being picked, or whose pages are all unticked, contributes nothing either way and
+  // is simply not sent.
+  const attachedDocuments = documents.flatMap((slot) =>
+    slot.snapshot &&
+    (slot.snapshot.pages.length > 0 || slot.snapshot.pendingPages.length > 0)
+      ? [slot.snapshot]
+      : [],
   );
 
   const addDocumentSlot = () => {
@@ -622,7 +647,7 @@ export default function DloPage() {
     if (
       notes.trim().length === 0 &&
       files.length === 0 &&
-      readDocuments.length === 0
+      attachedDocuments.length === 0
     ) {
       setError(STR.dloNeedInput);
       return;
@@ -635,12 +660,14 @@ export default function DloPage() {
       form.append('category', category);
       form.append('heading', heading);
       for (const file of files) form.append('files', file, file.name);
-      // Documents were read here, at the input step, so they travel as text rather than as
-      // bytes — which is what stops a scanned PDF being OCR'd a second time by the job.
-      if (readDocuments.length > 0) {
+      // Documents were handled here, at the input step, so they travel as text rather than as
+      // bytes — which is what stops a scanned PDF being OCR'd a second time by the job. A scan
+      // the officer chose not to wait for travels as its page selection instead, and IS read by
+      // the job, once.
+      if (attachedDocuments.length > 0) {
         form.append(
           'documents',
-          JSON.stringify(readDocuments.map(toPreReadDocument)),
+          JSON.stringify(attachedDocuments.map(toPreReadDocument)),
         );
       }
       const id = await createDloIntake(form);
@@ -943,6 +970,10 @@ export default function DloPage() {
               accept={['pdf', 'docx', 'txt']}
               title={STR.dloDocsCardTitle}
               hint={STR.dloDocsIntakeHint}
+              // /dlo is the one surface that can read a scan later: the intake job it is about
+              // to start reads exactly the pages picked here, out of the archived original. So
+              // waiting for the OCR in this card is optional, not the price of going on.
+              allowDeferredRead
               onTextChange={(_text, snapshot) => {
                 setDocuments((prev) =>
                   // Every card reports once on mount with nothing loaded; rebuilding the

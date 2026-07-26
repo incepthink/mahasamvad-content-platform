@@ -56,6 +56,12 @@ export type DloIntakeFileEntry = Readonly<{
   // Which backend read this PDF — OCR text deserves more scrutiny in review, and
   // only a text-layer read is worth offering to re-read with OCR.
   pdfSource?: 'text-layer' | 'ocr';
+  // Pages the officer selected at the INPUT step but deliberately did not wait to have read
+  // ("न वाचता ही पृष्ठे वापरा"). The intake job's extract phase reads exactly these instead of
+  // probing the file, so the OCR wait happens inside प्रक्रिया rather than in front of the form.
+  // Only ever set on a 'pending' PDF, and gone once the file is read — extractPdfEntry rebuilds
+  // the entry rather than spreading it.
+  pendingPages?: readonly number[];
 }>;
 
 export type DloIntakeRow = Readonly<{

@@ -10,7 +10,7 @@ export {
   buildArticleScenePrompt,
   buildCmoCirclePhotoPrompt,
 } from './build-scene-prompt.js';
-export { generateImage, IMAGE_MODEL } from './openai-image.js';
+export { generateImage, editImage, IMAGE_MODEL } from './openai-image.js';
 export type { GenerateImageOptions } from './openai-image.js';
 export { loadBrandAssets, loadArticleAssets } from './assets.js';
 export type { BrandAssets } from './assets.js';
@@ -78,4 +78,14 @@ export {
   wavDurationSeconds,
   resolveFfmpeg,
   type NarrationSegment,
+  type SceneOverlay,
 } from './video/assemble.js';
+// The burned-in Marathi key point: Chromium typesets it (the only correct
+// Devanagari shaper here) and assembleSilentVideo composites it after Veo, so
+// no image or video model ever renders the text.
+export {
+  renderCaptionOverlay,
+  buildCaptionHtml,
+  CAPTION_FRAME_SIZE,
+  type CaptionAspect,
+} from './video/caption-overlay.js';
