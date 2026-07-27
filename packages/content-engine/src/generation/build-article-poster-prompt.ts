@@ -167,7 +167,8 @@ export function buildArticlePosterPrompt(
   const photoLines = input.hasPhoto
     ? [
         '',
-        `IMAGERY — a realistic documentary photograph, placed exactly where the composition above puts it, containing NO text, words, letters, numbers or logos, and never covering the headline: ${sceneBrief || 'a relevant Maharashtra public-welfare documentary scene'}`,
+        `IMAGERY — REQUIRED AND VISIBLY PROMINENT. Include a realistic documentary photograph occupying the substantial image area defined by the composition, containing NO text, words, letters, numbers or logos, and never covering the headline: ${sceneBrief || 'a relevant Maharashtra public-welfare documentary scene'}`,
+        'Do NOT replace the photograph with an empty colour field, gradient, texture, abstract shapes or extra blank space. If the composition wording permits either imagery or a plain field, choose IMAGERY.',
       ]
     : [
         '',
@@ -184,7 +185,8 @@ export function buildArticlePosterPrompt(
     // the spec says WHICH colours, the direction says HOW they are used.
     if (input.assignedPalette) {
       lines.push('', fmtColourSpec(input.assignedPalette), '', COLOUR_MANDATE);
-      if (input.artDirection) lines.push('', fmtArtDirection(input.artDirection));
+      if (input.artDirection)
+        lines.push('', fmtArtDirection(input.artDirection));
     } else if (input.artDirection) {
       lines.push('', fmtArtDirection(input.artDirection), '', COLOUR_MANDATE);
     } else {
@@ -194,7 +196,8 @@ export function buildArticlePosterPrompt(
       );
     }
 
-    if (input.assignedLayout) lines.push('', fmtComposition(input.assignedLayout));
+    if (input.assignedLayout)
+      lines.push('', fmtComposition(input.assignedLayout));
 
     lines.push(
       '',
@@ -241,10 +244,12 @@ export function buildArticlePosterPrompt(
     "KEEP THIS master template's layout EXACTLY as provided — the same composition, panel shapes, colour zones, decorative elements and arrangement THIS particular master has. Do NOT restructure it toward any other poster layout, do NOT add panels or shapes it does not have, and do NOT remove ones it does have.",
   ];
   if (layoutSummary) {
-    lines.push(`THIS master's structure, read from the template itself: ${layoutSummary}`);
+    lines.push(
+      `THIS master's structure, read from the template itself: ${layoutSummary}`,
+    );
   }
   lines.push(
-    "ERASE the branding chrome the master carries: any महासंवाद logo card in the top-left and any department footer band or social-handle strip along the bottom. Fill those areas by continuing the surrounding panel colour, photograph or background naturally, as if that branding was never there. Erasing that branding does NOT free up space — those areas remain RESERVED ZONES as defined above. Do NOT move, enlarge, re-centre or reflow the headline, the photograph, or any other element into the space the erased branding occupied; leave it as quiet empty background.",
+    'ERASE the branding chrome the master carries: any महासंवाद logo card in the top-left and any department footer band or social-handle strip along the bottom. Fill those areas by continuing the surrounding panel colour, photograph or background naturally, as if that branding was never there. Erasing that branding does NOT free up space — those areas remain RESERVED ZONES as defined above. Do NOT move, enlarge, re-centre or reflow the headline, the photograph, or any other element into the space the erased branding occupied; leave it as quiet empty background.',
     '',
     "REPLACE the master's placeholder content, inside the master's OWN existing zones:",
     '',
@@ -286,7 +291,8 @@ export function buildArticleFeedbackPrompt(
   input: BuildArticleFeedbackPromptInput,
 ): string {
   const imageFeedback = input.imageFeedback.trim();
-  if (imageFeedback.length === 0) throw new Error('No image feedback provided.');
+  if (imageFeedback.length === 0)
+    throw new Error('No image feedback provided.');
   const markerCount = Math.max(
     0,
     Math.min(3, Math.trunc(Number(input.markerCount) || 0)),
@@ -322,7 +328,10 @@ export function buildArticleFeedbackPrompt(
 // Prints the assembled 'fresh' prompt for two differently-assigned runs plus a scheme-locked one,
 // and asserts the properties the diversity fix and the scheme rule depend on. Pure string
 // assembly — no model call, no spend.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
   const HEADLINE = 'चार प्राथमिक आरोग्य केंद्रांचे उन्नतीकरण';
   const SCHEME = 'पुण्यश्लोक अहिल्यादेवी होळकर शेतकरी कर्जमुक्ती योजना २०२६';
   const SCENE =
@@ -348,8 +357,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       assignedLayout: layout,
       artDirection: {
         palette: '',
-        background: 'a flat ground with a single crisp colour block, no gradients',
-        composition: 'the headline set tight, left-aligned, with wide outer margins',
+        background:
+          'a flat ground with a single crisp colour block, no gradients',
+        composition:
+          'the headline set tight, left-aligned, with wide outer margins',
         mood: 'calm, clinical, reassuring',
         accents: 'thin rules and simple geometry, one emphasis only',
       },
@@ -366,7 +377,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       palette.hex.ink,
       palette.hex.accent,
     ]) {
-      if (!prompt.includes(hex)) failures.push(`${seed}: assigned hex ${hex} missing`);
+      if (!prompt.includes(hex))
+        failures.push(`${seed}: assigned hex ${hex} missing`);
     }
     // 2. The colour spec must LEAD — before any art direction.
     const specAt = prompt.indexOf('COLOUR SPECIFICATION');
@@ -387,41 +399,61 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       const hint = prompt.slice(structAt);
       for (const word of ['saffron', 'cream', 'maroon', 'orange']) {
         if (new RegExp(`\\b${word}\\b`, 'i').test(hint)) {
-          failures.push(`${seed}: master colour word "${word}" leaked into the hint`);
+          failures.push(
+            `${seed}: master colour word "${word}" leaked into the hint`,
+          );
         }
       }
     }
     // 5. Reserved zones stated first AND repeated as a final check.
-    if (prompt.indexOf('RESERVED ZONES') === -1) failures.push(`${seed}: no reserved zones`);
-    if (!prompt.includes('FINAL CHECK')) failures.push(`${seed}: no final check`);
+    if (prompt.indexOf('RESERVED ZONES') === -1)
+      failures.push(`${seed}: no reserved zones`);
+    if (!prompt.includes('FINAL CHECK'))
+      failures.push(`${seed}: no final check`);
     // 6. An ordinary run carries NO text lock.
-    if (prompt.includes('TEXT LOCK')) failures.push(`${seed}: unexpected TEXT LOCK`);
+    if (prompt.includes('TEXT LOCK'))
+      failures.push(`${seed}: unexpected TEXT LOCK`);
     // 7. The one-headline rule is stated.
     if (!prompt.includes('no other text of any kind')) {
       failures.push(`${seed}: the headline-only rule is missing`);
     }
-    // 8. The no-decoration rule is present (the fix for stray orange accents).
+    // 8. Photo-bearing article posters explicitly reject the empty colour-field failure mode.
+    if (
+      !prompt.includes('REQUIRED AND VISIBLY PROMINENT') ||
+      !prompt.includes(
+        'Do NOT replace the photograph with an empty colour field',
+      )
+    ) {
+      failures.push(`${seed}: the required-imagery guard is missing`);
+    }
+    // 9. The no-decoration rule is present (the fix for stray orange accents).
     if (!prompt.includes('CLEAN COMPOSITION')) {
-      failures.push(`${seed}: the CLEAN COMPOSITION / no-decoration rule is missing`);
+      failures.push(
+        `${seed}: the CLEAN COMPOSITION / no-decoration rule is missing`,
+      );
     }
     if (!prompt.includes('no dashed or dotted connector lines')) {
-      failures.push(`${seed}: the decoration ban does not enumerate the failure modes`);
+      failures.push(
+        `${seed}: the decoration ban does not enumerate the failure modes`,
+      );
     }
-    // 9. The accent is demoted to RESTRAINED — never the old general-purpose framing.
+    // 10. The accent is demoted to RESTRAINED — never the old general-purpose framing.
     if (!prompt.includes('Accent — OPTIONAL and RESTRAINED')) {
-      failures.push(`${seed}: the accent is not marked OPTIONAL and RESTRAINED`);
+      failures.push(
+        `${seed}: the accent is not marked OPTIONAL and RESTRAINED`,
+      );
     }
     if (prompt.includes('Accent for rules, shapes and emphasis')) {
       failures.push(`${seed}: the old general-purpose accent framing survived`);
     }
-    // 10. The art-direction block no longer feeds accent decoration back in. This seed passes
+    // 11. The art-direction block no longer feeds accent decoration back in. This seed passes
     //     an `accents` art-direction field, so a regression would surface here.
     if (prompt.includes('Panels / shapes / accents')) {
       failures.push(`${seed}: the art-direction accents line was re-emitted`);
     }
   }
 
-  // 11. A scheme-locked run: the lock appears, and the FULL name (year included) is in it.
+  // 12. A scheme-locked run: the lock appears, and the FULL name (year included) is in it.
   {
     const palette = pickPalette('scheme-run');
     const layout = pickArticleLayout('scheme-run', { hasPhoto: true });
@@ -435,16 +467,21 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       assignedLayout: layout,
       textLocked: true,
     });
-    console.log(`\n${'='.repeat(78)}\nscheme-locked run\n${'='.repeat(78)}\n${prompt}`);
-    if (!prompt.includes('TEXT LOCK')) failures.push('scheme run: no TEXT LOCK block');
-    if (!prompt.includes(SCHEME)) failures.push('scheme run: full scheme name missing');
-    if (!prompt.includes('२०२६')) failures.push('scheme run: the year was dropped');
+    console.log(
+      `\n${'='.repeat(78)}\nscheme-locked run\n${'='.repeat(78)}\n${prompt}`,
+    );
+    if (!prompt.includes('TEXT LOCK'))
+      failures.push('scheme run: no TEXT LOCK block');
+    if (!prompt.includes(SCHEME))
+      failures.push('scheme run: full scheme name missing');
+    if (!prompt.includes('२०२६'))
+      failures.push('scheme run: the year was dropped');
     if (!prompt.includes('no subtitle')) {
       failures.push('scheme run: the "nothing else" rule is missing');
     }
   }
 
-  // 12. A text-only run must forbid imagery and must never be handed a photo-required layout.
+  // 13. A text-only run must forbid imagery and must never be handed a photo-required layout.
   {
     const layout = pickArticleLayout('text-only', { hasPhoto: false });
     if (layout.photo === 'required') {
@@ -457,10 +494,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       assignedPalette: pickPalette('text-only'),
       assignedLayout: layout,
     });
-    if (!prompt.includes('TEXT-ONLY')) failures.push('text-only run: no imagery lock');
+    if (!prompt.includes('TEXT-ONLY'))
+      failures.push('text-only run: no imagery lock');
   }
 
-  // 13. onbrand without a master must fail loudly rather than edit nothing.
+  // 14. onbrand without a master must fail loudly rather than edit nothing.
   {
     let threw = false;
     try {
@@ -475,7 +513,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     if (!threw) failures.push('onbrand with no master URL did not throw');
   }
 
-  // 14. Feedback prompts: marker branch mentions the count and the erase rule; plain branch does
+  // 15. Feedback prompts: marker branch mentions the count and the erase rule; plain branch does
   //     not mention markers at all (the legacy prompt, byte-for-byte).
   {
     const marked = buildArticleFeedbackPrompt({
@@ -488,8 +526,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     if (!marked.includes('ERASE every red marker')) {
       failures.push('marker feedback prompt lost the erase rule');
     }
-    const plain = buildArticleFeedbackPrompt({ imageFeedback: 'शीर्षक मोठे करा' });
-    if (plain.includes('marker')) failures.push('plain feedback prompt mentions markers');
+    const plain = buildArticleFeedbackPrompt({
+      imageFeedback: 'शीर्षक मोठे करा',
+    });
+    if (plain.includes('marker'))
+      failures.push('plain feedback prompt mentions markers');
     if (!plain.includes('RESERVED ZONES')) {
       failures.push('plain feedback prompt lost the reserved zones');
     }

@@ -5,6 +5,7 @@
 import { z } from 'zod';
 import { PdfTextSourceSchema } from './document.js';
 import { NameDesignationsSchema } from './designations.js';
+import { STYLE_REFERENCE_MAX_CHARS } from './api.js';
 
 export const DloIntakeStatusSchema = z.enum([
   'queued',
@@ -136,6 +137,14 @@ export const DloGenerateRequestSchema = z.object({
   combinedText: z.string().trim().min(20).max(60_000),
   category: DloCategorySchema,
   heading: z.string().trim().max(200).optional(),
+  // LEGACY (see pointers.ts). Back when Pointers was a 5W1H checkbox list, these three
+  // fields carried the officer's approved inventory and became the article's completeness
+  // contract. /dlo no longer sends any of them — the article is written from combinedText —
+  // but they are deliberately KEPT and still honoured: zod objects are non-strict, so
+  // dropping them would silently STRIP rather than reject, and a browser tab still on the
+  // old bundle mid-deploy would lose its officer's selections without a trace. Stored rows
+  // that carry them stay fully supported on retry and article feedback.
+  //
   // Facts the officer kept in the Pointers step. The dimension is persisted with each
   // bullet so the article pipeline can reuse the approved inventory as its 5W1H scaffold.
   selectedFacts: z
@@ -162,12 +171,21 @@ export const DloGenerateRequestSchema = z.object({
     .optional(),
   // Facts the officer deselected in the Pointers step (their AI-summarized bullet text).
   // The generation pipeline is instructed to leave these out — see pointers.ts. Absent/empty
-  // ⇒ nothing excluded ⇒ the article the intake would have produced before this feature.
+  // ⇒ nothing excluded ⇒ the article the intake would have produced before this feature,
+  // which is what every new /dlo run now sends.
   excludedFacts: z.array(z.string().trim().min(1).max(500)).max(60).optional(),
   // Person → पदनाम pairs the officer approved in the "व्यक्ती व पदनाम" step — see
   // designations.ts. The designation is printed before the name on its first mention in the
   // article, and both translations inherit it. Absent/empty ⇒ every name prints bare.
   designations: NameDesignationsSchema.optional(),
+  // A published article the officer pasted as the STYLE reference — tier 1 of the simplified
+  // generator's reference hierarchy (see CreateGenerationRequestSchema.styleReference). Style
+  // and structure only; never a factual source. Absent/empty ⇒ retrieval, then no reference.
+  styleReference: z
+    .string()
+    .trim()
+    .max(STYLE_REFERENCE_MAX_CHARS)
+    .optional(),
 });
 export type DloGenerateRequest = z.infer<typeof DloGenerateRequestSchema>;
 

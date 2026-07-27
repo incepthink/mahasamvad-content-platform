@@ -1,11 +1,11 @@
 // Per-scene explainer-video script from a user note (gate 1 of the video
 // pipeline). The scene BREAKDOWN comes first from the planner
-// (plan-video-scenes.ts — citizen-first beats, scene count, shot hint); this
-// module then writes narration/visual briefs AGAINST that plan (one JSON call
-// + one repair — the generate-copy.ts pattern), and runs ONE bounded coverage
-// round: a check listing plan beats the narrations fail to convey, and if any,
-// ONE repair of only the flagged scenes. Accepted either way — gate 1's human
-// review is the real gate, this pass just catches the obvious drops.
+// (plan-video-scenes.ts), which authors independent voice and visual tracks.
+// This module writes ONLY narration, overlays and the shared film look against
+// that plan (one JSON call + one repair — the generate-copy.ts pattern), and
+// runs ONE bounded voice-coverage round. It cannot rewrite the storyboard from
+// the narration: that separation is what stops detailed sentences turning
+// into crowded, animation-hostile frames.
 //
 // AUDIO LEADS: the narration is budgeted against the project's TOTAL time
 // (VIDEO_TOTAL_SECONDS), distributed across scenes by importance, with only a
@@ -14,10 +14,8 @@
 // a window.
 //
 // Guardrails mirror generate-article.ts: the note is the SOLE factual source
-// (never invent names/dates/amounts/designations/schemes/locations), the RAG
-// exemplar steers tone/structure only, and every scene's visual brief must be
-// stylized-3D-animation, text-free AND speech-free — nobody shown talking,
-// because narration carries the words and video models glitch on mouths.
+// (never invent names/dates/amounts/designations/schemes/locations), while the
+// RAG exemplar steers tone/structure only.
 
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
@@ -48,10 +46,6 @@ import {
 
 const SceneSchema = z.object({
   narration: z.string().trim().min(1).max(VIDEO_NARRATION_MAX_CHARS),
-  visual_brief: z.string().trim().min(1).max(600),
-  // The SAME shot at its end state — what the second reviewed frame shows and
-  // what Veo interpolates toward. Same location/people/light by rule.
-  end_visual_brief: z.string().trim().min(1).max(600),
   // The on-screen line. Optional AND allowed to be empty: a scene with no hard
   // number or name in it should say so rather than invent something to display,
   // and an old draft has no such field at all.
@@ -108,7 +102,7 @@ export function keyPointIsGrounded(keyPoint: string, note: string): boolean {
 export type VideoScriptScene = Readonly<{
   narration: string;
   visualBrief: string;
-  endVisualBrief: string;
+  endVisualBrief?: string;
   // Short Marathi line for the burned-in overlay. Empty when the model had no
   // hard detail to show, or when the digit check rejected what it proposed.
   keyPoint: string;
@@ -141,19 +135,21 @@ function buildSystemPrompt(
   const totalChars = videoNarrationBudgetChars(bucket);
   return [
     'तुम्ही महाराष्ट्र शासनाच्या माहिती व जनसंपर्क महासंचालनालयासाठी (DGIPR / महासंवाद)',
-    'माहिती समजावून सांगणाऱ्या stylized 3D animation चित्रपट-शैलीतील व्हिडिओंसाठी',
+    'माहिती समजावून सांगणाऱ्या वास्तव चित्रीकरण असलेल्या (live-action) व्हिडिओंसाठी',
     'दृश्यनिहाय संहिता (script) लिहिणारे अनुभवी मराठी संपादक आहात.',
     '',
-    'तुम्हाला एक अधिकृत टिपणी आणि दृश्य-आराखडा (PLAN) दिला जाईल. PLAN मधील प्रत्येक',
-    'दृश्यासाठी निवेदन व दृश्यवर्णने लिहून वैध JSON object तयार करा:',
-    '{ "title": "...", "style": "...", "scenes": [ { "narration": "...",',
-    '  "key_point": "...", "visual_brief": "...", "end_visual_brief": "..." } ] }',
+    'तुम्हाला एक अधिकृत टिपणी आणि दोन स्वतंत्र tracks असलेला आराखडा (PLAN) दिला',
+    'जाईल. PLAN मधील voice track साठी निवेदन लिहा. Visual track PLAN मध्ये आधीच',
+    'दिग्दर्शित आहे; तो narration शी जुळवण्यासाठी बदलायचा नाही. वैध JSON object:',
+    '{ "title": "...", "style": "...",',
+    '  "scenes": [ { "narration": "...", "key_point": "..." } ] }',
     '',
     'कठोर नियम:',
     '1. टिपणी हाच तथ्यांचा एकमेव स्रोत आहे. टिपणीत नसलेली नावे, तारखा, रक्कम, पदनामे,',
     '   योजना, ठिकाणे, आकडे, संस्था, निर्णय किंवा दावे तयार करू नका.',
-    `2. scenes मध्ये नेमकी ${sceneCount} दृश्ये द्या — PLAN मधील दृश्यांच्याच क्रमाने,`,
-    '   प्रत्येक दृश्यात त्याच्या beat मधील माहिती पूर्णपणे पोहोचवा.',
+    `2. scenes मध्ये नेमकी ${sceneCount} दृश्ये द्या — PLAN मधील दृश्यांच्याच क्रमाने.`,
+    '   प्रत्येक narration ने त्याचा VOICE beat पोहोचवावा. PLAN मधील VISUAL माहिती',
+    '   output मध्ये कॉपी, सारांशित किंवा पुन्हा लिहू नका.',
     '3. narration: फक्त मराठीत, देवनागरी लिपीत. सर्व दृश्यांचे निवेदन मिळून सुमारे',
     `   ${totalSeconds} सेकंद असावे — ~${totalWords} शब्द / ~${totalChars} अक्षरे (BUDGET ब्लॉक पाहा).`,
     '   प्रत्येक दृश्याला महत्त्वानुसार वेळ द्या — महत्त्वाच्या तथ्याला जास्त, दुय्यमाला',
@@ -170,42 +166,21 @@ function buildSystemPrompt(
     '   बसणार नाही ते वगळा. काय ठेवायचे याचा क्रम — मुख्य मुद्दा, मग नागरिकाला थेट',
     '   उपयोगी तपशील (फायदा, पात्रता, मुदत, दर, कुठे जायचे), मग उरलेले. तपशील',
     '   ठासून भरलेले घाईचे निवेदन हे मोजके पण स्पष्ट निवेदनापेक्षा वाईट असते.',
-    '4. visual_brief: इंग्रजीत, त्या दृश्याच्या stylized 3D animation चित्रपटातील',
-    '   (Pixar/DreamWorks सारख्या) पहिल्या क्षणाचे वर्णन — PLAN मधील shot सूचनेशी सुसंगत.',
-    '   (क) या दृश्याच्या आधारातली ठोस गोष्टच दाखवा: नेमके ठिकाण, नेमकी कृती, नेमक्या',
-    '   वस्तू व माणसे नावानिशी वर्णन करा. "a hospital", "people walking", "an office"',
-    '   अशी मोघम वातावरणदर्शक दृश्ये लिहू नका — आवाज बंद करून पाहणाऱ्यालाही दृश्य',
-    '   कशाबद्दल आहे ते कळले पाहिजे. दृश्य पुरेसे जवळून घ्या.',
-    '   (ख) चित्रीकरण महाराष्ट्रात, भारतात होते आहे. ठिकाण, इमारती, वाहने, रस्ते,',
-    '   कार्यालये भारतीय असतील आणि दिसणारी माणसेही भारतीयच — त्यांचा पेहराव',
-    '   (साडी, सलवार-कमीज, कुर्ता, शर्ट-पॅन्ट, गणवेश) महाराष्ट्रात जसा असतो तसा.',
-    '   पाश्चात्त्य किंवा परदेशी माणसे व ठिकाणे कधीही लिहू नका.',
-    '   (ग) हा stylized 3D animation चित्रपट आहे — खरे चित्रीकरण (live-action) नाही,',
-    '   flat 2D चित्र नाही. कोणतीही व्यक्ती बोलताना किंवा कॅमेऱ्याशी संवाद साधताना',
-    '   दाखवू नका — निवेदन शब्द वाहून नेते. कोणताही मजकूर, अक्षरे, आकडे, पाट्या,',
-    '   बॅनर, लोगो दाखवू नका.',
-    '   end_visual_brief: त्याच दृश्याचा शेवटचा क्षण — तेच ठिकाण, त्याच व्यक्ती, तोच',
-    '   प्रकाश; बदल फक्त त्या दृश्याच्या काही सेकंदांत घडलेल्या क्रियेचा असावा: कृती पुढे सरकली किंवा पूर्ण',
-    '   झाली (अर्ज शिक्का मारून मिळाला, रुग्ण तपासणी यंत्रात गेला, रांग सरली, वस्तू',
-    '   हाती पडली). नुसती कॅमेऱ्याची हालचाल हा बदल नव्हे — त्यातून प्रेक्षकाला काहीच',
-    '   नवीन कळत नाही. नवीन ठिकाण किंवा नवीन दृश्य लिहू नका — व्हिडिओ पहिल्या',
-    '   फ्रेमपासून शेवटच्या फ्रेमपर्यंत एकाच shot मध्ये सलग जाणार आहे.',
-    `5. key_point: मराठीत, जास्तीत जास्त ${VIDEO_KEY_POINT_MAX_CHARS} अक्षरांची एकच ओळ — या दृश्यातील`,
+    `4. key_point: मराठीत, जास्तीत जास्त ${VIDEO_KEY_POINT_MAX_CHARS} अक्षरांची एकच ओळ — या दृश्यातील`,
     '   सर्वात उपयोगी ठोस तपशील पडद्यावर लिहिण्यासाठी (रक्कम, अंतिम मुदत, संख्या, दर,',
     '   योजनेचे नाव, ठिकाण). निवेदनाचा सारांश नव्हे, वाक्य नव्हे — नजरेत भरणारा तुकडा',
     '   (उदा. "२ लाखांपर्यंत कर्जमाफी", "अर्जाची मुदत: ३१ ऑगस्ट", "४ महापालिका रुग्णालये").',
     '   आकडे व नावे टिपणीत आहेत तशीच लिहा; टिपणीत नसलेला आकडा कधीही लिहू नका.',
     '   या दृश्यात असा ठोस तपशील नसेल तर रिकामी ("") ठेवा — भरण्यासाठी काहीतरी लिहू नका.',
-    '6. style: इंग्रजीत एक परिच्छेद — संपूर्ण व्हिडिओसाठी एकच stylized 3D animation',
-    '   शैली (Pixar/DreamWorks सारखा चित्रपट), आणि त्यात ठिकाण व पात्रे स्पष्टपणे',
-    '   सांगा: Maharashtra, India; Marathi-speaking Indian characters. त्यासोबत',
-    '   प्रकाशयोजना, रंगसंगती, framing (उदा. stylized 3D animated film, soft',
-    '   cinematic lighting, warm earthy palette, expressive characters).',
+    '5. style: इंग्रजीत एक परिच्छेद — संपूर्ण व्हिडिओसाठी एकच वास्तव चित्रीकरण शैली,',
+    '   आणि त्यात चित्रीकरणाचे ठिकाण व माणसे स्पष्टपणे सांगा: Maharashtra, India;',
+    '   Marathi-speaking Indian people. त्यासोबत प्रकाशयोजना, रंगसंगती, lens/framing',
+    '   (उदा. cinematic documentary realism, natural daylight, warm earthy palette).',
     '   ही शैली विषयाला साजेशी निवडा; ती प्रत्येक दृश्याला सारखीच लागू होईल.',
-    '   photoreal/live-action किंवा flat 2D/anime शैली कधीही वापरू नका.',
-    '7. भाषा शासकीय, नागरिकाभिमुख, संयत आणि विश्वासार्ह ठेवा. अतिनाट्यमय किंवा',
+    '   illustration/animation/cartoon शैली कधीही वापरू नका.',
+    '6. भाषा शासकीय, नागरिकाभिमुख, संयत आणि विश्वासार्ह ठेवा. अतिनाट्यमय किंवा',
     '   जाहिरातीसारखी भाषा वापरू नका.',
-    '8. REFERENCE फक्त शैली/रचनेसाठी आहे; त्यातील तथ्ये वापरू नका.',
+    '7. REFERENCE फक्त शैली/रचनेसाठी आहे; त्यातील तथ्ये वापरू नका.',
     '',
     'फक्त वैध JSON object परत करा. markdown, code fence, स्पष्टीकरण किंवा अतिरिक्त मजकूर देऊ नका.',
   ].join('\n');
@@ -222,10 +197,19 @@ function buildPlanBlock(
 ): string {
   const lines = plan.scenes.map(
     (scene, index) =>
-      `दृश्य ${index + 1}: beat: ${scene.beat} | shot: ${scene.shotHint}` +
+      `दृश्य ${index + 1}:` +
+      `\n  VOICE beat: ${scene.beat}` +
       // The planner's verified verbatim anchor: the writer expands THIS, so a
       // narration cannot drift off the fact the beat was grounded in.
-      `\n  आधार (टिपणीतील मजकूर): ${scene.sourceQuote}`,
+      `\n  VOICE आधार (टिपणीतील मजकूर): ${scene.sourceQuote}` +
+      // Read-only context. The script schema has no visual fields, so even a
+      // model tempted to sync the tracks has nowhere to rewrite the shot.
+      `\n  VISUAL (बदलू नका): ${scene.visualBrief}` +
+      (scene.endVisualBrief
+        ? ` → ${scene.endVisualBrief}`
+        : ' → start-frame-only motion') +
+      ` | ${scene.shotHint}` +
+      `\n  VISUAL आधार: ${scene.visualSourceQuote}`,
   );
   return [
     '<PLAN purpose="scene_plan_follow_exactly">',
@@ -379,9 +363,10 @@ async function repairUncoveredScenes(
             '</UNCOVERED>',
             '',
             '<TASK>',
-            'UNCOVERED मधील दृश्यांचे narration (गरज असल्यास visual_brief व end_visual_brief) असे पुन्हा लिहा',
-            'की beat मधील माहिती पोहोचेल — फक्त टिपणीतील तथ्ये वापरून. इतर सर्व दृश्ये,',
-            'title आणि style जशीच्या तशी ठेवा. संपूर्ण script चा वैध JSON object परत करा.',
+            'UNCOVERED मधील दृश्यांचे narration असे पुन्हा लिहा की VOICE beat मधील',
+            'माहिती पोहोचेल — फक्त टिपणीतील तथ्ये वापरून. VISUAL track बदलू नका; तो',
+            'output schema चा भागही नाही. इतर सर्व दृश्ये, title आणि style जशीच्या तशी',
+            'ठेवा. संपूर्ण script चा वैध JSON object परत करा.',
             '</TASK>',
           ].join('\n'),
         },
@@ -392,10 +377,15 @@ async function repairUncoveredScenes(
         responseFormat: 'json_object',
       },
     );
-    const result = scriptSchemaFor(plan.scenes.length).safeParse(parseJson(raw));
+    const result = scriptSchemaFor(plan.scenes.length).safeParse(
+      parseJson(raw),
+    );
     return result.success ? result.data : script;
   } catch (error) {
-    console.warn('[video-script] coverage repair failed (keeping draft):', error);
+    console.warn(
+      '[video-script] coverage repair failed (keeping draft):',
+      error,
+    );
     return script;
   }
 }
@@ -542,8 +532,10 @@ export async function generateVideoScript(
     style: script.style,
     scenes: script.scenes.map((scene, index) => ({
       narration: scene.narration,
-      visualBrief: scene.visual_brief,
-      endVisualBrief: scene.end_visual_brief,
+      visualBrief: plan.scenes[index]!.visualBrief,
+      ...(plan.scenes[index]!.endVisualBrief
+        ? { endVisualBrief: plan.scenes[index]!.endVisualBrief }
+        : {}),
       keyPoint: keyPointOf(scene.key_point, note),
       beat: plan.scenes[index]!.beat,
       shotHint: plan.scenes[index]!.shotHint,
@@ -604,7 +596,10 @@ if (
     'one bad number among good ones drops the whole line',
     keyPointOf('४ रुग्णालये, ९ जिल्हे', note) === '',
   );
-  check('whitespace is trimmed', keyPointOf('  मोफत सेवा  ', note) === 'मोफत सेवा');
+  check(
+    'whitespace is trimmed',
+    keyPointOf('  मोफत सेवा  ', note) === 'मोफत सेवा',
+  );
   // The guard only ever DROPS: it must never rewrite a number it accepted.
   check(
     'an accepted key point is returned byte-for-byte',

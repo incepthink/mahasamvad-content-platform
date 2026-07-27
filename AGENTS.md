@@ -1748,6 +1748,11 @@ public-information poster'`, `'authentic skin, fabric and material textures'` in
   `failed` with an actionable Marathi message instead of dropping a whole source silently), and
   the extract loop now skips `'failed'` entries as well as `'done'` ones — that status can only
   have come from the route, and re-probing would fail again with a worse message.
+  **Amended 2026-07-27:** deferral is now the default rather than an opt-in button. While the
+  server job is genuinely in `status: 'selecting'`, the ticked pages themselves are the live
+  `pendingPages` handover; **`न वाचता ही पृष्ठे वापरा` is gone**. `निवडलेली पृष्ठे वाचा` stays
+  secondary for read-now and becomes primary when re-picking an already-read scan, so paid text
+  is never silently discarded and re-OCR'd.
   Verified 2026-07-26, all free — typecheck 7/7 green, lint clean on all nine touched files
   (prettier's complaints on six of them are pre-existing at HEAD, confirmed per file); a live API
   E2E driving a **born-digital** PDF through the deferred path, which exercises schema → route →
@@ -2010,6 +2015,296 @@ public-information poster'`, `'authentic skin, fabric and material textures'` in
   `OPENAI_VIDEO_MODEL`. Rollback for the model is env-only; the style and the audio-led flow
   are code. No migration, no n8n; deploy is API + web after rebuilding `@dgipr/schemas` →
   `@dgipr/database` → `@dgipr/poster-renderer` → `@dgipr/content-engine` dists.
+
+- **Realistic video look restored** (2026-07-26, no migration): this supersedes only the
+  **stylized-3D visual-style half** of the audio-led milestone above. Variable clip lengths,
+  start+end-frame interpolation, Kling/Veo and Nano Banana/OpenAI provider seams, narration
+  timing, caption overlays, review gates and storage lineage are unchanged. The earlier
+  realism implementation was recovered and reapplied: `REALISM_RULE` again demands a
+  photorealistic live-action photograph with real people/places, natural light and
+  true-to-life colour; the clip negative prompt again rejects cartoon/illustration/anime/
+  3D-render/CGI output while continuing to reject writing, talking and non-Maharashtra
+  settings. The planner and script writer again author live-action shot hints, photoreal
+  start/end briefs and one cinematic-documentary-realism style paragraph. Both paid-provider
+  CLI harness prompts also say realistic live-action. No migration, no n8n; deploy is API
+  only for runtime behavior (rebuild `@dgipr/content-engine` first).
+
+- **Creative and Social: a two-level output picker and a caption-only lane**
+  (2026-07-26, no migration): the media room offered one flat row of three cards
+  (पोस्टर / ट्विटर पोस्ट / फेसबुक पोस्ट) plus a "कॅप्शनही तयार करा" checkbox that appeared
+  only on the two social ones. That conflated two independent questions — *what artifact
+  am I making* and *what platform is it for* — and it had no way at all to ask for the
+  thing officers actually wanted often enough to name it: **a caption with no poster.**
+  The sidebar label becomes **Creative and Social**, the one English entry in a
+  Marathi-first nav (by request; `navNew` is still the only source of that string, so
+  `AppSidebar` needed no edit). `काय तयार करायचे?` splits: level 1 is **पोस्टर** (default)
+  or **कॅप्शन**, level 2 is **लेख / ट्विटर / फेसबुक** under पोस्टर and **ट्विटर / फेसबुक**
+  under कॅप्शन.
+  - **The whole feature needed no migration, and that is the interesting part.**
+    `generations.output_type` has existed since 0002 with `check (… in ('article','poster',
+'both'))`, and on the article lane `'article'` has always meant "skip the poster phase"
+    (`runner.ts:408,470`). A social caption is stored in the **`article` column** — the
+    social lane's own convention — so `outputType: 'article'` on a social run means exactly
+    the same sentence: **this run renders no poster.** One meaning, both lanes, an existing
+    CHECK value, and it is already on both payloads.
+  - **Caption-only is read off the ROW, not passed as a job option — unlike
+    `generateCaption`, deliberately.** `generateCaption` can be a job parameter precisely
+    because a re-run can infer it (`detail.article !== null`). Caption-only has **no** sound
+    inference: a null `posterPath` on a completed social run cannot distinguish "never
+    wanted a poster" from "the render failed", so an option would be silently lost on the
+    first retry and the retry would buy a poster nobody asked for. `startSocialPostJob` now
+    opens with `const captionOnly = row.outputType === 'article'`, skips
+    `renderAndStoreSocialPoster` entirely, and writes the caption with **no `postType`** —
+    which `startGenerateCaptionJob` has always done, and which is the proof a caption needs
+    neither a poster nor a classification. A caption-only run is therefore ONE chat call:
+    no classify, no master selection, no image, no n8n. Both retry paths
+    (`[id]/page.tsx:42`, `NextActions.tsx:417`) already forward `detail.outputType`, so a
+    caption-only retry and edit-note rerun stay caption-only for free.
+  - **The poster+caption combination is deliberately KEPT**, as the toggle under
+    पोस्टर → ट्विटर/फेसबुक. Dropping it would have made that unreachable from this page
+    while `NextActions.CreateSocialBlock` still offered it — the two create surfaces must
+    not disagree about what a social run can be. Under कॅप्शन the toggle is not rendered at
+    all (a tautology there), and `generateCaption` is sent `captionOnly || wantCaption`.
+  - **`category` became derived, not state**: level-2 values ARE `Category` values, so the
+    derivation is a bare ternary with no mapping table. `'article'` is deliberately never a
+    level-2 value — it would mean "the लेख poster" in one variable and "no poster at all" in
+    `outputType` forty lines away. The pin-reset `useEffect` needed no change (`category` is
+    still a string primitive compared with `Object.is`), and `captionOnly` is deliberately
+    NOT in its deps: a पोस्टर→ट्विटर pin should survive a look at the कॅप्शन branch, and the
+    pin is instead simply not *sent* on a caption-only run.
+  - **Busy gating across two levels:** the level-1 पोस्टर card is never `disabled` — its
+    children straddle both lanes, so a single flag would be a lie whenever one lane is free.
+    कॅप्शन takes `hasActiveSocialTask` (both its children are social) and the existing
+    per-lane rule moves to the level-2 cards, where it collapses with no special case. A
+    selected card that becomes disabled is left selected: `submit()` re-checks both flags,
+    and moving the choice under the user's cursor would be worse. `TasksProvider`'s
+    one-social-task-at-a-time gate is kept as-is even though a caption-only run touches no
+    n8n — carving out an exception would change that rule in both directions for a ~15s job.
+  - **Three things that assumed a completed social run has a poster**, all found by walking
+    the readers rather than by running it: `TasksMenu` would have parked a *completed*
+    caption-only run behind its grey `task-thumb--pending` placeholder forever (now gated on
+    `outputType !== 'article'`); `SocialPostView` headed the card "तयार झालेले पोस्टर" (now
+    falls back to कॅप्शन); and `STEP_LABELS.caption` said "ट्विटर कॅप्शन…" — always wrong for
+    facebook, but on a caption-only run it is the ONLY progress line the officer ever sees.
+    Everything else degrades correctly untouched: the poster frame, `canPublish`, the
+    history card, `ProgressSteps` (unreachable for social), a *failed* caption-only run.
+  - **Guards.** The create route's pin check keyed off `!isSocialCategory && outputType ===
+'article'`; the category test is now noise and it had a hole, so it becomes one
+    `rendersPoster` flag covering both `referenceImageId` and `referenceTypeId`. One
+    `superRefine` clause rejects `social + 'article' + generateCaption !== true` (a request
+    asking for nothing at all). The publish route already refused for want of a poster, but
+    said "yet" — now a Marathi 409 that says a caption-only post cannot be published,
+    permanently, because both X and the Page endpoint need the poster bytes/URL.
+    Caption-only is **terminal for posters** by design (`/generations/:id/poster` rejects
+    social, `/poster/regenerate` needs a `posterPath`); the route to a poster is a fresh run
+    from the same note via the cross-format fold — noted in the job's header comment so
+    nobody later "fixes" those guards.
+  - CSS is three rules (`.output-sublevel`) reusing `.ref-picker-inline`'s rule-and-gap
+    idiom for the same subordinate-block relationship and `.segmented`'s denser padding; the
+    sub-cards drop the icon, which is what gives the two rows their hierarchy for free (the
+    `/video` pickers' precedent) and is why `Bird`/`ThumbsUp` left the import.
+  Verified 2026-07-26, all free: workspace typecheck **7/7 green**; lint clean on every
+  touched file (the only failures are the pre-existing untracked
+  `content-engine/src/intake/text-file.ts` irregular-whitespace error and two
+  poster-template warnings); prettier clean on all eight touched files, with the two API
+  files confirmed **already** unformatted at HEAD and every remaining complaint outside my
+  hunks. **Left for a real run** (one cheap chat call, no image spend): the कॅप्शन → ट्विटर
+  E2E asserting `output_type='article'` / `poster_path` null / caption present, no poster
+  frame or publish button on the detail page, the tasks panel showing no pending thumb, and
+  a retry staying caption-only. **No migration, no n8n**; deploy is `@dgipr/schemas` dist →
+  API → web.
+
+- **A simplified single-call article baseline, on gpt-5.6-sol** (2026-07-27, migration 0035):
+  the article pipeline had grown to as many as **14 + N** sequential `gpt-5.6-terra` calls — 5W1H
+  extraction, an editorial brief, a tier audit, section-by-section drafting for long scheme notes,
+  a bounded coverage-revision loop, a faithfulness check and repair, and a scheme-only
+  traceability appendix. Measured baseline: ~16 calls, ~275 s, ~$0.29 per article. The stages were
+  added to raise factual completeness and they do, but several of them **re-read and rewrite the
+  finished draft**, and that is what made the prose read mechanically: by the time an officer sees
+  it, the article has been argued with two to four times by graders optimising for coverage rather
+  than for voice. With no stored officer edits yet, a learning system cannot be built — so the
+  right move is a much simpler, higher-quality BASELINE first.
+  `ARTICLE_GENERATION_MODE` (**default `simple`**) now forks the article lane in one place,
+  `articleGenerationMode()` in `apps/api/src/jobs/runner.ts`, beside the `ARTICLE_POSTER_MODE`
+  precedent. `simple` is `selectStyleReference` (≤1 embedding) → **one** `chatComplete` →
+  `applyDesignations`. `full` restores the old pipeline, whose every module —
+  `generate-article.ts`, `extract-5w1h.ts`, `editorial-brief.ts`, `verify-coverage.ts`,
+  `polish-article.ts`, `news-exemplar.ts` — is **byte-for-byte untouched**. Rollback is that one
+  env line plus a restart; nothing migrates and nothing is destroyed.
+  - **The editorial specification is a versioned artifact**
+    (`generation/simple-article-prompt.ts`, `SIMPLE_ARTICLE_PROMPT_VERSION`), split into a system
+    message of DGIPR rules and a user message of filled INPUTS. The split does not weaken the
+    factual-source boundaries: the FACTUAL AUTHORITY rules reference input slots by NAME and those
+    names are stable headings. Two renderer decisions are load-bearing. Every optional slot is
+    **omitted when empty**, never rendered blank — the spec forbids printing an unfilled
+    placeholder, and a heading with nothing under it is exactly the shape that invites a model to
+    fill it in. And the **dateline is RENDERED, not substituted**: with a verified location and
+    date it becomes a concrete line, with either missing only the fallback instruction survives.
+    Blind substitution would emit `, दि.  :` or leak a literal `{{location}}` into a published
+    government article. `location`/`date` are deliberately unsupplied in v1 — nothing trusted
+    collects them, and no call was added to infer them.
+  - **Reference selection gained the confidence fallback it never had.**
+    `generation/select-style-reference.ts`: officer paste → retrieval **above
+    `ARTICLE_STYLE_REFERENCE_MIN_SIMILARITY`** → nothing. The floor matters because retrieval had
+    **no threshold anywhere** — `pickBestMatch` returns the argmax unconditionally, so whenever
+    the corpus held nothing relevant an unrelated article still became the exemplar, and the model
+    is told to follow its structure and terminology. That is worse than no exemplar. The default
+    (0.35) is a starting value and is **env-tunable because it must be calibrated**, not guessed:
+    `retrieve:test` prints the distribution and every run records what it matched. The reference
+    is also passed **whole** rather than `slice(0, 1500)` — the spec asks the model to study
+    paragraph sequencing and how a piece concludes, both of which a head truncation removes.
+    `NEWS_STYLE_EXEMPLAR` is not used here: it is a fourth tier the hierarchy does not have.
+  - **Model: `ARTICLE_MODEL` (`OPENAI_ARTICLE_MODEL`, default `gpt-5.6-sol`)**, passed explicitly
+    at the one call site so no other caller's default moves — the `VIDEO_CHAT_MODEL` precedent.
+    ~2× terra per token but replacing up to fourteen calls, so an article gets cheaper. No pricing
+    change was needed (`pricing.ts` already carries a sol row). Its companion
+    `OPENAI_ARTICLE_REASONING_EFFORT` (default `medium`) is **not cosmetic**: with the graders
+    gone, the spec's SILENT FINAL CHECK block is the only verification left and it runs in the
+    reasoning stage.
+  - **Migration 0035** adds `generations.style_reference` (insert-only — `startGenerationJob`
+    re-reads everything from the row, so a job parameter would be lost on the first retry and the
+    retry would quietly re-style the article) and `style_reference_meta` (patchable; which tier
+    fired, at what similarity, under which prompt version). The meta write is a **separate
+    best-effort update** after the article write, so an un-applied 0035 costs the officer tier and
+    the telemetry rather than a paid article — the 0028 principle.
+  - **UI: /dlo only, and that is from the code, not a preference.** The media room always submits
+    `providedArticle: true` — its note IS the finished article and the generator never runs there
+    — so a style-reference field would be dead data on every media-room run. `/dlo` is the one
+    surface that turns source material into prose. `StyleReferenceField` is shown in both its
+    steps; the create route additionally refuses to store the column on a social or
+    `providedArticle` run.
+  - **Nothing officer-approved and nothing deterministic was dropped**: `applyDesignations` (zero
+    calls, the pipeline's only structural name guarantee), `selectedFacts`, `statements`,
+    `excludedFacts` and `nameDesignations` all reach the one prompt; the note stays the sole
+    factual authority; status/step, cost metering and every downstream feature are unchanged.
+    `factCheck` is `null` on this path (the appendix was its own full pass over the finished
+    article) and `fiveWOneH` is **null rather than an empty scaffold** unless the run carries /dlo
+    pointers — `[id]/page.tsx:168` gates that card on truthiness, so an all-empty object would
+    render six "टिपणीत नाही" placeholder rows.
+  - **One consistency fix found by walking the readers:** `reviseArticle` rebuilt the appendix for
+    every scheme run, so a simple-mode article would have *sprouted* a तथ्य-तपासणी fold — and
+    bought an extra model pass — on its first feedback round. It gained a `withFactCheck`
+    parameter (default `true`, so full mode is byte-for-byte unchanged) fed by `rowHasFactCheck(row)`,
+    which keys off the STORED article rather than the current mode so a row keeps behaving like
+    itself no matter which way the flag is later flipped. The feedback path otherwise keeps the
+    full machinery **deliberately** — it is the officer-in-the-loop path, and simplifying it is a
+    separate, separately-verifiable change.
+  - **Evaluation is built in**: `article:compare` runs BOTH pipelines on one note and prints
+    wall-clock, chat calls, measured cost, length, and `findUnsupportedClaims` run as a
+    **read-only judge** over each output. Simple mode removes the faithfulness *repair*, so that
+    count is the evidence the removal is safe; the harness warns explicitly when simple mode's
+    count is worse, and the fix is then the specification rather than restoring the loop.
+  Verified 2026-07-27, all free: workspace typecheck **7/7 green**; lint clean on all 14 touched
+  files; 50 prompt assertions (`tsx src/generation/simple-article-prompt.ts` — every rule block
+  present, no `{{` survives in any slot combination, the dateline degrades correctly with either
+  half missing, per-category targets and ranges, empty optionals omitted, officer-approved blocks
+  and their task rules reaching the prompt, and a style reference alone never opening ADDITIONAL
+  VERIFIED INFORMATION) and 22 resolver assertions (`tsx src/generation/select-style-reference.ts`
+  — tier order, fragment fall-through, the floor accepting/rejecting/boundary, telemetry carried
+  through, the 3000-char article NOT truncated to 1500, and every env-parse fallback).
+  **Left for a real run** (spend): the `article:compare` sweep over ~6 real notes incl. a long DLO
+  transcript and a thin note, the `retrieve:test` calibration of the similarity floor, and a /dlo
+  E2E (article renders, PDF exports, en+hi translate, poster attaches, one feedback round adds no
+  appendix, `style_reference_meta` populated). **Deploy: 0035 → API → web**, rebuilding
+  `@dgipr/schemas` → `@dgipr/database` → `@dgipr/content-engine` dists first. No n8n. New env, all
+  optional: `ARTICLE_GENERATION_MODE`, `OPENAI_ARTICLE_MODEL`,
+  `OPENAI_ARTICLE_REASONING_EFFORT`, `ARTICLE_STYLE_REFERENCE_MIN_SIMILARITY`.
+  **Designed for, not built:** the future approved-example loop. `selectStyleReference()` is the
+  single seam — a "similar approved source → officer-final article" tier slots in above
+  retrieval, matched on the SOURCE embedding (`embedTexts` 1024-dim and the `halfvec(1024)` match
+  RPC already exist). `style_reference_meta` is its join key. The named gap: there is still **no
+  manual article-edit path and no approval state**, so "final approved article", "manual edits"
+  and "approval/publication status" have nowhere to live — that is the next migration when the
+  loop starts, and it is additive to this design rather than a replacement for it.
+
+- **Pointers simplified to one flat Marathi key-point list, on gpt-5.6-sol** (2026-07-27, no
+  migration): `/dlo`'s Pointers step classified the reviewed note into six 5W1H groups
+  (कोण/काय/केव्हा/कुठे/का/कसे) plus a separate attributed-statements list, rendered every bullet as
+  a bordered checkbox row, and turned the officer's ticks into `selected_facts` / `statements` /
+  `excluded_facts` on the generation — which then became the article's completeness contract.
+  Three things were wrong with that. The 5W1H buckets **fragment related facts** (a scheme, its
+  benefit and its deadline land in three different groups), which reads worst on exactly the
+  input this feature exists for: a 20-page PDF holding many separate articles. The checkboxes
+  implied a curation decision **nobody was making** — everything ships checked, and unchecking
+  is a rare, high-consequence act. And the whole apparatus made the officer's one readable view
+  of a long scanned source into a form.
+  What an officer actually wants after review is what ChatGPT gives you for "give pointers": one
+  ordered list of the source's most important facts. So `POST /api/pointers` now returns
+  `{ points: string[] }` — flat, in **source order**, count adapting to the source — and `/dlo`
+  renders it under **महत्त्वाचे मुद्दे** as plain bullets with article-like line height.
+  **Selection is gone from the UI and no longer steers generation**: the article is written from
+  the complete reviewed text, as it was before Pointers existed.
+  - **The prompt is built around COVERAGE, not a count.** It is told the note may hold several
+    separate articles, to read start to finish, to give every materially important topic a place
+    and **not to drop the tail**, and — explicitly — that a topic may span pages while a page may
+    hold several topics, so "one point per page" is ruled out and padding is forbidden. Related
+    facts are to be combined into one point; names, designations, scheme names, dates, amounts,
+    percentages and figures stay verbatim; an important quote may sit inside its point with the
+    speaker's name, but there is no statements section. The `<HEADING>` block survives with its
+    `purpose` re-scoped to `context_only_not_a_coverage_filter` plus an explicit "do not drop any
+    topic because of this" line — an editorial angle NARROWS coverage, which fights the whole
+    requirement. (The web never sends it, so this is belt-and-braces.)
+  - **The output budget was the real bug, and it was silent.** The call passed no `maxTokens`, so
+    it took `DEFAULT_MAX_TOKENS = 4096`. Marathi on o200k_base runs ~1 token per 1.2-1.8 chars,
+    so 25 points of ~150 chars is already ~3,200 tokens and a 40-point multi-article list is
+    ~6,200. Exhausting the budget yields either empty content (`finish_reason: 'length'`) or
+    truncated JSON — and **both throw and were swallowed into `EMPTY_POINTERS`**, meaning the
+    long-PDF case this feature is for was the one that silently produced nothing. Now
+    `POINTERS_MAX_TOKENS = 16_000` (billing is on tokens emitted, so an unused ceiling is free,
+    and the schema's 120 cap becomes the only binding limit) **plus** `salvageTruncatedPoints`,
+    which pulls the complete `"…"` literals out of a cut-off `{"points":[…` body so a truncated
+    reply returns the 45 points that landed instead of none. **Deliberately not chunked**: 60k
+    chars ≈ 45k input tokens fits comfortably, and chunking would duplicate facts across
+    boundaries (which the requirement forbids), destroy the single global source order, and need
+    a merge call. The residual risk — under-enumerating the tail — is mitigated in the prompt.
+  - **Model: `POINTERS_MODEL` (`OPENAI_POINTERS_MODEL`, default `gpt-5.6-sol`)**, passed
+    explicitly at the one call site so no other caller's default moves (the `ARTICLE_MODEL` /
+    `VIDEO_CHAT_MODEL` precedent). Enumerating every distinct topic of a long multi-article
+    document, in order, verbatim and without repeating itself is judgement-heavy, and it is the
+    officer's only view of what the source says with nothing downstream to correct it. No pricing
+    change was needed — `pricing.ts` already carries a sol row. **Cost is now a pure add-on**
+    (~$0.10 a short note, ~$0.40-0.50 a 60k-char PDF, charged on entering review and on every
+    regenerate press) where Pointers used to partly pay for itself by removing `extractFiveWOneH`,
+    the brief audit and two coverage graders. `OPENAI_POINTERS_MODEL=gpt-5.6-terra` halves it.
+  - **Nothing on the stored-generation path was deleted.** `SelectedFact*`,
+    `AttributedStatement*`, `POINTER_DIMENSIONS`, `fiveWOneHFromPointers`,
+    `findMissingApprovedFacts`, `includedFactsBlock`/`statementBlock`, the `excludedFacts` rules,
+    `editorial-brief`'s `skipAudit`, and `DloGenerateRequestSchema`'s three fields all stay — with
+    "LEGACY ROWS ONLY — do not delete" comments naming what keeps them reachable, because
+    `runner.ts` re-reads the row on **every** run and `revise-article.ts` re-reads it on every
+    feedback round, so any pre-change generation still walks the full inventory path forever. The
+    three wire fields are still **honoured** rather than dropped: zod objects are non-strict, so
+    removing them would silently STRIP instead of reject, and a browser tab on the old bundle
+    mid-deploy would lose its officer's selections without a trace. Only `PointerGroupSchema`
+    (an ephemeral transport shape, never persisted), `pointerId`/`statementId`/`marathiNumber`,
+    9 Marathi strings and the `.pointer-row*` CSS were removed.
+  - **Two accepted consequences, not bugs.** New `simple`-mode DLO runs store
+    `five_w_one_h = null`, so the तपशील card disappears for new runs while legacy rows keep
+    rendering it (`full` mode still populates it via `extractFiveWOneH`, so the card is
+    mode-dependent). And with no inventory, `preferAttribution` flips false and
+    `simple-article-prompt.ts`'s `### ADDITIONAL VERIFIED INFORMATION` / `### EXCLUDED BY THE
+    OFFICER` blocks can vanish entirely — the note is the source again. Latent: an
+    `ARTICLE_GENERATION_MODE=full` DLO article gains +4 to +6 chat calls (restored
+    `extractFiveWOneH`, restored brief tier-audit, coverage back to the 3-way check); nothing
+    errors, since every restored path is the pre-0034 default that non-DLO runs exercise today.
+  - `apps/web/components/PointerSelector.tsx` → **`PointerList.tsx`** (`git mv`, so blame
+    follows): the repo names components after what they render, and a "Selector" that selects
+    nothing is an actively false name.
+  Verified 2026-07-27, all free: `@dgipr/schemas` dist rebuilt, then **typecheck green on
+  schemas, database, social-publisher, poster-renderer, content-engine and api**, with `apps/web`
+  failing ONLY on the pre-existing untracked `components/GenerationUsedNames.tsx` (it references
+  six `usedNames*` strings that have never existed in `strings.ts`, at HEAD or now — unrelated
+  in-progress work, deliberately not "fixed" here); zero pointer-related errors anywhere. Lint
+  and prettier clean on every touched file. **Left for a real run** (one paid sol call): the
+  engine harness on a genuine 20-page multi-article Marathi PDF, checking that every distinct
+  article is represented **including the last**, that nothing repeats, that names/dates/amounts
+  survive verbatim, and that the cost meter logs `gpt-5.6-sol` rather than terra (the proof the
+  explicit `model` argument reached `chatComplete`); plus the `/dlo` browser pass and one article
+  feedback round on a legacy row to prove `findMissingApprovedFacts` still fires. **No migration,
+  no n8n**; deploy is `@dgipr/schemas` dist → API → web, and API and web must ship **together** —
+  the response shape is a shared contract parsed by `apps/web/lib/api.ts` with the same schema the
+  engine produces, so a half-deploy makes the card error on every review. New env (optional):
+  `OPENAI_POINTERS_MODEL`.
 
 Two n8n workflows are implemented and host-independent for deployment; their master
 templates arrive as immutable `references/library/...` public URLs inside each webhook

@@ -470,7 +470,7 @@ if (
     );
     const clip = await generateVeoClip({
       prompt:
-        'One continuous shot in stylized 3D animation; smooth, purposeful ' +
+        'One continuous realistic live-action shot; smooth, purposeful ' +
         'camera motion. ' +
         (lastFramePath
           ? 'Move naturally from the first frame to the provided final frame. '

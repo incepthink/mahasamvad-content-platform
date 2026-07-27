@@ -19,6 +19,7 @@ import {
   generateArtDirection,
   applyDesignations,
   generateArticle,
+  generateArticleSimple,
   generateCopy,
   generatePosterCopy,
   generateSocialCaption,
@@ -327,11 +328,37 @@ function articleCategoryOf(
 // The row's approved person → पदनाम pairs (migration 0033). Stored as jsonb, so the shape is
 // validated here rather than trusted: a malformed or pre-0033 value degrades to "no
 // designations", which is exactly the article the note would have produced anyway.
+// Which article pipeline runs. 'simple' (the unset default) is the single-call baseline: one
+// style reference, one model call on ARTICLE_MODEL, one article — no editorial brief, no
+// coverage-revision loop, no faithfulness repair, no traceability appendix. 'full' restores the
+// multi-stage pipeline exactly as it was; generate-article.ts and every stage module it calls
+// are untouched, so rollback is this one env line plus a restart.
+//
+// Read here rather than inside the engine, beside the ARTICLE_POSTER_MODE precedent: apps/api
+// sequences and chooses, the engine computes.
+function articleGenerationMode(): 'simple' | 'full' {
+  return process.env.ARTICLE_GENERATION_MODE === 'full' ? 'full' : 'simple';
+}
+
+// Whether this row's article carries a traceability appendix, and therefore whether a revision
+// should rebuild one. Keyed off the STORED article rather than the current mode, deliberately:
+// a row generated before the flag was flipped either way must keep behaving like itself, and a
+// simple-mode article must not silently sprout a तथ्य-तपासणी fold (plus an extra model pass) on
+// its first feedback round. News never had an appendix, so this only ever matters for scheme.
+function rowHasFactCheck(row: GenerationRow): boolean {
+  return (row.factCheck ?? '').trim().length > 0;
+}
+
 export function nameDesignationsOf(row: GenerationRow): NameDesignation[] {
   const parsed = NameDesignationsSchema.safeParse(row.nameDesignations ?? []);
   return parsed.success ? [...parsed.data] : [];
 }
 
+// LEGACY ROWS ONLY — do not delete. /dlo's Pointers step became a read-only summary, so no
+// new run stores an approved inventory and both of these return [] for a fresh generation
+// (which then takes the pre-0034 raw-note path). They stay because the row is re-read on
+// EVERY run: a retry or an article-feedback round on any pre-change generation still needs
+// its stored contract, and a `null` column safe-parses to [] rather than throwing.
 export function selectedFactsOf(row: GenerationRow): SelectedFact[] {
   const parsed = SelectedFactsSchema.safeParse(row.selectedFacts ?? []);
   return parsed.success ? [...parsed.data] : [];
@@ -432,40 +459,99 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
       row,
     );
 
-    const result = await generateArticle(row.note, {
+    const progress = (phase: string): void => {
+      void updateGeneration(client, id, { step: phase }).catch((error) => {
+        console.error(`[job ${id}] progress update failed:`, error);
+      });
+    };
+    // Facts the officer deselected in the /dlo Pointers step (migration 0030). Threaded into
+    // drafting so a dropped fact is not re-added. Null on every non-DLO run, which both
+    // pipelines treat as "exclude nothing".
+    const shared = {
       category: articleCategoryOf(row.category),
       heading: row.heading ?? undefined,
-      // Facts the officer deselected in the /dlo Pointers step (migration 0030). Threaded
-      // into drafting + the coverage checkers so a dropped fact is not re-added. Null on
-      // every non-DLO run, which generateArticle treats as "exclude nothing".
       excludeFacts: row.excludedFacts ?? undefined,
       includeFacts: selectedFactsOf(row),
       statements: statementsOf(row),
       designations,
       knownDesignations,
-      onProgress: (phase) => {
-        void updateGeneration(client, id, { step: phase }).catch((error) => {
-          console.error(`[job ${id}] progress update failed:`, error);
-        });
-      },
-    });
-    // Log the derived editorial angle for observability; the brief itself is not
-    // persisted yet (that is a later, optional phase).
-    if (result.brief) {
-      console.log(`[job ${id}] editorial angle: ${result.brief.angle}`);
-    }
+    } as const;
+
+    const mode = articleGenerationMode();
+    const result =
+      mode === 'simple'
+        ? await (async () => {
+            const simple = await generateArticleSimple(row.note, {
+              ...shared,
+              // Tier 1 of the style-reference hierarchy (migration 0035). Read off the ROW, so
+              // a retry reproduces the same reference rather than silently re-styling.
+              styleReference: row.styleReference,
+              // location/date are deliberately not supplied: nothing in the product collects
+              // them from trusted input yet, and no call is added to infer them. The prompt
+              // omits the dateline entirely rather than inventing one.
+              onProgress: progress,
+            });
+            return {
+              article: simple.article,
+              factCheck: simple.factCheck,
+              referenceTitle: simple.styleReference.title,
+              referenceUrl: simple.styleReference.url,
+              fiveWOneH: simple.fiveWOneH,
+              designationIssues: simple.designationIssues,
+              styleReferenceMeta: simple.styleReferenceMeta as unknown,
+            };
+          })()
+        : await (async () => {
+            const full = await generateArticle(row.note, {
+              ...shared,
+              onProgress: progress,
+            });
+            // Log the derived editorial angle for observability; the brief itself is not
+            // persisted (that is a later, optional phase).
+            if (full.brief) {
+              console.log(`[job ${id}] editorial angle: ${full.brief.angle}`);
+            }
+            return {
+              article: full.article,
+              factCheck: full.factCheck,
+              referenceTitle: full.reference?.title ?? null,
+              referenceUrl: full.reference?.url ?? null,
+              fiveWOneH: full.fiveWOneH as unknown,
+              designationIssues: full.designationIssues,
+              styleReferenceMeta: null,
+            };
+          })();
+
     // Report, never fail: the article is about to be persisted either way, and an officer who
     // can see "this designation did not apply" can fix it — one who cannot, cannot.
     designationWarnings.set(id, [...result.designationIssues]);
     await updateGeneration(client, id, {
       article: result.article,
       factCheck: result.factCheck,
-      referenceTitle: result.reference?.title ?? null,
-      referenceUrl: result.reference?.url ?? null,
-      // 5W1H is extracted from the note before drafting (see generateArticle);
-      // persist it so the detail page can show the at-a-glance fact scaffold.
+      referenceTitle: result.referenceTitle,
+      referenceUrl: result.referenceUrl,
+      // The 5W1H fact scaffold, so the detail page can show the at-a-glance card. In simple
+      // mode this is the officer's approved pointer inventory, or NULL when there is none —
+      // null rather than an empty scaffold, because the card is gated on truthiness and an
+      // all-empty object would render six "टिपणीत नाही" placeholder rows.
       fiveWOneH: result.fiveWOneH,
     });
+
+    // Which style reference the run actually used (migration 0035). A SEPARATE best-effort
+    // update after the article write, for the reason 0028's poster_style write is separate:
+    // bundling them would mean that on a database without 0035 the whole update fails and the
+    // already-generated article never lands on the row. Losing the telemetry for one run is
+    // acceptable; losing the article is not.
+    if (result.styleReferenceMeta) {
+      await updateGeneration(client, id, {
+        styleReferenceMeta: result.styleReferenceMeta,
+      }).catch((error) => {
+        console.warn(
+          `[job ${id}] could not persist style_reference_meta (is 0035 applied?):`,
+          error,
+        );
+      });
+    }
 
     if (row.outputType === 'article') return;
 
@@ -609,7 +695,8 @@ async function renderAndStoreArticlePoster(
   const note = options.note.trim();
   let subject: PosterSubject | null = null;
   if (typedHeading.length === 0) {
-    const glossarySource = note && note !== article ? `${note}\n\n${article}` : article;
+    const glossarySource =
+      note && note !== article ? `${note}\n\n${article}` : article;
     const glossaryTerms = await findGlossaryTermsInText(client, glossarySource);
     const knownSchemeNames = glossaryTerms
       .filter((t) => t.termType === 'scheme' || t.termType === 'org')
@@ -646,7 +733,7 @@ async function renderAndStoreArticlePoster(
   const reference = pinned
     ? pinned.master
     : await pickArticleReference(client, seed, article);
-  const hasPhoto = reference.layoutSpec?.hasPhotoZone !== false;
+  const referenceHasPhoto = reference.layoutSpec?.hasPhotoZone !== false;
 
   // 4. The two rotations. Only the from-scratch path uses them — an 'onbrand' edit repaints a
   //    master whose own colours are the point, so assigning it a palette it cannot honour would
@@ -654,13 +741,22 @@ async function renderAndStoreArticlePoster(
   //    be, not only the ones they were assigned: if the image model ignores a spec, avoiding
   //    intentions achieves nothing.
   const isFresh = designMode === 'fresh';
+  // A fresh article poster must contain meaningful subject imagery. Previously a selected
+  // text-only master set this false, which admitted the `art_type_field` archetype and produced
+  // the empty colour-field poster officers consistently replaced with "वेगळी रचना तयार करा".
+  // Fresh mode does not edit the master's pixels, so its lack of a photo zone is not a real
+  // constraint. The legacy on-brand edit still honours the physical zone in its master.
+  const hasPhoto = isFresh || referenceHasPhoto;
   const history = isFresh
     ? await recentStyleHistory(client, ARTICLE_STYLE_CATEGORIES)
     : undefined;
   const assignedPalette = isFresh
     ? pickPalette(seed, {
         ids: history?.paletteIds,
-        families: [...(history?.families ?? []), ...(options.avoidFamilies ?? [])],
+        families: [
+          ...(history?.families ?? []),
+          ...(options.avoidFamilies ?? []),
+        ],
       })
     : undefined;
   const assignedLayout = isFresh
@@ -679,8 +775,12 @@ async function renderAndStoreArticlePoster(
         note: article,
         copyStyle: 'article',
         // Colour words are stripped from this hint inside the prompt builder; the art director
-        // gets the raw summary but is told the palette is not its call.
-        referenceHint: reference.layoutSpec?.layoutSummary,
+        // gets the raw summary but is told the palette is not its call. A text-only master's
+        // summary is omitted entirely because fresh article posters now require a photograph.
+        referenceHint:
+          !referenceHasPhoto && isFresh
+            ? undefined
+            : reference.layoutSpec?.layoutSummary,
         seed,
         assignedPalette,
         assignedLayout,
@@ -694,11 +794,20 @@ async function renderAndStoreArticlePoster(
       pinned: Boolean(pinned),
       referenceUrl: reference.url,
       analyzed: Boolean(reference.layoutSpec),
+      referenceHasPhoto,
       hasPhoto,
       textLocked,
-      headlineSource: typedHeading ? 'typed' : subject ? subject.kind : 'editorial',
-      palette: assignedPalette ? `${assignedPalette.id} (${assignedPalette.family})` : null,
-      layout: assignedLayout ? `${assignedLayout.id} (${assignedLayout.coverage})` : null,
+      headlineSource: typedHeading
+        ? 'typed'
+        : subject
+          ? subject.kind
+          : 'editorial',
+      palette: assignedPalette
+        ? `${assignedPalette.id} (${assignedPalette.family})`
+        : null,
+      layout: assignedLayout
+        ? `${assignedLayout.id} (${assignedLayout.coverage})`
+        : null,
       avoidedFamilies: [
         ...(history?.families ?? []),
         ...(options.avoidFamilies ?? []),
@@ -711,10 +820,16 @@ async function renderAndStoreArticlePoster(
   // 6. Prompt (pure string assembly, no model call) → render.
   const prompt = buildArticlePosterPrompt({
     headline,
-    sceneBrief: typeof copy.scene_brief === 'string' ? copy.scene_brief : undefined,
+    sceneBrief:
+      typeof copy.scene_brief === 'string' ? copy.scene_brief : undefined,
     designMode,
     masterUrl: reference.url,
-    layoutSummary: reference.layoutSpec?.layoutSummary,
+    // A text-only master's structure is actively misleading on the from-scratch path now that
+    // every fresh poster requires imagery. The assigned photo composition is sufficient.
+    layoutSummary:
+      isFresh && !referenceHasPhoto
+        ? undefined
+        : reference.layoutSpec?.layoutSummary,
     hasPhoto,
     assignedPalette,
     assignedLayout,
@@ -743,7 +858,10 @@ async function renderAndStoreArticlePoster(
     }
     posterStyle = buildPosterStyle(assignedPalette, assignedLayout, measured);
     if (measured) {
-      const complied = familyHonoured(assignedPalette.family, measured.hueBucket);
+      const complied = familyHonoured(
+        assignedPalette.family,
+        measured.hueBucket,
+      );
       console.log(
         `[job ${id}] measured: ground=${measured.groundHex}${measured.groundIsWarm ? ' (warm cream)' : ''}` +
           ` dominant=${measured.dominantHex} bucket=${measured.hueBucket}` +
@@ -897,7 +1015,9 @@ async function renderSocialPosterViaN8n(
   const webhookUrl = requireEnv('N8N_SOCIAL_POST_WEBHOOK_URL');
   const webhookSecret = process.env.N8N_WEBHOOK_SECRET;
 
-  const headers: Record<string, string> = { 'content-type': 'application/json' };
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+  };
   if (webhookSecret) headers['x-n8n-webhook-secret'] = webhookSecret;
 
   const response = await fetch(webhookUrl, {
@@ -959,15 +1079,25 @@ async function renderSocialPosterFeedbackViaN8n(
   // feedback edit never changes the photo. Required when brand === 'cmo'.
   cmoPhoto?: Buffer,
 ): Promise<Buffer> {
-  const prompt = buildFeedbackPrompt({ imageFeedback: feedback, brand, markerCount });
-  const rawPoster = await renderSocialPosterViaN8n(id, currentPosterUrl, prompt);
+  const prompt = buildFeedbackPrompt({
+    imageFeedback: feedback,
+    brand,
+    markerCount,
+  });
+  const rawPoster = await renderSocialPosterViaN8n(
+    id,
+    currentPosterUrl,
+    prompt,
+  );
   // The workflow leaves the reserved chrome zones untouched; re-stamp the chrome so
   // any drift from the edit is corrected (mirrors the article path). CMO re-stamps
   // its full-width leader header + the DGIPR footer, and re-composites the SAME cached
   // circle photograph (the workflow leaves the circle zone quiet on feedback too).
   if (brand === 'cmo') {
     if (!cmoPhoto) {
-      throw new Error('CMO feedback re-render requires the cached circle photo.');
+      throw new Error(
+        'CMO feedback re-render requires the cached circle photo.',
+      );
     }
     return overlayCmoChrome(rawPoster, cmoPhoto);
   }
@@ -985,9 +1115,16 @@ const socialMasterRecency = new Map<string, string[]>();
 function recentMasters(key: string): readonly string[] {
   return socialMasterRecency.get(key) ?? [];
 }
-function rememberMaster(key: string, masterId: string, enabledCount: number): void {
+function rememberMaster(
+  key: string,
+  masterId: string,
+  enabledCount: number,
+): void {
   // Never avoid so many that the band could empty; leave at least one template pickable.
-  const cap = Math.max(0, Math.min(SOCIAL_MASTER_RECENCY_CAP, enabledCount - 1));
+  const cap = Math.max(
+    0,
+    Math.min(SOCIAL_MASTER_RECENCY_CAP, enabledCount - 1),
+  );
   if (cap === 0) return;
   const prior = socialMasterRecency.get(key) ?? [];
   socialMasterRecency.set(
@@ -1024,7 +1161,10 @@ async function recentStyleHistory(
       await listRecentPosterStyles(client, STYLE_HISTORY_DEPTH, categories),
     );
   } catch (error) {
-    console.warn('[job] could not read recent poster styles (rendering unspread):', error);
+    console.warn(
+      '[job] could not read recent poster styles (rendering unspread):',
+      error,
+    );
     return toStyleHistory([]);
   }
 }
@@ -1051,7 +1191,12 @@ async function resolveSocialReference(
     if (pinned) return pinned;
   }
   if (row.referenceTypeId) {
-    const pinned = await resolvePinnedType(client, row.referenceTypeId, id, row.note);
+    const pinned = await resolvePinnedType(
+      client,
+      row.referenceTypeId,
+      id,
+      row.note,
+    );
     if (pinned) return pinned;
   }
   if (brand === 'cmo') {
@@ -1072,7 +1217,10 @@ async function resolveSocialReference(
   const master = await selectMaster(
     client,
     type.images,
-    { points: classification.pointCount, wantsPhoto: classification.wantsPhoto },
+    {
+      points: classification.pointCount,
+      wantsPhoto: classification.wantsPhoto,
+    },
     id,
     row.note,
     recentMasters(recencyKey),
@@ -1251,7 +1399,10 @@ async function renderAndStoreSocialPoster(
     }
     posterStyle = buildPosterStyle(assignedPalette, assignedLayout, measured);
     if (measured) {
-      const complied = familyHonoured(assignedPalette.family, measured.hueBucket);
+      const complied = familyHonoured(
+        assignedPalette.family,
+        measured.hueBucket,
+      );
       console.log(
         `[job ${id}] measured: ground=${measured.groundHex}${measured.groundIsWarm ? ' (warm cream)' : ''}` +
           ` dominant=${measured.dominantHex} bucket=${measured.hueBucket}` +
@@ -1318,6 +1469,12 @@ async function renderAndStoreSocialPoster(
 // later without re-rendering (startGenerateCaptionJob). Ordering matters: the poster is
 // persisted BEFORE the caption call, so a caption failure fails the run with the already-paid
 // poster safely on the row rather than costing a re-render.
+//
+// The कॅप्शन lane (media room, outputType 'article') inverts that: NO poster is rendered at
+// all and the caption is the run's entire output. That is terminal for posters by design —
+// /generations/:id/poster rejects social runs and /poster/regenerate needs an existing
+// posterPath — because the intended route to a poster is a fresh run from the same note
+// (NextActions' cross-format fold). Do not "fix" those guards.
 export function startSocialPostJob(
   client: SupabaseClient,
   id: string,
@@ -1333,26 +1490,39 @@ export function startSocialPostJob(
       error: null,
     });
 
-    const brand = row.templateBrand;
-    // Default is now 'fresh' — a unique, AI-designed poster each run. 'onbrand'/'adaptive'
-    // remain available for a run that explicitly wants to follow a template.
-    const designMode = (row.designMode ?? 'fresh') as PosterDesignMode;
+    // outputType 'article' means "this run renders no poster" on BOTH lanes — the article
+    // pipeline already reads it that way. Taken off the ROW rather than a job option
+    // (unlike generateCaption, which a re-run can infer from `article !== null`): there is
+    // no sound inference for caption-only, since a null posterPath cannot distinguish
+    // "never wanted a poster" from "the render failed". The row is the state of record, so
+    // a retry and an edit-note rerun both stay caption-only with no poster spend.
+    const captionOnly = row.outputType === 'article';
 
-    const { postType } = await renderAndStoreSocialPoster(
-      client,
-      id,
-      row,
-      brand,
-      designMode,
-      1,
-      id,
-    );
+    let postType: string | undefined;
+    if (!captionOnly) {
+      const brand = row.templateBrand;
+      // Default is now 'fresh' — a unique, AI-designed poster each run. 'onbrand'/'adaptive'
+      // remain available for a run that explicitly wants to follow a template.
+      const designMode = (row.designMode ?? 'fresh') as PosterDesignMode;
 
-    if (!options.generateCaption) return;
+      ({ postType } = await renderAndStoreSocialPoster(
+        client,
+        id,
+        row,
+        brand,
+        designMode,
+        1,
+        id,
+      ));
+
+      if (!options.generateCaption) return;
+    }
 
     // Caption → article column (the social lane's convention). The note stays the sole
     // fact source; the poster copy is not fed in, exactly as the retired n8n node had it
-    // ("base the caption on the notes, not the poster copy").
+    // ("base the caption on the notes, not the poster copy"). `postType` is undefined on
+    // the caption-only path — nothing classified the note, and it is only a tone steer
+    // (startGenerateCaptionJob has always omitted it).
     await updateGeneration(client, id, { step: 'caption' });
     const caption = await generateSocialCaption({
       note: row.note,
@@ -1445,11 +1615,12 @@ export function startPosterRegenerateJob(
         target: 'poster_image',
         // Only a request that actually CARRIED a heading is logged as a text change — a plain
         // redo of a run that already had one must not read as an edit.
-        feedback: options.posterHeading !== undefined
-          ? `पोस्टरवरील मजकूर: ${posterHeading ?? 'आपोआप'}`
-          : options.recolour
-            ? 'पुन्हा तयार केले (वेगळे रंग)'
-            : 'पुन्हा तयार केले (नवीन रचना)',
+        feedback:
+          options.posterHeading !== undefined
+            ? `पोस्टरवरील मजकूर: ${posterHeading ?? 'आपोआप'}`
+            : options.recolour
+              ? 'पुन्हा तयार केले (वेगळे रंग)'
+              : 'पुन्हा तयार केले (नवीन रचना)',
         posterPath: posterPath(id, version),
       });
       return;
@@ -1564,6 +1735,7 @@ export function startArticleFeedbackJob(
       selectedFactsOf(row),
       statementsOf(row),
       row.excludedFacts ?? [],
+      rowHasFactCheck(row),
     );
     designationWarnings.set(id, [...revised.designationIssues]);
 
@@ -1625,6 +1797,7 @@ export function startConcurrentArticleFeedbackJob(
           selectedFactsOf(row),
           statementsOf(row),
           row.excludedFacts ?? [],
+          rowHasFactCheck(row),
         );
         designationWarnings.set(id, [...revised.designationIssues]);
 

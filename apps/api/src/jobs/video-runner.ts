@@ -1,5 +1,5 @@
 // In-process job runner for explainer-video projects: per-scene script (the video
-// tier), storyboard frame PAIRS (a stylized-3D START frame and an END frame
+// tier), storyboard frame PAIRS (a photoreal START frame and an END frame
 // EDITED from it, so both live in one shot — rendered through frame-provider.ts,
 // Nano Banana by default with gpt-image one env line away), provider clip renders
 // (Kling today — SILENT first+last-frame interpolation), ffmpeg stitch, SRT.
@@ -190,7 +190,9 @@ export function startVideoScriptJob(client: SupabaseClient, id: string): void {
     const scenes: VideoSceneEntry[] = script.scenes.map((scene) => ({
       narration: scene.narration,
       visualBrief: scene.visualBrief,
-      endVisualBrief: scene.endVisualBrief,
+      ...(scene.endVisualBrief !== undefined
+        ? { endVisualBrief: scene.endVisualBrief }
+        : {}),
       keyPoint: scene.keyPoint,
       durationSeconds: clipSecondsForNarration(
         estimateNarrationSeconds(scene.narration),
@@ -230,7 +232,11 @@ async function renderEndFrame(
   endVisualBrief: string,
 ): Promise<Buffer> {
   return renderFrame({
-    prompt: buildEndFramePrompt(row.style ?? '', endVisualBrief, scene.shotHint),
+    prompt: buildEndFramePrompt(
+      row.style ?? '',
+      endVisualBrief,
+      scene.shotHint,
+    ),
     aspect: aspectOf(row),
     sourceFramePng: startPng,
   });
@@ -489,7 +495,9 @@ async function storeSceneNarration(
 
 // A scene's spoken length: measured when audio exists, estimated otherwise.
 function narrationSecondsOf(scene: VideoSceneEntry): number {
-  return scene.narrationAudioSeconds ?? estimateNarrationSeconds(scene.narration);
+  return (
+    scene.narrationAudioSeconds ?? estimateNarrationSeconds(scene.narration)
+  );
 }
 
 // What a scene contributes to the finished video's running time. A scene with a
@@ -529,7 +537,10 @@ async function fitNarrationToTotal(
     let pick = -1;
     for (const [index, scene] of scenes.entries()) {
       if (clipIsCurrent(scene)) continue;
-      if (pick === -1 || narrationSecondsOf(scene) > narrationSecondsOf(scenes[pick]!)) {
+      if (
+        pick === -1 ||
+        narrationSecondsOf(scene) > narrationSecondsOf(scenes[pick]!)
+      ) {
         pick = index;
       }
     }
@@ -992,7 +1003,11 @@ async function stitchAndPersist(
   if (projectIsVoiced(scenes)) {
     const segments = await Promise.all(
       scenes.map(async (scene) => ({
-        wav: await downloadFile(client, VIDEOS_BUCKET, scene.narrationAudioPath!),
+        wav: await downloadFile(
+          client,
+          VIDEOS_BUCKET,
+          scene.narrationAudioPath!,
+        ),
         durationSeconds: scene.durationSeconds,
       })),
     );

@@ -31,9 +31,13 @@ import { TranslationTermsReview } from './TranslationTermsReview';
 export function ArticleView({
   detail,
   onFeedbackSent,
+  embedded = false,
 }: {
   detail: GenerationDetail;
   onFeedbackSent: () => Promise<void>;
+  // Poster-focused runs keep the source article in a closed disclosure below the poster.
+  // In that case the parent already owns the visible title and card shell.
+  embedded?: boolean;
 }) {
   const [copied, setCopied] = useState(false);
   const [lang, setLang] = useState<'mr' | TranslationLanguage>('mr');
@@ -177,9 +181,15 @@ export function ArticleView({
   );
 
   return (
-    <section className="card">
-      <div className="article-head">
-        <h2 style={{ margin: 0 }}>{STR.articleTitle}</h2>
+    <section
+      className={embedded ? 'article-view-embedded' : 'card'}
+      aria-label={embedded ? STR.articleTitle : undefined}
+    >
+      <div
+        className="article-head"
+        style={embedded ? { justifyContent: 'flex-end' } : undefined}
+      >
+        {!embedded ? <h2 style={{ margin: 0 }}>{STR.articleTitle}</h2> : null}
         {has('en') || has('hi') ? (
           <div className="lang-toggle" role="group" aria-label="भाषा">
             <button
@@ -223,8 +233,7 @@ export function ArticleView({
         <div className="info-callout warn" style={{ marginBottom: 12 }}>
           <p className="field-label">{STR.translateUnpreservedTitle}</p>
           <p className="hint">
-            {STR.translateUnpreservedHint}{' '}
-            {detail.translateWarnings.join(', ')}
+            {STR.translateUnpreservedHint} {detail.translateWarnings.join(', ')}
           </p>
         </div>
       ) : null}
@@ -250,7 +259,9 @@ export function ArticleView({
               {STR.designationWarnCorrected}{' '}
               {detail.designationWarnings
                 .filter((w) => w.reason === 'corrected')
-                .map((w) => `${w.replaced ?? ''} → ${w.designation} (${w.name})`)
+                .map(
+                  (w) => `${w.replaced ?? ''} → ${w.designation} (${w.name})`,
+                )
                 .join(', ')}
             </p>
           ) : null}

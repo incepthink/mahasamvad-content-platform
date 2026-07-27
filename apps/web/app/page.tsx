@@ -1,68 +1,103 @@
 'use client';
 
-// Media-room page: paste a FINISHED article, then turn it into a poster, a
-// Facebook post, or a Twitter post. No article is written here — the pasted text
-// is the sole source and is used as-is (providedArticle) for the poster path.
+// Creative and Social page: paste a FINISHED article, then turn it into a poster
+// (for the article itself, for X, or for Facebook) or into a caption alone. No
+// article is written here — the pasted text is the sole source and is used as-is
+// (providedArticle) for the poster path.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Bird, Image as ImageIcon, ThumbsUp } from 'lucide-react';
+import {
+  Clapperboard,
+  Image as ImageIcon,
+  MessageSquareText,
+} from 'lucide-react';
 import {
   NOTE_MAX_CHARS,
   POSTER_HEADING_MAX_CHARS,
   isSocialCategory,
 } from '@dgipr/schemas';
-import type {
-  Category,
-  DesignMode,
-  KnownDesignation,
-  PreparedName,
-  TemplateBrand,
-} from '@dgipr/schemas';
-import { createGeneration, prepareDesignations } from '../lib/api';
-import {
-  DesignationReview,
-  collectDesignations,
-  type DesignationEdit,
-  type DesignationExtra,
-} from '../components/DesignationReview';
+import type { Category, DesignMode, TemplateBrand } from '@dgipr/schemas';
+import { createGeneration } from '../lib/api';
 import { BRAND_OPTIONS, DESIGN_OPTIONS } from '../lib/generationOptions';
 import { useTasks } from '../lib/TasksProvider';
 import { STR } from '../lib/strings';
-import { DocumentIntake } from '../components/DocumentIntake';
+import {
+  DocumentIntake,
+  type DocumentIntakeStatus,
+} from '../components/DocumentIntake';
 import ReferencePicker, {
   type ReferenceSelection,
 } from '../components/ReferencePicker';
 
-// The three outputs this page offers. "पोस्टर" runs the article-poster path
-// (category 'scheme') on the pasted article verbatim; the other two are the
-// existing social lanes. Built locally so the shared CATEGORY_OPTIONS (reused by
-// the detail-page "next step" panel) is left untouched.
-const OUTPUT_CHOICES = [
+// The output picker is TWO levels: what artifact (पोस्टर / कॅप्शन), then what it is for
+// (लेख / ट्विटर / फेसबुक). The two questions are independent, which the old flat row of
+// three cards conflated. Built locally so the shared CATEGORY_OPTIONS (reused by the
+// detail-page "next step" panel and /dlo) is left untouched.
+type OutputKind = 'poster' | 'caption';
+// Level-2 values ARE Category values, so `category` needs no mapping table. Deliberately
+// NOT a 'article' | 'twitter' | 'facebook' union: 'article' would mean "the लेख poster"
+// here and "no poster at all" in outputType, forty lines apart.
+type PosterTarget = Extract<Category, 'scheme' | 'twitter' | 'facebook'>;
+type CaptionTarget = Extract<Category, 'twitter' | 'facebook'>;
+
+// Level 1. पोस्टर is the default and the common case; कॅप्शन is the caption-only lane,
+// where no poster is rendered at all.
+const OUTPUT_KINDS = [
   {
-    value: 'scheme',
+    value: 'poster',
     icon: ImageIcon,
     name: STR.categoryPoster,
     desc: STR.categoryPosterDesc,
   },
   {
-    value: 'twitter',
-    icon: Bird,
-    name: STR.categoryTwitter,
-    desc: STR.categoryTwitterDesc,
-  },
-  {
-    value: 'facebook',
-    icon: ThumbsUp,
-    name: STR.categoryFacebook,
-    desc: STR.categoryFacebookDesc,
+    value: 'caption',
+    icon: MessageSquareText,
+    name: STR.mediaOutputCaption,
+    desc: STR.mediaOutputCaptionDesc,
   },
 ] as const satisfies ReadonlyArray<{
-  value: Category;
+  value: OutputKind;
   icon: typeof ImageIcon;
   name: string;
   desc: string;
 }>;
+
+// Level 2, पोस्टर branch. No icons — the level-1 row carries those, which is what gives
+// the two rows their hierarchy for free (the /video page's pickers do the same).
+const POSTER_TARGETS = [
+  {
+    value: 'scheme',
+    name: STR.mediaTargetArticle,
+    desc: STR.mediaTargetArticleDesc,
+  },
+  {
+    value: 'twitter',
+    name: STR.mediaTargetTwitter,
+    desc: STR.mediaTargetTwitterDesc,
+  },
+  {
+    value: 'facebook',
+    name: STR.mediaTargetFacebook,
+    desc: STR.mediaTargetFacebookDesc,
+  },
+] as const satisfies ReadonlyArray<{
+  value: PosterTarget;
+  name: string;
+  desc: string;
+}>;
+
+// Level 2, कॅप्शन branch — the same two platform cards. One table serves both branches
+// because the labels are platform names only: the card above already says whether a
+// poster or only a caption is being made.
+const CAPTION_TARGETS = POSTER_TARGETS.filter(
+  (
+    target,
+  ): target is Extract<
+    (typeof POSTER_TARGETS)[number],
+    { value: CaptionTarget }
+  > => isSocialCategory(target.value),
+);
 
 // Where the upload card remembers its in-flight job across a refresh. The page also clears
 // it by hand after a submit (see clearDocument), so it is named once.
@@ -78,9 +113,17 @@ export default function NewGenerationPage() {
   // on a button click inside the upload card, which meant an officer who uploaded a PDF and
   // pressed तयार करा was told to write a longer टिपणी while their document sat there unused.
   const [docText, setDocText] = useState('');
+  const [docStatus, setDocStatus] = useState<DocumentIntakeStatus>('empty');
+  const [readRequest, setReadRequest] = useState(0);
+  const [awaitingRead, setAwaitingRead] = useState(false);
+  const readRequestedForSubmitRef = useRef(false);
   // Remounts the upload card to drop a finished document (its own state is internal).
   const [docKey, setDocKey] = useState(0);
-  const [category, setCategory] = useState<Category>('scheme');
+  // The two levels of the output picker. `category` is DERIVED from the pair below rather
+  // than stored, so the two can never disagree.
+  const [outputKind, setOutputKind] = useState<OutputKind>('poster');
+  const [posterTarget, setPosterTarget] = useState<PosterTarget>('scheme');
+  const [captionTarget, setCaptionTarget] = useState<CaptionTarget>('twitter');
   const [designMode, setDesignMode] = useState<DesignMode>('fresh');
   const [templateBrand, setTemplateBrand] = useState<TemplateBrand>('dgipr');
   // A social post is poster-only unless asked otherwise: the caption is a separate
@@ -95,23 +138,11 @@ export default function NewGenerationPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // व्यक्ती व पदनाम gate. Unlike /dlo — which has a natural review step — this page submits in
-  // one press, so the check runs ON submit: prepare, and if the text names nobody, go straight
-  // through. `names === null` therefore means "not checked yet", and the card only ever appears
-  // when there is genuinely something to decide. Article (पोस्टर) runs only.
-  const [designationNames, setDesignationNames] = useState<
-    PreparedName[] | null
-  >(null);
-  const [knownDesignations, setKnownDesignations] = useState<
-    KnownDesignation[]
-  >([]);
-  const [checkingNames, setCheckingNames] = useState(false);
-  const [designationEdits, setDesignationEdits] = useState<
-    Record<string, DesignationEdit>
-  >({});
-  const [designationExtras, setDesignationExtras] = useState<
-    DesignationExtra[]
-  >([]);
+  // कॅप्शन = caption only, no poster. On the wire that is outputType 'article' — which on
+  // the social lane means exactly what it has always meant on the article lane: this run
+  // renders no poster. (The caption lives in the `article` column, the social convention.)
+  const captionOnly = outputKind === 'caption';
+  const category: Category = captionOnly ? captionTarget : posterTarget;
 
   // ट्विटर and फेसबुक are one lane: same n8n workflow, same design modes, same
   // master library — only the recorded category differs.
@@ -123,13 +154,18 @@ export default function NewGenerationPage() {
   // Which library the template picker shows: twitter masters for the social flows
   // (except 'fresh' — no master is edited; CMO always edits a master), article
   // masters for the पोस्टर path (which always renders a poster). null hides it.
-  const pickerCategory: 'twitter' | 'article' | null = isSocial
-    ? isCmo
-      ? 'twitter'
-      : designMode === 'fresh'
-        ? null
-        : 'twitter'
-    : 'article';
+  // A कॅप्शन run renders nothing, so there is no template to pin. This needs its own
+  // branch rather than riding on isCmo: at designMode 'adaptive' the social arm below
+  // would still return 'twitter'.
+  const pickerCategory: 'twitter' | 'article' | null = captionOnly
+    ? null
+    : isSocial
+      ? isCmo
+        ? 'twitter'
+        : designMode === 'fresh'
+          ? null
+          : 'twitter'
+      : 'article';
   // CMO templates live under the twitter category but the 'cmo' brand; every other
   // social/article poster is DGIPR.
   const pickerBrand: TemplateBrand = isCmo ? 'cmo' : 'dgipr';
@@ -139,11 +175,12 @@ export default function NewGenerationPage() {
     setReference(null);
   }, [category, designMode, templateBrand]);
 
-  // विभाग is a social-only concept; snap it back to DGIPR whenever the run is not a
-  // social post, so switching category can never leave a stray CMO brand set.
+  // विभाग is a social-only concept, and a कॅप्शन run has no template at all; snap it back
+  // to DGIPR whenever the run is neither, so switching can never leave a stray CMO brand
+  // set (which also makes isCmo above false for a caption-only run).
   useEffect(() => {
-    if (!isSocial) setTemplateBrand('dgipr');
-  }, [isSocial]);
+    if (!isSocial || captionOnly) setTemplateBrand('dgipr');
+  }, [isSocial, captionOnly]);
 
   // What actually gets generated from: typed text, uploaded file, or both, in that order.
   // Blank-line separated so a pasted lead and an attached GR read as two blocks.
@@ -151,15 +188,6 @@ export default function NewGenerationPage() {
     () => [note.trim(), docText.trim()].filter(Boolean).join('\n\n'),
     [note, docText],
   );
-
-  // Editing the note after the check has run invalidates it: the people named may have
-  // changed, and silently reusing the previous list would apply a designation to a name the
-  // officer just removed. Clearing back to null means the next तयार करा re-checks.
-  useEffect(() => {
-    setDesignationNames(null);
-    setDesignationEdits({});
-    setDesignationExtras([]);
-  }, [combinedNote]);
 
   // Drop the attached document. A remount is what clears the card's internal state, and the
   // stored job id has to go with it or the mount effect would re-attach the same file.
@@ -169,41 +197,21 @@ export default function NewGenerationPage() {
     setDocKey((n) => n + 1);
   };
 
-  // Press तयार करा → check the names first. A पोस्टर run whose text names somebody stops here
-  // and shows the card; a social run, or one naming nobody, goes straight through so the check
-  // is invisible when there is nothing to check. A prepare failure is NOT a blocker — the whole
-  // point is the article, and designations are an enhancement to it.
+  // Press तयार करा → start the run immediately. Person/designation extraction is display-only
+  // on the generation detail page, where it reads the text that was actually produced.
   const startSubmit = async () => {
-    if (isSocial || designationNames !== null) {
-      await submit();
-      return;
-    }
-    if (combinedNote.length < 20) {
-      setError(STR.noteTooShort);
-      return;
-    }
-    setCheckingNames(true);
-    setError(null);
-    try {
-      const result = await prepareDesignations({ text: combinedNote });
-      setKnownDesignations(result.knownDesignations);
-      setDesignationNames(result.names);
-      if (result.names.length === 0) {
-        await submit();
+    if (docStatus === 'unread' || docStatus === 'reading') {
+      setAwaitingRead(true);
+      if (docStatus === 'unread') {
+        readRequestedForSubmitRef.current = true;
+        setReadRequest((request) => request + 1);
       }
-    } catch {
-      // Could not check — carry on rather than block the run on an optional step.
-      setDesignationNames([]);
-      await submit();
-    } finally {
-      setCheckingNames(false);
+      return;
     }
+    await submit();
   };
 
-  // `skipDesignations` is an explicit argument rather than a state flag because the "skip"
-  // button calls submit in the same tick it would clear the state — a setState would not have
-  // flushed, and the run would still carry the dictionary's pre-filled titles.
-  const submit = async (skipDesignations = false) => {
+  const submit = async () => {
     if (combinedNote.length < 20) {
       setError(STR.noteTooShort);
       return;
@@ -226,42 +234,36 @@ export default function NewGenerationPage() {
       setError(STR.busyError);
       return;
     }
-    // Blank पदनामे are dropped, so an untouched card sends nothing and the run is exactly
-    // what this page produced before the feature.
-    const designations =
-      isSocial || skipDesignations
-        ? []
-        : collectDesignations(
-            designationNames,
-            designationEdits,
-            designationExtras,
-          );
     setSubmitting(true);
     setError(null);
     try {
       const id = await createGeneration({
         note: combinedNote,
         category,
-        // Approved पदनामे — पोस्टर runs only (the API rejects them on a social run anyway).
-        // Applied to the pasted article by the runner's articleProvided branch.
-        ...(designations.length > 0 ? { designations } : {}),
-        // Always a poster here (the runner ignores outputType for social).
-        outputType: 'poster',
+        // A कॅप्शन run carries outputType 'article' — "this run renders no poster", the
+        // same meaning the article lane has always given it. The runner reads it off the
+        // ROW, so it survives a retry and an edit-note rerun for free.
+        outputType: captionOnly ? 'article' : 'poster',
         // The पोस्टर path uses the pasted article verbatim (skip generateArticle);
-        // inert for social, whose caption is always written fresh by n8n.
+        // inert for social, whose caption is always written fresh.
         providedArticle: !isSocial,
-        // Social only: the caption is opt-in (see wantCaption above). Absent on the
-        // पोस्टर path, where the pasted article already IS the text.
-        generateCaption: isSocial ? wantCaption : undefined,
+        // Social only. On the कॅप्शन lane the caption is the run's entire output, so it is
+        // not opt-in there — the toggle is not even rendered.
+        generateCaption: isSocial ? captionOnly || wantCaption : undefined,
         // पोस्टर only, and only when actually typed — an empty string would be a
         // meaningless "clear" on a run that has nothing to clear.
         posterHeading:
           !isSocial && posterHeading.trim() ? posterHeading.trim() : undefined,
-        designMode: isSocial ? designMode : undefined,
-        templateBrand: isSocial ? templateBrand : undefined,
+        // Template questions belong to a poster; a caption has none (and the API rejects
+        // a pin on a run that renders nothing).
+        designMode: isSocial && !captionOnly ? designMode : undefined,
+        templateBrand: isSocial && !captionOnly ? templateBrand : undefined,
         referenceImageId:
-          reference?.kind === 'image' ? reference.id : undefined,
-        referenceTypeId: reference?.kind === 'type' ? reference.id : undefined,
+          !captionOnly && reference?.kind === 'image'
+            ? reference.id
+            : undefined,
+        referenceTypeId:
+          !captionOnly && reference?.kind === 'type' ? reference.id : undefined,
       });
       if (isSocial) {
         // Background task: don't navigate. Track it, open the panel, reset the form
@@ -270,13 +272,9 @@ export default function NewGenerationPage() {
         openPanel();
         setNote('');
         clearDocument();
-        setCategory('scheme');
+        setOutputKind('poster');
+        setPosterTarget('scheme');
         setPosterHeading('');
-        // The gate is per-note: a fresh note must be checked afresh, or the next run would
-        // inherit the last one's people.
-        setDesignationNames(null);
-        setDesignationEdits({});
-        setDesignationExtras([]);
         setSubmitting(false);
       } else {
         // Navigate to the progress page, but also register a session row so the
@@ -292,6 +290,29 @@ export default function NewGenerationPage() {
       setSubmitting(false);
     }
   };
+
+  const startSubmitRef = useRef(startSubmit);
+  useEffect(() => {
+    startSubmitRef.current = startSubmit;
+  });
+  useEffect(() => {
+    if (!awaitingRead) return;
+    if (docStatus === 'unread') {
+      if (!readRequestedForSubmitRef.current) {
+        readRequestedForSubmitRef.current = true;
+        setReadRequest((request) => request + 1);
+      }
+      return;
+    }
+    if (docStatus === 'ready') {
+      readRequestedForSubmitRef.current = false;
+      setAwaitingRead(false);
+      void startSubmitRef.current();
+    } else if (docStatus === 'failed' || docStatus === 'empty') {
+      readRequestedForSubmitRef.current = false;
+      setAwaitingRead(false);
+    }
+  }, [awaitingRead, docStatus]);
 
   return (
     <main className="page">
@@ -330,40 +351,93 @@ export default function NewGenerationPage() {
           setDocText(text);
           if (text.trim()) setError(null);
         }}
+        onStatusChange={setDocStatus}
+        readRequest={readRequest}
       />
 
       <section className="card">
         <h2>{STR.mediaOutputLabel}</h2>
         <div className="output-picker">
-          {OUTPUT_CHOICES.map((option) => {
-            // v1 allows one active task per lane at a time: the ट्विटर/फेसबुक cards
-            // are gated by an in-flight social run (they share one n8n workflow),
-            // the पोस्टर card by an in-flight article run (the lanes don't block
-            // each other).
-            const disabled = isSocialCategory(option.value)
-              ? hasActiveSocialTask
-              : hasActiveArticleTask;
-            return (
-              <button
-                key={option.value}
-                type="button"
-                className="output-option"
-                aria-pressed={category === option.value}
-                disabled={disabled}
-                onClick={() => setCategory(option.value)}
-              >
-                <span className="icon" aria-hidden="true">
-                  <option.icon size={30} strokeWidth={1.75} />
-                </span>
-                <span className="name">{option.name}</span>
-                <span className="desc">{option.desc}</span>
-              </button>
-            );
-          })}
+          {OUTPUT_KINDS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className="output-option"
+              aria-pressed={outputKind === option.value}
+              // पोस्टर is never disabled: its children straddle both lanes, so a single
+              // flag would be a lie whenever one lane is free. कॅप्शन can be — both of
+              // its children are social.
+              disabled={option.value === 'caption' && hasActiveSocialTask}
+              onClick={() => setOutputKind(option.value)}
+            >
+              <span className="icon" aria-hidden="true">
+                <option.icon size={30} strokeWidth={1.75} />
+              </span>
+              <span className="name">{option.name}</span>
+              <span className="desc">{option.desc}</span>
+            </button>
+          ))}
+          <button
+            type="button"
+            className="output-option"
+            onClick={() => router.push('/video')}
+          >
+            <span className="icon" aria-hidden="true">
+              <Clapperboard size={30} strokeWidth={1.75} />
+            </span>
+            <span className="name">{STR.mediaOutputVideo}</span>
+            <span className="desc">{STR.mediaOutputVideoDesc}</span>
+          </button>
+        </div>
+        {/* Level 2: what the chosen artifact is FOR. Subordinate to the row above rather
+            than a card of its own, and without icons — that is what gives the two rows
+            their hierarchy. */}
+        <div className="output-sublevel">
+          <p className="field-label">{STR.mediaTargetLabel}</p>
+          <div
+            className={
+              captionOnly ? 'output-picker output-picker-two' : 'output-picker'
+            }
+          >
+            {(captionOnly ? CAPTION_TARGETS : POSTER_TARGETS).map((option) => {
+              // v1 allows one active task per lane at a time: the ट्विटर/फेसबुक cards
+              // are gated by an in-flight social run (they share one n8n workflow),
+              // the लेख card by an in-flight article run (the lanes don't block each
+              // other). Under कॅप्शन every child is social, so this collapses with no
+              // special case. A selected card that becomes disabled is left selected —
+              // submit() re-checks both flags, and moving the choice under the user's
+              // cursor would be worse.
+              const disabled = isSocialCategory(option.value)
+                ? hasActiveSocialTask
+                : hasActiveArticleTask;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  className="output-option"
+                  aria-pressed={category === option.value}
+                  disabled={disabled}
+                  onClick={() => {
+                    if (!captionOnly) {
+                      setPosterTarget(option.value);
+                      // CAPTION_TARGETS already excludes 'scheme'; this re-narrows the
+                      // widened union the ternary above produces (the /dlo picker's move).
+                    } else if (option.value !== 'scheme') {
+                      setCaptionTarget(option.value);
+                    }
+                  }}
+                >
+                  <span className="name">{option.name}</span>
+                  <span className="desc">{option.desc}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
         {/* Sits with the format cards, not in its own section: "a post with a caption"
-            is part of choosing what to make, and it only exists for the social lanes. */}
-        {isSocial ? (
+            is part of choosing what to make. Social lanes only, and not on the कॅप्शन
+            lane, where a caption is the whole output and the toggle would be a tautology. */}
+        {isSocial && !captionOnly ? (
           <label className="option-toggle">
             <input
               type="checkbox"
@@ -402,6 +476,11 @@ export default function NewGenerationPage() {
             />
           </div>
         ) : null}
+        {/* A caption-only run can never be published from the app — both X and the
+            Facebook Page endpoint need the poster — so say so before the run, not after. */}
+        {captionOnly ? (
+          <p className="info-callout">{STR.mediaCaptionOnlyInfo}</p>
+        ) : null}
         {hasActiveSocialTask ? (
           <p className="info-callout">{STR.socialBusyInfo}</p>
         ) : null}
@@ -410,7 +489,8 @@ export default function NewGenerationPage() {
         ) : null}
       </section>
 
-      {isSocial ? (
+      {/* विभाग and रचना-शैली are poster questions; a कॅप्शन run has no template at all. */}
+      {isSocial && !captionOnly ? (
         <>
           <section className="card">
             <h2>{STR.brandLabel}</h2>
@@ -473,86 +553,20 @@ export default function NewGenerationPage() {
         />
       ) : null}
 
-      {/* The पदनाम gate. Appears only after तयार करा found people to ask about — a run naming
-          nobody, and every social run, never sees it. */}
-      {!isSocial && designationNames !== null && designationNames.length > 0 ? (
-        <DesignationReview
-          names={designationNames}
-          known={knownDesignations}
-          edits={designationEdits}
-          extras={designationExtras}
-          loading={false}
-          error={null}
-          busy={submitting}
-          onEditDesignation={(marathi, designation) =>
-            setDesignationEdits((prev) => ({
-              ...prev,
-              [marathi]: {
-                designation,
-                remember: prev[marathi]?.remember ?? false,
-              },
-            }))
-          }
-          onToggleRemember={(marathi, remember) =>
-            setDesignationEdits((prev) => ({
-              ...prev,
-              [marathi]: {
-                designation:
-                  prev[marathi]?.designation ??
-                  designationNames.find((n) => n.marathi === marathi)
-                    ?.designation ??
-                  '',
-                remember,
-              },
-            }))
-          }
-          onChangeExtra={(index, patch) =>
-            setDesignationExtras((prev) =>
-              prev.map((row, i) => (i === index ? { ...row, ...patch } : row)),
-            )
-          }
-          onAddExtra={() =>
-            setDesignationExtras((prev) => [
-              ...prev,
-              { name: '', designation: '', remember: false },
-            ])
-          }
-          onRegenerate={() => {
-            setDesignationNames(null);
-            void startSubmit();
-          }}
-        />
-      ) : null}
-
       <section className="card">
         <div className="btn-row">
           <button
             type="button"
             className="btn btn-primary"
             onClick={() => void startSubmit()}
-            disabled={submitting || checkingNames}
+            disabled={submitting || awaitingRead}
           >
-            {checkingNames
-              ? STR.designationsChecking
+            {awaitingRead
+              ? STR.docReadingForSubmit
               : submitting
                 ? STR.submitting
-                : designationNames !== null && designationNames.length > 0
-                  ? STR.designationsConfirm
-                  : STR.submit}
+                : STR.submit}
           </button>
-          {/* Escape hatch: generate with no designations at all, without clearing the card. */}
-          {!isSocial &&
-          designationNames !== null &&
-          designationNames.length > 0 ? (
-            <button
-              type="button"
-              className="btn"
-              onClick={() => void submit(true)}
-              disabled={submitting}
-            >
-              {STR.designationsSkip}
-            </button>
-          ) : null}
         </div>
         {error ? <p className="form-error">{error}</p> : null}
       </section>

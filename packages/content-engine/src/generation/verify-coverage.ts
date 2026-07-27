@@ -321,9 +321,14 @@ const APPROVED_COVERAGE_SYSTEM_PROMPT = [
   'फक्त वैध JSON द्या: {"missing":[],"overweighted":[]}. नवीन तथ्य किंवा स्पष्टीकरण जोडू नका.',
 ].join('\n');
 
-// The DLO path has already paid for and received an officer-approved fact inventory. Grade
-// against that bounded checklist instead of re-sending the full note to three independent
-// checkers. One call returns both under-coverage and, when a brief exists, over-expansion.
+// Grade against a bounded officer-approved checklist instead of re-sending the full note to
+// three independent checkers. One call returns both under-coverage and, when a brief exists,
+// over-expansion.
+//
+// LEGACY ROWS ONLY — do not delete. /dlo's Pointers step is now a read-only summary and no
+// new run carries an inventory, so a fresh generation takes the three-way check instead.
+// This stays live via `revise-article.ts`, which re-reads the stored columns on EVERY
+// article-feedback round: any pre-change generation still grades through here, forever.
 export async function findMissingApprovedFacts(
   article: string,
   includeFacts: readonly string[],

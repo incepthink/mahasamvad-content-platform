@@ -75,6 +75,17 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
     is poster-only unless `generateCaption` was set, produced AFTER the poster row-write so a
     caption failure never costs the paid render. A run that skipped it gets one later via
     `startGenerateCaptionJob`.
+    **The कॅप्शन lane inverts that: `row.outputType === 'article'` means NO poster at all** and
+    the caption is the run's entire output — one `generateSocialCaption` call, no classify, no
+    master, no n8n, no image spend. `outputType: 'article'` now reads the same on BOTH lanes
+    ("this run renders no poster"); the article pipeline has always read it that way. It is
+    taken off the **row**, not a job option like `generateCaption`, because a re-run cannot
+    infer it: a null `posterPath` cannot distinguish "never wanted a poster" from "the render
+    failed", so an option would be lost on the first retry — and `detail.outputType` is already
+    forwarded by both retry paths. Caption-only is **terminal for posters** by design
+    (`/generations/:id/poster` rejects social, `/poster/regenerate` needs a `posterPath`); the
+    route to a poster is a fresh run from the same note via `NextActions`' cross-format fold.
+    Publishing is refused (both X and the FB Page need the poster bytes/URL).
   - `startArticleFeedbackJob`, `startPosterFeedbackJob` (`copy` re-renders with the
     **cached** scene; `scene` regenerates the background image).
   - `startPosterImageFeedbackJob` (pixel feedback, both poster kinds): with marker
@@ -121,11 +132,13 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
     rather than making the browser upload the same bytes twice. An expired ephemeral job
     (60-min TTL) yields an entry with no `storagePath`: the text still lands, only the
     re-read is lost, and `canReextract` on the detail payload is what hides that button.
-    **Reading it there is OPTIONAL** (2026-07-26): a scan can be OCR'd for minutes, so the
-    picker also offers **"न वाचता ही पृष्ठे वापरा"** (`allowDeferredRead` on
-    `<DocumentIntake>` — /dlo only, being the one surface with a job downstream). That
-    hands over the page SELECTION instead of text: the snapshot carries `pendingPages` and
-    no `pages`, the create request sends the same field, the route stores a
+    **Reading it there is OPTIONAL** (2026-07-26; default deferred on 2026-07-27): a scan can
+    be OCR'd for minutes, so `/dlo`'s live page selection is handed over unread automatically
+    (`allowDeferredRead` on `<DocumentIntake>` — /dlo only, being the one surface with a job
+    downstream). The former **"न वाचता ही पृष्ठे वापरा"** button is gone; ticking pages is
+    the handover, while **"निवडलेली पृष्ठे वाचा"** remains as the optional read-now action.
+    The snapshot carries `pendingPages` and no `pages`, the create request sends the same
+    field, the route stores a
     `status: 'pending'` entry carrying it, and the intake job's extract phase calls
     `extractPdfEntry(entry, entry.pendingPages)` instead of `probePdfEntry`. Same spend
     gate — the pages were still chosen before anything was billed — with the wait folded
@@ -447,7 +460,7 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   (`extractGlossaryCandidates` ∪ `findGlossaryTermsInText`) with the pre-translation name check
   — one detector, two questions. Web → `apps/web/components/DesignationReview.tsx` (datalist of
   known titles, per-row **"यापुढेही हेच वापरा"** write-back), shown in `/dlo`'s middle step beside
-  `PointerSelector` and as a submit-time gate on the media room that **auto-skips when the text
+  `PointerList` and as a submit-time gate on the media room that **auto-skips when the text
   names nobody**. Write-back → `apps/api/src/jobs/designation-writeback.ts` (patches the person
   row in place via `setPersonDesignation` — never `upsertGlossaryTerm`, which would clobber a
   reviewed English spelling — and ensures the TITLE exists as its own row, the step that makes
@@ -671,7 +684,57 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   `tsx src/generation/{poster-palettes,poster-layouts,poster-style,strip-colour-words,build-poster-prompt}.ts`;
   `pnpm --filter @dgipr/poster-renderer poster:preview:colours <poster.png|url> …` measures
   finished posters (accepts URLs, so a set of live posters can be checked for sameness).
-- Article gen / coverage / faithfulness / revisions →
+- **Article generation has TWO pipelines, chosen by `ARTICLE_GENERATION_MODE` (default
+  `simple`).** The flag is read in ONE place, `articleGenerationMode()` in
+  `apps/api/src/jobs/runner.ts`, beside the `ARTICLE_POSTER_MODE` precedent.
+  - `simple` (default) → `generation/generate-article-simple.ts`: **one style reference, one
+    model call, one article**. `selectStyleReference` (≤1 embedding) → `chatComplete` on
+    `ARTICLE_MODEL` → `applyDesignations`. No 5W1H call, no editorial brief, no tier audit, no
+    sectioned drafting, no coverage-revision loop, no faithfulness repair, no traceability
+    appendix. Steps are `retrieve → draft → done` — all existing `GenerationStepSchema` values,
+    so no schema change. Returns `factCheck: null` always, and `fiveWOneH: null` unless the run
+    carries approved /dlo pointers (**null, not an empty scaffold** — `[id]/page.tsx:168` gates
+    the card on truthiness and an all-empty object renders six "टिपणीत नाही" rows). Since /dlo's
+    Pointers step became a read-only summary, **no new run carries an inventory**, so in `simple`
+    mode `fiveWOneH` is now null for every fresh run and the तपशील card renders only for legacy
+    rows. `full` mode still populates it via `extractFiveWOneH`, so the card is mode-dependent.
+  - `full` → `generation/generate-article.ts`, the multi-stage editorial pipeline, **byte-for-byte
+    untouched** (`extract-5w1h.ts`, `editorial-brief.ts`, `verify-coverage.ts`,
+    `polish-article.ts`, `news-exemplar.ts` all unchanged). Rollback is this one env line.
+  - **The editorial specification** is `generation/simple-article-prompt.ts` — a system message
+    of DGIPR rules plus a user message of filled INPUTS, versioned by
+    `SIMPLE_ARTICLE_PROMPT_VERSION` and persisted per run. Every optional slot is OMITTED when
+    empty rather than rendered blank, and the **dateline is rendered, not substituted** (a blind
+    substitution emits `, दि.  :` or leaks a literal `{{location}}`). `location`/`date` are
+    deliberately unsupplied today — nothing trusted collects them and no call infers them.
+    Word targets come from `ARTICLE_WORD_TARGETS` in `@dgipr/schemas` (बातमी 350/250–450,
+    योजना-लेख 600/450–750), stated as soft guidelines. Free harness:
+    `tsx src/generation/simple-article-prompt.ts` (50 assertions).
+  - **Style reference = 3 tiers** (`generation/select-style-reference.ts`): the officer's pasted
+    article (`generations.style_reference`, 0035) → the closest Mahasamvad article **above
+    `ARTICLE_STYLE_REFERENCE_MIN_SIMILARITY`** (default 0.35) → nothing. The floor is the fix for
+    a retrieval path that had **no threshold at all** — `pickBestMatch` returns the argmax
+    unconditionally, so an unrelated article became the exemplar whenever the corpus held nothing
+    close, which is worse than no exemplar. **Calibrate it** with `retrieve:test` and
+    `generations.style_reference_meta`; do not guess. The reference is passed WHOLE, not
+    `slice(0, 1500)` — the spec asks how a piece concludes. `NEWS_STYLE_EXEMPLAR` is not used
+    here (it is a fourth tier the hierarchy does not have). This function is the seam where the
+    future approved-example tier slots in, matched on the SOURCE embedding. Free harness:
+    `tsx src/generation/select-style-reference.ts`.
+  - **What survives in BOTH modes and must not be removed:** `applyDesignations` (deterministic,
+    zero calls, the only structural name guarantee), every officer-approved input
+    (`selectedFacts`, `statements`, `excludedFacts`, `nameDesignations`), the note as sole
+    factual authority, job status/step, cost metering, and every downstream feature.
+  - **Feedback keeps the full machinery** (`revise-article.ts`), deliberately — it is the
+    officer-in-the-loop path. Its one change: a `withFactCheck` parameter (default `true`) fed by
+    `rowHasFactCheck(row)`, so a simple-mode article does not sprout a तथ्य-तपासणी fold — and buy
+    an extra model pass — on its first feedback round.
+  - Evaluation: `pnpm --filter @dgipr/content-engine article:compare -- --file=note.txt [news|scheme]
+    [--effort=high]` runs BOTH pipelines on one note and prints wall-clock, chat calls, cost,
+    length and — the number that matters — `findUnsupportedClaims` run as a **read-only judge**
+    over each output. Simple mode drops the faithfulness *repair*, so that count is the evidence
+    the removal is safe.
+- Article gen / coverage / faithfulness / revisions (the `full` pipeline) →
   `packages/content-engine/src/generation/*`
   (`generate-article.ts`, `verify-coverage.ts`, `generate-copy.ts`, `revise-*.ts`,
   `openai-chat.ts`; category-aware prompting in `category-prompt.ts`)
@@ -702,15 +765,25 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
 
 **Web flow (user journey starts here):**
 
-- Entry / create a generation (the media room: paste a finished article, upload a file, or
+- Entry / create a generation (**Creative and Social**, formerly the media room — the
+  sidebar's one English label: paste a finished article, upload a file, or
   **both** — the upload runs `DocumentIntake` in **live** mode, so the file's text is a
   SECOND source held beside the textarea (`docText`) and joined with it at submit
   (`combinedNote`), never pushed into it. That is what makes "either one or both" true with
   no extra click: the earlier append-on-button-press meant an upload nobody handed over was
   dropped and the submit answered `कृपया किमान २० अक्षरांची टिपणी लिहा`. A run consumes the
   document — `clearDocument()` drops the sessionStorage job id and remounts the card on BOTH
-  submit paths, or navigating back would silently re-attach it to the next run. The caption
-  toggle for a social run lives in the same `काय तयार करायचे?` card) →
+  submit paths, or navigating back would silently re-attach it to the next run.
+  `काय तयार करायचे?` is a **two-level picker**: level 1 पोस्टर (default) / कॅप्शन, level 2
+  लेख / ट्विटर / फेसबुक under पोस्टर and ट्विटर / फेसबुक under कॅप्शन. `category` is DERIVED
+  from that pair — level-2 values ARE `Category` values, so there is no mapping table, and
+  `'article'` is deliberately never a level-2 value (it would mean "the लेख poster" here and
+  "no poster at all" in `outputType`). कॅप्शन sends `outputType: 'article'` and hides every
+  poster question (विभाग, रचना-शैली, `ReferencePicker`, पोस्टरवरील मजकूर). The
+  poster-**plus**-caption toggle survives under पोस्टर → ट्विटर/फेसबुक — dropping it would
+  make that combination unreachable while `NextActions.CreateSocialBlock` still offered it.
+  Busy gating: the पोस्टर level-1 card is never disabled (its children straddle both lanes),
+  कॅप्शन is gated on `hasActiveSocialTask`, and the per-lane rule lives on the level-2 cards) →
   `apps/web/app/page.tsx`
 - Generation detail (progress, article, poster, feedback) →
   `apps/web/app/generations/[id]/page.tsx`; history list →
@@ -771,6 +844,15 @@ applied. Apply before the API deploy anyway.
 so a re-uploaded recording is never re-transcribed on /dlo). Self-contained + additive; the
 intake job treats a cache-read error as an empty cache, so an un-applied 0031 disables only the
 optimization instead of breaking intake — apply it before the API deploy anyway.
+`0035` — `generations.style_reference` (the article an officer pasted as the STYLE model for a
+run; insert-only, because `startGenerationJob` re-reads everything from the row and a retry must
+reproduce the same reference) + `generations.style_reference_meta` (jsonb: which tier actually
+fired, at what similarity, under which prompt version — the calibration signal for the retrieval
+floor AND the join key for the future approved-example loop; patchable, written after the article).
+Both additive + nullable; `insertGeneration` omits `style_reference` unless one was pasted and the
+meta write is a SEPARATE best-effort update after the article write, so an un-applied 0035 costs
+the officer tier and the telemetry rather than a generated article (the 0028 principle). Apply
+before the API deploy anyway.
 
 **Aux / not on the main request path:**
 
@@ -1022,7 +1104,18 @@ Chromium): `pnpm --filter @dgipr/poster-renderer exec playwright install chromiu
   tie-break, page-instruction parsing, offline finetune prep); `VISION_MODEL`
   (`OPENAI_VISION_MODEL`, `gpt-5.6-terra`) is the image-input calls. `POSTER_COPY_MODEL`
   (`OPENAI_COPY_MODEL`) and `ANALYZE_MODEL` (`OPENAI_ANALYZE_MODEL`) stay as separate pins
-  for the poster path and the must-be-vision-capable master analysis. Two consequences the
+  for the poster path and the must-be-vision-capable master analysis; `VIDEO_CHAT_MODEL`
+  (`OPENAI_VIDEO_MODEL`, `gpt-5.6-sol`), **`ARTICLE_MODEL` (`OPENAI_ARTICLE_MODEL`,
+  `gpt-5.6-sol`)** and `POINTERS_MODEL` (`OPENAI_POINTERS_MODEL`, `gpt-5.6-sol`) are pinned
+  one step UP — the /video text calls, the simplified generator's single article call and
+  /dlo's key-point summary are the judgement-heaviest Marathi work in the repo; in the
+  article's case the brief, the coverage loop and the faithfulness repair were removed, so
+  all of that judgement now happens inside that one call, and in the pointers' case one call
+  must enumerate every distinct topic of a 60k-char multi-article document in order, with
+  nothing downstream to correct it.
+  `articleReasoningEffort()` (`OPENAI_ARTICLE_REASONING_EFFORT`, default `medium`) is its
+  companion knob, and is not cosmetic: the specification's SILENT FINAL CHECK block is the
+  only verification left on that path and it runs in the reasoning stage. Two consequences the
   whole codebase depends on: **`temperature` is rejected by gpt-5**, so the temperature-0
   determinism ~24 call sites passed is silently inert — the deterministic post-filters
   (proof-read's verbatim-excerpt/digit guards, `lock-scheme-names`, the translate name

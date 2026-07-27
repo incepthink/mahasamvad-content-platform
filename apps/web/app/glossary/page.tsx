@@ -594,7 +594,7 @@ export default function GlossaryPage() {
   const [search, setSearch] = useState('');
   const [appliedSearch, setAppliedSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<TermType | ''>('');
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('unverified');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);

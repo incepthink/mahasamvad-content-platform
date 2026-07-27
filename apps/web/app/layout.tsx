@@ -6,6 +6,7 @@ import { Noto_Sans_Devanagari } from 'next/font/google';
 import { STR } from '../lib/strings';
 import { TasksProvider } from '../lib/TasksProvider';
 import { AppSidebar } from '../components/AppSidebar';
+import { PersistentAppContent } from '../components/PersistentAppContent';
 import HashcaseLogo from '../public/hashcase-text.svg';
 
 // Same family the poster renderer typesets with, so the UI shapes Devanagari
@@ -36,7 +37,7 @@ export default function RootLayout({
         <TasksProvider>
           <AppSidebar />
           <div className="app-main">
-            {children}
+            <PersistentAppContent>{children}</PersistentAppContent>
             <footer className="site-footer">
               <a
                 href="https://hashcase.co"

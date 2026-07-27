@@ -116,10 +116,45 @@ export const NOTE_MAX_CHARS = 60_000;
 // web form so it can warn instead of eating a 400.
 export const POSTER_HEADING_MAX_CHARS = 120;
 
+// Hard ceiling on an officer-supplied style-reference article (the simplified article
+// generator's tier-1 reference — see select-style-reference.ts). Generous, because the whole
+// point is that the model studies a COMPLETE published article's structure: how it opens, how
+// it sequences paragraphs and how it concludes. Shared with the web form so it can warn
+// instead of eating a 400.
+export const STYLE_REFERENCE_MAX_CHARS = 20_000;
+
+// Below this a paste is a fragment, not an article — too little to demonstrate structure, and
+// far more likely to be a stray line than an intentional reference. Such input falls through
+// to retrieval rather than being honoured as tier 1.
+export const STYLE_REFERENCE_MIN_CHARS = 200;
+
+// Category-appropriate article length, handed to the generator as a GUIDELINE. `target` is
+// what the prompt asks for; `min`/`max` bound the acceptable range. The prompt states
+// explicitly that a limited source must produce a shorter article and that the target may be
+// exceeded slightly to preserve material administrative detail — length is never a reason to
+// invent content. Lives here (not in content-engine) so the web can surface it later:
+// apps/web cannot import content-engine.
+export type ArticleWordTarget = Readonly<{
+  target: number;
+  min: number;
+  max: number;
+}>;
+
+export const ARTICLE_WORD_TARGETS: Readonly<
+  Record<'news' | 'scheme', ArticleWordTarget>
+> = {
+  news: { target: 350, min: 250, max: 450 },
+  scheme: { target: 600, min: 450, max: 750 },
+};
+
 export const CreateGenerationRequestSchema = z
   .object({
     // The Marathi note (टिपणी) — sole factual source for everything generated.
     note: z.string().trim().min(20).max(NOTE_MAX_CHARS),
+    // What the run produces. 'article' means NO POSTER on BOTH lanes: on news/scheme the
+    // poster phase is skipped, and on twitter/facebook it is the caption-only run (the
+    // caption lives in the `article` column, the social lane's convention). 'poster' and
+    // 'both' each render a poster on the social lane, which has no separate article.
     outputType: OutputTypeSchema,
     // The Mahasamvad voice to write in. Defaults to 'scheme' (the original behaviour).
     category: CategorySchema.default('scheme'),
@@ -167,6 +202,17 @@ export const CreateGenerationRequestSchema = z
     // mention and both translations inherit it — see designations.ts (migration 0033).
     // Absent/empty ⇒ every name prints bare, i.e. today's article.
     designations: NameDesignationsSchema.optional(),
+    // Article runs only (news/scheme): a published article the officer pasted as the STYLE
+    // reference — tier 1 of the simplified generator's reference hierarchy, above vector
+    // retrieval. Style, structure and voice only; it is NEVER a factual source, and the
+    // prompt says so explicitly. Absent/empty ⇒ fall through to retrieval, then to the
+    // prompt's own DGIPR rules. Inert for social runs and for a pasted finished article
+    // (providedArticle), neither of which generates prose.
+    styleReference: z
+      .string()
+      .trim()
+      .max(STYLE_REFERENCE_MAX_CHARS)
+      .optional(),
   })
   .superRefine((value, ctx) => {
     if (value.referenceImageId && value.referenceTypeId) {
@@ -175,6 +221,21 @@ export const CreateGenerationRequestSchema = z
         message:
           'Reference image and reference type pins are mutually exclusive.',
         path: ['referenceTypeId'],
+      });
+    }
+    // A social run with outputType 'article' is the कॅप्शन lane: no poster is rendered, so
+    // the caption is the run's ONLY output. A request that also says generateCaption:false
+    // asks for nothing at all.
+    if (
+      value.outputType === 'article' &&
+      isSocialCategory(value.category) &&
+      value.generateCaption !== true
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "A caption-only social run (outputType 'article') must set generateCaption: true — the caption is its only output.",
+        path: ['generateCaption'],
       });
     }
   });

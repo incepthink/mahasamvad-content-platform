@@ -590,6 +590,26 @@ textarea.note-input {
   }
 }
 
+/* Second level of the media room's two-level output picker: WHAT FOR, once WHAT has
+   been chosen. Subordinate to the row above rather than another card, so it borrows the
+   rule-and-gap idiom .ref-picker-inline uses for exactly that relationship. */
+.output-sublevel {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+/* .field-label is scoped to <label> (see the form-controls block), so a <p> gets nothing —
+   the same reason .next-actions-picker carries this rule. */
+.output-sublevel .field-label {
+  margin: 0;
+  font-weight: 600;
+}
+/* Denser than the level-1 cards, like .segmented's: these refine the choice above and
+   carry no icon. Touches padding only, so aria-pressed / :disabled are unaffected. */
+.output-sublevel .output-option {
+  padding: 14px;
+}
+
 .output-option {
   border: 2px solid var(--border);
   border-radius: 16px;
@@ -1261,6 +1281,31 @@ textarea.note-input {
   white-space: pre-wrap;
   font-size: 1.05rem;
   line-height: 1.9;
+}
+
+/* On a poster-focused article run, the poster is the primary result and the article is only
+   its source. Keep the complete article toolset available, but behind one quiet disclosure. */
+details.poster-source-article {
+  padding: 0;
+}
+
+details.poster-source-article > summary {
+  cursor: pointer;
+  padding: 20px 28px;
+  font-size: 1.08rem;
+  font-weight: 700;
+}
+
+details.poster-source-article[open] > summary {
+  border-bottom: 1px solid var(--border);
+}
+
+.poster-source-article-body {
+  padding: 24px 28px 28px;
+}
+
+.article-view-embedded .article-head:empty {
+  display: none;
 }
 
 details.fold {
@@ -2093,6 +2138,48 @@ details.fold .fold-body.gl-add-body {
 .names-review-row.is-unverified {
   border-left: 4px solid var(--warn);
   background: var(--warn-soft);
+}
+
+/* Read-only post-generation person/designation summary. Kept visually quieter than the
+   editable pre-translation/DLO review because it is an audit note, not a gate. */
+.used-names-card {
+  margin-top: 16px;
+}
+
+.used-names-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.used-name-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr);
+  gap: 18px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fffdfa;
+}
+
+.used-name-row > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.used-name-label {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+@media (max-width: 640px) {
+  .used-name-row {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
 }
 
 /* Per-row "keep verbatim in Hindi" toggle. */
@@ -2963,50 +3050,25 @@ a.thread-node:hover {
   text-align: center;
 }
 
-/* ---------- pointers (5W1H fact selection on /dlo) ---------- */
-
-.pointer-group {
-  margin-top: 16px;
-}
+/* ---------- pointers (महत्त्वाचे मुद्दे — the read-only key-point list on /dlo) ----------
+   A reading summary, not a form: plain bullets with article-like line height, no bordered
+   rows and no controls. Line height sits just under .article-body's so the card reads as
+   prose while staying visibly a list. */
 
 .pointer-list {
-  list-style: none;
-  margin: 8px 0 0;
-  padding: 0;
+  margin: 12px 0 0;
+  padding-left: 22px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-}
-
-.pointer-row {
-  display: flex;
-  align-items: flex-start;
   gap: 10px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: #fffdfa;
-  padding: 10px 12px;
-  cursor: pointer;
 }
 
-.pointer-row input[type='checkbox'] {
-  width: 18px;
-  height: 18px;
-  flex-shrink: 0;
-  margin-top: 2px;
-  accent-color: var(--accent);
+.pointer-list li {
+  line-height: 1.85;
 }
 
-.pointer-row.excluded {
-  opacity: 0.55;
-}
-
-.pointer-row.excluded .pointer-text {
-  text-decoration: line-through;
-}
-
-.pointer-text {
-  line-height: 1.5;
+.pointer-list li::marker {
+  color: var(--accent);
 }
 
 /* ---------- PDF translation: page picker + per-language result ---------- */

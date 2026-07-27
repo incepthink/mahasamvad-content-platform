@@ -71,6 +71,16 @@ export type GenerationRow = Readonly<{
   // for the same reason as `copy`/`posterStyle`: the database package does not own the shape.
   // Insert-only; null on rows created before 0033 and on runs where none were approved.
   nameDesignations: unknown;
+  // A published article the officer pasted as the STYLE model for this run (migration 0035) —
+  // tier 1 of the simplified generator's reference hierarchy, above vector retrieval. Style and
+  // structure only; never a factual source. Insert-only, because a retry re-reads the row and
+  // must reproduce the same reference. Null when the officer pasted nothing and on pre-0035 rows.
+  styleReference: string | null;
+  // Which style reference the run ACTUALLY used (migration 0035): the officer's paste, a
+  // retrieved Mahasamvad article above the similarity floor, or none — plus the similarity and
+  // the prompt version. `unknown` for the same reason as `copy`/`posterStyle`: the database
+  // package does not own the shape. Written after generation, so it is patchable.
+  styleReferenceMeta: unknown;
   // The media-room flow (migration 0027): the note IS a finished article, so the
   // runner uses it verbatim and skips generateArticle. false for every ordinary
   // run and for rows created before this feature.
@@ -155,6 +165,8 @@ type GenerationDbRow = {
   selected_facts: unknown;
   statements: unknown;
   name_designations: unknown;
+  style_reference: string | null;
+  style_reference_meta: unknown;
   article_provided: boolean | null;
   poster_style: unknown;
   status: GenerationStatus;
@@ -213,6 +225,10 @@ function fromDbRow(row: GenerationDbRow): GenerationRow {
     nameDesignations: Array.isArray(row.name_designations)
       ? row.name_designations
       : null,
+    // ?? null: a pre-0035 database returns no such columns (undefined), which every reader
+    // already treats as "no officer reference / nothing recorded".
+    styleReference: row.style_reference ?? null,
+    styleReferenceMeta: row.style_reference_meta ?? null,
     // ?? false: a pre-0027 database returns no such column (undefined), and an
     // ordinary run is not article-provided anyway.
     articleProvided: row.article_provided ?? false,
@@ -273,6 +289,7 @@ export type GenerationPatch = Partial<
     | 'posterPath'
     | 'posterStyle'
     | 'posterHeading'
+    | 'styleReferenceMeta'
     | 'publishedUrl'
     | 'publishedAt'
   >
@@ -300,6 +317,8 @@ function patchToDbRow(patch: GenerationPatch): Record<string, unknown> {
   if (patch.posterStyle !== undefined) row.poster_style = patch.posterStyle;
   if (patch.posterHeading !== undefined)
     row.poster_heading = patch.posterHeading;
+  if (patch.styleReferenceMeta !== undefined)
+    row.style_reference_meta = patch.styleReferenceMeta;
   if (patch.publishedUrl !== undefined) row.published_url = patch.publishedUrl;
   if (patch.publishedAt !== undefined) row.published_at = patch.publishedAt;
   return row;
@@ -349,6 +368,10 @@ export async function insertGeneration(
     nameDesignations?:
       | readonly Readonly<{ name: string; designation: string }>[]
       | undefined;
+    // Insert-only (migration 0035): a published article the officer pasted as the STYLE model.
+    // Read again on every retry, which is why it lives on the row rather than in the create
+    // request alone.
+    styleReference?: string | undefined;
     // Insert-only: the note is a finished article; the runner skips generation.
     articleProvided?: boolean | undefined;
   }>,
@@ -392,6 +415,12 @@ export async function insertGeneration(
       // un-applied 0033 costs this feature rather than every create.
       ...(input.nameDesignations && input.nameDesignations.length > 0
         ? { name_designations: input.nameDesignations }
+        : {}),
+      // Sent ONLY when the officer actually pasted a style reference — same reasoning again,
+      // so an un-applied 0035 costs the officer-reference tier (retrieval still runs) rather
+      // than failing every create.
+      ...(input.styleReference
+        ? { style_reference: input.styleReference }
         : {}),
       article_provided: input.articleProvided ?? false,
     })

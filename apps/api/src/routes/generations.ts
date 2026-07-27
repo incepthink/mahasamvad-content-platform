@@ -255,12 +255,17 @@ export function registerGenerationRoutes(
     // Optional pin: must reference an existing library image of the matching
     // category (social↔twitter library, news/scheme↔article), and only for runs
     // that actually render a poster.
+    //
+    // outputType 'article' says the run renders none — on the article lane (the poster
+    // phase is skipped) and on the social lane (the कॅप्शन run) alike. Storing a pin
+    // nothing will ever read is worse than saying so.
+    const rendersPoster = body.outputType !== 'article';
     if (body.referenceImageId) {
-      if (!isSocialCategory(body.category) && body.outputType === 'article') {
+      if (!rendersPoster) {
         return reply.code(400).send({
           error: {
             message:
-              'A reference image cannot be pinned for an article-only run.',
+              'A reference image cannot be pinned for a run that renders no poster.',
           },
         });
       }
@@ -279,6 +284,14 @@ export function registerGenerationRoutes(
         return reply.code(400).send({
           error: {
             message: 'A reference type can only be pinned for a social post.',
+          },
+        });
+      }
+      if (!rendersPoster) {
+        return reply.code(400).send({
+          error: {
+            message:
+              'A reference type cannot be pinned for a run that renders no poster.',
           },
         });
       }
@@ -351,6 +364,14 @@ export function registerGenerationRoutes(
         body.providedArticle && !isSocialCategory(body.category)
           ? true
           : undefined,
+      // Tier-1 style reference (migration 0035) — article runs that actually generate prose.
+      // A social run writes no article, and a providedArticle run skips generation entirely,
+      // so storing it on either would be dead data that a later reader could misread as
+      // "this run was styled on that". insertGeneration omits the column when absent.
+      styleReference:
+        isSocialCategory(body.category) || body.providedArticle
+          ? undefined
+          : body.styleReference,
     });
     // Twitter/Facebook → external n8n social-post job; news/scheme → in-process
     // article pipeline. A social run is poster-only unless the caller asked for a
@@ -706,7 +727,9 @@ export function registerGenerationRoutes(
       }
       if (isSocialCategory(row.category)) {
         return reply.code(400).send({
-          error: { message: 'Social posts always include a poster.' },
+          error: {
+            message: 'A social post cannot be given an article poster.',
+          },
         });
       }
       if (!row.article) {
@@ -1073,6 +1096,18 @@ export function registerGenerationRoutes(
         return reply
           .code(409)
           .send({ error: { message: 'The run has not completed yet.' } });
+      }
+      // The कॅप्शन lane renders no poster, and both platforms need one (X uploads the
+      // poster bytes as media, the Page endpoint is /photos) — so this is permanent, not
+      // "yet". The UI never offers the button here (SocialPostView requires posterUrl);
+      // this is the backstop, hence Marathi like the 503/422 guards below.
+      if (row.outputType === 'article') {
+        return reply.code(409).send({
+          error: {
+            message:
+              'ही फक्त कॅप्शन आहे — पोस्टरशिवाय पोस्ट प्रकाशित करता येत नाही.',
+          },
+        });
       }
       if (!row.posterPath || !row.article) {
         return reply.code(409).send({

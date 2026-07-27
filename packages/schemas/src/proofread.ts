@@ -5,10 +5,6 @@
 
 import { z } from 'zod';
 
-// Same bound as translation: keeps one synchronous request bounded and keeps the
-// engine's two-call token budget comfortably under the org's rate limit.
-export const PROOFREAD_TEXT_MAX_CHARS = 10_000;
-
 export const ProofreadLanguageSchema = z.enum(['mr', 'en']);
 export type ProofreadLanguage = z.infer<typeof ProofreadLanguageSchema>;
 
@@ -41,7 +37,7 @@ export const ProofreadIssueSchema = z.object({
 export type ProofreadIssue = z.infer<typeof ProofreadIssueSchema>;
 
 export const ProofreadRequestSchema = z.object({
-  text: z.string().trim().min(1).max(PROOFREAD_TEXT_MAX_CHARS),
+  text: z.string().trim().min(1),
 });
 export type ProofreadRequest = z.infer<typeof ProofreadRequestSchema>;
 

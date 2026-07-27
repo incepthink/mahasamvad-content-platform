@@ -73,6 +73,11 @@ export type KnownDesignation = z.infer<typeof KnownDesignationSchema>;
 export const PrepareDesignationsResponseSchema = z.object({
   names: z.array(PreparedNameSchema),
   knownDesignations: z.array(KnownDesignationSchema),
+  // Designation surface forms that occur in the analyzed text itself. This is separate
+  // from the verified autocomplete dictionary: the generation detail page uses it only
+  // to report the title that was actually printed beside a person, never as a fact source.
+  // Defaulted so a web build can roll out before the matching API.
+  mentionedDesignations: z.array(z.string()).default([]),
 });
 export type PrepareDesignationsResponse = z.infer<
   typeof PrepareDesignationsResponseSchema

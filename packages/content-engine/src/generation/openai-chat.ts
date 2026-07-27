@@ -37,6 +37,41 @@ export const UTILITY_MODEL = process.env.OPENAI_UTILITY_MODEL ?? 'gpt-5.6-luna';
 // renderers receive. Rollback is an .env edit (OPENAI_VIDEO_MODEL=gpt-5.6-terra).
 export const VIDEO_CHAT_MODEL = process.env.OPENAI_VIDEO_MODEL ?? 'gpt-5.6-sol';
 
+// The simplified article generator's tier (ARTICLE_GENERATION_MODE=simple). That path makes
+// exactly ONE call to write the whole publication-ready Marathi article, having deliberately
+// dropped the editorial brief, the coverage-revision loop and the faithfulness repair that used
+// to grade and rewrite the draft. All of that judgement now happens inside a single call, which
+// is why it is pinned one step up from CHAT_MODEL rather than sharing it — the same reasoning
+// that pinned the /video text calls. Costs ~2x terra per token but replaces up to fourteen
+// calls, so an article gets cheaper, not dearer. Passed EXPLICITLY at the one call site so no
+// other caller's default moves; rollback is an .env edit (OPENAI_ARTICLE_MODEL=gpt-5.6-terra),
+// or ARTICLE_GENERATION_MODE=full to restore the old model and the old pipeline together.
+export const ARTICLE_MODEL = process.env.OPENAI_ARTICLE_MODEL ?? 'gpt-5.6-sol';
+
+// /dlo's key-point summary (generation/extract-pointers.ts). Enumerating every materially
+// distinct topic across a 60k-char multi-article document — in source order, keeping names,
+// amounts, dates and percentages verbatim, without repeating itself and without padding the
+// list — is a judgement-heavy read, not the mechanical extraction it looks like. It is also
+// the officer's ONLY readable view of what a 20-page scanned source actually says, and it
+// steers nothing downstream that could correct it. So it is pinned one step up from
+// CHAT_MODEL for the same reason /video's text calls and the simplified article generator
+// are. Passed EXPLICITLY at the one call site so no other caller's default moves; rollback
+// is an .env edit (OPENAI_POINTERS_MODEL=gpt-5.6-terra), which halves the per-run cost.
+export const POINTERS_MODEL =
+  process.env.OPENAI_POINTERS_MODEL ?? 'gpt-5.6-sol';
+
+// Deliberation for that one call. With the separate grading passes gone, the runtime prompt's
+// SILENT FINAL CHECK block is the only verification left and it runs in the reasoning stage —
+// so this is the knob that replaced them, not a cosmetic default. Env-tunable because 'high'
+// is a legitimate quality/latency trade for a surface where one call produces the whole
+// deliverable. Values: none | low | medium | high; anything else falls back to 'medium'.
+export function articleReasoningEffort(): ReasoningEffort {
+  const raw = process.env.OPENAI_ARTICLE_REASONING_EFFORT?.trim().toLowerCase();
+  return raw === 'none' || raw === 'low' || raw === 'medium' || raw === 'high'
+    ? raw
+    : 'medium';
+}
+
 // Bound the completion so one runaway generation can't silently cost several times a
 // normal run (unbounded, the model defaults to its own ceiling). 4096 is ~2x the
 // largest current output (~2,000 tk draft), so it never truncates normal output. Callers

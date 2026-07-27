@@ -19,7 +19,7 @@
 //     ticked, it becomes the dictionary's answer next time. Someone named in a one-off capacity
 //     should not silently rewrite their permanent entry.
 //
-// Controlled by the parent (like PointerSelector) so /dlo and the media room can hold the state
+// Controlled by the parent so /dlo and the media room can hold the state
 // in whatever shape their own flow needs.
 
 import type { KnownDesignation, PreparedName } from '@dgipr/schemas';

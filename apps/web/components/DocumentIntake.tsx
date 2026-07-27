@@ -23,11 +23,12 @@
 //     character cap that is how they get under it. A surface that treats the file as a
 //     SECOND source beside its own text box passes `onTextChange` instead (LIVE mode) —
 //     see the prop comments.
-//   - A surface with a job of its own downstream (/dlo) can pass `allowDeferredRead`, which
-//     lets the user hand over the page SELECTION and skip the OCR wait entirely; the snapshot
-//     then carries `pendingPages` and no text, and reading them is the caller's problem.
+//   - A surface with a job of its own downstream (/dlo) can pass `allowDeferredRead`. While
+//     the server is still waiting for a scanned PDF's page selection, that live selection is
+//     handed over automatically as `pendingPages`; the caller reads it later, with no commit
+//     button or OCR wait here.
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FileText } from 'lucide-react';
 import type { DocumentKind, PdfTextSourceValue } from '@dgipr/schemas';
 import {
@@ -36,7 +37,6 @@ import {
   reextractDocumentIntake,
 } from '../lib/api';
 import {
-  formatPageRanges,
   joinPageTexts,
   numberedPages,
   pageText,
@@ -75,6 +75,9 @@ export type DocumentSnapshot = Readonly<{
   pendingPages: readonly number[];
 }>;
 
+export type DocumentIntakeStatus =
+  'empty' | 'unread' | 'reading' | 'ready' | 'failed';
+
 export function DocumentIntake({
   storageKey,
   accept = ['pdf', 'docx', 'txt'],
@@ -84,24 +87,28 @@ export function DocumentIntake({
   allowDeferredRead = false,
   onText,
   onTextChange,
+  onStatusChange,
+  readRequest,
   onRemove,
 }: {
   // Where this surface remembers its in-flight job across a refresh. Must be unique per
   // surface, or two pages would fight over one job.
   storageKey: string;
   accept?: readonly DocumentKind[] | undefined;
-  // The caller's character budget, if it has one (/proofread caps at 10,000). Shown against
-  // the running total so the page checkboxes become the way to get under it.
+  // The caller's character budget, if it has one. Shown against the running total so the
+  // page checkboxes become the way to get under it.
   maxChars?: number | undefined;
   // Card heading + hint, when the shared copy does not fit. /dlo needs its own: the default
   // hint promises the file is not stored, and a DLO document IS archived with the intake.
   title?: string | undefined;
   hint?: string | undefined;
-  // Offers "न वाचता ही पृष्ठे वापरा" on the pre-OCR picker: hand the page SELECTION to the
-  // caller and skip the wait, leaving the reading to whatever runs next. Only /dlo may set
+  // Makes the live page SELECTION itself the handover while the server is still in
+  // `status === 'selecting'`, leaving the reading to whatever runs next. Only /dlo may set
   // this — it is the one surface with a job of its own downstream (the intake reads exactly
-  // these pages from the archived original). Everywhere else the text has to exist in the
-  // browser now, so a selection with no text would simply be a lost upload.
+  // these pages from the archived original). The server-status gate deliberately excludes
+  // reselecting an already-read scan, whose paid text must not be discarded and re-read later.
+  // Everywhere else the text has to exist in the browser now, so a selection with no text
+  // would simply be a lost upload.
   //
   // LIVE mode only, in practice: a deferred document has no text, so there is nothing for the
   // handoff button to hand over.
@@ -120,8 +127,12 @@ export function DocumentIntake({
   // loaded). A caller that only wants a string ignores it — which is why it is a second
   // parameter rather than a change to the first.
   onTextChange?:
-    | ((text: string, snapshot: DocumentSnapshot | null) => void)
-    | undefined;
+    ((text: string, snapshot: DocumentSnapshot | null) => void) | undefined;
+  // LIVE mode: lets a parent distinguish an attached scan whose selected pages have not
+  // been read yet from a genuinely empty source. Bumping `readRequest` asks this component
+  // to run its existing selected-page extraction flow.
+  onStatusChange?: ((status: DocumentIntakeStatus) => void) | undefined;
+  readRequest?: number | undefined;
   // Offered by a surface that shows SEVERAL of these at once (/dlo), where dropping one
   // document has to be possible without dropping the others.
   onRemove?: (() => void) | undefined;
@@ -137,10 +148,6 @@ export function DocumentIntake({
   // "go back to selecting" state and does not need one — changing the selection is just
   // another /extract call.
   const [reselecting, setReselecting] = useState(false);
-  // The pages the user handed over WITHOUT having them read (allowDeferredRead). Also purely
-  // local, and for a stronger reason: the ephemeral job is never told, because nothing is being
-  // asked of it — the whole point is that no OCR runs here.
-  const [deferredPages, setDeferredPages] = useState<number[] | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const { detail, gone, refresh } = useDocumentIntake(jobId);
@@ -160,6 +167,9 @@ export function DocumentIntake({
   const isSelecting =
     detail?.status === 'selecting' ||
     (reselecting && detail?.status === 'ready');
+  // Use the server status rather than `isSelecting`: that flag also covers re-picking pages
+  // from an already-read scan, where auto-deferral would discard text already paid for.
+  const deferring = allowDeferredRead && detail?.status === 'selecting';
 
   // What the checkboxes list. While selecting that is every page the document HAS (known
   // from the free probe, before anything is read); afterwards it is the pages actually
@@ -202,15 +212,35 @@ export function DocumentIntake({
   );
   const overLimit = maxChars !== undefined && text.length > maxChars;
   const live = onTextChange !== undefined;
+  const status = useMemo<DocumentIntakeStatus>(() => {
+    if (gone && jobId) return 'failed';
+    if (!jobId) return 'empty';
+    if (text.trim().length > 0) return 'ready';
+    if (!detail || detail.status === 'extracting' || extracting) {
+      return 'reading';
+    }
+    if (isSelecting) return selected.size > 0 ? 'unread' : 'empty';
+    if (detail.status === 'failed' && pages.length === 0) return 'failed';
+    return 'empty';
+  }, [
+    gone,
+    jobId,
+    text,
+    detail,
+    extracting,
+    isSelecting,
+    selected.size,
+    pages.length,
+  ]);
 
   // The same selection `text` was built from, kept page by page for a caller that stores
   // documents that way. Null until there is a read file to describe.
   const snapshot = useMemo<DocumentSnapshot | null>(() => {
     if (!jobId || !detail) return null;
-    // A deferred document describes a selection, not text: `pages` is empty and `source` is
-    // unknown because nothing has read it yet. It still needs a snapshot — that selection is
-    // the entire thing the caller is being given.
-    if (deferredPages) {
+    // A deferred document describes the live selection, not text: `pages` is empty and
+    // `source` is unknown because nothing has read it yet.
+    if (deferring) {
+      if (selected.size === 0) return null;
       return {
         jobId,
         fileName: detail.fileName,
@@ -218,7 +248,7 @@ export function DocumentIntake({
         source: null,
         pageCount: detail.pageCount,
         pages: [],
-        pendingPages: deferredPages,
+        pendingPages: [...selected].sort((a, b) => a - b),
       };
     }
     if (pages.length === 0) return null;
@@ -233,7 +263,7 @@ export function DocumentIntake({
         .map((page) => ({ page: page.page, text: pageText(page, edits) })),
       pendingPages: [],
     };
-  }, [jobId, detail, deferredPages, pages, selected, edits]);
+  }, [jobId, detail, deferring, pages, selected, edits]);
 
   const acceptAttr = accept.map((kind) => EXTENSIONS[kind]).join(',');
 
@@ -247,6 +277,14 @@ export function DocumentIntake({
   useEffect(() => {
     onTextChangeRef.current?.(text, snapshot);
   }, [text, snapshot]);
+
+  const onStatusChangeRef = useRef(onStatusChange);
+  useEffect(() => {
+    onStatusChangeRef.current = onStatusChange;
+  });
+  useEffect(() => {
+    onStatusChangeRef.current?.(status);
+  }, [status]);
 
   // "हा मजकूर वापरा" hands over a snapshot, so any later change to the selection or the
   // text means the caller is now holding something stale — say so rather than leave a
@@ -262,9 +300,6 @@ export function DocumentIntake({
     setUsed(false);
     setReselecting(false);
     setExtracting(false);
-    // A deferral belongs to the file it was made for; carrying it onto a different upload
-    // would hand the caller another document's page numbers.
-    setDeferredPages(null);
   };
 
   const reset = () => {
@@ -296,7 +331,7 @@ export function DocumentIntake({
 
   // "Read these pages." The one call that spends OCR credits on a scanned document — and
   // only on what is ticked. The job goes to 'extracting' and the poll takes over.
-  const readSelected = async () => {
+  const readSelected = useCallback(async () => {
     if (!jobId || selected.size === 0) return;
     setExtracting(true);
     setError(null);
@@ -313,7 +348,22 @@ export function DocumentIntake({
       setExtracting(false);
       setError(e instanceof Error ? e.message : STR.genericError);
     }
-  };
+  }, [jobId, refresh, selected]);
+
+  // A request counter makes retries explicit and prevents a still-true boolean from
+  // re-running an OCR read after a failed attempt or a later file upload.
+  const handledReadRequestRef = useRef(readRequest);
+  useEffect(() => {
+    if (
+      readRequest === undefined ||
+      readRequest === handledReadRequestRef.current ||
+      status !== 'unread'
+    ) {
+      return;
+    }
+    handledReadRequestRef.current = readRequest;
+    void readSelected();
+  }, [readRequest, readSelected, status]);
 
   // Re-read with OCR. Page text (including the user's corrections) is rebuilt from
   // scratch, so the edits go with it — but the page SELECTION is kept and sent, because
@@ -439,35 +489,6 @@ export function DocumentIntake({
     );
   }
 
-  // Pages handed over unread. There is nothing to show but the selection itself — the text
-  // does not exist and, by the user's own choice, is not going to until the next step runs.
-  if (deferredPages) {
-    return (
-      <section className="card">
-        <p className="field-label">{STR.docPagesDeferredTitle}</p>
-        <p className="hint">{STR.docPagesDeferredHint}</p>
-        <p className="hint" style={{ marginTop: 8 }}>
-          <FileText size={16} aria-hidden="true" /> {detail.fileName} ·{' '}
-          {STR.docPagesDeferredSelection}{' '}
-          {formatPageRanges(deferredPages) || '—'} ·{' '}
-          {marathiNumber(deferredPages.length)} /{' '}
-          {marathiNumber(detail.pageCount ?? 0)} {STR.docSelectCount}
-        </p>
-        <div className="btn-row" style={{ marginTop: 14 }}>
-          <button
-            type="button"
-            className="btn btn-small"
-            onClick={() => setDeferredPages(null)}
-          >
-            {STR.docChangeSelection}
-          </button>
-          {fileButton}
-        </div>
-        {error ? <p className="form-error">{error}</p> : null}
-      </section>
-    );
-  }
-
   // The pre-OCR page picker. Numbers only: this document's text does not exist yet, and
   // producing it is exactly the spend being authorised here.
   if (isSelecting) {
@@ -497,33 +518,17 @@ export function DocumentIntake({
           {marathiNumber(detail.pageCount ?? 0)} {STR.docSelectCount}
         </p>
 
-        {/* Reading now is the only way forward unless the surface can read these pages later,
-            in which case waiting here is optional and says so. */}
-        {allowDeferredRead ? (
+        {/* /dlo hands the live selection to its downstream job automatically. */}
+        {deferring ? (
           <p className="hint" style={{ marginTop: 8 }}>
-            {STR.docUsePagesUnreadHint}
+            {STR.docPagesReadLaterHint}
           </p>
         ) : null}
 
         <div className="btn-row" style={{ marginTop: 14 }}>
-          {/* Where skipping the wait is possible it is also the recommended path — the pages
-              are still read, reviewed and correctable, just one step later — so it takes the
-              primary slot and reading now becomes the deliberate choice. */}
-          {allowDeferredRead ? (
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={extracting || selected.size === 0}
-              onClick={() =>
-                setDeferredPages([...selected].sort((a, b) => a - b))
-              }
-            >
-              {STR.docUsePagesUnread}
-            </button>
-          ) : null}
           <button
             type="button"
-            className={allowDeferredRead ? 'btn' : 'btn btn-primary'}
+            className="btn btn-small"
             disabled={extracting || selected.size === 0}
             onClick={() => void readSelected()}
           >

@@ -28,6 +28,8 @@
     "intake:test": "tsx --env-file=../../.env src/intake/intake-test.ts",
     "retrieve:test": "tsx --env-file=../../.env src/retrieval/retrieve-references.ts",
     "generate:test": "tsx --env-file=../../.env src/generation/generate-article.ts",
+    "generate:simple": "tsx --env-file=../../.env src/generation/generate-article-simple.ts",
+    "article:compare": "tsx --env-file=../../.env src/scripts/compare-article-modes.ts",
     "polish:test": "tsx --env-file=../../.env src/generation/polish-article.ts"
   },
   "dependencies": {

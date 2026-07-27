@@ -182,7 +182,9 @@ export function SocialPostView({
 
   return (
     <section className="card">
-      <h2>{STR.posterTitle}</h2>
+      {/* A कॅप्शन run has no poster, so "तयार झालेले पोस्टर" would head a card that
+          contains only a caption. */}
+      <h2>{detail.posterUrl ? STR.posterTitle : STR.captionLabel}</h2>
       <div className="poster-layout">
         {detail.posterUrl ? (
           <div className="poster-frame">

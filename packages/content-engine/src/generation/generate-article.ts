@@ -142,6 +142,12 @@ function referenceStyleExcerpt(text: string): string {
 // The selected pointers already carry their 5W1H dimension. Reusing that approved grouping
 // removes a redundant full-note extraction call and ensures the scaffold matches the facts
 // the officer actually kept.
+//
+// LEGACY ROWS ONLY — do not delete. /dlo's Pointers step is now a read-only summary and no
+// new run sends `selectedFacts`, so this is unreachable for a fresh generation. It stays
+// live because `runner.ts` re-reads the row on EVERY run: a retry or an article-feedback
+// round on any pre-change generation still arrives here with a stored inventory. Called
+// from generate-article.ts (below) and generate-article-simple.ts.
 export function fiveWOneHFromPointers(
   facts: readonly SelectedFact[],
 ): FiveWOneH {

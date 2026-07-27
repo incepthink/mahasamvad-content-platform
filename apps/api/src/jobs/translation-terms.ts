@@ -133,7 +133,14 @@ export async function prepareDesignations(
     .map((row) => ({ marathi: row.marathi, english: row.english }))
     .sort((a, b) => a.marathi.localeCompare(b.marathi, 'mr'));
 
-  return { names, knownDesignations };
+  // Exact designation strings found in THIS text, including a newly encountered title
+  // that is not in the verified autocomplete list yet. The post-generation read-only
+  // display uses these only when the title occurs directly beside an extracted person.
+  const mentionedDesignations = merged
+    .filter((term) => term.termType === 'designation')
+    .map((term) => term.marathi);
+
+  return { names, knownDesignations, mentionedDesignations };
 }
 
 // Every verified designation's Marathi form. The article pipeline uses this ONLY to recognise

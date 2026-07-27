@@ -11,6 +11,23 @@ export {
   type GenerateArticlePhase,
   type GenerateArticleOptions,
 } from './generation/generate-article.js';
+// The simplified single-call generator (ARTICLE_GENERATION_MODE=simple, the default) and the
+// style-reference resolver it is built on. The full pipeline above is untouched and stays
+// reachable through the same env var.
+export {
+  generateArticleSimple,
+  type SimpleGeneratedArticle,
+  type SimpleGenerateArticleOptions,
+  type SimpleArticlePhase,
+  type StyleReferenceMeta,
+} from './generation/generate-article-simple.js';
+export {
+  selectStyleReference,
+  styleReferenceMinSimilarity,
+  type StyleReference,
+  type StyleReferenceSource,
+} from './generation/select-style-reference.js';
+export { SIMPLE_ARTICLE_PROMPT_VERSION } from './generation/simple-article-prompt.js';
 export { polishArticleWithSarvam } from './generation/polish-article.js';
 export { generateCopy } from './generation/generate-copy.js';
 export { extractFiveWOneH } from './generation/extract-5w1h.js';

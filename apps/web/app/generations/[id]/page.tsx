@@ -9,6 +9,7 @@ import { createGeneration } from '../../../lib/api';
 import { useTasks } from '../../../lib/TasksProvider';
 import { STR } from '../../../lib/strings';
 import { GenerationThread } from '../../../components/GenerationThread';
+import { GenerationUsedNames } from '../../../components/GenerationUsedNames';
 import { ProgressSteps } from '../../../components/ProgressSteps';
 import { TaskProgressBar } from '../../../components/TaskProgressBar';
 import { StatusChip } from '../../../components/StatusChip';
@@ -108,6 +109,11 @@ export default function GenerationDetailPage({
       detail.step === 'copy' ||
       detail.step === 'scene' ||
       detail.step === 'render');
+  // /generations creates article-category poster runs with outputType='poster'. The article
+  // stored on those rows is the poster's source, not the officer's primary requested output,
+  // so keep it available without letting it lead the page.
+  const posterFocused =
+    !isSocialCategory(detail.category) && detail.outputType === 'poster';
 
   return (
     <main className="page">
@@ -165,10 +171,8 @@ export default function GenerationDetailPage({
           />
         ) : (
           <>
-            {detail.fiveWOneH ? <FiveWOneHView detail={detail} /> : null}
-            {detail.article ? (
-              <ArticleView detail={detail} onFeedbackSent={refresh} />
-            ) : null}
+            {/* A poster request should open on the result it asked for. The skeleton occupies
+                this same first position while the initial render is still in flight. */}
             {detail.posterUrl ? (
               <PosterPanel
                 detail={detail}
@@ -178,8 +182,35 @@ export default function GenerationDetailPage({
             ) : posterPending ? (
               <PosterSkeleton detail={detail} />
             ) : null}
+            {detail.fiveWOneH ? <FiveWOneHView detail={detail} /> : null}
+            {detail.article ? (
+              posterFocused ? (
+                <details className="card poster-source-article">
+                  <summary>{STR.articleTitle}</summary>
+                  <div className="poster-source-article-body">
+                    <ArticleView
+                      detail={detail}
+                      onFeedbackSent={refresh}
+                      embedded
+                    />
+                  </div>
+                </details>
+              ) : (
+                <ArticleView detail={detail} onFeedbackSent={refresh} />
+              )
+            ) : null}
           </>
         ))}
+
+      {/* Informational only: this runs after content exists and lists person/designation
+          strings from the actual article, caption, or poster copy. It never gates creation. */}
+      {(detail.article || detail.copy) &&
+      (detail.status === 'completed' ||
+        posterBusy ||
+        posterPending ||
+        detail.status === 'failed') ? (
+        <GenerationUsedNames detail={detail} />
+      ) : null}
 
       {/* Thread of runs spawned from this note lineage. Self-hides when this
           run has no follow-ups; updates live while any member is in flight. */}

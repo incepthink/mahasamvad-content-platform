@@ -175,9 +175,10 @@ export async function reextractDloFile(
   });
 }
 
-// Extract the 5W1H-grouped "pointers" (fact bullets) from the current assembled note, so
-// the officer can deselect what the article should leave out. Synchronous + ad-hoc — nothing
-// is stored; on failure the engine returns { groups: [] } and the officer generates as usual.
+// Summarise the current assembled note into a flat ordered list of Marathi key points, shown
+// to the officer as a reading summary of their source. DISPLAY ONLY — it does not steer
+// generation, which works from the complete reviewed text. Synchronous + ad-hoc — nothing is
+// stored; on failure the engine returns { points: [] } and the officer generates as usual.
 export async function fetchPointers(
   input: PointersRequest,
 ): Promise<PointersResult> {
@@ -203,7 +204,8 @@ export async function prepareDesignations(
 }
 
 // The review step's submit: the (edited) combined text becomes a normal
-// generation on the existing pipeline; returns its id for polling.
+// generation and enters the shared article runner (simple mode by default);
+// returns its id for polling.
 export async function generateFromDloIntake(
   id: string,
   input: DloGenerateRequest,

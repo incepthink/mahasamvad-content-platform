@@ -113,7 +113,10 @@ export function TasksMenu({ collapsed = false }: { collapsed?: boolean }) {
                             href={`/generations/${task.id}`}
                             onClick={closePanel}
                           >
-                            {isSocial ? (
+                            {/* outputType 'article' on a social run is the कॅप्शन lane —
+                                no poster is ever coming, so the pending placeholder
+                                would sit there forever on a completed run. */}
+                            {isSocial && task.outputType !== 'article' ? (
                               task.posterUrl ? (
                                 <img
                                   src={task.posterUrl}

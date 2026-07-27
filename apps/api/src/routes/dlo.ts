@@ -448,8 +448,10 @@ export function registerDloRoutes(
   );
 
   // The review step's submit: the officer-edited combined text becomes the
-  // note of a brand-new generation on the EXISTING pipeline (history, feedback,
-  // translation, and posters via the detail page all work on it for free).
+  // note of a brand-new generation on the shared article runner. That runner
+  // selects generateArticleSimple by default (ARTICLE_GENERATION_MODE=full is
+  // the explicit legacy opt-out), while history, feedback, translation, and
+  // posters continue to work through the normal generation row.
   app.post<{ Params: { id: string } }>(
     '/dlo/intakes/:id/generate',
     async (request, reply) => {
@@ -476,13 +478,13 @@ export function registerDloRoutes(
         category: body.category,
         heading: body.heading,
         dloIntakeId: row.id,
-        // Facts the officer deselected in the Pointers step (migration 0030). insertGeneration
-        // omits the column when this is empty/absent, so an un-applied 0030 only disables the
-        // feature rather than failing the create.
+        // LEGACY (migrations 0030 + 0034) — /dlo no longer sends any of these three, since
+        // the Pointers step became a read-only summary and the article is written from
+        // combinedText. They are still forwarded rather than dropped so a browser tab on the
+        // old bundle mid-deploy keeps working, and so stored rows behave identically on
+        // retry and article feedback. insertGeneration omits each column when empty/absent,
+        // so an un-applied 0030/0034 only disables the feature rather than failing the create.
         excludedFacts: body.excludedFacts,
-        // The selected pointer inventory and attributed statements are persisted so initial
-        // generation, retries and article-feedback revisions all use the same officer-approved
-        // completeness contract. insertGeneration omits empty values for pre-0034 safety.
         selectedFacts: body.selectedFacts,
         statements: body.statements,
         // Approved person → पदनाम pairs (migration 0033), minus the request-only `remember`
@@ -491,6 +493,9 @@ export function registerDloRoutes(
           name: pair.name,
           designation: pair.designation,
         })),
+        // The article the officer pasted as the STYLE model (migration 0035) — tier 1 of the
+        // simplified generator's reference hierarchy. Same omit-when-empty treatment again.
+        styleReference: body.styleReference,
       });
       startGenerationJob(client, generation.id);
       return reply.code(202).send({ generationId: generation.id });

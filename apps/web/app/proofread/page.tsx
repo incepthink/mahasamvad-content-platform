@@ -8,7 +8,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   buildProofreadHighlights,
-  PROOFREAD_TEXT_MAX_CHARS,
   type ProofreadHighlight,
   type ProofreadIssue,
   type ProofreadResponse,
@@ -234,8 +233,7 @@ export default function ProofreadPage() {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  const overLimit = text.length > PROOFREAD_TEXT_MAX_CHARS;
-  const disabled = checking || text.trim().length === 0 || overLimit;
+  const disabled = checking || text.trim().length === 0;
 
   const submit = async () => {
     if (disabled) return;
@@ -302,21 +300,13 @@ export default function ProofreadPage() {
           }}
           style={{ marginTop: 10 }}
         />
-        <p className={overLimit ? 'form-error' : 'hint'}>
-          {text.length.toLocaleString('en-IN')} /{' '}
-          {PROOFREAD_TEXT_MAX_CHARS.toLocaleString('en-IN')}
-          {overLimit ? ` — ${STR.proofreadOverLimit}` : ''}
-        </p>
+        <p className="hint">{text.length.toLocaleString('en-IN')}</p>
       </section>
 
       {/* The text to check usually exists as a file — a draft press note, a scanned GR.
-          The page picker is also how a long document gets under the 10,000-character cap:
-          untick pages rather than hand-delete text, which is why the component is given
-          the same limit the counter above enforces. Inline, like every other upload
-          surface in the product. */}
+          Keep the upload inline, like every other document surface in the product. */}
       <DocumentIntake
         storageKey="dgipr.proofread.document"
-        maxChars={PROOFREAD_TEXT_MAX_CHARS}
         onText={(value) => {
           setText(value);
           setResult(null);

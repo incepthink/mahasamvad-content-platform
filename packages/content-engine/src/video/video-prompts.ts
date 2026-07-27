@@ -1,9 +1,9 @@
-// Prompt builders for the explainer-video pipeline, STYLIZED-3D flow: an
-// animated-film START frame (a fresh generation), an END frame of the SAME
-// shot (an EDIT of the start frame), and the motion prompt that interpolates
-// between the two. Which image model renders the frames is frame-provider.ts's
-// business, and which model animates them is clip-provider.ts's — neither is
-// this file's.
+// Prompt builders for the explainer-video pipeline, REALISTIC flow: a
+// photoreal START frame (a fresh generation), a photoreal END frame of the
+// SAME shot (an EDIT of the start frame), and the motion prompt that
+// interpolates between the two. Which image model renders the frames is
+// frame-provider.ts's business, and which model animates them is
+// clip-provider.ts's — neither is this file's.
 //
 // The motion prompt therefore serves BOTH clip providers, which is why nothing
 // here is named after one of them. Two provider differences land here rather
@@ -26,17 +26,16 @@
 // nothing here relaxes.
 //
 // The same quality reasoning bans TALKING: video models glitch badly on
-// lip-sync, so characters may appear — close and expressive is fine, that is
-// the whole appeal of the animated-film style — but never mid-speech; the
-// voiceover carries the words.
+// lip-sync, so people may appear — close and expressive is fine, the user wants
+// maximum realism — but never mid-speech; the voiceover carries the words.
 //
 // Cross-scene consistency has two mechanisms. The project's one `style`
 // paragraph is embedded verbatim in every prompt, and from scenes 2..N an
 // earlier scene's approved frame rides along as a world reference
 // (WORLD_REFERENCE_RULE) — style alone let a four-scene video read as four
 // unrelated productions. The optional per-scene `shotHint` (planner-authored,
-// e.g. "wide establishing shot, slow push-in") directs framing/camera; legacy
-// scenes without one keep the generic lines.
+// e.g. "medium close-up, subtle push-in") directs framing/camera; legacy scenes
+// without one keep the generic lines.
 
 import { pathToFileURL } from 'node:url';
 
@@ -60,34 +59,56 @@ const NO_TEXT_RULE =
   'and Latin script both come out as nonsense here, so anything written is a ' +
   'defect — the voiceover carries every word.';
 
-// Characters may be close and expressive (that is the style's appeal), but
-// never mid-speech: a frame that looks like someone talking invites the clip
-// model to animate the mouth, and lip glitches were the single worst artifact
-// in real renders.
+// People may be close and expressive (realism), but never mid-speech: a frame
+// that looks like someone talking invites the clip model to animate the mouth,
+// and lip glitches were the single worst artifact in real renders.
 const NO_TALKING_STILL_RULE =
   'People may appear naturally, but never mid-speech: mouths closed or ' +
   'neutral, nobody addressing the camera as if speaking.';
 
 const NO_TALKING_MOTION_RULE =
   'No one talks: no speaking, no lip or mouth movement, no dialogue, no one ' +
-  'addressing the camera. People may walk, gesture, work, look around, and ' +
-  'show natural expression.';
+  'addressing the camera. People make only the small focal action described ' +
+  'and otherwise hold natural, neutral expressions.';
 
-// The look contract shared by both frame prompts — one string so the start
-// and end frame cannot drift onto different styles. Stylized 3D replaced the
-// photoreal live-action rule 2026-07-26: real renders never quite landed
-// "real", and a polished animated-film look is both more forgiving of model
-// artifacts and warmer to watch. Bounded on BOTH sides — never live-action,
-// never flat 2D — because a bare "3D animation" drifts to whichever end the
-// brief suggests.
-const ANIMATION_STYLE_RULE =
-  'Stylized 3D animated film look, in the manner of a contemporary Pixar or ' +
-  'DreamWorks feature: expressive stylized characters with appealing ' +
-  'proportions, richly detailed believable environments, soft cinematic ' +
-  'lighting, warm filmic colour grading, polished high-end 3D rendering. ' +
-  'Clearly an animated film — never live-action footage, never a photograph ' +
-  'or photorealistic humans, and never flat 2D vector art, paper-cutout ' +
-  'illustration or anime.';
+// The visual-density contract. The upstream planner and script writer are told
+// the same rule, but this code-appended copy is what guarantees the image and
+// clip models receive it even when an LLM-authored brief becomes ambitious.
+// A second person is allowed only when both share ONE action; the constraint is
+// one focal event and a tiny, explicit subject inventory.
+const FOCUSED_SHOT_RULE =
+  'ANIMATION-SAFE FRAME CONTRACT: close-up of ONE hero person/object, or ' +
+  'exactly TWO people sharing ONE action; at most ONE vehicle and 2–3 ' +
+  'props. Blurred background and negative space; no background people or ' +
+  'action. Never wide; no crowd, queue, traffic, multiple vehicles, dense ' +
+  'detail/activity or extra narration facts. Contract overrides scene; omit ' +
+  'extras.';
+
+// A clip model has to solve subject motion and camera motion at the same time.
+// One modest delta gives it a tractable job and prevents the background from
+// becoming a second, accidental story.
+const SIMPLE_MOTION_RULE =
+  'Only one small plausible hero action, shared by both people if present. ' +
+  'Everything else stays still and soft. No entrances, exits, large body ' +
+  'movement, transformation or simultaneous actions.';
+
+// The source image is the complete inventory for the end-frame edit. This is
+// deliberately explicit: "same scene" alone still lets an edit model add a
+// colleague, reveal a room, or re-stage every prop to satisfy an ambitious end
+// brief, which then gives interpolation an impossible journey.
+const END_FRAME_CONTINUITY_RULE =
+  'Treat the source photograph as a locked inventory and composition. Preserve ' +
+  'every visible person and object, their identity and count, clothing, ' +
+  'position except for the one focal action, close framing, camera side, lens, ' +
+  'lighting and background. Add or remove nothing. Do not reveal more of the ' +
+  'room, widen the crop, introduce a new event, or change more than one action.';
+
+// The realism contract shared by both frame prompts — one string so the start
+// and end frame cannot drift onto different film stocks.
+const REALISM_RULE =
+  'Photorealistic live-action photograph — real people, real places, natural ' +
+  'light, true-to-life colour, cinematic composition. Never an illustration, ' +
+  'cartoon, 3D render, or anything that looks computer-generated.';
 
 // WHERE we are, stated in code rather than left to the script writer. Nothing
 // in this pipeline used to name a country: the style paragraph is authored by
@@ -101,7 +122,7 @@ const ANIMATION_STYLE_RULE =
 // the poster path's buildScenePrompt, which has always named the setting.
 const SETTING_RULE =
   'Setting: Maharashtra, India — a Government of Maharashtra public ' +
-  'information film. Every character is Indian: Indian faces, skin tones and ' +
+  'information film. Every person is Indian: Indian faces, skin tones and ' +
   'hair, and clothing as actually worn in Maharashtra (saree, salwar kameez, ' +
   'kurta, shirt and trousers, work and service uniforms). Streets, vehicles, ' +
   'shopfronts, homes, hospitals and government offices as they really look in ' +
@@ -113,20 +134,20 @@ const SETTING_RULE =
 // to say plainly that the reference is not this scene, or the model reproduces
 // its location and action instead of borrowing its world.
 const WORLD_REFERENCE_RULE =
-  'One attached image is a frame from an EARLIER SCENE of this same ' +
+  'One attached photograph is a frame from an EARLIER SCENE of this same ' +
   'video. Keep its world: the same country and region, the same kind of ' +
-  'people and clothing, the same colour treatment and animation style. It is ' +
-  'NOT this scene — do not copy its location, its framing or its action ' +
-  'unless the scene description above asks for the same place.';
+  'people and clothing, the same colour treatment and film look. It is NOT ' +
+  'this scene — do not copy its location, its framing or its action unless ' +
+  'the scene description above asks for the same place.';
 
 // The frame has to EARN its place: the visuals used to be mood B-roll while
 // every fact rode on the voiceover, which is what made the videos feel
 // decorative. Stated here as well as in the brief spec because the brief is
 // LLM-authored and this is not.
 const INFORMATIVE_RULE =
-  'Show the specific place, people, objects and action this scene is about, ' +
-  'close enough to read them — a viewer watching with the sound off should be ' +
-  'able to tell what is happening. Not a generic stock mood shot.';
+  'Show the single clearest physical event that represents this scene, close ' +
+  'enough to understand with the sound off. The narration carries the other ' +
+  'facts; do not illustrate every spoken detail. Not a generic stock mood shot.';
 
 // The "avoid" list, written as bare terms rather than "no ..." because Veo's
 // negativePrompt field already negates. Kling has no such field and takes the
@@ -134,20 +155,20 @@ const INFORMATIVE_RULE =
 // the clip step rather than for either provider.
 //
 // The talking/lip-sync terms back up the motion prompt's no-talking rule. The
-// style terms bound the stylized-3D look from BOTH ends: live-action/photoreal
-// terms keep the footage animated, flat-2D/anime terms keep it from collapsing
-// into cheap illustration. `3D render` and `CGI look` came OUT when the look
-// went 3D — they ARE the look now — and `cartoon`/`illustration` came out
-// because they sit close enough to the Pixar family to fight it. The setting
-// terms are deliberately about PLACE, not people: the people are specified
-// positively by SETTING_RULE, which is the safer half of that instruction to
-// give a model.
+// anti-animation terms hold the realistic look; `photorealistic faces` and
+// `close-up face` were deliberately REMOVED from the old list — both fight the
+// realism this flow exists for. The setting terms are deliberately about PLACE,
+// not people: the people are specified positively by SETTING_RULE, which is the
+// safer half of that instruction to give a model.
 export const CLIP_NEGATIVE_PROMPT =
   'text, letters, numerals, captions, subtitles, words, signage, banners, ' +
   'logos, watermark, talking, speaking, lip sync, lip movement, mouth ' +
-  'movement, dialogue, monologue, interview, live-action, photorealistic, ' +
-  'photograph, real footage, flat 2D vector art, anime, Western setting, ' +
-  'European or American architecture';
+  'movement, dialogue, monologue, interview, cartoon, illustration, anime, ' +
+  '3D render, CGI look, Western setting, European or American architecture, ' +
+  'wide shot, establishing shot, long shot, crowd, meeting, queue, busy ' +
+  'background, background pedestrians, multiple vehicles, traffic, dense ' +
+  'foliage, detailed architecture, shelves, rows of objects, simultaneous ' +
+  'actions, montage, split screen, collage';
 
 // The START frame for one scene. It is what the user approves, what the end
 // frame is edited from, and what the clip model animates from — so it must
@@ -170,10 +191,12 @@ export function buildKeyframePrompt(
     SETTING_RULE,
     ...(hasWorldReference ? ['', WORLD_REFERENCE_RULE] : []),
     '',
-    'This is the opening frame of one continuous animated shot in a ' +
+    'This is the opening frame of one continuous live-action shot in a ' +
       'Government of Maharashtra explainer video. ' +
-      ANIMATION_STYLE_RULE +
-      ' Clean composition with a clear focal subject. ' +
+      REALISM_RULE +
+      ' ' +
+      FOCUSED_SHOT_RULE +
+      ' ' +
       INFORMATIVE_RULE +
       ' ' +
       NO_TALKING_STILL_RULE,
@@ -184,7 +207,7 @@ export function buildKeyframePrompt(
 
 // The END frame, as an images/EDITS instruction over the start frame. Editing
 // (rather than generating fresh) is what keeps the pair inside ONE shot —
-// same location, characters, light and lens — so the interpolation reads as
+// same location, people, light and lens — so the interpolation reads as
 // motion within the scene instead of a crossfade between two places.
 export function buildEndFramePrompt(
   style: string,
@@ -192,14 +215,18 @@ export function buildEndFramePrompt(
   shotHint?: string,
 ): string {
   return [
-    'Edit this image into the FINAL frame of the same continuous ' +
-      'animated shot. Keep the same location, the same characters, the same ' +
-      'lighting, colour palette and camera framing — this is the same scene ' +
-      'a few seconds later, not a new one.',
+    'Edit this photograph into the FINAL frame of the same continuous ' +
+      'live-action shot. Keep the same location, the same people, the same ' +
+      'lighting, colour palette and camera lens — this is the same scene a ' +
+      'few seconds later, not a new one.',
+    END_FRAME_CONTINUITY_RULE,
     '',
     `By the end of the shot: ${endVisualBrief.trim()}`,
     ...(shotHint
-      ? ['', `The camera move across the shot: ${shotHint.trim()}`]
+      ? [
+          '',
+          `Preserve this close framing and camera direction: ${shotHint.trim()}`,
+        ]
       : []),
     '',
     `Cinematic style (unchanged): ${style.trim()}`,
@@ -209,12 +236,18 @@ export function buildEndFramePrompt(
     // the action on, which would break the pair the interpolation depends on.
     SETTING_RULE,
     '',
-    ANIMATION_STYLE_RULE + ' ' + NO_TALKING_STILL_RULE,
+    REALISM_RULE +
+      ' ' +
+      FOCUSED_SHOT_RULE +
+      ' ' +
+      SIMPLE_MOTION_RULE +
+      ' ' +
+      NO_TALKING_STILL_RULE,
     '',
     // Also on the edit: the source frame may itself contain writing the
     // generator slipped in, and an edit prompt that says nothing about text
     // will faithfully preserve it.
-    NO_TEXT_RULE + ' Remove any writing already visible in the image.',
+    NO_TEXT_RULE + ' Remove any writing already visible in the photograph.',
   ].join('\n');
 }
 
@@ -244,14 +277,14 @@ export function buildClipMotionPrompt(
   endVisualBrief?: string,
 ): string {
   const cameraLine = shotHint
-    ? `Camera: ${shotHint.trim()}. Smooth, continuous, purposeful motion — ` +
-      'no cuts, no scene changes, no camera shake.'
-    : 'Camera: one smooth, continuous move (a slow push, pan or track). ' +
-      'No cuts, no scene changes, no camera shake.';
+    ? `Camera and framing: ${shotHint.trim()}. Keep the close composition; ` +
+      'if the direction calls for movement, make it subtle and continuous. ' +
+      'No cuts, no scene changes, no camera shake.'
+    : 'Camera: hold the close composition with a locked frame or one subtle ' +
+      'continuous push. No cuts, no scene changes, no camera shake.';
   return [
-    'One continuous shot of a calm, informative Government of Maharashtra ' +
-      'explainer video, in stylized 3D animation (a contemporary ' +
-      'Pixar/DreamWorks-style animated film — never live-action).',
+    'One continuous realistic live-action shot of a calm, informative ' +
+      'Government of Maharashtra explainer video.',
     SETTING_RULE,
     `${STYLE_PREFIX}${style.trim()}`,
     `${OPEN_PREFIX}${visualBrief.trim()}`,
@@ -263,6 +296,8 @@ export function buildClipMotionPrompt(
         ]
       : []),
     cameraLine,
+    FOCUSED_SHOT_RULE,
+    SIMPLE_MOTION_RULE,
     NO_TALKING_MOTION_RULE,
     NO_TEXT_RULE,
   ].join('\n');
@@ -335,9 +370,10 @@ export function fitClipPrompt(prompt: string, maxChars: number): string {
 
   console.warn(
     `[video-prompts] clip prompt is ${rendered().length} chars against a ` +
-      `${maxChars} budget even after trimming. Sending it anyway — the three ` +
-      'hard rules matter more than the budget. If this repeats, the visual ' +
-      'briefs are running long and the script generator is where to fix it.',
+      `${maxChars} budget even after trimming. Sending it anyway — the hard ` +
+      'setting, focus, motion, speech and text rules matter more than the ' +
+      'budget. If this repeats, the visual briefs are running long and the ' +
+      'script generator is where to fix it.',
   );
   return rendered();
 }
@@ -358,16 +394,18 @@ if (
     if (!ok) failures.push(label);
   };
 
-  const style =
-    'Stylized 3D animated film, Maharashtra, soft daylight, warm palette.';
-  const brief = 'A technician guides a trolley into an MRI scanner.';
-  const endBrief = 'The trolley is fully inside; the technician steps back.';
-  const hint = 'medium shot, slow push-in';
+  const style = 'Cinematic documentary realism, Maharashtra, natural daylight.';
+  const brief =
+    'Close-up of a technician and patient focused on the same MRI control.';
+  const endBrief =
+    'The technician presses the control once while the patient remains still.';
+  const hint = 'medium close-up, subtle push-in';
 
   const start = buildKeyframePrompt(style, brief, hint);
   const startWithRef = buildKeyframePrompt(style, brief, hint, true);
   const end = buildEndFramePrompt(style, endBrief, hint);
   const motion = buildClipMotionPrompt(style, brief, hint, endBrief);
+  const startOnlyMotion = buildClipMotionPrompt(style, brief, hint);
 
   for (const [label, prompt] of [
     ['start frame', start],
@@ -381,18 +419,28 @@ if (
     // prohibition against text in a scene that contains forms is a
     // contradiction, and the model resolves it by inventing gibberish.
     check(`${label}: says what to show instead`, /BLANK/.test(prompt));
-    check(`${label}: forbids talking`, /never mid-speech|No one talks/.test(prompt));
-    check(`${label}: carries the style paragraph`, prompt.includes(style));
-    // The 3D inversion (2026-07-26): every prompt must DEMAND the animated-film
-    // look and explicitly rule live-action out — a prompt that merely stopped
-    // saying "photoreal" would let the model default back to it.
     check(
-      `${label}: demands the animated-film look`,
-      /stylized 3D|animated film|animated shot/i.test(prompt),
+      `${label}: forbids talking`,
+      /never mid-speech|No one talks/.test(prompt),
+    );
+    check(`${label}: carries the style paragraph`, prompt.includes(style));
+    check(
+      `${label}: demands realistic live-action`,
+      /photorealistic live-action|realistic live-action/i.test(prompt),
     );
     check(
-      `${label}: rules out live-action`,
-      /never live-action/i.test(prompt),
+      `${label}: requires an animation-safe close composition`,
+      prompt.includes('ANIMATION-SAFE FRAME CONTRACT'),
+    );
+    check(
+      `${label}: forbids wide and crowded composition`,
+      prompt.includes('Never wide') && prompt.includes('crowd'),
+    );
+    check(
+      `${label}: caps people, vehicles and props`,
+      prompt.includes('exactly TWO people') &&
+        prompt.includes('at most ONE vehicle') &&
+        prompt.includes('2–3 props'),
     );
   }
 
@@ -416,31 +464,53 @@ if (
     start.includes('sound off'),
   );
   check(
+    'start frame: leaves extra narration facts to the voiceover',
+    start.includes('narration carries the other facts'),
+  );
+  check(
+    'end frame: locks the source inventory and crop',
+    end.includes('locked inventory and composition') &&
+      end.includes('Add or remove nothing') &&
+      end.includes('widen the crop'),
+  );
+  check(
+    'clip motion: permits only one focal action',
+    motion.includes('Only one small plausible hero action') &&
+      motion.includes('Everything else stays still'),
+  );
+  check(
+    'start-only motion: does not invent a final frame',
+    !startOnlyMotion.includes(END_PREFIX) &&
+      !startOnlyMotion.includes('provided final frame'),
+  );
+  check(
     'negative prompt: bars a Western setting',
     CLIP_NEGATIVE_PROMPT.includes('Western setting'),
   );
-  // Removed deliberately in the realistic era and still out — expressive
-  // character faces are the appeal of the animated-film style.
+  // Removed deliberately when this flow went realistic — re-adding either would
+  // fight the photorealism the whole pipeline now asks for.
   check(
     'negative prompt: still allows faces and close-ups',
     !/close-up face|photorealistic faces/.test(CLIP_NEGATIVE_PROMPT),
   );
-  // The 3D inversion of the negative list: photoreal terms went IN, the terms
-  // that ARE the new look (3D render, CGI) came OUT, and the flat-2D/anime
-  // terms stayed so the style cannot collapse into cheap illustration.
   check(
-    'negative prompt: bans live-action and photorealism',
-    CLIP_NEGATIVE_PROMPT.includes('live-action') &&
-      CLIP_NEGATIVE_PROMPT.includes('photorealistic'),
+    'negative prompt: does not fight live-action realism',
+    !/live-action|photorealistic|photograph|real footage/.test(
+      CLIP_NEGATIVE_PROMPT,
+    ),
   );
   check(
-    'negative prompt: no longer bans the 3D look',
-    !/3D render|CGI look|cartoon|illustration/.test(CLIP_NEGATIVE_PROMPT),
+    'negative prompt: rejects animation and CGI',
+    /cartoon/.test(CLIP_NEGATIVE_PROMPT) &&
+      /illustration/.test(CLIP_NEGATIVE_PROMPT) &&
+      /3D render/.test(CLIP_NEGATIVE_PROMPT) &&
+      /CGI look/.test(CLIP_NEGATIVE_PROMPT),
   );
   check(
-    'negative prompt: still bans flat 2D and anime',
-    CLIP_NEGATIVE_PROMPT.includes('flat 2D') &&
-      CLIP_NEGATIVE_PROMPT.includes('anime'),
+    'negative prompt: rejects wide, busy shots',
+    /wide shot/.test(CLIP_NEGATIVE_PROMPT) &&
+      /busy background/.test(CLIP_NEGATIVE_PROMPT) &&
+      /simultaneous actions/.test(CLIP_NEGATIVE_PROMPT),
   );
 
   // The avoid clause is how a provider with no negative_prompt field (Kling)
@@ -466,16 +536,36 @@ if (
   // The three rules the trimmer must never reach, re-checked on the TRIMMED
   // prompt — a tail truncation would have taken all three, since they sit last.
   check('fit: keeps the setting rule', fitted.includes('Maharashtra, India'));
-  check('fit: keeps the no-writing rule', fitted.includes('NO WRITING ANYWHERE'));
+  check(
+    'fit: keeps the focused-shot rule',
+    fitted.includes('ANIMATION-SAFE FRAME CONTRACT'),
+  );
+  check(
+    'fit: keeps the one-action rule',
+    fitted.includes('Only one small plausible hero action'),
+  );
+  check(
+    'fit: keeps the no-writing rule',
+    fitted.includes('NO WRITING ANYWHERE'),
+  );
   check('fit: keeps the no-talking rule', fitted.includes('No one talks'));
   check(
     'fit: keeps the interpolation instruction',
     fitted.includes('Move naturally and continuously'),
   );
-  // A typical prompt must pass through untouched, or every ordinary render
-  // would silently lose its style paragraph.
-  const typical = buildClipMotionPrompt(style, brief, hint, endBrief) + '\n\n' + avoid;
-  check('fit: typical prompt is unchanged', fitClipPrompt(typical, 2500) === typical);
+  // The expanded avoid list is intentionally the disposable duplicate of the
+  // positive focus/text/speech rules. A typical prompt may shed only that list;
+  // its style and all positive directions must pass through unchanged.
+  const typical =
+    buildClipMotionPrompt(style, brief, hint, endBrief) + '\n\n' + avoid;
+  const typicalBase = buildClipMotionPrompt(style, brief, hint, endBrief);
+  const fittedTypical = fitClipPrompt(typical, 2500);
+  check('fit: typical prompt fits the budget', fittedTypical.length <= 2500);
+  check(
+    'fit: typical prompt drops only the duplicate avoid clause',
+    fittedTypical === typicalBase,
+  );
+  check('fit: typical prompt keeps its style', fittedTypical.includes(style));
 
   console.log(
     failures.length === 0

@@ -15,13 +15,13 @@ import type {
 export const STR = {
   appName: 'महासंवाद मजकूर मंच',
   appSubtitle: 'माहिती व जनसंपर्क महासंचालनालय, महाराष्ट्र शासन',
-  navNew: 'मीडिया रूम',
+  navNew: 'क्रिएटिव्ह आणि सोशल',
   navHistory: 'मागील काम',
   navTranslate: 'भाषांतर',
   navProofread: 'मुद्रितशोधन',
   navGlossary: 'शब्दकोश',
   navReferences: 'मास्टर टेम्पलेट',
-  navDlo: 'DLO लेख',
+  navDlo: 'लेखनिर्मिती',
   navMenu: 'मेनू',
   navCollapse: 'मेनू लहान करा',
   navExpand: 'मेनू मोठा करा',
@@ -43,12 +43,39 @@ export const STR = {
   mediaOutputLabel: 'काय तयार करायचे?',
   categoryPoster: 'पोस्टर',
   categoryPosterDesc: 'लेखावर आधारित मराठी पोस्टर',
+  // The output picker is two levels: WHAT to make (पोस्टर / कॅप्शन) and then WHAT FOR
+  // (लेख / ट्विटर / फेसबुक). The second row's labels are shared by both branches — the
+  // card above already says whether a poster or only a caption is being made, so these
+  // deliberately do NOT reuse categoryTwitter/categoryFacebook, whose descriptions
+  // promise "पोस्टर + कॅप्शन" (conditional under पोस्टर, false under कॅप्शन).
+  mediaOutputCaption: 'कॅप्शन',
+  mediaOutputCaptionDesc: 'पोस्टरशिवाय फक्त मराठी कॅप्शन',
+  mediaOutputVideo: 'व्हिडिओ',
+  mediaOutputVideoDesc: 'टिपणीवरून मराठी व्हिडिओ — व्हिडिओ पानावर जा',
+  mediaCaptionOnlyInfo:
+    'फक्त कॅप्शन तयार होईल — पोस्टर तयार होणार नाही, त्यामुळे ही पोस्ट येथून थेट प्रकाशित करता येणार नाही.',
+  mediaTargetLabel: 'कशासाठी?',
+  mediaTargetArticle: 'लेख',
+  mediaTargetArticleDesc: 'लेखासोबत प्रसिद्ध करण्यासाठीचे पोस्टर',
+  mediaTargetTwitter: 'ट्विटर',
+  mediaTargetTwitterDesc: 'X (ट्विटर) साठी',
+  mediaTargetFacebook: 'फेसबुक',
+  mediaTargetFacebookDesc: 'फेसबुकसाठी',
   notePlaceholder:
     'उदा. शासन निर्णय, बैठकीची टिपणी, योजनेची माहिती… ही टिपणीच लेखाचा एकमेव आधार असेल.',
   headingLabel: 'शीर्षक किंवा लेखाचा रोख (ऐच्छिक)',
   headingHint:
     'शीर्षक द्या, किंवा लेखाचा रोख थोडक्यात सांगा — रिकामे ठेवल्यास मंच स्वतः रोख ठरवेल.',
   headingPlaceholder: 'उदा. कर्जमुक्तीमुळे ग्रामीण अर्थव्यवस्थेला नवी ऊर्जा',
+  // The officer-supplied STYLE reference (tier 1). The hint has one job: make it unmistakable
+  // that this article is copied for its SHAPE and never for its facts — an officer who pastes
+  // a related article expecting its details to be reused would be misreading the field.
+  styleRefLabel: 'नमुना लेख — शैलीसाठी (ऐच्छिक)',
+  styleRefHint:
+    'आधी प्रसिद्ध झालेला एखादा लेख इथे चिकटवा; त्याची मांडणी, शीर्षक-रचना व भाषाशैली नमुना म्हणून वापरली जाईल. यातील कोणतीही माहिती, नावे किंवा आकडे नव्या लेखात घेतले जाणार नाहीत — त्यासाठी टिपणीच एकमेव आधार आहे. रिकामे ठेवल्यास मंच जुळणारा महासंवाद लेख स्वतः निवडेल.',
+  styleRefPlaceholder:
+    'उदा. महासंवादवर आधी प्रसिद्ध झालेल्या लेखाचा संपूर्ण मजकूर…',
+  styleRefTooLong: 'नमुना लेख खूप मोठा आहे — कृपया थोडा कमी करा.',
   categoryLabel: 'लेखाचा प्रकार?',
   categoryScheme: 'योजना-लेख',
   categorySchemeDesc: 'सविस्तर, चिंतनशील महासंवाद फीचर-लेख',
@@ -96,6 +123,7 @@ export const STR = {
   outputBothDesc: 'लेख आणि त्यावर आधारित पोस्टर',
   submit: 'तयार करा →',
   submitting: 'पाठवत आहोत…',
+  docReadingForSubmit: 'फाईल वाचत आहे…',
   noteTooShort: 'कृपया किमान २० अक्षरांची टिपणी लिहा.',
   // Chiefly for the media room, where a pasted article plus a file's text can add up
   // past the API's cap.
@@ -185,28 +213,17 @@ export const STR = {
   dloReviewPreviewHide: 'पूर्ण मजकूर लपवा',
   dloReviewEmpty: 'कोणताही मजकूर निवडलेला नाही — किमान एक स्रोत निवडा.',
   dloReviewRereading: 'OCR ने पुन्हा वाचत आहे…',
-  // Pointers (मुद्दे): the 5W1H-grouped fact bullets shown at the top of the review step.
-  // Every bullet is checked by default; unchecking one drops that fact from the article.
-  dloPointersTitle: 'लेखात कोणते मुद्दे वापरायचे?',
+  // Pointers (मुद्दे): a read-only summary of the source, shown at the top of the review
+  // step. Display only — the article is written from the full reviewed text below it.
+  dloPointersTitle: 'महत्त्वाचे मुद्दे',
   dloPointersHint:
-    'खालील मुद्दे तुमच्या माहितीतून काढले आहेत. जे मुद्दे लेखात नको असतील त्यांची खूण काढा — निवडलेले मुद्देच लेखात वापरले जातील.',
+    'तुम्ही दिलेल्या मजकुरातील महत्त्वाचे मुद्दे खाली दिले आहेत. लेख मात्र संपूर्ण तपासलेल्या मजकुरावरून तयार होईल.',
   dloPointersLoading: 'मुद्दे तयार करत आहोत…',
   dloPointersEmpty:
     'मुद्दे तयार करता आले नाहीत. काही हरकत नाही — तुम्ही थेट खालील मजकुरावरून लेख तयार करू शकता.',
   dloPointersError:
     'मुद्दे तयार करताना अडचण आली. पुन्हा प्रयत्न करा किंवा थेट लेख तयार करा.',
   dloPointersRegenerate: 'मुद्दे पुन्हा तयार करा',
-  dloPointersExcludedCount: 'मुद्दे वगळले आहेत',
-  dloStatementsTitle: 'वक्त्यांची महत्त्वाची विधाने',
-  dloStatementsHint:
-    'निवडलेली विधाने वक्त्याच्या नावासह लेखात जपली जातील. टिपणीत नसलेले पदनाम किंवा ठिकाण जोडले जाणार नाही.',
-  // 5W1H group headings for the pointer sections (कोण/काय/केव्हा/कुठे/का/कसे).
-  dloPointerDimWho: 'कोण',
-  dloPointerDimWhat: 'काय',
-  dloPointerDimWhen: 'केव्हा',
-  dloPointerDimWhere: 'कुठे',
-  dloPointerDimWhy: 'का',
-  dloPointerDimHow: 'कसे',
   // व्यक्ती व पदनाम: the designation the article will print before each person's name. A blank
   // field means the name prints bare — a designation is never guessed from the note.
   designationsTitle: 'व्यक्ती व पदनाम तपासा',
@@ -231,6 +248,16 @@ export const STR = {
   designationsSkip: 'पदनामाशिवाय पुढे जा',
   designationsConfirm: 'पदनामे निश्चित करा व तयार करा →',
   designationsChecking: 'नावे तपासत आहोत…',
+  // Read-only summary on a generation detail page. This deliberately avoids "तपासा":
+  // unlike the DLO authoring card it does not gate or mutate the generation.
+  usedNamesTitle: 'व्यक्ती व पदनाम',
+  usedNamesHint:
+    'तयार झालेल्या मजकुरात व्यक्तींची नावे व पदनामे जशी वापरली आहेत तशी येथे दिसतील.',
+  usedNamesLoading: 'वापरलेली नावे ओळखत आहोत…',
+  usedNamesEmpty: 'या मजकुरात कोणत्याही व्यक्तीचे नाव आढळले नाही.',
+  usedNamesUnavailable:
+    'वापरलेल्या नावांची यादी सध्या तयार करता आली नाही. निर्मितीवर याचा परिणाम झालेला नाही.',
+  usedNamesNoDesignation: 'पदनाम नमूद नाही',
   // Shown on the finished article when an approved designation could not be applied.
   designationWarnTitle: 'पदनामाबाबत लक्ष द्या',
   designationWarnNotFound:
@@ -326,16 +353,10 @@ export const STR = {
   docSelectTotal: 'एकूण पृष्ठे',
   docSelectCount: 'पृष्ठे निवडली',
   docReadSelected: 'निवडलेली पृष्ठे वाचा',
-  // /dlo only: that page has an intake job of its own, so the officer can hand over the page
-  // selection and let the OCR run inside प्रक्रिया instead of waiting for it here. Every other
-  // surface needs the text in the browser now and never shows these.
-  docUsePagesUnread: 'न वाचता ही पृष्ठे वापरा',
-  docUsePagesUnreadHint:
-    'घाई असेल तर पृष्ठे निवडून थेट पुढे जा — ती प्रक्रियेच्या टप्प्यात वाचली जातील आणि तपासणीच्या टप्प्यावर मजकूर दुरुस्त करता येईल.',
-  docPagesDeferredTitle: 'पृष्ठे निवडली — पुढील टप्प्यात वाचली जातील',
-  docPagesDeferredHint:
-    'ही पृष्ठे आता वाचली जाणार नाहीत. “पुढे जा” दाबल्यावर प्रक्रियेच्या टप्प्यात ती OCR ने वाचली जातील आणि त्यानंतर तपासणीच्या टप्प्यावर मजकूर दुरुस्त करता येईल.',
-  docPagesDeferredSelection: 'निवडलेली पृष्ठे',
+  // /dlo only: its intake job reads the current selection later by default. Every other
+  // surface needs the text in the browser now and never shows this.
+  docPagesReadLaterHint:
+    'ही पृष्ठे प्रक्रियेच्या टप्प्यात OCR ने वाचली जातील — थेट “पुढे जा” दाबा. आताच मजकूर पाहायचा असेल तर “निवडलेली पृष्ठे वाचा” दाबा. तपासणीच्या टप्प्यावर मजकूर दुरुस्त करता येईल.',
   docChangeSelection: 'पृष्ठ निवड बदला',
   docChangeSelectionHint:
     'वेगळी पृष्ठे निवडल्यास ती पुन्हा वाचावी लागतील आणि सध्याचा मजकूर पुन्हा तयार होईल.',
@@ -805,7 +826,7 @@ export const STR = {
   navVideo: 'व्हिडिओ',
   videoTitle: 'नवीन व्हिडिओ तयार करा',
   videoIntro:
-    'टिपणीवरून दृश्यनिहाय संहिता तयार होईल. आधी संहिता, मग प्रत्येक दृश्याचे नमुना चित्र तपासा — व्हिडिओ तयार करण्याचा खर्च फक्त तुमच्या मंजुरीनंतरच होतो.',
+    'टिपणीवरून दोन स्वतंत्र गोष्टी तयार होतील: मराठी निवेदन आणि आवाज बंद असतानाही माहिती समजावणारी साधी दृश्य-कथा. आधी दोन्ही तपासा — व्हिडिओ तयार करण्याचा खर्च फक्त तुमच्या मंजुरीनंतरच होतो.',
   videoNoteLabel: 'टिपणी येथे लिहा किंवा चिकटवा',
   videoHeadingLabel: 'शीर्षक / मुख्य मुद्दा (ऐच्छिक)',
   videoDurationLabel: 'व्हिडिओची लांबी',
@@ -839,9 +860,9 @@ export const STR = {
   // Script gate (gate 1)
   videoScriptTitle: 'संहिता तपासा व संपादित करा',
   videoScriptIntro:
-    'प्रत्येक दृश्याचे निवेदन (व्हिडिओत ऐकू येणारा मजकूर) आणि दृश्य-वर्णन तपासा. निवेदनातील नावे, आकडे व तारखा टिपणीशी जुळतात का ते पाहा.',
+    'निवेदन आणि दृश्य-कथा स्वतंत्र आहेत; दृश्याने त्याच क्षणी ऐकू येणारे प्रत्येक वाक्य दाखवण्याची गरज नाही. प्रत्येक चित्रात एक hero subject, एक कृती आणि शांत पार्श्वभूमी आहे का ते पहा. गर्दी, रांग, अनेक वाहने किंवा अनेक कृती असतील तर दृश्य-वर्णन साधे करा.',
   videoSceneLabel: 'दृश्य',
-  videoSceneBeatLabel: 'मुद्दा',
+  videoSceneBeatLabel: 'निवेदनाचा मुद्दा',
   videoNarrationLabel: 'निवेदन (मराठी)',
   videoNarrationHint:
     'जेवढे निवेदन लिहाल तेवढी या दृश्याची क्लिप लांब होते (३–१५ सेकंद). सर्व दृश्यांचे निवेदन मिळून निवडलेल्या एकूण वेळेत बसवा.',
@@ -851,17 +872,17 @@ export const STR = {
     'निवेदन एकूण वेळेपेक्षा जास्त आहे — काही दृश्ये लहान करा, नाहीतर ती आपोआप लहान केली जातील.',
   videoBriefLabel: 'प्रारंभ दृश्य-वर्णन (इंग्रजी)',
   videoBriefHint:
-    'दृश्याची सुरुवात कशी दिसेल — 3D ॲनिमेशन चित्रपटासारखे दृश्य; चित्रात मजकूर/अक्षरे दिसणार नाहीत, शब्द निवेदनात असतात.',
+    'वास्तव चित्रीकरणासारखी साधी फ्रेम: एक प्रमुख व्यक्ती/वस्तू (अत्यावश्यक असल्यास एकाच कृतीतील दोन व्यक्ती), एकच कृती, जास्तीत जास्त एक वाहन व २–३ महत्त्वाच्या वस्तू. गर्दी, रांग, traffic, अनेक कामे आणि busy background टाळा; चित्रात मजकूर/अक्षरे नसतील.',
   videoEndBriefLabel: 'अंतिम दृश्य-वर्णन (इंग्रजी)',
   videoEndBriefHint:
-    'तेच दृश्य काही सेकंदांनी कसे दिसेल — तेच ठिकाण व त्याच व्यक्ती; व्हिडिओ पहिल्या फ्रेमपासून या फ्रेमपर्यंत सलग जातो.',
+    'ऐच्छिक. त्याच जवळच्या फ्रेममध्ये, त्याच व्यक्ती व वस्तूंमध्ये एकच छोटा बदल शक्य असेल तर लिहा. नवीन व्यक्ती/वस्तू, प्रवेश-निर्गमन किंवा दुसरी कृती नको. रिकामे ठेवल्यास प्रारंभ फ्रेमवरूनच संयत हालचाल तयार होईल.',
   videoKeyPointLabel: 'पडद्यावरील ठळक ओळ (मराठी)',
   videoKeyPointHint:
     'या दृश्यावर दिसणारा एकच ठोस तपशील — रक्कम, मुदत, संख्या, योजनेचे नाव. रिकामी ठेवली तर या दृश्यावर काहीही लिहिले जाणार नाही.',
   videoKeyPointReviewLabel: 'पडद्यावरील ओळ',
   videoStyleLabel: 'दृश्यशैली व स्थळ (इंग्रजी — सर्व दृश्यांना लागू)',
   videoStyleHint:
-    'सर्व दृश्ये याच शैलीत व याच वातावरणात तयार होतात (stylized 3D ॲनिमेशन). चित्रात परदेशी माणसे किंवा ठिकाणे आली असतील तर इथे महाराष्ट्र/भारत स्पष्ट लिहा. ही ओळ बदलली की सर्व दृश्ये पुन्हा काढावी लागतात.',
+    'सर्व दृश्ये याच वास्तव, live-action चित्रपट-शैलीत तयार होतात. महाराष्ट्र/भारत, नैसर्गिक प्रकाश, वास्तव भारतीय व्यक्ती व संयत documentary look स्पष्ट ठेवा. ही ओळ बदलली की सर्व दृश्ये पुन्हा काढावी लागतात.',
   videoAddScene: 'दृश्य जोडा',
   videoRemoveScene: 'हे दृश्य काढा',
   videoToStoryboard: 'स्टोरीबोर्ड तयार करा',
@@ -871,12 +892,12 @@ export const STR = {
   // Storyboard gate (gate 2)
   videoStoryboardTitle: 'स्टोरीबोर्ड तपासा',
   videoStoryboardIntro:
-    'प्रत्येक दृश्याची प्रारंभ व अंतिम फ्रेम — व्हिडिओ या दोन फ्रेममध्ये सलग हालचाल करेल. एखादी फ्रेम पटत नसेल तर वर्णन बदलून पुन्हा काढा — त्याचा खर्च अगदी थोडा आहे.',
+    'प्रत्येक दृश्याची प्रारंभ फ्रेम आणि गरज असेल तेथे अंतिम फ्रेम तपासा. चित्र साधे व सहज animate होण्यासारखे नसेल तर वर्णन बदलून पुन्हा काढा — त्याचा खर्च अगदी थोडा आहे.',
   videoStartFrameLabel: 'प्रारंभ फ्रेम',
   videoEndFrameLabel: 'अंतिम फ्रेम',
   videoRedrawStill: 'प्रारंभ फ्रेम पुन्हा काढा',
   videoRedrawStillNote:
-    'प्रारंभ फ्रेम बदलली की अंतिम फ्रेमही तिच्यावरून नव्याने काढली जाते.',
+    'प्रारंभ फ्रेम बदलली की या दृश्याला अंतिम फ्रेम असल्यास तीही तिच्यावरून नव्याने काढली जाते.',
   videoRedrawEndStill: 'अंतिम फ्रेम पुन्हा काढा',
   videoEndStillPending: 'अंतिम फ्रेम अजून काढलेली नाही',
   videoEditBrief: 'वर्णन बदला',
@@ -965,7 +986,9 @@ export const STEP_LABELS: Record<GenerationStep, string> = {
   classify: 'विषय ओळखत आहोत…',
   copy: 'पोस्टरचा मजकूर तयार करत आहोत…',
   image: 'पोस्टरचे चित्र तयार करत आहोत…',
-  caption: 'ट्विटर कॅप्शन लिहित आहोत…',
+  // Platform-neutral: this shows for facebook runs too, and on a caption-only run it is
+  // the ONLY progress line the officer ever sees.
+  caption: 'कॅप्शन लिहित आहोत…',
   scene: 'पोस्टरचे चित्र तयार करत आहोत…',
   render: 'पोस्टर जुळवत आहोत…',
   revise_article: 'अभिप्रायानुसार लेख सुधारत आहोत…',

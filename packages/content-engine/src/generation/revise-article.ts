@@ -312,6 +312,12 @@ export async function reviseArticle(
   selectedFacts: readonly SelectedFact[] = [],
   statements: readonly AttributedStatement[] = [],
   excludeFacts: readonly string[] = [],
+  // Whether this run's article carries a traceability appendix. Defaults to true, which is the
+  // full pipeline's behaviour byte-for-byte. The caller passes false for an article produced by
+  // the SIMPLIFIED generator, which deliberately has no appendix — without this, the first
+  // feedback round on such an article would silently grow a तथ्य-तपासणी fold that the run never
+  // had, and buy an extra model pass to do it. Scheme-only either way; news never had one.
+  withFactCheck = true,
 ): Promise<RevisedArticle> {
   const expand = wantsExpansion(feedback);
   const includeFacts = selectedFacts
@@ -417,7 +423,9 @@ export async function reviseArticle(
   // keeping the { content, article, factCheck } contract unchanged. News has no appendix.
   const { article: rawArticle } = splitContent(content);
   const factCheck =
-    category === 'scheme' ? await generateFactCheck(rawArticle, note) : null;
+    category === 'scheme' && withFactCheck
+      ? await generateFactCheck(rawArticle, note)
+      : null;
 
   // Same placement as generateArticle: after the appendix, so it never reports the officer's
   // designation as unsourced, and last of all, so no later pass can drop it.
