@@ -13,8 +13,8 @@
 //     filled (imagery, colour mass, negative space) instead of what other copy sits there.
 //  3. THE RESERVED ZONES. The article chrome is stamped top-LEFT (the महासंवाद logo, ~420x180)
 //     plus the full-width bottom strip (~150px); the social chrome is a top-RIGHT emblem plus its
-//     own bottom strip. Every instruction here is written to leave the article zones clear, and
-//     in particular never to place the headline in the top-left corner.
+//     own bottom strip. Every instruction keeps text and important information out of the article
+//     zones while allowing ordinary colour, texture, decoration and background imagery through.
 //
 // Ids are prefixed `art_` so an article layout id can never be confused with a social one — they
 // share one `generations.poster_style` column (migration 0028) and one label lookup.
@@ -68,7 +68,7 @@ export const ARTICLE_POSTER_LAYOUTS: readonly ArticlePosterLayout[] = [
     coverage: 'panel',
     photo: 'either',
     instruction:
-      'a solid colour panel filling the RIGHT ~40% of the canvas from top edge to bottom edge, carrying the headline in large reversed-out type, vertically centred with generous margins; the imagery fills the LEFT ~60% edge to edge. Placing the headline on the right leaves the top-left reserved rectangle naturally clear. The headline is the ONLY text on the poster.',
+      'a solid colour panel filling the RIGHT ~40% of the canvas from top edge to bottom edge, carrying the headline in large reversed-out type, vertically centred with generous margins; the imagery fills the LEFT ~60% edge to edge, continuing naturally behind the top-left logo zone while keeping faces, focal subjects and information out of that corner. The headline is the ONLY text on the poster.',
   },
   {
     id: 'art_split_half',
@@ -77,7 +77,7 @@ export const ARTICLE_POSTER_LAYOUTS: readonly ArticlePosterLayout[] = [
     coverage: 'split',
     photo: 'required',
     instruction:
-      'an exact 50/50 vertical split with a hard straight edge down the centre: a flat colour field on the RIGHT half holding the headline in large reversed-out type, vertically centred, and a full-bleed photograph filling the LEFT half completely. Nothing crosses the centre line and there is no frame or border around either half. Putting the headline on the right keeps it clear of the top-left reserved rectangle; keep the photograph free of any subject matter in that corner too. The headline is the ONLY text on the poster.',
+      'an exact 50/50 vertical split with a hard straight edge down the centre: a flat colour field on the RIGHT half holding the headline in large reversed-out type, vertically centred, and a full-bleed photograph filling the LEFT half completely. Nothing crosses the centre line and there is no frame or border around either half. The photograph continues naturally behind the top-left logo zone, but place no face, focal subject or information in that corner. The headline is the ONLY text on the poster.',
   },
   {
     id: 'art_photo_bleed_scrim',
@@ -86,7 +86,7 @@ export const ARTICLE_POSTER_LAYOUTS: readonly ArticlePosterLayout[] = [
     coverage: 'field',
     photo: 'required',
     instruction:
-      'a photograph bleeding across the ENTIRE canvas, with a solid opaque colour band running full width across the lower-middle of the poster holding the headline in reversed-out type. The band must stop clear of the reserved bottom strip and must not reach the top-left reserved rectangle. Keep the photograph legible above and below the band; the headline is the ONLY text on the poster.',
+      'a photograph bleeding across the ENTIRE canvas, including naturally behind the branding zones, with a solid opaque colour band running full width across the lower-middle of the poster holding the headline in reversed-out type. Keep the headline and every important subject clear of the top-left logo zone and reserved bottom strip. Keep the photograph legible above and below the band; the headline is the ONLY text on the poster.',
   },
   {
     id: 'art_top_band',
@@ -95,7 +95,7 @@ export const ARTICLE_POSTER_LAYOUTS: readonly ArticlePosterLayout[] = [
     coverage: 'band',
     photo: 'either',
     instruction:
-      'a solid full-width colour band across the upper part of the canvas holding the headline in large reversed-out type, and the imagery or a flat colour field filling everything beneath it. The band must START BELOW the top-left reserved rectangle rather than at the very top edge, so the stamped logo sits on quiet background above it. The headline is the ONLY text on the poster.',
+      'a solid full-width colour band across the upper part of the canvas, continuing naturally behind the top-left logo zone, with the headline in large reversed-out type starting below and clear of that zone; the imagery or a flat colour field fills everything beneath it. Do not create a blank or cut-out patch behind the logo. The headline is the ONLY text on the poster.',
   },
   {
     id: 'art_bottom_anchor',
@@ -113,7 +113,7 @@ export const ARTICLE_POSTER_LAYOUTS: readonly ArticlePosterLayout[] = [
     coverage: 'wedge',
     photo: 'either',
     instruction:
-      'a large diagonal wedge of the dominant colour sweeping in from the RIGHT edge across roughly half the canvas, carrying the headline in reversed-out type set horizontally (never rotated to follow the diagonal); the imagery or a plain field fills the area on the other side of the diagonal. The wedge must not intrude into the top-left reserved rectangle. The headline is the ONLY text on the poster.',
+      'a large diagonal wedge of the dominant colour sweeping in from the RIGHT edge across roughly half the canvas, carrying the headline in reversed-out type set horizontally (never rotated to follow the diagonal); the imagery or a plain field fills the area on the other side of the diagonal. Background colour and shapes may continue through the top-left logo zone, but the headline and important subjects must not. The headline is the ONLY text on the poster.',
   },
   {
     id: 'art_centre_slab',
@@ -140,7 +140,7 @@ export const ARTICLE_POSTER_LAYOUTS: readonly ArticlePosterLayout[] = [
     coverage: 'field',
     photo: 'forbidden',
     instruction:
-      'no photograph at all: the dominant colour fills the whole canvas as a flat field, and the headline is set very large across the vertical centre in reversed-out type, occupying most of the width, with one simple geometric accent — a thick rule, a bar, or a plain shape in the accent colour — anchoring it. Generous empty space above and below, which is what keeps the headline clear of the top-left reserved rectangle and the reserved bottom strip; the accent shape must not enter either. The headline is the ONLY text on the poster.',
+      'no photograph at all: the dominant colour fills the whole canvas continuously as a flat field, and the headline is set very large across the vertical centre in reversed-out type, occupying most of the width, with one simple geometric accent — a thick rule, a bar, or a plain shape in the accent colour — anchoring it. Keep the headline clear of the top-left logo zone and reserved bottom strip; the background field and accent may continue through those zones. The headline is the ONLY text on the poster.',
   },
   {
     id: 'art_edge_stripe',

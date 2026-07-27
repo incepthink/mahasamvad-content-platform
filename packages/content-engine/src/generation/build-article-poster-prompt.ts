@@ -119,10 +119,10 @@ function fmtComposition(l: ArticlePosterLayout): string {
 // Ported byte-for-byte from the workflow's Build Prompt node. Keep the numbers in sync with
 // poster-renderer/src/article-chrome.ts and apps/web's ARTICLE_RESERVED_ZONES.
 const RESERVED_ZONES =
-  'RESERVED ZONES — READ THIS FIRST. Two rectangles of this canvas are already spoken for: the official logo and footer graphics are stamped onto the finished poster afterwards by software, laid OVER whatever you paint there. (a) The TOP-LEFT rectangle from (0,0) to (420,180) — the leftmost ~27% of the width across the topmost ~18% of the height. (b) The FULL-WIDTH BOTTOM strip, approx 150 px tall. These two rectangles must contain NOTHING: no headline, no text, no letters, no numbers, no statistics, no faces, no photograph, no logo, no decorative element, no important visual subject matter. Plain flat colour or quiet background continuation there is expected and correct. Compose the poster the way a human designer would who knows the logo and footer will cover those areas and must not hide any information.';
+  'RESERVED ZONES — READ THIS FIRST. Two rectangles of this canvas are already spoken for: the official logo and footer graphics are stamped onto the finished poster afterwards by software, laid OVER whatever you paint there. (a) The TOP-LEFT rectangle from (0,0) to (420,180) — the leftmost ~27% of the width across the topmost ~18% of the height. (b) The FULL-WIDTH BOTTOM strip, approx 150 px tall. Place NO headline, text, letters, numbers, statistics, logos, faces, focal subjects or other important information inside these zones because the software-added branding will cover them. Ordinary background colour, gradients, textures, decorative shapes and non-informational background imagery SHOULD continue naturally through these zones; do not leave them plain, white, empty or cut away solely for the branding.';
 
 const FINAL_CHECK =
-  'FINAL CHECK before you output: the top-left 420x180 rectangle and the full-width bottom 150 px strip must be empty quiet background — no part of the headline, no photograph, no subject matter and no branding anywhere inside them.';
+  'FINAL CHECK before you output: the top-left 420x180 rectangle and the full-width bottom 150 px strip contain no headline, text, numbers, logos, faces, focal subjects or important information. Normal background colour, gradients, textures, decorative shapes and non-informational background imagery should continue through them without a blank or cut-out patch.';
 
 // The headline-placement rule. The failure it prevents is specific and was seen in real renders:
 // told to erase the master's logo, the model treated the freed corner as usable space and floated
@@ -249,7 +249,7 @@ export function buildArticlePosterPrompt(
     );
   }
   lines.push(
-    'ERASE the branding chrome the master carries: any महासंवाद logo card in the top-left and any department footer band or social-handle strip along the bottom. Fill those areas by continuing the surrounding panel colour, photograph or background naturally, as if that branding was never there. Erasing that branding does NOT free up space — those areas remain RESERVED ZONES as defined above. Do NOT move, enlarge, re-centre or reflow the headline, the photograph, or any other element into the space the erased branding occupied; leave it as quiet empty background.',
+    'ERASE the branding chrome the master carries: any महासंवाद logo card in the top-left and any department footer band or social-handle strip along the bottom. Fill those areas by continuing the surrounding panel colour, gradient, texture, decorative background or non-informational part of the photograph naturally, as if that branding was never there. Erasing that branding does NOT free up space for content: do NOT move, enlarge, re-centre or reflow the headline, a face, a focal subject or any important information into those zones. Do NOT leave a quiet, white, empty or cut-out patch solely for the branding.',
     '',
     "REPLACE the master's placeholder content, inside the master's OWN existing zones:",
     '',
