@@ -1,5 +1,5 @@
-// Offline preview of the twitter-poster chrome overlay (poster-logo.png top-right +
-// poster-footer.png full-width bottom) WITHOUT any model call — for tuning the
+// Offline preview of the social-poster chrome overlay (poster-logo-new.png top-right +
+// footer-new-poster.png full-width bottom) WITHOUT any model call — for tuning the
 // scale/margin constants in src/twitter-chrome.ts for free.
 //
 //   pnpm --filter @dgipr/poster-renderer poster:preview:chrome:twitter [poster.png]
@@ -18,9 +18,9 @@ import { overlayTwitterChrome } from '../src/twitter-chrome.js';
 const here = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_OUT_DIR = resolve(here, '../../content-engine/data/output');
 
-// Flat portrait stand-in for an n8n render: header band + content card, with faint
-// outlines marking the reserved zones the prompt asks the model to keep clear
-// (top-right ~220x180, bottom ~130px).
+// Flat portrait stand-in for a social render: header band + content card, with
+// faint outlines marking the reserved zones the prompt asks the model to keep
+// clear (top-right ~280x270, bottom ~130px).
 async function placeholderPoster(): Promise<Buffer> {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="1600">
     <rect width="1280" height="1600" fill="#eef4fb"/>
@@ -29,7 +29,7 @@ async function placeholderPoster(): Promise<Buffer> {
       text-anchor="middle">HEADLINE ZONE</text>
     <rect x="120" y="420" width="1040" height="900" rx="24" fill="#ffffff"
       stroke="#c4d3e8" stroke-width="3"/>
-    <rect x="1060" y="0" width="220" height="180" fill="none"
+    <rect x="1000" y="0" width="280" height="270" fill="none"
       stroke="#ff0000" stroke-opacity="0.4" stroke-width="3" stroke-dasharray="12 8"/>
     <rect x="0" y="1470" width="1280" height="130" fill="none"
       stroke="#ff0000" stroke-opacity="0.4" stroke-width="3" stroke-dasharray="12 8"/>

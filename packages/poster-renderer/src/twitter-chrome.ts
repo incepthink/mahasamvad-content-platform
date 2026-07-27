@@ -1,35 +1,145 @@
-// Stamp the brand chrome — the Government of Maharashtra emblem lockup
-// (poster-logo.png, top-right) and the department footer band + social-handle
-// strip (poster-footer.png, full-width bottom) — onto an n8n-rendered twitter
-// poster. Mirrors article-chrome.ts: the social-post-v2-api prompts erase the
-// master's chrome and reserve these zones, and the API composites these immutable
-// PNGs after the webhook returns. Applies to BOTH the initial render and
-// pixel-feedback edits (feedback re-edits a poster that already carries the
-// chrome; re-stamping keeps it crisp).
+// Stamp the brand chrome — the Government of Maharashtra emblem lockup (a clean
+// white rounded-square badge with poster-logo-new.png and "महाराष्ट्र शासन",
+// top-right) and the department footer band + social-handle strip
+// (footer-new-poster.png, full-width bottom) — onto a rendered social poster.
+// Mirrors article-chrome.ts: the image prompts erase the master's chrome and reserve
+// these zones, and the API composites these immutable graphics after the render
+// returns. Applies to BOTH the initial render and pixel-feedback edits (feedback
+// re-edits a poster that already carries the chrome; re-stamping keeps it crisp).
 //
 // The reserved-zone numbers quoted to the image model live in the n8n workflow's
-// Build Image Prompt and Build Feedback Prompt nodes
-// (n8n/workflow-exports/social-post-v2-api.json) and must stay in sync with the
-// constants below: at the 1280x1600 canvas the composited emblem is ~150x137 at a
-// ~20px margin from the top-right corner (zone quoted as the top-right ~220x180)
-// and the footer is full-width ~123px tall (zone quoted as the bottom ~130px).
+// prompt builders (content-engine/build-poster-prompt.ts) and must stay in sync
+// with the constants below: at the 1280x1600 canvas the white lockup badge is
+// 240x220 at a 20px margin from the top-right corner (zone quoted as the
+// top-right ~280x270) and the footer is full-width ~91px tall (zone quoted as
+// the bottom ~130px).
 
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import { loadScaled } from './article-chrome.js';
+
+const ASSETS_DIR = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  '../assets',
+);
 
 // Base units are pixels on the twitter canvas itself: masters and n8n renders are
 // always 1280x1600 (MASTER_DIMENSIONS in content-engine), so the scale factor is
 // normally 1 — it only kicks in if the model ever returns another width.
 const ASSET_BASE_WIDTH = 1280;
-// Matches the emblem block width in the poster-header-footer.png frame design
-// (the poster-logo.png asset is 166px wide edge-to-edge).
-const LOGO_TARGET_WIDTH = 150;
-// Emblem offset from the poster's top and right edges.
-const LOGO_MARGIN = 20;
+const LOCKUP_WIDTH = 240;
+const LOCKUP_HEIGHT = 220;
+const LOCKUP_CORNER_RADIUS = 20;
+const LOCKUP_MARGIN = 20;
+const EMBLEM_TARGET_WIDTH = 130;
+const EMBLEM_TOP = 17;
+const LABEL_TOP = 163;
+const LABEL_MAX_WIDTH = 210;
+const LABEL_FONT_SIZE = 27;
+const LABEL = 'महाराष्ट्र शासन';
+const LABEL_COLOUR = '#17324d';
+// footer-new-poster.png was exported on a 3376x4219 transparent canvas; the
+// intended footer artwork occupies the bottom 239 pixels.
+const SOCIAL_FOOTER_SOURCE_HEIGHT = 239;
 
-// Composite poster-logo.png (top-right) and poster-footer.png (full-width, flush
-// to the bottom edge) onto the poster PNG and return the result as a new PNG
-// buffer.
+type Raster = Readonly<{ data: Buffer; width: number; height: number }>;
+
+// Render the Marathi wordmark through Sharp/Pango with the bundled Devanagari
+// font. The emblem remains a high-resolution raster, while the label is freshly
+// shaped at the output size so both stay sharp and perfectly centred.
+async function renderGovernmentLabel(scale: number): Promise<Raster> {
+  const data = await sharp({
+    text: {
+      text: `<span foreground="${LABEL_COLOUR}">${LABEL}</span>`,
+      font: `Noto Sans Devanagari SemiBold ${LABEL_FONT_SIZE}`,
+      fontfile: resolve(ASSETS_DIR, 'fonts/NotoSansDevanagari.ttf'),
+      width: Math.round(LABEL_MAX_WIDTH * scale),
+      align: 'centre',
+      rgba: true,
+      dpi: 72 * scale,
+    },
+  })
+    .png()
+    .toBuffer();
+  const meta = await sharp(data).metadata();
+  if (!meta.width || !meta.height) {
+    throw new Error('Could not render the Maharashtra government wordmark.');
+  }
+  return { data, width: meta.width, height: meta.height };
+}
+
+async function buildGovernmentLockup(scale: number): Promise<Raster> {
+  const width = Math.round(LOCKUP_WIDTH * scale);
+  const height = Math.round(LOCKUP_HEIGHT * scale);
+  const stroke = Math.max(1, 1.5 * scale);
+  const strokeInset = stroke / 2;
+  const cornerRadius = LOCKUP_CORNER_RADIUS * scale;
+  const card = Buffer.from(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
+      <rect x="${strokeInset}" y="${strokeInset}"
+        width="${width - stroke}" height="${height - stroke}"
+        rx="${cornerRadius}" ry="${cornerRadius}"
+        fill="#ffffff" stroke="#dce3ea" stroke-width="${stroke}"/>
+    </svg>`,
+  );
+  const [emblem, label] = await Promise.all([
+    loadScaled('poster-logo-new.png', EMBLEM_TARGET_WIDTH * scale),
+    renderGovernmentLabel(scale),
+  ]);
+
+  return {
+    data: await sharp(card)
+      .composite([
+        {
+          input: emblem.data,
+          left: Math.round((width - emblem.width) / 2),
+          top: Math.round(EMBLEM_TOP * scale),
+        },
+        {
+          input: label.data,
+          left: Math.round((width - label.width) / 2),
+          top: Math.round(LABEL_TOP * scale),
+        },
+      ])
+      .png()
+      .toBuffer(),
+    width,
+    height,
+  };
+}
+
+async function loadSocialFooter(targetWidth: number): Promise<Raster> {
+  const source = sharp(resolve(ASSETS_DIR, 'footer-new-poster.png'));
+  const meta = await source.metadata();
+  if (
+    !meta.width ||
+    !meta.height ||
+    meta.height < SOCIAL_FOOTER_SOURCE_HEIGHT
+  ) {
+    throw new Error('Could not read dimensions of social footer asset.');
+  }
+
+  const width = Math.round(targetWidth);
+  const height = Math.round(
+    (SOCIAL_FOOTER_SOURCE_HEIGHT / meta.width) * width,
+  );
+  const data = await source
+    .extract({
+      left: 0,
+      top: meta.height - SOCIAL_FOOTER_SOURCE_HEIGHT,
+      width: meta.width,
+      height: SOCIAL_FOOTER_SOURCE_HEIGHT,
+    })
+    .resize({ width, kernel: 'lanczos3' })
+    .png()
+    .toBuffer();
+  return { data, width, height };
+}
+
+// Composite the white emblem + Marathi wordmark lockup (top-right) and
+// footer-new-poster.png (full-width, flush to the bottom edge) onto the poster PNG
+// and return the result as a new PNG buffer.
 export async function overlayTwitterChrome(poster: Buffer): Promise<Buffer> {
   const meta = await sharp(poster).metadata();
   if (!meta.width || !meta.height) {
@@ -37,15 +147,19 @@ export async function overlayTwitterChrome(poster: Buffer): Promise<Buffer> {
   }
   const scale = meta.width / ASSET_BASE_WIDTH;
 
-  const [logo, footer] = await Promise.all([
-    loadScaled('poster-logo.png', LOGO_TARGET_WIDTH * scale),
-    loadScaled('poster-footer.png', meta.width),
+  const [lockup, footer] = await Promise.all([
+    buildGovernmentLockup(scale),
+    loadSocialFooter(meta.width),
   ]);
 
-  const margin = Math.round(LOGO_MARGIN * scale);
+  const margin = Math.round(LOCKUP_MARGIN * scale);
   return sharp(poster)
     .composite([
-      { input: logo.data, left: meta.width - logo.width - margin, top: margin },
+      {
+        input: lockup.data,
+        left: meta.width - lockup.width - margin,
+        top: margin,
+      },
       { input: footer.data, left: 0, top: meta.height - footer.height },
     ])
     .png()
