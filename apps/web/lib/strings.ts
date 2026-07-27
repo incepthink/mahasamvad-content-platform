@@ -457,6 +457,7 @@ export const STR = {
 
   // Results
   articleTitle: 'तयार झालेला लेख',
+  givenArticle: 'दिलेला लेख',
   factCheckTitle: 'तथ्य-तपासणी (माहिती कुठून आली?)',
   noteTitle: 'मूळ टिपणी',
 

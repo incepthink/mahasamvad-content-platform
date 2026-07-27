@@ -186,7 +186,7 @@ export default function GenerationDetailPage({
             {detail.article ? (
               posterFocused ? (
                 <details className="card poster-source-article">
-                  <summary>{STR.articleTitle}</summary>
+                  <summary>{STR.givenArticle}</summary>
                   <div className="poster-source-article-body">
                     <ArticleView
                       detail={detail}

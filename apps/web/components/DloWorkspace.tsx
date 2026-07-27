@@ -1023,6 +1023,31 @@ export default function DloWorkspace() {
 
       {step === 'review' ? (
         <>
+          <section className="card">
+            <div className="btn-row">
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={generate}
+                disabled={
+                  submitting ||
+                  extracting ||
+                  pendingSelection ||
+                  reextractingIndex !== null
+                }
+              >
+                {submitting ? STR.submitting : STR.dloGenerate}
+              </button>
+              <button type="button" className="btn" onClick={reset}>
+                {STR.dloStartOver}
+              </button>
+            </div>
+            {pendingSelection ? (
+              <p className="hint">{STR.dloReviewSelectionPending}</p>
+            ) : null}
+            {error ? <p className="form-error">{error}</p> : null}
+          </section>
+
           {/* A read-only key-point summary first, then the authoritative uploaded-source review.
               The summary helps scan a long intake; it does not filter what reaches the article. */}
           <PointerList
@@ -1190,31 +1215,6 @@ export default function DloWorkspace() {
             value={styleReference}
             onChange={setStyleReference}
           />
-
-          <section className="card">
-            <div className="btn-row">
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={generate}
-                disabled={
-                  submitting ||
-                  extracting ||
-                  pendingSelection ||
-                  reextractingIndex !== null
-                }
-              >
-                {submitting ? STR.submitting : STR.dloGenerate}
-              </button>
-              <button type="button" className="btn" onClick={reset}>
-                {STR.dloStartOver}
-              </button>
-            </div>
-            {pendingSelection ? (
-              <p className="hint">{STR.dloReviewSelectionPending}</p>
-            ) : null}
-            {error ? <p className="form-error">{error}</p> : null}
-          </section>
         </>
       ) : null}
 
