@@ -129,7 +129,7 @@ function CreateSocialBlock({
   const [source, setSource] = useState<SocialSource>(
     canUseArticle ? 'article' : 'note',
   );
-  const [designMode, setDesignMode] = useState<DesignMode>('fresh');
+  const [designMode, setDesignMode] = useState<DesignMode>('onbrand');
   const [reference, setReference] = useState<ReferenceSelection | null>(null);
   // Opt-in, matching the home form: a social post is poster-only unless asked otherwise.
   const [wantCaption, setWantCaption] = useState(false);

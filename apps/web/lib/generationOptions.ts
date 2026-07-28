@@ -10,7 +10,6 @@ import {
   Image as ImageIcon,
   Landmark,
   Newspaper,
-  Palette,
   Sparkles,
   Target,
   ThumbsUp,
@@ -126,25 +125,21 @@ export const BRAND_OPTIONS: ReadonlyArray<GenerationOption<TemplateBrand>> = [
   },
 ];
 
-// 'fresh' (a unique AI-designed poster from scratch) is the default and the primary option,
-// so it leads; 'adaptive'/'onbrand' still edit a template for a run that wants to follow one.
+// Two choices only: follow the selected template exactly ('onbrand', the default — the
+// simple fixed-template prompt), or let the model design the poster from scratch ('fresh').
+// 'adaptive' remains a valid DesignMode for legacy rows but is no longer offered: it sat
+// between the two without being clearly either.
 export const DESIGN_OPTIONS: ReadonlyArray<GenerationOption<DesignMode>> = [
-  {
-    value: 'fresh',
-    icon: Sparkles,
-    name: STR.designFresh,
-    desc: STR.designFreshDesc,
-  },
-  {
-    value: 'adaptive',
-    icon: Palette,
-    name: STR.designAdaptive,
-    desc: STR.designAdaptiveDesc,
-  },
   {
     value: 'onbrand',
     icon: Target,
     name: STR.designOnbrand,
     desc: STR.designOnbrandDesc,
+  },
+  {
+    value: 'fresh',
+    icon: Sparkles,
+    name: STR.designFresh,
+    desc: STR.designFreshDesc,
   },
 ];

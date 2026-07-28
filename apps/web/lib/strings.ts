@@ -89,11 +89,9 @@ export const STR = {
 
   // Design-mode selector (shown only for the समाजमाध्यम — ट्विटर/फेसबुक — flows)
   designModeLabel: 'पोस्टरची रचना-शैली?',
-  designFresh: 'AI रचना (शिफारस)',
+  designFresh: 'AI रचना',
   designFreshDesc:
     'प्रत्येक वेळी पूर्णपणे नवे, वेगळे पोस्टर — रंग व रचना AI ठरवते',
-  designAdaptive: 'टेम्पलेटवर आधारित',
-  designAdaptiveDesc: 'निवडलेल्या टेम्पलेटचा आधार, विषयानुसार थोडा बदल',
   designOnbrand: 'ठरलेले टेम्पलेट',
   designOnbrandDesc: 'निवडलेल्या टेम्पलेटनुसार तसेच पोस्टर',
 
@@ -126,10 +124,6 @@ export const STR = {
   submitting: 'पाठवत आहोत…',
   docReadingForSubmit: 'फाईल वाचत आहे…',
   noteTooShort: 'कृपया किमान २० अक्षरांची टिपणी लिहा.',
-  // Chiefly for the media room, where a pasted article plus a file's text can add up
-  // past the API's cap.
-  noteTooLong:
-    'मजकूर ६०,००० अक्षरांच्या मर्यादेपेक्षा मोठा आहे — नको असलेला भाग वगळा.',
 
   // DLO (Digital Liaison Officer) interface — meeting notes + recordings +
   // documents → transcription/extraction → editable review → article.
@@ -380,7 +374,7 @@ export const STR = {
   // which made the same capability look different on each page.
   docUploadTitle: 'फाईलमधून मजकूर घ्या',
   docUploadHint:
-    'PDF, DOCX किंवा TXT फाईल निवडा (कमाल २५ MB). स्कॅन केलेली PDF देखील चालते. फाईल जतन केली जाणार नाही.',
+    'PDF, DOCX किंवा TXT फाईल निवडा (कमाल ५० MB). स्कॅन केलेली PDF देखील चालते. फाईल जतन केली जाणार नाही.',
   docUpload: 'फाईल निवडा',
   docUploadOther: 'दुसरी फाईल निवडा',
   // Only on a surface that shows several upload cards at once (/dlo), where one document

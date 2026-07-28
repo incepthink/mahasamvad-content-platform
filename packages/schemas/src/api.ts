@@ -104,10 +104,10 @@ export type RevisionTarget = z.infer<typeof RevisionTargetSchema>;
 export const TranslationLanguageSchema = z.enum(['en', 'hi']);
 export type TranslationLanguage = z.infer<typeof TranslationLanguageSchema>;
 
-// Hard ceiling on a generation's note (टिपणी). Shared with the web form, which now
-// lets the officer PASTE text and APPEND a file's text to it — the one path that can
-// realistically overflow the cap, so the client warns before the API has to 400.
-export const NOTE_MAX_CHARS = 60_000;
+// A generation's note (टिपणी) has NO character ceiling. It used to be capped at 60,000,
+// which a pasted article plus an uploaded document's text could exceed for no good reason —
+// a whole scanned booklet is a legitimate source. The remaining bound is the API's 1 MiB
+// body limit, which is a transport fact rather than an editorial rule.
 
 // Hard ceiling on a hand-typed article-poster heading. A poster carries ONE Marathi line and
 // the image model has to set it legibly at display size, so this is deliberately short — long
@@ -150,7 +150,7 @@ export const ARTICLE_WORD_TARGETS: Readonly<
 export const CreateGenerationRequestSchema = z
   .object({
     // The Marathi note (टिपणी) — sole factual source for everything generated.
-    note: z.string().trim().min(20).max(NOTE_MAX_CHARS),
+    note: z.string().trim().min(20),
     // What the run produces. 'article' means NO POSTER on BOTH lanes: on news/scheme the
     // poster phase is skipped, and on twitter/facebook it is the caption-only run (the
     // caption lives in the `article` column, the social lane's convention). 'poster' and

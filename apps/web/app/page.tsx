@@ -13,8 +13,8 @@ import {
   MessageSquareText,
 } from 'lucide-react';
 import {
-  NOTE_MAX_CHARS,
   POSTER_HEADING_MAX_CHARS,
+  UPLOAD_FILE_MAX_BYTES,
   isSocialCategory,
 } from '@dgipr/schemas';
 import type { Category, DesignMode, TemplateBrand } from '@dgipr/schemas';
@@ -124,7 +124,7 @@ export default function NewGenerationPage() {
   const [outputKind, setOutputKind] = useState<OutputKind>('poster');
   const [posterTarget, setPosterTarget] = useState<PosterTarget>('scheme');
   const [captionTarget, setCaptionTarget] = useState<CaptionTarget>('twitter');
-  const [designMode, setDesignMode] = useState<DesignMode>('fresh');
+  const [designMode, setDesignMode] = useState<DesignMode>('onbrand');
   const [templateBrand, setTemplateBrand] = useState<TemplateBrand>('dgipr');
   // A social post is poster-only unless asked otherwise: the caption is a separate
   // paid model call, and plenty of posts are published as an image. It can also be added
@@ -214,12 +214,6 @@ export default function NewGenerationPage() {
   const submit = async () => {
     if (combinedNote.length < 20) {
       setError(STR.noteTooShort);
-      return;
-    }
-    // A pasted article plus a file's text can add up past the API's cap; say so here
-    // rather than let the request come back 400.
-    if (combinedNote.length > NOTE_MAX_CHARS) {
-      setError(STR.noteTooLong);
       return;
     }
     if (!isSocial && posterHeading.trim().length > POSTER_HEADING_MAX_CHARS) {
@@ -347,6 +341,7 @@ export default function NewGenerationPage() {
       <DocumentIntake
         key={docKey}
         storageKey={DOC_STORAGE_KEY}
+        maxBytes={UPLOAD_FILE_MAX_BYTES}
         onTextChange={(text) => {
           setDocText(text);
           if (text.trim()) setError(null);
@@ -489,9 +484,36 @@ export default function NewGenerationPage() {
         ) : null}
       </section>
 
-      {/* विभाग and रचना-शैली are poster questions; a कॅप्शन run has no template at all. */}
+      {/* रचना-शैली and विभाग are poster questions; a कॅप्शन run has no template at all.
+          रचना-शैली leads: it is the choice that decides whether a template is followed at
+          all, and the template picker below it follows from that answer. */}
       {isSocial && !captionOnly ? (
         <>
+          {/* CMO just follows its fixed template, so the रचना-शैली modes only apply
+              to DGIPR social posts. */}
+          {!isCmo ? (
+            <section className="card">
+              <h2>{STR.designModeLabel}</h2>
+              <div className="output-picker output-picker-two">
+                {DESIGN_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className="output-option"
+                    aria-pressed={designMode === option.value}
+                    onClick={() => setDesignMode(option.value)}
+                  >
+                    <span className="icon" aria-hidden="true">
+                      <option.icon size={30} strokeWidth={1.75} />
+                    </span>
+                    <span className="name">{option.name}</span>
+                    <span className="desc">{option.desc}</span>
+                  </button>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
           <section className="card">
             <h2>{STR.brandLabel}</h2>
             <div className="output-picker output-picker-two">
@@ -512,31 +534,6 @@ export default function NewGenerationPage() {
               ))}
             </div>
           </section>
-
-          {/* CMO just follows its fixed template, so the रचना-शैली modes only apply
-              to DGIPR social posts. */}
-          {!isCmo ? (
-            <section className="card">
-              <h2>{STR.designModeLabel}</h2>
-              <div className="output-picker">
-                {DESIGN_OPTIONS.map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    className="output-option"
-                    aria-pressed={designMode === option.value}
-                    onClick={() => setDesignMode(option.value)}
-                  >
-                    <span className="icon" aria-hidden="true">
-                      <option.icon size={30} strokeWidth={1.75} />
-                    </span>
-                    <span className="name">{option.name}</span>
-                    <span className="desc">{option.desc}</span>
-                  </button>
-                ))}
-              </div>
-            </section>
-          ) : null}
         </>
       ) : null}
 

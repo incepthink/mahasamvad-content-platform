@@ -7,6 +7,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
+  UPLOAD_FILE_MAX_BYTES,
   buildProofreadHighlights,
   type ProofreadHighlight,
   type ProofreadIssue,
@@ -307,6 +308,7 @@ export default function ProofreadPage() {
           Keep the upload inline, like every other document surface in the product. */}
       <DocumentIntake
         storageKey="dgipr.proofread.document"
+        maxBytes={UPLOAD_FILE_MAX_BYTES}
         onText={(value) => {
           setText(value);
           setResult(null);
