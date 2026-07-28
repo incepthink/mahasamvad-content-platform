@@ -11,9 +11,9 @@
 // consequences follow. The prompt is written around COVERAGE of distinct topics in source
 // order rather than around a fixed count — a topic can span pages and a page can hold several
 // topics, so "one point per page" is explicitly ruled out. And the output budget is sized for
-// that case: Devanagari is token-heavy, so the transport default (4096) would truncate a long
-// list, and a truncated reply used to be swallowed silently as "no pointers at all". See
-// POINTERS_MAX_TOKENS and salvageTruncatedPoints below.
+// that case: Devanagari is token-heavy, so long input is processed in bounded source chunks
+// and each chunk gets its own 4096-token answer budget. A truncated reply used to be swallowed
+// silently as "no pointers at all"; salvageTruncatedPoints still preserves complete items.
 //
 // Deterministic-ish, strict-JSON output, defensively parsed (code-fence stripping + brace-span
 // extraction, mirroring extract-5w1h.ts / generate-copy.ts) and coerced/validated against
@@ -21,7 +21,12 @@
 
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { PointersResultSchema, type PointersResult } from '@dgipr/schemas';
+import {
+  POINTERS_REQUEST_CHUNK_CHARS,
+  PointersResultSchema,
+  splitPointerInput,
+  type PointersResult,
+} from '@dgipr/schemas';
 import {
   POINTERS_MODEL,
   chatComplete,
@@ -33,15 +38,11 @@ import { CATEGORY_LABEL, type ArticleCategory } from './category-prompt.js';
 // pointers" and the officer generates from the reviewed text as usual.
 export const EMPTY_POINTERS: PointersResult = { points: [] };
 
-// Room for the ANSWER (the transport adds its own reasoning headroom on top). The default
-// 4096 is not enough here: Marathi on o200k_base runs ~1 token per 1.2-1.8 chars, so 25
-// points of ~150 chars is already ~3,200 tokens and a 40-point multi-article list is ~6,200.
-// Exhausting the budget yields either empty content or truncated JSON — both of which used to
-// be caught below and returned as EMPTY_POINTERS, i.e. the long-PDF case this feature exists
-// for was the one that silently produced nothing. 16k covers ~100 pessimistic-length points,
-// leaving the schema's 120 cap as the only binding limit, and costs nothing when unused
-// (billing is on tokens emitted, not on the ceiling).
-const POINTERS_MAX_TOKENS = 16_000;
+// A 60k-character Marathi note is roughly 40-45k input tokens. Sending all of it in one call
+// while also reserving a 16k answer plus medium-reasoning headroom can exceed the project's
+// entire tokens-per-minute allowance before generation even begins. Bound each request;
+// chunk results are appended in source order and de-duplicated by the existing result parser.
+const POINTERS_MAX_TOKENS = 4_096;
 
 // Matches a leading list marker the model may emit despite being told not to: `1.` / `१)` /
 // `-` / `•` / `*`, optionally repeated. The UI renders the bullet, so a marker inside the
@@ -204,13 +205,11 @@ function coercePointers(parsed: unknown): PointersResult {
 // Summarise the assembled note into a flat Marathi key-point list. Best-effort by design: an
 // empty note, or any parse/validation/API failure, returns EMPTY_POINTERS so /dlo behaves
 // exactly as it did before this feature existed.
-export async function extractPointers(
+async function extractPointerChunk(
   text: string,
   category: ArticleCategory,
   heading?: string,
 ): Promise<PointersResult> {
-  if (text.trim().length === 0) return EMPTY_POINTERS;
-
   let raw = '';
   try {
     raw = await chatComplete(buildMessages(text, category, heading), {
@@ -218,6 +217,7 @@ export async function extractPointers(
       temperature: 0,
       responseFormat: 'json_object',
       maxTokens: POINTERS_MAX_TOKENS,
+      reasoningEffort: 'low',
     });
     return coercePointers(parseJson(raw));
   } catch (error) {
@@ -231,21 +231,44 @@ export async function extractPointers(
       try {
         return coercePoints(salvaged);
       } catch {
-        // Fall through to the empty result below.
+        // Fall through and let the document-level caller skip this failed chunk.
       }
     }
-    console.warn(
-      '[pointers] extraction failed; continuing without pointers:',
-      error,
-    );
-    return EMPTY_POINTERS;
+    throw error;
   }
 }
 
-// Run directly to eyeball extraction in isolation (needs OPENAI_API_KEY). This is ONE PAID
-// call on POINTERS_MODEL — on a 60k-char note that is ~45k input tokens, so prefer a real
-// multi-article document when checking coverage. Prefer --file= over an argv string: on
-// Windows `npx` truncates a multi-line argument at the first newline.
+export async function extractPointers(
+  text: string,
+  category: ArticleCategory,
+  heading?: string,
+): Promise<PointersResult> {
+  if (text.trim().length === 0) return EMPTY_POINTERS;
+
+  const chunks = splitPointerInput(text, POINTERS_REQUEST_CHUNK_CHARS);
+  const points: string[] = [];
+  let succeeded = 0;
+
+  for (const [index, chunk] of chunks.entries()) {
+    try {
+      const result = await extractPointerChunk(chunk, category, heading);
+      points.push(...result.points);
+      succeeded += 1;
+    } catch (error) {
+      console.warn(
+        `[pointers] chunk ${index + 1}/${chunks.length} failed; continuing with the remaining source:`,
+        error,
+      );
+    }
+  }
+
+  return succeeded > 0 ? coercePoints(points) : EMPTY_POINTERS;
+}
+
+// Run directly to eyeball extraction in isolation (needs OPENAI_API_KEY). This makes one paid
+// call per bounded source chunk, so prefer a representative document when checking coverage.
+// Prefer --file= over an argv string: on Windows `npx` truncates a multi-line argument at the
+// first newline.
 //
 //   tsx --env-file=../../.env src/generation/extract-pointers.ts --file=note.txt
 if (

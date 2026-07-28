@@ -526,6 +526,52 @@ export async function getGeneration(
   return data ? fromDbRow(data as GenerationDbRow) : null;
 }
 
+// Which articles came out of these DLO intakes. Lineage is one-way — generations point at
+// their intake via dlo_intake_id (0018) and nothing points back — so this is how the /dlo list
+// and detail learn that an intake has already produced an article.
+//
+// Deliberately NOT a reverse dlo_intakes.generation_id column: that would be a best-effort
+// write which, when it silently failed, would leave an officer free to pay for a second
+// article from the same source. The forward lineage answers the question authoritatively, and
+// one batched `.in()` answers it for a whole page rather than N+1.
+export type DloIntakeGenerationRow = Readonly<{
+  id: string;
+  dloIntakeId: string;
+  status: GenerationStatus;
+  createdAt: string;
+}>;
+
+export async function listGenerationsForDloIntakes(
+  client: SupabaseClient,
+  intakeIds: readonly string[],
+): Promise<DloIntakeGenerationRow[]> {
+  // `.in()` with an empty array is a query that can only return nothing — skip the round trip.
+  if (intakeIds.length === 0) return [];
+  const { data, error } = await client
+    .from(GENERATIONS_TABLE)
+    .select('id,dlo_intake_id,status,created_at')
+    .in('dlo_intake_id', [...intakeIds])
+    .order('created_at', { ascending: false });
+  if (error) {
+    throw new Error(
+      `Failed to list generations for DLO intakes: ${error.message}`,
+    );
+  }
+  return ((data ?? []) as unknown as Array<{
+    id: string;
+    dlo_intake_id: string | null;
+    status: GenerationStatus;
+    created_at: string;
+  }>)
+    .filter((row) => row.dlo_intake_id !== null)
+    .map((row) => ({
+      id: row.id,
+      dloIntakeId: row.dlo_intake_id as string,
+      status: row.status,
+      createdAt: row.created_at,
+    }));
+}
+
 export async function listGenerations(
   client: SupabaseClient,
   limit = 50,

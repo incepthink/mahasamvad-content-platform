@@ -92,6 +92,14 @@ function mergeKeepingText(
   return {
     ...lean,
     combinedText: lean.combinedText ?? prev.combinedText,
+    // Also text-gated, so a lean tick reports null for it. Carrying the previous value
+    // forward matters more here than for the text: the review step distinguishes "no saved
+    // state" from "not loaded", and a lean poll flipping it to null would look like the
+    // officer's saved corrections had been deleted.
+    reviewState: lean.reviewState ?? prev.reviewState,
+    // Only computed once the intake is ready, so an earlier tick would clear it.
+    generations:
+      lean.generations.length > 0 ? lean.generations : prev.generations,
     files: lean.files.map((file, index) => {
       const before = prev.files[index];
       if (!before || before.name !== file.name) return file;

@@ -29,6 +29,7 @@ import {
   listReferenceTypes,
   setReferenceImageEnabled,
   setReferenceImagePhotoZone,
+  updateReferenceImageLayoutSpec,
   updateReferenceType,
   uploadReferenceImage,
 } from '../../lib/api';
@@ -45,21 +46,28 @@ function errText(error: unknown): string {
   return error instanceof Error ? error.message : STR.genericError;
 }
 
-// What the vision pass read off this master. hasPhotoZone is the consequential
-// field: it is what stops the image model painting a hero photograph onto a
-// text-only template, so it is surfaced (not buried) and stays correctable.
+// What the vision pass read off this master. Two fields here are consequential and
+// therefore surfaced (not buried) and correctable by hand: hasPhotoZone, which stops
+// the image model painting a hero photograph onto a text-only template; and the
+// subject line, which the reference ranker matches a note against — a vague read
+// there quietly picks the wrong template on every future run, and re-rolling the
+// vision pass is not a reliable fix for a vague answer.
 function LayoutBadge({
   image,
   disabled,
   onRecheck,
   onFlip,
+  onSaveAbout,
 }: {
   image: ReferenceImage;
   disabled: boolean;
   onRecheck: () => void;
   onFlip: () => void;
+  onSaveAbout: (contentSummary: string) => Promise<boolean>;
 }) {
   const spec = image.layoutSpec;
+  const [editingAbout, setEditingAbout] = useState(false);
+  const [aboutDraft, setAboutDraft] = useState(spec?.contentSummary ?? '');
 
   if (!spec) {
     return (
@@ -109,14 +117,78 @@ function LayoutBadge({
       <p className="ref-layout-summary" title={spec.layoutSummary}>
         {spec.layoutSummary}
       </p>
-      {spec.contentSummary ? (
-        <p
-          className="ref-layout-summary ref-layout-about"
-          title={spec.contentSummary}
-        >
-          <strong>{STR.refLayoutAbout}</strong> {spec.contentSummary}
-        </p>
-      ) : null}
+      {editingAbout ? (
+        <div className="ref-layout-about-edit">
+          <label className="field-label" htmlFor={`about-${image.id}`}>
+            {STR.refLayoutAboutLabel}
+          </label>
+          <p className="hint">{STR.refLayoutAboutHint}</p>
+          <textarea
+            id={`about-${image.id}`}
+            className="ref-desc-input"
+            placeholder={STR.refLayoutAboutPlaceholder}
+            value={aboutDraft}
+            maxLength={400}
+            disabled={disabled}
+            onChange={(event) => setAboutDraft(event.target.value)}
+          />
+          <div className="btn-row">
+            <button
+              type="button"
+              className="btn btn-small btn-primary"
+              disabled={disabled}
+              onClick={() => {
+                void onSaveAbout(aboutDraft).then((ok) => {
+                  if (ok) setEditingAbout(false);
+                });
+              }}
+            >
+              {disabled ? STR.refLayoutAboutSaving : STR.refLayoutAboutSave}
+            </button>
+            <button
+              type="button"
+              className="btn btn-small"
+              disabled={disabled}
+              onClick={() => {
+                setEditingAbout(false);
+                setAboutDraft(spec.contentSummary ?? '');
+              }}
+            >
+              {STR.refLayoutAboutCancel}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* The button sits OUTSIDE the paragraph: .ref-layout-summary clamps to
+              two lines with overflow:hidden, which would swallow it on a long
+              summary. */}
+          <p
+            className="ref-layout-summary ref-layout-about"
+            title={spec.contentSummary ?? ''}
+          >
+            <strong>{STR.refLayoutAbout}</strong>{' '}
+            {spec.contentSummary ? (
+              spec.contentSummary
+            ) : (
+              <span className="ref-layout-about-empty">
+                {STR.refLayoutAboutEmpty}
+              </span>
+            )}
+          </p>
+          <button
+            type="button"
+            className="ref-layout-flip"
+            disabled={disabled}
+            onClick={() => {
+              setAboutDraft(spec.contentSummary ?? '');
+              setEditingAbout(true);
+            }}
+          >
+            {STR.refLayoutAboutEdit}
+          </button>
+        </>
+      )}
       <button
         type="button"
         className="ref-layout-flip"
@@ -140,6 +212,7 @@ function ImageTile({
   onDelete,
   onRecheck,
   onFlip,
+  onSaveAbout,
 }: {
   image: ReferenceImage;
   typeLabel: string;
@@ -148,6 +221,7 @@ function ImageTile({
   onDelete: () => void;
   onRecheck: () => void;
   onFlip: () => void;
+  onSaveAbout: (contentSummary: string) => Promise<boolean>;
 }) {
   return (
     <div className={`ref-thumb${image.isActive ? ' is-enabled' : ''}`}>
@@ -167,6 +241,7 @@ function ImageTile({
           disabled={disabled}
           onRecheck={onRecheck}
           onFlip={onFlip}
+          onSaveAbout={onSaveAbout}
         />
         <div className="ref-thumb-actions">
           <button
@@ -212,14 +287,19 @@ function TypeCard({
   const [descDraft, setDescDraft] = useState(type.description);
   const [brandDraft, setBrandDraft] = useState(type.brand);
 
-  const run = async (fn: () => Promise<unknown>) => {
+  // Reports whether the action succeeded, so a caller holding an open editor
+  // (the subject-line one) keeps the operator's draft on screen after a failure
+  // instead of closing over it.
+  const run = async (fn: () => Promise<unknown>): Promise<boolean> => {
     setBusy(true);
     setError(null);
     try {
       await fn();
       await onChanged();
+      return true;
     } catch (caught) {
       setError(errText(caught));
+      return false;
     } finally {
       setBusy(false);
     }
@@ -413,6 +493,11 @@ function TypeCard({
                     image.id,
                     !image.layoutSpec?.hasPhotoZone,
                   ),
+                )
+              }
+              onSaveAbout={(contentSummary) =>
+                run(() =>
+                  updateReferenceImageLayoutSpec(image.id, { contentSummary }),
                 )
               }
             />

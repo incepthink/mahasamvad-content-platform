@@ -2,14 +2,21 @@
 //
 // The classify/copy/prompt steps now run in the API (content-engine), not in n8n, so this
 // module no longer builds an n8n wire catalog. Instead it surfaces, for a brand, the poster
-// types and their ENABLED master images, so the runner can:
-//   1. classify the note against the type descriptions (classify-poster-type.ts),
-//   2. pick the best-fit master within the chosen type (select-master.ts),
-//   3. build the copy + image prompt from that master's real layout_spec.
+// types and their ENABLED master images.
+//
+// An ordinary social run is INFORMATION-FIRST (resolveSocialReferenceByInformation): the raw
+// note is compared against every enabled master of the brand, the best-fitting reference wins,
+// and its type is read off the chosen image — nothing about the note is predicted beforehand.
+// See select-by-information.ts for why. The copy + image prompt are then built from that
+// master's real layout_spec, so the reference decides how the information is arranged.
 //
 // pickRandom is gone: master selection is content-aware and seeded (see select-master.ts).
-// Pins short-circuit classification exactly as before — an exact-image pin fixes the master,
-// a type pin forces the type and rolls one of its enabled images by seed.
+// Pins short-circuit selection exactly as before — an exact-image pin fixes the master, a type
+// pin forces the type and picks within it.
+//
+// LEGACY (still reachable, do not delete): listSocialTypes + classifyPosterType +
+// selectMaster's `need` scoring are the pre-2026-07-28 classify-first flow, kept behind
+// SOCIAL_REFERENCE_MODE=classify in apps/api/src/jobs/runner.ts as the one-line rollback.
 
 import {
   getReferenceImageRow,
@@ -23,6 +30,7 @@ import {
   type TemplateBrand,
 } from '@dgipr/database';
 import { selectMaster, type MasterNeed, type SelectedMaster } from './select-master.js';
+import { selectReferenceByInformation } from './select-by-information.js';
 
 export type { MasterNeed, SelectedMaster };
 
@@ -105,6 +113,9 @@ export type ResolvedReference = Readonly<{
   master: SelectedMaster;
   forced: boolean;
   title?: string | undefined;
+  // How many masters the pick was made from. Set only on the information-first path, where the
+  // caller's recency ring must not grow large enough to exclude the whole library.
+  poolSize?: number | undefined;
 }>;
 
 // A pinned EXACT image: honored even if it was disabled after pinning (only a deleted row is
@@ -168,6 +179,58 @@ export async function resolveCmoReference(
   const pickedImage = enabled.find((img) => img.id === master.id) as ReferenceImageRow;
   const type = cmoTypes.find((t) => t.slug === pickedImage.subtype) as ReferenceTypeRow;
   return { type: typeContext(type), master, forced: true };
+}
+
+// INFORMATION-FIRST resolution for an ordinary social run: compare the raw note against EVERY
+// enabled master of `brand` across all its types, pick the reference whose subject and
+// information structure fit best, and only then resolve which type that reference belongs to.
+//
+// This is the CMO path's shape (pick the image, derive the type from it) generalised to the
+// DGIPR library — and it is why no classification step is needed: the type is a property of the
+// chosen reference, not a prediction made before choosing one. `forced` is false because the
+// choice was made from the content, so callers that treat a forced run as "the operator decided"
+// stay correct.
+export async function resolveSocialReferenceByInformation(
+  client: SupabaseClient,
+  brand: TemplateBrand,
+  seed: string,
+  note: string,
+  avoidIds?: readonly string[],
+  options: Readonly<{ ignoreColour?: boolean | undefined }> = {},
+): Promise<ResolvedReference> {
+  const [types, images] = await Promise.all([
+    listReferenceTypeRows(client),
+    listReferenceImageRows(client),
+  ]);
+  const brandTypes = types.filter(
+    (t) => t.category === 'twitter' && t.brand === brand,
+  );
+  const bySlug = new Map(brandTypes.map((t) => [t.slug, t]));
+  const enabled = images.filter(
+    (image) =>
+      image.category === 'twitter' && image.isActive && bySlug.has(image.subtype),
+  );
+  if (enabled.length === 0) throw new Error(EMPTY_CATALOG_ERROR);
+
+  const { master, title } = await selectReferenceByInformation(
+    client,
+    enabled,
+    (image) => bySlug.get(image.subtype)?.labelMr ?? image.subtype,
+    seed,
+    note,
+    avoidIds,
+    options,
+  );
+
+  const pickedImage = enabled.find((img) => img.id === master.id) as ReferenceImageRow;
+  const type = bySlug.get(pickedImage.subtype) as ReferenceTypeRow;
+  return {
+    type: typeContext(type),
+    master,
+    forced: false,
+    title: title ?? undefined,
+    poolSize: enabled.length,
+  };
 }
 
 // The article path (news/scheme posters). There is no classification step here, so there is no

@@ -154,7 +154,7 @@ export function registerTranslateRoutes(
       ) {
         return reply
           .code(413)
-          .send({ error: { message: 'फाईल खूप मोठी आहे (कमाल २५ MB).' } });
+          .send({ error: { message: 'फाईल खूप मोठी आहे.' } });
       }
       throw error;
     }

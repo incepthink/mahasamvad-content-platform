@@ -7,7 +7,7 @@ import {
   deleteReferenceType,
   listReferenceLibrary,
   listReferenceTypes,
-  overrideReferenceImagePhotoZone,
+  overrideReferenceImageLayoutSpec,
   reanalyzeReferenceImage,
   setReferenceImageEnabled,
   updateReferenceType,
@@ -151,15 +151,16 @@ export function registerReferenceRoutes(
     },
   );
 
-  // Manual override when the vision pass gets the photo-zone call wrong.
+  // Manual override when the vision pass gets the photo-zone call or the subject
+  // summary wrong. A patch, not a replace — see overrideReferenceImageLayoutSpec.
   app.patch<{ Params: { id: string } }>(
     '/references/:id/layout-spec',
     async (request, reply) => {
       const body = UpdateLayoutSpecRequestSchema.parse(request.body);
-      const image = await overrideReferenceImagePhotoZone(
+      const image = await overrideReferenceImageLayoutSpec(
         client,
         request.params.id,
-        body.hasPhotoZone,
+        body,
       );
       if (!image) {
         return reply

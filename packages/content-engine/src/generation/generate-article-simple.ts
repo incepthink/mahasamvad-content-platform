@@ -20,6 +20,31 @@
 //   - the note as the sole factual authority, which the runtime specification states directly.
 //
 // The full pipeline is untouched and one env line away: ARTICLE_GENERATION_MODE=full.
+//
+// WHICH SPECIFICATION writes the article is a second, independent env line,
+// ARTICLE_PROMPT_VARIANT (see articlePromptVariant below):
+//
+//   standard (default) — simple-article-prompt.ts, the full DGIPR specification.
+//   minimal            — minimal-article-prompt.ts: five sentences, no structure guidance. The
+//                        exemplars are the specification.
+//
+// Since simple-v4 the two have converged in substance: `standard` also states no editorial
+// rules, only "follow the reference's style and structure, take facts from the supplied
+// sections". BOTH now receive the verified name dictionary as data (`names`). What still
+// differs is packaging — `standard` keeps the labelled officer-approved blocks
+// (<DESIGNATIONS>, <REQUIRED_FACTS>, <ATTRIBUTED_STATEMENTS>) and their Marathi task rules,
+// `minimal` renders the same information as plain lists.
+//
+// NEITHER states a word target: since simple-v3 the standard specification dropped its count and
+// range too. And since simple-v5 / minimal-v2 both say the same thing about length in the same
+// terms — take style and structure from the exemplars but NOT their length, be as detailed as the
+// source supports, longer only when the extra length explains something. That parity is
+// deliberate: a difference in length policy would swamp the packaging difference the two
+// variants exist to measure. There is no length knob; styleReferenceMaxChars() in
+// select-style-reference.ts still bounds an EXEMPLAR (as a genre filter), not the output.
+//
+// Everything outside the prompt is identical between the two: the same reference selection, the
+// same model, the same deterministic applyDesignations pass. That is what makes them comparable.
 
 import type { FiveWOneH } from '@dgipr/schemas';
 import type { AttributedStatement, SelectedFact } from '@dgipr/schemas';
@@ -41,6 +66,7 @@ import {
   ARTICLE_MODEL,
   articleReasoningEffort,
   chatComplete,
+  chatCompleteStream,
 } from './openai-chat.js';
 import {
   selectStyleReference,
@@ -50,6 +76,24 @@ import {
   SIMPLE_ARTICLE_PROMPT_VERSION,
   buildSimpleArticleMessages,
 } from './simple-article-prompt.js';
+import {
+  MINIMAL_ARTICLE_PROMPT_VERSION,
+  buildMinimalArticleMessages,
+  type ArticleNameEntry,
+} from './minimal-article-prompt.js';
+
+// Which editorial specification writes the article. 'standard' (the unset default) is the full
+// DGIPR specification in simple-article-prompt.ts. 'minimal' is the experiment: five sentences,
+// no word target, no structure guidance — the style comes from the exemplars alone. Read here
+// rather than in the runner because this is a prompt detail, not a pipeline choice, and the
+// paid CLI harness below must honour it too.
+export type ArticlePromptVariant = 'standard' | 'minimal';
+
+export function articlePromptVariant(): ArticlePromptVariant {
+  return process.env.ARTICLE_PROMPT_VARIANT?.trim().toLowerCase() === 'minimal'
+    ? 'minimal'
+    : 'standard';
+}
 
 // Only two phases now, and both are existing GenerationStepSchema values, so the progress UI
 // needed no schema change: retrieve → draft → done.
@@ -57,6 +101,16 @@ export type SimpleArticlePhase = 'retrieve' | 'draft';
 
 export type SimpleGenerateArticleOptions = Readonly<{
   onProgress?: (phase: SimpleArticlePhase) => void;
+  // Show the article being written instead of a spinner. Supplying this switches the one
+  // draft call to the streaming transport, which hands over each piece of the answer as it
+  // arrives; omitting it leaves the call byte-for-byte as it was.
+  //
+  // What arrives here is the RAW draft, before splitContent and before applyDesignations —
+  // neither of which can run on half an article. So this is display only: the returned
+  // `article` remains the authoritative text, and a consumer must replace what it showed
+  // with it rather than keep the concatenated deltas. In practice the two differ only where
+  // a designation was inserted, which is exactly the difference that matters.
+  onDelta?: ((chunk: string) => void) | undefined;
   category?: ArticleCategory;
   // The officer's editorial angle. Not an independent factual source.
   heading?: string | undefined;
@@ -68,6 +122,10 @@ export type SimpleGenerateArticleOptions = Readonly<{
   statements?: readonly AttributedStatement[] | undefined;
   designations?: readonly DesignationPair[] | undefined;
   knownDesignations?: readonly string[] | undefined;
+  // Verified glossary rows whose Marathi form occurs in the note, put in front of the model as
+  // a spelling authority. Read by BOTH prompt variants since simple-v4. The caller fetches them
+  // (findGlossaryTermsInText); content-engine does not depend on @dgipr/database.
+  names?: readonly ArticleNameEntry[] | undefined;
   // Used only when they arrive from trusted input; nothing here infers them.
   location?: string | undefined;
   date?: string | undefined;
@@ -85,6 +143,9 @@ export type StyleReferenceMeta = Readonly<{
   chars: number;
   mode: 'simple';
   promptVersion: string;
+  // How many complete exemplars the prompt actually received. The calibration signal for
+  // ARTICLE_STYLE_REFERENCE_COUNT — without it a 1-vs-3 A/B is unattributable after the fact.
+  articleCount: number;
 }>;
 
 export type SimpleGeneratedArticle = Readonly<{
@@ -125,25 +186,40 @@ export async function generateArticleSimple(
   });
 
   onProgress('draft');
-  const raw = await chatComplete(
-    buildSimpleArticleMessages({
-      category,
-      sourceInformation: note,
-      styleReference: styleReference.text,
-      editorialDirection: options?.heading,
-      designations,
-      statements,
-      includeFacts: selectedFacts,
-      excludeFacts: options?.excludeFacts,
-      location: options?.location,
-      date: options?.date,
-    }),
-    {
-      model: ARTICLE_MODEL,
-      maxTokens: ARTICLE_BODY_MAX_TOKENS,
-      reasoningEffort: articleReasoningEffort(),
-    },
-  );
+  const variant = articlePromptVariant();
+  const promptInputs = {
+    category,
+    sourceInformation: note,
+    // Every accepted exemplar, each WITH its headline — the pattern the specification asks
+    // the model to learn lives in the headline, and for a long time only the bodies were sent.
+    styleReferences: styleReference.articles,
+    editorialDirection: options?.heading,
+    designations,
+    statements,
+    includeFacts: selectedFacts,
+    excludeFacts: options?.excludeFacts,
+    // The verified dictionary. Read by BOTH variants since simple-v4 — the standard
+    // specification no longer states name rules either, so it hands over the spellings
+    // themselves exactly as the minimal one does.
+    names: options?.names,
+    location: options?.location,
+    date: options?.date,
+  } as const;
+
+  const messages =
+    variant === 'minimal'
+      ? buildMinimalArticleMessages(promptInputs)
+      : buildSimpleArticleMessages(promptInputs);
+  const callOptions = {
+    model: ARTICLE_MODEL,
+    maxTokens: ARTICLE_BODY_MAX_TOKENS,
+    reasoningEffort: articleReasoningEffort(),
+  } as const;
+
+  const onDelta = options?.onDelta;
+  const raw = onDelta
+    ? await chatCompleteStream(messages, { ...callOptions, onDelta })
+    : await chatComplete(messages, callOptions);
 
   // Defensive: the specification asks for the article alone, but if a draft ever emits the
   // traceability delimiter anyway, keep it out of the stored article — the feedback path
@@ -174,9 +250,20 @@ export async function generateArticleSimple(
   const fiveWOneH =
     selectedFacts.length > 0 ? fiveWOneHFromPointers(selectedFacts) : null;
 
+  // Which specification produced this article. Persisted below, so a good or bad output is
+  // attributable to the prompt rather than to a memory of which env line was set that day.
+  const promptVersion =
+    variant === 'minimal'
+      ? MINIMAL_ARTICLE_PROMPT_VERSION
+      : SIMPLE_ARTICLE_PROMPT_VERSION;
+
   console.log(
     `[simple-article] ${category} | model=${ARTICLE_MODEL} effort=${articleReasoningEffort()} | ` +
-      `style-ref=${styleReference.source} | ${article.length} chars`,
+      `style-ref=${styleReference.source}x${styleReference.articles.length} | ` +
+      `prompt=${promptVersion}${
+        variant === 'minimal' ? ` names=${(options?.names ?? []).length}` : ''
+      } | ${article.length} chars | ` +
+      `${article.trim().split(/\s+/u).length} words`,
   );
 
   return {
@@ -192,7 +279,8 @@ export async function generateArticleSimple(
       similarity: styleReference.similarity,
       chars: styleReference.chars,
       mode: 'simple',
-      promptVersion: SIMPLE_ARTICLE_PROMPT_VERSION,
+      promptVersion,
+      articleCount: styleReference.articles.length,
     },
     fiveWOneH,
     designationIssues: designationResult.issues,
@@ -227,6 +315,9 @@ if (
         onProgress: (phase) => console.log(`[phase] ${phase}`),
       });
       const seconds = ((Date.now() - started) / 1000).toFixed(1);
+      console.log(
+        `\n=== variant: ${articlePromptVariant()} (${result.styleReferenceMeta.promptVersion}) ===`,
+      );
       console.log(`\n=== शैली-संदर्भ (${result.styleReference.source}) ===`);
       console.log(
         result.styleReference.source === 'none'

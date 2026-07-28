@@ -2,6 +2,7 @@
 // schemas, read/write rows via @dgipr/database, and hand real work to jobs/runner.
 
 import type { FastifyInstance } from 'fastify';
+import { PassThrough } from 'node:stream';
 import { z } from 'zod';
 import {
   getGeneration,
@@ -65,6 +66,7 @@ import {
   isRevisingArticle,
   isRevisingCaption,
   isTranslating,
+  subscribeArticleStream,
   startArticleFeedbackJob,
   startArticlePosterJob,
   startCaptionFeedbackJob,
@@ -433,6 +435,101 @@ export function registerGenerationRoutes(
         });
       }
       return toDetail(client, row);
+    },
+  );
+
+  // The article as it is being written, as Server-Sent Events. Two event types:
+  //
+  //   snapshot — REPLACE what you are showing with this text
+  //   delta    — APPEND this text
+  //   end      — nothing more is coming; close
+  //
+  // The snapshot/delta split is what makes reconnection safe. EventSource retries on its own
+  // after any drop, and a reconnecting client is re-sent everything written so far; if that
+  // replay were a delta the text would silently double. It is also how the run's LAST word is
+  // delivered: the deltas carry the raw draft, and the final snapshot carries the article after
+  // applyDesignations has inserted the officer's approved पदनामे.
+  //
+  // Deliberately SEPARATE from the 2.5 s detail poll rather than a field on it. A token-level
+  // stream cannot be polled — a field would arrive in 2.5-second blocks — and pushing the
+  // partial article into the payload would grow every poll of every client by the length of an
+  // article for the whole run.
+  //
+  // Nothing here is a source of truth. The article lands on the row exactly as before, and a
+  // client that gets no stream at all (a restarted API, a second instance, a proxy that will
+  // not pass an event stream) simply sees its ordinary progress steps and then the finished
+  // article. That is why this route never fails a run — its worst case is a lost animation.
+  app.get<{ Params: { id: string } }>(
+    '/generations/:id/article/stream',
+    async (request, reply) => {
+      const row = await getGeneration(client, request.params.id);
+      if (!row) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'Generation not found.' } });
+      }
+
+      const stream = new PassThrough();
+      const send = (event: string, data: unknown): void => {
+        if (stream.writableEnded) return;
+        // JSON on one line: SSE frames are newline-delimited, and a Marathi article is
+        // full of newlines.
+        stream.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      };
+
+      reply
+        .header('content-type', 'text/event-stream; charset=utf-8')
+        .header('cache-control', 'no-cache, no-transform')
+        .header('connection', 'keep-alive')
+        // Reverse proxies buffer a proxied response by default, which would hold every delta
+        // back until the run finished — precisely what this route exists to avoid.
+        .header('x-accel-buffering', 'no');
+
+      // Already written: serve it whole and close. This is what a reload after completion
+      // gets, and what keeps a reconnecting EventSource from retrying forever.
+      if (row.article) {
+        send('snapshot', row.article);
+        send('end', {});
+        stream.end();
+        return reply.send(stream);
+      }
+
+      const { unsubscribe, live } = subscribeArticleStream(
+        request.params.id,
+        (event) => {
+          if (event.type === 'end') {
+            send('end', {});
+            stream.end();
+            return;
+          }
+          send(event.type, event.text);
+        },
+      );
+
+      // Nothing to watch — this run is not being drafted in this process (it failed, it never
+      // generates an article, or the API restarted). Say so and close; the client's poll is
+      // already following the row.
+      if (!live) {
+        if (!stream.writableEnded) {
+          send('end', {});
+          stream.end();
+        }
+        return reply.send(stream);
+      }
+
+      // A high reasoning effort means real minutes can pass before the first token, so the
+      // connection has to be kept visibly alive. An SSE comment is ignored by the client.
+      const heartbeat = setInterval(() => {
+        if (!stream.writableEnded) stream.write(': ping\n\n');
+      }, 15_000);
+      const cleanup = (): void => {
+        clearInterval(heartbeat);
+        unsubscribe();
+      };
+      request.raw.on('close', cleanup);
+      stream.on('close', cleanup);
+
+      return reply.send(stream);
     },
   );
 

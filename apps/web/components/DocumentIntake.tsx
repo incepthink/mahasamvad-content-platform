@@ -82,6 +82,7 @@ export function DocumentIntake({
   storageKey,
   accept = ['pdf', 'docx', 'txt'],
   maxChars,
+  maxBytes,
   title,
   hint,
   allowDeferredRead = false,
@@ -98,6 +99,11 @@ export function DocumentIntake({
   // The caller's character budget, if it has one. Shown against the running total so the
   // page checkboxes become the way to get under it.
   maxChars?: number | undefined;
+  // The caller's per-file upload ceiling, if it has one. Checked before the upload starts,
+  // which on a large scan is the difference between a refusal now and one several minutes
+  // from now. Omitted by every surface that does not cap uploads — the shared document
+  // service itself does not.
+  maxBytes?: number | undefined;
   // Card heading + hint, when the shared copy does not fit. /dlo needs its own: the default
   // hint promises the file is not stored, and a DLO document IS archived with the intake.
   title?: string | undefined;
@@ -312,6 +318,10 @@ export function DocumentIntake({
     const name = file.name.toLowerCase();
     if (!accept.some((kind) => name.endsWith(EXTENSIONS[kind]))) {
       setError(STR.docUnsupported);
+      return;
+    }
+    if (maxBytes !== undefined && file.size > maxBytes) {
+      setError(STR.fileTooLargeError);
       return;
     }
     setUploading(true);

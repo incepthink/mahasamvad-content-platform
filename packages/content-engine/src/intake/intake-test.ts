@@ -1,14 +1,20 @@
 // Dev CLI for the DLO intake pipeline — exercises Sarvam batch STT / document
 // digitization / mammoth on local files without the web UI or the API.
 //
-//   pnpm --filter @dgipr/content-engine intake:test <file.mp3|file.pdf|file.docx> [...]
+//   pnpm --filter @dgipr/content-engine intake:test <recording|file.pdf|file.docx> [...]
+//
+// Recordings may be any container Sarvam auto-detects (AUDIO_FILE_EXTENSIONS).
 //
 // Requires SARVAM_API_KEY in the root .env (the script loads it via --env-file).
 
 import { readFile } from 'node:fs/promises';
 import { basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { combineIntakeSources, type IntakeSource } from '@dgipr/schemas';
+import {
+  combineIntakeSources,
+  isAudioFileName,
+  type IntakeSource,
+} from '@dgipr/schemas';
 import { extractDocxText } from './docx.js';
 import { extractPdfPagesDetailed } from './pdf-pages.js';
 import { transcribeAudioFiles, type AudioFileInput } from './sarvam-stt.js';
@@ -17,7 +23,7 @@ async function main(): Promise<void> {
   const paths = process.argv.slice(2);
   if (paths.length === 0) {
     console.error(
-      'Usage: pnpm --filter @dgipr/content-engine intake:test <files...> (.mp3/.pdf/.docx)',
+      'Usage: pnpm --filter @dgipr/content-engine intake:test <files...> (audio/.pdf/.docx)',
     );
     process.exit(1);
   }
@@ -29,7 +35,7 @@ async function main(): Promise<void> {
     const name = basename(path);
     const data = await readFile(path);
     const lower = name.toLowerCase();
-    if (lower.endsWith('.mp3')) {
+    if (isAudioFileName(lower)) {
       audio.push({ name, data, path });
     } else if (lower.endsWith('.pdf')) {
       console.log(`[intake:test] extracting PDF ${name}…`);

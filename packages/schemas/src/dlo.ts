@@ -4,8 +4,12 @@
 
 import { z } from 'zod';
 import { PdfTextSourceSchema } from './document.js';
-import { NameDesignationsSchema } from './designations.js';
-import { STYLE_REFERENCE_MAX_CHARS } from './api.js';
+import {
+  KnownDesignationSchema,
+  NameDesignationsSchema,
+  PreparedNameSchema,
+} from './designations.js';
+import { GenerationStatusSchema, STYLE_REFERENCE_MAX_CHARS } from './api.js';
 
 export const DloIntakeStatusSchema = z.enum([
   'queued',
@@ -74,6 +78,61 @@ export const DloIntakeFileSchema = z.object({
 });
 export type DloIntakeFile = z.infer<typeof DloIntakeFileSchema>;
 
+// ---------- how big one uploaded file may be ----------
+//
+// The ceiling for a single file on the officer-facing intake surfaces: /dlo's recordings and
+// documents, and /transcribe's recordings. It lives here because it is asked in three places
+// and must be answered identically in all of them — the two API routes enforce it, and the web
+// pickers refuse an oversized file BEFORE the upload starts, which on a meeting recording is
+// the difference between a refusal now and a refusal several minutes from now.
+//
+// `_MB` is stated rather than derived so the Marathi copy and the messages cannot disagree with
+// the number actually enforced.
+export const UPLOAD_FILE_MAX_MB = 50;
+export const UPLOAD_FILE_MAX_BYTES = UPLOAD_FILE_MAX_MB * 1024 * 1024;
+
+// ---------- meeting recordings: the audio containers Sarvam can transcribe ----------
+//
+// Sarvam's STT auto-detects the codec for every container listed here, so a recording needs
+// no conversion before upload. The set is deliberately NARROW — MP3, AAC and M4A only.
+// Everything else a meeting recorder can emit (WAV, FLAC, OGG/OPUS, WEBM, AIFF, AMR, WMA,
+// and raw PCM, which Sarvam cannot auto-detect at all) is rejected here rather than at
+// transcription time, so the officer learns at the picker instead of after the upload.
+//
+// Shared because the API validates an upload by its extension and stores the object under
+// the matching content type, while the web picker's `accept` must offer exactly the same
+// set — two lists would drift into "the browser let me pick it, the server refused it".
+export const AUDIO_MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
+  '.mp3': 'audio/mpeg',
+  '.m4a': 'audio/mp4',
+  '.aac': 'audio/aac',
+};
+
+export const AUDIO_FILE_EXTENSIONS: readonly string[] = Object.keys(
+  AUDIO_MIME_BY_EXTENSION,
+);
+
+// The `accept` attribute for a recording picker. Extensions AND media types, because
+// browsers differ over which they honour, and offering both is what keeps the picker from
+// greying out a file the server would have accepted.
+export const AUDIO_FILE_ACCEPT: string = [
+  ...AUDIO_FILE_EXTENSIONS,
+  ...new Set(Object.values(AUDIO_MIME_BY_EXTENSION)),
+].join(',');
+
+// The content type to store a recording under, or null when the name is not a recording.
+// Extension-driven rather than trusting the browser's reported type, which is empty or
+// wrong for several of these containers.
+export function audioMimeForFileName(fileName: string): string | null {
+  const dot = fileName.lastIndexOf('.');
+  if (dot === -1) return null;
+  return AUDIO_MIME_BY_EXTENSION[fileName.slice(dot).toLowerCase()] ?? null;
+}
+
+export function isAudioFileName(fileName: string): boolean {
+  return audioMimeForFileName(fileName) !== null;
+}
+
 // A document the officer uploaded and READ at the input step, through the shared ephemeral
 // document service, before this intake existed. It arrives already extracted, so the intake
 // job has nothing to do with it — the route stores it as a finished file entry and every
@@ -107,7 +166,162 @@ export type DloPreReadDocument = z.infer<typeof DloPreReadDocumentSchema>;
 
 // Same ceiling as the multipart file limit — an intake is a meeting's worth of material,
 // not a document library.
-export const DloCreateDocumentsSchema = z.array(DloPreReadDocumentSchema).max(10);
+export const DloCreateDocumentsSchema = z
+  .array(DloPreReadDocumentSchema)
+  .max(10);
+
+// ---------- durable review state (migration 0036) ----------
+//
+// Everything the officer does in the review step that is NOT already a column: their
+// corrections to the extracted text, the pages they unticked, and the two PAID lookups
+// (pointers, prepared names). It is persisted so that reloading — or handing the intake to a
+// colleague, or coming back tomorrow — costs nothing that has already been bought.
+//
+// It is stored in its OWN jsonb column rather than written back into `files`, for three
+// reasons worth keeping: (1) `files` is rewritten wholesale by the extract/re-extract jobs, so
+// an officer's autosave landing there would be a lost-update race against a live job, while
+// disjoint columns can never clobber each other; (2) `files[].text` is the machine's answer and
+// has to stay readable as such — the client's `edits[key] ?? page.text` overlay keeps both; and
+// (3) the existing `forgetFile`/`forgetFileKeys` helpers prune that overlay by file index after
+// an OCR re-read, and work unchanged on a restored blob.
+
+// Sized against the API's JSON body limit, NOT picked round — and that relationship is the
+// whole point of the number. Devanagari is 3 bytes per character in UTF-8, so this cap must
+// stay comfortably under `bodyLimit / 3` or it becomes unreachable: the body limit would
+// reject the request first and the officer would get an opaque English "Request body is too
+// large" instead of the Marathi message. (Verified live at the old pairing: 300k chars
+// against a 1 MiB limit fired the intended 400, 410k Devanagari fired a 413.)
+//
+// With the note's own ceiling removed and PDF uploads unbounded, a review state now holds a
+// whole booklet's text, so the pair was raised together: bodyLimit is 64 MiB
+// (apps/api/src/index.ts) and this is 15,000,000 characters ≈ 45 MB of Devanagari. Change
+// one and you must change the other.
+export const DLO_REVIEW_STATE_MAX_CHARS = 15_000_000;
+
+// The pointer summary, kept verbatim. Re-running it is several paid model calls on a long
+// source (one per POINTERS_REQUEST_CHUNK_CHARS block), which is exactly what resuming must not
+// cost. `generatedAt` is shown so a stale summary can be recognised and refreshed by hand.
+export const DloReviewPointersSchema = z.object({
+  points: z.array(z.string()).max(120),
+  generatedAt: z.string(),
+});
+
+// One person's edited पदनाम, keyed by the person's Marathi name (the same key
+// DesignationReview edits by, so a re-fetch returning the same people keeps what was typed).
+export const DloReviewDesignationEditSchema = z.object({
+  designation: z.string(),
+  remember: z.boolean(),
+  // Whether the officer accepted a `suggested` row (a person the note does not name, proposed
+  // because the नाव-शब्दकोश knows who holds the office it DOES name). Autosaved so the decision
+  // survives a reload; defaulted so a review blob written before this field still parses.
+  accepted: z.boolean().default(false),
+});
+
+// A name the officer added by hand because the extractor missed it.
+export const DloReviewDesignationExtraSchema = z.object({
+  name: z.string(),
+  designation: z.string(),
+  remember: z.boolean(),
+});
+
+// `names` and `known` both ride on the PAID prepare call, so both are stored. `known` going
+// stale is harmless — it is only the autocomplete datalist.
+export const DloReviewDesignationsSchema = z.object({
+  names: z.array(PreparedNameSchema),
+  known: z.array(KnownDesignationSchema),
+  edits: z.record(z.string(), DloReviewDesignationEditSchema),
+  extras: z.array(DloReviewDesignationExtraSchema),
+});
+
+export const DloReviewStateSchema = z.object({
+  // Shape version, so a future change is DETECTED rather than silently mis-parsed.
+  v: z.literal(1),
+  // Per-source corrections and unticked pages. Keys are the review layer's own scheme
+  // (`notes` | `${fileIndex}` | `${fileIndex}:${page}`) — see apps/web/lib/dloReview.ts, which
+  // stays the single owner of that format. `excluded` is the client's Set, sorted.
+  edits: z.record(z.string(), z.string()).default({}),
+  excluded: z.array(z.string()).default([]),
+  // Pasted style reference. Unlike category/heading this has no column of its own.
+  styleReference: z.string().max(STYLE_REFERENCE_MAX_CHARS).optional(),
+  pointers: DloReviewPointersSchema.optional(),
+  designations: DloReviewDesignationsSchema.optional(),
+  // Who wrote this and when. The intake list is shared and there is no auth, so two people can
+  // open the same intake; a client that reads back a `writer` it did not produce knows someone
+  // else has saved and warns instead of silently overwriting. A random per-tab id rather than a
+  // timestamp comparison, because two saves can land in the same millisecond.
+  writer: z.string().max(64),
+  updatedAt: z.string(),
+});
+export type DloReviewState = z.infer<typeof DloReviewStateSchema>;
+
+// The autosave request. `category`/`heading` ride along because they are real columns and so
+// survive even without 0036 — strictly better than putting them in the blob.
+export const DloReviewPatchRequestSchema = z.object({
+  reviewState: DloReviewStateSchema,
+  category: DloCategorySchema.optional(),
+  heading: z.string().trim().max(200).optional(),
+});
+export type DloReviewPatchRequest = z.infer<typeof DloReviewPatchRequestSchema>;
+
+// The response reports who wrote the blob this save REPLACED, not who wrote the new one —
+// echoing our own writer back would be information we already have, and comparing it to
+// ourselves could never detect anything. `null` means the intake had no saved state yet.
+// The client compares this to the writer it last saw: a different one means somebody else
+// saved between our load and our save, which is exactly the case worth warning about.
+export const DloReviewPatchResponseSchema = z.object({
+  previousWriter: z.string().nullable(),
+  updatedAt: z.string(),
+});
+export type DloReviewPatchResponse = z.infer<
+  typeof DloReviewPatchResponseSchema
+>;
+
+// Build the blob from the client's live state. The sort is not cosmetic: `excluded` is a Set,
+// whose iteration order follows insertion, so an unsorted array would differ between two
+// clients holding the SAME selection and make every comparison report a spurious change.
+export function serializeDloReviewState(
+  input: Readonly<{
+    edits: Readonly<Record<string, string>>;
+    excluded: Iterable<string>;
+    styleReference?: string | undefined;
+    pointers?: z.infer<typeof DloReviewPointersSchema> | undefined;
+    designations?: z.infer<typeof DloReviewDesignationsSchema> | undefined;
+    writer: string;
+    updatedAt?: string | undefined;
+  }>,
+): DloReviewState {
+  return {
+    v: 1,
+    edits: { ...input.edits },
+    excluded: [...input.excluded].sort(),
+    ...(input.styleReference ? { styleReference: input.styleReference } : {}),
+    ...(input.pointers ? { pointers: input.pointers } : {}),
+    ...(input.designations ? { designations: input.designations } : {}),
+    writer: input.writer,
+    updatedAt: input.updatedAt ?? new Date().toISOString(),
+  };
+}
+
+// Read a stored blob back. Returns null for anything unusable — an absent column on a database
+// without 0036, a shape from a future version, or junk — because a resumed review that silently
+// restores the WRONG corrections would be far worse than one that restores none.
+export function parseDloReviewState(raw: unknown): DloReviewState | null {
+  if (raw === null || raw === undefined) return null;
+  const parsed = DloReviewStateSchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
+
+// ---------- detail + list payloads ----------
+
+// A generation produced from this intake. An intake is never marked "consumed" — it stays
+// `ready` forever and can legitimately produce several articles — so this is a list, and the
+// list card shows a COUNT rather than a done/not-done flag.
+export const DloIntakeGenerationSchema = z.object({
+  id: z.string(),
+  status: GenerationStatusSchema,
+  createdAt: z.string(),
+});
+export type DloIntakeGeneration = z.infer<typeof DloIntakeGenerationSchema>;
 
 export const DloIntakeDetailSchema = z.object({
   id: z.string(),
@@ -120,10 +334,42 @@ export const DloIntakeDetailSchema = z.object({
   // The combined transcription/extraction output; null until status is 'ready'.
   combinedText: z.string().nullable(),
   error: z.string().nullable(),
+  // The officer's saved review state. Like the per-source text this ships only on `?text=1`
+  // (it CARRIES that text), so the 2.5 s poll stays lean. Defaulted so a web build can roll
+  // out before the matching API, and null on a database without 0036.
+  reviewState: DloReviewStateSchema.nullable().default(null),
+  // Articles already generated from this intake. Computed only once the intake is `ready` —
+  // none can exist before that. Defaulted for the same roll-out reason.
+  generations: z.array(DloIntakeGenerationSchema).default([]),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
 export type DloIntakeDetail = z.infer<typeof DloIntakeDetailSchema>;
+
+// One row of the shared recent-intake list on /dlo. Deliberately carries no text: the list
+// route omits `combined_text` and `review_state` from its select, because a card needs
+// neither and both are large.
+export const DloIntakeSummarySchema = z.object({
+  id: z.string(),
+  status: DloIntakeStatusSchema,
+  step: DloIntakeStepSchema.nullable(),
+  category: DloCategorySchema,
+  heading: z.string().nullable(),
+  // What the card shows: the officer's heading, else an excerpt of the notes, else the first
+  // file's name, else a fallback. Computed server-side so every surface names an intake alike.
+  title: z.string(),
+  sourceCount: z.number().int().nonnegative(),
+  failedCount: z.number().int().nonnegative(),
+  // A scanned PDF is still waiting for its pages to be read, so this intake cannot generate yet.
+  needsSelection: z.boolean(),
+  generationCount: z.number().int().nonnegative(),
+  latestGenerationId: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type DloIntakeSummary = z.infer<typeof DloIntakeSummarySchema>;
+
+export const DloIntakeListResponseSchema = z.array(DloIntakeSummarySchema);
 
 export const CreateDloIntakeResponseSchema = z.object({ id: z.string() });
 export type CreateDloIntakeResponse = z.infer<
@@ -131,10 +377,16 @@ export type CreateDloIntakeResponse = z.infer<
 >;
 
 // The review step's "generate" submission. combinedText is the officer-edited
-// text and becomes the generation's note verbatim, so it shares the note field's
-// bounds (min 20 / max 60_000 — see CreateGenerationRequestSchema).
+// text and becomes the generation's note verbatim.
+//
+// It carries NO upper bound, deliberately: /dlo's source is a meeting's worth of recordings
+// and scans, and truncating that at a round number would have thrown away material the
+// officer had already reviewed and paid to extract. The lower bound stays — a run needs
+// something to write from. The real ceiling now lives downstream in the model's context
+// window, so a very long note costs proportionally more and can fail at the chat call
+// rather than at this schema; that is the accepted trade.
 export const DloGenerateRequestSchema = z.object({
-  combinedText: z.string().trim().min(20).max(60_000),
+  combinedText: z.string().trim().min(20),
   category: DloCategorySchema,
   heading: z.string().trim().max(200).optional(),
   // LEGACY (see pointers.ts). Back when Pointers was a 5W1H checkbox list, these three
@@ -181,11 +433,7 @@ export const DloGenerateRequestSchema = z.object({
   // A published article the officer pasted as the STYLE reference — tier 1 of the simplified
   // generator's reference hierarchy (see CreateGenerationRequestSchema.styleReference). Style
   // and structure only; never a factual source. Absent/empty ⇒ retrieval, then no reference.
-  styleReference: z
-    .string()
-    .trim()
-    .max(STYLE_REFERENCE_MAX_CHARS)
-    .optional(),
+  styleReference: z.string().trim().max(STYLE_REFERENCE_MAX_CHARS).optional(),
 });
 export type DloGenerateRequest = z.infer<typeof DloGenerateRequestSchema>;
 

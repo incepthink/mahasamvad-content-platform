@@ -1283,6 +1283,37 @@ textarea.note-input {
   line-height: 1.9;
 }
 
+/* The draft while it is still being written (useArticleStream). Muted on purpose: this is
+   not the article yet, and it must not read as something to copy or approve. */
+.article-body--streaming {
+  color: var(--muted);
+}
+
+/* A blinking caret at the write head, so a pause between tokens reads as "still writing"
+   rather than "finished". */
+.stream-caret {
+  display: inline-block;
+  width: 0.5ch;
+  height: 1.05em;
+  margin-inline-start: 1px;
+  vertical-align: text-bottom;
+  background: currentColor;
+  opacity: 0.75;
+  animation: stream-caret-blink 1.1s step-end infinite;
+}
+
+@keyframes stream-caret-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stream-caret {
+    animation: none;
+  }
+}
+
 /* On a poster-focused article run, the poster is the primary result and the article is only
    its source. Keep the complete article toolset available, but behind one quiet disclosure. */
 details.poster-source-article {
@@ -2140,6 +2171,47 @@ details.fold .fold-body.gl-add-body {
   background: var(--warn-soft);
 }
 
+/* A person the note does NOT name, proposed from the नाव-शब्दकोश because the note mentions an
+   office exactly one verified person holds. Deliberately styled as a PROPOSAL rather than a
+   finding: it is inert until ticked, and `is-inactive` is what makes "nothing happens unless
+   you act" visible instead of merely true. */
+.names-review-row.is-suggested {
+  border-left: 4px solid var(--accent, var(--warn));
+  border-style: dashed;
+}
+
+.names-review-row.is-inactive {
+  opacity: 0.72;
+  background: var(--bg-soft, #fafafa);
+}
+
+.names-suggest-accept {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.names-suggest-accept input {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.names-suggest-hint {
+  margin-top: 12px;
+}
+
+/* Provenance tag under a पदनाम that was read off the note itself rather than the शब्दकोश.
+   Deliberately quiet — it explains where a filled field came from, it is not a status. */
+.names-from-text {
+  display: inline-block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
 /* Read-only post-generation person/designation summary. Kept visually quieter than the
    editable pre-translation/DLO review because it is an audit note, not a gate. */
 .used-names-card {
@@ -2436,6 +2508,23 @@ textarea.ref-desc-input {
 .ref-layout-about strong {
   color: var(--accent);
   font-weight: 600;
+}
+
+.ref-layout-about-empty {
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* Inline correction of the subject line. It is a ranking input, not a caption, so
+   it gets a real labelled field rather than a contenteditable one-liner. */
+.ref-layout-about-edit {
+  margin-top: 8px;
+  display: grid;
+  gap: 6px;
+}
+
+.ref-layout-about-edit .ref-desc-input {
+  min-height: 72px;
 }
 
 /* Escape hatch for a wrong vision reading — quiet, but always reachable. */
@@ -3048,6 +3137,123 @@ a.thread-node:hover {
   gap: 12px;
   padding: 40px 20px;
   text-align: center;
+}
+
+/* ---------- /dlo as a list of work (several officers, one intake each) ----------
+   The workspace header keeps the page title and the "start new work" button on one line, and
+   wraps rather than shrinking the button on a narrow screen. */
+
+.dlo-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.dlo-head .page-title {
+  margin-bottom: 0;
+}
+
+/* The resume card sits above the new-intake form, so it has to read as "your work is still
+   going" at a glance without shouting. An accent left edge does that without a new colour. */
+.dlo-resume {
+  border-left: 3px solid var(--accent);
+}
+
+.dlo-resume-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.dlo-resume-head h2 {
+  margin: 0;
+}
+
+.dlo-resume-title {
+  margin: 10px 0 2px;
+  font-weight: 600;
+}
+
+/* The shared work list. Rows are a chip + a title link + quiet metadata; the whole row is not
+   a link, so the title stays the one obvious target. */
+.dlo-work-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+.dlo-work-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.dlo-work-row:last-child {
+  border-bottom: none;
+}
+
+.dlo-work-title {
+  flex: 1 1 240px;
+  min-width: 0;
+  font-weight: 600;
+  color: inherit;
+  text-decoration: none;
+}
+
+.dlo-work-title:hover,
+.dlo-work-title:focus-visible {
+  text-decoration: underline;
+}
+
+.dlo-work-meta {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+/* Text as well as colour, per the StatusChip rule — the ✓ travels with it in the markup. */
+.dlo-work-done {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ---------- transcription (/transcribe) ----------
+   The list rows reuse .dlo-work-* wholesale; only two things differ. A row OPENS IN PLACE,
+   so its title is a <button> rather than a link and has to be un-styled back to looking like
+   one. And a multi-recording run lists its sources above the text. */
+
+.transcribe-open {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* The open run, marked with weight rather than colour alone. */
+.transcribe-open[aria-current='true'] {
+  color: var(--accent);
+}
+
+.transcribe-source-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.transcribe-source-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 0.9rem;
 }
 
 /* ---------- pointers (महत्त्वाचे मुद्दे — the read-only key-point list on /dlo) ----------

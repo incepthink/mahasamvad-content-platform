@@ -29,6 +29,13 @@ import { STR } from '../lib/strings';
 export type DesignationEdit = Readonly<{
   designation: string;
   remember: boolean;
+  // Only meaningful on a `suggested` row (a person the note does not name, proposed because the
+  // dictionary knows who holds the office it DOES name). Such a row is excluded until the
+  // officer ticks it — see collectDesignations. Always false on an ordinary row.
+  //
+  // Required rather than optional so it matches the autosaved shape exactly (which defaults it),
+  // and so a future construction site cannot forget it and silently un-accept a confirmed row.
+  accepted: boolean;
 }>;
 
 // Names the officer added by hand because the extractor missed them.
@@ -50,9 +57,13 @@ export function DesignationReview({
   busy,
   onEditDesignation,
   onToggleRemember,
+  onToggleAccepted,
   onChangeExtra,
   onAddExtra,
   onRegenerate,
+  onVerify,
+  verifying,
+  verifyError,
 }: {
   names: readonly PreparedName[] | null;
   known: readonly KnownDesignation[];
@@ -64,9 +75,15 @@ export function DesignationReview({
   busy: boolean;
   onEditDesignation: (marathi: string, designation: string) => void;
   onToggleRemember: (marathi: string, remember: boolean) => void;
+  onToggleAccepted: (marathi: string, accepted: boolean) => void;
   onChangeExtra: (index: number, patch: Partial<DesignationExtra>) => void;
   onAddExtra: () => void;
   onRegenerate: () => void;
+  // "तपासले म्हणून खूण करा" on an unverified row. Writes straight to the नाव-शब्दकोश — the
+  // parent owns the request so it can also flip the row's badge on success.
+  onVerify: (marathi: string) => void;
+  verifying: readonly string[];
+  verifyError: string | null;
 }) {
   const valueFor = (term: PreparedName): DesignationEdit =>
     edits[term.marathi] ?? {
@@ -74,14 +91,41 @@ export function DesignationReview({
       // A designation that came FROM the dictionary is already remembered; re-saving an
       // unchanged value would only churn the row's updated_at.
       remember: false,
+      // Suggestions start ACCEPTED. They used to start unticked, which read as the safe
+      // default and was in fact a silent one: the officer ticks it on the run where they
+      // notice, and every later run drops the name again with no notice at all — measured
+      // live, one run in four carried the designation and three did not. Since a suggestion
+      // is a lookup against a VERIFIED dictionary row, and this card is shown before any
+      // spend with the person named on it, the review is preserved by making it visible and
+      // untickable rather than by making it off. See the comment on `suggested`.
+      accepted: term.suggested,
     };
+
+  const hasSuggested = (names ?? []).some((term) => term.suggested);
+  // A पदनाम read off the note itself is explained once, above the rows, rather than repeating
+  // the sentence on every row that has one.
+  const hasFromText = (names ?? []).some(
+    (term) =>
+      term.fromText &&
+      (edits[term.marathi]?.designation ?? term.designation) ===
+        term.designation,
+  );
 
   return (
     <section className="card names-review">
       <h3 className="names-review-title">{STR.designationsTitle}</h3>
       <p className="hint">{STR.designationsHint}</p>
 
-      {loading ? <p className="hint">{STR.designationsLoading}</p> : null}
+      {/* The lookup is a paid call over the whole reviewed note and can take a few seconds,
+          during which this card would otherwise be an empty box. A spinner beside the label
+          says the names are still being found rather than that there are none — and the
+          लेख तयार करा button is held until this finishes, so the wait has to be visible. */}
+      {loading ? (
+        <p className="translating-note" aria-live="polite">
+          <span className="spinner" aria-hidden="true" />
+          {STR.designationsLoading}
+        </p>
+      ) : null}
 
       {error ? (
         <div className="btn-row" style={{ marginTop: 12 }}>
@@ -110,18 +154,55 @@ export function DesignationReview({
         ))}
       </datalist>
 
+      {hasSuggested ? (
+        <p className="hint names-suggest-hint">{STR.designationsSuggestHint}</p>
+      ) : null}
+
+      {hasFromText ? (
+        <p className="hint names-suggest-hint">
+          {STR.designationsFromTextHint}
+        </p>
+      ) : null}
+
+      {verifyError ? <p className="form-error">{verifyError}</p> : null}
+
       {(names ?? []).map((term) => {
         const value = valueFor(term);
+        // A suggestion is inert until ticked: the dictionary knows who holds an office, but
+        // only the officer knows this meeting was that officeholder's.
+        const accepted = value.accepted === true;
+        const inactive = term.suggested && !accepted;
         return (
           <div
             key={term.marathi}
-            className={`names-review-row ${term.inGlossary ? 'is-verified' : 'is-unverified'}`}
+            className={[
+              'names-review-row',
+              term.verified ? 'is-verified' : 'is-unverified',
+              term.suggested ? 'is-suggested' : '',
+              inactive ? 'is-inactive' : '',
+            ]
+              .filter(Boolean)
+              .join(' ')}
           >
             <div className="glossary-cell">
               <span className="glossary-field-label">
                 {STR.designationsName}
               </span>
-              <span className="glossary-marathi">{term.marathi}</span>
+              {term.suggested ? (
+                <label className="names-suggest-accept">
+                  <input
+                    type="checkbox"
+                    checked={accepted}
+                    onChange={(e) =>
+                      onToggleAccepted(term.marathi, e.target.checked)
+                    }
+                    disabled={busy}
+                  />
+                  <span className="glossary-marathi">{term.marathi}</span>
+                </label>
+              ) : (
+                <span className="glossary-marathi">{term.marathi}</span>
+              )}
             </div>
 
             <div className="glossary-cell">
@@ -136,12 +217,22 @@ export function DesignationReview({
                 onChange={(e) =>
                   onEditDesignation(term.marathi, e.target.value)
                 }
-                disabled={busy}
+                disabled={busy || inactive}
               />
+              {/* Shown only while the note's own wording is still what stands in the field —
+                  the moment the officer edits it, it is theirs and the provenance tag would
+                  be a lie. */}
+              {term.fromText && value.designation === term.designation ? (
+                <span className="names-from-text">
+                  {STR.designationsFromText}
+                </span>
+              ) : null}
             </div>
 
-            {/* Only offered once there is something to remember. */}
-            {value.designation.trim().length > 0 ? (
+            {/* Only offered once there is something to remember, and never on a suggestion the
+                officer has not accepted — remembering an unconfirmed guess is the one write
+                that could corrupt the dictionary this feature reads from. */}
+            {value.designation.trim().length > 0 && !inactive ? (
               <label className="names-lock-toggle">
                 <input
                   type="checkbox"
@@ -157,10 +248,37 @@ export function DesignationReview({
               <span />
             )}
 
+            {/* The नाव-शब्दकोश's verified flag, reachable from the card the officer is already
+                on. Not offered on an unaccepted suggestion — that name is not in play yet. */}
+            {!term.verified && !inactive ? (
+              <button
+                type="button"
+                className="btn btn-small"
+                onClick={() => onVerify(term.marathi)}
+                disabled={busy || verifying.includes(term.marathi)}
+              >
+                {verifying.includes(term.marathi)
+                  ? STR.designationsVerifying
+                  : STR.designationsVerify}
+              </button>
+            ) : null}
+
+            {/* Keyed on `verified`, NOT `inGlossary`. The dictionary holding a row only means
+                something extracted it once; "तपासले" is a claim that a human confirmed the
+                spelling, and showing it for an unverified row both overstated it and hid the
+                one row the officer could usefully act on. */}
             <span
-              className={`chip ${term.inGlossary ? 'chip-completed' : 'chip-queued'}`}
+              className={`chip ${
+                !term.suggested && term.verified
+                  ? 'chip-completed'
+                  : 'chip-queued'
+              }`}
             >
-              {term.inGlossary ? STR.glossaryVerified : STR.designationsNew}
+              {term.suggested
+                ? STR.designationsSuggested
+                : term.verified
+                  ? STR.glossaryVerified
+                  : STR.designationsNew}
             </span>
           </div>
         );
@@ -187,16 +305,21 @@ export function DesignationReview({
               list={DATALIST_ID}
               value={extra.designation}
               placeholder={STR.designationsPlaceholder}
-              onChange={(e) => onChangeExtra(i, { designation: e.target.value })}
+              onChange={(e) =>
+                onChangeExtra(i, { designation: e.target.value })
+              }
               disabled={busy}
             />
           </div>
-          {extra.designation.trim().length > 0 && extra.name.trim().length > 0 ? (
+          {extra.designation.trim().length > 0 &&
+          extra.name.trim().length > 0 ? (
             <label className="names-lock-toggle">
               <input
                 type="checkbox"
                 checked={extra.remember}
-                onChange={(e) => onChangeExtra(i, { remember: e.target.checked })}
+                onChange={(e) =>
+                  onChangeExtra(i, { remember: e.target.checked })
+                }
                 disabled={busy}
               />
               <span>{STR.designationsRemember}</span>
@@ -254,6 +377,14 @@ export function collectDesignations(
 
   for (const term of names ?? []) {
     const edit = edits[term.marathi];
+    // A dictionary suggestion (the note names the office, not the person) is included unless
+    // the officer UNTICKS it. `?? term.suggested` rather than `?? false` is what makes the
+    // pre-tick real: an untouched row has no edit entry at all, so a `false` fallback would
+    // drop every suggestion the officer simply left alone — which is the exact behaviour
+    // this replaced. An explicit `accepted: false` from an untick is a real `false` and
+    // survives the `??`.
+    const accepted = edit?.accepted ?? term.suggested;
+    if (term.suggested && !accepted) continue;
     const designation = (edit?.designation ?? term.designation).trim();
     if (designation.length === 0) continue;
     seen.add(term.marathi);

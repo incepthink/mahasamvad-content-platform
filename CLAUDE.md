@@ -59,14 +59,32 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
     and are the only article path still touching n8n. `ARTICLE_POSTER_THEMES` is deleted —
     the shared palette rotation supersedes it. Neither n8n mode writes a `scenePath`, so
     poster copy/scene feedback stay `html`-only.
-  - `startSocialPostJob` (both social categories) now runs classify → pick master → copy
+  - `startSocialPostJob` (both social categories) now runs reference selection → copy
     → build image prompt **in the API** (`@dgipr/content-engine`), and the thin
     `social-post-v2-api` workflow (5 nodes) only EDITS the chosen image with the API-built
     prompt (see the 2026-07-24 milestone in AGENTS.md — supersedes the older "workflow
-    classifies/copies" notes). Sequence: `resolveSocialReference` (pin/CMO/`classifyPosterType`)
-    → `selectMaster` (content-aware, seeded — not random) → `generatePosterCopy` (gpt-5.6-luna,
+    classifies/copies" notes). Sequence: `resolveSocialReference` (pin → CMO →
+    **`resolveSocialReferenceByInformation`**)
+    → `generatePosterCopy` (gpt-5.6-luna,
     env `OPENAI_COPY_MODEL`; applies `lockSchemeNames` so a scheme name stays full/verbatim) →
-    `buildPosterPrompt` → `renderSocialPosterViaN8n(id, imageUrl, prompt)`. `step` is set
+    `buildPosterPrompt` → `renderSocialPosterViaN8n(id, imageUrl, prompt)`.
+    **Reference selection is INFORMATION-FIRST** (2026-07-28,
+    `references/select-by-information.ts`): the raw note is compared against EVERY enabled
+    master of the brand across ALL types, using the informational descriptions cached on
+    `reference_images.layout_spec` (`contentSummary` = what that poster is about,
+    `layoutSummary` = how it arranges information), and the winning reference's own `subtype`
+    resolves the poster TYPE — the CMO path's shape generalised to the DGIPR library. So the
+    note is never classified into a type first, and `point_count`/`wants_photo` are no longer
+    predicted at all: they were forecasts that constrained the pool *before* a reference had
+    been looked at. Tone/mood/colour are explicitly NOT criteria (that is `rank-master.ts`'s
+    different job); the ranker also returns the run's Marathi `referenceTitle`, which the
+    retired classifier used to produce. It runs on `POSTER_COPY_MODEL` at medium effort —
+    it inherits the classifier's tier because it is now the decisive routing call. A master
+    with no `layout_spec` is invisible to it, so one is warmed per run (as before) and
+    `analyze:references` is the backfill. `SOCIAL_REFERENCE_MODE=classify` restores the old
+    classify→score-within-type flow (`socialReferenceMode()` in `runner.ts`, beside the
+    `ARTICLE_POSTER_MODE` precedent); `listSocialTypes`, `classifyPosterType` and
+    `selectMaster`'s `MasterNeed` scoring are kept alive for it. `step` is set
     directly at each stage (`classify`/`copy`/`image`) — the old n8n Ping nodes fired after the
     response and never reached the UI. `design_mode: 'fresh'` calls `generateImage` directly
     (no master). The API stamps `poster-logo.png` (top-right) + `poster-footer.png` (bottom) in
@@ -101,7 +119,9 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
     this feature: `pnpm n8n:push` first, API second (old workflow + new API can
     leave the red marker boxes in the output).
 - DLO intake (meeting MP3s/PDFs/DOCX/TXT → reviewed Marathi text → normal generation):
-  routes → `apps/api/src/routes/dlo.ts` (multipart with per-request 120 MiB/10-file
+  routes → `apps/api/src/routes/dlo.ts` (multipart with per-request `UPLOAD_FILE_MAX_BYTES`
+  (**50 MiB**, `@dgipr/schemas`, shared with `/transcribe` and with the web pickers, which
+  refuse an oversized file before the upload starts)/10-file
   limits + an 8 MiB `fieldSize` for the `documents` field; `/api/dlo/intakes` + `/:id`
   poll + `/:id/generate` + `/:id/files/:index/reextract`); job →
   `apps/api/src/jobs/dlo-runner.ts`
@@ -185,6 +205,26 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
     refreshes the instant the 202 lands, and a row still reading `ready` stops its poll
     and sits there through the whole OCR. DLO can afford this where `/translate` cannot
     because the original file is still in the private bucket.
+- **Transcription (`/transcribe`) — recordings in, Marathi text out, nothing else.** The DLO
+  intake job's transcribe phase as a product of its own: routes →
+  `apps/api/src/routes/transcriptions.ts` (create/list/detail only — no review contract, no
+  generation lineage, so there is nothing else to expose); job →
+  `apps/api/src/jobs/transcription-runner.ts`; rows → `packages/database/src/transcriptions.ts`
+  (migration 0037); shapes + `combineTranscripts` → `packages/schemas/src/transcription.ts`;
+  web → `apps/web/app/transcribe/page.tsx` (ONE page — form, result in place, history list —
+  because a transcript has no workspace to navigate to) + `TranscriptionForm`/`Result`/`List`
+  + `useTranscription`/`useTranscriptionList`.
+  Four things worth knowing. The recordings are ARCHIVED in the existing PRIVATE
+  `dlo-uploads` bucket under a `transcriptions/{id}/…` prefix, so **0037 provisions no
+  bucket**. It shares `audio_transcript_cache` (0031) with /dlo, so a recording transcribed
+  on either surface is free and instant on the other — and the job shows cache hits before
+  calling Sarvam, since an all-cached run needs no call at all. The list card's counters
+  (`file_count`/`failed_count`/`char_count`) are **columns, not derived**: that is what lets
+  the list query skip `files` and `combined_text`, which hold a whole meeting's transcript.
+  And the transcript is rendered READ-ONLY — this page's contract is "the recording,
+  verbatim"; correcting text before it becomes an article is /dlo's review step.
+  Audio container rules are NOT redefined here: `AUDIO_FILE_ACCEPT`/`audioMimeForFileName`
+  come from `schemas/src/dlo.ts`, so the picker can never offer a file the API refuses.
 - Proof Read (ad-hoc grammar/name/style check of pasted Marathi/English text):
   route → `apps/api/src/routes/proofread.ts` (`POST /api/proofread`, synchronous,
   nothing stored; assembles the verified-glossary context); engine →
@@ -475,7 +515,16 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   three revise-article builders. Guarantee: `applyDesignations`
   (`content-engine/src/generation/apply-designations.ts`) — first exact occurrence only,
   honorific-aware (inserts BEFORE `श्री.`), replaces a *different* known title rather than
-  duplicating it, never matches a bare surname (two people can share one), never touches digits.
+  duplicating it, never touches digits — **plus, since 2026-07-28, EVERY standalone mention of the
+  approved name's SURNAME** (`असल्याचे सांगत फडणवीस यांनी` → `… मुख्यमंत्री फडणवीस यांनी`), which is also
+  what rescues an article that only ever has the surname. Whole-word only, so an inflected
+  `फडणवीसांनी` is left alone, and a surname TWO approved people share is disabled for both — that
+  ambiguity is the review card's question, not this pass's. Which person a bare surname is comes
+  from `resolveSurnameDesignations` (`translation-terms.ts`): the dictionary's full-name rows are
+  indexed by last word, a person whose FULL name is already in the text is skipped (their own row
+  covers it), and when several share the surname exactly one of their stored titles must occur in
+  the text or nothing is proposed. The pair it produces names the **surname**, never the
+  dictionary's first name — adding an approved title is not licence to add a name.
   It runs **after `generateFactCheck`** in both `generateArticle` and `reviseArticle`, so the
   traceability appendix cannot emit a false `(टिपणीत आधार नाही)` for the officer's own title.
   The media room's `articleProvided` branch applies it to the pasted article too. Unapplied
@@ -794,12 +843,42 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
 - UI components → `apps/web/components/*` (`ArticleView`, `PosterPanel`,
   `ProgressSteps`, `FeedbackBox`, `CopyEditForm`, `HistoryCard`, `StatusChip`,
   `GenerationThread` — the runs-from-this-note rail above `NextActions`)
-- DLO page (notes + MP3/PDF/DOCX → processing → **per-source editable review** →
-  article) → `apps/web/app/dlo/page.tsx` + `apps/web/components/DloSourceReview.tsx`
-  (one card per source; PDFs as a `/translate`-style page list) +
-  `apps/web/lib/dloReview.ts` (source keys, assembly, per-file forgetting); intake poll
-  hook → `apps/web/lib/useDloIntake.ts` (the generating phase reuses `useGeneration` +
-  `ProgressSteps`)
+- DLO — **a list of work, not one workspace** (2026-07-27). `/dlo`
+  (`apps/web/app/dlo/page.tsx`) is a conditional **सुरू असलेले काम** resume card
+  (`DloResumeCard`) → the new-intake form (`DloIntakeForm`) → the shared list
+  (`DloIntakeList`, split **तुमचे काम** / **इतर कामे**); each intake's workspace is
+  `apps/web/app/dlo/[id]/page.tsx` → `DloWorkspace` (processing → per-source editable review →
+  article). Modelled on `/video`. `PersistentAppContent.tsx` is **deleted** — the row is the
+  state of record, which covers reload/crash/another machine as well as tab-switching, and
+  unlike the singleton does not stop a second officer reaching the form. **The step is DERIVED
+  from the row**, never stored. Review UI → `DloSourceReview` (one card per source, PDFs as a
+  `/translate`-style page list) + `apps/web/lib/dloReview.ts` (source keys, assembly, per-file
+  forgetting); polls → `useDloIntake` (one intake) and `useDloIntakeList` (the list, 5 s and
+  only while one of THIS browser's runs is non-terminal).
+  - **Resuming re-buys nothing** (0036). `dlo_intakes.review_state` holds the officer's
+    corrections, unticked pages, style reference and the two PAID lookups (the pointer summary,
+    one `gpt-5.6-sol` call per `POINTERS_REQUEST_CHUNK_CHARS` block; the prepared names).
+    Autosaved on a 1200 ms debounce by `useDloReviewAutosave`, flushed and **awaited before
+    generate** so the blob and the submitted `combinedText` cannot disagree. The guarantee that
+    a resume does not re-fire the paid calls is `restoredFromSave`, a **ref** — both auto-fire
+    effects run in the same commit as the seeding effect, where their `pointers === null`
+    closure is still true, so a state-based guard would spend one render too late.
+    Last-writer-wins, **warn-never-lock**: the PATCH returns the PREVIOUS writer (echoing our
+    own could never detect anything). `category`/`heading` go to their real 0018 columns, not
+    the blob, so they survive without 0036.
+  - **`dgipr.dlo.mine` (localStorage, `lib/dloDraft.ts`) is ORDERING ONLY — never auth.** Every
+    intake is visible and openable by anyone; the API never receives or filters on it. Same file
+    holds the pre-submit sessionStorage draft and the module-scoped `pendingAudio` (a picked
+    `File` cannot be serialized, so across a reload only its NAME survives, as a re-attach
+    callout).
+  - **`GET /api/dlo/intakes` must NEVER run the orphan reaper** — it would mass-fail every live
+    intake the moment anyone opened `/dlo`. The detail route keeps it, and it is what makes the
+    API a **single-process** service (two instances ⇒ B's poll kills A's job; the fix is a
+    heartbeat + grace window across `dlo-runner.ts`/`runner.ts`/`video-runner.ts`, a named
+    follow-up). `listGenerationsForDloIntakes` answers "already produced an article?" in one
+    batched `.in()`; lineage stays one-way and an intake is never marked consumed.
+  - Free harness: `tsx src/intake/dlo-review-state.ts` (in content-engine, which has tsx —
+    the `proof-read.ts --check` split).
 
 **Data & schema:** `supabase/migrations/0001…0004_*.sql` — pgvector Mahasamvad
 chunks, `generations` table, generation category + chunk style-category columns;
@@ -852,6 +931,20 @@ floor AND the join key for the future approved-example loop; patchable, written 
 Both additive + nullable; `insertGeneration` omits `style_reference` unless one was pasted and the
 meta write is a SEPARATE best-effort update after the article write, so an un-applied 0035 costs
 the officer tier and the telemetry rather than a generated article (the 0028 principle). Apply
+before the API deploy anyway.
+`0037` — `transcriptions` (new table: standalone recording → Marathi text runs behind
+`/transcribe`). Self-contained and additive — nothing else reads it, and it provisions no
+bucket (the recordings go into 0018's private `dlo-uploads` under a `transcriptions/` prefix),
+so an un-applied 0037 disables only that page. Verified live: with the table absent the routes
+are registered and every input guard still answers correctly; only the two queries 500.
+`0036` — `dlo_intakes.review_state` (jsonb: the officer's review-step corrections, unticked pages,
+style reference and the two PAID lookups — the pointer summary and the prepared names — so resuming
+an intake re-buys nothing). Its own column rather than a write-back into `files`, because `files` is
+rewritten wholesale by the extract/re-extract jobs and an autosave landing there would race them.
+Additive + nullable; `insertDloIntake` never names the column, `updateDloIntake` writes it only when
+the patch carries one, and the autosave is a SEPARATE route from create/extract/generate — so an
+un-applied 0036 disables durable review state alone. **Verified live against a database without
+it**: list, detail, create and generate all work and the PATCH is the only thing that fails. Apply
 before the API deploy anyway.
 
 **Aux / not on the main request path:**

@@ -9,10 +9,10 @@
 //
 // The reserved-zone numbers quoted to the image model live in the n8n workflow's
 // prompt builders (content-engine/build-poster-prompt.ts) and must stay in sync
-// with the constants below: at the 1280x1600 canvas the white lockup badge is
-// 240x220 at a 20px margin from the top-right corner (zone quoted as the
-// top-right ~280x270) and the footer is full-width ~91px tall (zone quoted as
-// the bottom ~130px).
+// with the constants below: at the 1280x1600 canvas the tightly-fitted white lockup badge is
+// 160x154 at a 6px margin from the top-right corner. The fixed-template prompt
+// reserves 180x170 there. The footer is full-width ~91px tall; fixed-template
+// mode reserves 120px at the bottom.
 
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -28,15 +28,15 @@ const ASSETS_DIR = resolve(
 // always 1280x1600 (MASTER_DIMENSIONS in content-engine), so the scale factor is
 // normally 1 — it only kicks in if the model ever returns another width.
 const ASSET_BASE_WIDTH = 1280;
-const LOCKUP_WIDTH = 240;
-const LOCKUP_HEIGHT = 220;
-const LOCKUP_CORNER_RADIUS = 20;
-const LOCKUP_MARGIN = 20;
-const EMBLEM_TARGET_WIDTH = 130;
-const EMBLEM_TOP = 17;
-const LABEL_TOP = 163;
-const LABEL_MAX_WIDTH = 210;
-const LABEL_FONT_SIZE = 27;
+const LOCKUP_WIDTH = 160;
+const LOCKUP_HEIGHT = 154;
+const LOCKUP_CORNER_RADIUS = 12;
+const LOCKUP_MARGIN = 6;
+const EMBLEM_TARGET_WIDTH = 96;
+const EMBLEM_TOP = 8;
+const LABEL_TOP = 119;
+const LABEL_MAX_WIDTH = 154;
+const LABEL_FONT_SIZE = 21;
 const LABEL = 'महाराष्ट्र शासन';
 const LABEL_COLOUR = '#17324d';
 // footer-new-poster.png was exported on a 3376x4219 transparent canvas; the
@@ -52,8 +52,8 @@ async function renderGovernmentLabel(scale: number): Promise<Raster> {
   const data = await sharp({
     text: {
       text: `<span foreground="${LABEL_COLOUR}">${LABEL}</span>`,
-      font: `Noto Sans Devanagari SemiBold ${LABEL_FONT_SIZE}`,
-      fontfile: resolve(ASSETS_DIR, 'fonts/NotoSansDevanagari.ttf'),
+      font: `Mukta SemiBold ${LABEL_FONT_SIZE}`,
+      fontfile: resolve(ASSETS_DIR, 'fonts/Mukta-SemiBold.ttf'),
       width: Math.round(LABEL_MAX_WIDTH * scale),
       align: 'centre',
       rgba: true,

@@ -794,10 +794,26 @@ export const ReferenceLayoutSpecSchema = z.object({
 });
 export type ReferenceLayoutSpec = z.infer<typeof ReferenceLayoutSpecSchema>;
 
-// Manual override for a bad vision read: rewrites the cached jsonb in place.
-export const UpdateLayoutSpecRequestSchema = z.object({
-  hasPhotoZone: z.boolean(),
-});
+// Manual override for a bad vision read: patches the cached jsonb in place.
+// Both fields are optional and applied independently — the vision pass gets the
+// rest of the spec (bulletSlots, layoutSummary) right often enough that a
+// whole-object replace would throw away good data to fix one field. At least one
+// must be present, or the request is a no-op the operator would read as a save.
+// contentSummary is editable because it is a RANKING input (select-by-information.ts
+// matches the note against it), so a vague or wrong read costs a wrong reference on
+// every future run — re-rolling the vision pass is not a reliable fix for that.
+export const UpdateLayoutSpecRequestSchema = z
+  .object({
+    hasPhotoZone: z.boolean().optional(),
+    // Trimmed, and empty means "clear it" — an empty summary is simply absent
+    // from the ranker's candidate line rather than an empty phrase in it.
+    contentSummary: z.string().trim().max(400).optional(),
+  })
+  .refine(
+    (body) =>
+      body.hasPhotoZone !== undefined || body.contentSummary !== undefined,
+    { message: 'Nothing to update.' },
+  );
 export type UpdateLayoutSpecRequest = z.infer<
   typeof UpdateLayoutSpecRequestSchema
 >;

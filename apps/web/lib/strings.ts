@@ -22,6 +22,7 @@ export const STR = {
   navGlossary: 'शब्दकोश',
   navReferences: 'मास्टर टेम्पलेट',
   navDlo: 'लेखनिर्मिती',
+  navTranscribe: 'ध्वनिलेखन',
   navMenu: 'मेनू',
   navCollapse: 'मेनू लहान करा',
   navExpand: 'मेनू मोठा करा',
@@ -134,7 +135,7 @@ export const STR = {
   // documents → transcription/extraction → editable review → article.
   dloTitle: 'DLO — बैठकीतून लेख',
   dloIntro:
-    'बैठकीतील टिपणी, ध्वनिमुद्रण (MP3) आणि कागदपत्रे (PDF/DOCX/TXT) येथे द्या — या सर्व माहितीतून लेख तयार होईल.',
+    'बैठकीतील टिपणी, ध्वनिमुद्रण (MP3, WAV, M4A आदी) आणि कागदपत्रे (PDF/DOCX/TXT) येथे द्या — या सर्व माहितीतून लेख तयार होईल.',
   dloStepInput: 'माहिती द्या',
   dloStepProcessing: 'प्रक्रिया',
   // The middle rail step now covers processing + the Pointers selection + the source review,
@@ -150,9 +151,10 @@ export const STR = {
   // recording is transcribed whole and has nothing to choose, while a document is read here
   // and now — page by page, with the scanned ones stopping to ask which pages are worth
   // OCR'ing before a single credit is spent.
-  dloAudioTitle: 'ध्वनिमुद्रण (MP3)',
-  dloAudioUpload: 'ध्वनिफीत जोडा (.mp3)',
-  dloAudioHint: 'बैठकीचे ध्वनिमुद्रण — एकावेळी अनेक फाईल जोडता येतील.',
+  dloAudioTitle: 'ध्वनिमुद्रण (MP3, AAC, M4A)',
+  dloAudioUpload: 'ध्वनिफीत जोडा',
+  dloAudioHint:
+    'बैठकीचे ध्वनिमुद्रण — एकावेळी अनेक फाईल जोडता येतील (प्रत्येकी कमाल ५० MB). फक्त MP3, AAC व M4A चालतात.',
   dloAudioFilesTitle: 'जोडलेली ध्वनिमुद्रणे',
   dloDocsTitle: 'कागदपत्रे (PDF / DOCX / TXT)',
   dloDocsHint:
@@ -160,10 +162,11 @@ export const STR = {
   // One upload card's own heading; the section above it explains what documents are for.
   dloDocsCardTitle: 'कागदपत्र',
   dloDocsIntakeHint:
-    'PDF, DOCX किंवा TXT फाईल निवडा (कमाल २५ MB). स्कॅन केलेली PDF देखील चालते. फाईल या बैठकीसोबत जतन केली जाईल.',
+    'PDF, DOCX किंवा TXT फाईल निवडा (कमाल ५० MB). स्कॅन केलेली PDF देखील चालते. फाईल या बैठकीसोबत जतन केली जाईल.',
   dloDocsAdd: 'आणखी कागदपत्र जोडा',
   dloRemoveFile: 'फाईल काढा',
-  dloFileTypeError: 'कृपया फक्त .mp3 फाईल निवडा.',
+  dloFileTypeError:
+    'कृपया ध्वनिमुद्रण फाईल निवडा (MP3, WAV, M4A, AAC, FLAC, OGG, OPUS, WEBM, AIFF, AMR, WMA).',
   dloNeedInput: 'कृपया टिपणी लिहा किंवा किमान एक फाईल जोडा.',
   dloSubmit: 'पुढे जा →',
   dloProcessingTitle: 'माहितीवर प्रक्रिया सुरू आहे…',
@@ -182,7 +185,6 @@ export const STR = {
   dloReviewFailedWarning:
     'काही फाईल्समधून मजकूर मिळाला नाही — त्यांशिवाय पुढे जाता येईल:',
   dloReviewTooShort: 'कृपया किमान २० अक्षरांचा मजकूर ठेवा.',
-  dloReviewTooLong: 'मजकूर ६०,००० अक्षरांपेक्षा जास्त आहे — कृपया कमी करा.',
   // Review step: one card per source (notes / each recording / each document),
   // PDFs with page-wise selection.
   dloReviewNotesTitle: 'बैठकीतील टिपणी',
@@ -213,17 +215,6 @@ export const STR = {
   dloReviewPreviewHide: 'पूर्ण मजकूर लपवा',
   dloReviewEmpty: 'कोणताही मजकूर निवडलेला नाही — किमान एक स्रोत निवडा.',
   dloReviewRereading: 'OCR ने पुन्हा वाचत आहे…',
-  // Pointers (मुद्दे): a read-only summary of the source, shown at the top of the review
-  // step. Display only — the article is written from the full reviewed text below it.
-  dloPointersTitle: 'महत्त्वाचे मुद्दे',
-  dloPointersHint:
-    'तुम्ही दिलेल्या मजकुरातील महत्त्वाचे मुद्दे खाली दिले आहेत. लेख मात्र संपूर्ण तपासलेल्या मजकुरावरून तयार होईल.',
-  dloPointersLoading: 'मुद्दे तयार करत आहोत…',
-  dloPointersEmpty:
-    'मुद्दे तयार करता आले नाहीत. काही हरकत नाही — तुम्ही थेट खालील मजकुरावरून लेख तयार करू शकता.',
-  dloPointersError:
-    'मुद्दे तयार करताना अडचण आली. पुन्हा प्रयत्न करा किंवा थेट लेख तयार करा.',
-  dloPointersRegenerate: 'मुद्दे पुन्हा तयार करा',
   // व्यक्ती व पदनाम: the designation the article will print before each person's name. A blank
   // field means the name prints bare — a designation is never guessed from the note.
   designationsTitle: 'व्यक्ती व पदनाम तपासा',
@@ -245,6 +236,24 @@ export const STR = {
   designationsNamePlaceholder: 'उदा. देवेंद्र फडणवीस',
   designationsKnown: 'शब्दकोशातील पदनाम',
   designationsNew: 'नवीन नाव',
+  // A person the note does NOT name: the note mentions an office (मुख्यमंत्री) and the
+  // नाव-शब्दकोश knows exactly one verified holder of it. Pre-ticked so it is not dropped by
+  // inaction, but shown by name before generating so the officer can untick it — an
+  // office-holder can change, and only the officer knows whose meeting this was.
+  designationsSuggested: 'शब्दकोशातून सुचवलेले',
+  designationsSuggestHint:
+    'टिपणीत पदनाम आहे पण नाव नाही. नाव-शब्दकोशानुसार हे पदनाम खालील व्यक्तीचे आहे आणि ते लेखात वापरले जाईल. चुकीचे असल्यास खूण काढून टाका.',
+  // The पदनाम was read off the officer's own note, where the title stands immediately before
+  // the name ("उपमुख्यमंत्री एकनाथ शिंदे"). Labelled so it is clear this came from the text and
+  // not from the शब्दकोश — the officer can clear it like any other.
+  designationsFromText: 'टिपणीतून',
+  designationsFromTextHint:
+    'काही पदनामे टिपणीत नावाच्या आधी लिहिली आहेत, ती इथे आपोआप भरली आहेत. चुकीची असल्यास बदला किंवा रिकामी करा.',
+  // Per-row "mark this name checked": writes the नाव-शब्दकोश row's verified flag, so the
+  // spelling locks into future translations without a trip to /glossary.
+  designationsVerify: 'तपासले म्हणून खूण करा',
+  designationsVerifying: 'खूण करत आहोत…',
+  designationsVerifyError: 'खूण करता आली नाही. पुन्हा प्रयत्न करा.',
   designationsSkip: 'पदनामाशिवाय पुढे जा',
   designationsConfirm: 'पदनामे निश्चित करा व तयार करा →',
   designationsChecking: 'नावे तपासत आहोत…',
@@ -268,6 +277,42 @@ export const STR = {
   dloViewDetail: 'सविस्तर पाहा (अभिप्राय, भाषांतर, पोस्टर)',
   dloStartOver: 'पुन्हा सुरुवात करा',
   dloNewArticle: 'नवीन DLO लेख तयार करा',
+  dloRegenerateArticle: 'याच स्रोतातून पुन्हा लेख तयार करा',
+
+  // Several officers work at once, so /dlo is a list of work and each intake lives at its
+  // own address. 'काम' throughout rather than the more technical 'सत्र', matching dloStartOver.
+  dloNewWork: '+ नवीन काम सुरू करा',
+  dloNewWorkTitle: 'नवीन काम',
+  dloResumeTitle: 'सुरू असलेले काम',
+  dloResumeAction: 'पुढे चला →',
+  dloRecent: 'मागील कामे',
+  dloMyWork: 'तुमचे काम',
+  dloOtherWork: 'इतर कामे',
+  dloListEmpty: 'अद्याप कोणतेही काम नाही. वरील फॉर्ममधून सुरुवात करा.',
+  dloListLoading: 'यादी लोड होत आहे…',
+  dloListLoadError: 'मागील कामांची यादी मिळाली नाही.',
+  dloSourceCountSuffix: 'स्रोत',
+  dloArticleReady: 'लेख तयार',
+  dloArticleCount: 'लेख',
+  dloOpenWork: 'उघडा',
+  dloLoadingWork: 'काम उघडत आहे…',
+  dloNotFound: 'हे काम सापडले नाही. ते हटवले गेले असावे.',
+
+  // The review autosave. Saving is silent when it works; only trouble is announced.
+  dloReviewSaving: 'बदल जतन होत आहेत…',
+  dloReviewSaved: 'बदल जतन झाले',
+  dloReviewSaveFailed: 'बदल जतन झाले नाहीत. पुन्हा प्रयत्न करा.',
+  dloReviewTooLargeToSave:
+    'तपासणीतील बदल जतन करण्यासाठी खूप मोठे आहेत. काही पृष्ठे वगळा.',
+  // Two officers can open the same intake — the list is shared and there is no login. We
+  // warn and offer the server's copy; we never overwrite what is on screen.
+  dloReviewConflict:
+    'हे काम दुसऱ्या कोणीतरी उघडले आहे. दोघांचे बदल एकमेकांवर लिहिले जाऊ शकतात.',
+  dloReviewConflictReload: 'सर्व्हरवरील आवृत्ती लोड करा',
+
+  // A picked recording is a live browser handle and cannot survive a page reload, unlike the
+  // typed text beside it. Name the files rather than pretending nothing was lost.
+  dloDraftAudioLost: 'ही ध्वनिमुद्रणे पुन्हा जोडा —',
 
   // Standalone Marathi-to-English/Hindi translation
   translatePageTitle: 'भाषांतर (Translation)',
@@ -445,6 +490,11 @@ export const STR = {
   proofreadHighlightLegendStyle: 'शैली सूचना — मजकूर बदललेला नाही',
   proofreadHighlightOriginal: 'मूळ:',
   proofreadHighlightClose: 'बंद करा',
+
+  // The draft arriving live (useArticleStream). Deliberately not called "लेख" — it is not
+  // the finished article until the run completes, and the officer must not copy from it.
+  articleStreamingTitle: 'लेख लिहिला जात आहे',
+  articleStreamingBadge: 'लिहीत आहे…',
 
   // Progress
   progressTitle: 'तयार होत आहे…',
@@ -774,8 +824,19 @@ export const STR = {
   refLayoutSlots: 'मुद्दे',
   refLayoutFlipToTextOnly: '“फक्त मजकूर” म्हणून नोंदवा',
   refLayoutFlipToPhoto: '“छायाचित्रासह” म्हणून नोंदवा',
-  // The vision pass's read of what this master is ABOUT (subject/scheme), for library browsing.
+  // The vision pass's read of what this master is ABOUT (subject/scheme). Shown for
+  // library browsing AND matched against the note when a reference is picked, so it
+  // is editable: a vague read costs a wrong template on every future run.
   refLayoutAbout: 'विषय:',
+  refLayoutAboutEmpty: 'विषय नोंदवलेला नाही.',
+  refLayoutAboutEdit: 'विषय बदला',
+  refLayoutAboutLabel: 'हे टेम्पलेट कशाबद्दल आहे?',
+  refLayoutAboutHint:
+    'मराठीत एक-दोन वाक्यांत लिहा — योजना, विषय किंवा घोषणा. टिपणीशी जुळवून योग्य टेम्पलेट निवडण्यासाठी हाच मजकूर वापरला जातो.',
+  refLayoutAboutPlaceholder: 'उदा. शेतकरी कर्जमुक्ती योजनेची घोषणा.',
+  refLayoutAboutSave: 'जतन करा',
+  refLayoutAboutSaving: 'जतन करत आहे…',
+  refLayoutAboutCancel: 'रद्द करा',
 
   // Custom reference types (create / edit / delete)
   refTypeNew: '+ नवीन प्रकार तयार करा',
@@ -819,7 +880,42 @@ export const STR = {
   refPickerPinnedTypeHint:
     'हा प्रकार व हेच चित्र वापरले जाईल; प्रकार आपोआप निवडला जाणार नाही.',
 
+  // Transcription (/transcribe). A recording in, Marathi text out — nothing is generated,
+  // rewritten or summarised here, which the intro says plainly so nobody expects an article.
+  transcribeTitle: 'ध्वनिलेखन',
+  transcribeIntro:
+    'ध्वनिमुद्रण जोडा — त्याचा मराठी मजकूर याच पानावर मिळेल. मजकूर जसाच्या तसा उतरवला जातो; त्यात कोणताही बदल, सारांश किंवा भर घातली जात नाही. फाईल जतन केली जाते.',
+  transcribeNewTitle: 'नवीन ध्वनिलेखन',
+  transcribeUpload: 'ध्वनिफीत जोडा',
+  transcribeHint:
+    'एकावेळी अनेक फाईल जोडता येतील (कमाल १० फाईल्स, प्रत्येकी ५० MB). फक्त MP3, AAC व M4A चालतात.',
+  transcribeFilesTitle: 'जोडलेली ध्वनिमुद्रणे',
+  transcribeNeedFile: 'कृपया किमान एक ध्वनिमुद्रण जोडा.',
+  transcribeSubmit: 'मजकूर तयार करा',
+  transcribeRunning: 'मजकूर तयार होत आहे… मोठ्या ध्वनिमुद्रणाला काही मिनिटे लागू शकतात.',
+  transcribeQueued: 'रांगेत आहे…',
+  transcribeResultTitle: 'तयार झालेला मजकूर',
+  transcribeCharsSuffix: 'अक्षरे',
+  // A transcript that came back from the content-addressed cache: the same recording had
+  // been transcribed before, so nothing was re-run.
+  transcribeCached: 'आधीच्या ध्वनिलेखनातून',
+  transcribeFileFailed: 'हे ध्वनिमुद्रण उतरवता आले नाही',
+  transcribeEmpty: 'या ध्वनिमुद्रणातून मजकूर मिळाला नाही.',
+  transcribeRecent: 'मागील ध्वनिलेखने',
+  transcribeListEmpty: 'अद्याप कोणतेही ध्वनिलेखन नाही. वरून एक ध्वनिफीत जोडा.',
+  transcribeListLoading: 'यादी लोड होत आहे…',
+  transcribeListLoadError: 'मागील ध्वनिलेखनांची यादी मिळाली नाही.',
+  transcribeFileCountSuffix: 'ध्वनिमुद्रणे',
+  transcribeOpen: 'उघडा',
+  transcribeClose: 'बंद करा',
+  transcribeDownloadName: 'ध्वनिलेखन',
+
   // Errors
+  // Said at the picker, before the upload starts — the whole point of checking the size in
+  // the browser. The number must match UPLOAD_FILE_MAX_MB (@dgipr/schemas), which is what the
+  // API enforces.
+  fileTooLargeError:
+    'फाईल खूप मोठी आहे. प्रत्येक फाईल कमाल ५० MB असावी. कृपया लहान फाईल निवडा.',
   genericError: 'काहीतरी चुकले. कृपया पुन्हा प्रयत्न करा.',
   busyError: 'एक काम आधीच सुरू आहे. ते पूर्ण होईपर्यंत थांबा.',
 
@@ -938,6 +1034,30 @@ export const STR = {
 // Marathi labels + chip colors for a video project's statuses. The two gates
 // are the USER's turn (not the server's), so they get the queued color, not
 // the running one.
+// DLO intake status, for the shared work list on /dlo. 'ready' is deliberately not "पूर्ण":
+// a ready intake is waiting for the officer to review it, not finished.
+export const DLO_STATUS_LABELS: Record<
+  string,
+  { label: string; chip: 'queued' | 'running' | 'completed' | 'failed' }
+> = {
+  queued: { label: 'रांगेत', chip: 'queued' },
+  running: { label: 'प्रक्रिया सुरू', chip: 'running' },
+  ready: { label: 'तपासणीसाठी तयार', chip: 'completed' },
+  failed: { label: 'अयशस्वी', chip: 'failed' },
+};
+
+// Its own map rather than a reuse of DLO_STATUS_LABELS: there 'ready' means "ready for the
+// officer to review", here it means the transcript is done — the same word would mislead.
+export const TRANSCRIPTION_STATUS_LABELS: Record<
+  string,
+  { label: string; chip: 'queued' | 'running' | 'completed' | 'failed' }
+> = {
+  queued: { label: 'रांगेत', chip: 'queued' },
+  running: { label: 'सुरू आहे', chip: 'running' },
+  ready: { label: 'तयार', chip: 'completed' },
+  failed: { label: 'अयशस्वी', chip: 'failed' },
+};
+
 export const VIDEO_STATUS_LABELS: Record<
   string,
   { label: string; chip: 'queued' | 'running' | 'completed' | 'failed' }
@@ -984,7 +1104,10 @@ export const STEP_LABELS: Record<GenerationStep, string> = {
   coverage: 'लेखाची पूर्णता तपासत आहोत…',
   faithfulness: 'तथ्यांची पडताळणी करत आहोत…',
   fact_check: 'तथ्य-तपासणी यादी तयार करत आहोत…',
-  classify: 'विषय ओळखत आहोत…',
+  // The step resolves which reference template the poster is built on. It no longer
+  // classifies the note into a post type first (information-first selection), so the label
+  // names what the officer is actually waiting for.
+  classify: 'संदर्भ टेम्पलेट निवडत आहोत…',
   copy: 'पोस्टरचा मजकूर तयार करत आहोत…',
   image: 'पोस्टरचे चित्र तयार करत आहोत…',
   // Platform-neutral: this shows for facebook runs too, and on a caption-only run it is

@@ -26,6 +26,11 @@ export * from './api.js';
 // DLO intake API schemas (file transcription/extraction → reviewed note).
 export * from './dlo.js';
 
+// Standalone transcription API schemas (/transcribe: recordings → Marathi text). Exported
+// after dlo.js, whose AUDIO_FILE_* container rules it deliberately reuses rather than
+// redefining.
+export * from './transcription.js';
+
 // "Pointers": the 5W1H fact-selection layer on /dlo (imports DloCategorySchema, so it is
 // exported AFTER dlo.js to keep each name defined once in this barrel).
 export * from './pointers.js';

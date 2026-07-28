@@ -20,6 +20,7 @@ import {
   applyDesignations,
   generateArticle,
   generateArticleSimple,
+  type ArticleNameEntry,
   generateCopy,
   generatePosterCopy,
   generateSocialCaption,
@@ -38,6 +39,7 @@ import {
   resolveCmoReference,
   resolvePinnedImage,
   resolvePinnedType,
+  resolveSocialReferenceByInformation,
   selectMaster,
   reviseArticle,
   reviseCaption,
@@ -144,6 +146,113 @@ const reviseArticleErrors = new Map<string, string>();
 // disjoint columns (article vs posterPath). One caption job at a time per row, either kind.
 const revisingCaption = new Set<string>();
 const captionReviseErrors = new Map<string, string>();
+
+// The article as it is being written, so the officer reads it appearing rather than watching
+// a spinner for minutes. In-process and transient for the same reason translateWarnings is:
+// the article on the row is the state of record, and this is only the view of it while it is
+// still being produced. Losing it to a restart costs the live view of one run, never the run.
+//
+// It is a REGISTRY rather than a column because it is written token by token: persisting each
+// delta would be thousands of row writes per article, and a poll could not render it smoothly
+// anyway. The SSE route below is what turns it back into something a browser can watch.
+//
+// This is also why the API must stay a single process (the constraint the /dlo detail route's
+// orphan reaper already imposes): instance B cannot stream a draft instance A is writing. A
+// client that connects to the wrong instance simply sees no live text and falls back to the
+// ordinary poll, so the failure is a lost animation, not a lost article.
+export type ArticleStreamEvent =
+  | { type: 'snapshot'; text: string }
+  | { type: 'delta'; text: string }
+  | { type: 'end' };
+
+type ArticleStream = {
+  // Everything emitted so far, replayed to any client that connects (or reconnects) mid-run.
+  text: string;
+  done: boolean;
+  listeners: Set<(event: ArticleStreamEvent) => void>;
+};
+
+const articleStreams = new Map<string, ArticleStream>();
+
+// How long a finished stream stays replayable. Only covers the gap between the last delta and
+// the row-write the poll picks up; past that the article is on the row and the route serves it
+// from there instead.
+const ARTICLE_STREAM_TTL_MS = 120_000;
+
+// Called synchronously when the article job starts, BEFORE any await — a client connecting the
+// instant its POST returns must find a live (empty) stream rather than an absent one, or it
+// would be told there is nothing to watch and give up before the first token exists.
+function beginArticleStream(id: string): void {
+  articleStreams.set(id, { text: '', done: false, listeners: new Set() });
+}
+
+function pushArticleDelta(id: string, chunk: string): void {
+  const stream = articleStreams.get(id);
+  if (!stream || stream.done) return;
+  stream.text += chunk;
+  for (const listener of stream.listeners) {
+    listener({ type: 'delta', text: chunk });
+  }
+}
+
+// Close the stream on the finished, authoritative article. The deltas were the RAW draft;
+// applyDesignations has since rewritten first mentions, so a watcher left holding the
+// concatenated deltas would be showing an article that is subtly not the one on the row.
+// One replacing snapshot settles that before anyone can notice the difference.
+function finishArticleStream(id: string, article: string): void {
+  const stream = articleStreams.get(id);
+  if (!stream || stream.done) return;
+  if (article !== stream.text) {
+    stream.text = article;
+    for (const listener of stream.listeners) {
+      listener({ type: 'snapshot', text: article });
+    }
+  }
+  endArticleStream(id);
+}
+
+function endArticleStream(id: string): void {
+  const stream = articleStreams.get(id);
+  if (!stream || stream.done) return;
+  stream.done = true;
+  for (const listener of stream.listeners) listener({ type: 'end' });
+  stream.listeners.clear();
+  const timer = setTimeout(
+    () => articleStreams.delete(id),
+    ARTICLE_STREAM_TTL_MS,
+  );
+  // Never hold the process open for a cleanup timer.
+  timer.unref?.();
+}
+
+// Watch one run's article being written. The buffered text is delivered synchronously as a
+// `snapshot` before the listener is registered, so no delta can slip through the gap — and a
+// reconnecting client REPLACES rather than appends, which is what keeps an EventSource retry
+// from doubling the text.
+//
+// `live: false` means there is nothing to watch (no such run in this process, or it already
+// finished): the caller should close and let the ordinary poll deliver the result.
+export function subscribeArticleStream(
+  id: string,
+  listener: (event: ArticleStreamEvent) => void,
+): { unsubscribe: () => void; live: boolean } {
+  const stream = articleStreams.get(id);
+  if (!stream) return { unsubscribe: () => {}, live: false };
+  if (stream.text) listener({ type: 'snapshot', text: stream.text });
+  if (stream.done) {
+    listener({ type: 'end' });
+    return { unsubscribe: () => {}, live: false };
+  }
+  stream.listeners.add(listener);
+  return { unsubscribe: () => stream.listeners.delete(listener), live: true };
+}
+
+// Streaming the draft is a display nicety over a paid call, so it has its own kill switch
+// independent of ARTICLE_GENERATION_MODE: unset it and the draft call reverts to the exact
+// non-streaming request it made before, with the UI falling back to its progress steps.
+function articleStreamingEnabled(): boolean {
+  return process.env.ARTICLE_STREAMING !== '0';
+}
 
 export function isJobRunning(id: string): boolean {
   return running.has(id);
@@ -398,11 +507,43 @@ async function designationContext(
   }
 }
 
+// The verified glossary rows whose Marathi form occurs in the note, as the article prompt wants
+// them. BOTH prompt variants read them as of simple-v4: neither specification states name rules
+// any more, so each is handed the spellings themselves — the dictionary reaching the article as
+// SPELLING rather than only as designations.
+//
+// Best-effort by construction: a failure logs and returns [], because an unreachable dictionary
+// must cost the spelling hints, never the article. applyDesignations() remains the structural
+// guarantee, and it runs off the officer-approved pairs regardless of what this returns.
+async function articleNameDictionary(
+  client: SupabaseClient,
+  note: string,
+): Promise<ArticleNameEntry[]> {
+  try {
+    const terms = await findGlossaryTermsInText(client, note);
+    return terms.map((term) => ({
+      marathi: term.marathi,
+      termType: term.termType,
+      designation: term.designation ?? null,
+    }));
+  } catch (error) {
+    console.warn(
+      '[article] could not load the name dictionary; continuing without it:',
+      error,
+    );
+    return [];
+  }
+}
+
 // Full pipeline for a new generation: article (always — poster copy derives its
 // facts from the verified article even in poster-only mode), then optionally
 // copy -> scene image -> typeset poster.
 export function startGenerationJob(client: SupabaseClient, id: string): void {
-  runJob(client, id, async () => {
+  // Registered here, synchronously, rather than beside the draft call it feeds: the browser
+  // opens its stream the moment this job's POST answers, and a run that has not yet reached
+  // the draft would otherwise report "nothing to watch" and stop asking.
+  if (articleStreamingEnabled()) beginArticleStream(id);
+  const job = async (): Promise<void> => {
     const row = await getGeneration(client, id);
     if (!row) throw new Error(`Generation ${id} not found.`);
 
@@ -486,10 +627,21 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
               // Tier 1 of the style-reference hierarchy (migration 0035). Read off the ROW, so
               // a retry reproduces the same reference rather than silently re-styling.
               styleReference: row.styleReference,
+              // The verified dictionary rows this note actually mentions. Read by both prompt
+              // variants: neither spells out name rules, both are handed the spellings.
+              names: await articleNameDictionary(client, row.note),
               // location/date are deliberately not supplied: nothing in the product collects
               // them from trusted input yet, and no call is added to infer them. The prompt
               // omits the dateline entirely rather than inventing one.
               onProgress: progress,
+              // Publish the draft as it is written, so the officer reads it appearing rather
+              // than watching a progress bar for minutes. Display only — the authoritative
+              // article is the returned one, which the row-write below and the poll deliver.
+              ...(articleStreamingEnabled()
+                ? {
+                    onDelta: (chunk: string) => pushArticleDelta(id, chunk),
+                  }
+                : {}),
             });
             return {
               article: simple.article,
@@ -521,6 +673,12 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
               styleReferenceMeta: null,
             };
           })();
+
+    // The article is final; anything still watching should stop here rather than hold a
+    // connection open through the 1-2 minute poster render. Sending the AUTHORITATIVE text as
+    // one last snapshot matters: the deltas carried the raw draft, and applyDesignations has
+    // since inserted the officer's approved पदनामे into it.
+    finishArticleStream(id, result.article);
 
     // Report, never fail: the article is about to be persisted either way, and an officer who
     // can see "this designation did not apply" can fix it — one who cannot, cannot.
@@ -562,6 +720,17 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
       row.referenceImageId,
       { note: row.note, posterHeading: row.posterHeading },
     );
+  };
+
+  runJob(client, id, async () => {
+    try {
+      await job();
+    } finally {
+      // Whatever happened — finished, failed, poster-only, or a pasted article that was never
+      // drafted at all — no more text is coming, so release every watcher instead of leaving
+      // it on the heartbeat. Idempotent: the normal path already closed on the final article.
+      endArticleStream(id);
+    }
   });
 }
 
@@ -1169,12 +1338,29 @@ async function recentStyleHistory(
   }
 }
 
-// Resolve which poster type + master template a social run uses, and (for a normal run)
-// classify the note. The precedence is exactly the old workflow's: an exact-image pin wins,
-// then a type pin, then the CMO brand — all three FORCE the type and skip classification.
-// Only an ordinary DGIPR run classifies, then picks the best-fit master within the chosen
-// type (content-aware selection replaces the old random roll). A deleted pin falls through
-// to the next rule, matching the previous nullable-pin behaviour. `id` is the selection seed.
+// How an ordinary (unpinned, non-CMO) social run picks its reference.
+//
+//   'information' (default) — raw note → the reference whose subject + information structure
+//     fits it best, across the WHOLE enabled library; the poster type is then read off the
+//     chosen reference. Nothing about the note is predicted first.
+//   'classify' — the previous flow: classify the note into a post type, read point_count +
+//     wants_photo off the same call, then score masters WITHIN that type. Kept as the
+//     one-line rollback; every module it needs is still exported.
+//
+// Read here rather than in content-engine, beside the ARTICLE_GENERATION_MODE /
+// ARTICLE_POSTER_MODE precedent: the flag selects between orchestration paths, and the engine
+// modules stay ignorant of which one is live.
+function socialReferenceMode(): 'information' | 'classify' {
+  return process.env.SOCIAL_REFERENCE_MODE === 'classify'
+    ? 'classify'
+    : 'information';
+}
+
+// Resolve which poster type + master template a social run uses. The precedence is exactly the
+// old workflow's: an exact-image pin wins, then a type pin, then the CMO brand — all three
+// FORCE the type and skip selection over the library. Only an ordinary DGIPR run chooses from
+// the library, information-first (see socialReferenceMode). A deleted pin falls through to the
+// next rule, matching the previous nullable-pin behaviour. `id` is the selection seed.
 async function resolveSocialReference(
   client: SupabaseClient,
   id: string,
@@ -1203,8 +1389,26 @@ async function resolveSocialReference(
     return resolveCmoReference(client, id, row.note);
   }
 
-  // Ordinary run: classify the note against the DGIPR type catalog (which excludes CMO), then
-  // select the best-fit master within the chosen type.
+  // Ordinary run, information-first: compare the raw note against every enabled master of the
+  // brand and let the winning reference decide the type. The recency ring is keyed by BRAND
+  // rather than by type here — the pool is the whole library, so spreading within one type
+  // would no longer describe what the last few runs actually used.
+  if (socialReferenceMode() === 'information') {
+    const recencyKey = `${brand}:library`;
+    const resolved = await resolveSocialReferenceByInformation(
+      client,
+      brand,
+      id,
+      row.note,
+      recentMasters(recencyKey),
+      { ignoreColour },
+    );
+    rememberMaster(recencyKey, resolved.master.id, resolved.poolSize ?? 1);
+    return resolved;
+  }
+
+  // LEGACY (SOCIAL_REFERENCE_MODE=classify): classify the note against the DGIPR type catalog
+  // (which excludes CMO), then select the best-fit master within the chosen type.
   const types = await listSocialTypes(client, 'dgipr');
   const classification = await classifyPosterType(
     row.note,
@@ -1287,25 +1491,35 @@ async function renderAndStoreSocialPoster(
     })}`,
   );
 
-  // 2. Scheme-name lock source: verified glossary scheme/org names present in the note.
-  //    These must survive in the copy in full (lock-scheme-names). Free — a substring
-  //    match over the small verified set, no model call.
-  const glossaryTerms = await findGlossaryTermsInText(client, row.note);
-  const lockedSchemeNames = glossaryTerms
-    .filter((t) => t.termType === 'scheme' || t.termType === 'org')
-    .map((t) => t.marathi);
+  // Twitter DGIPR's fixed-template mode deliberately gives the image model only the unchanged
+  // reference image and the original note, with two chrome exclusions. It therefore skips
+  // poster-copy generation entirely: generated structured copy would be hidden editorial work
+  // and an unnecessary model charge for a prompt that must contain the note verbatim.
+  // Adaptive, fresh and CMO runs keep the established copy pipeline.
+  const isSimpleTemplateEdit =
+    row.category === 'twitter' && brand === 'dgipr' && designMode === 'onbrand';
+  let copyResult: Awaited<ReturnType<typeof generatePosterCopy>> | null = null;
+  if (!isSimpleTemplateEdit) {
+    // 2. Scheme-name lock source: verified glossary scheme/org names present in the note.
+    //    These must survive in the copy in full (lock-scheme-names). Free — a substring
+    //    match over the small verified set, no model call.
+    const glossaryTerms = await findGlossaryTermsInText(client, row.note);
+    const lockedSchemeNames = glossaryTerms
+      .filter((t) => t.termType === 'scheme' || t.termType === 'org')
+      .map((t) => t.marathi);
 
-  // 3. Copy (gpt-5.6-luna, metered inside this job's cost scope).
-  await updateGeneration(client, id, { step: 'copy' });
-  const copyResult = await generatePosterCopy({
-    note: row.note,
-    postType: resolved.type.slug,
-    copyStyle: resolved.type.copyStyle,
-    description: resolved.type.description,
-    brand,
-    layoutSpec: resolved.master.layoutSpec,
-    lockedSchemeNames,
-  });
+    // 3. Copy (gpt-5.6-luna, metered inside this job's cost scope).
+    await updateGeneration(client, id, { step: 'copy' });
+    copyResult = await generatePosterCopy({
+      note: row.note,
+      postType: resolved.type.slug,
+      copyStyle: resolved.type.copyStyle,
+      description: resolved.type.description,
+      brand,
+      layoutSpec: resolved.master.layoutSpec,
+      lockedSchemeNames,
+    });
+  }
 
   // 3a. Colour palette + composition — only the fully-AI-generated DGIPR path uses them. Both are
   //     rotated per run away from what the last few runs used (families and coverages first, then
@@ -1326,7 +1540,7 @@ async function renderAndStoreSocialPoster(
   const assignedLayout = isFresh
     ? pickLayout(
         seed,
-        { hasPhoto: copyResult.hasPhoto, copyStyle: copyResult.copyStyle },
+        { hasPhoto: copyResult!.hasPhoto, copyStyle: copyResult!.copyStyle },
         { ids: history?.layoutIds, coverages: history?.coverages },
       )
     : undefined;
@@ -1338,7 +1552,7 @@ async function renderAndStoreSocialPoster(
   const artDirection = isFresh
     ? await generateArtDirection({
         note: row.note,
-        copyStyle: copyResult.copyStyle,
+        copyStyle: copyResult!.copyStyle,
         // Colour words are stripped from this hint inside buildPosterPrompt; the art director
         // gets the raw summary but is told the palette is not its call.
         referenceHint: resolved.master.layoutSpec?.layoutSummary,
@@ -1359,13 +1573,14 @@ async function renderAndStoreSocialPoster(
 
   // 4. Image prompt (pure string assembly, no model call).
   const prompt = buildPosterPrompt({
-    copy: copyResult.copy,
-    copyStyle: copyResult.copyStyle,
+    copy: copyResult?.copy ?? {},
+    information: isSimpleTemplateEdit ? row.note : undefined,
+    copyStyle: copyResult?.copyStyle ?? resolved.type.copyStyle,
     designMode,
     brand,
     masterUrl: resolved.master.url,
     layoutSummary: resolved.master.layoutSpec?.layoutSummary,
-    hasPhoto: copyResult.hasPhoto,
+    hasPhoto: copyResult?.hasPhoto ?? false,
     artDirection: artDirection ?? undefined,
     assignedPalette,
     assignedLayout,
@@ -1417,7 +1632,7 @@ async function renderAndStoreSocialPoster(
   let posterPng: Buffer;
   if (brand === 'cmo') {
     const sceneBrief =
-      (typeof copyResult.copy.scene_brief === 'string'
+      (typeof copyResult?.copy.scene_brief === 'string'
         ? copyResult.copy.scene_brief.trim()
         : '') || row.note;
     const photo = await generateImage(buildCmoCirclePhotoPrompt(sceneBrief), {

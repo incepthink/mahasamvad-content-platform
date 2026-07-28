@@ -39,31 +39,25 @@ const TERM_TYPES: readonly TermType[] = [
 ];
 
 const SYSTEM_PROMPT = [
-  'You extract proper nouns from a Marathi (Devanagari) article so they can be added to a',
-  'Marathi→English glossary. You only MAP terms that already appear in the article — you',
-  'invent nothing.',
+  'You extract person names and official designations from a Marathi (Devanagari) article so they can be added to a Marathi-to-English glossary.',
+  'You only map terms that explicitly appear in the article. Do not invent, infer, expand, or add any term that is not present in the source text.',
   '',
-  'Extract every proper noun and classify each one:',
-  '- person: a person’s name (e.g. from "मुख्यमंत्री एकनाथ शिंदे", the name "एकनाथ शिंदे")',
-  '- designation: an official title / post (e.g. मुख्यमंत्री, जिल्हाधिकारी, सचिव)',
-  '- scheme: a named government scheme or programme',
-  '- place: a city, district, taluka, village, or state',
-  '- org: an organization, department, ministry, board, or committee',
-  '- other: a proper noun that fits none of the above',
+  'Extract every matching term and classify it as:',
+  '- person: a person’s name (e.g. from "मुख्यमंत्री देवेंद्र फडणवीस", the name "देवेंद्र फडणवीस")',
+  '- designation: an official title, government post, or administrative position (e.g. मुख्यमंत्री, उपमुख्यमंत्री, जिल्हाधिकारी, सचिव, आयुक्त)',
   '',
   'For each, give the correct STANDARD English rendering as `english`:',
   '- personal names → standard English transliteration. A name is a name, NEVER its',
   '  literal meaning (e.g. the surname "वाघ" is "Wagh", not "Tiger").',
-  '- schemes / organizations / designations / places → the official or conventional',
-  '  English name if one exists, otherwise a faithful transliteration.',
   '',
   'Rules:',
   '- Return ONLY a strict JSON array and nothing else, in this exact shape:',
-  '  [{ "marathi": "...", "english": "...", "type": "person|designation|scheme|place|org|other" }]',
+  '  [{ "marathi": "...", "english": "...", "type": "person|designation" }]',
   '- Use the exact Marathi surface form from the article for `marathi`.',
-  '- Proper nouns only — exclude common words, generic phrases, dates, amounts and',
-  '  ordinary nouns.',
-  '- If the article contains no proper nouns, return [].',
+  '- Extract only person names and official designations — exclude schemes, places,',
+  '  organisations, projects, common words, generic phrases, dates, amounts, and ordinary nouns.',
+  'Do not extract honorifics such as श्री., श्रीमती, or मा. as separate entries',
+  '- If the article contains no person names or official designations, return [].',
 ].join('\n');
 
 function buildMessages(marathiArticle: string): ChatMessage[] {
@@ -200,7 +194,7 @@ if (
   import.meta.url === pathToFileURL(process.argv[1]).href
 ) {
   const SAMPLE_ARTICLE = [
-    'मुख्यमंत्री एकनाथ शिंदे यांच्या हस्ते आज मुंबईत नमो शेतकरी महासन्मान निधी योजनेचा',
+    'मुख्यमंत्री देवेंद्र फडणवीस यांच्या हस्ते आज मुंबईत नमो शेतकरी महासन्मान निधी योजनेचा',
     'शुभारंभ झाला. जिल्हाधिकारी श्री. वाघ यांनी कार्यक्रमाचे आयोजन केले होते. महसूल',
     'विभागाच्या वतीने ही योजना राबवली जाणार आहे.',
   ].join('\n');

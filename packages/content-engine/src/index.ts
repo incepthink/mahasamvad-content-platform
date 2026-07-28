@@ -16,6 +16,8 @@ export {
 // reachable through the same env var.
 export {
   generateArticleSimple,
+  articlePromptVariant,
+  type ArticlePromptVariant,
   type SimpleGeneratedArticle,
   type SimpleGenerateArticleOptions,
   type SimpleArticlePhase,
@@ -27,7 +29,11 @@ export {
   type StyleReference,
   type StyleReferenceSource,
 } from './generation/select-style-reference.js';
-export { SIMPLE_ARTICLE_PROMPT_VERSION } from './generation/simple-article-prompt.js';
+export {
+  SIMPLE_ARTICLE_PROMPT_VERSION,
+  type ArticleNameEntry,
+} from './generation/simple-article-prompt.js';
+export { MINIMAL_ARTICLE_PROMPT_VERSION } from './generation/minimal-article-prompt.js';
 export { polishArticleWithSarvam } from './generation/polish-article.js';
 export { generateCopy } from './generation/generate-copy.js';
 export { extractFiveWOneH } from './generation/extract-5w1h.js';
@@ -233,7 +239,7 @@ export {
   deleteReferenceImage,
   listReferenceLibrary,
   normalizeReferenceImage,
-  overrideReferenceImagePhotoZone,
+  overrideReferenceImageLayoutSpec,
   reanalyzeReferenceImage,
   setReferenceImageEnabled,
   uploadReferenceImage,
@@ -258,6 +264,7 @@ export {
   resolveCmoReference,
   resolvePinnedImage,
   resolvePinnedType,
+  resolveSocialReferenceByInformation,
   masterUrl,
   type SocialTypeInfo,
   type ResolvedType,
@@ -269,6 +276,15 @@ export {
   type MasterNeed,
   type SelectedMaster,
 } from './references/select-master.js';
+// Information-first reference selection: the raw note is matched against the whole enabled
+// library before anything about the note is predicted (see the module header).
+export {
+  rankReferenceByInformation,
+  selectReferenceByInformation,
+  type InformationCandidate,
+  type InformationRanking,
+  type SelectedByInformation,
+} from './references/select-by-information.js';
 // Social poster classify → copy → image-prompt, ported from the n8n workflow into code.
 export {
   classifyPosterType,

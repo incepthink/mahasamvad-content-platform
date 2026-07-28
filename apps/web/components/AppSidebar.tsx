@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
+  AudioLines,
   BookOpen,
   Clapperboard,
   History,
@@ -32,6 +33,7 @@ const COLLAPSED_KEY = 'sidebar-collapsed';
 const NAV_LINKS = [
   { href: '/', label: STR.navNew, Icon: ImagePlus },
   { href: '/dlo', label: STR.navDlo, Icon: Mic },
+  { href: '/transcribe', label: STR.navTranscribe, Icon: AudioLines },
   { href: '/generations', label: STR.navHistory, Icon: History },
   { href: '/translate', label: STR.navTranslate, Icon: Languages },
   { href: '/proofread', label: STR.navProofread, Icon: SpellCheck },

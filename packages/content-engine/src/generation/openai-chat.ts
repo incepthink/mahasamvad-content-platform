@@ -53,23 +53,26 @@ export const ARTICLE_MODEL = process.env.OPENAI_ARTICLE_MODEL ?? 'gpt-5.6-sol';
 // amounts, dates and percentages verbatim, without repeating itself and without padding the
 // list — is a judgement-heavy read, not the mechanical extraction it looks like. It is also
 // the officer's ONLY readable view of what a 20-page scanned source actually says, and it
-// steers nothing downstream that could correct it. So it is pinned one step up from
-// CHAT_MODEL for the same reason /video's text calls and the simplified article generator
-// are. Passed EXPLICITLY at the one call site so no other caller's default moves; rollback
-// is an .env edit (OPENAI_POINTERS_MODEL=gpt-5.6-terra), which halves the per-run cost.
+// steers nothing downstream. The bounded extraction path handles coverage; the normal
+// authoring tier keeps this review aid responsive. Deployments can opt into a different tier
+// with OPENAI_POINTERS_MODEL without moving any other caller.
 export const POINTERS_MODEL =
-  process.env.OPENAI_POINTERS_MODEL ?? 'gpt-5.6-sol';
+  process.env.OPENAI_POINTERS_MODEL ?? 'gpt-5.6-terra';
 
 // Deliberation for that one call. With the separate grading passes gone, the runtime prompt's
-// SILENT FINAL CHECK block is the only verification left and it runs in the reasoning stage —
-// so this is the knob that replaced them, not a cosmetic default. Env-tunable because 'high'
-// is a legitimate quality/latency trade for a surface where one call produces the whole
-// deliverable. Values: none | low | medium | high; anything else falls back to 'medium'.
+// verification happens in the reasoning stage — so this is the knob that replaced them, not a
+// cosmetic default. It defaults to 'high': one call now produces the entire deliverable, and
+// under ARTICLE_PROMPT_VARIANT=minimal the specification is five sentences, so the judgement
+// that used to be spread over fourteen calls has nowhere else to happen. Latency is the cost,
+// and it is paid on a surface the officer is already waiting on for one article rather than
+// fourteen round trips. Env-tunable in both directions
+// (OPENAI_ARTICLE_REASONING_EFFORT=medium restores the previous behaviour).
+// Values: none | low | medium | high; anything else falls back to 'high'.
 export function articleReasoningEffort(): ReasoningEffort {
   const raw = process.env.OPENAI_ARTICLE_REASONING_EFFORT?.trim().toLowerCase();
   return raw === 'none' || raw === 'low' || raw === 'medium' || raw === 'high'
     ? raw
-    : 'medium';
+    : 'high';
 }
 
 // Bound the completion so one runaway generation can't silently cost several times a
@@ -117,7 +120,10 @@ const REASONING_HEADROOM: Readonly<Record<ReasoningEffort, number>> = {
 };
 
 type ChatResponse = {
-  choices: Array<{ message: { content: string | null }; finish_reason?: string }>;
+  choices: Array<{
+    message: { content: string | null };
+    finish_reason?: string;
+  }>;
   usage?: ChatUsage;
 };
 
@@ -227,6 +233,174 @@ export async function chatComplete(
   const content = body.choices[0]?.message.content;
   if (!content) {
     throw noContentError('chat', body);
+  }
+  return content;
+}
+
+// One chunk of a `stream: true` completion. `choices` is empty on the final usage-only
+// chunk, which is why every field here is optional.
+type ChatStreamChunk = {
+  choices?: Array<{
+    delta?: { content?: string | null };
+    finish_reason?: string | null;
+  }>;
+  usage?: ChatUsage;
+};
+
+// Streaming twin of chatComplete: identical request, identical return value (the complete
+// assistant message), but the text is handed to `onDelta` as it arrives so a caller can show
+// it being written. Text only — no json_object/json_schema variant, because the one caller is
+// the article draft and a partially-streamed JSON document is not something a UI can render.
+//
+// The transport is otherwise the shared one: openAiFetch still serializes the call process-wide
+// and still retries transient failures BEFORE returning a Response, so a retry can never replay
+// tokens a caller has already seen.
+//
+// The deliberate part is the fallback. Streaming is a nicety; the article is the deliverable.
+// If the streaming request fails before a single token has been read — a model or gateway that
+// rejects `stream`/`stream_options`, a proxy that will not pass an event stream — this retries
+// the ordinary non-streaming call rather than failing a run the officer is waiting on. Nothing
+// was billed for a request that produced no tokens. A failure AFTER content has arrived is
+// thrown as usual: those tokens are paid for, and silently re-running the call would bill them
+// a second time.
+export async function chatCompleteStream(
+  messages: readonly ChatMessage[],
+  options: {
+    // Called with each incremental piece of the answer, in order. Concatenating every
+    // chunk yields exactly the returned string.
+    onDelta: (chunk: string) => void;
+    temperature?: number;
+    model?: string;
+    maxTokens?: number;
+    reasoningEffort?: ReasoningEffort;
+  },
+): Promise<string> {
+  const model = options.model ?? CHAT_MODEL;
+  const maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS;
+  const modelParams = isGpt5Model(model)
+    ? gpt5Params(maxTokens, options.reasoningEffort)
+    : {
+        temperature: options.temperature ?? 0.4,
+        max_tokens: maxTokens,
+      };
+
+  const fallback = async (reason: unknown): Promise<string> => {
+    console.warn(
+      `[openai] chat stream unavailable (${String(reason)}); falling back to a non-streaming call`,
+    );
+    const content = await chatComplete(messages, {
+      ...(options.temperature !== undefined
+        ? { temperature: options.temperature }
+        : {}),
+      ...(options.model !== undefined ? { model: options.model } : {}),
+      ...(options.maxTokens !== undefined
+        ? { maxTokens: options.maxTokens }
+        : {}),
+      ...(options.reasoningEffort !== undefined
+        ? { reasoningEffort: options.reasoningEffort }
+        : {}),
+    });
+    // The caller is showing what it was handed, so give it the whole answer at once
+    // rather than leaving it with a permanently empty view of a finished article.
+    options.onDelta(content);
+    return content;
+  };
+
+  let response: Response;
+  try {
+    response = await openAiFetch(CHAT_URL, {
+      label: 'chat',
+      apiKey: requireApiKey(),
+      body: {
+        model,
+        messages,
+        ...modelParams,
+        stream: true,
+        // Usage is otherwise absent from a streamed response, and dropping it would make
+        // every streamed article invisible to the cost meter.
+        stream_options: { include_usage: true },
+      },
+    });
+  } catch (error) {
+    return fallback(error);
+  }
+
+  const body = response.body;
+  if (!body) return fallback('response carried no body');
+
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let content = '';
+  let finishReason: string | undefined;
+  let usage: ChatUsage | undefined;
+
+  try {
+    reading: for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      // Bare CR is never meaningful here (a carriage return inside a JSON string is
+      // escaped as two characters), so dropping it makes the event separator exactly
+      // "\n\n" regardless of how the server framed its lines or where a chunk split.
+      buffer = (buffer + decoder.decode(value, { stream: true })).replace(
+        /\r/g,
+        '',
+      );
+
+      let separator = buffer.indexOf('\n\n');
+      while (separator !== -1) {
+        const event = buffer.slice(0, separator);
+        buffer = buffer.slice(separator + 2);
+        for (const line of event.split('\n')) {
+          if (!line.startsWith('data:')) continue;
+          const data = line.slice(5).trim();
+          if (data === '') continue;
+          if (data === '[DONE]') break reading;
+          let chunk: ChatStreamChunk;
+          try {
+            chunk = JSON.parse(data) as ChatStreamChunk;
+          } catch {
+            // A malformed frame is not worth failing a paid generation over; the
+            // completed text is reassembled from the frames that did parse.
+            console.warn('[openai] skipped an unparseable chat stream frame');
+            continue;
+          }
+          if (chunk.usage) usage = chunk.usage;
+          const choice = chunk.choices?.[0];
+          if (choice?.finish_reason) finishReason = choice.finish_reason;
+          const delta = choice?.delta?.content;
+          if (delta) {
+            content += delta;
+            options.onDelta(delta);
+          }
+        }
+        separator = buffer.indexOf('\n\n');
+      }
+    }
+  } catch (error) {
+    // Nothing arrived, so nothing was billed and nothing was shown: the non-streaming
+    // call is still the cheaper way to finish. Past the first token it is not.
+    if (content === '') return fallback(error);
+    throw error;
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+
+  recordChatUsage(model, usage);
+  if (!content) {
+    // The stream itself worked — the model simply produced nothing, which on gpt-5 almost
+    // always means reasoning consumed the budget. Retrying non-streaming would fail the same
+    // way and bill it twice, so this reports exactly what chatComplete reports.
+    throw noContentError('chat stream', {
+      choices: [
+        {
+          message: { content: null },
+          ...(finishReason !== undefined
+            ? { finish_reason: finishReason }
+            : {}),
+        },
+      ],
+    });
   }
   return content;
 }

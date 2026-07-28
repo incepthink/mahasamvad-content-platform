@@ -16,6 +16,9 @@ export type DesignMode = 'fresh' | 'adaptive' | 'onbrand';
 
 export type BuildPosterPromptInput = Readonly<{
   copy: PosterCopy;
+  // The original source note. In Twitter DGIPR 'onbrand' mode this is passed to the image
+  // model with the reference image; no generated poster-copy or design rules are added.
+  information?: string | undefined;
   copyStyle: string;
   designMode: DesignMode;
   brand: TemplateBrand;
@@ -65,14 +68,13 @@ function fmtColourSpec(p: PosterPalette): string {
 // (rather than in art-direction.ts) so all image-prompt string assembly lives in one file. The
 // `palette` line only appears on the legacy un-assigned path, where colour really was its call.
 function fmtArtDirection(ad: ArtDirection): string {
-  const lines = [
-    'ART DIRECTION — the intended treatment for this poster:',
-  ];
+  const lines = ['ART DIRECTION — the intended treatment for this poster:'];
   if (ad.palette) lines.push(`- Colour palette: ${ad.palette}`);
   if (ad.background) lines.push(`- Background handling: ${ad.background}`);
   if (ad.composition) lines.push(`- Composition detail: ${ad.composition}`);
   if (ad.mood) lines.push(`- Mood: ${ad.mood}`);
-  if (ad.accents) lines.push(`- Panels / cards / icons / accents: ${ad.accents}`);
+  if (ad.accents)
+    lines.push(`- Panels / cards / icons / accents: ${ad.accents}`);
   return lines.join('\n');
 }
 
@@ -106,7 +108,9 @@ function fmtBullets(arr: unknown): string {
   return items
     .map((b, i) => {
       const bullet = b as { text?: string; emphasis?: unknown[] };
-      const e = (Array.isArray(bullet.emphasis) ? bullet.emphasis : []).filter(Boolean);
+      const e = (Array.isArray(bullet.emphasis) ? bullet.emphasis : []).filter(
+        Boolean,
+      );
       return `  ${i + 1}. ${bullet.text ?? ''}${e.length ? `  [emphasise: ${e.join(' | ')}]` : ''}`;
     })
     .join('\n');
@@ -115,7 +119,7 @@ function fmtBullets(arr: unknown): string {
 // Render the copy object into the layout instruction block. Dispatches on copy_style (not the
 // type slug), so custom types render with the generic headline + points layout.
 function buildChange(copyStyle: string, c: PosterCopy): string {
-  const get = <T,>(k: string): T => c[k] as T;
+  const get = <T>(k: string): T => c[k] as T;
   let lines: string[];
   if (copyStyle === 'alert') {
     lines = [
@@ -126,8 +130,11 @@ function buildChange(copyStyle: string, c: PosterCopy): string {
       fmtBullets(get('bullets')),
     ];
   } else if (copyStyle === 'campaign') {
-    const sch = (get<Record<string, string>>('schedule') as Record<string, string>) || {};
-    const stats = Array.isArray(get('stats')) ? (get('stats') as Record<string, string>[]) : [];
+    const sch =
+      (get<Record<string, string>>('schedule') as Record<string, string>) || {};
+    const stats = Array.isArray(get('stats'))
+      ? (get('stats') as Record<string, string>[])
+      : [];
     lines = [
       `KICKER (small tag near the top): ${get<string>('kicker')}`,
       `HEADLINE (largest block, the campaign name): ${get<string>('headline')}`,
@@ -138,11 +145,16 @@ function buildChange(copyStyle: string, c: PosterCopy): string {
       `CALL TO ACTION (make it prominent): ${get<string>('cta') || ''}`,
       'STAT CALLOUTS (each as icon + figure + label):',
       stats
-        .map((s, i) => `  ${i + 1}. ${s.value} — ${s.label}  [icon: ${s.icon_hint}]`)
+        .map(
+          (s, i) =>
+            `  ${i + 1}. ${s.value} — ${s.label}  [icon: ${s.icon_hint}]`,
+        )
         .join('\n'),
     ];
   } else if (copyStyle === 'quote') {
-    const at = (get<Record<string, string>>('attribution') as Record<string, string>) || {};
+    const at =
+      (get<Record<string, string>>('attribution') as Record<string, string>) ||
+      {};
     const points = Array.isArray(get('points'))
       ? (get('points') as Record<string, string>[])
       : [];
@@ -152,7 +164,9 @@ function buildChange(copyStyle: string, c: PosterCopy): string {
       `QUOTE (main text, inside large quotation marks): ${get<string>('quote_text')}`,
       `ATTRIBUTION (name then designation): ${at.name || ''}, ${at.title || ''}`,
       'SUPPORTING POINTS (each as icon + text):',
-      points.map((p, i) => `  ${i + 1}. ${p.text}  [icon: ${p.icon_hint}]`).join('\n'),
+      points
+        .map((p, i) => `  ${i + 1}. ${p.text}  [icon: ${p.icon_hint}]`)
+        .join('\n'),
     ];
   } else if (copyStyle === 'timeline') {
     const milestones = Array.isArray(get('milestones'))
@@ -196,7 +210,8 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
   }
 
   const change = buildChange(copyStyle, copy);
-  const sceneBrief = typeof copy.scene_brief === 'string' ? copy.scene_brief : '';
+  const sceneBrief =
+    typeof copy.scene_brief === 'string' ? copy.scene_brief : '';
 
   if (brand === 'cmo') {
     return [
@@ -215,6 +230,24 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
     ].join('\n');
   }
 
+  if (designMode === 'onbrand' && input.information !== undefined) {
+    console.log('HIIIIIIIIIIIIIIIIIIIIIIIIIII');
+
+    const information = input.information.trim();
+    return [
+      'Using the given reference image, generate an image for this information:',
+      '',
+      information,
+      '',
+      "Use the provided reference image as the AUTHORITATIVE STRUCTURE for the poster. Preserve its overall composition, section placement, proportions, content distribution, imagery zones, visual balance, and density while replacing its information. Do not redesign the structure, compress everything onto one side, or leave large blank or unused areas. Fill the usable canvas as efficiently as the reference image does.",
+      'Do not add a logo.',
+      'Do not add a footer.',
+      "MANDATORY EMPTY COVER ZONES: only the top-right 180 × 170 pixels and the full-width bottom 120 pixels of the 1280 × 1600 output are reserved for branding added later by software. These are the ONLY areas that may be intentionally empty: use all remaining space right up to their boundaries, following the reference structure. Leave both zones COMPLETELY EMPTY of content and continue the poster's immediately surrounding background through them seamlessly, with the same colour and visual treatment as the adjacent background. Do NOT create a separate colour, white space, patch, box, panel, band, reserved-space marker, or visible boundary in either zone. ABSOLUTELY NO text, numbers, logos, footer, photographs, faces, people, objects, icons, borders, shapes, or decoration may enter, sit behind, or cross either zone.",
+      'Use only Marathi text and Devanagari numerals in the output. Use Nirmala UI for all text.',
+      'Never paste the entire input article into the image; select only the most important information for the poster.',
+    ].join('\n');
+  }
+
   if (designMode === 'fresh') {
     const freshLines = [
       'Design a single, complete 4:5 portrait OFFICIAL DGIPR Maharashtra government poster FROM SCRATCH — an original composition, NOT a copy of any existing template.',
@@ -223,10 +256,21 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
     // it. Both are emitted when both exist: the spec says which colours, the direction says how
     // they are used. Only a run with no assignment at all falls back to free choice.
     if (input.assignedPalette) {
-      freshLines.push('', fmtColourSpec(input.assignedPalette), '', COLOUR_MANDATE);
-      if (input.artDirection) freshLines.push('', fmtArtDirection(input.artDirection));
+      freshLines.push(
+        '',
+        fmtColourSpec(input.assignedPalette),
+        '',
+        COLOUR_MANDATE,
+      );
+      if (input.artDirection)
+        freshLines.push('', fmtArtDirection(input.artDirection));
     } else if (input.artDirection) {
-      freshLines.push('', fmtArtDirection(input.artDirection), '', COLOUR_MANDATE);
+      freshLines.push(
+        '',
+        fmtArtDirection(input.artDirection),
+        '',
+        COLOUR_MANDATE,
+      );
     } else {
       freshLines.push(
         '',
@@ -260,7 +304,10 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
       change,
     );
     if (hasPhoto) {
-      freshLines.push('', `BACKGROUND / HERO IMAGERY (must never cover the text): ${sceneBrief}`);
+      freshLines.push(
+        '',
+        `BACKGROUND / HERO IMAGERY (must never cover the text): ${sceneBrief}`,
+      );
     } else {
       freshLines.push(
         '',
@@ -284,7 +331,9 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
   locked.push(
     'Single 4:5 portrait poster. Typography: bold, high-contrast, highly legible Devanagari (Marathi). Government public-notice aesthetic: clean, serious, trustworthy.',
   );
-  locked.push('Render ALL Marathi text crisply and correctly in Devanagari, spelled exactly as below.');
+  locked.push(
+    'Render ALL Marathi text crisply and correctly in Devanagari, spelled exactly as below.',
+  );
 
   const lines = [locked.join(' ')];
   if (layoutSummary) {
@@ -321,8 +370,12 @@ export type BuildFeedbackPromptInput = Readonly<{
 // byte-for-byte).
 export function buildFeedbackPrompt(input: BuildFeedbackPromptInput): string {
   const imageFeedback = input.imageFeedback.trim();
-  if (imageFeedback.length === 0) throw new Error('No image feedback provided.');
-  const markerCount = Math.max(0, Math.min(3, Math.trunc(Number(input.markerCount) || 0)));
+  if (imageFeedback.length === 0)
+    throw new Error('No image feedback provided.');
+  const markerCount = Math.max(
+    0,
+    Math.min(3, Math.trunc(Number(input.markerCount) || 0)),
+  );
 
   const reservedZones =
     input.brand === 'cmo'
@@ -355,7 +408,10 @@ export function buildFeedbackPrompt(input: BuildFeedbackPromptInput): string {
 //   tsx src/generation/build-poster-prompt.ts
 // Prints the assembled 'fresh' prompt for two differently-assigned runs and asserts the
 // properties the colour-diversity fix depends on. Pure string assembly — no model call, no spend.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
   const COPY: PosterCopy = {
     kicker: 'आरोग्य सेवा',
     headline: 'चार प्राथमिक आरोग्य केंद्रांचे उन्नतीकरण',
@@ -365,7 +421,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       { text: 'नेर येथे २४ तास सेवा', emphasis: ['२४ तास'] },
       { text: 'पिंगळाई येथे रुग्णवाहिका', emphasis: [] },
     ],
-    scene_brief: 'A rural primary health centre with staff attending to visitors in daylight.',
+    scene_brief:
+      'A rural primary health centre with staff attending to visitors in daylight.',
   } as unknown as PosterCopy;
 
   // A master summary in the shape analyze-template.ts really produces — colour theme and all.
@@ -374,64 +431,82 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 
   const failures: string[] = [];
 
-  void Promise.all([import('./poster-palettes.js'), import('./poster-layouts.js')]).then(
-    ([{ pickPalette }, { pickLayout }]) => {
-      for (const seed of ['run-alpha', 'run-beta']) {
-        const palette = pickPalette(seed);
-        const layout = pickLayout(seed, { hasPhoto: true, copyStyle: 'info_bullets' });
-        const prompt = buildPosterPrompt({
-          copy: COPY,
-          copyStyle: 'info_bullets',
-          designMode: 'fresh',
-          brand: 'dgipr',
-          masterUrl: '',
-          layoutSummary: MASTER_SUMMARY,
-          hasPhoto: true,
-          assignedPalette: palette,
-          assignedLayout: layout,
-          artDirection: {
-            palette: '',
-            background: 'a flat ground with a single crisp colour block, no gradients',
-            composition: 'the headline set tight over three evenly spaced rows',
-            mood: 'calm, clinical, reassuring',
-            accents: 'thin rules and simple line icons, one emphasis per row',
-          },
-        });
+  void Promise.all([
+    import('./poster-palettes.js'),
+    import('./poster-layouts.js'),
+  ]).then(([{ pickPalette }, { pickLayout }]) => {
+    for (const seed of ['run-alpha', 'run-beta']) {
+      const palette = pickPalette(seed);
+      const layout = pickLayout(seed, {
+        hasPhoto: true,
+        copyStyle: 'info_bullets',
+      });
+      const prompt = buildPosterPrompt({
+        copy: COPY,
+        copyStyle: 'info_bullets',
+        designMode: 'fresh',
+        brand: 'dgipr',
+        masterUrl: '',
+        layoutSummary: MASTER_SUMMARY,
+        hasPhoto: true,
+        assignedPalette: palette,
+        assignedLayout: layout,
+        artDirection: {
+          palette: '',
+          background:
+            'a flat ground with a single crisp colour block, no gradients',
+          composition: 'the headline set tight over three evenly spaced rows',
+          mood: 'calm, clinical, reassuring',
+          accents: 'thin rules and simple line icons, one emphasis per row',
+        },
+      });
 
-        console.log(`\n${'='.repeat(78)}\nseed ${seed} · ${palette.id} (${palette.family}) · ${layout.id}\n${'='.repeat(78)}\n${prompt}`);
+      console.log(
+        `\n${'='.repeat(78)}\nseed ${seed} · ${palette.id} (${palette.family}) · ${layout.id}\n${'='.repeat(78)}\n${prompt}`,
+      );
 
-        // 1. The assigned hexes must be present — this is the bug that made the whole rotation inert.
-        for (const hex of [palette.hex.ground, palette.hex.panel, palette.hex.ink, palette.hex.accent]) {
-          if (!prompt.includes(hex)) failures.push(`${seed}: assigned hex ${hex} missing from the prompt`);
-        }
-        // 2. The colour spec must come BEFORE the art direction, so the spec is what leads.
-        const specAt = prompt.indexOf('COLOUR SPECIFICATION');
-        const adAt = prompt.indexOf('ART DIRECTION');
-        if (specAt === -1) failures.push(`${seed}: no COLOUR SPECIFICATION block`);
-        if (adAt !== -1 && specAt > adAt) failures.push(`${seed}: art direction precedes the colour spec`);
-        // 3. The assigned composition must be present and precede the master's structure hint.
-        const compAt = prompt.indexOf('COMPOSITION —');
-        const structAt = prompt.indexOf('STRUCTURE INSPIRATION');
-        if (compAt === -1) failures.push(`${seed}: no COMPOSITION block`);
-        if (structAt !== -1 && compAt > structAt) failures.push(`${seed}: structure hint precedes the composition`);
-        // 4. NO colour word from the master's summary may survive into the structure hint.
-        if (structAt !== -1) {
-          const hint = prompt.slice(structAt);
-          for (const word of ['saffron', 'cream', 'maroon', 'orange']) {
-            if (new RegExp(`\b${word}\b`, 'i').test(hint)) {
-              failures.push(`${seed}: master colour word "${word}" leaked into the structure hint`);
-            }
+      // 1. The assigned hexes must be present — this is the bug that made the whole rotation inert.
+      for (const hex of [
+        palette.hex.ground,
+        palette.hex.panel,
+        palette.hex.ink,
+        palette.hex.accent,
+      ]) {
+        if (!prompt.includes(hex))
+          failures.push(`${seed}: assigned hex ${hex} missing from the prompt`);
+      }
+      // 2. The colour spec must come BEFORE the art direction, so the spec is what leads.
+      const specAt = prompt.indexOf('COLOUR SPECIFICATION');
+      const adAt = prompt.indexOf('ART DIRECTION');
+      if (specAt === -1)
+        failures.push(`${seed}: no COLOUR SPECIFICATION block`);
+      if (adAt !== -1 && specAt > adAt)
+        failures.push(`${seed}: art direction precedes the colour spec`);
+      // 3. The assigned composition must be present and precede the master's structure hint.
+      const compAt = prompt.indexOf('COMPOSITION —');
+      const structAt = prompt.indexOf('STRUCTURE INSPIRATION');
+      if (compAt === -1) failures.push(`${seed}: no COMPOSITION block`);
+      if (structAt !== -1 && compAt > structAt)
+        failures.push(`${seed}: structure hint precedes the composition`);
+      // 4. NO colour word from the master's summary may survive into the structure hint.
+      if (structAt !== -1) {
+        const hint = prompt.slice(structAt);
+        for (const word of ['saffron', 'cream', 'maroon', 'orange']) {
+          if (new RegExp(`\b${word}\b`, 'i').test(hint)) {
+            failures.push(
+              `${seed}: master colour word "${word}" leaked into the structure hint`,
+            );
           }
         }
       }
+    }
 
-      if (failures.length > 0) {
-        console.error(`\n${failures.length} FAILURE(S):`);
-        for (const f of failures) console.error(`  - ${f}`);
-        process.exitCode = 1;
-      } else {
-        console.log('\nAll prompt-assembly assertions passed.');
-      }
-    },
-  );
+    if (failures.length > 0) {
+      console.error(`\n${failures.length} FAILURE(S):`);
+      for (const f of failures) console.error(`  - ${f}`);
+      process.exitCode = 1;
+    } else {
+      console.log('\nAll prompt-assembly assertions passed.');
+    }
+  });
 }

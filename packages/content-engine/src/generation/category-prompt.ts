@@ -54,10 +54,12 @@ export function designationBlock(
   ];
 }
 
-// The drafting/revision instruction. First mention in full, later mentions bare — standard
-// Marathi news style, and what the deterministic pass expects to find.
+// The drafting/revision instruction. First mention in full, later mentions by surname — standard
+// Marathi news style — and the designation on EVERY one of them, which is what the deterministic
+// pass now enforces (apply-designations.ts, 2026-07-28). A bare surname mid-article reads as a
+// stranger in a government press note.
 export const DESIGNATION_TASK_RULE =
-  'DESIGNATIONS यादीतील व्यक्तींचा लेखातील पहिला उल्लेख "पदनाम + पूर्ण नाव" असाच करा (उदा. "मुख्यमंत्री देवेंद्र फडणवीस यांनी"). पुढील उल्लेखांत पदनाम पुन्हा लिहू नका, फक्त नाव वापरा. ही पदनामे अधिकाऱ्याने तपासून दिली आहेत, त्यामुळे टिपणीत नसली तरी ती वापरणे बरोबर आहे; यादीत नसलेले कोणतेही पदनाम मात्र स्वतःहून जोडू नका.';
+  'DESIGNATIONS यादीतील व्यक्तींचा लेखातील पहिला उल्लेख "पदनाम + पूर्ण नाव" असाच करा (उदा. "मुख्यमंत्री देवेंद्र फडणवीस यांनी"). पुढील उल्लेखांत पूर्ण नाव पुन्हा लिहू नका, फक्त आडनाव वापरा — पण त्या प्रत्येक उल्लेखातही आडनावाआधी पदनाम लिहा (उदा. "असल्याचे सांगत मुख्यमंत्री फडणवीस यांनी"). टिपणीत व्यक्तीचे फक्त आडनावच आले असेल, तरी त्या आडनावापुढे हेच पदनाम वापरा; स्वतःहून पूर्ण नाव जोडू नका. ही पदनामे अधिकाऱ्याने तपासून दिली आहेत, त्यामुळे टिपणीत नसली तरी ती वापरणे बरोबर आहे; यादीत नसलेले कोणतेही पदनाम मात्र स्वतःहून जोडू नका.';
 
 // The "do not strip this" instruction for the checkers/repair passes, which otherwise see an
 // unsourced designation and correctly (but wrongly, here) flag it.

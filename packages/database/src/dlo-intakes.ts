@@ -74,6 +74,13 @@ export type DloIntakeRow = Readonly<{
   heading: string | null;
   files: readonly DloIntakeFileEntry[];
   combinedText: string | null;
+  // The officer's saved review-step state (migration 0036) — corrections, unticked pages, and
+  // the two paid lookups. Deliberately untyped here: its shape is owned by
+  // DloReviewStateSchema in @dgipr/schemas, which the API parses it with, and this package
+  // does not depend on schemas. Null both when nothing has been saved and when the column
+  // does not exist yet, which is what makes an un-applied 0036 a disabled feature rather
+  // than a broken intake.
+  reviewState: unknown;
   createdAt: string;
   updatedAt: string;
 }>;
@@ -88,6 +95,7 @@ type DloIntakeDbRow = {
   heading: string | null;
   files: DloIntakeFileEntry[] | null;
   combined_text: string | null;
+  review_state?: unknown;
   created_at: string;
   updated_at: string;
 };
@@ -103,10 +111,32 @@ function fromDbRow(row: DloIntakeDbRow): DloIntakeRow {
     heading: row.heading,
     files: row.files ?? [],
     combinedText: row.combined_text,
+    // `?? null` rather than a bare read: on a database without 0036 the column is simply
+    // absent from the response, so the property is undefined and must collapse to "nothing
+    // saved" instead of leaking undefined into the detail payload.
+    reviewState: row.review_state ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }
+
+// What the shared recent-intake list on /dlo needs, and nothing more. `combined_text` and
+// `review_state` are deliberately NOT selected: a card shows neither, and on a long intake
+// both are tens of thousands of characters that would be shipped on every list poll.
+const SUMMARY_COLUMNS =
+  'id,status,step,category,heading,notes,files,created_at,updated_at';
+
+export type DloIntakeSummaryRow = Readonly<{
+  id: string;
+  status: DloIntakeStatus;
+  step: DloIntakeStep | null;
+  category: DloIntakeCategory;
+  heading: string | null;
+  notes: string;
+  files: readonly DloIntakeFileEntry[];
+  createdAt: string;
+  updatedAt: string;
+}>;
 
 export async function insertDloIntake(
   client: SupabaseClient,
@@ -133,9 +163,20 @@ export async function insertDloIntake(
   return fromDbRow(data as DloIntakeDbRow);
 }
 
-// Fields the intake job may update after creation.
+// Fields updatable after creation — by the intake job (status/step/error/files/combinedText)
+// and by the officer's review autosave (reviewState/category/heading).
 export type DloIntakePatch = Partial<
-  Pick<DloIntakeRow, 'status' | 'step' | 'error' | 'files' | 'combinedText'>
+  Pick<
+    DloIntakeRow,
+    | 'status'
+    | 'step'
+    | 'error'
+    | 'files'
+    | 'combinedText'
+    | 'reviewState'
+    | 'category'
+    | 'heading'
+  >
 >;
 
 export async function updateDloIntake(
@@ -149,6 +190,11 @@ export async function updateDloIntake(
   if (patch.error !== undefined) row.error = patch.error;
   if (patch.files !== undefined) row.files = patch.files;
   if (patch.combinedText !== undefined) row.combined_text = patch.combinedText;
+  // Named only when the caller actually has one, so every job write stays untouched by 0036
+  // and a database without the column keeps working for everything except the autosave.
+  if (patch.reviewState !== undefined) row.review_state = patch.reviewState;
+  if (patch.category !== undefined) row.category = patch.category;
+  if (patch.heading !== undefined) row.heading = patch.heading;
   const { error } = await client
     .from(DLO_INTAKES_TABLE)
     .update(row)
@@ -171,4 +217,42 @@ export async function getDloIntake(
     throw new Error(`Failed to fetch DLO intake ${id}: ${error.message}`);
   }
   return data ? fromDbRow(data as DloIntakeDbRow) : null;
+}
+
+// The shared recent-intake list behind /dlo. Newest first, and the same limit /video's project
+// list uses. There is no auth and no owner column, so this is deliberately every intake — the
+// web groups the caller's own runs above the rest purely for ordering.
+export async function listDloIntakes(
+  client: SupabaseClient,
+  limit = 20,
+): Promise<DloIntakeSummaryRow[]> {
+  const { data, error } = await client
+    .from(DLO_INTAKES_TABLE)
+    .select(SUMMARY_COLUMNS)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) {
+    throw new Error(`Failed to list DLO intakes: ${error.message}`);
+  }
+  return ((data ?? []) as unknown as Array<{
+    id: string;
+    status: DloIntakeStatus;
+    step: DloIntakeStep | null;
+    category: DloIntakeCategory;
+    heading: string | null;
+    notes: string;
+    files: DloIntakeFileEntry[] | null;
+    created_at: string;
+    updated_at: string;
+  }>).map((row) => ({
+    id: row.id,
+    status: row.status,
+    step: row.step,
+    category: row.category,
+    heading: row.heading,
+    notes: row.notes,
+    files: row.files ?? [],
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }));
 }

@@ -14,6 +14,84 @@
 import { z } from 'zod';
 import { DloCategorySchema } from './dlo.js';
 
+// Keep each pointer-extraction request below the model transport's practical token-rate
+// budget. Shared by the browser (so it can reveal completed chunks progressively) and by the
+// engine (so non-web callers cannot accidentally recreate one oversized request).
+export const POINTERS_REQUEST_CHUNK_CHARS = 18_000;
+
+function splitOversizedPointerBlock(block: string, maxChars: number): string[] {
+  const pieces: string[] = [];
+  let remaining = block.trim();
+  const earliestPreferredBreak = Math.floor(maxChars * 0.6);
+
+  while (remaining.length > maxChars) {
+    const window = remaining.slice(0, maxChars + 1);
+    const candidates = [
+      window.lastIndexOf('\n'),
+      window.lastIndexOf('\u0964'),
+      window.lastIndexOf('. '),
+      window.lastIndexOf(' '),
+    ];
+    const preferred = candidates.find(
+      (position) => position >= earliestPreferredBreak,
+    );
+    let cut = preferred === undefined ? maxChars : preferred + 1;
+    // Do not strand a tail too short for PointersRequestSchema. Moving a few characters to
+    // the tail keeps both requests valid while preserving the exact source order.
+    if (remaining.length - cut > 0 && remaining.length - cut < 20) {
+      cut = remaining.length - 20;
+    }
+    const piece = remaining.slice(0, cut).trim();
+    if (piece.length > 0) pieces.push(piece);
+    remaining = remaining.slice(cut).trim();
+  }
+
+  if (remaining.length > 0) pieces.push(remaining);
+  return pieces;
+}
+
+// Paragraph-aware packing with an unconditional fallback for a single giant pasted/OCR
+// paragraph. Every non-empty output is at most maxChars and source order is preserved.
+export function splitPointerInput(
+  text: string,
+  maxChars = POINTERS_REQUEST_CHUNK_CHARS,
+): string[] {
+  if (!Number.isFinite(maxChars) || maxChars < 20) {
+    throw new Error('Pointer chunk size must be at least 20 characters.');
+  }
+
+  const blocks = text
+    .split(/\n\s*\n/)
+    .map((block) => block.trim())
+    .filter((block) => block.length > 0);
+  const packed: string[] = [];
+  let buffer: string[] = [];
+  let bufferChars = 0;
+  const flush = (): void => {
+    if (buffer.length === 0) return;
+    packed.push(buffer.join('\n\n'));
+    buffer = [];
+    bufferChars = 0;
+  };
+
+  for (const block of blocks) {
+    const separatorChars = buffer.length > 0 ? 2 : 0;
+    if (
+      buffer.length > 0 &&
+      bufferChars + separatorChars + block.length > maxChars
+    ) {
+      flush();
+    }
+    buffer.push(block);
+    bufferChars += separatorChars + block.length;
+  }
+  flush();
+
+  return (packed.length > 0 ? packed : [text.trim()])
+    .flatMap((block) => splitOversizedPointerBlock(block, maxChars))
+    .filter((block) => block.length > 0);
+}
+
 // The extraction result: one ordered list, source order preserved. The count adapts to the
 // source — a single press note yields a handful, a 20-page multi-article PDF naturally
 // yields many more — so 120 is an anti-runaway guard on a malformed reply, NOT a target and
@@ -23,11 +101,14 @@ export const PointersResultSchema = z.object({
 });
 export type PointersResult = z.infer<typeof PointersResultSchema>;
 
-// The extraction request. `text` is the current assembled note (same 60k bound as a DLO
-// generation's note); `category` steers the extractor's tone the way the article voice does.
-// `heading` is context only — it must never narrow which topics get covered.
+// The extraction request. `text` is the current assembled note — uncapped, like the DLO
+// generation note it is taken from, since this call is the officer's only view of what a
+// long source says and truncating it would silently hide the tail. Long input is already
+// chunked (POINTERS_REQUEST_CHUNK_CHARS), so length costs proportionally more model calls
+// rather than failing. `category` steers the extractor's tone the way the article voice
+// does. `heading` is context only — it must never narrow which topics get covered.
 export const PointersRequestSchema = z.object({
-  text: z.string().trim().min(20).max(60_000),
+  text: z.string().trim().min(20),
   category: DloCategorySchema,
   heading: z.string().trim().max(200).optional(),
 });

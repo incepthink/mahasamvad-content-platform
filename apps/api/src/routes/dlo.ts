@@ -10,20 +10,32 @@ import {
   getDloIntake,
   insertDloIntake,
   insertGeneration,
+  listDloIntakes,
+  listGenerationsForDloIntakes,
   updateDloIntake,
   uploadFile,
   type DloIntakeFileEntry,
   type DloIntakeFileKind,
   type DloIntakeRow,
+  type DloIntakeSummaryRow,
   type SupabaseClient,
 } from '@dgipr/database';
 import {
+  AUDIO_FILE_EXTENSIONS,
+  audioMimeForFileName,
+  DLO_REVIEW_STATE_MAX_CHARS,
   DloCategorySchema,
   DloCreateDocumentsSchema,
   DloExtractRequestSchema,
   DloGenerateRequestSchema,
   DloReextractFileRequestSchema,
+  DloReviewPatchRequestSchema,
+  parseDloReviewState,
+  UPLOAD_FILE_MAX_BYTES,
+  UPLOAD_FILE_MAX_MB,
   type DloIntakeDetail,
+  type DloIntakeGeneration,
+  type DloIntakeSummary,
   type DloPreReadDocument,
 } from '@dgipr/schemas';
 import {
@@ -36,22 +48,32 @@ import { getDocumentIntakeJob } from '../jobs/document-intake.js';
 import { startGenerationJob } from '../jobs/runner.js';
 import { rememberDesignations } from '../jobs/designation-writeback.js';
 
-// Meeting recordings are big (a 2h mp3 @128kbps ≈ 115 MB — the Sarvam batch
-// ceiling), so this route overrides the conservative global multipart limits
-// (10 MiB / 1 file, sized for reference-image uploads) per request.
-const MAX_FILE_BYTES = 120 * 1024 * 1024;
+// Meeting recordings and scanned GRs are big, so this route overrides the conservative global
+// multipart limits (10 MiB / 1 file, sized for reference-image uploads) per request. The
+// ceiling itself is @dgipr/schemas' UPLOAD_FILE_MAX_BYTES — the same number the web picker
+// refuses at, so a file the browser accepted can never be rejected here.
+const MAX_FILE_BYTES = UPLOAD_FILE_MAX_BYTES;
 const MAX_FILES = 10;
 // The `documents` field carries whole documents' worth of extracted Marathi text, and
 // busboy defaults a field to 1 MiB — which a couple of GRs in Devanagari (3 bytes a
-// character) will pass straight through.
-const MAX_FIELD_BYTES = 8 * 1024 * 1024;
+// character) will pass straight through. Raised to 64 MiB alongside the removal of the
+// upload and note ceilings: a booklet read at the input step arrives here as TEXT, so this
+// field is now the largest thing in the request.
+const MAX_FIELD_BYTES = 64 * 1024 * 1024;
 
 const KIND_BY_EXTENSION: Record<string, DloIntakeFileKind> = {
-  '.mp3': 'audio',
+  // MP3/AAC/M4A only. The list lives in @dgipr/schemas so the web picker offers exactly
+  // what this accepts.
+  ...Object.fromEntries(
+    AUDIO_FILE_EXTENSIONS.map((ext) => [ext, 'audio' as const]),
+  ),
   '.pdf': 'pdf',
   '.docx': 'docx',
 };
 
+// Fallback per kind. Recordings are stored under their OWN container's type
+// (`audioMimeForFileName`); this entry only covers a name with no known extension,
+// which `kindOf` cannot classify as audio in the first place.
 const CONTENT_TYPE_BY_KIND: Record<DloIntakeFileKind, string> = {
   audio: 'audio/mpeg',
   pdf: 'application/pdf',
@@ -75,7 +97,55 @@ function storagePathFor(intakeId: string, index: number, name: string): string {
 // `includeText` carries the extracted text (per source, and page by page for
 // PDFs) plus the combined text. It is opt-in because the review step needs a whole
 // meeting transcript exactly once, while the 2.5 s poll behind it runs for minutes.
-function toDetail(row: DloIntakeRow, includeText: boolean): DloIntakeDetail {
+// What the /dlo list card calls this intake. The officer's heading if they gave one, else the
+// opening of their notes, else the first uploaded file — computed here rather than in the web
+// so every surface names an intake the same way.
+const TITLE_EXCERPT_CHARS = 80;
+
+function intakeTitle(
+  row: Readonly<{
+    heading: string | null;
+    notes: string;
+    files: readonly Readonly<{ name: string }>[];
+  }>,
+): string {
+  const heading = row.heading?.trim();
+  if (heading) return heading;
+  const notes = row.notes.trim().replace(/\s+/g, ' ');
+  if (notes.length > 0) {
+    return notes.length > TITLE_EXCERPT_CHARS
+      ? `${notes.slice(0, TITLE_EXCERPT_CHARS)}…`
+      : notes;
+  }
+  return row.files[0]?.name ?? 'विनाशीर्षक';
+}
+
+function toSummary(
+  row: DloIntakeSummaryRow,
+  generations: readonly DloIntakeGeneration[],
+): DloIntakeSummary {
+  return {
+    id: row.id,
+    status: row.status,
+    step: row.step,
+    category: row.category,
+    heading: row.heading,
+    title: intakeTitle(row),
+    sourceCount: row.files.length,
+    failedCount: row.files.filter((file) => file.status === 'failed').length,
+    needsSelection: row.files.some((file) => file.status === 'needs-selection'),
+    generationCount: generations.length,
+    latestGenerationId: generations[0]?.id ?? null,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function toDetail(
+  row: DloIntakeRow,
+  includeText: boolean,
+  generations: readonly DloIntakeGeneration[] = [],
+): DloIntakeDetail {
   return {
     id: row.id,
     status: row.status,
@@ -107,6 +177,12 @@ function toDetail(row: DloIntakeRow, includeText: boolean): DloIntakeDetail {
     })),
     combinedText: includeText ? row.combinedText : null,
     error: row.error,
+    // Text-gated for the same reason the per-source text is: the blob CARRIES the officer's
+    // corrected page text, and the 2.5 s poll runs for minutes. `parseDloReviewState` returns
+    // null for anything unusable — including the absent column on a database without 0036 —
+    // so a bad blob degrades to "nothing saved" rather than failing the whole detail fetch.
+    reviewState: includeText ? parseDloReviewState(row.reviewState) : null,
+    generations: [...generations],
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -158,7 +234,8 @@ export function registerDloRoutes(
         if (!kind) {
           return reply.code(400).send({
             error: {
-              message: 'फक्त PDF, MP3 आणि DOCX फाईल्स स्वीकारल्या जातात.',
+              message:
+                'फक्त ध्वनिमुद्रण (MP3, AAC, M4A), PDF आणि DOCX फाईल्स स्वीकारल्या जातात.',
             },
           });
         }
@@ -179,7 +256,7 @@ export function registerDloRoutes(
       ) {
         return reply.code(413).send({
           error: {
-            message: 'फाईल खूप मोठी आहे (कमाल १२० MB प्रति फाईल).',
+            message: `फाईल खूप मोठी आहे (कमाल ${UPLOAD_FILE_MAX_MB.toLocaleString('mr-IN')} MB प्रति फाईल).`,
           },
         });
       }
@@ -217,7 +294,7 @@ export function registerDloRoutes(
         DLO_UPLOADS_BUCKET,
         storagePath,
         upload.data,
-        CONTENT_TYPE_BY_KIND[upload.kind],
+        audioMimeForFileName(upload.name) ?? CONTENT_TYPE_BY_KIND[upload.kind],
       );
       entries.push({
         name: upload.name,
@@ -320,6 +397,35 @@ export function registerDloRoutes(
     return reply.code(202).send({ id: row.id });
   });
 
+  // The shared recent-intake list behind /dlo. Every intake, newest first — there is no auth
+  // and no owner column, so the web groups the caller's own runs above the rest purely for
+  // ordering (a localStorage id list, never a permission).
+  //
+  // This route deliberately does NOT run the orphan check below. That check fails any
+  // queued/running row absent from THIS PROCESS's job set, which is correct for one row the
+  // client is actively watching and catastrophic across a whole list: opening /dlo in a second
+  // tab would mass-fail every intake currently running. Statuses are reported verbatim here;
+  // the detail route is where a genuinely orphaned row gets reaped.
+  app.get('/dlo/intakes', async () => {
+    const rows = await listDloIntakes(client);
+    const generations = await listGenerationsForDloIntakes(
+      client,
+      rows.map((row) => row.id),
+    );
+    // One batched query for the page, grouped in memory — never N+1.
+    const byIntake = new Map<string, DloIntakeGeneration[]>();
+    for (const generation of generations) {
+      const list = byIntake.get(generation.dloIntakeId) ?? [];
+      list.push({
+        id: generation.id,
+        status: generation.status,
+        createdAt: generation.createdAt,
+      });
+      byIntake.set(generation.dloIntakeId, list);
+    }
+    return rows.map((row) => toSummary(row, byIntake.get(row.id) ?? []));
+  });
+
   app.get<{ Params: { id: string }; Querystring: { text?: string } }>(
     '/dlo/intakes/:id',
     async (request, reply) => {
@@ -333,6 +439,11 @@ export function registerDloRoutes(
       // Orphan check, same as the generation detail route: a row stuck in
       // queued/running whose job is not in this process died with a previous
       // server; fail it so the UI stops spinning.
+      //
+      // NOTE: this makes the API a SINGLE-PROCESS service. With two instances behind a load
+      // balancer, instance B's poll would fail a job running healthily on instance A. Scaling
+      // horizontally requires replacing this with a heartbeat + grace window (and the same
+      // change in runner.ts / video-runner.ts, which share the pattern).
       if (
         (row.status === 'queued' || row.status === 'running') &&
         !isIntakeJobRunning(row.id)
@@ -341,7 +452,62 @@ export function registerDloRoutes(
         await updateDloIntake(client, row.id, { status: 'failed', error });
         return toDetail({ ...row, status: 'failed', error }, includeText);
       }
-      return toDetail(row, includeText);
+      // Only a `ready` intake can have produced an article, and useDloIntake stops polling at
+      // ready — so this runs on the ready-transition fetch and manual refreshes, not on the
+      // 2.5 s progress poll.
+      const generations =
+        row.status === 'ready'
+          ? (await listGenerationsForDloIntakes(client, [row.id])).map(
+              (generation) => ({
+                id: generation.id,
+                status: generation.status,
+                createdAt: generation.createdAt,
+              }),
+            )
+          : [];
+      return toDetail(row, includeText, generations);
+    },
+  );
+
+  // The review step's autosave: the officer's corrections, unticked pages, and the two PAID
+  // lookups (pointers, prepared names), so leaving /dlo costs nothing already bought.
+  //
+  // Last-writer-wins by design. The list is shared and there is no identity to lock against,
+  // so the blob carries a `writer` id and the client warns when it reads back one it did not
+  // produce; it never silently overwrites what is on screen. Optimistic concurrency on the
+  // row's updated_at was rejected: the intake job stamps that column too, so an OCR re-read
+  // would spuriously reject the officer's own save.
+  app.patch<{ Params: { id: string } }>(
+    '/dlo/intakes/:id/review',
+    async (request, reply) => {
+      const body = DloReviewPatchRequestSchema.parse(request.body);
+      const row = await getDloIntake(client, request.params.id);
+      if (!row) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'Intake not found.' } });
+      }
+      // The client checks this before sending; the guard here is what stops an oversized blob
+      // reaching the 1 MiB body limit as an opaque 413.
+      const size = JSON.stringify(body.reviewState).length;
+      if (size > DLO_REVIEW_STATE_MAX_CHARS) {
+        return reply.code(400).send({
+          error: { message: 'तपासणीतील बदल जतन करण्यासाठी खूप मोठे आहेत.' },
+        });
+      }
+      // Who wrote what this save is about to replace. Read BEFORE the update, and reported
+      // back so the client can tell "I am overwriting my own last save" (the normal case)
+      // from "somebody else has been in here since I loaded".
+      const previous = parseDloReviewState(row.reviewState);
+      await updateDloIntake(client, row.id, {
+        reviewState: body.reviewState,
+        ...(body.category !== undefined ? { category: body.category } : {}),
+        ...(body.heading !== undefined ? { heading: body.heading } : {}),
+      });
+      return {
+        previousWriter: previous?.writer ?? null,
+        updatedAt: body.reviewState.updatedAt,
+      };
     },
   );
 
@@ -425,7 +591,8 @@ export function registerDloRoutes(
       if (entry.storagePath === undefined) {
         return reply.code(400).send({
           error: {
-            message: 'या फाईलची मूळ प्रत उपलब्ध नाही, त्यामुळे ती पुन्हा वाचता येत नाही.',
+            message:
+              'या फाईलची मूळ प्रत उपलब्ध नाही, त्यामुळे ती पुन्हा वाचता येत नाही.',
           },
         });
       }

@@ -24,7 +24,8 @@ import {
 
 // Kept as its own name because the /translate route and its web panel read it, but it is
 // deliberately the SAME number as every other upload surface's cap — one file-size limit
-// across the product, not four that drift.
+// across the product, not four that drift. That number is now "no limit" (see
+// DOCUMENT_MAX_BYTES); this alias follows it on purpose.
 export const TRANSLATE_DOCUMENT_MAX_BYTES = DOCUMENT_MAX_BYTES;
 
 // Ceiling on the SELECTED text of one translation run. Unlike the pasted-text route's

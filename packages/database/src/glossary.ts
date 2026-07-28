@@ -193,10 +193,7 @@ export async function countGlossaryTerms(
   const baseQuery = client
     .from(GLOSSARY_TERMS_TABLE)
     .select('*', { count: 'exact', head: true });
-  const query = applyGlossaryFilters(
-    baseQuery,
-    opts,
-  );
+  const query = applyGlossaryFilters(baseQuery, opts);
   const { count, error } = await query;
   if (error) {
     throw new Error(`Failed to count glossary terms: ${error.message}`);
@@ -222,6 +219,45 @@ export async function findGlossaryTermsInText(
   return terms
     .filter((t) => text.includes(t.marathi))
     .sort((a, b) => b.marathi.length - a.marathi.length);
+}
+
+// The designation → person map, built from the person rows that carry one (0032).
+//
+// `glossary_terms.designation` has only ever been read in one direction: given a person's name
+// found in the text, print their title. But a meeting transcript often names the OFFICE and not
+// the person — "मुख्यमंत्री" with the name lost to STT — and the dictionary already knows,
+// verified, that मुख्यमंत्री is देवेंद्र फडणवीस. Nobody had written the query, so that answer sat
+// unused while the article fell back to agentless prose.
+//
+// Verified person rows only: this feeds a SUGGESTION an officer confirms, and an unverified
+// auto-extracted row is not a good enough basis even for that.
+//
+// Titles are returned with EVERY holder, never pre-resolved to one, because ambiguity is the
+// whole risk: Maharashtra has two उपमुख्यमंत्री, and office-holders change. Deciding what to do
+// when a title maps to several people is the caller's job — see prepareDesignations, which
+// proposes nothing at all in that case.
+export async function mapDesignationsToPersons(
+  client: SupabaseClient,
+): Promise<Map<string, string[]>> {
+  const rows = await listGlossaryTerms(client, {
+    type: 'person',
+    verifiedOnly: true,
+    limit: 5000,
+  });
+
+  const byDesignation = new Map<string, string[]>();
+  for (const row of rows) {
+    const designation = (row.designation ?? '').trim();
+    const name = row.marathi.trim();
+    if (!designation || !name) continue;
+    const holders = byDesignation.get(designation);
+    if (holders) {
+      if (!holders.includes(name)) holders.push(name);
+    } else {
+      byDesignation.set(designation, [name]);
+    }
+  }
+  return byDesignation;
 }
 
 // Bulk-inserts auto-extracted candidates, skipping any Marathi term that already
@@ -278,6 +314,41 @@ export async function setPersonDesignation(
       termType: 'person',
       verified: false,
       source: 'auto',
+    },
+  ]);
+}
+
+// Marks a person's row verified, disturbing nothing else on it. Used by the pre-generation
+// "व्यक्ती व पदनाम" card's per-row "तपासले म्हणून खूण करा".
+//
+// Same shape and same reasoning as setPersonDesignation: an existing row is patched in place
+// (never upsertGlossaryTerm, which is create-or-REPLACE and would overwrite a human-reviewed
+// English/Hindi spelling), and only a person the dictionary has never seen is inserted. That
+// insert is VERIFIED, because ticking the box IS the human review this flag records — the
+// difference from setPersonDesignation, where the officer had confirmed the पदनाम rather than
+// the name.
+export async function markPersonVerified(
+  client: SupabaseClient,
+  marathi: string,
+  fallbackEnglish: string,
+): Promise<void> {
+  const { data, error } = await client
+    .from(GLOSSARY_TERMS_TABLE)
+    .update({ verified: true, updated_at: new Date().toISOString() })
+    .eq('marathi', marathi)
+    .select('id');
+  if (error) {
+    throw new Error(`Failed to verify "${marathi}": ${error.message}`);
+  }
+  if ((data ?? []).length > 0) return;
+
+  await insertGlossaryCandidates(client, [
+    {
+      marathi,
+      english: fallbackEnglish,
+      termType: 'person',
+      verified: true,
+      source: 'manual',
     },
   ]);
 }

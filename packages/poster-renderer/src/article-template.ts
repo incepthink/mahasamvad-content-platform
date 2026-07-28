@@ -39,13 +39,7 @@ export function buildArticlePosterHtml(input: BuildArticlePosterHtmlInput): stri
 <head>
 <meta charset="utf-8" />
 <style>
-  @font-face {
-    font-family: 'Noto Sans Devanagari';
-    src: url('${assets.fontDataUri}') format('truetype');
-    font-weight: 100 900;
-    font-style: normal;
-    font-display: block;
-  }
+${assets.fontFaceCss}
   :root {
     --maroon: #7a1512;
     --cream: 255, 247, 234;
@@ -53,7 +47,7 @@ export function buildArticlePosterHtml(input: BuildArticlePosterHtmlInput): stri
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { width: ${ARTICLE_WIDTH}px; height: ${ARTICLE_HEIGHT}px; }
   body {
-    font-family: 'Noto Sans Devanagari', sans-serif;
+    font-family: 'Mukta', sans-serif;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
   }
@@ -90,7 +84,8 @@ export function buildArticlePosterHtml(input: BuildArticlePosterHtmlInput): stri
     );
   }
   .headline {
-    font-weight: 900;
+    /* Mukta's heaviest cut is ExtraBold; 900 would only resolve back to it. */
+    font-weight: 800;
     font-size: 52px;
     line-height: 1.2;
     letter-spacing: -.3px;

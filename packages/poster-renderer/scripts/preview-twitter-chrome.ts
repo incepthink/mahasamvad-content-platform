@@ -19,8 +19,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_OUT_DIR = resolve(here, '../../content-engine/data/output');
 
 // Flat portrait stand-in for a social render: header band + content card, with
-// faint outlines marking the reserved zones the prompt asks the model to keep
-// clear (top-right ~280x270, bottom ~130px).
+// faint outlines marking the fixed-template prompt's reserved zones
+// (top-right 180x170, bottom 120px).
 async function placeholderPoster(): Promise<Buffer> {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="1600">
     <rect width="1280" height="1600" fill="#eef4fb"/>
@@ -29,9 +29,9 @@ async function placeholderPoster(): Promise<Buffer> {
       text-anchor="middle">HEADLINE ZONE</text>
     <rect x="120" y="420" width="1040" height="900" rx="24" fill="#ffffff"
       stroke="#c4d3e8" stroke-width="3"/>
-    <rect x="1000" y="0" width="280" height="270" fill="none"
+    <rect x="1100" y="0" width="180" height="170" fill="none"
       stroke="#ff0000" stroke-opacity="0.4" stroke-width="3" stroke-dasharray="12 8"/>
-    <rect x="0" y="1470" width="1280" height="130" fill="none"
+    <rect x="0" y="1480" width="1280" height="120" fill="none"
       stroke="#ff0000" stroke-opacity="0.4" stroke-width="3" stroke-dasharray="12 8"/>
   </svg>`;
   return sharp(Buffer.from(svg)).png().toBuffer();

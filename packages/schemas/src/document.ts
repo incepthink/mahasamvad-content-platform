@@ -20,9 +20,16 @@ import { z } from 'zod';
 export const DocumentKindSchema = z.enum(['pdf', 'docx', 'txt']);
 export type DocumentKind = z.infer<typeof DocumentKindSchema>;
 
-// 25 MiB is generous for a scanned 20-page government PDF and keeps the in-memory job
-// bounded; the routes set the same value as their multipart limit.
-export const DOCUMENT_MAX_BYTES = 25 * 1024 * 1024;
+// No upload ceiling: a department scan can be a whole booklet, and refusing it at the door
+// was the one failure an officer could do nothing about. The routes still pass this as their
+// multipart `fileSize` limit — busboy treats Infinity as "unlimited", which is its own
+// default — so the only bound left is the box's memory: an intake job holds the file's bytes
+// in process for its TTL, so a very large upload costs RAM for up to 60 minutes.
+//
+// The page-selection spend gate is untouched and is what still keeps a 300-page scan cheap:
+// nothing is read until pages are ticked, and OCR_MAX_TOTAL_PAGES (env
+// SARVAM_DOC_MAX_TOTAL_PAGES, default 50) bounds that SELECTION, not the file.
+export const DOCUMENT_MAX_BYTES = Number.POSITIVE_INFINITY;
 
 // Which backend produced the page text. Shown to the user because it changes how hard the
 // review step has to work: OCR misreads names and amounts, a text layer is exact.

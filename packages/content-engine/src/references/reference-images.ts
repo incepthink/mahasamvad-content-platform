@@ -116,12 +116,22 @@ export async function reanalyzeReferenceImage(
   return withUrl(client, await setReferenceImageLayoutSpec(client, id, spec));
 }
 
-// Manual correction of a bad vision read. The rest of the spec (bulletSlots,
-// layoutSummary) still describes the master accurately, so only the flag flips.
-export async function overrideReferenceImagePhotoZone(
+// Manual correction of a bad vision read. Deliberately a PATCH of the cached spec,
+// not a replace: the rest of it (bulletSlots, layoutSummary) usually still describes
+// the master accurately, so only the named fields move.
+//
+// hasPhotoZone is the field that gates imagery; contentSummary is the field the
+// information-first reference ranker matches a note against (select-by-information.ts),
+// so a vague read there quietly costs the wrong master on every future run — an
+// operator's correction is worth more than another vision roll. An empty summary is
+// stored as absent, which is exactly how a never-analysed row behaves at the ranker.
+export async function overrideReferenceImageLayoutSpec(
   client: SupabaseClient,
   id: string,
-  hasPhotoZone: boolean,
+  patch: Readonly<{
+    hasPhotoZone?: boolean | undefined;
+    contentSummary?: string | undefined;
+  }>,
 ): Promise<ReferenceImage | null> {
   const row = await getReferenceImageRow(client, id);
   if (!row) return null;
@@ -131,9 +141,19 @@ export async function overrideReferenceImagePhotoZone(
     );
   }
 
+  const contentSummary =
+    patch.contentSummary === undefined
+      ? row.layoutSpec.contentSummary
+      : patch.contentSummary.trim() || undefined;
+
+  // contentSummary is assigned rather than spread-merged, so clearing it actually
+  // removes it instead of falling back to the value being cleared.
   const updated = await setReferenceImageLayoutSpec(client, id, {
     ...row.layoutSpec,
-    hasPhotoZone,
+    ...(patch.hasPhotoZone === undefined
+      ? {}
+      : { hasPhotoZone: patch.hasPhotoZone }),
+    contentSummary,
   });
   return withUrl(client, updated);
 }

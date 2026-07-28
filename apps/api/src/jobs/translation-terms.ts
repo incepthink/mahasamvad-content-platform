@@ -9,14 +9,17 @@
 // Sharing the merge is what keeps them from drifting apart, and means the designation card
 // inherits the extractor's existing person detection rather than adding a second one.
 
+import { pathToFileURL } from 'node:url';
 import { extractGlossaryCandidates } from '@dgipr/content-engine';
 import {
   findGlossaryTermsInText,
   listGlossaryTerms,
+  mapDesignationsToPersons,
   type SupabaseClient,
   type TermType,
 } from '@dgipr/database';
 import type {
+  PreparedName,
   PrepareDesignationsResponse,
   PrepareTranslationResponse,
 } from '@dgipr/schemas';
@@ -99,6 +102,255 @@ export async function prepareTranslationTerms(
   return { terms };
 }
 
+// Propose the office-holder when the text names an OFFICE but not the person.
+//
+// A DLO transcript routinely keeps the title and loses the name — a real run reached the article
+// generator with "मुख्यमंत्री पोत" and no person at all, so the whole article came out in
+// agentless passive ("निर्देश देण्यात आले") because there was nobody to attribute a directive to.
+// Meanwhile the dictionary held, verified, that मुख्यमंत्री is देवेंद्र फडणवीस.
+//
+// This is a LOOKUP, not an inference, and that distinction is what keeps the never-invent rule
+// intact: the answer comes from a row an officer verified, it is presented as a suggestion the
+// officer must accept, and nothing is written into any article until they do.
+//
+// Four rules, each guarding a way this could go wrong:
+//   1. exactly ONE verified holder — Maharashtra has two उपमुख्यमंत्री, and guessing between
+//      them would put the wrong person's name on a government article;
+//   2. the LONGEST matching title wins — "उपमुख्यमंत्री" contains "मुख्यमंत्री" as a substring,
+//      so a naive scan proposes the Chief Minister for a note that only mentions the Deputy;
+//   3. never propose someone the text already names, or already suggested (dedupe);
+//   4. `suggested: true`, so the card can render it unticked and labelled.
+export function suggestOfficeHolders(
+  text: string,
+  existing: readonly { marathi: string }[],
+  personsByDesignation: ReadonlyMap<string, readonly string[]>,
+): PreparedName[] {
+  // Longest title first — rule 2. Without this, a note naming only "उपमुख्यमंत्री" also matches
+  // the substring "मुख्यमंत्री" and would propose the Chief Minister as well.
+  const titles = [...personsByDesignation.keys()].sort(
+    (a, b) => b.length - a.length,
+  );
+
+  const taken = new Set(existing.map((name) => name.marathi.trim()));
+  const suggestions: PreparedName[] = [];
+
+  // Rule 2 is enforced by CONSUMING each matched span: once "उपमुख्यमंत्री" has matched, its
+  // occurrences are masked out before the shorter "मुख्यमंत्री" is tested. Masking per occurrence
+  // rather than suppressing the shorter title outright is what keeps a note that genuinely names
+  // BOTH offices from silently losing the Chief Minister. `split`/`join` matches literally, so a
+  // title containing regex metacharacters needs no escaping.
+  let remaining = text;
+
+  for (const title of titles) {
+    if (!remaining.includes(title)) continue;
+    remaining = remaining.split(title).join(' ');
+
+    const holders = personsByDesignation.get(title) ?? [];
+    // Rule 1 — ambiguous or empty means propose nothing. Silence is the correct answer here;
+    // the officer can still add the name by hand, which the card has always supported.
+    if (holders.length !== 1) continue;
+
+    const name = (holders[0] ?? '').trim();
+    // Rule 3 — the extractor already found them, so their row exists with its own designation.
+    if (!name || taken.has(name) || text.includes(name)) continue;
+    taken.add(name);
+
+    suggestions.push({
+      marathi: name,
+      designation: title,
+      inGlossary: true,
+      verified: true,
+      suggested: true,
+      // The title came from the dictionary's reverse lookup, not from a title standing beside
+      // a name in the note — by definition, since the note does not name this person at all.
+      fromText: false,
+    });
+  }
+
+  return suggestions;
+}
+
+// Resolve a bare SURNAME against the dictionary's full-name person rows.
+//
+// The complaint this answers: a note says "फडणवीस यांनी" and the article published it bare,
+// because `designation` is only ever read off a row whose Marathi form matches the text
+// verbatim — and "फडणवीस" is not "देवेंद्र फडणवीस". The answer was in the dictionary the whole
+// time, one row away, exactly as it was for suggestOfficeHolders. Same shape of fix: a LOOKUP
+// against a verified row, presented as a suggestion the officer sees before anything is paid for.
+//
+// The pair produced names the SURNAME, not the full name — the note's own string. Substituting
+// the dictionary's first name would be adding a name the source does not have, which is a
+// different (and unasked-for) decision from adding an approved title.
+//
+// Rules, each guarding a way this goes wrong:
+//   1. only a WHOLE-word surname mention counts, so "फडणवीसांनी" (inflected) and any longer word
+//      ending in the surname are not matches;
+//   2. a person whose FULL name is already in the text is skipped — their own row carries the
+//      designation, and the deterministic pass extends it to their surname mentions from there;
+//   3. when several dictionary people share the surname, the CONTEXT decides: exactly one of
+//      them must have their stored title written somewhere in the text. Otherwise nothing is
+//      proposed, because attributing a directive to the wrong official is the failure this
+//      whole feature exists to prevent — and the officer can still type the title on the card.
+const SURNAME_BOUNDARY = /[\p{L}\p{M}\p{N}]/u;
+
+function mentionsWord(text: string, word: string): boolean {
+  let from = 0;
+  for (;;) {
+    const at = text.indexOf(word, from);
+    if (at < 0) return false;
+    from = at + word.length;
+    const before = text[at - 1];
+    const after = text[at + word.length];
+    if (
+      (before === undefined || !SURNAME_BOUNDARY.test(before)) &&
+      (after === undefined || !SURNAME_BOUNDARY.test(after))
+    ) {
+      return true;
+    }
+  }
+}
+
+export function resolveSurnameDesignations(
+  text: string,
+  personsByDesignation: ReadonlyMap<string, readonly string[]>,
+): Map<string, string> {
+  // Invert to full name → title, and group by surname.
+  const bySurname = new Map<string, { name: string; designation: string }[]>();
+  for (const [designation, holders] of personsByDesignation) {
+    for (const holder of holders) {
+      const name = holder.trim();
+      const words = name.split(/\s+/).filter(Boolean);
+      // A one-word dictionary row IS already matched verbatim by the normal merge.
+      if (words.length < 2) continue;
+      const surname = words[words.length - 1] ?? '';
+      if (!surname) continue;
+      const bucket = bySurname.get(surname);
+      if (bucket) bucket.push({ name, designation });
+      else bySurname.set(surname, [{ name, designation }]);
+    }
+  }
+
+  const resolved = new Map<string, string>();
+  for (const [surname, candidates] of bySurname) {
+    // Rule 1.
+    if (!mentionsWord(text, surname)) continue;
+    // Rule 2 — the full name is present, so this is not the surname-only case.
+    const usable = candidates.filter(
+      (candidate) => !text.includes(candidate.name),
+    );
+    if (usable.length === 0) continue;
+
+    if (usable.length === 1) {
+      resolved.set(surname, usable[0]?.designation ?? '');
+      continue;
+    }
+
+    // Rule 3 — context. The note that says "महसूल मंत्री" and then "बावनकुळे" has told us which
+    // बावनकुळे it means; a note that says neither has not.
+    const byTitle = usable.filter((candidate) =>
+      text.includes(candidate.designation),
+    );
+    if (byTitle.length === 1) {
+      resolved.set(surname, byTitle[0]?.designation ?? '');
+    }
+  }
+
+  return resolved;
+}
+
+// Honorifics that legitimately stand BETWEEN a title and a name ("मुख्यमंत्री श्री. देवेंद्र
+// फडणवीस"). Skipped when looking backwards, so an honorific does not hide the title behind it.
+// Longest first, since 'श्री.' contains 'श्री'.
+const HONORIFICS = [
+  'श्रीमती',
+  'अॅड.',
+  'ॲड.',
+  'श्री.',
+  'श्री',
+  'डॉ.',
+  'प्रा.',
+  'ना.',
+  'मा.',
+  'कु.',
+];
+
+// Characters that may sit immediately before a title. Anything else — in practice a Devanagari
+// letter — means the "title" is only the tail of a longer word, which is the उपमुख्यमंत्री /
+// मुख्यमंत्री trap: without this check a note naming only the Deputy Chief Minister would have
+// "मुख्यमंत्री" attached to the name beside it.
+const TITLE_BOUNDARY = /[\s,.;:।(){}[\]"'“”‘’«»\-–—/|]/;
+
+function stripHonorificsAtEnd(before: string): string {
+  let out = before.replace(/[\s,–—-]+$/u, '');
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const honorific of HONORIFICS) {
+      if (out.endsWith(honorific)) {
+        out = out.slice(0, -honorific.length).replace(/[\s,–—-]+$/u, '');
+        changed = true;
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+// Read each person's designation OFF THE NOTE, when the note writes it immediately before the
+// name: "उपमुख्यमंत्री एकनाथ शिंदे", "केंद्रीय मंत्री नितीन गडकरी".
+//
+// This is the gap the card had. `designation` used to come ONLY from the person's stored
+// glossary row, so a note that spells the title out in full still showed an EMPTY field — and
+// the officer had to retype what their own text already said. The titles were even detected
+// (they arrive as `designation`-typed terms in the same merge); nothing linked one to the name
+// standing next to it.
+//
+// It does not weaken the never-invent rule. Nothing is guessed from context or from outside
+// knowledge: the exact title string is taken verbatim from the officer's own text, only where
+// it directly precedes the name, and only to fill a field that would otherwise be blank. The
+// officer still reviews and can clear it before anything is generated.
+//
+// Deliberately FIRST occurrence: a person is introduced with their title and referred to bare
+// afterwards, so the first mention is where the title lives.
+export function designationsFromText(
+  text: string,
+  names: readonly string[],
+  titles: readonly string[],
+): Map<string, string> {
+  // Longest title first, so "केंद्रीय मंत्री" wins over a bare "मंत्री" the dictionary may also
+  // hold, and "उपमुख्यमंत्री" over "मुख्यमंत्री".
+  const ordered = [
+    ...new Set(titles.map((t) => t.trim()).filter(Boolean)),
+  ].sort((a, b) => b.length - a.length);
+  const found = new Map<string, string>();
+  if (ordered.length === 0) return found;
+
+  for (const name of names) {
+    if (!name) continue;
+    let from = 0;
+    // Walk every occurrence: the first mention may be the bare surname elsewhere in the note,
+    // and the titled one may come later.
+    for (;;) {
+      const at = text.indexOf(name, from);
+      if (at < 0) break;
+      from = at + name.length;
+
+      const before = stripHonorificsAtEnd(text.slice(0, at));
+      const title = ordered.find((candidate) => {
+        if (!before.endsWith(candidate)) return false;
+        const prev = before[before.length - candidate.length - 1];
+        return prev === undefined || TITLE_BOUNDARY.test(prev);
+      });
+      if (title) {
+        found.set(name, title);
+        break;
+      }
+    }
+  }
+
+  return found;
+}
+
 // The pre-generation "व्यक्ती व पदनाम" card: every PERSON the note names, with the designation
 // the article will print before their name. A blank designation is the normal state for a
 // person the dictionary has not met — the card shows an empty field and the officer fills it
@@ -111,23 +363,25 @@ export async function prepareDesignations(
   client: SupabaseClient,
   text: string,
 ): Promise<PrepareDesignationsResponse> {
-  const [merged, designationRows] = await Promise.all([
+  const [merged, designationRows, personsByDesignation] = await Promise.all([
     mergeTextTerms(client, text),
     listGlossaryTerms(client, {
       type: 'designation',
       verifiedOnly: true,
       limit: 500,
     }),
+    // Best-effort: on a database without 0032 the column is absent and every person maps to
+    // nothing, which simply means no suggestions. It must never cost the card itself.
+    mapDesignationsToPersons(client).catch((error: unknown) => {
+      console.warn(
+        '[designations] reverse lookup unavailable (is 0032 applied?):',
+        error,
+      );
+      return new Map<string, string[]>();
+    }),
   ]);
 
-  const names = merged
-    .filter((term) => term.termType === 'person')
-    .map((term) => ({
-      marathi: term.marathi,
-      designation: term.designation,
-      inGlossary: term.inGlossary,
-      verified: term.verified,
-    }));
+  const persons = merged.filter((term) => term.termType === 'person');
 
   const knownDesignations = designationRows
     .map((row) => ({ marathi: row.marathi, english: row.english }))
@@ -139,6 +393,57 @@ export async function prepareDesignations(
   const mentionedDesignations = merged
     .filter((term) => term.termType === 'designation')
     .map((term) => term.marathi);
+
+  // Titles to look for beside a name: the ones this very note uses, plus the dictionary's
+  // verified list (which catches a title the extractor happened not to type as `designation`).
+  const besideName = designationsFromText(
+    text,
+    persons.map((term) => term.marathi),
+    [...mentionedDesignations, ...knownDesignations.map((row) => row.marathi)],
+  );
+
+  // "फडणवीस" → the देवेंद्र फडणवीस row's title. Best-effort like the reverse lookup it sits
+  // beside: an empty map simply means no surname was resolvable.
+  const bySurname = resolveSurnameDesignations(text, personsByDesignation);
+
+  const names = persons.map((term) => {
+    // The dictionary wins where it has an answer — it is the reviewed, cross-article spelling.
+    // Its surname resolution comes next (the row exists, only under the full name), and the note
+    // itself only ever fills a field the dictionary left blank.
+    const fromSurname = term.designation
+      ? ''
+      : (bySurname.get(term.marathi) ?? '');
+    const fromText =
+      term.designation || fromSurname
+        ? ''
+        : (besideName.get(term.marathi) ?? '');
+    return {
+      marathi: term.marathi,
+      designation: term.designation || fromSurname || fromText,
+      inGlossary: term.inGlossary,
+      verified: term.verified,
+      // A surname resolved through a full-name row is a dictionary SUGGESTION, so the card
+      // labels it and the officer can untick it — the same treatment as the reverse lookup.
+      suggested: fromSurname.length > 0,
+      fromText: fromText.length > 0,
+    };
+  });
+
+  // A surname the extractor did not report as a person at all still gets proposed: the
+  // dictionary knows the name, and the alternative is losing the title silently.
+  for (const [surname, designation] of bySurname) {
+    if (names.some((name) => name.marathi === surname)) continue;
+    names.push({
+      marathi: surname,
+      designation,
+      inGlossary: true,
+      verified: true,
+      suggested: true,
+      fromText: false,
+    });
+  }
+
+  names.push(...suggestOfficeHolders(text, names, personsByDesignation));
 
   return { names, knownDesignations, mentionedDesignations };
 }
@@ -155,4 +460,284 @@ export async function listKnownDesignations(
     limit: 500,
   });
   return rows.map((row) => row.marathi);
+}
+
+// ---------------------------------------------------------------------------
+// Free harness: `tsx src/jobs/translation-terms.ts`
+// No key, no database, no network. Covers suggestOfficeHolders, whose substring and ambiguity
+// rules are the only place in this change where a wrong answer would put the wrong person's
+// name on a government article.
+// ---------------------------------------------------------------------------
+
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
+  let failures = 0;
+  const check = (label: string, condition: boolean): void => {
+    if (!condition) {
+      failures += 1;
+      console.error(`  FAIL  ${label}`);
+    } else {
+      console.log(`  ok    ${label}`);
+    }
+  };
+
+  const dictionary = new Map<string, string[]>([
+    ['मुख्यमंत्री', ['देवेंद्र फडणवीस']],
+    ['उपमुख्यमंत्री', ['एकनाथ शिंदे', 'अजित पवार']],
+    ['जिल्हाधिकारी', ['सुहास दिवसे']],
+  ]);
+
+  console.log('\n=== the real failing case: a title with no name ===');
+  const realNote =
+    'त्या वेळेला आपल्याला असा एक मुख्यमंत्री पोत आणि एस सी एम टी आर रिंग रोड ' +
+    'यावर बैठक घेण्यात आली. निर्देश देण्यात आलेले आहे.';
+  const proposed = suggestOfficeHolders(realNote, [], dictionary);
+  check('exactly one suggestion', proposed.length === 1);
+  check(
+    'it is the verified office-holder',
+    proposed[0]?.marathi === 'देवेंद्र फडणवीस',
+  );
+  check(
+    'carrying the matched title',
+    proposed[0]?.designation === 'मुख्यमंत्री',
+  );
+  check('flagged as suggested', proposed[0]?.suggested === true);
+  check(
+    'marked verified + inGlossary (it came from a verified row)',
+    proposed[0]?.verified === true && proposed[0]?.inGlossary === true,
+  );
+
+  console.log('\n=== ambiguity proposes NOTHING ===');
+  check(
+    'a title held by two people is skipped',
+    suggestOfficeHolders('उपमुख्यमंत्री यांनी आढावा घेतला.', [], dictionary)
+      .length === 0,
+  );
+  check(
+    'a title held by nobody is skipped',
+    suggestOfficeHolders('राज्यपाल यांनी सांगितले.', [], dictionary).length ===
+      0,
+  );
+
+  console.log('\n=== the substring trap ===');
+  check(
+    'उपमुख्यमंत्री does NOT also propose the मुख्यमंत्री',
+    suggestOfficeHolders(
+      'उपमुख्यमंत्री यांच्या अध्यक्षतेखाली बैठक झाली.',
+      [],
+      dictionary,
+    ).length === 0,
+  );
+  check(
+    'both titles present still proposes only the unambiguous one',
+    (() => {
+      const both = suggestOfficeHolders(
+        'मुख्यमंत्री व उपमुख्यमंत्री उपस्थित होते.',
+        [],
+        dictionary,
+      );
+      return both.length === 1 && both[0]?.marathi === 'देवेंद्र फडणवीस';
+    })(),
+  );
+
+  console.log('\n=== never duplicate someone already on the card ===');
+  check(
+    'a person the extractor already found is not re-proposed',
+    suggestOfficeHolders(
+      'मुख्यमंत्री देवेंद्र फडणवीस यांनी निर्देश दिले.',
+      [{ marathi: 'देवेंद्र फडणवीस' }],
+      dictionary,
+    ).length === 0,
+  );
+  check(
+    'a name present in the text is not proposed even if the card missed it',
+    suggestOfficeHolders(
+      'मुख्यमंत्री देवेंद्र फडणवीस यांनी निर्देश दिले.',
+      [],
+      dictionary,
+    ).length === 0,
+  );
+
+  console.log('\n=== degrades quietly ===');
+  check(
+    'an empty dictionary proposes nothing',
+    suggestOfficeHolders(realNote, [], new Map()).length === 0,
+  );
+  check(
+    'a text naming no office proposes nothing',
+    suggestOfficeHolders('रिंग रोडचे भूसंपादन सुरू आहे.', [], dictionary)
+      .length === 0,
+  );
+  check(
+    'empty text proposes nothing',
+    suggestOfficeHolders('', [], dictionary).length === 0,
+  );
+
+  console.log('\n=== several distinct offices ===');
+  check(
+    'two unambiguous titles yield two suggestions',
+    (() => {
+      const many = suggestOfficeHolders(
+        'मुख्यमंत्री यांनी जिल्हाधिकारी यांना निर्देश दिले.',
+        [],
+        dictionary,
+      );
+      return (
+        many.length === 2 &&
+        many.some((n) => n.marathi === 'देवेंद्र फडणवीस') &&
+        many.some((n) => n.marathi === 'सुहास दिवसे')
+      );
+    })(),
+  );
+
+  console.log('\n=== a bare SURNAME resolved through the dictionary ===');
+  {
+    const surnames = new Map<string, string[]>([
+      ['मुख्यमंत्री', ['देवेंद्र फडणवीस']],
+      ['महसूल मंत्री', ['चंद्रशेखर बावनकुळे']],
+      ['जिल्हाधिकारी', ['सुहास दिवसे']],
+    ]);
+    check(
+      'फडणवीस → the देवेंद्र फडणवीस row’s title',
+      resolveSurnameDesignations(
+        'असल्याचे सांगत फडणवीस यांनी उपक्रमाला मान्यता दिली.',
+        surnames,
+      ).get('फडणवीस') === 'मुख्यमंत्री',
+    );
+    check(
+      'बावनकुळे → महसूल मंत्री',
+      resolveSurnameDesignations('बावनकुळे यांनी आढावा घेतला.', surnames).get(
+        'बावनकुळे',
+      ) === 'महसूल मंत्री',
+    );
+    check(
+      'the FULL name in the text is left to its own row',
+      resolveSurnameDesignations(
+        'देवेंद्र फडणवीस यांनी सांगितले. नंतर फडणवीस यांनी पाहणी केली.',
+        surnames,
+      ).size === 0,
+    );
+    check(
+      'an inflected form is not a mention',
+      resolveSurnameDesignations('फडणवीसांनी सांगितले.', surnames).size === 0,
+    );
+    check(
+      'a surname the dictionary does not hold yields nothing',
+      resolveSurnameDesignations('शिंदे यांनी सांगितले.', surnames).size === 0,
+    );
+    check(
+      'an empty dictionary yields nothing',
+      resolveSurnameDesignations('फडणवीस यांनी सांगितले.', new Map()).size ===
+        0,
+    );
+  }
+
+  console.log(
+    '\n=== a shared surname is decided by CONTEXT, or not at all ===',
+  );
+  {
+    const twoPawars = new Map<string, string[]>([
+      ['उपमुख्यमंत्री', ['अजित पवार']],
+      ['जिल्हाधिकारी', ['सुप्रिया पवार']],
+    ]);
+    check(
+      'no context ⇒ nothing proposed',
+      resolveSurnameDesignations('पवार यांनी बैठक घेतली.', twoPawars).size ===
+        0,
+    );
+    check(
+      'the title written in the note picks the right पवार',
+      resolveSurnameDesignations(
+        'उपमुख्यमंत्री यांच्या अध्यक्षतेखाली बैठक झाली. पवार यांनी निर्देश दिले.',
+        twoPawars,
+      ).get('पवार') === 'उपमुख्यमंत्री',
+    );
+    check(
+      'BOTH titles present ⇒ still nothing, the surname is genuinely ambiguous',
+      resolveSurnameDesignations(
+        'उपमुख्यमंत्री व जिल्हाधिकारी उपस्थित होते. पवार यांनी सांगितले.',
+        twoPawars,
+      ).size === 0,
+    );
+  }
+
+  console.log('\n=== the designation the NOTE writes beside the name ===');
+  const titles = [
+    'उपमुख्यमंत्री',
+    'केंद्रीय मंत्री',
+    'महसूल मंत्री',
+    'मुख्यमंत्री',
+    'मंत्री',
+    'जिल्हाधिकारी',
+  ];
+  const realCase =
+    'बैठकीस उपमुख्यमंत्री एकनाथ शिंदे उपस्थित होते. केंद्रीय मंत्री नितीन गडकरी ' +
+    'यांनी सांगितले की, महसूल मंत्री चंद्रशेखर बावनकुळे यांनी आढावा घेतला.';
+  const beside = designationsFromText(
+    realCase,
+    ['एकनाथ शिंदे', 'नितीन गडकरी', 'चंद्रशेखर बावनकुळे'],
+    titles,
+  );
+  check(
+    'उपमुख्यमंत्री एकनाथ शिंदे',
+    beside.get('एकनाथ शिंदे') === 'उपमुख्यमंत्री',
+  );
+  check(
+    'केंद्रीय मंत्री नितीन गडकरी — the LONGER title wins over "मंत्री"',
+    beside.get('नितीन गडकरी') === 'केंद्रीय मंत्री',
+  );
+  check(
+    'महसूल मंत्री चंद्रशेखर बावनकुळे',
+    beside.get('चंद्रशेखर बावनकुळे') === 'महसूल मंत्री',
+  );
+
+  check(
+    'the उपमुख्यमंत्री/मुख्यमंत्री substring trap: no मुख्यमंत्री is attached',
+    designationsFromText(
+      'उपमुख्यमंत्री अजित पवार यांनी',
+      ['अजित पवार'],
+      ['मुख्यमंत्री'],
+    ).size === 0,
+  );
+  check(
+    'an honorific between title and name is skipped',
+    designationsFromText(
+      'मुख्यमंत्री श्री. देवेंद्र फडणवीस यांनी निर्देश दिले.',
+      ['देवेंद्र फडणवीस'],
+      ['मुख्यमंत्री'],
+    ).get('देवेंद्र फडणवीस') === 'मुख्यमंत्री',
+  );
+  check(
+    'a title elsewhere in the sentence is NOT attached',
+    designationsFromText(
+      'मुख्यमंत्री यांच्या अध्यक्षतेखाली झालेल्या बैठकीत सुनीता पवार यांनी माहिती दिली.',
+      ['सुनीता पवार'],
+      ['मुख्यमंत्री'],
+    ).size === 0,
+  );
+  check(
+    'a later titled mention is found when the first is bare',
+    designationsFromText(
+      'गडकरी यांनी भेट दिली. नंतर केंद्रीय मंत्री गडकरी यांनी सांगितले.',
+      ['गडकरी'],
+      ['केंद्रीय मंत्री'],
+    ).get('गडकरी') === 'केंद्रीय मंत्री',
+  );
+  check(
+    'no titles at all yields nothing',
+    designationsFromText(realCase, ['एकनाथ शिंदे'], []).size === 0,
+  );
+  check(
+    'a name the text never uses yields nothing',
+    designationsFromText(realCase, ['सुहास दिवसे'], titles).size === 0,
+  );
+
+  if (failures > 0) {
+    console.error(`\n${failures} check(s) failed.`);
+    process.exitCode = 1;
+  } else {
+    console.log('\nAll checks passed.');
+  }
 }

@@ -54,7 +54,7 @@ function escapeHtml(text: string): string {
 export function buildCaptionHtml(
   keyPoint: string,
   aspect: CaptionAspect,
-  fontDataUri: string,
+  fontFaceCss: string,
 ): string {
   const { width, height } = CAPTION_FRAME_SIZE[aspect];
   // Vertical is the narrower canvas, so its text has to be proportionally
@@ -66,11 +66,7 @@ export function buildCaptionHtml(
 <head>
 <meta charset="utf-8" />
 <style>
-  @font-face {
-    font-family: 'Noto Sans Devanagari';
-    src: url('${fontDataUri}') format('truetype');
-    font-weight: 100 900;
-  }
+${fontFaceCss}
   /* No background anywhere: the screenshot is taken with omitBackground, and a
      painted body would come back as an opaque rectangle over the footage. */
   html, body {
@@ -99,7 +95,7 @@ export function buildCaptionHtml(
     border-left: ${Math.round(width * 0.006)}px solid #f59e0b;
     border-radius: ${Math.round(width * 0.005)}px;
     padding: ${Math.round(fontSize * 0.55)}px ${Math.round(fontSize * 0.85)}px;
-    font-family: 'Noto Sans Devanagari', sans-serif;
+    font-family: 'Mukta', sans-serif;
     font-weight: 600;
     font-size: ${fontSize}px;
     /* Devanagari matras sit above the line; a tight leading clips them. */
@@ -125,9 +121,9 @@ export async function renderCaptionOverlay(
   const text = keyPoint.trim();
   if (text === '') return null;
 
-  const { fontDataUri } = await loadCaptionAssets();
+  const { fontFaceCss } = await loadCaptionAssets();
   const { width, height } = CAPTION_FRAME_SIZE[aspect];
-  return renderHtmlToPng(buildCaptionHtml(text, aspect, fontDataUri), {
+  return renderHtmlToPng(buildCaptionHtml(text, aspect, fontFaceCss), {
     width,
     height,
     // 1, not the poster default of 2: the PNG is already at the video's exact

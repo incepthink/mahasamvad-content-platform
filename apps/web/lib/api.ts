@@ -3,16 +3,18 @@
 
 import {
   DloIntakeDetailSchema,
+  DloIntakeListResponseSchema,
+  DloReviewPatchResponseSchema,
   GenerationDetailSchema,
   GenerationSummarySchema,
   GlossaryListResponseSchema,
   GlossaryTermSchema,
-  PointersResultSchema,
   PrepareDesignationsResponseSchema,
   PrepareTranslationResponseSchema,
   ProofreadResponseSchema,
   PublishGenerationResponseSchema,
   ReferenceImageSchema,
+  VerifyNameResponseSchema,
   ReferenceTypeSchema,
   ThreadItemSchema,
   CreateDocumentResponseSchema,
@@ -28,19 +30,22 @@ import {
   type CreateGenerationRequest,
   type DloGenerateRequest,
   type DloIntakeDetail,
+  type DloIntakeSummary,
+  type DloReviewPatchRequest,
+  type DloReviewPatchResponse,
   type CreateGlossaryTermRequest,
   type CreateReferenceTypeRequest,
   type GenerationDetail,
   type GenerationSummary,
   type GlossaryListResponse,
   type GlossaryTerm,
-  type PointersRequest,
-  type PointersResult,
   type PrepareDesignationsRequest,
   type PrepareDesignationsResponse,
   type PosterFeedbackRequest,
   type PosterImageFeedbackRequest,
   type PrepareTranslationResponse,
+  type VerifyNameRequest,
+  type VerifyNameResponse,
   type ProofreadRequest,
   type ProofreadResponse,
   type ReferenceCategory,
@@ -59,6 +64,10 @@ import {
   type TranslationTermInput,
   type UpdateGlossaryTermRequest,
   type UpdateReferenceTypeRequest,
+  TranscriptionDetailSchema,
+  TranscriptionListResponseSchema,
+  type TranscriptionDetail,
+  type TranscriptionSummary,
   VideoProjectDetailSchema,
   VideoProjectSummarySchema,
   type CreateVideoProjectRequest,
@@ -147,6 +156,57 @@ export async function getDloIntake(
   return DloIntakeDetailSchema.parse(body);
 }
 
+// The shared recent-intake list behind /dlo. Carries no text — the summary omits both the
+// combined text and the review state, so this stays cheap enough to poll while work runs.
+export async function listDloIntakes(): Promise<DloIntakeSummary[]> {
+  const body = await requestJson('/api/dlo/intakes');
+  return DloIntakeListResponseSchema.parse(body);
+}
+
+// Transcription: multipart create (recordings only). No content-type header — the browser
+// sets the multipart boundary (same as createDloIntake).
+export async function createTranscription(form: FormData): Promise<string> {
+  const response = await fetch(`${API_URL}/api/transcriptions`, {
+    method: 'POST',
+    body: form,
+  });
+  const body = await readJsonResponse(response);
+  return z.object({ id: z.string() }).parse(body).id;
+}
+
+// `includeText` is opt-in for the same reason as getDloIntake: the payload then carries
+// every transcript, which the result card needs once and the progress poll does not.
+export async function getTranscription(
+  id: string,
+  includeText = false,
+): Promise<TranscriptionDetail> {
+  const body = await requestJson(
+    `/api/transcriptions/${id}${includeText ? '?text=1' : ''}`,
+  );
+  return TranscriptionDetailSchema.parse(body);
+}
+
+// The recent-run list behind /transcribe. Carries no text — the summary omits both the
+// per-file transcripts and the combined text, so this stays cheap enough to poll.
+export async function listTranscriptions(): Promise<TranscriptionSummary[]> {
+  const body = await requestJson('/api/transcriptions');
+  return TranscriptionListResponseSchema.parse(body);
+}
+
+// Persist the review step's state so a reload — or a colleague opening the same intake —
+// costs nothing already paid for. See useDloReviewAutosave for the debounce and the
+// conflict warning; this is only the transport.
+export async function saveDloReview(
+  id: string,
+  input: DloReviewPatchRequest,
+): Promise<DloReviewPatchResponse> {
+  const body = await requestJson(`/api/dlo/intakes/${id}/review`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+  return DloReviewPatchResponseSchema.parse(body);
+}
+
 // "Read these pages." The officer's page choice for every scanned PDF in this intake —
 // the call that spends OCR credits, bounded to exactly the pages listed. Puts the intake
 // back into running so the review step's existing poll picks up the new pages.
@@ -175,22 +235,8 @@ export async function reextractDloFile(
   });
 }
 
-// Summarise the current assembled note into a flat ordered list of Marathi key points, shown
-// to the officer as a reading summary of their source. DISPLAY ONLY — it does not steer
-// generation, which works from the complete reviewed text. Synchronous + ad-hoc — nothing is
-// stored; on failure the engine returns { points: [] } and the officer generates as usual.
-export async function fetchPointers(
-  input: PointersRequest,
-): Promise<PointersResult> {
-  const body = await requestJson('/api/pointers', {
-    method: 'POST',
-    body: JSON.stringify(input),
-  });
-  return PointersResultSchema.parse(body);
-}
-
 // Which people does this text name, and what पदनाम should the article print before each?
-// Synchronous + ad-hoc like fetchPointers — nothing is stored. A text naming nobody comes back
+// Synchronous + ad-hoc — nothing is stored. A text naming nobody comes back
 // with `names: []`, and the caller submits straight through: the check is invisible when there
 // is nothing to check.
 export async function prepareDesignations(
@@ -201,6 +247,19 @@ export async function prepareDesignations(
     body: JSON.stringify(input),
   });
   return PrepareDesignationsResponseSchema.parse(body);
+}
+
+// "तपासले म्हणून खूण करा" from the review card: confirm this person's नाव-शब्दकोश row without
+// leaving the review step. Writes `verified` and nothing else — the English/Hindi spellings stay
+// the pre-translation name check's business.
+export async function verifyPersonName(
+  input: VerifyNameRequest,
+): Promise<VerifyNameResponse> {
+  const body = await requestJson('/api/designations/verify', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  return VerifyNameResponseSchema.parse(body);
 }
 
 // The review step's submit: the (edited) combined text becomes a normal
@@ -729,16 +788,26 @@ export async function analyzeReferenceImage(
 }
 
 // Manual override when the vision pass called the photo zone wrong.
-export async function setReferenceImagePhotoZone(
+// Patches the cached vision reading. Fields are independent: send only what the
+// operator changed, so correcting the subject line can never flip the photo-zone
+// verdict (or the reverse) as a side effect.
+export async function updateReferenceImageLayoutSpec(
   id: string,
-  hasPhotoZone: boolean,
+  patch: Readonly<{ hasPhotoZone?: boolean; contentSummary?: string }>,
 ): Promise<ReferenceImage> {
   const body = await requestJson(`/api/references/${id}/layout-spec`, {
     method: 'PATCH',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ hasPhotoZone }),
+    body: JSON.stringify(patch),
   });
   return ReferenceImageSchema.parse(body);
+}
+
+export async function setReferenceImagePhotoZone(
+  id: string,
+  hasPhotoZone: boolean,
+): Promise<ReferenceImage> {
+  return updateReferenceImageLayoutSpec(id, { hasPhotoZone });
 }
 
 export async function deleteReferenceImage(id: string): Promise<void> {

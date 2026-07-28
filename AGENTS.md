@@ -19,6 +19,30 @@ The long-term product will:
 Scaffolding is done. The core generation pipeline and a first web product on top of
 it are implemented and working end-to-end:
 
+- **Simple fixed-template social prompt** (2026-07-28, no migration): for Twitter DGIPR runs
+  using `designMode: 'onbrand'` (UI: **ठरलेले टेम्पलेट**), the selected reference
+  image is sent unchanged to the image-edit model with the original note verbatim and only
+  six constraints: use the reference image as the AUTHORITATIVE structure (composition,
+  sections, proportions, content distribution, imagery zones, balance and density), filling
+  the usable canvas without collapsing onto one side or leaving large unused areas; do not
+  add a logo; do not add a footer; keep only the top-right 180x170 and full-width bottom 120px
+  as mandatory empty cover zones that seamlessly continue the
+  immediately adjacent background—never a separate colour, white patch, box, panel, band,
+  marker, or visible boundary (and explicitly no text, imagery, objects, decoration, or
+  anything sitting behind the later overlays); treat those as the ONLY intentionally empty
+  areas and use all remaining space right up to their boundaries; use only Marathi text,
+  Devanagari numerals and Nirmala UI; and never paste the entire input article—select only its
+  most important poster information. No other colour, placeholder-erasure, imagery, sizing,
+  or text-placement rules are included.
+  This branch also skips `generatePosterCopy`, since its structured rewrite would not be used
+  and would add an unnecessary text-model charge. The existing API-side
+  `overlayTwitterChrome` still adds the official logo and footer after rendering. `adaptive`,
+  `fresh`, Facebook, and the separate CMO template path are unchanged; no n8n workflow change.
+  The Twitter chrome lockup was also tightened from 240x220 to 160x154 and moved from a 20px
+  to a 6px top/right margin on the 1280x1600 canvas. The emblem is 96px wide and starts 8px
+  below the card top; the Marathi wordmark keeps its established size and vertical position.
+  This turns the emblem's reduced height into intentional top padding while the narrower card
+  removes excess left/right padding.
 - Mahasamvad scraping/ingestion, chunking, embeddings, and RAG retrieval
   (`packages/content-engine/src/{scraping,chunking,embedding,retrieval}`)
 - Article generation with coverage + faithfulness verification
@@ -2305,6 +2329,404 @@ public-information poster'`, `'authentic skin, fabric and material textures'` in
   the response shape is a shared contract parsed by `apps/web/lib/api.ts` with the same schema the
   engine produces, so a half-deploy makes the card error on every review. New env (optional):
   `OPENAI_POINTERS_MODEL`.
+
+- **Concurrent /dlo work: a list of intakes, each at its own URL, resumable for free**
+  (2026-07-27, migration 0036): `/dlo` behaved as if the platform could hold exactly ONE piece of
+  article work. Exploration found **no server-side limit anywhere** — `POST /dlo/intakes` has no
+  concurrency check, the `running` Set in `dlo-runner.ts` is an unbounded double-run guard, and
+  `dlo_intakes` has no owner column because there is no auth. Two independent causes produced the
+  symptom, and only fixing both makes the product actually concurrent:
+  (1) **One form, globally.** `DloWorkspace` was a single component instance holding one
+  `intakeId` and one `step` machine, mounted once by `PersistentAppContent` in the root layout and
+  hidden with CSS. Its own `app/dlo/page.tsx` stub said it "prevents a second workspace instance".
+  (2) **One OpenAI slot, process-wide.** `createLimiter(readInt('OPENAI_MAX_CONCURRENCY', 1))` in
+  `http/openai-request.ts` serializes EVERY OpenAI call with a 300 s timeout, so a second officer's
+  pointer summary or article silently queued behind the first with no sign of why.
+  Two officers on separate machines were never blocked by (1); they were blocked by (2), and by the
+  fact that **`intakeId` was never persisted** — no URL, no storage — so a reload orphaned the
+  intake outright while Sarvam kept billing. Officers sharing one machine hit both.
+  - **`/dlo` is now a list + form; `/dlo/[id]` is the workspace** (the existing `/video` shape:
+    `app/video/page.tsx` + `app/video/[id]/page.tsx`). `PersistentAppContent.tsx` is **deleted**,
+    and the case for deleting it is that server-backed resume strictly dominates it: the singleton
+    covered tab-switching only, while the row-as-state-of-record covers tab-switching, **reload,
+    crash, closed tab, another machine** — and, unlike the singleton, does not prevent a second
+    officer from reaching the form. **The step is DERIVED from the row**, never stored, which is
+    what makes resuming land exactly where the officer was.
+  - **Migration 0036 `dlo_intakes.review_state` (jsonb)** persists everything the review step holds
+    that is not already a column: the officer's per-source corrections, the unticked pages, the
+    pasted style reference, and — the point — the two **PAID** lookups, the pointer summary (one
+    `gpt-5.6-sol` call per `POINTERS_REQUEST_CHUNK_CHARS` block of the source) and the prepared
+    names behind व्यक्ती व पदनाम. Resuming re-buys nothing.
+    **Its own column, not a write-back into `files`**, for three reasons: `files` is rewritten
+    WHOLESALE by the extract/re-extract jobs, so an autosave landing there would be a lost-update
+    race against a live OCR job (`updateDloIntake` patches per field, so disjoint columns can never
+    clobber each other); `files[].text` is the machine's answer and must stay distinguishable from
+    the officer's correction, which the `edits[key] ?? page.text` overlay preserves; and
+    `forgetFile`/`forgetFileKeys` already prune that overlay by file index after a re-read and work
+    unchanged on a restored blob. `category`/`heading` deliberately go to their REAL columns (0018),
+    so they survive even without 0036.
+  - **The no-re-spend guarantee needed no new logic.** The pointer and designation auto-fire effects
+    were already `if (pointers !== null || pointersLoading) return`; seeding those states from the
+    blob suppresses them. The subtlety is that both effects run in the SAME commit as the seeding
+    effect, where their `pointers === null` closure is still true — so the guard is a **ref**
+    (`restoredFromSave`), which mutates immediately; a state-based guard would fire a paid call one
+    render before the seed landed.
+  - **Autosave is a 1200 ms debounce** (`useDloReviewAutosave`), flushed and awaited before
+    `generate()` so the stored blob and the submitted `combinedText` can never disagree, and flushed
+    on `pagehide`/`visibilitychange`. **Last-writer-wins, warn-never-lock**: the list is shared and
+    there is no identity to lock against, so the blob carries a `writer` id and the PATCH returns
+    the **previous** writer — echoing back our own would be information we already have and could
+    never detect anything (this was a real bug caught in review). Optimistic concurrency on the
+    row's `updated_at` was rejected: the intake job stamps that column too, so an OCR re-read would
+    spuriously reject the officer's own save.
+  - **Navigation** (§1.4 of the plan, and the half that decides whether this *feels* concurrent):
+    `/dlo` renders a conditional **सुरू असलेले काम** resume card → the new-intake form → the list
+    split into **तुमचे काम** / **इतर कामे**. Deliberately **no auto-redirect** — an officer whose
+    first intake is transcribing very often came back to start a SECOND one. The workspace header
+    carries **`+ नवीन काम सुरू करा`**, named rather than a bare `+`. `काम` throughout, not the more
+    technical `सत्र`, matching `dloStartOver`. The list polls at 5 s **only while one of this
+    browser's own runs is non-terminal** (the `useGenerationThread` discipline).
+  - **`dgipr.dlo.mine` (localStorage) is ORDERING ONLY and must never become auth.** Every intake
+    stays visible and openable by anyone — that is the confirmed requirement, not an oversight. The
+    API never receives, reads or filters on it; losing it costs ordering, never access. Said in the
+    module comment so nobody later "upgrades" it into a permission check.
+  - **The pre-submit draft**: notes/category/heading/style-reference and the document slot ids go to
+    sessionStorage (the slot ids matter — each `<DocumentIntake>` already survives a reload via
+    `dgipr.dlo.document.${slotId}`, but only if the same ids return). **Picked MP3s genuinely cannot
+    be persisted** — a `File` is a live handle behind a user gesture — so within a session they ride
+    in a module-scoped variable (not a component, so Next.js never unmounts it) and across a reload
+    only their NAMES survive, surfaced as a "re-attach these" callout rather than a silent submit.
+  - **`GET /dlo/intakes` must NOT run the orphan reaper**, and this is the one place the change
+    could have made things worse: the reaper fails any queued/running row absent from THIS
+    PROCESS's job set, so running it across a whole list would mass-fail every live intake the
+    moment anyone opened `/dlo` in a second tab. Verified structurally — the route references
+    neither `isIntakeJobRunning` nor `updateDloIntake`. The detail route keeps the reaper and now
+    carries a comment naming the **single-process constraint** it imposes: with two API instances,
+    instance B's poll would kill instance A's live job. Fixing that needs a heartbeat + grace window
+    across `dlo-runner.ts`/`runner.ts`/`video-runner.ts` alike and is a named follow-up, not part of
+    this change — but it is now written down in `.env.example` too, because the first instinct under
+    load is "run two API containers".
+  - **Lineage stays one-way.** `listGenerationsForDloIntakes` answers "has this intake produced an
+    article?" with one batched `.in('dlo_intake_id', ids)` for the whole page. A reverse
+    `dlo_intakes.generation_id` column was rejected: a best-effort reverse write that silently
+    failed would leave an officer free to pay for a second article from the same source. An intake
+    is never marked consumed — it stays `ready` and may legitimately produce several articles — so
+    the card shows a COUNT and the output view offers "याच स्रोतातून पुन्हा लेख तयार करा".
+  - DLO runs now register with `TasksProvider` (`addTask` after `generateFromDloIntake`), which they
+    never did. **Known side effect**: `hasActiveArticleTask` gates the home form's article cards, so
+    a DLO run now disables them while it generates — in-memory and per-officer, arguably correct,
+    but a behaviour change on a page this work did not otherwise touch. If unwanted, the fix is a
+    `track: 'panel-only'` flag on `addTask`.
+  - **`OPENAI_MAX_CONCURRENCY`**: code default stays **1** (safe on the smallest org and a fresh
+    clone; this repo's rollback story is env-only). Deployment value **5, and only on tier 2+
+    (450k TPM)**. The arithmetic, stated honestly: an article is ~120k tokens spread over minutes,
+    so five officers aggregate to ~150k TPM in steady state; the exposure is the burst case (~600k
+    in one minute), which retry-with-backoff absorbs because **the slot is held across retries**.
+    Expect `[openai] … got 429` warnings to become ROUTINE at 5 — the mechanism working, but it does
+    mean the log stops being a useful signal. Worse throughput after deploying = overshot the tier,
+    drop to 3. On tier 1 raising it makes things worse.
+  Verified 2026-07-27, all free: workspace typecheck **7/7 green**, lint clean on every touched file
+  (prettier's complaints on the four pre-existing files were confirmed **already failing at HEAD**);
+  23 offline assertions (`tsx src/intake/dlo-review-state.ts` — deterministic serialization, the
+  restored overlay reproducing a **byte-identical** assembled note including its `=== स्रोत: … ===`
+  headers, empty/unknown-key tolerance, wrong-`v`/junk/null rejection); and a **live API run against
+  a database WITHOUT 0036 applied**, which is this repo's own blast-radius standard: the list
+  returns correct titles/counts/lineage and provably no text, the detail returns
+  `reviewState: null` + `generations`, **create still reaches `ready` and lists**, and the PATCH is
+  the ONLY thing that fails. Guards: unknown id 404, wrong `v` 400, oversized blob 400.
+  **`DLO_REVIEW_STATE_MAX_CHARS` was lowered 400k → 300k as a result of that run**: Devanagari is 3
+  bytes/char and `apps/api` caps bodies at 1 MiB, so a 400k cap was *unreachable* for Marathi — the
+  body limit fired first and the officer would have got an opaque English 413 instead of the Marathi
+  message. Confirmed both ways live (410k Devanagari → 413; 410k ASCII → the intended 400) and now
+  pinned by a harness assertion.
+  **Left for a real run**: applying 0036, then the resume E2E proving **zero** new `/api/pointers`
+  and `/api/designations/prepare` requests after a reload (the claim that cannot be shown offline),
+  the two-officer conflict banner, an OCR re-read against a restored blob, and the
+  `OPENAI_MAX_CONCURRENCY=1 vs 5` wall-clock measurement against the real org's tier.
+  **Deploy: 0036 → API → web** (rebuild `@dgipr/schemas` → `@dgipr/database` dists first). No n8n.
+
+- **The article stopped out-instructing its own style example** (2026-07-27, no migration): DLOs
+  reported that platform articles read like reshuffled minutes, and that pasting the same note into
+  ChatGPT with ONE Mahasamvad article as a sample produced visibly better copy. Generation
+  `d997d12c` was the reference case: 282 words, no dateline, no named speaker, two `•` bullets, and
+  `निर्देश देण्यात आले` / `सूचित करण्यात आले` in every paragraph. It was not a model gap — it is the
+  same model family. Five causes, four of them ours:
+  (1) **The exemplar's HEADLINE was never sent.** `retrieveReferenceArticle` returned
+  `chunks.map(c => c.text).join('\n\n')` — bodies only — while the specification told the model to
+  study *"how it presents the main news in the headline"*. The retrieved article's title was
+  `…गैरसोय टाळावी – पालकमंत्री मंगलप्रभात लोढा`; that `– पदनाम नाव` pattern is the single most
+  recognisable DGIPR habit and the model had never seen it. Fixed by carrying `title` through
+  `StyleReference.articles[]` and rendering it as a `शीर्षक:` line.
+  (2) **The prompt banned DGIPR's own house idiom.** The avoid-list held `यावेळी` and
+  `त्यांनी सांगितले` — which the exemplar uses (`यावेळी … उपस्थित होते`,
+  `असेही मंत्री श्री.लोढा यांनी सांगितले`) and which `STATEMENT_TASK_RULE` explicitly prescribes.
+  Banned, the model invented the flat agentless register officers were rejecting. The list is gone;
+  the constructions are now offered positively, with "never invent a name to avoid it" attached.
+  (3) **The dictionary already knew the answer and nobody had written the query.** The note says
+  `मुख्यमंत्री` with the name lost to STT, and `glossary_terms` holds, verified,
+  `{ देवेंद्र फडणवीस, person, designation: मुख्यमंत्री }`. But `prepareDesignations` searched only for
+  PERSON NAMES, so it returned `[]` and the article had nobody to attribute a directive to — while
+  ChatGPT supplied from outside knowledge a fact we hold ourselves. New
+  `mapDesignationsToPersons` (`@dgipr/database`) + `suggestOfficeHolders` propose the office-holder
+  as a `suggested: true` row. It is a LOOKUP, not an inference: **exactly one** verified holder
+  (`उपमुख्यमंत्री` maps to two people and therefore proposes nothing), longest title first with the
+  matched span CONSUMED so `उपमुख्यमंत्री` cannot also fire `मुख्यमंत्री`, and the officer reviews it
+  before any spend (`DesignationEdit.accepted`, autosaved).
+  **AMENDED 2026-07-28 — `accepted` now defaults to `term.suggested` (pre-TICKED), not `false`.**
+  It shipped default-off, which sounded like the safe choice and measured as a silent one. The
+  four consecutive `/dlo` intakes after the feature landed each carried the identical proposed
+  row `{देवेंद्र फडणवीस, suggested: true, designation: मुख्यमंत्री}` in `review_state`, and exactly
+  ONE had a non-empty `edits` — so one generation got `name_designations` and three got `null`,
+  with the article silently reverting to the agentless prose the whole feature exists to
+  prevent. The officer had also ticked **यापुढेही हेच वापरा** on that run, and it changed nothing
+  for later ones: for a reverse-lookup row the write-back only creates the glossary row the
+  suggestion is *generated from*, so the row comes back `suggested: true` and unticked forever.
+  Pre-filling only ever helped notes that already spell the name out — i.e. the case that never
+  needed help. Review is preserved by making the suggestion **visible and untickable** (named on
+  the card before any spend, labelled शब्दकोशातून सुचवलेले) rather than inert. Two construction
+  sites must stay in step or the fix is undone by a keystroke: `valueFor` in
+  `DesignationReview.tsx` and the seed in `DloWorkspace.patchDesignationEdit` — an untouched row
+  has no `edits` entry at all, so `collectDesignations` reads `edit?.accepted ?? term.suggested`
+  and a `?? false` anywhere re-drops every suggestion the officer simply left alone.
+  (4) **A ten-rung priority ladder plus "do not preserve the original order" IS the "reshuffled our
+  data" complaint.** Replaced by: lead on the strongest supported outcome, then **follow the order
+  of the source**, departing only to keep a directly related fact beside its point.
+  (5) **Rules outweighed the example ~8:1** (11,041 chars of spec vs a 1,350-char headless excerpt),
+  and several rules contradicted it — including an invented "zero to two highlight bullets" rule no
+  Mahasamvad article follows. The spec is cut to **6,676 chars** in five numbered blocks (FACTS /
+  STYLE / EDITING / LENGTH / BEFORE ANSWERING) and now says outright that where instructions and
+  references disagree about FORM, **follow the references**; the instructions govern facts and
+  accuracy, the references govern how the article reads. Up to 3 exemplars
+  (`ARTICLE_STYLE_REFERENCE_COUNT`, default 3) with the shared-shape rule "follow what they have in
+  COMMON".
+  Two things found while measuring, both load-bearing once the spec is short. **A wrong-GENRE
+  exemplar** — a real retrieval ranked a 12,550-char `विधानसभा लक्षवेधी` (legislative Q&A, ~1,700
+  words) above the 835-char news report that actually showed the pattern; `styleReferenceMaxChars`
+  bounds an exemplar at `wordTarget.max × 6.5 × 2` chars, using length as the cheapest reliable
+  proxy for genre. And **"reproduce verbatim" over-generalised**: with the old terminology guidance
+  cut, the model preserved raw STT artefacts (`एस सी एम टी आर`, `एकत्रित जीआर`, `ॲडव्हान्स पोझिशन`,
+  `कॅश कॉम्पेंसेशन`, `टीपी प्लॅन`, Latin `2028`). The rule now says explicitly that it protects FACTS,
+  not transcription artefacts, with worked examples and Devanagari numerals — re-scripting a numeral
+  may never re-value it (the `revise-caption` distinction).
+  Also: DGIPR's end-of-copy sign-off (`****` + `संध्या गरवारे/विसंअ/`) is stripped from every
+  exemplar (`stripArticleBoilerplate`), or the model is being shown a byline to imitate.
+  `SIMPLE_ARTICLE_PROMPT_VERSION` → `simple-v2`; `styleReferenceMeta.articleCount` records how many
+  exemplars a run actually got, which is what makes a 1-vs-3 A/B attributable afterwards.
+  Verified 2026-07-27: typecheck **7/7 green**, lint clean on all 12 touched files, and four free
+  harnesses — 77 prompt assertions, 47 reference-selection assertions (incl. the real 12,550-char
+  rejection beside the 835-char keep), 7 sign-off assertions, and 16 office-holder assertions whose
+  substring case **caught a real bug** (global suppression instead of per-occurrence masking, which
+  silently dropped the Chief Minister from a note naming both offices). Paid end-to-end on the exact
+  failing note: the article now opens
+  `शासकीय जमिनींचा आगाऊ ताबा देण्यासाठी एकत्रित शासन निर्णय काढावा – मुख्यमंत्री देवेंद्र फडणवीस`, leads with
+  `असे निर्देश मुख्यमंत्री देवेंद्र फडणवीस यांनी दिले.`, carries `असेही फडणवीस यांनी सांगितले`, expands every
+  acronym (`एचसीएमटीआर`, `पुणे महानगरपालिका`, `पुणे महानगर प्रदेश विकास प्राधिकरण`, `नगररचना योजना`), uses
+  `२०२८`, has no bullets and follows the source order — with `designationIssues: []`.
+  **Still open**: no dateline, because `runner.ts` still hardwires `location`/`date` to nothing —
+  the prompt slots exist and a small venue/date field at the /dlo review step fills them. Also
+  deferred: the retrieval RANKING still put the legislative document first on selection score (the
+  length bound only excludes it), and vector search runs a **sequential scan over 37,811 chunks**
+  since 0019 dropped the HNSW index, which times out under load and silently degrades a run to
+  tier 3 — i.e. to the rules-only configuration this whole change moves away from.
+  No migration, no n8n; deploy is `@dgipr/schemas` → `@dgipr/database` → `@dgipr/content-engine`
+  dists, then API, then web. New env, both optional: `ARTICLE_STYLE_REFERENCE_COUNT`.
+
+- **The Devanagari typeface is Mukta, not Noto Sans Devanagari** (2026-07-28, no migration): an
+  officer reported that the platform "messes up the spelling of many Marathi names on pasting" —
+  a word copied out of a DGIPR Word document showed as `इलेक्ट्रानिक्स` there and `इलेक्ट्रॉनिक्स` on
+  the site. **No character was ever altered**, and that was established before any code changed:
+  `/proofread`'s textarea does `setText(event.target.value)` and nothing else, there is no
+  `onPaste`/`.normalize()` anywhere in `apps/web`, and the officer's own clean-room test settled
+  it — text copied from **Google**, pasted into the site, then copied back out came through
+  unchanged. A `<textarea>` cannot change a code point.
+  What was actually wrong is worse, because it was shipping in published material: **Noto Sans
+  Devanagari fails to form the C+र conjuncts Marathi is full of.** For `क्ट्र` it leaves an
+  explicit halant under the `ट` and sets `र` as a separate wide letter, so `इलेक्ट्रॉनिक्स` reads
+  as broken to a Marathi eye. Rendered side by side through Chromium, **Nirmala UI, Mukta, Hind,
+  Tiro Devanagari Marathi, Baloo 2 and Mangal all form the ligature correctly — Noto was the
+  only outlier**, and since it is the only font this product ships, it was the only place text
+  looked wrong. Every other app the officers use (Word, Chrome on google.com, Notepad, a chat
+  window) falls back to Windows' **Nirmala UI** and therefore looked right. The lesson worth
+  keeping: a report of "your app changed our text" against a Devanagari surface is a **shaping**
+  complaint until proven otherwise — diff the code points first (they were identical here), then
+  screenshot the same string in several faces rather than reasoning about it.
+  The swap is **Mukta** (Ek Type, OFL — `assets/fonts/Mukta-OFL.txt`), chosen by the operator
+  from that comparison, and it reaches **every surface**: the web UI (`apps/web/app/layout.tsx`,
+  `next/font/google`), the article PDF, both posters, the burned-in video captions, and the
+  Sharp/Pango `महाराष्ट्र शासन` wordmark in `twitter-chrome.ts`. Fixing only the screen was
+  explicitly rejected — the defect was going out in every poster and every circulated PDF.
+  One structural consequence: **Mukta is a STATIC family, one file per weight**, where the Noto
+  file it replaces was a single variable font covering 100–900. So `assets.ts` gained
+  `MARATHI_FONT_FAMILY` + a private `fontFaceCss(weights)` helper, and `fontDataUri` became
+  `fontFaceCss` on all three asset types — each loader now names the weights its template
+  actually uses (posters 400+800, PDF 400+700+800, captions 600 alone), so a poster does not
+  carry the PDF's bold cuts as base64. The templates lost their hand-rolled `@font-face` blocks
+  and interpolate that string instead, which is also why there is now exactly one place to
+  change the face again. `font-weight: 900` on both poster headlines became **800**: Mukta's
+  heaviest cut is ExtraBold, so 900 could only ever resolve back to it.
+  `NotoSansDevanagari.ttf` is deliberately **left in place, unreferenced**, as a one-line revert.
+  Verified 2026-07-28, all free: workspace typecheck **7/7 green**; lint clean on all seven
+  touched files (only the two pre-existing `poster-template.ts` unused-var warnings remain);
+  a no-fallback coverage render proving Mukta carries Basic Latin, `०-९`, `₹ € – — … •`, curly
+  quotes, `। ॥` and all four weights with **zero tofu**, so English and Hindi PDF exports are
+  safe; `pdf:preview --png` in **mr / en / hi** (letterhead intact, `कर्जमुक्ती` `विद्यार्थ्यांच्या`
+  `ज्ञानज्योती` `हृदयरोग` `ऑगस्ट` all shaping, English justified with no tofu, Hindi date line in
+  Devanagari numerals); `poster:preview` + `poster:preview:article` (headline shapes and still
+  fits its panel at 800); `poster:preview:chrome:twitter` (the Pango wordmark shapes `ष्ट्र`);
+  `video:preview:captions --720p` **passing its own on-frame assertion** (13.6% panel pixels);
+  and a live-app probe where Chromium's `CSS.getPlatformFontsForNode` reports **`Mukta SemiBold`**
+  painting the page and the textarea renders `क्ट्रॉ`/`ट्रा` correctly.
+  No migration, no n8n; deploy is `@dgipr/poster-renderer` dist → API → web.
+
+- **The designation follows the SURNAME too** (2026-07-28, no migration): a published article
+  read `असल्याचे सांगत फडणवीस यांनी उपक्रमाला मान्यता दिली` — a bare surname mid-article, where a
+  government press note names an official with their office every time it names them. Two
+  independent causes, one in each half of the feature.
+  (1) **The deterministic pass matched the full name only.** `applyDesignations` prefixed the
+  FIRST mention of `देवेंद्र फडणवीस` and stopped; its header comment said a bare surname was
+  "deliberately NOT matched" because two people can share one. That reasoning is sound about
+  ATTRIBUTION and was over-applied to placement: once the officer has approved a pair, every
+  standalone mention of that pair's surname is the same person by construction. It now prefixes
+  the full name once and **every standalone surname mention** after it (the officer's call —
+  "first surname mention only" and "every mention" were both offered). Whole-word matching, so
+  an inflected `फडणवीसांनी` is left to the prompt rather than assembled from guessed morphology;
+  a surname occurrence INSIDE its own full name is skipped; a surname shared by two approved
+  pairs is disabled for both and falls back to full-name-only. `not-found` therefore now means
+  the article genuinely does not name the person — which is a strictly rarer, more informative
+  warning than before.
+  (2) **The dictionary knew the answer and nobody had written the query — again.** This is the
+  `suggestOfficeHolders` finding repeating one row over: `designation` is only read off a row
+  whose Marathi form matches the text VERBATIM, and `फडणवीस` is not `देवेंद्र फडणवीस`, so a
+  transcript that keeps only the surname reached the card with a blank field. New
+  `resolveSurnameDesignations` (translation-terms.ts) indexes verified full-name person rows by
+  their last word. Rules, each guarding a failure: whole-word mention only; a person whose FULL
+  name is in the text is SKIPPED (their own row already carries the title, and the pass above
+  now extends it to their surname mentions); and where several dictionary people share the
+  surname the **context decides** — exactly one of their stored titles must occur in the text
+  (`उपमुख्यमंत्री … पवार यांनी` resolves, a bare `पवार यांनी` does not, and a note naming BOTH
+  titles resolves nothing, because that is genuine ambiguity rather than a hint). The pair it
+  produces names the **surname**, never the dictionary's first name: adding an officer-approved
+  title is not licence to add a name the source does not have. It surfaces as an ordinary
+  `suggested: true` row, so it is pre-ticked, labelled शब्दकोशातून सुचवलेले and untickable — no
+  web change at all.
+  Prompt half, in all three places that state it: `DESIGNATION_TASK_RULE` (category-prompt.ts,
+  shared by drafting + every revision/checker), and the NAME DICTIONARY sentence in both
+  `simple-article-prompt.ts` (**`simple-v6`**) and `minimal-article-prompt.ts`. The system
+  message's char ceiling was raised 900 → 1000 deliberately: that check exists so "just one more
+  rule" has to be an explicit decision, and this is one — it is DATA handling, not editorial
+  instruction. Found in passing and restored while there: `Never add unsupplied information to
+  make it longer.`, which v5's own harness asserts and the v5 system message had lost.
+  Verified 2026-07-28, all free: workspace typecheck **7/7 green**, lint clean on all six touched
+  files, and both harnesses green — `tsx src/generation/apply-designations.ts` (the six new cases:
+  every-surname-mention beside an already-titled full name, a surname-only article, a one-word
+  approved name, the inflected form left alone, the shared surname disabled for both, and an
+  honorific/wrong-title before a surname) and `tsx src/jobs/translation-terms.ts` (nine new cases
+  covering both lookup halves and all three ambiguity outcomes). **Left for a real run**: a /dlo
+  article whose source uses only the surname, checking the card pre-fills the title and every
+  surname mention publishes with it. No migration, no n8n; deploy is `@dgipr/schemas` →
+  `@dgipr/content-engine` dists → API → web.
+
+- **Social reference selection is INFORMATION-FIRST** (2026-07-28, no migration — SUPERSEDES the
+  classify→point_count→wants_photo→select-within-type flow of the 2026-07-24 content-aware
+  selection milestone): the social poster path decided three things ABOUT the note before it had
+  looked at a single reference — which post type it was (`classifyPosterType`), how many body
+  points it supported (`point_count`), and whether it wanted a photograph (`wants_photo`) — and
+  every one of those predictions then narrowed the pool. A wrong `point_count` scored the right
+  template out of the band; a wrong `post_type` excluded a whole family of templates before
+  scoring even began. The predictions were doing the choosing, and they were made blind.
+  The order is inverted. `references/select-by-information.ts` compares the **raw note, exactly
+  as the officer wrote it**, against **every enabled master of the brand across ALL types**,
+  using the descriptions already cached on `reference_images.layout_spec` (migration 0016) —
+  `contentSummary` (what that poster is about) and `layoutSummary` (how it arranges information)
+  — and the winning reference's own `subtype` then resolves the poster TYPE. That is the CMO
+  path's long-standing shape (pick the image, derive the type from it) generalised to the DGIPR
+  library, which is why no new type-resolution machinery was needed and why the classification
+  step could simply be deleted rather than replaced. Downstream is **unchanged and is the
+  point**: `generatePosterCopy` already pins the body-slot count to the chosen master's real
+  `bulletSlots`, drops `scene_brief` when it has no photo zone, and takes its layout from the
+  resolved type's `copyStyle` — so "the reference decides how the information is arranged" was
+  already true; it was only ever the *selection* that ran backwards.
+  Decisions worth keeping:
+  - **Tone, mood and colour are explicitly NOT criteria**, stated as a negative rule in the
+    prompt. That is `rank-master.ts`'s job for a different flow (a tie-break inside an
+    already-structurally-filtered band) and it is deliberately left intact and untouched. The
+    criteria here are subject domain and whether the reference's sections can hold the
+    information the note actually contains. `ignoreColour` still strips colour out of the
+    descriptions on a `fresh` render, for the reason the diversity milestone established.
+  - **The ranker inherits the classifier's tier, not the tie-breaker's.** It runs on
+    `POSTER_COPY_MODEL` (gpt-5.6-terra) at `medium` effort, where `rank-master.ts` runs on the
+    utility tier at `low` — because this is now the DECISIVE routing call and the reference it
+    picks determines the poster's entire information structure. Net model cost is unchanged: one
+    call replaces the classifier's one call.
+  - **It also returns the run's Marathi working title**, which the classifier used to produce and
+    which becomes `generations.reference_title`. Free — it rides the same strict-JSON call.
+  - **A master with no `layout_spec` is invisible to it**, having no description to match on.
+    This is the one real regression risk and it is handled the way `select-master.ts` already
+    handles it rather than with a bulk gate: one un-analysed master is warmed per run, so an
+    undescribed library becomes rankable over successive runs, and with fewer than two described
+    candidates the pick falls back to the seeded hash. **Run
+    `pnpm --filter @dgipr/content-engine analyze:references` at deploy** or early posters are
+    seeded rolls.
+  - **The recency ring is keyed by BRAND, not by type** (`${brand}:library`): the pool is now
+    the whole library, so spreading within one type would no longer describe what the last few
+    runs used. `ResolvedReference` gained an optional `poolSize` so the caller's avoid-set can
+    never grow large enough to exclude the library.
+  - **Rollback is one env line.** `SOCIAL_REFERENCE_MODE=classify` restores the old flow;
+    `socialReferenceMode()` in `runner.ts` is the single read (the `ARTICLE_POSTER_MODE` /
+    `ARTICLE_GENERATION_MODE` precedent), and `listSocialTypes`, `classifyPosterType`,
+    `scoreMaster` and `MasterNeed` are all kept exported and reachable for it — commented as
+    legacy, not deleted.
+  - Pins and CMO are untouched: an exact-image pin, a type pin and the CMO brand all still FORCE
+    the choice and never reach this path.
+  - The `classify` step's Marathi label became **संदर्भ टेम्पलेट निवडत आहोत…** — "विषय ओळखत आहोत"
+    named precisely the thing that no longer happens first.
+  Verified 2026-07-28, all free except the harness: workspace typecheck **7/7 green**, lint clean
+  on all six touched files, and a live run of `tsx --env-file=../../.env
+  src/references/select-by-information.ts` (cents) on the MRI note against an alert master, a
+  quote master and a stats master — it chose the stats master, citing the note's four locations,
+  budget figure and deadline as fitting its stat callouts, and returned
+  `चार रुग्णालयांत अत्याधुनिक एमआरआय केंद्रे` as the title. **Left for a real run** (image spend): a
+  full twitter E2E against the live library confirming the log's `information-ranked (...)` reason
+  and that the resolved type matches the picked image's subtype. No migration, no n8n; deploy is
+  `@dgipr/content-engine` dist → API → web, with `analyze:references` run first. New env
+  (optional): `SOCIAL_REFERENCE_MODE`.
+
+- **Transcription as its own product (`/transcribe`)** (2026-07-28, migration 0037): officers
+  wanted a recording turned into Marathi text *without* the article machinery around it —
+  /dlo can do the transcription, but only as step one of a multi-step workspace that then
+  asks for a category, a heading, a review pass and a generation. The new page is upload →
+  transcript → copy/download, on ONE screen, plus a history list of past runs.
+  Almost nothing was written twice, which is the point. The Sarvam batch STT logic
+  (`transcribeAudioFiles`), the content-addressed transcript cache (`audio_transcript_cache`,
+  0031), the private archive bucket (`dlo-uploads`, 0018) and the audio-container rules
+  (`AUDIO_FILE_ACCEPT`/`audioMimeForFileName` in `schemas/src/dlo.ts`) are all REUSED; the new
+  code is a row, a job that is the DLO intake job's transcribe phase and nothing else, three
+  thin routes, and a page. Sharing the cache means a recording transcribed on /dlo is free and
+  instant here, and vice versa — and the job persists cache hits BEFORE calling Sarvam, so an
+  all-cached run shows its result without a call being made at all.
+  Decisions worth keeping: it is its OWN table rather than a flavour of `dlo_intakes` (whose
+  every column past `files` exists to serve the article pipeline, and whose `status: 'ready'`
+  means "ready for review" — the wrong sentence here); the recordings go under a
+  `transcriptions/{id}/…` prefix in the EXISTING private bucket, so 0037 provisions none; the
+  list-card counters are real columns, which is what lets the list query skip `files` and
+  `combined_text` (a meeting transcript is tens of thousands of characters and the list polls
+  while work runs); the transcript renders READ-ONLY, because this page's contract is "the
+  recording, verbatim" and an editable box would invite corrections nothing persists —
+  correcting text before it becomes an article is /dlo's review step; a run OPENS IN PLACE
+  rather than at its own route, there being nothing to do to a transcript that needs a screen;
+  and the form keeps no sessionStorage draft, unlike DloIntakeForm, since a `File` cannot be
+  serialized and here it is the only input — a draft remembering nothing but file names would
+  be a promise the form cannot keep. One bad recording among several fails only itself and is
+  reported beside the transcripts that worked; a run fails only when nothing survived.
+  Verified 2026-07-28, all free: workspace typecheck **7/7 green**, lint clean and prettier
+  clean on all new files, and a live API pass **against a database without 0037 applied** —
+  the routes register, a request with no file answers the Marathi 400, a `.txt` answers the
+  Marathi "recordings only" 400, and the two table queries are the only things that fail (the
+  0028 blast-radius standard). **Left for a real run** (0037 applied + Sarvam spend): one MP3
+  end to end, then the SAME MP3 again to confirm it returns from the cache with no
+  `[sarvam-stt] batch job:` log line, and a two-file run where one recording fails.
+  Deploy: **0037 → API → web** (rebuild `@dgipr/schemas` → `@dgipr/database` dists first).
+  No n8n, no new env.
 
 Two n8n workflows are implemented and host-independent for deployment; their master
 templates arrive as immutable `references/library/...` public URLs inside each webhook

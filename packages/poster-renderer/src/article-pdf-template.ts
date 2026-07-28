@@ -129,13 +129,7 @@ export function buildArticlePdfHtml(input: BuildArticlePdfHtmlInput): string {
     margin: ${A4_MARGIN.top} ${A4_MARGIN.right} ${A4_MARGIN.bottom} ${A4_MARGIN.left};
   }
 
-  @font-face {
-    font-family: 'Noto Sans Devanagari';
-    src: url('${assets.fontDataUri}') format('truetype');
-    font-weight: 100 900;
-    font-style: normal;
-    font-display: block;
-  }
+${assets.fontFaceCss}
 
   :root {
     --maroon: #7a1512;
@@ -151,12 +145,13 @@ export function buildArticlePdfHtml(input: BuildArticlePdfHtmlInput): string {
   }
 
   body {
-    /* The embedded font carries 551 codepoints — all of Basic Latin, Latin-1 with accents,
-       curly quotes, – — … • ₹ €, AND full Devanagari including ०-९ and । ॥ — so an English
-       or Hindi PDF is never tofu, even in a container with no system fonts. Liberation Sans
-       is the second chance for anything outside that set; "playwright install --with-deps"
-       apt-installs fonts-liberation alongside Chromium. */
-    font-family: 'Noto Sans Devanagari', 'Liberation Sans', sans-serif;
+    /* Mukta carries all of Basic Latin, Latin-1 with accents, curly quotes, – — … • ₹ €,
+       AND full Devanagari including ०-९ and । ॥ — so an English or Hindi PDF is never tofu,
+       even in a container with no system fonts (verified by rendering each of those classes
+       with no fallback family and checking for tofu). Liberation Sans is the second chance
+       for anything outside that set; "playwright install --with-deps" apt-installs
+       fonts-liberation alongside Chromium. */
+    font-family: 'Mukta', 'Liberation Sans', sans-serif;
     color: var(--ink);
     font-size: 11.5pt;
     /* Devanagari needs generous leading: matras sit both above and below the line. */

@@ -131,6 +131,16 @@ export type ReferenceArticle = Readonly<{
   text: string;
 }>;
 
+// DGIPR's own end-of-copy sign-off: a rule of asterisks, then the writer/desk credit
+// ("संध्या गरवारे/विसंअ/"). It is production boilerplate, not editorial style, and an exemplar
+// that ends in a byline invites the model to sign a fabricated one onto the new article. Strip
+// it from the reference text — the article's own words end at the rule.
+const ARTICLE_SIGNOFF = /\n\s*\*{3,}[\s\S]*$/u;
+
+export function stripArticleBoilerplate(text: string): string {
+  return text.replace(ARTICLE_SIGNOFF, '').trimEnd();
+}
+
 function normalizeText(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }
@@ -262,8 +272,71 @@ export async function retrieveReferenceArticle(
       category,
       preferAttribution,
     ),
-    text: chunks.map((chunk) => chunk.text).join('\n\n'),
+    text: stripArticleBoilerplate(chunks.map((chunk) => chunk.text).join('\n\n')),
   };
+}
+
+// The same retrieval, but returning the top `count` DISTINCT articles rather than one.
+//
+// Several complete exemplars are a far stronger style signal than one: a single article can
+// only demonstrate the shape it happens to have, and the model cannot tell which of its traits
+// are the house style and which are that one story's accident. Three make the pattern — the
+// dateline, the `– पदनाम नाव` headline, the attribution close — legible as a pattern.
+//
+// Ordering is by selection score, so element 0 is exactly the article
+// `retrieveReferenceArticle` would have returned. Callers that only want the primary can keep
+// using that function; nothing about its behaviour changed.
+export async function retrieveReferenceArticles(
+  query: string,
+  category: ArticleCategory | null = null,
+  angle?: string,
+  preferAttribution = false,
+  count = 3,
+): Promise<ReferenceArticle[]> {
+  if (count <= 0) return [];
+
+  const matches = await retrieveReferences(
+    buildAngleWeightedQuery(query, angle),
+    CANDIDATE_CHUNK_COUNT,
+    category,
+  );
+  if (matches.length === 0) return [];
+
+  // One entry per article, keeping that article's BEST-scoring chunk — the candidate list is
+  // chunk-level, so a long article can occupy several slots and would otherwise crowd out the
+  // variety this function exists to provide.
+  const bestPerArticle = new Map<number, { match: MatchRow; score: number }>();
+  for (const match of matches) {
+    const score = scoreReferenceCandidate(match, category, preferAttribution);
+    const seen = bestPerArticle.get(match.articleId);
+    if (!seen || score > seen.score) {
+      bestPerArticle.set(match.articleId, { match, score });
+    }
+  }
+
+  const ranked = [...bestPerArticle.values()]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, count);
+
+  const client = createServiceRoleClient();
+  const articles = await Promise.all(
+    ranked.map(async ({ match, score }): Promise<ReferenceArticle | null> => {
+      const chunks = await fetchArticleChunks(client, match.articleId);
+      if (chunks.length === 0) return null;
+      return {
+        articleId: match.articleId,
+        title: match.title,
+        url: match.url,
+        similarity: match.similarity,
+        selectionScore: score,
+        text: stripArticleBoilerplate(
+          chunks.map((chunk) => chunk.text).join('\n\n'),
+        ),
+      };
+    }),
+  );
+
+  return articles.filter((article): article is ReferenceArticle => article !== null);
 }
 
 // Run directly:
@@ -280,7 +353,61 @@ export async function retrieveReferenceArticle(
 //
 // Prints retrieved references so we can eyeball that similarity search works and
 // that news references are not drifting into the wrong style.
+//
+// `--check` runs the pure sign-off stripping assertions only: no key, no network, no spend.
 if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href &&
+  process.argv.includes('--check')
+) {
+  let failures = 0;
+  const check = (label: string, condition: boolean): void => {
+    if (!condition) {
+      failures += 1;
+      console.error(`  FAIL  ${label}`);
+    } else {
+      console.log(`  ok    ${label}`);
+    }
+  };
+
+  console.log('\n=== the end-of-copy sign-off is stripped ===');
+  const body = 'मुंबई, दि. ६ : निर्देश देण्यात आले.\n\nदुसरा परिच्छेद.';
+  check(
+    'a real DGIPR sign-off + writer credit is removed',
+    stripArticleBoilerplate(`${body}\n\n****\n\nसंध्या गरवारे/विसंअ/`) === body,
+  );
+  check(
+    'a longer asterisk rule is removed too',
+    stripArticleBoilerplate(`${body}\n\n*******\n\nकुणीतरी/विसंअ/`) === body,
+  );
+  check(
+    'an article with no sign-off is byte-identical',
+    stripArticleBoilerplate(body) === body,
+  );
+  check(
+    'trailing whitespace alone is trimmed, nothing else',
+    stripArticleBoilerplate(`${body}\n\n`) === body,
+  );
+  check(
+    'an asterisk INSIDE a paragraph is not treated as a rule',
+    stripArticleBoilerplate('पहिला * दुसरा') === 'पहिला * दुसरा',
+  );
+  check(
+    'empty input stays empty',
+    stripArticleBoilerplate('') === '',
+  );
+  check(
+    'a sign-off with no credit line is still removed',
+    stripArticleBoilerplate(`${body}\n****`) === body,
+  );
+
+  if (failures > 0) {
+    console.error(`\n${failures} check(s) failed.`);
+    process.exitCode = 1;
+  } else {
+    console.log('\nAll checks passed.');
+  }
+} else if (
   process.argv[1] &&
   import.meta.url === pathToFileURL(process.argv[1]).href
 ) {

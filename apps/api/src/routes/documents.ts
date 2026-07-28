@@ -29,7 +29,9 @@ export function registerDocumentRoutes(app: FastifyInstance): void {
     let upload: { name: string; data: Buffer } | null = null;
     try {
       // Per-request limits: the global multipart config is sized for small reference
-      // images.
+      // images. DOCUMENT_MAX_BYTES is unlimited, so this override exists to LIFT that
+      // global 10 MiB cap rather than to impose one; the 413 branch below is unreachable
+      // and kept only so a future ceiling has somewhere to land.
       const parts = request.parts({
         limits: { fileSize: DOCUMENT_MAX_BYTES, files: 1 },
       });
@@ -54,7 +56,7 @@ export function registerDocumentRoutes(app: FastifyInstance): void {
       ) {
         return reply
           .code(413)
-          .send({ error: { message: 'फाईल खूप मोठी आहे (कमाल २५ MB).' } });
+          .send({ error: { message: 'फाईल खूप मोठी आहे.' } });
       }
       throw error;
     }

@@ -63,7 +63,8 @@ export function scoreMaster(
 
 // Deterministic 32-bit hash of a string (FNV-1a). Used to pick within the top band so the
 // same generation id always yields the same master, while different ids spread across it.
-function hashString(value: string): number {
+// Exported for select-by-information.ts, which needs the identical seeded fallback.
+export function hashString(value: string): number {
   let hash = 0x811c9dc5;
   for (let i = 0; i < value.length; i += 1) {
     hash ^= value.charCodeAt(i);
@@ -74,8 +75,8 @@ function hashString(value: string): number {
 
 // Analyse one master and persist its spec (best-effort). Returns the spec, or null if the
 // vision pass failed — a failure must never sink a render, so the caller falls back to the
-// un-analysed behaviour.
-async function analyzeAndPersist(
+// un-analysed behaviour. Exported for select-by-information.ts (same on-demand + warm rules).
+export async function analyzeAndPersist(
   client: SupabaseClient,
   image: ReferenceImageRow,
 ): Promise<ReferenceLayoutSpec | null> {

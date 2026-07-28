@@ -13,13 +13,19 @@ import { registerProofreadRoutes } from './routes/proofread.js';
 import { registerPointerRoutes } from './routes/pointers.js';
 import { registerDesignationRoutes } from './routes/designations.js';
 import { registerReferenceRoutes } from './routes/references.js';
+import { registerTranscriptionRoutes } from './routes/transcriptions.js';
 import { registerVideoRoutes } from './routes/video.js';
 
 export async function createServer() {
   const app = Fastify({
     logger: true,
-    // JSON requests stay capped at 1 MiB. Multipart uploads have their own limit below.
-    bodyLimit: 1_048_576,
+    // JSON requests. 64 MiB rather than Fastify's 1 MiB default because /dlo's reviewed
+    // text is no longer capped: a whole scanned booklet's Marathi (3 bytes a character)
+    // travels as JSON on the review autosave and again on generate. Kept in step with
+    // DLO_REVIEW_STATE_MAX_CHARS (@dgipr/schemas), which is deliberately sized under a
+    // third of this so the officer gets a Marathi 400 rather than an opaque 413.
+    // Multipart uploads have their own limits below.
+    bodyLimit: 67_108_864,
   });
 
   await app.register(cors, {
@@ -68,6 +74,7 @@ export async function createServer() {
       registerDesignationRoutes(instance, client);
       registerReferenceRoutes(instance, client);
       registerDloRoutes(instance, client);
+      registerTranscriptionRoutes(instance, client);
       registerVideoRoutes(instance, client);
     },
     { prefix: '/api' },
