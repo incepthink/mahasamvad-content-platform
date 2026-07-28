@@ -9,7 +9,6 @@ import { createGeneration } from '../../../lib/api';
 import { useTasks } from '../../../lib/TasksProvider';
 import { STR } from '../../../lib/strings';
 import { GenerationThread } from '../../../components/GenerationThread';
-import { GenerationUsedNames } from '../../../components/GenerationUsedNames';
 import { ProgressSteps } from '../../../components/ProgressSteps';
 import { TaskProgressBar } from '../../../components/TaskProgressBar';
 import { StatusChip } from '../../../components/StatusChip';
@@ -165,7 +164,6 @@ export default function GenerationDetailPage({
         (isSocialCategory(detail.category) ? (
           <SocialPostView
             detail={detail}
-            onRegenerate={retry}
             onChanged={refresh}
             busy={posterBusy}
           />
@@ -201,16 +199,6 @@ export default function GenerationDetailPage({
             ) : null}
           </>
         ))}
-
-      {/* Informational only: this runs after content exists and lists person/designation
-          strings from the actual article, caption, or poster copy. It never gates creation. */}
-      {(detail.article || detail.copy) &&
-      (detail.status === 'completed' ||
-        posterBusy ||
-        posterPending ||
-        detail.status === 'failed') ? (
-        <GenerationUsedNames detail={detail} />
-      ) : null}
 
       {/* Thread of runs spawned from this note lineage. Self-hides when this
           run has no follow-ups; updates live while any member is in flight. */}

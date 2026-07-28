@@ -28,7 +28,10 @@ import {
   type VideoProjectDetail,
   type VideoProjectSummary,
 } from '@dgipr/schemas';
-import { clipProviderApiKeyEnv } from '@dgipr/content-engine';
+import {
+  clipProviderApiKeyEnv,
+  frameProviderApiKeyEnv,
+} from '@dgipr/content-engine';
 import {
   isVideoJobRunning,
   startNarrationJob,
@@ -51,6 +54,15 @@ import {
 // animates perfectly well.
 function clipProviderKeyMissing(): string | null {
   const envName = clipProviderApiKeyEnv();
+  if (envName === null) return null;
+  const key = process.env[envName];
+  return typeof key === 'string' && key.trim() !== '' ? null : envName;
+}
+
+// Storyboard stills have their own provider and key, independent of the clip
+// provider used later by the animate gate.
+function frameProviderKeyMissing(): string | null {
+  const envName = frameProviderApiKeyEnv();
   if (envName === null) return null;
   const key = process.env[envName];
   return typeof key === 'string' && key.trim() !== '' ? null : envName;
@@ -367,6 +379,21 @@ export function registerVideoRoutes(
           .code(409)
           .send({ error: { message: 'आधी संहिता तयार व्हायला हवी.' } });
       }
+      const needsFrame = row.scenes.some(
+        (scene) =>
+          scene.stillPath === undefined ||
+          (scene.endVisualBrief !== undefined &&
+            scene.endVisualBrief !== '' &&
+            scene.endStillPath === undefined),
+      );
+      const missingKey = needsFrame ? frameProviderKeyMissing() : null;
+      if (missingKey) {
+        return reply.code(503).send({
+          error: {
+            message: `चित्र सेवा अजून जोडलेली नाही (${missingKey}). प्रशासकाशी संपर्क साधा.`,
+          },
+        });
+      }
       // Flip BEFORE the 202 (poll-race rule). The job's first phase is the
       // TTS voice-and-measure pass, so the step starts at 'narrate'.
       await updateVideoProject(client, row.id, {
@@ -404,6 +431,14 @@ export function registerVideoRoutes(
         isVideoJobRunning(row.id)
       ) {
         return reply.code(409).send({ error: { message: BUSY_MESSAGE } });
+      }
+      const missingKey = frameProviderKeyMissing();
+      if (missingKey) {
+        return reply.code(503).send({
+          error: {
+            message: `चित्र सेवा अजून जोडलेली नाही (${missingKey}). प्रशासकाशी संपर्क साधा.`,
+          },
+        });
       }
       const frame = body.frame ?? 'start';
       if (frame === 'end' && scene.stillPath === undefined) {

@@ -25,6 +25,7 @@ import {
 } from '../lib/api';
 import { STR } from '../lib/strings';
 import { downloadBlob } from '../lib/download';
+import { CrossFormatLinks } from './CrossFormatLinks';
 import { FeedbackBox } from './FeedbackBox';
 import { TranslationTermsReview } from './TranslationTermsReview';
 
@@ -308,6 +309,17 @@ export function ArticleView({
         <a className="btn" href={articlePdfDownloadUrl(detail.id, shownLang)}>
           {STR.downloadPdf}
         </a>
+
+        {/* "Same note, other platform". Only when this run has NO poster — article-only
+            and DLO runs, which never render PosterPanel and would otherwise have no way
+            across since the cross-format folds left पुढील पाऊल. With a poster the links
+            live in PosterPanel's row instead, beside the poster they belong to. */}
+        {!detail.posterUrl ? (
+          <CrossFormatLinks
+            generationId={detail.id}
+            category={detail.category}
+          />
+        ) : null}
 
         {/* One button per language that has no translation yet; the one being
             translated right now shows the spinner in its place. */}

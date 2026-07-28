@@ -5,69 +5,34 @@
 // categories by design — a caption is one short social post with hashtags, not an
 // article.
 //
-// The note stays the only fact source; the feedback may only steer wording, length,
-// tone, emphasis, and script. One chat call, plus one repair call if the model's JSON
-// is malformed.
+// The prompt is deliberately minimal: interpret the user's request, change the current
+// caption, and keep all text and numerals Marathi. One chat call, plus one repair call
+// if the model's JSON is malformed.
 
 import { pathToFileURL } from 'node:url';
 import { chatComplete, type ChatMessage } from './openai-chat.js';
 
 const SYSTEM_PROMPT = [
-  'तुम्ही महाराष्ट्र शासनाच्या माहिती व जनसंपर्क महासंचालनालयासाठी (DGIPR / महासंवाद)',
-  'सोशल-मीडिया पोस्टची कॅप्शन सुधारणारे अनुभवी मराठी संपादक आहात.',
-  'तुम्हाला मूळ टिपणी, पोस्टची सध्याची कॅप्शन आणि वापरकर्त्याचा अभिप्राय दिला जाईल.',
-  'अभिप्रायानुसार कॅप्शन सुधारून परत करा.',
-  '',
-  'कठोर नियम:',
-  '1. मूळ टिपणी हाच तथ्यांचा एकमेव स्रोत आहे. टिपणीत नसलेली नावे, तारखा, रक्कम, पदनामे,',
-  '   योजना, ठिकाणे, आकडे, संस्था, निर्णय, आश्वासने किंवा दावे तयार करू नका.',
-  '2. सध्याची कॅप्शन हा फक्त सुधारायचा मजकूर आहे; तो स्वतंत्र तथ्य-स्रोत नाही.',
-  '3. वापरकर्त्याचा अभिप्राय फक्त शैली, शब्दरचना, लांबी, भर, स्पष्टता, लिपी आणि मांडणी',
-  '   यासाठी आहे; तो तथ्य-स्रोत नाही. अभिप्रायात नवीन तथ्य सुचवले असल्यास ते फक्त',
-  '   टिपणीत स्पष्ट आधार असल्यासच वापरा.',
-  '4. अभिप्राय आणि टिपणी यांच्यात विरोध असेल तर टिपणीला प्राधान्य द्या.',
-  '5. कॅप्शन मराठीत व देवनागरी लिपीतच ठेवा.',
-  '6. सध्याच्या कॅप्शनमधील हॅशटॅग, @handles आणि इमोजी जसेच्या तसे ठेवा — अभिप्रायात',
-  '   त्यांविषयी स्पष्ट सूचना असल्यासच बदला.',
-  '7. अंक देवनागरी (०-९) व इंग्रजी (0-9) यांमध्ये बदलण्यास परवानगी आहे — अभिप्रायात तसे',
-  '   मागितले असेल तेव्हा. मात्र आकड्याचे मूल्य कधीही बदलू नका (५०० → 500 चालेल,',
-  '   ५०० → ६०० चालणार नाही).',
-  '8. फक्त अभिप्रायाने मागितलेला बदल करा; बाकी कॅप्शन शक्य तितकी जशीच्या तशी ठेवा.',
-  '9. कॅप्शन शासकीय, सन्मानजनक आणि सोप्या मराठीत ठेवा. अतिनाट्यमय, क्लिकबेट किंवा',
-  '   जाहिरातीसारखी भाषा वापरू नका.',
-  '',
-  'फक्त {"caption": "..."} या रचनेचा वैध JSON object परत करा.',
-  'markdown, code fence, अवतरणचिन्हे, स्पष्टीकरण किंवा अतिरिक्त मजकूर देऊ नका.',
+  'Revise a caption for an official social-media account of DGIPR Maharashtra.',
+  "Interpret the user's request and make the requested change to the current caption.",
+  'Keep all text in Marathi only and write every number using Marathi Devanagari digits',
+  '(०-९) only.',
+  'Respond with STRICT JSON only: { "caption": string }.',
+  'No markdown, no code fence, no explanation.',
 ].join('\n');
-
-// The platform's hard cap, stated as a rule only when the caller has one (X: 280
-// weighted characters; a Facebook post has no practical limit).
-function lengthRule(maxLength: number | undefined): string[] {
-  if (!maxLength) return [];
-  return [
-    '',
-    'लांबीची मर्यादा:',
-    `- सुधारित कॅप्शन जास्तीत जास्त ${maxLength} अक्षरांची असावी (हॅशटॅगसह).`,
-    '- मर्यादेत बसण्यासाठी कमी महत्त्वाचे तपशील वगळा; तथ्ये बदलू नका.',
-  ];
-}
 
 function buildUserTurn(
   input: ReviseCaptionInput,
   invalid?: { raw: string; errorMessage: string },
 ): string {
   return [
-    '<NOTE purpose="only_authoritative_fact_source">',
-    input.note.trim(),
-    '</NOTE>',
-    '',
-    '<CURRENT_CAPTION purpose="caption_to_revise_not_fact_source">',
+    '<CURRENT_CAPTION>',
     input.caption.trim(),
     '</CURRENT_CAPTION>',
     '',
-    '<FEEDBACK purpose="style_wording_length_emphasis_script_only_not_fact_source">',
+    '<USER_REQUEST>',
     input.feedback.trim(),
-    '</FEEDBACK>',
+    '</USER_REQUEST>',
     ...(invalid
       ? [
           '',
@@ -84,8 +49,7 @@ function buildUserTurn(
     '<TASK>',
     invalid
       ? 'वरील INVALID_OUTPUT अपेक्षित रचनेशी जुळत नाही. तेच काम पुन्हा करा आणि'
-      : 'वरील FEEDBACK नुसार CURRENT_CAPTION सुधारा.',
-    'टिपणीत नसलेले कोणतेही तथ्य जोडू नका.',
+      : 'USER_REQUEST चा अर्थ समजून त्यानुसार CURRENT_CAPTION मध्ये बदल करा.',
     'फक्त {"caption": "..."} अशा वैध JSON object स्वरूपात उत्तर द्या.',
     '</TASK>',
   ].join('\n');
@@ -98,7 +62,7 @@ function buildMessages(
   return [
     {
       role: 'system',
-      content: [SYSTEM_PROMPT, ...lengthRule(input.maxLength)].join('\n'),
+      content: SYSTEM_PROMPT,
     },
     { role: 'user', content: buildUserTurn(input, invalid) },
   ];
@@ -140,12 +104,6 @@ export type ReviseCaptionInput = Readonly<{
   // The caption as it stands (generations.article on a social row).
   caption: string;
   feedback: string;
-  // The run's original note — the only thing new facts may come from.
-  note: string;
-  // Platform character cap, when the platform has one. Stated in the prompt; not
-  // enforced in code (an overshoot is still worth showing — the web counter makes it
-  // visible and the publish route is the hard gate).
-  maxLength?: number | undefined;
 }>;
 
 export async function reviseCaption(
@@ -198,8 +156,7 @@ export async function reviseCaption(
 //
 //   tsx --env-file=../../.env src/generation/revise-caption.ts ["feedback"]
 //
-// The default feedback checks the two asks this feature was built for: shortening to
-// X's limit, and re-scripting the numerals — the amounts must survive both.
+// The default feedback exercises the simple instruction-following revision path.
 if (
   process.argv[1] &&
   import.meta.url === pathToFileURL(process.argv[1]).href
@@ -207,12 +164,6 @@ if (
   const feedback =
     process.argv.slice(2).join(' ').trim() ||
     'कॅप्शन २८० अक्षरांपेक्षा लहान करा आणि सर्व आकडे मराठी अंकांत लिहा.';
-
-  const SAMPLE_NOTE = [
-    'मुख्यमंत्री यांच्या हस्ते आज मुंबईत नमो शेतकरी महासन्मान निधी योजनेच्या दुसऱ्या टप्प्याचे',
-    'उद्घाटन झाले. या टप्प्यात राज्यातील 500 शेतकरी कुटुंबांना थेट लाभ मिळणार असून त्यासाठी',
-    'एकूण 2 कोटी रुपयांची तरतूद करण्यात आली आहे. अर्ज करण्याची अंतिम मुदत 31 ऑगस्ट 2026 आहे.',
-  ].join(' ');
 
   const SAMPLE_CAPTION = [
     'नमो शेतकरी महासन्मान निधी योजनेच्या दुसऱ्या टप्प्याचे मुंबईत मुख्यमंत्री यांच्या हस्ते उद्घाटन.',
@@ -224,8 +175,6 @@ if (
   reviseCaption({
     caption: SAMPLE_CAPTION,
     feedback,
-    note: SAMPLE_NOTE,
-    maxLength: 280,
   })
     .then((revised) => {
       console.log('\n=== feedback ===\n');

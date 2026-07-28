@@ -92,6 +92,9 @@ and `posters/references/master-*.png` are already uploaded. Just confirm:
    ```
    Set `CORS_ORIGIN` in `.env.prod` to `https://newsroom.indicex.xyz` (you can add
    the `https://<app>.vercel.app` URL too until the custom domain is live in Phase D).
+   The repository-root `.env` is for local development only and is excluded from
+   the Docker image. Video storyboards therefore require `GEMINI_API_KEY` in
+   `deploy/.env.prod` (or `OPENAI_API_KEY` with `VIDEO_IMAGE_PROVIDER=openai`).
    Then edit `Caddyfile` if your ACME email should differ from the default.
 7. **Launch**:
    ```bash

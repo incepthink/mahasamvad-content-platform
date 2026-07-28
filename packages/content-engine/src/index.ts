@@ -197,6 +197,7 @@ export {
 } from './video/gemini-image-client.js';
 export {
   renderFrame,
+  frameProviderApiKeyEnv,
   type FrameRenderInput,
   type FrameAspect,
 } from './video/frame-provider.js';

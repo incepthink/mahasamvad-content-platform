@@ -91,7 +91,6 @@ import {
   CopySchema,
   NameDesignationsSchema,
   SelectedFactsSchema,
-  TWEET_MAX_LENGTH,
   isSocialCategory,
   type Copy,
   type AttributedStatement,
@@ -1213,15 +1212,6 @@ async function renderSocialPosterViaN8n(
   return Buffer.from(result.poster_png_base64, 'base64');
 }
 
-// Which caption rule the platform imposes. X caps a post at 280 weighted characters;
-// a Facebook post has no comparable limit. (A within-social branch, like the publish
-// route's — not an isSocialCategory() violation.)
-function captionMaxLength(
-  category: GenerationRow['category'],
-): number | undefined {
-  return category === 'twitter' ? TWEET_MAX_LENGTH : undefined;
-}
-
 // The social lane the caption is being written for. The row's category already is one
 // of the two, but the runner's GenerationRow['category'] is the widened union.
 function socialPlatformOf(
@@ -1713,14 +1703,13 @@ export function startSocialPostJob(
     // a retry and an edit-note rerun both stay caption-only with no poster spend.
     const captionOnly = row.outputType === 'article';
 
-    let postType: string | undefined;
     if (!captionOnly) {
       const brand = row.templateBrand;
       // Default is now 'fresh' — a unique, AI-designed poster each run. 'onbrand'/'adaptive'
       // remain available for a run that explicitly wants to follow a template.
       const designMode = (row.designMode ?? 'fresh') as PosterDesignMode;
 
-      ({ postType } = await renderAndStoreSocialPoster(
+      await renderAndStoreSocialPoster(
         client,
         id,
         row,
@@ -1728,22 +1717,17 @@ export function startSocialPostJob(
         designMode,
         1,
         id,
-      ));
+      );
 
       if (!options.generateCaption) return;
     }
 
-    // Caption → article column (the social lane's convention). The note stays the sole
-    // fact source; the poster copy is not fed in, exactly as the retired n8n node had it
-    // ("base the caption on the notes, not the poster copy"). `postType` is undefined on
-    // the caption-only path — nothing classified the note, and it is only a tone steer
-    // (startGenerateCaptionJob has always omitted it).
+    // Caption → article column (the social lane's convention). The supplied note is sent
+    // directly to the deliberately simple caption prompt; poster copy is not included.
     await updateGeneration(client, id, { step: 'caption' });
     const caption = await generateSocialCaption({
       note: row.note,
       platform: socialPlatformOf(row.category),
-      postType,
-      maxLength: captionMaxLength(row.category),
     });
     await updateGeneration(client, id, { article: caption });
   });
@@ -1891,7 +1875,6 @@ export function startGenerateCaptionJob(
         const caption = await generateSocialCaption({
           note: row.note,
           platform: socialPlatformOf(row.category),
-          maxLength: captionMaxLength(row.category),
         });
         await updateGeneration(client, id, { article: caption });
       });
@@ -2048,9 +2031,8 @@ export function startConcurrentArticleFeedbackJob(
 // Feedback loop for a social post's caption (twitter/facebook — the caption is stored in
 // the row's `article` column). The article feedback jobs above cannot serve it: they run
 // reviseArticle, whose category argument goes through articleCategoryOf and hard-fails on
-// a social category. This one calls the caption editor instead, under the same guardrail
-// (the note stays the sole fact source) — and the poster, copy and published state are
-// untouched.
+// a social category. This one calls the deliberately simple caption editor instead; the
+// poster, copy and published state are untouched.
 //
 // Deliberately NOT wrapped in runJob, for the reasons on `revisingCaption` above: it never
 // claims `running` and never writes status/step/error, so the finished post stays on
@@ -2075,8 +2057,6 @@ export function startCaptionFeedbackJob(
         const revised = await reviseCaption({
           caption: row.article,
           feedback,
-          note: row.note,
-          maxLength: captionMaxLength(row.category),
         });
 
         await updateGeneration(client, id, { article: revised });

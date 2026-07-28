@@ -51,6 +51,22 @@ function providerName(): string {
   return raw && raw.trim() !== '' ? raw.trim().toLowerCase() : 'gemini';
 }
 
+// Which env var the STORYBOARD gate must find for the configured frame
+// provider. Keep this beside providerName() so the API route cannot drift from
+// the provider default when deployments switch between Gemini and OpenAI.
+export function frameProviderApiKeyEnv(): string | null {
+  switch (providerName()) {
+    case 'gemini':
+      return 'GEMINI_API_KEY';
+    case 'openai':
+      return 'OPENAI_API_KEY';
+    default:
+      // renderFrame() reports the unsupported provider itself. There is no
+      // meaningful key name for the route to guess here.
+      return null;
+  }
+}
+
 // Same sync rule as the runner's: used only to attribute the fixed per-render
 // gpt-image price. Gemini bills flat per image and meters itself.
 function imageQuality(): ImageQuality {

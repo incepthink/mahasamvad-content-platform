@@ -43,7 +43,8 @@ function requireApiKey(): string {
   if (!key) {
     throw new Error(
       'Missing required environment variable GEMINI_API_KEY. ' +
-        'Copy .env.example to .env and fill it in.',
+        'Set it in the API process environment (deploy/.env.prod for the ' +
+        'production Docker deployment; the root .env is local-only).',
     );
   }
   return key;

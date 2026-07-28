@@ -34,12 +34,12 @@ const NAV_LINKS = [
   { href: '/', label: STR.navNew, Icon: ImagePlus },
   { href: '/dlo', label: STR.navDlo, Icon: Mic },
   { href: '/transcribe', label: STR.navTranscribe, Icon: AudioLines },
-  { href: '/generations', label: STR.navHistory, Icon: History },
   { href: '/translate', label: STR.navTranslate, Icon: Languages },
   { href: '/proofread', label: STR.navProofread, Icon: SpellCheck },
   { href: '/glossary', label: STR.navGlossary, Icon: BookOpen },
   { href: '/references', label: STR.navReferences, Icon: LayoutTemplate },
   { href: '/video', label: STR.navVideo, Icon: Clapperboard },
+  { href: '/generations', label: STR.navHistory, Icon: History },
 ] as const;
 
 export function AppSidebar() {

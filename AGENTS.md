@@ -22,9 +22,11 @@ it are implemented and working end-to-end:
 - **Simple fixed-template social prompt** (2026-07-28, no migration): for Twitter DGIPR runs
   using `designMode: 'onbrand'` (UI: **ठरलेले टेम्पलेट**), the selected reference
   image is sent unchanged to the image-edit model with the original note verbatim and only
-  six constraints: use the reference image as the AUTHORITATIVE structure (composition,
+  seven constraints: use the reference image as the AUTHORITATIVE structure (composition,
   sections, proportions, content distribution, imagery zones, balance and density), filling
   the usable canvas without collapsing onto one side or leaving large unused areas; do not
+  inherit its colours—the reference controls STRUCTURE ONLY, while the image model chooses
+  the palette freely and creatively subject only to strong contrast and readability; do not
   add a logo; do not add a footer; keep only the top-right 180x170 and full-width bottom 120px
   as mandatory empty cover zones that seamlessly continue the
   immediately adjacent background—never a separate colour, white patch, box, panel, band,

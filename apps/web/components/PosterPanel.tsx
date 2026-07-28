@@ -16,6 +16,7 @@ import {
 import { STR } from '../lib/strings';
 import { usePosterMarkers } from '../lib/usePosterMarkers';
 import { CopyEditForm } from './CopyEditForm';
+import { CrossFormatLinks } from './CrossFormatLinks';
 import { FeedbackBox } from './FeedbackBox';
 import {
   ARTICLE_RESERVED_ZONES,
@@ -106,6 +107,12 @@ export function PosterPanel({
                 {editing ? STR.closeEditCopy : STR.editCopy}
               </button>
             ) : null}
+            {/* The only entry here that navigates rather than acting on this run —
+                the trailing arrow is what says so. */}
+            <CrossFormatLinks
+              generationId={detail.id}
+              category={detail.category}
+            />
           </div>
 
           {canRevise && editing ? (

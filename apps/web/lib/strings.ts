@@ -21,7 +21,7 @@ export const STR = {
   navProofread: 'मुद्रितशोधन',
   navGlossary: 'शब्दकोश',
   navReferences: 'मास्टर टेम्पलेट',
-  navDlo: 'लेखनिर्मिती',
+  navDlo: 'लेख / बातमी',
   navTranscribe: 'ध्वनिलेखन',
   navMenu: 'मेनू',
   navCollapse: 'मेनू लहान करा',
@@ -41,27 +41,20 @@ export const STR = {
     'तयार झालेला लेख येथे चिकटवा किंवा खालून फाईलमधून घ्या — दोन्ही एकत्रही करता येईल. त्यावरून पोस्टर व सोशल पोस्ट तयार होईल.',
   articlePastePlaceholder:
     'उदा. पूर्ण तयार झालेला मराठी लेख येथे चिकटवा… हाच लेख पोस्टर व सोशल पोस्टचा आधार असेल.',
+  // ONE flat row of formats — यूट्यूब थंबनेल / ट्विटर / फेसबुक / लेख पोस्टर / व्हिडिओ.
+  // Deliberately NOT the categoryTwitter/categoryFacebook pair, whose descriptions promise
+  // "पोस्टर + कॅप्शन": the caption is now an opt-in checkbox under those two cards.
   mediaOutputLabel: 'काय तयार करायचे?',
-  categoryPoster: 'पोस्टर',
-  categoryPosterDesc: 'लेखावर आधारित मराठी पोस्टर',
-  // The output picker is two levels: WHAT to make (पोस्टर / कॅप्शन) and then WHAT FOR
-  // (लेख / ट्विटर / फेसबुक). The second row's labels are shared by both branches — the
-  // card above already says whether a poster or only a caption is being made, so these
-  // deliberately do NOT reuse categoryTwitter/categoryFacebook, whose descriptions
-  // promise "पोस्टर + कॅप्शन" (conditional under पोस्टर, false under कॅप्शन).
-  mediaOutputCaption: 'कॅप्शन',
-  mediaOutputCaptionDesc: 'पोस्टरशिवाय फक्त मराठी कॅप्शन',
+  mediaFormatYoutube: 'यूट्यूब थंबनेल',
+  mediaFormatYoutubeDesc: 'लवकरच उपलब्ध होईल',
+  mediaFormatTwitter: 'ट्विटर पोस्ट',
+  mediaFormatTwitterDesc: 'X (ट्विटर) साठी मराठी पोस्टर',
+  mediaFormatFacebook: 'फेसबुक पोस्ट',
+  mediaFormatFacebookDesc: 'फेसबुकसाठी मराठी पोस्टर',
+  mediaFormatArticlePoster: 'लेख पोस्टर',
+  mediaFormatArticlePosterDesc: 'लेखासोबत प्रसिद्ध करण्यासाठीचे पोस्टर',
   mediaOutputVideo: 'व्हिडिओ',
-  mediaOutputVideoDesc: 'टिपणीवरून मराठी व्हिडिओ — व्हिडिओ पानावर जा',
-  mediaCaptionOnlyInfo:
-    'फक्त कॅप्शन तयार होईल — पोस्टर तयार होणार नाही, त्यामुळे ही पोस्ट येथून थेट प्रकाशित करता येणार नाही.',
-  mediaTargetLabel: 'कशासाठी?',
-  mediaTargetArticle: 'लेख',
-  mediaTargetArticleDesc: 'लेखासोबत प्रसिद्ध करण्यासाठीचे पोस्टर',
-  mediaTargetTwitter: 'ट्विटर',
-  mediaTargetTwitterDesc: 'X (ट्विटर) साठी',
-  mediaTargetFacebook: 'फेसबुक',
-  mediaTargetFacebookDesc: 'फेसबुकसाठी',
+  mediaOutputVideoDesc: 'टिपणीवरून मराठी व्हिडिओ',
   notePlaceholder:
     'उदा. शासन निर्णय, बैठकीची टिपणी, योजनेची माहिती… ही टिपणीच लेखाचा एकमेव आधार असेल.',
   headingLabel: 'शीर्षक किंवा लेखाचा रोख (ऐच्छिक)',
@@ -607,16 +600,41 @@ export const STR = {
   captionDirtyBlocksAi:
     'कॅप्शन बदलणे सुरू आहे — आधी ते जतन करा किंवा रद्द करा.',
   captionCounterLabel: 'अक्षरे',
+  // The caption box is always editable now, so the hand edit saves itself when focus
+  // leaves the textarea — there is no "जतन करा" button to press.
+  captionAutosaveHint: 'कॅप्शन इथेच बदलता येते — बदल आपोआप जतन होतील.',
+  captionSavingShort: 'जतन करत आहोत…',
   captionFeedbackTitle: 'कॅप्शनमध्ये बदल हवा आहे?',
   captionFeedbackHint:
-    'काय बदलायचे ते आपल्या शब्दांत लिहा — उदा. "२८० अक्षरांपेक्षा लहान करा", "सर्व आकडे मराठी अंकांत लिहा". टिपणीत नसलेली माहिती जोडली जाणार नाही.',
+    'काय बदलायचे ते आपल्या शब्दांत लिहा. AI आपली विनंती समजून कॅप्शनमध्ये बदल करेल.',
   revisingCaption: 'कॅप्शन सुधारली जात आहे…',
   chipsCaption: [
-    '२८० अक्षरांपेक्षा लहान करा',
-    'सर्व आकडे मराठी अंकांत (१२३) लिहा',
+    'कॅप्शन अधिक स्पष्ट आणि सोपे करा',
+    'महत्त्वाच्या माहितीवर अधिक भर द्या',
     'भाषा आणखी सोपी करा',
     'शेवटी योग्य हॅशटॅग जोडा',
   ],
+
+  // Icon-button row under a social poster + the icon pair inside the caption box.
+  // Icon-only controls, so every one of these is its title/aria-label — never visible text.
+  iconDownloadPoster: 'पोस्टर डाउनलोड करा',
+  iconRedesignPoster: 'वेगळी रचना तयार करा',
+  iconRecolourPoster: 'वेगळ्या रंगात तयार करा',
+  iconEditPoster: 'चित्रात बदल करा (पोस्टरवर खूण करा)',
+  iconEditPosterOn: 'खूण करणे बंद करा',
+  iconPublishDisabled: 'सध्या X वर पोस्ट करता येणार नाही',
+  iconCopyCaption: 'कॅप्शन कॉपी करा',
+  iconGenerateCaption: 'कॅप्शन तयार करा',
+
+  // One fold for both change requests, switched by the pills at its top. The two
+  // drafts are kept apart, so switching a pill never discards what was typed.
+  changeRequestTitle: 'बदल हवा आहे?',
+  changeTabCaption: 'कॅप्शन',
+  changeTabPoster: 'पोस्टर',
+  changeCaptionPlaceholder:
+    'कॅप्शनमध्ये काय बदलायचे ते लिहा — उदा. "२८० अक्षरांपेक्षा लहान करा"…',
+  changePosterPlaceholder:
+    'पोस्टरमध्ये काय बदलायचे ते लिहा — उदा. "मजकूर आणखी मोठा करा"…',
 
   // Poster version history (every render is kept; the strip lets users compare/download)
   posterVersionsTitle: 'आधीच्या आवृत्त्या',
@@ -634,29 +652,35 @@ export const STR = {
   threadCurrentBadge: 'हे पान',
   threadNoteEdited: 'बदललेली टिपणी',
 
-  // "Next step" panel on a finished generation (create the other format from the
-  // same note, or edit the note and re-run)
+  // Cross-format links in a finished run's action row: open Creative and Social with
+  // this run's note prefilled and the other platform preselected. The short name sits
+  // on the button between the platform mark and the arrow; the sentence is its title +
+  // aria-label, so a screen reader hears what the button actually does.
+  crossFormatTwitterShort: 'ट्विटर',
+  crossFormatFacebookShort: 'फेसबुक',
+  crossFormatToTwitter: 'याच मजकुरावरून ट्विटर पोस्ट तयार करा',
+  crossFormatToFacebook: 'याच मजकुरावरून फेसबुक पोस्ट तयार करा',
+  // Shown on Creative and Social while the run named by ?from= is being fetched.
+  prefillLoading: 'आधीच्या कामातील टिपणी आणली जात आहे…',
+  prefillFailed:
+    'आधीच्या कामातील टिपणी आणता आली नाही — खाली टिपणी लिहा किंवा फाईल जोडा.',
+  prefillApplied: 'आधीच्या कामातील टिपणी भरली आहे. हवे ते बदल करून तयार करा.',
+
+  // "Next step" panel on a finished generation (edit the note and re-run; the
+  // cross-format folds moved to the poster links above)
   nextActionsTitle: 'पुढील पाऊल',
-  nextActionsHint:
-    'हीच टिपणी वापरून आणखी काही तयार करायचे आहे? खालील पर्याय निवडा.',
-  nextTwitterTitle: 'याच टिपणीवरून ट्विटर पोस्ट तयार करा',
-  nextTwitterHint:
-    'निवडलेल्या मजकुरावरून X (ट्विटर) साठी मराठी पोस्टर + कॅप्शन तयार होईल.',
-  nextSourceLabel: 'कोणता मजकूर वापरायचा?',
+  nextActionsHint: 'हीच टिपणी वापरून पुन्हा काम सुरू करायचे आहे?',
+  nextTwitterStarted:
+    'ट्विटर पोस्ट तयार होत आहे — प्रगती वरील "सुरू असलेली कामे" मध्ये पाहा.',
+  nextFacebookStarted:
+    'फेसबुक पोस्ट तयार होत आहे — प्रगती वरील "सुरू असलेली कामे" मध्ये पाहा.',
+  // Still read by SOCIAL_SOURCE_OPTIONS in lib/generationOptions.ts, which is kept
+  // alongside the other unused option tables there.
   sourceArticle: 'तयार झालेला लेख',
   sourceArticleDesc:
     'या कामात तयार झालेला लेख पोस्टसाठी आधार म्हणून वापरला जाईल.',
   sourceNote: 'मूळ टिपणी',
   sourceNoteDesc: 'तुम्ही दिलेली मूळ टिपणी वापरली जाईल.',
-  nextTwitterCta: 'ट्विटर पोस्ट तयार करा',
-  nextTwitterStarted:
-    'ट्विटर पोस्ट तयार होत आहे — प्रगती वरील "सुरू असलेली कामे" मध्ये पाहा.',
-  nextFacebookTitle: 'याच टिपणीवरून फेसबुक पोस्ट तयार करा',
-  nextFacebookHint:
-    'निवडलेल्या मजकुरावरून फेसबुकसाठी मराठी पोस्टर + कॅप्शन तयार होईल.',
-  nextFacebookCta: 'फेसबुक पोस्ट तयार करा',
-  nextFacebookStarted:
-    'फेसबुक पोस्ट तयार होत आहे — प्रगती वरील "सुरू असलेली कामे" मध्ये पाहा.',
   nextArticleTitle: 'याच टिपणीवरून लेख तयार करा',
   nextArticleHint:
     'हीच टिपणी वापरून महासंवाद शैलीतील लेख (हवे असल्यास पोस्टरसह) तयार होईल.',
@@ -873,6 +897,14 @@ export const STR = {
   refPickerLoading: 'टेम्पलेट आणत आहोत…',
   refPickerPinnedTypeHint:
     'हा प्रकार व हेच चित्र वापरले जाईल; प्रकार आपोआप निवडला जाणार नाही.',
+  // 'disclosure' variant (the create form): one collapsed optional row instead of the
+  // आपोआप / स्वतः निवडा card pair — closed simply MEANS automatic, so the pair was asking
+  // a question the fold already answers.
+  refPickerDisclosureTitle: 'संदर्भ टेम्पलेट निवडा (ऐच्छिक)',
+  refPickerDisclosureHint:
+    'रिकामे ठेवल्यास मंच विषयानुसार योग्य टेम्पलेट स्वतः निवडेल.',
+  refPickerDisclosureNone: 'आपोआप निवड',
+  refPickerDisclosureClear: 'निवड काढा',
 
   // Transcription (/transcribe). A recording in, Marathi text out — nothing is generated,
   // rewritten or summarised here, which the intro says plainly so nobody expects an article.
@@ -886,7 +918,8 @@ export const STR = {
   transcribeFilesTitle: 'जोडलेली ध्वनिमुद्रणे',
   transcribeNeedFile: 'कृपया किमान एक ध्वनिमुद्रण जोडा.',
   transcribeSubmit: 'मजकूर तयार करा',
-  transcribeRunning: 'मजकूर तयार होत आहे… मोठ्या ध्वनिमुद्रणाला काही मिनिटे लागू शकतात.',
+  transcribeRunning:
+    'मजकूर तयार होत आहे… मोठ्या ध्वनिमुद्रणाला काही मिनिटे लागू शकतात.',
   transcribeQueued: 'रांगेत आहे…',
   transcribeResultTitle: 'तयार झालेला मजकूर',
   transcribeCharsSuffix: 'अक्षरे',
@@ -914,7 +947,7 @@ export const STR = {
   busyError: 'एक काम आधीच सुरू आहे. ते पूर्ण होईपर्यंत थांबा.',
 
   // Explainer videos (/video)
-  navVideo: 'व्हिडिओ',
+  navVideo: 'व्हिडिओ (Beta)',
   videoTitle: 'नवीन व्हिडिओ तयार करा',
   videoIntro:
     'टिपणीवरून दोन स्वतंत्र गोष्टी तयार होतील: मराठी निवेदन आणि आवाज बंद असतानाही माहिती समजावणारी साधी दृश्य-कथा. आधी दोन्ही तपासा — व्हिडिओ तयार करण्याचा खर्च फक्त तुमच्या मंजुरीनंतरच होतो.',

@@ -8,7 +8,7 @@
 // enabled images only.
 
 import { useMemo, useState } from 'react';
-import { Images, Sparkles } from 'lucide-react';
+import { ChevronDown, ChevronRight, Images, Sparkles } from 'lucide-react';
 import type {
   ReferenceImage,
   ReferenceType,
@@ -20,7 +20,8 @@ import { STR } from '../lib/strings';
 type PickerCategory = 'twitter' | 'article';
 
 export type ReferenceSelection =
-  { kind: 'image'; id: string } | { kind: 'type'; id: string };
+  | { kind: 'image'; id: string }
+  | { kind: 'type'; id: string };
 
 type Library = Readonly<{
   types: ReferenceType[];
@@ -86,11 +87,16 @@ export default function ReferencePicker({
   brand?: TemplateBrand;
   value: ReferenceSelection | null;
   onChange: (selection: ReferenceSelection | null) => void;
-  // 'card' is the home form's standalone section; 'inline' drops the card chrome
-  // so the picker can sit inside another card (e.g. the detail page's next-step
-  // panel) without a nested-card look.
-  variant?: 'card' | 'inline';
+  // 'card' is the standalone section; 'inline' drops the card chrome so the picker can
+  // sit inside another card (e.g. the detail page's next-step panel) without a
+  // nested-card look; 'disclosure' is that same gallery folded shut behind ONE optional
+  // row — the create form, where the template is a secondary question and a closed fold
+  // already means "let the platform choose", so the आपोआप / स्वतः निवडा card pair would
+  // be asking a question the fold has answered.
+  variant?: 'card' | 'inline' | 'disclosure';
 }) {
+  const isDisclosure = variant === 'disclosure';
+  const [open, setOpen] = useState(isDisclosure && value !== null);
   const [mode, setMode] = useState<'auto' | 'manual'>(
     value ? 'manual' : 'auto',
   );
@@ -122,6 +128,14 @@ export default function ReferencePicker({
   const chooseManual = () => {
     if (!library && !loading) void load();
     setMode('manual');
+  };
+
+  // Opening the fold IS choosing manual, so it does the same lazy load.
+  const toggleOpen = () => {
+    setOpen((wasOpen) => {
+      if (!wasOpen && !library && !loading) void load();
+      return !wasOpen;
+    });
   };
 
   // Enabled images of the relevant category, grouped under their type (types
@@ -169,6 +183,165 @@ export default function ReferencePicker({
       value?.kind === 'type' && value.id === id ? null : { kind: 'type', id },
     );
 
+  // The gallery itself is variant-independent — the three variants differ only in what
+  // wraps it and in what decides whether it is on screen.
+  const gallery = (
+    <div className="ref-picker-gallery">
+      {selectedImage ? (
+        <div className="ref-picker-selected">
+          <img src={selectedImage.url} alt="" aria-hidden="true" />
+          <div className="ref-picker-selected-info">
+            <span className="ref-picker-selected-label">
+              {STR.refPickerSelected}
+              {selectedType ? ` — ${selectedType.labelMr}` : ''}
+            </span>
+            {category === 'twitter' ? (
+              <span className="ref-picker-selected-hint">
+                {STR.refPickerPinnedTypeHint}
+              </span>
+            ) : null}
+          </div>
+        </div>
+      ) : value?.kind === 'type' && selectedType ? (
+        <div className="ref-picker-selected ref-picker-selected-type">
+          <span className="ref-picker-selected-type-icon" aria-hidden="true">
+            <Images size={26} strokeWidth={1.75} />
+          </span>
+          <div className="ref-picker-selected-info">
+            <span className="ref-picker-selected-label">
+              {STR.refPickerTypeSelected} — {selectedType.labelMr}
+            </span>
+            <span className="ref-picker-selected-hint">
+              {STR.refPickerTypeHint}
+            </span>
+            <span className="ref-picker-selected-count">
+              {STR.refPickerTypeBadge} · {selectedGroup?.images.length ?? 0}{' '}
+              चित्रे
+            </span>
+          </div>
+        </div>
+      ) : null}
+
+      {loading ? (
+        <p className="ref-picker-loading">
+          <span className="spinner" aria-hidden="true" />
+          {STR.refPickerLoading}
+        </p>
+      ) : error ? (
+        <p className="form-error">{error}</p>
+      ) : groups.length === 0 ? (
+        <p className="info-callout">{STR.refPickerEmpty}</p>
+      ) : category === 'twitter' ? (
+        groups.map(({ type, images }) => (
+          <div key={type.id} className="ref-picker-group">
+            <div className="ref-picker-group-header">
+              <h3 className="ref-picker-group-title">{type.labelMr}</h3>
+              {/* Checked = pin the whole type; the job then rolls one of its
+                  enabled images at random. Picking a thumbnail below swaps the
+                  type pin for an image pin, so this unchecks itself. */}
+              <label className="ref-picker-check">
+                <input
+                  type="checkbox"
+                  checked={value?.kind === 'type' && value.id === type.id}
+                  onChange={() => pickType(type.id)}
+                />
+                <span>{STR.refPickerTypeSelect}</span>
+              </label>
+            </div>
+            <div className="ref-picker-grid">
+              {images.map((image) => (
+                <Thumb
+                  key={image.id}
+                  image={image}
+                  category={category}
+                  label={type.labelMr}
+                  selected={value?.kind === 'image' && value.id === image.id}
+                  onClick={() => pick(image.id)}
+                />
+              ))}
+            </div>
+          </div>
+        ))
+      ) : (
+        <div className="ref-picker-grid ref-picker-grid-wide">
+          {groups.flatMap(({ type, images }) =>
+            images.map((image) => (
+              <Thumb
+                key={image.id}
+                image={image}
+                category={category}
+                label={type.labelMr}
+                selected={value?.kind === 'image' && value.id === image.id}
+                onClick={() => pick(image.id)}
+              />
+            )),
+          )}
+        </div>
+      )}
+    </div>
+  );
+
+  if (isDisclosure) {
+    // What the collapsed row states about the run: the pinned template's own type name
+    // when there is one, so folding it shut never hides the answer. The library may not
+    // be loaded yet on a restored pin, hence the plain "निवडलेले टेम्पलेट" fallback.
+    const summary = selectedType
+      ? value?.kind === 'type'
+        ? `${STR.refPickerTypeBadge} — ${selectedType.labelMr}`
+        : selectedType.labelMr
+      : value
+        ? STR.refPickerSelected
+        : STR.refPickerDisclosureNone;
+
+    return (
+      <div className="ref-picker ref-picker-disclosure">
+        <button
+          type="button"
+          className="ref-picker-disclosure-head"
+          aria-expanded={open}
+          onClick={toggleOpen}
+        >
+          <span className="ref-picker-disclosure-chevron" aria-hidden="true">
+            {open ? (
+              <ChevronDown size={18} strokeWidth={2} />
+            ) : (
+              <ChevronRight size={18} strokeWidth={2} />
+            )}
+          </span>
+          <span className="ref-picker-disclosure-label">
+            {STR.refPickerDisclosureTitle}
+          </span>
+          <span
+            className={
+              value
+                ? 'ref-picker-disclosure-summary ref-picker-disclosure-summary-set'
+                : 'ref-picker-disclosure-summary'
+            }
+          >
+            {summary}
+          </span>
+        </button>
+        {open ? (
+          <div className="ref-picker-disclosure-body">
+            <p className="hint">{STR.refPickerDisclosureHint}</p>
+            {value ? (
+              <div className="ref-picker-disclosure-actions">
+                <button
+                  type="button"
+                  className="btn btn-small"
+                  onClick={() => onChange(null)}
+                >
+                  {STR.refPickerDisclosureClear}
+                </button>
+              </div>
+            ) : null}
+            {gallery}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
   const Wrapper = variant === 'card' ? 'section' : 'div';
   const Title = variant === 'card' ? 'h2' : 'h3';
 
@@ -208,106 +381,7 @@ export default function ReferencePicker({
         </button>
       </div>
 
-      {mode === 'manual' ? (
-        <div className="ref-picker-gallery">
-          {selectedImage ? (
-            <div className="ref-picker-selected">
-              <img src={selectedImage.url} alt="" aria-hidden="true" />
-              <div className="ref-picker-selected-info">
-                <span className="ref-picker-selected-label">
-                  {STR.refPickerSelected}
-                  {selectedType ? ` — ${selectedType.labelMr}` : ''}
-                </span>
-                {category === 'twitter' ? (
-                  <span className="ref-picker-selected-hint">
-                    {STR.refPickerPinnedTypeHint}
-                  </span>
-                ) : null}
-              </div>
-            </div>
-          ) : value?.kind === 'type' && selectedType ? (
-            <div className="ref-picker-selected ref-picker-selected-type">
-              <span
-                className="ref-picker-selected-type-icon"
-                aria-hidden="true"
-              >
-                <Images size={26} strokeWidth={1.75} />
-              </span>
-              <div className="ref-picker-selected-info">
-                <span className="ref-picker-selected-label">
-                  {STR.refPickerTypeSelected} — {selectedType.labelMr}
-                </span>
-                <span className="ref-picker-selected-hint">
-                  {STR.refPickerTypeHint}
-                </span>
-                <span className="ref-picker-selected-count">
-                  {STR.refPickerTypeBadge} · {selectedGroup?.images.length ?? 0}{' '}
-                  चित्रे
-                </span>
-              </div>
-            </div>
-          ) : null}
-
-          {loading ? (
-            <p className="ref-picker-loading">
-              <span className="spinner" aria-hidden="true" />
-              {STR.refPickerLoading}
-            </p>
-          ) : error ? (
-            <p className="form-error">{error}</p>
-          ) : groups.length === 0 ? (
-            <p className="info-callout">{STR.refPickerEmpty}</p>
-          ) : category === 'twitter' ? (
-            groups.map(({ type, images }) => (
-              <div key={type.id} className="ref-picker-group">
-                <div className="ref-picker-group-header">
-                  <h3 className="ref-picker-group-title">{type.labelMr}</h3>
-                  {/* Checked = pin the whole type; the job then rolls one of its
-                      enabled images at random. Picking a thumbnail below swaps the
-                      type pin for an image pin, so this unchecks itself. */}
-                  <label className="ref-picker-check">
-                    <input
-                      type="checkbox"
-                      checked={value?.kind === 'type' && value.id === type.id}
-                      onChange={() => pickType(type.id)}
-                    />
-                    <span>{STR.refPickerTypeSelect}</span>
-                  </label>
-                </div>
-                <div className="ref-picker-grid">
-                  {images.map((image) => (
-                    <Thumb
-                      key={image.id}
-                      image={image}
-                      category={category}
-                      label={type.labelMr}
-                      selected={
-                        value?.kind === 'image' && value.id === image.id
-                      }
-                      onClick={() => pick(image.id)}
-                    />
-                  ))}
-                </div>
-              </div>
-            ))
-          ) : (
-            <div className="ref-picker-grid ref-picker-grid-wide">
-              {groups.flatMap(({ type, images }) =>
-                images.map((image) => (
-                  <Thumb
-                    key={image.id}
-                    image={image}
-                    category={category}
-                    label={type.labelMr}
-                    selected={value?.kind === 'image' && value.id === image.id}
-                    onClick={() => pick(image.id)}
-                  />
-                )),
-              )}
-            </div>
-          )}
-        </div>
-      ) : null}
+      {mode === 'manual' ? gallery : null}
     </Wrapper>
   );
 }

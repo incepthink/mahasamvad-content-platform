@@ -573,6 +573,13 @@ textarea.note-input {
   margin-top: 4px;
 }
 
+/* Same slot in the stack, but for a control that draws its own structure (the folded
+   template picker) — the border would otherwise box a box. */
+.option-field-flush {
+  border: 0;
+  padding: 12px 0 0;
+}
+
 /* Same cards, two choices (e.g. the poster-template auto/manual switch). */
 .output-picker-two {
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -588,6 +595,19 @@ textarea.note-input {
   .output-picker-four {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
+
+/* A row whose card COUNT is not fixed (the create form's five formats). auto-fit rather
+   than a repeat(5) so the cards reflow to 3 + 2 and then to one column instead of being
+   squeezed to a width the Marathi labels cannot hold. */
+.output-picker-flow {
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+/* Built, but not yet: dimmer than :disabled's 0.5 so a busy card and an unavailable
+   feature do not read as the same state. */
+.output-option-soon:disabled {
+  opacity: 0.35;
 }
 
 /* Second level of the media room's two-level output picker: WHAT FOR, once WHAT has
@@ -984,7 +1004,44 @@ textarea.note-input {
   margin: 0;
 }
 
-/* The caption is read-only until "कॅप्शन बदला" swaps in a textarea wearing the same look. */
+/* The caption box: an always-live textarea with its copy / generate icons floated into
+   the bottom-right corner. The textarea keeps padding-bottom clear of them so a long
+   caption's last line is never hidden under the buttons. */
+.caption-box {
+  position: relative;
+}
+
+.caption-box .social-caption-edit {
+  padding-bottom: 46px;
+}
+
+.caption-box-actions {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  display: flex;
+  gap: 6px;
+}
+
+.caption-generate-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  background: rgba(255, 253, 250, 0.72);
+}
+
+.caption-generate-button {
+  min-width: 176px;
+  min-height: 44px;
+}
+
+.caption-generate-button .spinner {
+  border-color: rgba(255, 255, 255, 0.42);
+  border-top-color: #fff;
+}
+
 .caption-label {
   display: block;
   font-size: 0.85rem;
@@ -1561,6 +1618,134 @@ details.fold[aria-disabled='true'] summary {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+/* ---------- icon buttons (social poster + caption box) ---------- */
+
+/* Square, label-free controls. Every one carries its Marathi label as title +
+   aria-label, so the meaning is never colour- or shape-only. */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  flex: none;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: #fff;
+  color: var(--text);
+  cursor: pointer;
+  /* The download control is an <a> (only the server can force a cross-origin
+     download), so it must not inherit the global link underline. */
+  text-decoration: none;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.icon-btn:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-dark);
+}
+
+.icon-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Toggle ON — the poster-marking mode. Filled rather than merely outlined, so the
+   armed state reads at a glance while the pointer is over the poster. */
+.icon-btn[aria-pressed='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.icon-btn-sm {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+}
+
+.poster-icon-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* "Same note, other platform" — an .icon-btn carrying the platform mark, its name, and
+   a trailing arrow, so it grows past the square. It sits in the same row as the actions
+   on this run; the arrow is what says this one navigates instead of acting. */
+.cross-format-link {
+  width: auto;
+  gap: 7px;
+  padding: 0 12px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+/* The arrow nudges on hover, so the direction is felt and not only seen. */
+.cross-format-link svg:last-child {
+  transition: transform 0.15s ease;
+}
+
+.cross-format-link:hover svg:last-child {
+  transform: translateX(2px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cross-format-link svg:last-child,
+  .cross-format-link:hover svg:last-child {
+    transition: none;
+    transform: none;
+  }
+}
+
+/* Marker notes, shown only once something is marked on the poster — they sit directly
+   above the "बदल हवा आहे?" fold they are submitted with. */
+.marker-notes {
+  margin-top: 18px;
+}
+
+.marker-notes .hint {
+  margin-bottom: 0;
+}
+
+/* One fold, two change requests (कॅप्शन / पोस्टर), switched by these pills. */
+.change-request {
+  margin-top: 18px;
+}
+
+.change-pills {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.change-pill {
+  padding: 7px 18px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 0.92rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.change-pill[aria-selected='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
 }
 
 /* "Print exactly this line" — the third redo, under the two style ones (article runs). */
@@ -2944,6 +3129,59 @@ textarea.ref-desc-input {
 .ref-picker-inline .ref-picker-title {
   margin: 0 0 6px;
   font-size: 1.02rem;
+}
+
+/* The 'disclosure' variant: the same gallery behind one collapsed optional row. Closed
+   MEANS automatic, which is why this variant carries no आपोआप / स्वतः निवडा card pair. */
+.ref-picker-disclosure-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  background: none;
+  border: 0;
+  padding: 2px 0;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.ref-picker-disclosure-chevron {
+  display: flex;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.ref-picker-disclosure-head:hover .ref-picker-disclosure-chevron {
+  color: var(--accent);
+}
+
+.ref-picker-disclosure-label {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+/* Pushed to the far end: what the run will actually use, so folding the row shut never
+   hides the answer. Muted while automatic, accented once a template is pinned. */
+.ref-picker-disclosure-summary {
+  margin-inline-start: auto;
+  color: var(--muted);
+  font-size: 0.85rem;
+  text-align: end;
+}
+
+.ref-picker-disclosure-summary-set {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.ref-picker-disclosure-body {
+  margin-top: 10px;
+}
+
+.ref-picker-disclosure-actions {
+  margin-top: 10px;
 }
 
 /* ---------- generation thread (lineage rail on the detail page) ---------- */
