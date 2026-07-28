@@ -201,10 +201,10 @@ export function SocialPostView({
     }
   };
 
-  const sendChange = async () => {
+  const sendChange = async (target: ChangeTab = changeTab) => {
     if (sendingChange) return;
     setChangeError(null);
-    if (changeTab === 'caption') {
+    if (target === 'caption') {
       const text = captionChange.trim();
       if (text.length < 3) {
         setChangeError(STR.feedbackTooShort);
@@ -379,6 +379,19 @@ export function SocialPostView({
                 category={detail.category}
               />
             </div>
+            {markers.length > 0 ? (
+              <div className="btn-row marker-submit-action">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  aria-busy={sendingChange}
+                  disabled={showSpinner || sendingChange}
+                  onClick={() => void sendChange('poster')}
+                >
+                  {sendingChange ? STR.sendingFeedback : STR.sendFeedback}
+                </button>
+              </div>
+            ) : null}
             {detail.posterStyleLabel ? (
               <p className="hint poster-style-label" style={{ marginTop: 10 }}>
                 {STR.posterStyleLabelPrefix} {detail.posterStyleLabel}
@@ -453,7 +466,9 @@ export function SocialPostView({
                 }}
                 onBlur={() => void saveCaptionOnBlur()}
                 rows={10}
-                disabled={captionMissing || savingCaption || captionRevising}
+                readOnly={captionMissing}
+                tabIndex={captionMissing ? -1 : undefined}
+                disabled={savingCaption || captionRevising}
                 aria-label={STR.captionLabel}
               />
               {captionMissing ? (
@@ -516,8 +531,8 @@ export function SocialPostView({
           </div>
 
           {/* Marker notes: shown only once something is actually marked on the poster
-              (or a marked round was just sent), directly above the change fold they
-              are submitted with. */}
+              (or a marked round was just sent). Their submit action sits below the
+              poster icons; the fold below remains for optional whole-poster feedback. */}
           {detail.posterUrl &&
           (markers.length > 0 || submittedMarkers.length > 0) ? (
             <div className="marker-notes">
@@ -526,19 +541,21 @@ export function SocialPostView({
                   ? STR.posterAnnotateHint
                   : STR.markersSubmittedHint}
               </p>
-              {markers.length === 0
-                ? submittedMarkers.map((marker, i) => (
-                    <div
-                      className="marker-note-row marker-note-submitted"
-                      key={`s-${marker.id}`}
-                    >
-                      <span className="marker-note-badge" aria-hidden="true">
-                        {i + 1}
-                      </span>
-                      <span className="marker-note-text">{marker.note}</span>
-                    </div>
-                  ))
-                : markers.map((marker, i) => (
+              {markers.length === 0 ? (
+                submittedMarkers.map((marker, i) => (
+                  <div
+                    className="marker-note-row marker-note-submitted"
+                    key={`s-${marker.id}`}
+                  >
+                    <span className="marker-note-badge" aria-hidden="true">
+                      {i + 1}
+                    </span>
+                    <span className="marker-note-text">{marker.note}</span>
+                  </div>
+                ))
+              ) : (
+                <>
+                  {markers.map((marker, i) => (
                     <div className="marker-note-row" key={marker.id}>
                       <span className="marker-note-badge" aria-hidden="true">
                         {i + 1}
@@ -563,6 +580,11 @@ export function SocialPostView({
                       </button>
                     </div>
                   ))}
+                  {changeError ? (
+                    <p className="form-error">{changeError}</p>
+                  ) : null}
+                </>
+              )}
             </div>
           ) : null}
 
@@ -666,7 +688,7 @@ export function SocialPostView({
                     {sendingChange ? STR.sendingFeedback : STR.sendFeedback}
                   </button>
                 </div>
-                {changeError ? (
+                {changeError && markers.length === 0 ? (
                   <p className="form-error">{changeError}</p>
                 ) : null}
               </div>

@@ -628,7 +628,7 @@ export const STR = {
 
   // One fold for both change requests, switched by the pills at its top. The two
   // drafts are kept apart, so switching a pill never discards what was typed.
-  changeRequestTitle: 'बदल हवा आहे?',
+  changeRequestTitle: 'AI ला सूचना द्या',
   changeTabCaption: 'कॅप्शन',
   changeTabPoster: 'पोस्टर',
   changeCaptionPlaceholder:

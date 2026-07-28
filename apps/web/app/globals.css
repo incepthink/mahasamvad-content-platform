@@ -1029,7 +1029,7 @@ textarea.note-input {
   display: grid;
   place-items: center;
   border-radius: 14px;
-  background: rgba(255, 253, 250, 0.72);
+  background: transparent;
 }
 
 .caption-generate-button {
@@ -1143,6 +1143,8 @@ textarea.note-input {
 }
 
 .spinner {
+  display: inline-block;
+  flex: 0 0 auto;
   width: 16px;
   height: 16px;
   border: 3px solid var(--accent-soft);
@@ -1708,14 +1710,17 @@ details.fold[aria-disabled='true'] summary {
   }
 }
 
-/* Marker notes, shown only once something is marked on the poster — they sit directly
-   above the "बदल हवा आहे?" fold they are submitted with. */
+/* Marker notes shown once the poster is marked. */
 .marker-notes {
   margin-top: 18px;
 }
 
 .marker-notes .hint {
   margin-bottom: 0;
+}
+
+.marker-submit-action {
+  margin-top: 14px;
 }
 
 /* One fold, two change requests (कॅप्शन / पोस्टर), switched by these pills. */

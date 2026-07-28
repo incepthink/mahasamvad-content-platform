@@ -22,9 +22,21 @@ it are implemented and working end-to-end:
 - **Simple fixed-template social prompt** (2026-07-28, no migration): for Twitter DGIPR runs
   using `designMode: 'onbrand'` (UI: **ठरलेले टेम्पलेट**), the selected reference
   image is sent unchanged to the image-edit model with the original note verbatim and only
-  seven constraints: use the reference image as the AUTHORITATIVE structure (composition,
+  these constraints: use the reference image as the AUTHORITATIVE visual structure (composition,
   sections, proportions, content distribution, imagery zones, balance and density), filling
-  the usable canvas without collapsing onto one side or leaving large unused areas; do not
+  the usable canvas without collapsing onto one side or leaving large unused areas, while
+  defining STRUCTURE as geometry/hierarchy only—not the meaning, content, or element type of
+  its slots; apply a strict REFERENCE-CONTENT FIREWALL so every reference word, numeral, date,
+  year, URL, domain, app name, contact, identifier, logo/emblem, QR/barcode and factual claim
+  is unrelated placeholder content and copied NONE of it; require every output fact/text/
+  number/code to be directly source-supported, with an unsupported reference slot repurposed
+  using other supported content or relevant non-informational imagery, or kept visually neutral
+  with the poster background/design treatment while preserving the successful reference
+  layout and spacing—never reflowing or redesigning the composition merely because a slot is
+  unsupported;
+  filter source-document artifacts (`वृत्त. क्र.`, page/issue/report/file/document numbers,
+  running headers/footers, filenames, scan/OCR artifacts) even when they occur in the supplied
+  text; do not
   inherit its colours—the reference controls STRUCTURE ONLY, while the image model chooses
   the palette freely and creatively subject only to strong contrast and readability; do not
   add a logo; do not add a footer; keep only the top-right 180x170 and full-width bottom 120px
