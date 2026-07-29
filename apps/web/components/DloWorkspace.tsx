@@ -65,6 +65,7 @@ import {
   type DesignationEdit,
   type DesignationExtra,
 } from './DesignationReview';
+import { MarkdownText } from './MarkdownText';
 import { ProgressSteps } from './ProgressSteps';
 import { StyleReferenceField } from './StyleReferenceField';
 import { DLO_INTAKE_STEP_LABELS, STR } from '../lib/strings';
@@ -269,7 +270,8 @@ function DloArticleOutput({
         <div className="article-head">
           <h2>{STR.dloOutputTitle}</h2>
         </div>
-        <div className="article-body">{article}</div>
+        {/* Same as the detail page: rendered for reading, copied/downloaded raw. */}
+        <MarkdownText text={article} className="article-body" />
         <div className="btn-row" style={{ marginTop: 18 }}>
           <button type="button" className="btn" onClick={copyArticle}>
             {copied ? STR.copied : STR.copyText}

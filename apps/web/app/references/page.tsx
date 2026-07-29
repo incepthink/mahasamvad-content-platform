@@ -33,6 +33,18 @@ import {
   updateReferenceType,
   uploadReferenceImage,
 } from '../../lib/api';
+import {
+  HighlightedText,
+  ReferenceSearchBar,
+  UnanalyzedNote,
+} from '../../components/ReferenceSearchBar';
+import {
+  NO_FILTERS,
+  highlightRanges,
+  searchReferences,
+  type ReferenceFilters,
+  type SearchableReference,
+} from '../../lib/referenceSearch';
 import { REF_CATEGORY_LABELS, STR } from '../../lib/strings';
 
 const ACCEPTED_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
@@ -55,12 +67,17 @@ function errText(error: unknown): string {
 function LayoutBadge({
   image,
   disabled,
+  query,
   onRecheck,
   onFlip,
   onSaveAbout,
 }: {
   image: ReferenceImage;
   disabled: boolean;
+  // The live search query, so the words that put this tile on screen are marked in the
+  // very lines they matched. Both summaries are shown here in full (unlike the picker's
+  // windowed snippet) — this is the page where they are edited.
+  query: string;
   onRecheck: () => void;
   onFlip: () => void;
   onSaveAbout: (contentSummary: string) => Promise<boolean>;
@@ -115,7 +132,10 @@ function LayoutBadge({
         </button>
       </span>
       <p className="ref-layout-summary" title={spec.layoutSummary}>
-        {spec.layoutSummary}
+        <HighlightedText
+          text={spec.layoutSummary}
+          highlights={highlightRanges(spec.layoutSummary, query)}
+        />
       </p>
       {editingAbout ? (
         <div className="ref-layout-about-edit">
@@ -169,7 +189,10 @@ function LayoutBadge({
           >
             <strong>{STR.refLayoutAbout}</strong>{' '}
             {spec.contentSummary ? (
-              spec.contentSummary
+              <HighlightedText
+                text={spec.contentSummary}
+                highlights={highlightRanges(spec.contentSummary, query)}
+              />
             ) : (
               <span className="ref-layout-about-empty">
                 {STR.refLayoutAboutEmpty}
@@ -208,6 +231,8 @@ function ImageTile({
   image,
   typeLabel,
   disabled,
+  query,
+  dimmed = false,
   onToggle,
   onDelete,
   onRecheck,
@@ -217,6 +242,11 @@ function ImageTile({
   image: ReferenceImage;
   typeLabel: string;
   disabled: boolean;
+  query: string;
+  // An un-analyzed master shown during a search: it is here because it CANNOT be
+  // searched, not because it matched, and dimming is what keeps that distinction visible
+  // in a grid where everything else did match.
+  dimmed?: boolean;
   onToggle: () => void;
   onDelete: () => void;
   onRecheck: () => void;
@@ -224,7 +254,9 @@ function ImageTile({
   onSaveAbout: (contentSummary: string) => Promise<boolean>;
 }) {
   return (
-    <div className={`ref-thumb${image.isActive ? ' is-enabled' : ''}`}>
+    <div
+      className={`ref-thumb${image.isActive ? ' is-enabled' : ''}${dimmed ? ' is-unsearchable' : ''}`}
+    >
       <div className={`ref-thumb-frame ref-thumb-frame-${image.category}`}>
         {/* Immutable library URLs are safe to render directly. */}
         <img src={image.url} alt={typeLabel} loading="lazy" />
@@ -239,6 +271,7 @@ function ImageTile({
         <LayoutBadge
           image={image}
           disabled={disabled}
+          query={query}
           onRecheck={onRecheck}
           onFlip={onFlip}
           onSaveAbout={onSaveAbout}
@@ -273,10 +306,19 @@ function ImageTile({
 function TypeCard({
   type,
   images,
+  unsearchable = [],
+  query,
+  searching = false,
   onChanged,
 }: {
   type: ReferenceType;
+  // Already filtered and ordered by the page. While searching this is the type's matches
+  // in rank order; otherwise it is its whole rotation.
   images: ReferenceImage[];
+  // This type's un-analyzed masters, shown only while searching — see UnanalyzedNote.
+  unsearchable?: ReferenceImage[];
+  query: string;
+  searching?: boolean;
   onChanged: () => Promise<void>;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -330,11 +372,16 @@ function TypeCard({
     void run(() => deleteReferenceType(type.id));
   };
 
-  const sorted = [...images].sort(
-    (a, b) =>
-      Number(b.isActive) - Number(a.isActive) ||
-      b.createdAt.localeCompare(a.createdAt),
-  );
+  // While searching, the page has already ranked these by relevance — re-sorting here
+  // would throw that away and put an exact subject-line hit below an enabled near-miss.
+  const sorted = searching
+    ? images
+    : [...images].sort(
+        (a, b) =>
+          Number(b.isActive) - Number(a.isActive) ||
+          b.createdAt.localeCompare(a.createdAt),
+      );
+  const shown = [...sorted, ...unsearchable];
   const enabledCount = images.filter((image) => image.isActive).length;
 
   return (
@@ -468,15 +515,17 @@ function TypeCard({
         </div>
       )}
 
-      {sorted.length === 0 ? <p className="hint">{STR.refEmpty}</p> : null}
-      {sorted.length > 0 ? (
+      {shown.length === 0 ? <p className="hint">{STR.refEmpty}</p> : null}
+      {shown.length > 0 ? (
         <div className="ref-thumb-grid">
-          {sorted.map((image) => (
+          {shown.map((image) => (
             <ImageTile
               key={image.id}
               image={image}
               typeLabel={type.labelMr}
               disabled={busy}
+              query={query}
+              dimmed={searching && image.layoutSpec === null}
               onToggle={() =>
                 void run(() =>
                   setReferenceImageEnabled(image.id, !image.isActive),
@@ -629,6 +678,8 @@ export default function ReferencesPage() {
   const [types, setTypes] = useState<ReferenceType[] | null>(null);
   const [images, setImages] = useState<ReferenceImage[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [filters, setFilters] = useState<ReferenceFilters>(NO_FILTERS);
 
   const refresh = useCallback(async () => {
     try {
@@ -658,6 +709,48 @@ export default function ReferencesPage() {
     return map;
   }, [types]);
 
+  // Unlike the picker, this page searches DISABLED masters too: it is where a template is
+  // brought back into rotation, so hiding the ones that are out of it would hide exactly
+  // the ones being looked for.
+  const searchable = useMemo<SearchableReference[]>(() => {
+    const typeBySlug = new Map(
+      (types ?? []).map((type) => [`${type.category}:${type.slug}`, type]),
+    );
+    return (images ?? []).flatMap((image) => {
+      const type = typeBySlug.get(`${image.category}:${image.subtype}`);
+      if (!type) return [];
+      return [
+        {
+          image,
+          typeId: type.id,
+          typeLabel: type.labelMr,
+          typeDescription: type.description,
+        },
+      ];
+    });
+  }, [types, images]);
+
+  const search = useMemo(
+    () => searchReferences(searchable, query, filters),
+    [searchable, query, filters],
+  );
+  const searching = search.queryActive || search.filtersActive;
+
+  // Rank position per image, so each type card can show its own matches in the page's
+  // global relevance order rather than re-deriving one.
+  const matchOrder = useMemo(() => {
+    const order = new Map<string, number>();
+    search.matches.forEach((match, index) =>
+      order.set(match.entry.image.id, index),
+    );
+    return order;
+  }, [search]);
+
+  const unsearchableIds = useMemo(
+    () => new Set(search.unanalyzed.map((entry) => entry.image.id)),
+    [search],
+  );
+
   const loaded = types !== null && images !== null;
   const categories: ReferenceCategory[] = ['twitter', 'article'];
 
@@ -667,37 +760,97 @@ export default function ReferencesPage() {
       <p className="hint ref-intro">{STR.refIntro}</p>
       {error ? <p className="form-error">{error}</p> : null}
 
+      {loaded ? (
+        <div className="ref-search-sticky">
+          <ReferenceSearchBar
+            query={query}
+            onQueryChange={setQuery}
+            filters={filters}
+            onFiltersChange={setFilters}
+            resultCount={search.matches.length}
+            total={search.total}
+            hint
+          />
+        </div>
+      ) : null}
+
       {!loaded && !error ? (
         <div className="ref-loading">
           <span className="spinner" aria-hidden="true" />
         </div>
       ) : null}
 
+      {loaded && searching && search.matches.length === 0 ? (
+        <div className="ref-search-empty">
+          <p>{STR.refSearchNoResults}</p>
+          <p className="hint">{STR.refSearchNoResultsHint}</p>
+        </div>
+      ) : null}
+      {loaded && searching ? (
+        <UnanalyzedNote count={search.unanalyzed.length} />
+      ) : null}
+
       {loaded
-        ? categories.map((category) => (
-            <section className="ref-category" key={category}>
-              <h2 className="ref-category-title">
-                {REF_CATEGORY_LABELS[category]}
-              </h2>
-              <div className="ref-type-list">
-                {(byCategory.get(category) ?? []).map((type) => (
-                  <TypeCard
-                    key={type.id}
-                    type={type}
-                    images={(images ?? []).filter(
-                      (image) =>
-                        image.category === category &&
-                        image.subtype === type.slug,
-                    )}
-                    onChanged={refresh}
-                  />
-                ))}
-                {category === 'twitter' ? (
-                  <NewTypeCard onCreated={refresh} />
-                ) : null}
-              </div>
-            </section>
-          ))
+        ? categories.map((category) => {
+            const cards = (byCategory.get(category) ?? []).map((type) => {
+              const own = (images ?? []).filter(
+                (image) =>
+                  image.category === category && image.subtype === type.slug,
+              );
+              const matched = searching
+                ? own
+                    .filter((image) => matchOrder.has(image.id))
+                    .sort(
+                      (a, b) =>
+                        (matchOrder.get(a.id) ?? 0) -
+                        (matchOrder.get(b.id) ?? 0),
+                    )
+                : own;
+              // Un-analyzed masters are appended (dimmed) rather than filtered out, so a
+              // search never makes a template unreachable — this card is the only place
+              // its "पुन्हा तपासा" button lives.
+              const unsearchable = searching
+                ? own.filter((image) => unsearchableIds.has(image.id))
+                : [];
+              return { type, matched, unsearchable };
+            });
+            // A type with nothing to show disappears while searching; with no query the
+            // page keeps every type, including empty ones, because uploading into an
+            // empty type is what its card is for.
+            const visible = searching
+              ? cards.filter(
+                  (card) =>
+                    card.matched.length > 0 || card.unsearchable.length > 0,
+                )
+              : cards;
+            if (searching && visible.length === 0) return null;
+
+            return (
+              <section className="ref-category" key={category}>
+                <h2 className="ref-category-title">
+                  {REF_CATEGORY_LABELS[category]}
+                </h2>
+                <div className="ref-type-list">
+                  {visible.map(({ type, matched, unsearchable }) => (
+                    <TypeCard
+                      key={type.id}
+                      type={type}
+                      images={matched}
+                      unsearchable={unsearchable}
+                      query={query}
+                      searching={searching}
+                      onChanged={refresh}
+                    />
+                  ))}
+                  {/* Creating a type is an admin action, not a search result — it stays
+                      out of the filtered view rather than looking like a match. */}
+                  {category === 'twitter' && !searching ? (
+                    <NewTypeCard onCreated={refresh} />
+                  ) : null}
+                </div>
+              </section>
+            );
+          })
         : null}
     </main>
   );

@@ -1,21 +1,6 @@
-// Per-scene explainer-video script from a user note (gate 1 of the video
-// pipeline). The scene BREAKDOWN comes first from the planner
-// (plan-video-scenes.ts), which authors independent voice and visual tracks.
-// This module writes ONLY narration, overlays and the shared film look against
-// that plan (one JSON call + one repair — the generate-copy.ts pattern), and
-// runs ONE bounded voice-coverage round. It cannot rewrite the storyboard from
-// the narration: that separation is what stops detailed sentences turning
-// into crowded, animation-hostile frames.
-//
-// AUDIO LEADS: the narration is budgeted against the project's TOTAL time
-// (VIDEO_TOTAL_SECONDS), distributed across scenes by importance, with only a
-// per-scene 15s ceiling (the longest clip Kling renders). Clip durations are
-// DERIVED later from the measured narration audio — this module never assigns
-// a window.
-//
-// Guardrails mirror generate-article.ts: the note is the SOLE factual source
-// (never invent names/dates/amounts/designations/schemes/locations), while the
-// RAG exemplar steers tone/structure only.
+// Writes the Marathi narration, optional on-screen key points and one shared
+// live-action style for the planner's scene sequence. Clip durations are
+// derived later from measured narration audio.
 
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
@@ -28,7 +13,6 @@ import {
   VIDEO_STYLE_MAX_CHARS,
   VIDEO_TOTAL_FIT_TOLERANCE,
   VIDEO_TOTAL_SECONDS,
-  videoNarrationBudgetChars,
   videoNarrationBudgetWords,
   type VideoDurationBucket,
 } from '@dgipr/schemas';
@@ -132,65 +116,19 @@ function buildSystemPrompt(
 ): string {
   const totalSeconds = VIDEO_TOTAL_SECONDS[bucket];
   const totalWords = videoNarrationBudgetWords(bucket);
-  const totalChars = videoNarrationBudgetChars(bucket);
   return [
-    'तुम्ही महाराष्ट्र शासनाच्या माहिती व जनसंपर्क महासंचालनालयासाठी (DGIPR / महासंवाद)',
-    'माहिती समजावून सांगणाऱ्या वास्तव चित्रीकरण असलेल्या (live-action) व्हिडिओंसाठी',
-    'दृश्यनिहाय संहिता (script) लिहिणारे अनुभवी मराठी संपादक आहात.',
-    '',
-    'तुम्हाला एक अधिकृत टिपणी आणि दोन स्वतंत्र tracks असलेला आराखडा (PLAN) दिला',
-    'जाईल. PLAN मधील voice track साठी निवेदन लिहा. Visual track PLAN मध्ये आधीच',
-    'दिग्दर्शित आहे; तो narration शी जुळवण्यासाठी बदलायचा नाही. वैध JSON object:',
-    '{ "title": "...", "style": "...",',
-    '  "scenes": [ { "narration": "...", "key_point": "..." } ] }',
-    '',
-    'कठोर नियम:',
-    '1. टिपणी हाच तथ्यांचा एकमेव स्रोत आहे. टिपणीत नसलेली नावे, तारखा, रक्कम, पदनामे,',
-    '   योजना, ठिकाणे, आकडे, संस्था, निर्णय किंवा दावे तयार करू नका.',
-    `2. scenes मध्ये नेमकी ${sceneCount} दृश्ये द्या — PLAN मधील दृश्यांच्याच क्रमाने.`,
-    '   प्रत्येक narration ने त्याचा VOICE beat पोहोचवावा. PLAN मधील VISUAL माहिती',
-    '   output मध्ये कॉपी, सारांशित किंवा पुन्हा लिहू नका.',
-    '3. narration: फक्त मराठीत, देवनागरी लिपीत. सर्व दृश्यांचे निवेदन मिळून सुमारे',
-    `   ${totalSeconds} सेकंद असावे — ~${totalWords} शब्द / ~${totalChars} अक्षरे (BUDGET ब्लॉक पाहा).`,
-    '   प्रत्येक दृश्याला महत्त्वानुसार वेळ द्या — महत्त्वाच्या तथ्याला जास्त, दुय्यमाला',
-    `   कमी. एका दृश्याची कमाल मर्यादा ${VIDEO_CLIP_MAX_SECONDS} सेकंद (~${VIDEO_NARRATION_MAX_CHARS} अक्षरे) —`,
-    '   क्लिप निवेदनाइतकी लांब होते, त्यामुळे कमी बोलणे चालते; एकूण बजेट ओलांडणे',
-    '   मात्र नको — बजेटबाहेरचे निवेदन नंतर आपोआप लहान करावे लागते.',
-    '   निवेदन सलग ऐकल्यावर एक सुसंगत, नागरिकाभिमुख कथा',
-    '   तयार झाली पाहिजे: सुरुवातीला घोषणा/विषय, मध्ये ठोस तपशील, शेवटी नागरिकाला',
-    '   होणारा ठोस फायदा — नागरिकाने करावयाची कृती टिपणीत असेल तरच ती शेवटी द्या,',
-    '   नसेल तर कृती तयार करू नका.',
-    '   beat मधील जी ठोस नावे, ठिकाणे, आकडे व मुदती narration मध्ये घ्याल ती जशीच्या',
-    '   तशी वापरा — त्यांच्याऐवजी "काही", "अनेक", "चार प्रमुख" असे मोघम शब्द वापरू नका.',
-    '   पण beat मधील प्रत्येक तपशील निवेदनात असलाच पाहिजे असे नाही: शब्दमर्यादेत जे',
-    '   बसणार नाही ते वगळा. काय ठेवायचे याचा क्रम — मुख्य मुद्दा, मग नागरिकाला थेट',
-    '   उपयोगी तपशील (फायदा, पात्रता, मुदत, दर, कुठे जायचे), मग उरलेले. तपशील',
-    '   ठासून भरलेले घाईचे निवेदन हे मोजके पण स्पष्ट निवेदनापेक्षा वाईट असते.',
-    `4. key_point: मराठीत, जास्तीत जास्त ${VIDEO_KEY_POINT_MAX_CHARS} अक्षरांची एकच ओळ — या दृश्यातील`,
-    '   सर्वात उपयोगी ठोस तपशील पडद्यावर लिहिण्यासाठी (रक्कम, अंतिम मुदत, संख्या, दर,',
-    '   योजनेचे नाव, ठिकाण). निवेदनाचा सारांश नव्हे, वाक्य नव्हे — नजरेत भरणारा तुकडा',
-    '   (उदा. "२ लाखांपर्यंत कर्जमाफी", "अर्जाची मुदत: ३१ ऑगस्ट", "४ महापालिका रुग्णालये").',
-    '   आकडे व नावे टिपणीत आहेत तशीच लिहा; टिपणीत नसलेला आकडा कधीही लिहू नका.',
-    '   या दृश्यात असा ठोस तपशील नसेल तर रिकामी ("") ठेवा — भरण्यासाठी काहीतरी लिहू नका.',
-    '5. style: इंग्रजीत एक परिच्छेद — संपूर्ण व्हिडिओसाठी एकच वास्तव चित्रीकरण शैली,',
-    '   आणि त्यात चित्रीकरणाचे ठिकाण व माणसे स्पष्टपणे सांगा: Maharashtra, India;',
-    '   Marathi-speaking Indian people. त्यासोबत प्रकाशयोजना, रंगसंगती, lens/framing',
-    '   (उदा. cinematic documentary realism, natural daylight, warm earthy palette).',
-    '   ही शैली विषयाला साजेशी निवडा; ती प्रत्येक दृश्याला सारखीच लागू होईल.',
-    '   illustration/animation/cartoon शैली कधीही वापरू नका.',
-    '6. भाषा शासकीय, नागरिकाभिमुख, संयत आणि विश्वासार्ह ठेवा. अतिनाट्यमय किंवा',
-    '   जाहिरातीसारखी भाषा वापरू नका.',
-    '7. REFERENCE फक्त शैली/रचनेसाठी आहे; त्यातील तथ्ये वापरू नका.',
-    '',
-    'फक्त वैध JSON object परत करा. markdown, code fence, स्पष्टीकरण किंवा अतिरिक्त मजकूर देऊ नका.',
+    'Write the best clear and engaging Marathi voiceover for a realistic Government of Maharashtra explainer video.',
+    'The NOTE is the factual source. Follow the supplied PLAN and make the complete narration flow naturally.',
+    `Return exactly ${sceneCount} scenes whose combined narration is about ${totalSeconds} seconds or ${totalWords} Marathi words.`,
+    `Keep each scene concise enough for a ${VIDEO_CLIP_MAX_SECONDS}-second clip.`,
+    `key_point is an optional Marathi on-screen phrase of at most ${VIDEO_KEY_POINT_MAX_CHARS} characters; leave it empty when it does not help.`,
+    'style is one English paragraph describing a consistent, realistic live-action look in Maharashtra, India.',
+    'The optional REFERENCE may inspire the writing style, but its facts are not part of the note.',
+    'Return only JSON in this shape:',
+    '{ "title": "...", "style": "...", "scenes": [ { "narration": "...", "key_point": "..." } ] }',
   ].join('\n');
 }
 
-// The PLAN and its BUDGET travel together in one block: every path that shows
-// the model the plan (first draft, schema repair, coverage repair) must also
-// restate the total-time budget, or a repair round would rewrite scenes with
-// no idea how much speaking room the video has. The repo's usual redundancy
-// for load-bearing numbers — they appear in the system prompt too.
 function buildPlanBlock(
   plan: VideoScenePlan,
   bucket: VideoDurationBucket,
@@ -198,18 +136,13 @@ function buildPlanBlock(
   const lines = plan.scenes.map(
     (scene, index) =>
       `दृश्य ${index + 1}:` +
-      `\n  VOICE beat: ${scene.beat}` +
-      // The planner's verified verbatim anchor: the writer expands THIS, so a
-      // narration cannot drift off the fact the beat was grounded in.
-      `\n  VOICE आधार (टिपणीतील मजकूर): ${scene.sourceQuote}` +
-      // Read-only context. The script schema has no visual fields, so even a
-      // model tempted to sync the tracks has nowhere to rewrite the shot.
-      `\n  VISUAL (बदलू नका): ${scene.visualBrief}` +
+      `\n  सांगायचा मुद्दा: ${scene.beat}` +
+      `\n  तथ्य: ${scene.sourceQuote}` +
+      `\n  दृश्य: ${scene.visualBrief}` +
       (scene.endVisualBrief
         ? ` → ${scene.endVisualBrief}`
-        : ' → start-frame-only motion') +
-      ` | ${scene.shotHint}` +
-      `\n  VISUAL आधार: ${scene.visualSourceQuote}`,
+        : ' → video model chooses the motion') +
+      ` | ${scene.shotHint}`,
   );
   return [
     '<PLAN purpose="scene_plan_follow_exactly">',
@@ -217,10 +150,8 @@ function buildPlanBlock(
     '</PLAN>',
     '',
     '<BUDGET purpose="total_narration_budget">',
-    `एकूण निवेदन: सुमारे ${VIDEO_TOTAL_SECONDS[bucket]} सेकंद — ~${videoNarrationBudgetWords(bucket)} शब्द / ` +
-      `~${videoNarrationBudgetChars(bucket)} अक्षरे, सर्व दृश्ये मिळून. एका दृश्याची कमाल मर्यादा ` +
-      `${VIDEO_CLIP_MAX_SECONDS} सेकंद (~${VIDEO_NARRATION_MAX_CHARS} अक्षरे). महत्त्वाच्या दृश्याला जास्त वेळ,` +
-      ' दुय्यमाला कमी — वाटणी तुम्ही ठरवा.',
+    `एकूण निवेदन: सुमारे ${VIDEO_TOTAL_SECONDS[bucket]} सेकंद / ${videoNarrationBudgetWords(bucket)} शब्द. ` +
+      `एका दृश्याची कमाल मर्यादा ${VIDEO_CLIP_MAX_SECONDS} सेकंद.`,
     '</BUDGET>',
   ].join('\n');
 }

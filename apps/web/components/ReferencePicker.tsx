@@ -15,6 +15,18 @@ import type {
   TemplateBrand,
 } from '@dgipr/schemas';
 import { listReferenceImages, listReferenceTypes } from '../lib/api';
+import {
+  NO_FILTERS,
+  highlightRanges,
+  searchReferences,
+  type ReferenceFilters,
+  type SearchableReference,
+} from '../lib/referenceSearch';
+import {
+  HighlightedText,
+  ReferenceSearchBar,
+  UnanalyzedNote,
+} from './ReferenceSearchBar';
 import { STR } from '../lib/strings';
 
 type PickerCategory = 'twitter' | 'article';
@@ -74,6 +86,57 @@ function Thumb({
   );
 }
 
+// A search hit. Unlike Thumb (which lives under a type heading that names it), a hit is
+// shown OUT of its group, so it has to carry its own type name and the line it matched
+// on — otherwise a flat grid of thumbnails gives no reason why any of them is there.
+function ResultTile({
+  image,
+  category,
+  typeLabel,
+  query,
+  snippet,
+  highlights,
+  selected,
+  onClick,
+}: {
+  image: ReferenceImage;
+  category: PickerCategory;
+  typeLabel: string;
+  // The type name is marked as well as the subject line: a query like "quote" matches the
+  // TYPE, and without a mark on it the tile gives no visible reason for being in the
+  // results at all.
+  query: string;
+  snippet: string;
+  highlights: readonly { start: number; end: number }[];
+  selected: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <div className="ref-result">
+      <Thumb
+        image={image}
+        category={category}
+        label={typeLabel}
+        selected={selected}
+        onClick={onClick}
+      />
+      <div className="ref-result-meta">
+        <span className="ref-result-type">
+          <HighlightedText
+            text={typeLabel}
+            highlights={highlightRanges(typeLabel, query)}
+          />
+        </span>
+        {snippet ? (
+          <span className="ref-result-snippet" title={snippet}>
+            <HighlightedText text={snippet} highlights={highlights} />
+          </span>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export default function ReferencePicker({
   category,
   brand = 'dgipr',
@@ -103,6 +166,8 @@ export default function ReferencePicker({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [library, setLibrary] = useState<Library | null>(null);
+  const [query, setQuery] = useState('');
+  const [filters, setFilters] = useState<ReferenceFilters>(NO_FILTERS);
 
   const load = async () => {
     setLoading(true);
@@ -122,6 +187,8 @@ export default function ReferencePicker({
 
   const chooseAuto = () => {
     setMode('auto');
+    setQuery('');
+    setFilters(NO_FILTERS);
     onChange(null);
   };
 
@@ -130,10 +197,16 @@ export default function ReferencePicker({
     setMode('manual');
   };
 
-  // Opening the fold IS choosing manual, so it does the same lazy load.
+  // Opening the fold IS choosing manual, so it does the same lazy load. Closing it drops
+  // the query: the collapsed row states the PIN, and a query surviving out of sight would
+  // silently narrow the gallery the next time it is opened.
   const toggleOpen = () => {
     setOpen((wasOpen) => {
       if (!wasOpen && !library && !loading) void load();
+      if (wasOpen) {
+        setQuery('');
+        setFilters(NO_FILTERS);
+      }
       return !wasOpen;
     });
   };
@@ -155,6 +228,28 @@ export default function ReferencePicker({
       }))
       .filter((group) => group.images.length > 0);
   }, [library, category, brand]);
+
+  // Search runs over the SAME enabled-only pool the groups are built from, flattened —
+  // so a hit can never be an image the gallery would refuse to show, and the counter
+  // ("N पैकी M") counts the templates this run could actually use.
+  const searchable = useMemo<SearchableReference[]>(
+    () =>
+      groups.flatMap(({ type, images }) =>
+        images.map((image) => ({
+          image,
+          typeId: type.id,
+          typeLabel: type.labelMr,
+          typeDescription: type.description,
+        })),
+      ),
+    [groups],
+  );
+
+  const search = useMemo(
+    () => searchReferences(searchable, query, filters),
+    [searchable, query, filters],
+  );
+  const searching = search.queryActive || search.filtersActive;
 
   const selectedImage =
     value?.kind === 'image' && library
@@ -222,6 +317,18 @@ export default function ReferencePicker({
         </div>
       ) : null}
 
+      {!loading && !error && groups.length > 0 ? (
+        <ReferenceSearchBar
+          query={query}
+          onQueryChange={setQuery}
+          filters={filters}
+          onFiltersChange={setFilters}
+          resultCount={search.matches.length}
+          total={search.total}
+          hint
+        />
+      ) : null}
+
       {loading ? (
         <p className="ref-picker-loading">
           <span className="spinner" aria-hidden="true" />
@@ -231,6 +338,37 @@ export default function ReferencePicker({
         <p className="form-error">{error}</p>
       ) : groups.length === 0 ? (
         <p className="info-callout">{STR.refPickerEmpty}</p>
+      ) : searching ? (
+        // A query cuts ACROSS types: the whole point is finding a master when you do not
+        // know which family holds it, so the type headings collapse into one ranked grid
+        // and each tile names its own type instead.
+        <>
+          {search.matches.length === 0 ? (
+            <div className="ref-search-empty">
+              <p>{STR.refSearchNoResults}</p>
+              <p className="hint">{STR.refSearchNoResultsHint}</p>
+            </div>
+          ) : (
+            <div className="ref-result-grid">
+              {search.matches.map(({ entry, snippet, highlights }) => (
+                <ResultTile
+                  key={entry.image.id}
+                  image={entry.image}
+                  category={category}
+                  typeLabel={entry.typeLabel}
+                  query={query}
+                  snippet={snippet}
+                  highlights={highlights}
+                  selected={
+                    value?.kind === 'image' && value.id === entry.image.id
+                  }
+                  onClick={() => pick(entry.image.id)}
+                />
+              ))}
+            </div>
+          )}
+          <UnanalyzedNote count={search.unanalyzed.length} />
+        </>
       ) : category === 'twitter' ? (
         groups.map(({ type, images }) => (
           <div key={type.id} className="ref-picker-group">

@@ -27,6 +27,7 @@ import { STR } from '../lib/strings';
 import { downloadBlob } from '../lib/download';
 import { CrossFormatLinks } from './CrossFormatLinks';
 import { FeedbackBox } from './FeedbackBox';
+import { MarkdownText } from './MarkdownText';
 import { TranslationTermsReview } from './TranslationTermsReview';
 
 export function ArticleView({
@@ -269,7 +270,10 @@ export function ArticleView({
         </div>
       ) : null}
 
-      <div className="article-body">{shown}</div>
+      {/* Display only — the generator's Markdown structure rendered as real headings,
+          lists and paragraphs. Copy, .txt/.md download and the PDF export below all
+          keep reading `shown` raw, so what leaves the page is unchanged. */}
+      <MarkdownText text={shown} className="article-body" />
 
       <div className="btn-row" style={{ marginTop: 18 }}>
         <button type="button" className="btn" onClick={copyToClipboard}>

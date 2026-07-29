@@ -40,6 +40,7 @@ import {
   startStoryboardJob,
   startVideoAnimateJob,
   startVideoScriptJob,
+  startVideoStitchJob,
 } from '../jobs/video-runner.js';
 
 // Clip rendering needs the configured provider's paid API key; without one the
@@ -125,11 +126,7 @@ function toDetail(
         : {}),
       ...(scene.endStillPath
         ? {
-            endStillUrl: publicUrlIn(
-              client,
-              VIDEOS_BUCKET,
-              scene.endStillPath,
-            ),
+            endStillUrl: publicUrlIn(client, VIDEOS_BUCKET, scene.endStillPath),
           }
         : {}),
       ...(scene.clipPath
@@ -611,6 +608,52 @@ export function registerVideoRoutes(
         error: null,
       });
       startNarrationJob(client, row.id);
+      return reply.code(202).send({ id: row.id });
+    },
+  );
+
+  // Re-run only the free local stitch from the scene clips already in Storage.
+  // This is the recovery path for a bad final container: no Kling/Veo render
+  // and no Sarvam synthesis is repeated. The runner validates duration/frames
+  // before publishing a new immutable video version, so the existing result
+  // remains selected unless the replacement is genuinely playable.
+  app.post<{ Params: { id: string } }>(
+    '/video/projects/:id/stitch',
+    async (request, reply) => {
+      const row = await getVideoProject(client, request.params.id);
+      if (!row) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'Video project not found.' } });
+      }
+      if (row.status !== 'completed' || isVideoJobRunning(row.id)) {
+        return reply.code(409).send({ error: { message: BUSY_MESSAGE } });
+      }
+      const active = await findActiveVideoProject(client);
+      if (active && active.id !== row.id) {
+        return reply
+          .code(409)
+          .send({ error: { message: ANOTHER_ACTIVE_MESSAGE } });
+      }
+      const missingClip = row.scenes.findIndex(
+        (scene) => scene.clipPath === undefined,
+      );
+      if (row.scenes.length === 0 || missingClip !== -1) {
+        return reply.code(409).send({
+          error: {
+            message:
+              missingClip === -1
+                ? 'जोडण्यासाठी कोणतीही दृश्य क्लिप उपलब्ध नाही.'
+                : `दृश्य ${missingClip + 1} ची क्लिप उपलब्ध नाही.`,
+          },
+        });
+      }
+      await updateVideoProject(client, row.id, {
+        status: 'animating',
+        step: 'stitch',
+        error: null,
+      });
+      startVideoStitchJob(client, row.id);
       return reply.code(202).send({ id: row.id });
     },
   );

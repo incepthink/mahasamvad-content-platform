@@ -93,19 +93,8 @@ export const VIDEO_TIER_PRICE_PER_SECOND_USD: Readonly<
   lite: KLING_720P_USD_PER_SECOND,
 };
 
-// Preferred scene counts per duration bucket. Since the AI planner took over
-// scene-count selection this is a PREFERENCE hint fed to the planner prompt,
-// not a validation rule — the only hard count rule is VIDEO_SCENE_LIMIT.
-// Against the 30/60s totals both ranges average 7.5-15s of speech per scene,
-// comfortably inside the 3-15s clip bounds.
-export const VIDEO_SCENE_BOUNDS: Readonly<
-  Record<VideoDurationBucket, Readonly<{ min: number; max: number }>>
-> = {
-  short: { min: 2, max: 4 },
-  long: { min: 4, max: 8 },
-};
-
-// The hard scene-count rule (gate-1 save + the web's add/remove buttons).
+// The planner chooses any count inside this broad product limit. Duration and
+// story needs decide the result; there is no preferred count per time bucket.
 export const VIDEO_SCENE_LIMIT: Readonly<{ min: number; max: number }> = {
   min: 1,
   max: 8,
@@ -124,11 +113,12 @@ export const VIDEO_CLIP_MAX_SECONDS = 15;
 // A soft target: the narrate phase shortens the worst-offending scenes while
 // the measured total overruns it by more than VIDEO_TOTAL_FIT_TOLERANCE, then
 // delivers whatever it has (a video a few seconds long beats mutilated speech).
-export const VIDEO_TOTAL_SECONDS: Readonly<Record<VideoDurationBucket, number>> =
-  {
-    short: 30,
-    long: 60,
-  };
+export const VIDEO_TOTAL_SECONDS: Readonly<
+  Record<VideoDurationBucket, number>
+> = {
+  short: 30,
+  long: 60,
+};
 
 // How far the measured narration total may overrun VIDEO_TOTAL_SECONDS before
 // the narrate phase spends shorten calls on the longest scenes.

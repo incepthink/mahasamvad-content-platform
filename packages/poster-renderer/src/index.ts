@@ -75,10 +75,13 @@ export {
   assembleSilentVideo,
   cropToAspect,
   muxNarration,
+  validateVideoOutput,
   wavDurationSeconds,
   resolveFfmpeg,
   type NarrationSegment,
   type SceneOverlay,
+  type VideoAssemblyOptions,
+  type VideoValidation,
 } from './video/assemble.js';
 // The burned-in Marathi key point: Chromium typesets it (the only correct
 // Devanagari shaper here) and assembleSilentVideo composites it after Veo, so

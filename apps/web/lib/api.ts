@@ -890,3 +890,9 @@ export async function reanimateVideoScene(
 export async function narrateVideo(id: string): Promise<void> {
   await requestJson(`/api/video/projects/${id}/narrate`, { method: 'POST' });
 }
+
+// Re-run only the local joining/muxing step from already-generated clips.
+// This never re-buys a scene render or narration.
+export async function restitchVideo(id: string): Promise<void> {
+  await requestJson(`/api/video/projects/${id}/stitch`, { method: 'POST' });
+}

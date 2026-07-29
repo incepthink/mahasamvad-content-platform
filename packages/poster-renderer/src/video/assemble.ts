@@ -53,6 +53,170 @@ export type SceneOverlay = Readonly<{
   endSeconds: number;
 }>;
 
+export type VideoAssemblyOptions = Readonly<{
+  // Used only if ffmpeg cannot report the first clip's dimensions. Normally
+  // that clip's native size becomes the common canvas, so 1080p stays 1080p
+  // while a mixed 720p/1080p retry is still normalized before concatenation.
+  aspectRatio?: '16:9' | '9:16';
+  // Supplying the paid scene windows makes every input clip and the completed
+  // output pass a full decode + duration gate before any bytes are returned.
+  expectedClipDurations?: readonly number[];
+}>;
+
+export type VideoValidation = Readonly<{
+  durationSeconds: number;
+  frames: number;
+}>;
+
+const VIDEO_VALIDATE_TIMEOUT_MS = 300_000;
+const VIDEO_VALIDATE_MAX_BUFFER = 16 * 1024 * 1024;
+
+function progressNumber(stdout: string, key: string): number {
+  let value = 0;
+  for (const line of stdout.split(/\r?\n/)) {
+    if (!line.startsWith(`${key}=`)) continue;
+    const parsed = Number(line.slice(key.length + 1));
+    if (Number.isFinite(parsed)) value = Math.max(value, parsed);
+  }
+  return value;
+}
+
+// Decode a stream all the way to ffmpeg's null sink. This is deliberately not
+// a container-header check: the production failure that prompted it was a
+// formally valid, 48 KB MP4 containing only its first frame. ffmpeg exited 0,
+// so only decoded frames + decoded time can distinguish it from a real video.
+async function inspectStreamFile(
+  path: string,
+  stream: 'video' | 'audio',
+): Promise<VideoValidation> {
+  const { stdout } = await execFileAsync(
+    resolveFfmpeg(),
+    [
+      '-hide_banner',
+      '-loglevel',
+      'error',
+      '-i',
+      path,
+      '-map',
+      stream === 'video' ? '0:v:0' : '0:a:0',
+      ...(stream === 'video' ? ['-an'] : ['-vn']),
+      '-f',
+      'null',
+      '-',
+      '-progress',
+      'pipe:1',
+      '-nostats',
+    ],
+    {
+      timeout: VIDEO_VALIDATE_TIMEOUT_MS,
+      maxBuffer: VIDEO_VALIDATE_MAX_BUFFER,
+    },
+  );
+  const text = String(stdout);
+  return {
+    durationSeconds: progressNumber(text, 'out_time_us') / 1_000_000,
+    frames: stream === 'video' ? progressNumber(text, 'frame') : 0,
+  };
+}
+
+function durationTolerance(expectedSeconds: number): number {
+  // Provider/container timestamps commonly finish one frame short.
+  return Math.max(0.75, expectedSeconds * 0.08);
+}
+
+async function assertStreamDuration(
+  path: string,
+  expectedSeconds: number,
+  label: string,
+  stream: 'video' | 'audio',
+): Promise<VideoValidation> {
+  const result = await inspectStreamFile(path, stream);
+  const minimumDuration = Math.max(
+    0.25,
+    expectedSeconds - durationTolerance(expectedSeconds),
+  );
+  const enoughFrames =
+    stream === 'audio' ||
+    result.frames >= Math.max(2, Math.floor(expectedSeconds * 2));
+  if (result.durationSeconds < minimumDuration || !enoughFrames) {
+    throw new Error(
+      `${label} failed validation: decoded ${result.durationSeconds.toFixed(2)}s` +
+        (stream === 'video' ? ` / ${result.frames} frames` : '') +
+        `; expected about ${expectedSeconds.toFixed(2)}s.`,
+    );
+  }
+  return result;
+}
+
+async function firstClipDimensions(
+  path: string,
+  fallbackAspect: '16:9' | '9:16',
+): Promise<{ width: number; height: number }> {
+  try {
+    const { stderr } = await execFileAsync(
+      resolveFfmpeg(),
+      [
+        '-hide_banner',
+        '-i',
+        path,
+        '-map',
+        '0:v:0',
+        '-frames:v',
+        '1',
+        '-f',
+        'null',
+        '-',
+      ],
+      { timeout: 60_000, maxBuffer: VIDEO_VALIDATE_MAX_BUFFER },
+    );
+    const match = String(stderr).match(
+      /Stream #.*Video:[^\r\n]*?(\d{2,5})x(\d{2,5})(?:\s|\[|,)/,
+    );
+    const width = Number(match?.[1]);
+    const height = Number(match?.[2]);
+    if (width >= 300 && height >= 300) {
+      return { width: width - (width % 2), height: height - (height % 2) };
+    }
+  } catch {
+    // The full decode below owns the useful error. Metadata-log parsing alone
+    // is not a reason to reject otherwise good footage.
+  }
+  return fallbackAspect === '9:16'
+    ? { width: 720, height: 1280 }
+    : { width: 1280, height: 720 };
+}
+
+// Validate an in-memory final MP4 before its versioned storage upload. Exported
+// because narration muxing happens after the silent assembly.
+export async function validateVideoOutput(
+  mp4: Buffer,
+  expectedSeconds: number,
+  options: Readonly<{ requireAudio?: boolean }> = {},
+): Promise<VideoValidation> {
+  const dir = await mkdtemp(join(tmpdir(), 'dgipr-video-validate-'));
+  try {
+    const path = join(dir, 'candidate.mp4');
+    await writeFile(path, mp4);
+    const video = await assertStreamDuration(
+      path,
+      expectedSeconds,
+      'Final video',
+      'video',
+    );
+    if (options.requireAudio) {
+      await assertStreamDuration(
+        path,
+        expectedSeconds,
+        'Final narration track',
+        'audio',
+      );
+    }
+    return video;
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
 // Stitch scene clips (in order) into one silent MP4. Returns the MP4 bytes.
 //
 // `overlays` burns the per-scene Marathi key points in during the SAME encode:
@@ -62,45 +226,83 @@ export type SceneOverlay = Readonly<{
 export async function assembleSilentVideo(
   clips: readonly Buffer[],
   overlays: readonly SceneOverlay[] = [],
+  options: VideoAssemblyOptions = {},
 ): Promise<Buffer> {
   if (clips.length === 0) {
     throw new Error('assembleSilentVideo needs at least one clip.');
   }
+  if (
+    options.expectedClipDurations &&
+    options.expectedClipDurations.length !== clips.length
+  ) {
+    throw new Error(
+      'assembleSilentVideo expectedClipDurations must match the clip count.',
+    );
+  }
 
   const dir = await mkdtemp(join(tmpdir(), 'dgipr-video-'));
   try {
-    const listLines: string[] = [];
+    const clipPaths: string[] = [];
     for (const [index, clip] of clips.entries()) {
       const clipPath = join(dir, `clip-${index}.mp4`);
       await writeFile(clipPath, clip);
-      // concat-demuxer entries need quoting; the paths are ours (no quotes in them).
-      listLines.push(`file '${clipPath.replace(/\\/g, '/')}'`);
+      clipPaths.push(clipPath);
     }
-    const listPath = join(dir, 'list.txt');
-    await writeFile(listPath, listLines.join('\n') + '\n', 'utf8');
 
-    // Input 0 stays the concatenated video; each overlay PNG becomes an extra
-    // input chained onto it, visible only inside its own scene's window.
-    //
-    // scale2ref resizes the overlay to the CURRENT video stage before laying it
-    // on. Its default (w=iw:h=ih) resolves against the reference — the second
-    // input — so the footage's real size is never written down here and this is
-    // a no-op whenever the two already match (1080p Veo output, unchanged).
-    // Rendering the caption at 1080p and scaling DOWN is also the right
-    // direction for text quality.
-    const overlayArgs: string[] = [];
+    // Each clip is an independent input; caption PNGs follow them. Captions are
+    // rendered at a high-quality reference size and scaled once to the common
+    // output canvas before being enabled for their scene window.
+    const expectedDurations =
+      options.expectedClipDurations ??
+      (await Promise.all(
+        clipPaths.map(async (path) => {
+          const result = await inspectStreamFile(path, 'video');
+          return result.durationSeconds;
+        }),
+      ));
+    for (const [index, path] of clipPaths.entries()) {
+      await assertStreamDuration(
+        path,
+        expectedDurations[index]!,
+        `Scene ${index + 1} clip`,
+        'video',
+      );
+    }
+
+    const { width, height } = await firstClipDimensions(
+      clipPaths[0]!,
+      options.aspectRatio ?? '16:9',
+    );
+    const inputArgs = clipPaths.flatMap((path) => ['-i', path]);
     const chains: string[] = [];
-    let stage = '0:v';
+
+    // Normalize canvas, SAR, FPS, and timestamps before using the concat
+    // filter. Provider timestamps and mixed 720p/1080p retries therefore
+    // cannot collapse an otherwise successful encode to its first frame.
+    for (const index of clipPaths.keys()) {
+      chains.push(
+        `[${index}:v:0]fps=25,scale=${width}:${height}:` +
+          `force_original_aspect_ratio=decrease:force_divisible_by=2,` +
+          `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,` +
+          `setsar=1,format=yuv420p,setpts=N/(25*TB)[clip${index}]`,
+      );
+    }
+    chains.push(
+      `${clipPaths.map((_, index) => `[clip${index}]`).join('')}` +
+        `concat=n=${clipPaths.length}:v=1:a=0[joined]`,
+    );
+
+    let stage = 'joined';
     for (const [index, overlay] of overlays.entries()) {
       const pngPath = join(dir, `overlay-${index}.png`);
       await writeFile(pngPath, overlay.png);
-      overlayArgs.push('-i', pngPath);
+      inputArgs.push('-loop', '1', '-i', pngPath);
+      const input = clipPaths.length + index;
       const scaled = `ov${index}`;
-      const base = `base${index}`;
       const next = `v${index}`;
       chains.push(
-        `[${index + 1}:v][${stage}]scale2ref[${scaled}][${base}]`,
-        `[${base}][${scaled}]overlay=0:0:enable='between(t,` +
+        `[${input}:v]scale=${width}:${height}[${scaled}]`,
+        `[${stage}][${scaled}]overlay=0:0:shortest=1:enable='between(t,` +
           `${overlay.startSeconds.toFixed(3)},${overlay.endSeconds.toFixed(3)})'` +
           `[${next}]`,
       );
@@ -114,16 +316,11 @@ export async function assembleSilentVideo(
         '-hide_banner',
         '-loglevel',
         'error',
-        '-f',
-        'concat',
-        '-safe',
-        '0',
-        '-i',
-        listPath,
-        ...overlayArgs,
-        ...(chains.length > 0
-          ? ['-filter_complex', chains.join(';'), '-map', `[${stage}]`]
-          : []),
+        ...inputArgs,
+        '-filter_complex',
+        chains.join(';'),
+        '-map',
+        `[${stage}]`,
         '-an',
         '-c:v',
         'libx264',
@@ -142,6 +339,16 @@ export async function assembleSilentVideo(
       { timeout: 300_000, maxBuffer: 16 * 1024 * 1024 },
     );
 
+    const expectedTotal = expectedDurations.reduce(
+      (sum, seconds) => sum + seconds,
+      0,
+    );
+    await assertStreamDuration(
+      outPath,
+      expectedTotal,
+      'Stitched video',
+      'video',
+    );
     return await readFile(outPath);
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -288,12 +495,27 @@ export async function muxNarration(
         '192k',
         '-movflags',
         '+faststart',
-        '-shortest',
         outPath,
       ],
       { timeout: 300_000, maxBuffer: 16 * 1024 * 1024 },
     );
 
+    const expectedSeconds = segments.reduce(
+      (sum, segment) => sum + segment.durationSeconds,
+      0,
+    );
+    await assertStreamDuration(
+      outPath,
+      expectedSeconds,
+      'Narrated video',
+      'video',
+    );
+    await assertStreamDuration(
+      outPath,
+      expectedSeconds,
+      'Narration track',
+      'audio',
+    );
     return await readFile(outPath);
   } finally {
     await rm(dir, { recursive: true, force: true });

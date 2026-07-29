@@ -30,6 +30,7 @@ import {
   narrateVideo,
   reanimateVideoScene,
   regenerateVideoStill,
+  restitchVideo,
   saveVideoScript,
   startVideoAnimation,
   startVideoStoryboard,
@@ -84,20 +85,54 @@ function WorkingCard({ detail }: { detail: VideoProjectDetail }) {
       {detail.scenes.length > 0 ? (
         <ul className="file-list" style={{ marginTop: 12 }}>
           {detail.scenes.map((scene, index) => (
-            <li key={index} className="file-row">
-              <span className="file-name" style={{ whiteSpace: 'normal' }}>
-                {STR.videoSceneLabel} {index + 1}: {scene.narration}
-              </span>
-              <span className="file-size">
-                {scene.status === 'done' || scene.status === 'still-ready'
-                  ? '✓'
-                  : scene.status === 'failed'
-                    ? STR.videoSceneFailed
-                    : scene.status === 'animating' ||
-                        scene.status === 'still-rendering'
-                      ? '…'
-                      : ''}
-              </span>
+            <li
+              key={index}
+              className="file-row"
+              style={{ alignItems: 'flex-start', flexWrap: 'wrap' }}
+            >
+              <div style={{ flex: '1 1 100%', minWidth: 0 }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                  }}
+                >
+                  <span className="file-name" style={{ whiteSpace: 'normal' }}>
+                    {STR.videoSceneLabel} {index + 1}: {scene.narration}
+                  </span>
+                  <span className="file-size">
+                    {scene.status === 'done' || scene.status === 'still-ready'
+                      ? '✓'
+                      : scene.status === 'failed'
+                        ? STR.videoSceneFailed
+                        : scene.status === 'animating' ||
+                            scene.status === 'still-rendering'
+                          ? '…'
+                          : ''}
+                  </span>
+                </div>
+                {scene.clipUrl ? (
+                  <div style={{ marginTop: 10 }}>
+                    <p className="hint" style={{ marginBottom: 6 }}>
+                      {STR.videoClipPreview}
+                    </p>
+                    <video
+                      key={scene.clipUrl}
+                      controls
+                      muted
+                      preload="metadata"
+                      src={scene.clipUrl}
+                      style={{
+                        display: 'block',
+                        width: '100%',
+                        maxWidth: 560,
+                        borderRadius: 8,
+                      }}
+                    />
+                  </div>
+                ) : null}
+              </div>
             </li>
           ))}
         </ul>
@@ -193,8 +228,7 @@ export default function VideoProjectPage({
     detail.scenes.every(
       (scene) =>
         scene.stillUrl !== undefined &&
-        (scene.endVisualBrief === undefined ||
-          scene.endStillUrl !== undefined),
+        (scene.endVisualBrief === undefined || scene.endStillUrl !== undefined),
     );
   // A per-scene re-render on a finished video: keep showing the result view.
   const reRendering = detail.status === 'animating' && detail.videoUrl !== null;
@@ -484,6 +518,7 @@ export default function VideoProjectPage({
             void act(() => reanimateVideoScene(id, index))
           }
           onNarrate={() => void act(() => narrateVideo(id))}
+          onRestitch={() => void act(() => restitchVideo(id))}
         />
       ) : null}
 

@@ -100,24 +100,10 @@ export async function shortenNarration(
         {
           role: 'system',
           content: [
-            'तुम्ही मराठी explainer व्हिडिओच्या निवेदनाचे (voiceover) संपादक आहात.',
-            'दिलेले निवेदन त्याच्या दृश्याच्या वेळेत बसत नाही — ते लहान करा.',
-            '',
-            'कठोर नियम:',
-            '1. नवीन माहिती जोडू नका — नवीन नावे, तारखा, रक्कम, पदनामे, योजना, ठिकाणे',
-            '   किंवा आकडे तयार करणे पूर्णपणे निषिद्ध आहे.',
-            '2. जे ठेवाल ते जशाच्या तसे ठेवा: नावे, तारखा, रक्कम, आकडे व योजनांची नावे',
-            '   अर्धवट लिहू नका, त्यांचे संक्षेप करू नका, अंकांची लिपी वा किंमत बदलू नका.',
-            '3. सर्वच तपशील ठेवण्याचा अट्टहास करू नका — निवेदन दृश्यात बसणे महत्त्वाचे आहे.',
-            '   प्राधान्यक्रम: (अ) दृश्याचा मुख्य मुद्दा, (ब) नागरिकाला थेट उपयोगी तपशील —',
-            '   फायदा, पात्रता, मुदत, दर, कुठे जायचे, (क) उरलेला तपशील.',
-            '   आधी पुनरुक्ती, विशेषणे व पाल्हाळ गाळा. तरीही लांब असेल तर (क) गटातील तपशील',
-            '   सरळ वगळा — लांबलचक याद्या, दुय्यम आकडे, प्रशासकीय तपशील.',
-            '   एखादे तथ्य अर्धवट किंवा मोघम लिहिण्यापेक्षा ते पूर्णपणे वगळणे चांगले.',
-            '4. भाषा शासकीय, नागरिकाभिमुख व संयत ठेवा; मराठी देवनागरीतच लिहा.',
-            '5. एकच वाक्यसमूह परत करा — शीर्षक, यादी किंवा स्पष्टीकरण नको.',
-            '',
-            'फक्त वैध JSON object परत करा: { "narration": "..." }',
+            'Shorten a Marathi explainer-video voiceover so it fits its scene.',
+            'Keep the main idea clear, natural and complete. Remove secondary detail before making important facts vague.',
+            'Do not add information or alter names, dates, amounts or numbers.',
+            'Return only JSON: { "narration": "..." }',
           ].join('\n'),
         },
         {
@@ -128,7 +114,12 @@ export async function shortenNarration(
             '</CURRENT_NARRATION>',
             '',
             ...(options.beat
-              ? ['<BEAT purpose="information_that_must_survive">', options.beat, '</BEAT>', '']
+              ? [
+                  '<BEAT purpose="information_that_must_survive">',
+                  options.beat,
+                  '</BEAT>',
+                  '',
+                ]
               : []),
             '<LENGTH>',
             `सध्याचे निवेदन बोलण्यास ${options.measuredSeconds.toFixed(1)} सेकंद लागतात;`,
@@ -184,7 +175,9 @@ if (
   const text = process.argv[2];
   const measured = Number(process.argv[3] ?? '18');
   // Defaults to the scene-ceiling rewrite target the storyboard job uses.
-  const target = Number(process.argv[4] ?? String(VIDEO_SCENE_REWRITE_TARGET_SECONDS));
+  const target = Number(
+    process.argv[4] ?? String(VIDEO_SCENE_REWRITE_TARGET_SECONDS),
+  );
   if (!text) {
     console.error(
       'Usage: tsx --env-file=../../.env src/video/shorten-narration.ts "<मराठी निवेदन>" [measuredSeconds] [targetSeconds]',

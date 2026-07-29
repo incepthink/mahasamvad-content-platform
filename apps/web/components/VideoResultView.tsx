@@ -26,6 +26,7 @@ export function VideoResultView({
   onRedrawEndStill,
   onReanimateScene,
   onNarrate,
+  onRestitch,
 }: {
   detail: VideoProjectDetail;
   // A job is in flight (re-still / re-animate / narrate) — actions disabled, note shown.
@@ -37,6 +38,8 @@ export function VideoResultView({
   onReanimateScene: (index: number) => void;
   // Add or refresh the Marathi TTS narration on the finished video.
   onNarrate: () => void;
+  // Rejoin already-generated clips/audio without another paid render.
+  onRestitch: () => void;
 }) {
   const [fixOpen, setFixOpen] = useState(false);
   // Two-step confirm per scene: first click arms, second fires (outward spend).
@@ -60,9 +63,12 @@ export function VideoResultView({
             <span className="spinner" aria-hidden="true" />
             {detail.step === 'narrate'
               ? STR.videoNarratingHint
-              : STR.videoAnimatingHint}
+              : detail.step === 'stitch' || detail.step === 'upload'
+                ? STR.videoRestitchingHint
+                : STR.videoAnimatingHint}
           </p>
         ) : null}
+        {detail.error ? <p className="form-error">{detail.error}</p> : null}
         {detail.videoUrl ? (
           <video
             key={detail.videoUrl}
@@ -100,6 +106,16 @@ export function VideoResultView({
               {detail.voiced ? STR.videoReNarration : STR.videoAddNarration}
             </button>
           ) : null}
+          {detail.videoUrl ? (
+            <button
+              type="button"
+              className="btn"
+              disabled={busy}
+              onClick={onRestitch}
+            >
+              {STR.videoRestitch}
+            </button>
+          ) : null}
         </div>
         <p className="hint" style={{ marginTop: 10 }}>
           {detail.voiced ? STR.videoSrtHintVoiced : STR.videoSrtHint}
@@ -109,6 +125,9 @@ export function VideoResultView({
             {STR.videoNarrationHintCta}
           </p>
         ) : null}
+        <p className="hint" style={{ marginTop: 6 }}>
+          {STR.videoRestitchHint}
+        </p>
       </section>
 
       <section className="card">

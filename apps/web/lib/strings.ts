@@ -856,6 +856,32 @@ export const STR = {
   refLayoutAboutSaving: 'जतन करत आहे…',
   refLayoutAboutCancel: 'रद्द करा',
 
+  // Template search (shared by the /references library and the create form's picker).
+  // The placeholder names the two things that are actually searchable — the subject line
+  // and the type — because a bare "शोधा" invites a query the index cannot answer.
+  refSearchLabel: 'टेम्पलेट शोधा',
+  refSearchPlaceholder:
+    'विषय, योजना किंवा प्रकार लिहा — उदा. लाडकी बहीण, पुरस्कार, कोट',
+  refSearchHint:
+    'मराठीत किंवा रोमन लिपीत लिहा (उदा. "ladki bahin"). शुद्धलेखन थोडे चुकले तरी चालते.',
+  refSearchClear: 'शोध काढा',
+  refSearchNoResults: 'या शोधाशी जुळणारे एकही टेम्पलेट नाही.',
+  refSearchNoResultsHint:
+    'दुसरा शब्द वापरून पाहा, किंवा गाळण्या काढा. टेम्पलेटच्या "विषय" ओळीत जे लिहिले आहे त्यावरूनच शोध चालतो.',
+  refSearchCountOf: 'पैकी',
+  refSearchCountSuffix: 'टेम्पलेट',
+  // Structured filters. These read the master's own analysed layout, so they are exact —
+  // unlike the text query, nothing here is a guess.
+  refFilterPhoto: 'छायाचित्रासह',
+  refFilterTextOnly: 'फक्त मजकूर',
+  refFilterSlots: '४+ मुद्दे',
+  refFilterClearAll: 'सर्व गाळण्या काढा',
+  // Masters with no layout_spec carry no searchable text at all, so they can never match.
+  // Saying so is the honest alternative to letting them vanish behind every query.
+  refSearchUnanalyzed: 'अजून तपासलेली नाहीत — ती शोधात येऊ शकत नाहीत',
+  refSearchUnanalyzedHint:
+    'या टेम्पलेट्सचा विषय अजून नोंदवलेला नाही. "मास्टर टेम्पलेट" पानावर "पुन्हा तपासा" दाबल्यावर ती शोधात येतील.',
+
   // Custom reference types (create / edit / delete)
   refTypeNew: '+ नवीन प्रकार तयार करा',
   refTypeNewHint:
@@ -1044,6 +1070,11 @@ export const STR = {
     'व्हिडिओत मराठी निवेदनाचा आवाज जोडला आहे. SRT फाईलमध्ये प्रत्येक दृश्याची वेळ आहे.',
   videoAddNarration: 'निवेदनाचा आवाज जोडा',
   videoReNarration: 'आवाज पुन्हा तयार करा',
+  videoRestitch: 'क्लिप्स पुन्हा जोडून व्हिडिओ तयार करा',
+  videoRestitchHint:
+    'आधी तयार झालेल्या क्लिप्स आणि आवाजच पुन्हा जोडले जातील; कोणत्याही दृश्याचा अतिरिक्त खर्च होणार नाही.',
+  videoRestitchingHint: 'तयार क्लिप्स पुन्हा जोडून अंतिम व्हिडिओ तपासत आहोत…',
+  videoClipPreview: 'तयार झालेली क्लिप',
   videoNarrationHintCta:
     'प्रत्येक दृश्याचे मराठी निवेदन Sarvam आवाजात तयार होऊन व्हिडिओत जोडले जाईल.',
   videoNarratingHint:

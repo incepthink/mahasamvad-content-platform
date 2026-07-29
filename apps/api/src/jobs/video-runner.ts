@@ -44,6 +44,7 @@ import {
   assembleSilentVideo,
   muxNarration,
   renderCaptionOverlay,
+  validateVideoOutput,
   wavDurationSeconds,
   type SceneOverlay,
 } from '@dgipr/poster-renderer';
@@ -121,6 +122,7 @@ function runVideoJob(
   client: SupabaseClient,
   id: string,
   job: () => Promise<void>,
+  options: Readonly<{ failureStatus?: 'failed' | 'completed' }> = {},
 ): void {
   running.add(id);
   void (async () => {
@@ -131,7 +133,8 @@ function runVideoJob(
       console.error(`[video ${id}] failed:`, error);
       try {
         await updateVideoProject(client, id, {
-          status: 'failed',
+          status: options.failureStatus ?? 'failed',
+          ...(options.failureStatus === 'completed' ? { step: 'done' } : {}),
           error: errorMessage(error),
         });
       } catch (updateError) {
@@ -993,25 +996,62 @@ async function stitchAndPersist(
   // Burned in during the stitch's own encode, BEFORE muxNarration — which
   // copies the video stream and only adds audio, so it needs no knowledge of
   // any of this.
-  const overlays = await buildCaptionOverlays(
-    await requireProject(client, id),
-    scenes,
-  );
-  const silent = await assembleSilentVideo(clips, overlays);
+  const project = await requireProject(client, id);
+  const overlays = await buildCaptionOverlays(project, scenes);
+  const voiced = projectIsVoiced(scenes);
+  const segments = voiced
+    ? await Promise.all(
+        scenes.map(async (scene) => ({
+          wav: await downloadFile(
+            client,
+            VIDEOS_BUCKET,
+            scene.narrationAudioPath!,
+          ),
+          durationSeconds: scene.durationSeconds,
+        })),
+      )
+    : null;
 
-  let video = silent;
-  if (projectIsVoiced(scenes)) {
-    const segments = await Promise.all(
-      scenes.map(async (scene) => ({
-        wav: await downloadFile(
-          client,
-          VIDEOS_BUCKET,
-          scene.narrationAudioPath!,
-        ),
-        durationSeconds: scene.durationSeconds,
-      })),
+  // Joining is local and free, so retry it once automatically. More
+  // importantly, assembleSilentVideo and muxNarration now fully decode and
+  // duration-check their outputs; a 0-second/one-frame MP4 can never advance
+  // to upload merely because ffmpeg happened to exit 0.
+  let video: Buffer | null = null;
+  let lastAssemblyError: unknown = null;
+  const expectedVideoSeconds = scenes.reduce(
+    (sum, scene) => sum + scene.durationSeconds,
+    0,
+  );
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const silent = await assembleSilentVideo(clips, overlays, {
+        aspectRatio: aspectOf(project),
+        expectedClipDurations: scenes.map((scene) => scene.durationSeconds),
+      });
+      const candidate = segments
+        ? await muxNarration(silent, segments)
+        : silent;
+      await validateVideoOutput(candidate, expectedVideoSeconds, {
+        requireAudio: segments !== null,
+      });
+      video = candidate;
+      break;
+    } catch (error) {
+      lastAssemblyError = error;
+      if (attempt < 2) {
+        console.warn(
+          `[video ${id}] assembly attempt ${attempt} failed; retrying once:`,
+          error,
+        );
+      }
+    }
+  }
+  if (!video) {
+    throw new Error(
+      `Final video assembly failed validation after 2 attempts: ${errorMessage(
+        lastAssemblyError,
+      )}`,
     );
-    video = await muxNarration(silent, segments);
   }
 
   const srt = buildSrt(
@@ -1083,6 +1123,22 @@ export function startVideoAnimateJob(client: SupabaseClient, id: string): void {
 
     await stitchAndPersist(client, id, scenes);
   });
+}
+
+// Re-run only the free joining/mux/upload stage from the already-persisted
+// scene clips and narration. Used by the completed-page recovery button; no
+// clip provider or TTS call is made. On failure the prior completed video stays
+// selected and playable, and the row returns to completed with the error.
+export function startVideoStitchJob(client: SupabaseClient, id: string): void {
+  runVideoJob(
+    client,
+    id,
+    async () => {
+      const row = await requireProject(client, id);
+      await stitchAndPersist(client, id, row.scenes);
+    },
+    { failureStatus: 'completed' },
+  );
 }
 
 // Post-render fix: re-animate ONE scene from its (possibly re-drawn) still and

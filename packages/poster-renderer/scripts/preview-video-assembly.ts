@@ -7,6 +7,7 @@
 //   pnpm --filter @dgipr/poster-renderer video:preview:assemble
 
 import { execFile } from 'node:child_process';
+import assert from 'node:assert/strict';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,7 +19,11 @@ const execFileAsync = promisify(execFile);
 const here = dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = join(here, '..', 'out');
 
-async function makeStubClip(color: string, seconds: number): Promise<Buffer> {
+async function makeStubClip(
+  color: string,
+  seconds: number,
+  size = '1280x720',
+): Promise<Buffer> {
   const path = join(OUT_DIR, `stub-${color}.mp4`);
   await execFileAsync(resolveFfmpeg(), [
     '-hide_banner',
@@ -28,7 +33,7 @@ async function makeStubClip(color: string, seconds: number): Promise<Buffer> {
     '-f',
     'lavfi',
     '-i',
-    `color=c=${color}:s=1280x720:d=${seconds}`,
+    `color=c=${color}:s=${size}:d=${seconds}`,
     '-f',
     'lavfi',
     '-i',
@@ -52,12 +57,15 @@ async function main(): Promise<void> {
   console.log('Synthesizing 3 stub clips (with audio)…');
   const clips = await Promise.all([
     makeStubClip('red', 2),
-    makeStubClip('green', 2),
+    makeStubClip('green', 2, '1920x1080'),
     makeStubClip('blue', 2),
   ]);
 
   console.log('Stitching…');
-  const video = await assembleSilentVideo(clips);
+  const video = await assembleSilentVideo(clips, [], {
+    aspectRatio: '16:9',
+    expectedClipDurations: [2, 2, 2],
+  });
   const outPath = join(OUT_DIR, 'video-assembly-preview.mp4');
   await writeFile(outPath, video);
 
@@ -65,6 +73,15 @@ async function main(): Promise<void> {
   // stitched file must show ~6s, three color bands, NO audio track).
   console.log(`Wrote ${outPath} (${video.length} bytes).`);
   console.log('Open it in a browser: expect ~6s, red→green→blue, silent.');
+  const oneFrame = await makeStubClip('black', 0.04);
+  await assert.rejects(
+    () =>
+      assembleSilentVideo([oneFrame], [], {
+        expectedClipDurations: [2],
+      }),
+    /failed validation/,
+  );
+  console.log('OK: a one-frame MP4 cannot pass as a completed 2s video.');
 }
 
 main().catch((error: unknown) => {

@@ -2844,6 +2844,33 @@ Not implemented yet: Canva integration, authentication.
 1. Every future AI agent must read this `AGENTS.md` file before making changes.
 2. `AGENTS.md` must be updated whenever a major architectural decision or implementation milestone changes.
 
+## Latest Implementation Milestone
+
+- **Final-video assembly is validated and recoverable** (2026-07-29, no migration):
+  production project `8383a0b6-9b4d-4597-9acc-994920b39b40` proved the paid assets
+  were healthy (four clips decoded to 6s/8s/5s/10s) while `video-v1.mp4` was a
+  formally valid 49,905-byte container that decoded to **one frame / 0.00s**.
+  The old boundary trusted ffmpeg exit code, so that object was uploaded and the
+  row was marked completed. `poster-renderer/video/assemble.ts` now fully decodes
+  every input and output through ffmpeg's null sink, requiring duration and frame
+  count near the scene windows; voiced outputs validate the audio track too.
+  Assembly no longer uses the concat demuxer against provider timestamps and
+  possibly mixed render sizes: every clip is an independent input normalized to
+  the first clip's canvas, 25fps, square pixels and frame-number-derived PTS, then
+  joined with the concat **filter**. Caption PNGs are looped/scaled independently,
+  and narration muxing no longer uses `-shortest` (an unexpectedly short auxiliary
+  stream must never truncate the already-validated video). The API retries this
+  free local stage once and does not calculate/upload a new immutable version until
+  validation passes. A completed project has `POST /video/projects/:id/stitch` +
+  **क्लिप्स पुन्हा जोडून व्हिडिओ तयार करा**, which reuses stored clips and cached
+  narration only (no Kling/Veo/Sarvam spend); failure returns to `completed` with
+  the old video still selected. During `animating`, polling now renders a playable
+  `<video>` under each scene as soon as its persisted `clipUrl` appears. The free
+  harness covers mixed 720p/1080p inputs and asserts a one-frame MP4 is rejected.
+  Replaying the exact four production clips, all four caption overlays and cached
+  WAVs through the new path produced a validation-clean 29.12s / 729-frame MP4.
+  Deploy API + web after rebuilding `@dgipr/poster-renderer`; no n8n.
+
 ## Development Expectations
 
 - Preserve useful existing files and configuration.
