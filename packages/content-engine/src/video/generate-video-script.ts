@@ -33,7 +33,9 @@ const SceneSchema = z.object({
   // The on-screen line. Optional AND allowed to be empty: a scene with no hard
   // number or name in it should say so rather than invent something to display,
   // and an old draft has no such field at all.
-  key_point: z.string().trim().max(VIDEO_KEY_POINT_MAX_CHARS).optional(),
+  // Length is deliberately NOT capped here: an over-long overlay line must cost
+  // that scene its overlay (keyPointOf), never the whole script. See below.
+  key_point: z.string().trim().optional(),
 });
 
 function scriptSchemaFor(sceneCount: number) {
@@ -54,7 +56,10 @@ function scriptSchemaFor(sceneCount: number) {
 //
 // Failure DROPS the key point (that scene loses its overlay) rather than
 // failing the run — the shorten-narration.ts rule: a best-effort step must not
-// become a gate.
+// become a gate. The LENGTH cap is enforced the same way and for the same
+// reason: a line a few characters over the overlay's budget must not fail a
+// whole script, and it must not be truncated either (a half Marathi sentence
+// burned onto a government video is worse than no line at all).
 const DEVANAGARI_ZERO = 0x0966;
 
 function toLatinDigits(text: string): string {
@@ -68,6 +73,14 @@ function toLatinDigits(text: string): string {
 export function keyPointOf(raw: string | undefined, note: string): string {
   const keyPoint = (raw ?? '').trim();
   if (keyPoint === '') return '';
+  if (keyPoint.length > VIDEO_KEY_POINT_MAX_CHARS) {
+    console.warn(
+      `[video-script] dropping on-screen key point "${keyPoint}" — it is ` +
+        `${keyPoint.length} characters, over the ${VIDEO_KEY_POINT_MAX_CHARS}-` +
+        'character overlay budget. That scene will render without an overlay.',
+    );
+    return '';
+  }
   if (keyPointIsGrounded(keyPoint, note)) return keyPoint;
   console.warn(
     `[video-script] dropping on-screen key point "${keyPoint}" — it carries a ` +
@@ -550,6 +563,17 @@ if (
   check(
     'whitespace is trimmed',
     keyPointOf('  मोफत सेवा  ', note) === 'मोफत सेवा',
+  );
+  // An over-long line loses its own overlay and nothing else — it must never
+  // fail the run, and must never come back truncated.
+  check(
+    'a key point at the budget is kept',
+    keyPointOf('क'.repeat(VIDEO_KEY_POINT_MAX_CHARS), note) ===
+      'क'.repeat(VIDEO_KEY_POINT_MAX_CHARS),
+  );
+  check(
+    'a key point one character over the budget is dropped',
+    keyPointOf('क'.repeat(VIDEO_KEY_POINT_MAX_CHARS + 1), note) === '',
   );
   // The guard only ever DROPS: it must never rewrite a number it accepted.
   check(

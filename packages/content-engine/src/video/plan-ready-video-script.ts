@@ -29,7 +29,11 @@ const VisualSceneSchema = z.object({
   visual_brief: z.string().trim().min(1).max(600),
   end_visual_brief: z.string().trim().max(600).optional(),
   shot_hint: z.string().trim().min(1).max(160),
-  key_point: z.string().trim().max(VIDEO_KEY_POINT_MAX_CHARS).optional(),
+  // Uncapped on purpose — an over-long overlay line costs that scene its
+  // overlay inside keyPointOf, never the whole plan. The narration is already
+  // final here, so failing the parse would throw away a paid call over a
+  // decoration.
+  key_point: z.string().trim().optional(),
 });
 
 function visualPlanSchema(sceneCount: number) {
@@ -151,7 +155,7 @@ function systemPrompt(sceneCount: number): string {
     'Each visual_brief must describe one realistic live-action shot in Maharashtra, India.',
     'Write beat and key_point in Marathi. Write visual_brief, end_visual_brief, shot_hint and style in English.',
     'Usually leave end_visual_brief empty; use it only when the shot needs a precise final state.',
-    'key_point is optional and must be directly supported by that scene narration.',
+    `key_point is optional, must be directly supported by that scene narration, and must be at most ${VIDEO_KEY_POINT_MAX_CHARS} characters. Leave it empty rather than exceeding that.`,
     'style is one consistent English live-action look shared by every scene.',
     'Return only JSON:',
     '{ "title": "...", "style": "...", "scenes": [ { "beat": "...", "visual_brief": "...", "end_visual_brief": "", "shot_hint": "...", "key_point": "" } ] }',
