@@ -1,7 +1,7 @@
 'use client';
 
 // The finished video card: player, timed narration list (from the scenes' own
-// durations — the same numbers the SRT is built from), SRT download, cost line,
+// durations — the same numbers the SRT is built from), SRT download,
 // and the per-scene fix panel (re-draw a still / re-animate ONE scene). The
 // previous video keeps playing during a re-render — during a per-scene
 // re-animation this view stays up with a progress note instead of being
@@ -9,8 +9,8 @@
 
 import { useState } from 'react';
 import type { VideoProjectDetail } from '@dgipr/schemas';
-import { VIDEO_TIER_PRICE_PER_SECOND_USD, sceneTimings } from '@dgipr/schemas';
-import { formatCost, STR } from '../lib/strings';
+import { sceneTimings } from '@dgipr/schemas';
+import { STR } from '../lib/strings';
 import { VideoSceneCard } from './VideoSceneCard';
 
 function formatClock(totalSeconds: number): string {
@@ -46,17 +46,12 @@ export function VideoResultView({
   const [armedIndex, setArmedIndex] = useState<number | null>(null);
 
   const timings = sceneTimings(detail.scenes);
-  const perScenePrice = (seconds: number) =>
-    formatCost(seconds * VIDEO_TIER_PRICE_PER_SECOND_USD[detail.tier]);
 
   return (
     <>
       <section className="card">
         <div className="article-head">
           <h2>{detail.title ?? STR.videoResultTitle}</h2>
-          {detail.costUsd !== null ? (
-            <span className="hint">{formatCost(detail.costUsd)}</span>
-          ) : null}
         </div>
         {busy ? (
           <p className="translating-note">
@@ -186,7 +181,7 @@ export function VideoResultView({
               }
               reanimateLabel={
                 armedIndex === index
-                  ? `${STR.videoAnimateConfirmYes} (${perScenePrice(scene.durationSeconds)})`
+                  ? STR.videoAnimateConfirmYes
                   : STR.videoReanimateScene
               }
             />

@@ -24,7 +24,6 @@ import {
   VIDEO_TOTAL_SECONDS,
   clipSecondsForNarration,
   estimateNarrationSeconds,
-  estimateVideoRenderCostUsd,
 } from '@dgipr/schemas';
 import {
   narrateVideo,
@@ -37,7 +36,6 @@ import {
 } from '../../../lib/api';
 import { useVideoProject } from '../../../lib/useVideoProject';
 import {
-  formatCost,
   videoNarrationTotal,
   videoReadyScriptEstimate,
   STR,
@@ -210,9 +208,6 @@ export default function VideoProjectPage({
   }
 
   const bounds = VIDEO_SCENE_LIMIT;
-  const estimate = formatCost(
-    estimateVideoRenderCostUsd(detail.tier, detail.scenes),
-  );
   // Gate-1 budget line: what the edited drafts are estimated to speak, against
   // the project's selected total. Estimated from characters, so it is a guide,
   // not a verdict — the storyboard job measures the real WAVs.
@@ -233,6 +228,9 @@ export default function VideoProjectPage({
         scene.stillUrl !== undefined &&
         (scene.endVisualBrief === undefined || scene.endStillUrl !== undefined),
     );
+  const allClipsReady =
+    detail.scenes.length > 0 &&
+    detail.scenes.every((scene) => scene.clipUrl !== undefined);
   // A per-scene re-render on a finished video: keep showing the result view.
   const reRendering = detail.status === 'animating' && detail.videoUrl !== null;
 
@@ -462,10 +460,7 @@ export default function VideoProjectPage({
             />
           ))}
           <section className="card">
-            <p className="hint">
-              {STR.videoAnimateEstimate}: <strong>{estimate}</strong>
-            </p>
-            <div className="btn-row" style={{ marginTop: 10 }}>
+            <div className="btn-row">
               {animateArmed ? (
                 <>
                   <button
@@ -479,7 +474,7 @@ export default function VideoProjectPage({
                       })
                     }
                   >
-                    {STR.videoAnimateConfirmYes} ({estimate})
+                    {STR.videoAnimateConfirmYes}
                   </button>
                   <button
                     type="button"
@@ -537,7 +532,17 @@ export default function VideoProjectPage({
           <h2>{STR.failedTitle}</h2>
           {detail.error ? <p className="form-error">{detail.error}</p> : null}
           <div className="btn-row" style={{ marginTop: 12 }}>
-            {allStillsReady ? (
+            {allClipsReady &&
+            (detail.step === 'stitch' || detail.step === 'upload') ? (
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={busy}
+                onClick={() => void act(() => restitchVideo(id))}
+              >
+                {STR.videoRestitch}
+              </button>
+            ) : allStillsReady ? (
               <button
                 type="button"
                 className="btn btn-primary"
@@ -560,7 +565,12 @@ export default function VideoProjectPage({
               {STR.videoTitle}
             </Link>
           </div>
-          {allStillsReady ? (
+          {allClipsReady &&
+          (detail.step === 'stitch' || detail.step === 'upload') ? (
+            <p className="hint" style={{ marginTop: 8 }}>
+              {STR.videoRestitchHint}
+            </p>
+          ) : allStillsReady ? (
             <p className="hint" style={{ marginTop: 8 }}>
               {STR.videoResumeHint}
             </p>

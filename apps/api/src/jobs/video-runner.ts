@@ -1114,10 +1114,15 @@ export function startVideoAnimateJob(client: SupabaseClient, id: string): void {
 }
 
 // Re-run only the free joining/mux/upload stage from the already-persisted
-// scene clips and narration. Used by the completed-page recovery button; no
-// clip provider or TTS call is made. On failure the prior completed video stays
-// selected and playable, and the row returns to completed with the error.
-export function startVideoStitchJob(client: SupabaseClient, id: string): void {
+// scene clips and narration. Used by both the completed-page recovery button
+// and restart recovery; no clip provider or TTS call is made. The caller picks
+// the failure status: preserve `completed` when an older result exists, or
+// return to `failed` when this is the first final assembly.
+export function startVideoStitchJob(
+  client: SupabaseClient,
+  id: string,
+  failureStatus: 'failed' | 'completed' = 'completed',
+): void {
   runVideoJob(
     client,
     id,
@@ -1125,7 +1130,7 @@ export function startVideoStitchJob(client: SupabaseClient, id: string): void {
       const row = await requireProject(client, id);
       await stitchAndPersist(client, id, row.scenes);
     },
-    { failureStatus: 'completed' },
+    { failureStatus },
   );
 }
 

@@ -17,15 +17,30 @@ import {
   type VideoProjectSummary,
 } from '@dgipr/schemas';
 import { createVideoProject, listVideoProjects } from '../../lib/api';
-import {
-  formatCost,
-  formatDate,
-  STR,
-  videoReadyScriptEstimate,
-} from '../../lib/strings';
+import { formatDate, STR, videoReadyScriptEstimate } from '../../lib/strings';
 import { VideoStatusChip } from '../../components/VideoStatusChip';
 
 const NOTE_MIN = 20;
+
+// मागील व्हिडिओ shows the runs worth keeping, not every experiment the pipeline
+// ever produced: the named projects below plus everything created from now on.
+// A cutoff rather than a hide-list, so new runs need no code change — and the
+// gate is presentational only, `activeProject` below still reads the FULL list
+// so a hidden run that is still working keeps blocking a second project.
+const KEEP_PROJECT_IDS = new Set([
+  '45384823-133e-49d2-85db-b1018556884b',
+  '1fcbb83c-ad77-45ba-a5e1-9847a97cb5bd',
+  'f1f4e3bd-6645-4c2f-9053-c85fb51a0774',
+  '873f4600-b783-46a5-a1f8-65b7e54a088a',
+]);
+const LIST_FROM = Date.parse('2026-07-30T05:00:00Z');
+
+function isListed(project: VideoProjectSummary): boolean {
+  if (KEEP_PROJECT_IDS.has(project.id)) return true;
+  const created = Date.parse(project.createdAt);
+  // An unparseable date must not disappear silently.
+  return Number.isNaN(created) || created >= LIST_FROM;
+}
 
 function isWorking(status: VideoProjectSummary['status']): boolean {
   return (
@@ -60,6 +75,7 @@ export default function VideoPage() {
     () => projects.find((project) => isWorking(project.status)) ?? null,
     [projects],
   );
+  const listedProjects = useMemo(() => projects.filter(isListed), [projects]);
   const scriptEstimateSeconds = estimateNarrationSeconds(
     normalizeVideoNarrationScript(note),
   );
@@ -238,11 +254,11 @@ export default function VideoPage() {
         {error ? <p className="form-error">{error}</p> : null}
       </section>
 
-      {projects.length > 0 ? (
+      {listedProjects.length > 0 ? (
         <section className="card">
           <h2>{STR.videoRecent}</h2>
           <ul className="file-list" style={{ marginTop: 10 }}>
-            {projects.map((project) => (
+            {listedProjects.map((project) => (
               <li key={project.id} className="file-row">
                 <VideoStatusChip status={project.status} />
                 <Link
@@ -254,9 +270,6 @@ export default function VideoPage() {
                 </Link>
                 <span className="file-size">
                   {formatDate(project.createdAt)}
-                  {project.costUsd !== null
-                    ? ` · ${formatCost(project.costUsd)}`
-                    : ''}
                 </span>
               </li>
             ))}

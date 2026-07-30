@@ -18,10 +18,14 @@
 //
 // Nothing is stored — not the text, not the uploaded file (the intake job is in-memory with
 // a TTL).
+//
+// This page imposes NO length limit on the text: translateArticle chunks internally, so a
+// long document translates as one long synchronous request. The API's own
+// TRANSLATE_TEXT_MAX_CHARS zod cap is still in force server-side, so an over-long text
+// surfaces as a request error rather than a local warning.
 
 import { useState } from 'react';
 import {
-  TRANSLATE_TEXT_MAX_CHARS,
   type PrepareTranslationResponse,
   type TranslationLanguage,
   type TranslationTermInput,
@@ -53,9 +57,7 @@ export default function TranslatePage() {
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const overLimit = text.length > TRANSLATE_TEXT_MAX_CHARS;
-  const disabled =
-    submitting || prep !== 'idle' || text.trim().length === 0 || overLimit;
+  const disabled = submitting || prep !== 'idle' || text.trim().length === 0;
 
   // Any change to the text invalidates a prepared name list and an old result.
   const resetFlow = () => {
@@ -132,23 +134,18 @@ export default function TranslatePage() {
           }}
           style={{ marginTop: 10 }}
         />
-        <p className={overLimit ? 'form-error' : 'hint'}>
-          {text.length.toLocaleString('en-IN')} /{' '}
-          {TRANSLATE_TEXT_MAX_CHARS.toLocaleString('en-IN')}
-          {overLimit ? ` — ${STR.translateOverLimit}` : ''}
-        </p>
+        <p className="hint">{text.length.toLocaleString('en-IN')}</p>
       </section>
 
       {/* The document to translate usually arrives as a file, not in the clipboard.
               The shared intake reads pdf/docx/txt and drops the text into the box above,
               where it is edited and translated like anything else — a scanned PDF stops to
-              ask which pages are worth OCR'ing before a credit is spent, and the character
-              budget below is what makes that page picker the way to trim a long booklet
-              down to a translatable size. */}
+              ask which pages are worth OCR'ing before a credit is spent. No character
+              budget is passed: this page imposes no length limit on the text, so page
+              selection is about OCR spend, not about trimming to fit. */}
       <DocumentIntake
         storageKey="dgipr.translate.document"
         accept={['pdf', 'docx', 'txt']}
-        maxChars={TRANSLATE_TEXT_MAX_CHARS}
         onText={(value) => {
           setText(value);
           resetFlow();

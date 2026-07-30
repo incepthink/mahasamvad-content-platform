@@ -70,6 +70,13 @@ function frameProviderKeyMissing(): string | null {
   return typeof key === 'string' && key.trim() !== '' ? null : envName;
 }
 
+function hasEverySceneClip(row: VideoProjectRow): boolean {
+  return (
+    row.scenes.length > 0 &&
+    row.scenes.every((scene) => scene.clipPath !== undefined)
+  );
+}
+
 // Narration needs a Sarvam key (TTS); fail the narrate gate with a setup message
 // BEFORE the row is flipped, mirroring clipProviderKeyMissing for animate.
 function sarvamKeyPresent(): boolean {
@@ -248,8 +255,36 @@ export function registerVideoRoutes(
       }
       // Orphan check, same as the generation detail route: a row stuck in a
       // working status whose job is not in this process died with a previous
-      // server; fail it so the UI stops spinning. Clips already rendered are
-      // persisted per scene, so the retry resumes rather than re-billing.
+      // server. Stitching is fully local and every paid input is already in
+      // Storage, so resume that step automatically instead of making the
+      // officer retry an animation that has already finished.
+      const restartInterruptedStitch =
+        row.step === 'stitch' &&
+        hasEverySceneClip(row) &&
+        ((row.status === 'animating' && !isVideoJobRunning(row.id)) ||
+          (row.status === 'failed' &&
+            row.error === 'Server restarted while this job was running.'));
+      if (restartInterruptedStitch) {
+        const resumed = {
+          ...row,
+          status: 'animating' as const,
+          step: 'stitch' as const,
+          error: null,
+        };
+        await updateVideoProject(client, row.id, {
+          status: resumed.status,
+          step: resumed.step,
+          error: resumed.error,
+        });
+        startVideoStitchJob(
+          client,
+          row.id,
+          row.videoPath ? 'completed' : 'failed',
+        );
+        return toDetail(client, resumed);
+      }
+      // Other orphaned work cannot be resumed without knowing exactly which
+      // external operation completed, so fail it and expose the normal retry.
       if (
         (row.status === 'scripting' ||
           row.status === 'storyboarding' ||
@@ -671,7 +706,10 @@ export function registerVideoRoutes(
           .code(404)
           .send({ error: { message: 'Video project not found.' } });
       }
-      if (row.status !== 'completed' || isVideoJobRunning(row.id)) {
+      if (
+        (row.status !== 'completed' && row.status !== 'failed') ||
+        isVideoJobRunning(row.id)
+      ) {
         return reply.code(409).send({ error: { message: BUSY_MESSAGE } });
       }
       const active = await findActiveVideoProject(client);
@@ -698,7 +736,11 @@ export function registerVideoRoutes(
         step: 'stitch',
         error: null,
       });
-      startVideoStitchJob(client, row.id);
+      startVideoStitchJob(
+        client,
+        row.id,
+        row.videoPath ? 'completed' : 'failed',
+      );
       return reply.code(202).send({ id: row.id });
     },
   );
