@@ -41,10 +41,12 @@ export type KlingTier = 'fast' | 'lite' | 'standard';
 export type KlingAspectRatio = '16:9' | '9:16';
 export type KlingResolution = '720p' | '1080p' | '4k';
 
-// Kling recommends <=2500 characters and hard-caps at 3072. We aim at the
-// recommendation and let fitClipPrompt overshoot toward the hard cap rather
-// than damage a rule (see its comment).
+// Kling recommends <=2500 characters and hard-caps at 3072 (a longer prompt is
+// rejected with `code 1201 contents[0].text: size must be between 0 and 3072`,
+// before any render). We aim at the recommendation and let fitClipPrompt
+// overshoot toward — but never past — the hard cap.
 const PROMPT_MAX_CHARS = 2500;
+const PROMPT_HARD_MAX_CHARS = 3072;
 
 // Kling's own input rules, checked locally so a bad frame fails free instead of
 // after a round trip.
@@ -202,6 +204,7 @@ async function submitTask(
   const text = fitClipPrompt(
     avoid ? `${input.prompt}\n\n${avoid}` : input.prompt,
     PROMPT_MAX_CHARS,
+    PROMPT_HARD_MAX_CHARS,
   );
 
   const buildBody = (

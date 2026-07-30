@@ -29,6 +29,7 @@ import {
   narrateVideo,
   reanimateVideoScene,
   regenerateVideoStill,
+  reopenVideoStoryboard,
   restitchVideo,
   saveVideoScript,
   saveVideoSceneMotion,
@@ -573,6 +574,16 @@ export default function VideoProjectPage({
                 {STR.videoToStoryboard}
               </button>
             ) : null}
+            {detail.scenes.length > 0 && allStillsReady ? (
+              <button
+                type="button"
+                className="btn"
+                disabled={busy}
+                onClick={() => void act(() => reopenVideoStoryboard(id))}
+              >
+                {STR.videoBackToStoryboard}
+              </button>
+            ) : null}
             <Link className="btn" href="/video">
               {STR.videoTitle}
             </Link>
@@ -585,6 +596,11 @@ export default function VideoProjectPage({
           ) : allStillsReady ? (
             <p className="hint" style={{ marginTop: 8 }}>
               {STR.videoResumeHint}
+            </p>
+          ) : null}
+          {detail.scenes.length > 0 && allStillsReady ? (
+            <p className="hint" style={{ marginTop: 8 }}>
+              {STR.videoBackToStoryboardHint}
             </p>
           ) : null}
           {formError ? <p className="form-error">{formError}</p> : null}

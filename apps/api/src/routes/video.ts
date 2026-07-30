@@ -731,6 +731,43 @@ export function registerVideoRoutes(
     },
   );
 
+  // Send a FAILED project back to gate 2 so the officer can fix what broke the
+  // render — most often an over-long motion direction — and animate again. It
+  // is a pure state flip: no job runs, nothing is re-rendered, and every clip,
+  // frame and narration already in Storage stays on the row, so the resume-aware
+  // animate job then renders only the scenes still missing a current clip.
+  app.post<{ Params: { id: string } }>(
+    '/video/projects/:id/reopen-storyboard',
+    async (request, reply) => {
+      const row = await getVideoProject(client, request.params.id);
+      if (!row) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'Video project not found.' } });
+      }
+      if (row.status !== 'failed' || isVideoJobRunning(row.id)) {
+        return reply.code(409).send({ error: { message: BUSY_MESSAGE } });
+      }
+      const active = await findActiveVideoProject(client);
+      if (active && active.id !== row.id) {
+        return reply
+          .code(409)
+          .send({ error: { message: ANOTHER_ACTIVE_MESSAGE } });
+      }
+      if (row.scenes.length === 0) {
+        return reply
+          .code(409)
+          .send({ error: { message: 'आधी स्टोरीबोर्ड तयार व्हायला हवा.' } });
+      }
+      await updateVideoProject(client, row.id, {
+        status: 'storyboard_ready',
+        step: 'stills',
+        error: null,
+      });
+      return reply.code(200).send({ id: row.id });
+    },
+  );
+
   // Re-run only the free local stitch from the scene clips already in Storage.
   // This is the recovery path for a bad final container: no Kling/Veo render
   // and no Sarvam synthesis is repeated. The runner validates duration/frames

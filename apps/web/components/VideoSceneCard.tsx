@@ -22,7 +22,12 @@ import {
   VIDEO_KEY_POINT_MAX_CHARS,
   estimateNarrationSeconds,
 } from '@dgipr/schemas';
-import { STR, videoNarrationEstimate, videoSceneTiming } from '../lib/strings';
+import {
+  STR,
+  videoMotionBriefLength,
+  videoNarrationEstimate,
+  videoSceneTiming,
+} from '../lib/strings';
 
 function SceneStatusChip({ scene }: { scene: VideoScene }) {
   if (scene.status === 'still-rendering' || scene.status === 'animating') {
@@ -281,6 +286,9 @@ export function VideoSceneCard({
                   setMotionSaved(false);
                 }}
               />
+              <p className="hint" style={{ marginTop: 6 }}>
+                {videoMotionBriefLength(motionDraft.trim().length)}
+              </p>
               <div className="btn-row" style={{ marginTop: 8 }}>
                 <button
                   type="button"

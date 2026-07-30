@@ -1108,6 +1108,9 @@ export const STR = {
   videoReanimateHint: 'फक्त या दृश्याचा खर्च होईल; बाकीचा व्हिडिओ तसाच राहतो.',
   videoRetryAnimate: 'पुन्हा प्रयत्न करा',
   videoResumeHint: 'आधी तयार झालेली दृश्ये पुन्हा वापरली जातील.',
+  videoBackToStoryboard: 'स्टोरीबोर्डवर परत जा',
+  videoBackToStoryboardHint:
+    'दृश्यांची चित्रे व हालचालीची सूचना पुन्हा तपासून बदलता येईल. आधी तयार झालेल्या क्लिप्स जतन राहतात — पुन्हा ॲनिमेशन केल्यास फक्त उरलेली दृश्ये तयार होतील.',
   videoStillPending: 'चित्र अजून काढलेले नाही',
   videoSceneFailed: 'हे दृश्य अयशस्वी झाले',
 } as const;
@@ -1298,6 +1301,16 @@ export function videoNarrationEstimate(
 
 // Gate-1 running total against the project's selected length. Advisory only:
 // the storyboard job measures the real audio and shortens what overruns.
+// The clip provider caps its prompt, so a very long hand-typed direction is
+// shortened at render time rather than failing. Say so while it is being typed.
+export const VIDEO_MOTION_BRIEF_ADVISORY_CHARS = 600;
+
+export function videoMotionBriefLength(chars: number): string {
+  return chars > VIDEO_MOTION_BRIEF_ADVISORY_CHARS
+    ? `${chars} अक्षरे — इतकी लांब सूचना व्हिडिओ तयार करताना सुमारे ${VIDEO_MOTION_BRIEF_ADVISORY_CHARS} अक्षरांपर्यंत छोटी केली जाईल.`
+    : `${chars} अक्षरे`;
+}
+
 export function videoNarrationTotal(
   estimatedSeconds: number,
   targetSeconds: number,

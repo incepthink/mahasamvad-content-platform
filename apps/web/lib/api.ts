@@ -906,6 +906,14 @@ export async function narrateVideo(id: string): Promise<void> {
   await requestJson(`/api/video/projects/${id}/narrate`, { method: 'POST' });
 }
 
+// Reopen gate 2 on a failed project so the frames and motion direction can be
+// edited before animating again. Preserves every clip already rendered.
+export async function reopenVideoStoryboard(id: string): Promise<void> {
+  await requestJson(`/api/video/projects/${id}/reopen-storyboard`, {
+    method: 'POST',
+  });
+}
+
 // Re-run only the local joining/muxing step from already-generated clips.
 // This never re-buys a scene render or narration.
 export async function restitchVideo(id: string): Promise<void> {

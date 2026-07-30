@@ -73,7 +73,18 @@ const STYLE_PREFIX = 'Visual style: ';
 const OPEN_PREFIX = 'Opening scene: ';
 const END_PREFIX = 'Required final state: ';
 const MOTION_PREFIX = 'Detailed performance direction: ';
+const CAMERA_PREFIX = 'Camera direction: ';
 const AVOID_PREFIX = 'Avoid all of the following';
+
+const INTERPOLATION_RULE =
+  'Move naturally from the opening frame to the provided final frame, making the change feel motivated and continuous.';
+
+// fitClipPrompt trims line by line, so every model-authored field must occupy
+// exactly ONE line. A style paragraph or a brief that arrives with newlines
+// would otherwise put most of its characters on lines carrying no prefix, which
+// the trimmer cannot see and cannot shed — the shape that sent a 3000+ char
+// prompt at Kling's 3072 hard cap.
+const oneLine = (value: string): string => value.trim().replace(/\s+/g, ' ');
 
 export function buildClipMotionPrompt(
   style: string,
@@ -82,28 +93,26 @@ export function buildClipMotionPrompt(
   endVisualBrief?: string,
   motionBrief?: string,
 ): string {
-  const directedMotion = motionBrief?.trim().replace(/\s+/g, ' ');
+  const directedMotion = motionBrief ? oneLine(motionBrief) : '';
+  const directedCamera = shotHint ? oneLine(shotHint) : '';
   return [
     'Create one engaging, realistic live-action shot for a Government of Maharashtra explainer video.',
     SETTING_RULE,
-    `${STYLE_PREFIX}${style.trim()}`,
-    `${OPEN_PREFIX}${visualBrief.trim()}`,
+    `${STYLE_PREFIX}${oneLine(style)}`,
+    `${OPEN_PREFIX}${oneLine(visualBrief)}`,
     ...(directedMotion
       ? [`${MOTION_PREFIX}${directedMotion}`]
       : [
           'Develop the action naturally and use the available time to create meaningful subject and camera movement.',
         ]),
     ...(endVisualBrief
-      ? [
-          `${END_PREFIX}${endVisualBrief.trim()}`,
-          'Move naturally from the opening frame to the provided final frame, making the change feel motivated and continuous.',
-        ]
+      ? [`${END_PREFIX}${oneLine(endVisualBrief)}`, INTERPOLATION_RULE]
       : [
           'There is no prescribed final frame. Develop the action naturally and use the available time to create meaningful subject and camera movement.',
         ]),
-    ...(shotHint
+    ...(directedCamera
       ? [
-          `Camera direction: ${shotHint.trim()}. Use it naturally rather than holding a rigid composition.`,
+          `${CAMERA_PREFIX}${directedCamera}. Use it naturally rather than holding a rigid composition.`,
         ]
       : [
           'Choose natural camera movement that makes the action clear and engaging.',
@@ -123,33 +132,67 @@ export function buildAvoidClause(negativePrompt: string): string {
   return `${AVOID_PREFIX} in every frame: ${list}.`;
 }
 
+// The lines a trimmed prompt keeps at any cost: they carry the setting, the
+// people/speech rules and the interpolation instruction, which is what the paid
+// render is buying. Everything else is describable detail that may be shortened.
+const PROTECTED_LINES: readonly string[] = [
+  SETTING_RULE,
+  FEW_PEOPLE_RULE,
+  NO_TALKING_RULE,
+  INTERPOLATION_RULE,
+];
+
+// Which model-authored field is shed first, and how much of it survives while a
+// prompt is only over the RECOMMENDED budget.
+const TRIMMABLE: readonly (readonly [string, number])[] = [
+  [STYLE_PREFIX, 80],
+  [END_PREFIX, 120],
+  [OPEN_PREFIX, 120],
+  [CAMERA_PREFIX, 120],
+  [MOTION_PREFIX, 600],
+];
+
 // Keep provider-facing prompts inside the recommended character budget without
-// truncating the continuity or speech instructions.
-export function fitClipPrompt(prompt: string, maxChars: number): string {
+// truncating the continuity or speech instructions. `hardMaxChars` is a limit
+// the provider ENFORCES (Kling rejects >3072 outright), so once it is supplied
+// the result is guaranteed to fit it — overshooting there is not a trade-off
+// between rules, it is a failed render.
+export function fitClipPrompt(
+  prompt: string,
+  maxChars: number,
+  hardMaxChars?: number,
+): string {
+  const hardMax =
+    hardMaxChars === undefined ? undefined : Math.max(hardMaxChars, 0);
   if (prompt.length <= maxChars) return prompt;
 
   let lines = prompt.split('\n');
   const rendered = (): string => lines.join('\n').trim();
 
+  // Shorten each trimmable field toward `budget`, no further than its floor
+  // (0 = the field may disappear entirely).
+  const shrinkToward = (
+    budget: number,
+    floorOf: (f: number) => number,
+  ): void => {
+    for (const [prefix, floor] of TRIMMABLE) {
+      const overflow = rendered().length - budget;
+      if (overflow <= 0) return;
+      const index = lines.findIndex((line) => line.startsWith(prefix));
+      if (index === -1) continue;
+      const body = (lines[index] as string).slice(prefix.length);
+      const keep = Math.max(floorOf(floor), body.length - overflow);
+      if (keep >= body.length) continue;
+      lines[index] = keep === 0 ? '' : prefix + body.slice(0, keep).trimEnd();
+    }
+    lines = lines.filter((line, index) => line !== '' || index === 0);
+  };
+
   lines = lines.filter((line) => !line.startsWith(AVOID_PREFIX));
   if (rendered().length <= maxChars) return rendered();
 
-  for (const [prefix, floor] of [
-    [STYLE_PREFIX, 80],
-    [END_PREFIX, 120],
-    [OPEN_PREFIX, 120],
-    [MOTION_PREFIX, 600],
-  ] as const) {
-    const index = lines.findIndex((line) => line.startsWith(prefix));
-    if (index === -1) continue;
-    const body = (lines[index] as string).slice(prefix.length);
-    const overflow = rendered().length - maxChars;
-    if (overflow <= 0) break;
-    const keep = Math.max(floor, body.length - overflow);
-    if (keep >= body.length) continue;
-    lines[index] = prefix + body.slice(0, keep).trimEnd();
-    if (rendered().length <= maxChars) return rendered();
-  }
+  shrinkToward(maxChars, (floor) => floor);
+  if (rendered().length <= maxChars) return rendered();
 
   const styleIndex = lines.findIndex((line) => line.startsWith(STYLE_PREFIX));
   if (styleIndex !== -1) {
@@ -157,12 +200,34 @@ export function fitClipPrompt(prompt: string, maxChars: number): string {
     if (rendered().length <= maxChars) return rendered();
   }
 
+  if (hardMax === undefined || rendered().length <= hardMax) {
+    console.warn(
+      `[video-prompts] clip prompt is ${rendered().length} chars against a ` +
+        `${maxChars} recommended budget after trimming. Sending it because the ` +
+        'remaining continuity and performance instructions are more important.',
+    );
+    return rendered();
+  }
+
+  // Past the provider's hard cap the floors stop being protective, so drop them
+  // and then shed unprotected lines from the end until it fits.
+  shrinkToward(hardMax, () => 0);
+  while (rendered().length > hardMax) {
+    const index = lines
+      .map((line, i) => [line, i] as const)
+      .filter(([line]) => !PROTECTED_LINES.includes(line))
+      .map(([, i]) => i)
+      .pop();
+    if (index === undefined) break;
+    lines.splice(index, 1);
+  }
+
   console.warn(
-    `[video-prompts] clip prompt is ${rendered().length} chars against a ` +
-      `${maxChars} recommended budget after trimming. Sending it because the ` +
-      'remaining continuity and performance instructions are more important.',
+    `[video-prompts] clip prompt hit the provider's ${hardMax}-char hard cap ` +
+      'and was cut back to the setting, people and continuity rules.',
   );
-  return rendered();
+  // Backstop: even the protected rules alone must not exceed the cap.
+  return rendered().slice(0, hardMax).trim();
 }
 
 // Free prompt-contract harness:
@@ -292,6 +357,51 @@ if (
     fitted.includes('provided final frame'),
   );
   check('fit: keeps the no-talking rule', fitted.includes('Nobody speaks'));
+
+  // The real failure: a model-authored field arriving as several paragraphs put
+  // most of its characters on lines the trimmer could not see, so the prompt
+  // sailed past Kling's 3072 hard cap and the render was rejected outright.
+  const multiLineStyle = `Cinematic realism.\n\n${'S'.repeat(900)}\n${'T'.repeat(900)}`;
+  const multiLineMotion = `Opening beat.\n\n${'M'.repeat(1800)}\n${'N'.repeat(1800)}`;
+  const paragraphed = buildClipMotionPrompt(
+    multiLineStyle,
+    `${'B'.repeat(700)}\n\n${'C'.repeat(700)}`,
+    hint,
+    `${'E'.repeat(700)}\n\n${'F'.repeat(700)}`,
+    multiLineMotion,
+  );
+  check(
+    'multi-line fields: every field stays on one line',
+    !/\n\n/.test(paragraphed) &&
+      paragraphed.split('\n').filter((line) => line.includes('SSS')).length ===
+        1,
+  );
+  const cappedSoft = fitClipPrompt(paragraphed, 2500);
+  const capped = fitClipPrompt(paragraphed, 2500, 3072);
+  check(
+    'hard cap: paragraphed worst case now fits the soft budget too',
+    cappedSoft.length <= 2500,
+  );
+  check('hard cap: never exceeds the provider limit', capped.length <= 3072);
+  check(
+    'hard cap: keeps the setting rule',
+    capped.includes('Maharashtra, India'),
+  );
+  check(
+    'hard cap: keeps the no-talking rule',
+    capped.includes('Nobody speaks'),
+  );
+  check(
+    'hard cap: keeps the final-frame transition',
+    capped.includes('provided final frame'),
+  );
+
+  // A prompt made only of protected rules must still be capped rather than sent.
+  const absurd = fitClipPrompt(paragraphed, 200, 200);
+  check(
+    'hard cap: honoured even below the rules themselves',
+    absurd.length <= 200,
+  );
 
   console.log(
     failures.length === 0
