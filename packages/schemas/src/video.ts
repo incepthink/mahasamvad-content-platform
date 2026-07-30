@@ -439,10 +439,15 @@ export const UpdateVideoScriptRequestSchema = z.object({
     .array(
       z.object({
         narration: z.string().trim().min(1).max(VIDEO_NARRATION_MAX_CHARS),
-        visualBrief: z.string().trim().min(1).max(600),
+        // Uncapped, like `openingVisualBrief` below: no provider imposes a
+        // limit near the old 600, and Kling's 3072-char prompt cap is absorbed
+        // downstream by fitClipPrompt, which sheds the briefs BEFORE the
+        // setting/no-talking/no-text rules. A long brief degrades at render
+        // time instead of being rejected at save time.
+        visualBrief: z.string().trim().min(1),
         // The end-frame description. Optional for back-compat with pre-feature
         // drafts; a scene saved without one renders first-frame-only.
-        endVisualBrief: z.string().trim().min(1).max(600).optional(),
+        endVisualBrief: z.string().trim().min(1).optional(),
         // Empty string is meaningful and must survive: it CLEARS the overlay
         // for this scene, so it cannot be min(1) like the briefs.
         keyPoint: z.string().trim().max(VIDEO_KEY_POINT_MAX_CHARS).optional(),
@@ -462,20 +467,18 @@ export type UpdateVideoScriptRequest = z.infer<
 // end is an EDIT of the start, so a new start orphans it; redrawing the END
 // alone re-edits from the current start (one image call).
 //
-// `openingVisualBrief` is deliberately UNCAPPED. No provider imposes a limit
-// near the old 1200: it reaches the frame models (Gemini / gpt-image) whose
-// text budgets are orders of magnitude larger, and the one real budget on the
-// path — Kling's 3072-char prompt cap — is already absorbed downstream by
-// fitClipPrompt, which sheds the opening brief BEFORE the setting/no-talking/
-// no-text rules. So a long brief degrades at render time instead of being
-// rejected at save time. The other two briefs keep their caps: they are the
-// short single-shot descriptions the script writer emits, not the officer's
-// free-form direction.
+// Every brief here is deliberately UNCAPPED. No provider imposes a limit near
+// the old 600/1200: they reach the frame models (Gemini / gpt-image) whose text
+// budgets are orders of magnitude larger, and the one real budget on the path —
+// Kling's 3072-char prompt cap — is already absorbed downstream by
+// fitClipPrompt, which sheds the briefs BEFORE the setting/no-talking/no-text
+// rules. So a long brief degrades at render time instead of being rejected at
+// save time.
 export const RegenerateStillRequestSchema = z.object({
   frame: z.enum(['start', 'end']).optional(),
-  visualBrief: z.string().trim().min(1).max(600).optional(),
+  visualBrief: z.string().trim().min(1).optional(),
   openingVisualBrief: z.string().trim().min(1).optional(),
-  endVisualBrief: z.string().trim().min(1).max(600).optional(),
+  endVisualBrief: z.string().trim().min(1).optional(),
 });
 export type RegenerateStillRequest = z.infer<
   typeof RegenerateStillRequestSchema

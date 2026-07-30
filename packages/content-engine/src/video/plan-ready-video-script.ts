@@ -26,8 +26,8 @@ import {
 
 const VisualSceneSchema = z.object({
   beat: z.string().trim().min(1).max(240),
-  visual_brief: z.string().trim().min(1).max(600),
-  end_visual_brief: z.string().trim().max(600).optional(),
+  visual_brief: z.string().trim().min(1),
+  end_visual_brief: z.string().trim().optional(),
   shot_hint: z.string().trim().min(1).max(160),
   // Uncapped on purpose — an over-long overlay line costs that scene its
   // overlay inside keyPointOf, never the whole plan. The narration is already

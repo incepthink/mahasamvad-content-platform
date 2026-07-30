@@ -29,8 +29,8 @@ const FactsSchema = z.object({
 const PlanSceneSchema = z.object({
   fact_index: z.number().int().min(1),
   beat: z.string().trim().min(1).max(300),
-  visual_brief: z.string().trim().min(1).max(600),
-  end_visual_brief: z.string().trim().max(600).optional(),
+  visual_brief: z.string().trim().min(1),
+  end_visual_brief: z.string().trim().optional(),
   shot_hint: z.string().trim().min(1).max(160),
 });
 
