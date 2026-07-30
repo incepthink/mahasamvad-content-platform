@@ -435,8 +435,11 @@ export default function DloWorkspace({ intakeId }: { intakeId: string }) {
     setExcluded(new Set(saved.excluded));
     if (saved.styleReference) setStyleReference(saved.styleReference);
     if (saved.designations) {
-      restoredFromSave.current.designations = true;
-      setDesignationNames([...saved.designations.names]);
+      const currentResolver = saved.designations.resolverVersion === 2;
+      restoredFromSave.current.designations = currentResolver;
+      if (currentResolver) {
+        setDesignationNames([...saved.designations.names]);
+      }
       setKnownDesignations([...saved.designations.known]);
       setDesignationEdits({ ...saved.designations.edits });
       setDesignationExtras([...saved.designations.extras]);
@@ -533,6 +536,7 @@ export default function DloWorkspace({ intakeId }: { intakeId: string }) {
       designations:
         designationNames !== null
           ? {
+              resolverVersion: 2,
               names: designationNames,
               known: knownDesignations,
               edits: designationEdits,
@@ -553,27 +557,32 @@ export default function DloWorkspace({ intakeId }: { intakeId: string }) {
   // Find the people this note names and what पदनाम each should carry. Best-effort: any failure
   // leaves an empty (non-null) list, so the officer can still generate — without designations,
   // which is what happens today.
-  const runDesignations = useCallback(async (text: string) => {
-    setDesignationsError(false);
-    setDesignationEdits({});
-    setDesignationExtras([]);
-    const trimmed = text.trim();
-    if (trimmed.length < TEXT_MIN_CHARS) {
-      setDesignationNames([]);
-      return;
-    }
-    setDesignationsLoading(true);
-    try {
-      const result = await prepareDesignations({ text: trimmed });
-      setDesignationNames(result.names);
-      setKnownDesignations(result.knownDesignations);
-    } catch {
-      setDesignationNames([]);
-      setDesignationsError(true);
-    } finally {
-      setDesignationsLoading(false);
-    }
-  }, []);
+  const runDesignations = useCallback(
+    async (text: string, preserveOfficerEdits = false) => {
+      setDesignationsError(false);
+      if (!preserveOfficerEdits) {
+        setDesignationEdits({});
+        setDesignationExtras([]);
+      }
+      const trimmed = text.trim();
+      if (trimmed.length < TEXT_MIN_CHARS) {
+        setDesignationNames([]);
+        return;
+      }
+      setDesignationsLoading(true);
+      try {
+        const result = await prepareDesignations({ text: trimmed });
+        setDesignationNames(result.names);
+        setKnownDesignations(result.knownDesignations);
+      } catch {
+        setDesignationNames([]);
+        setDesignationsError(true);
+      } finally {
+        setDesignationsLoading(false);
+      }
+    },
+    [],
+  );
 
   // Once per review session, and never on resume — a RESUMED intake must not re-buy a name
   // list it already has.
@@ -581,7 +590,10 @@ export default function DloWorkspace({ intakeId }: { intakeId: string }) {
     if (step !== 'review' || !intake) return;
     if (!seeded.current || restoredFromSave.current.designations) return;
     if (designationNames !== null || designationsLoading) return;
-    void runDesignations(reviewText);
+    void runDesignations(
+      reviewText,
+      intake.reviewState?.designations !== undefined,
+    );
   }, [
     step,
     intake,

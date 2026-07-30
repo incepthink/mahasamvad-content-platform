@@ -48,6 +48,12 @@ export type VideoProjectStep = z.infer<typeof VideoProjectStepSchema>;
 export const VideoDurationBucketSchema = z.enum(['short', 'long']);
 export type VideoDurationBucket = z.infer<typeof VideoDurationBucketSchema>;
 
+// How the narration entered the project. A note is rewritten into a fixed
+// 30-second voiceover; a script is already-final Marathi narration whose words
+// must survive unchanged and whose natural speaking time decides the video.
+export const VideoInputModeSchema = z.enum(['note', 'script']);
+export type VideoInputMode = z.infer<typeof VideoInputModeSchema>;
+
 export const VideoOrientationSchema = z.enum(['landscape', 'vertical']);
 export type VideoOrientation = z.infer<typeof VideoOrientationSchema>;
 
@@ -109,6 +115,12 @@ export const VIDEO_SCENE_LIMIT: Readonly<{ min: number; max: number }> = {
 export const VIDEO_CLIP_MIN_SECONDS = 3;
 export const VIDEO_CLIP_MAX_SECONDS = 15;
 
+// Ready-script mode has no arbitrary character ceiling. Its meaningful guard
+// is the visual provider's capacity: eight clips at at most 15 seconds each.
+// The form estimates this for free; TTS later measures the authoritative time.
+export const VIDEO_SCRIPT_MAX_SECONDS =
+  VIDEO_SCENE_LIMIT.max * VIDEO_CLIP_MAX_SECONDS;
+
 // The officer-selected TOTAL video length per bucket — the narration's budget.
 // A soft target: the narrate phase shortens the worst-offending scenes while
 // the measured total overruns it by more than VIDEO_TOTAL_FIT_TOLERANCE, then
@@ -147,6 +159,40 @@ export function clipSecondsForNarration(narrationSeconds: number): number {
     VIDEO_CLIP_MAX_SECONDS,
     Math.max(VIDEO_CLIP_MIN_SECONDS, Math.ceil(narrationSeconds)),
   );
+}
+
+// Allocate whole-second visual windows beneath one continuous narration track.
+// `sceneWeights` are normally the provisional durations the script writer saw.
+// Only the TOTAL must contain the WAV; individual visual cuts may occur while a
+// sentence continues. Provider bounds remain absolute.
+export function allocateVideoSceneDurations(
+  sceneWeights: readonly number[],
+  totalSeconds: number,
+): number[] {
+  if (sceneWeights.length === 0) return [];
+  const minimum = sceneWeights.length * VIDEO_CLIP_MIN_SECONDS;
+  const maximum = sceneWeights.length * VIDEO_CLIP_MAX_SECONDS;
+  const total = Math.max(minimum, Math.min(maximum, Math.ceil(totalSeconds)));
+  const weights = sceneWeights.map((weight) => Math.max(1, weight));
+  const weightTotal = weights.reduce((sum, weight) => sum + weight, 0);
+  const durations = sceneWeights.map(() => VIDEO_CLIP_MIN_SECONDS);
+
+  for (let remaining = total - minimum; remaining > 0; remaining -= 1) {
+    let pick = -1;
+    let largestDeficit = Number.NEGATIVE_INFINITY;
+    for (const [index, duration] of durations.entries()) {
+      if (duration >= VIDEO_CLIP_MAX_SECONDS) continue;
+      const ideal = (total * weights[index]!) / weightTotal;
+      const deficit = ideal - duration;
+      if (deficit > largestDeficit) {
+        largestDeficit = deficit;
+        pick = index;
+      }
+    }
+    if (pick === -1) break;
+    durations[pick]! += 1;
+  }
+  return durations;
 }
 
 // Spoken-Marathi rate: chars of Devanagari per second of bulbul speech.
@@ -228,6 +274,17 @@ export function estimateNarrationSeconds(
   return chars / Math.max(1, charsPerSecond);
 }
 
+// Script mode preserves every supplied word. Whitespace has no spoken value,
+// so this is the only normalization allowed before deterministic scene splits,
+// API equality checks and continuous TTS assembly.
+export function normalizeVideoNarrationScript(text: string): string {
+  return text.trim().replace(/\s+/g, ' ');
+}
+
+export function isMarathiVideoNarration(text: string): boolean {
+  return /[\u0900-\u097f]/.test(text);
+}
+
 export const VideoSceneStatusSchema = z.enum([
   'pending',
   'still-rendering',
@@ -241,12 +298,15 @@ export type VideoSceneStatus = z.infer<typeof VideoSceneStatusSchema>;
 // One scene as the detail payload ships it. Storage paths are server-side;
 // the client gets public URLs.
 export const VideoSceneSchema = z.object({
-  // Marathi voiceover text for this scene. Carries the information; the
-  // visuals stay text-free (video models garble Devanagari).
+  // Marathi voiceover text for this scene.
   narration: z.string(),
-  // English visual description of the scene's START frame (and the shot as a
-  // whole) for the image/motion prompts.
+  // The scene's overall visual idea from the planner.
   visualBrief: z.string(),
+  // Duration-aware direction added before storyboard rendering: a precise
+  // opening state for the still and chronological performance for the clip.
+  // Optional for projects created before the motion-director stage.
+  openingVisualBrief: z.string().optional(),
+  motionBrief: z.string().optional(),
   // English description of how the SAME shot looks at its END — the second
   // reviewed frame, edited from the start frame so setting/people/light hold,
   // which Veo interpolates toward. Absent on legacy (single-frame) scenes.
@@ -262,8 +322,9 @@ export const VideoSceneSchema = z.object({
   // Planner's English shot/camera direction ("wide establishing shot, slow
   // push-in") — threaded into the keyframe + Veo motion prompts.
   shotHint: z.string().optional(),
-  // Measured duration of the scene's synthesized narration WAV, when audio
-  // exists — what durationSeconds is derived from (clipSecondsForNarration).
+  // Approximate spoken share of this scene slice. For continuous narration it
+  // is proportional metadata from the one measured project WAV; legacy rows
+  // carry the measured duration of their separate scene WAV.
   narrationSeconds: z.number().optional(),
   // Public URL of the scene's narration WAV (gate-2 audition).
   narrationAudioUrl: z.string().optional(),
@@ -285,6 +346,7 @@ export const VideoProjectDetailSchema = z.object({
   error: z.string().nullable(),
   note: z.string(),
   heading: z.string().nullable(),
+  inputMode: VideoInputModeSchema,
   durationBucket: VideoDurationBucketSchema,
   orientation: VideoOrientationSchema,
   tier: VideoTierSchema,
@@ -322,15 +384,37 @@ export const VideoProjectSummarySchema = z.object({
 });
 export type VideoProjectSummary = z.infer<typeof VideoProjectSummarySchema>;
 
-// Same note bounds as CreateGenerationRequestSchema — the note is the sole
-// factual source here too.
-export const CreateVideoProjectRequestSchema = z.object({
-  note: z.string().trim().min(20).max(60_000),
-  heading: z.string().trim().max(200).optional(),
-  durationBucket: VideoDurationBucketSchema,
-  orientation: VideoOrientationSchema,
-  tier: VideoTierSchema,
-});
+// There is no generic video character ceiling. Ready narration is guarded by
+// its estimated spoken duration because that determines scene/render capacity.
+export const CreateVideoProjectRequestSchema = z
+  .object({
+    note: z.string().trim().min(20),
+    heading: z.string().trim().max(200).optional(),
+    inputMode: VideoInputModeSchema.default('note'),
+    durationBucket: VideoDurationBucketSchema,
+    orientation: VideoOrientationSchema,
+    tier: VideoTierSchema,
+  })
+  .superRefine((value, context) => {
+    if (value.inputMode === 'script' && !isMarathiVideoNarration(value.note)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['note'],
+        message: 'तयार निवेदन मराठीत असणे आवश्यक आहे.',
+      });
+    }
+    if (
+      value.inputMode === 'script' &&
+      estimateNarrationSeconds(normalizeVideoNarrationScript(value.note)) >
+        VIDEO_SCRIPT_MAX_SECONDS
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['note'],
+        message: 'तयार निवेदनाचा अंदाज दोन मिनिटांपेक्षा जास्त आहे.',
+      });
+    }
+  });
 export type CreateVideoProjectRequest = z.infer<
   typeof CreateVideoProjectRequestSchema
 >;
@@ -380,6 +464,7 @@ export type UpdateVideoScriptRequest = z.infer<
 export const RegenerateStillRequestSchema = z.object({
   frame: z.enum(['start', 'end']).optional(),
   visualBrief: z.string().trim().min(1).max(600).optional(),
+  openingVisualBrief: z.string().trim().min(1).max(1200).optional(),
   endVisualBrief: z.string().trim().min(1).max(600).optional(),
 });
 export type RegenerateStillRequest = z.infer<

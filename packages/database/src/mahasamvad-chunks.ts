@@ -103,6 +103,54 @@ export type ArticleChunkRow = Readonly<{
   url: string;
 }>;
 
+// A cheap, non-vector candidate for the style-reference fallback. `chunk_index = 0`
+// gives us exactly one row per article; the caller then reconstructs only the few
+// articles it may actually hand to the prompt.
+export type CategoryArticleCandidateRow = Readonly<{
+  articleId: number;
+  title: string;
+  url: string;
+  // First chunk only: enough to rank the fallback by editorial shape before reconstructing
+  // the few complete articles that will actually reach the prompt.
+  text: string;
+  publishedTime: string | null;
+}>;
+
+type CategoryArticleCandidateDbRow = {
+  article_id: number;
+  title: string | null;
+  url: string | null;
+  text: string;
+  published_time: string | null;
+};
+
+export async function fetchCategoryArticleCandidates(
+  client: SupabaseClient,
+  category: Category,
+  limit = 24,
+): Promise<CategoryArticleCandidateRow[]> {
+  const { data, error } = await client
+    .from(MAHASAMVAD_CHUNKS_TABLE)
+    .select('article_id, title, url, text, published_time')
+    .eq('style_category', category)
+    .eq('chunk_index', 0)
+    .order('published_time', { ascending: false, nullsFirst: false })
+    .limit(limit);
+  if (error) {
+    throw new Error(
+      `Failed to fetch category article candidates: ${error.message}`,
+    );
+  }
+  const rows = (data ?? []) as CategoryArticleCandidateDbRow[];
+  return rows.map((row) => ({
+    articleId: row.article_id,
+    title: row.title ?? '',
+    url: row.url ?? '',
+    text: row.text,
+    publishedTime: row.published_time,
+  }));
+}
+
 // Shape the select below returns (snake_case column names).
 type ArticleChunkDbRow = {
   chunk_index: number;

@@ -75,12 +75,14 @@ export {
   assembleSilentVideo,
   cropToAspect,
   muxNarration,
+  overlayVideoLogo,
   validateVideoOutput,
   wavDurationSeconds,
   resolveFfmpeg,
   type NarrationSegment,
   type SceneOverlay,
   type VideoAssemblyOptions,
+  type VideoLogoOptions,
   type VideoValidation,
 } from './video/assemble.js';
 // The burned-in Marathi key point: Chromium typesets it (the only correct

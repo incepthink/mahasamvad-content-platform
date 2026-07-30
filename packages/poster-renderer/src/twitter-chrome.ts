@@ -43,7 +43,12 @@ const LABEL_COLOUR = '#17324d';
 // intended footer artwork occupies the bottom 239 pixels.
 const SOCIAL_FOOTER_SOURCE_HEIGHT = 239;
 
-type Raster = Readonly<{ data: Buffer; width: number; height: number }>;
+export type GovernmentLockupRaster = Readonly<{
+  data: Buffer;
+  width: number;
+  height: number;
+}>;
+type Raster = GovernmentLockupRaster;
 
 // Render the Marathi wordmark through Sharp/Pango with the bundled Devanagari
 // font. The emblem remains a high-resolution raster, while the label is freshly
@@ -57,7 +62,7 @@ async function renderGovernmentLabel(scale: number): Promise<Raster> {
       width: Math.round(LABEL_MAX_WIDTH * scale),
       align: 'centre',
       rgba: true,
-      dpi: 72 * scale,
+      dpi: Math.max(1, Math.round(72 * scale)),
     },
   })
     .png()
@@ -109,6 +114,19 @@ async function buildGovernmentLockup(scale: number): Promise<Raster> {
   };
 }
 
+// Shared with the explainer-video path so posters and videos always use the
+// exact same Maharashtra Government emblem + wordmark artwork. Callers choose
+// the target width; the social poster uses 160px on a 1280px canvas, while
+// video intentionally asks for a slightly larger proportion.
+export async function renderGovernmentLockup(
+  targetWidth: number,
+): Promise<GovernmentLockupRaster> {
+  if (!Number.isFinite(targetWidth) || targetWidth <= 0) {
+    throw new Error('Government lockup target width must be positive.');
+  }
+  return buildGovernmentLockup(targetWidth / LOCKUP_WIDTH);
+}
+
 async function loadSocialFooter(targetWidth: number): Promise<Raster> {
   const source = sharp(resolve(ASSETS_DIR, 'footer-new-poster.png'));
   const meta = await source.metadata();
@@ -121,9 +139,7 @@ async function loadSocialFooter(targetWidth: number): Promise<Raster> {
   }
 
   const width = Math.round(targetWidth);
-  const height = Math.round(
-    (SOCIAL_FOOTER_SOURCE_HEIGHT / meta.width) * width,
-  );
+  const height = Math.round((SOCIAL_FOOTER_SOURCE_HEIGHT / meta.width) * width);
   const data = await source
     .extract({
       left: 0,
@@ -148,7 +164,7 @@ export async function overlayTwitterChrome(poster: Buffer): Promise<Buffer> {
   const scale = meta.width / ASSET_BASE_WIDTH;
 
   const [lockup, footer] = await Promise.all([
-    buildGovernmentLockup(scale),
+    renderGovernmentLockup(LOCKUP_WIDTH * scale),
     loadSocialFooter(meta.width),
   ]);
 

@@ -20,6 +20,8 @@ import {
   applyDesignations,
   generateArticle,
   generateArticleSimple,
+  currentArticleDateline,
+  ensureArticleDateline,
   type ArticleNameEntry,
   generateCopy,
   generatePosterCopy,
@@ -616,6 +618,7 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
       designations,
       knownDesignations,
     } as const;
+    const dateline = currentArticleDateline(shared.category);
 
     const mode = articleGenerationMode();
     const result =
@@ -629,9 +632,11 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
               // The verified dictionary rows this note actually mentions. Read by both prompt
               // variants: neither spells out name rules, both are handed the spellings.
               names: await articleNameDictionary(client, row.note),
-              // location/date are deliberately not supplied: nothing in the product collects
-              // them from trusted input yet, and no call is added to infer them. The prompt
-              // omits the dateline entirely rather than inventing one.
+              // Every DGIPR news copy starts with the configured publication place and today's
+              // India-local date. The model receives it for flow; ensureArticleDateline below
+              // enforces it deterministically on the final text.
+              location: dateline?.location,
+              date: dateline?.date,
               onProgress: progress,
               // Publish the draft as it is written, so the officer reads it appearing rather
               // than watching a progress bar for minutes. Display only — the authoritative
@@ -672,18 +677,19 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
               styleReferenceMeta: null,
             };
           })();
+    const finalArticle = ensureArticleDateline(result.article, shared.category);
 
     // The article is final; anything still watching should stop here rather than hold a
     // connection open through the 1-2 minute poster render. Sending the AUTHORITATIVE text as
     // one last snapshot matters: the deltas carried the raw draft, and applyDesignations has
     // since inserted the officer's approved पदनामे into it.
-    finishArticleStream(id, result.article);
+    finishArticleStream(id, finalArticle);
 
     // Report, never fail: the article is about to be persisted either way, and an officer who
     // can see "this designation did not apply" can fix it — one who cannot, cannot.
     designationWarnings.set(id, [...result.designationIssues]);
     await updateGeneration(client, id, {
-      article: result.article,
+      article: finalArticle,
       factCheck: result.factCheck,
       referenceTitle: result.referenceTitle,
       referenceUrl: result.referenceUrl,
@@ -715,7 +721,7 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
     await runArticlePosterPhase(
       client,
       id,
-      result.article,
+      finalArticle,
       row.referenceImageId,
       { note: row.note, posterHeading: row.posterHeading },
     );
@@ -1936,16 +1942,20 @@ export function startArticleFeedbackJob(
       rowHasFactCheck(row),
     );
     designationWarnings.set(id, [...revised.designationIssues]);
+    const revisedArticle = ensureArticleDateline(
+      revised.article,
+      articleCategoryOf(row.category),
+    );
 
     await updateGeneration(client, id, {
-      article: revised.article,
+      article: revisedArticle,
       factCheck: revised.factCheck,
     });
     await insertRevision(client, {
       generationId: id,
       target: 'article',
       feedback,
-      article: revised.article,
+      article: revisedArticle,
       factCheck: revised.factCheck,
     });
   });
@@ -1998,16 +2008,20 @@ export function startConcurrentArticleFeedbackJob(
           rowHasFactCheck(row),
         );
         designationWarnings.set(id, [...revised.designationIssues]);
+        const revisedArticle = ensureArticleDateline(
+          revised.article,
+          articleCategoryOf(row.category),
+        );
 
         await updateGeneration(client, id, {
-          article: revised.article,
+          article: revisedArticle,
           factCheck: revised.factCheck,
         });
         await insertRevision(client, {
           generationId: id,
           target: 'article',
           feedback,
-          article: revised.article,
+          article: revisedArticle,
           factCheck: revised.factCheck,
         });
       });

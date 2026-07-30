@@ -34,6 +34,13 @@ export {
   type ArticleNameEntry,
 } from './generation/simple-article-prompt.js';
 export { MINIMAL_ARTICLE_PROMPT_VERSION } from './generation/minimal-article-prompt.js';
+export {
+  currentArticleDateline,
+  ensureArticleDateline,
+  DEFAULT_NEWS_DATELINE_LOCATION,
+  NEWS_DATELINE_TIME_ZONE,
+  type ArticleDateline,
+} from './generation/article-dateline.js';
 export { polishArticleWithSarvam } from './generation/polish-article.js';
 export { generateCopy } from './generation/generate-copy.js';
 export { extractFiveWOneH } from './generation/extract-5w1h.js';
@@ -154,11 +161,21 @@ export {
   type VideoScriptOptions,
 } from './video/generate-video-script.js';
 export {
+  planReadyVideoScript,
+  splitReadyVideoScript,
+} from './video/plan-ready-video-script.js';
+export {
   planVideoScenes,
   type VideoScenePlan,
   type VideoScenePlanScene,
   type VideoScenePlanOptions,
 } from './video/plan-video-scenes.js';
+export {
+  directVideoMotion,
+  type DirectVideoMotionInput,
+  type VideoMotionDirection,
+  type VideoMotionSceneInput,
+} from './video/direct-video-motion.js';
 export {
   buildKeyframePrompt,
   buildEndFramePrompt,
@@ -208,7 +225,9 @@ export {
   type NarrationOptions,
 } from './video/sarvam-tts.js';
 export {
+  shortenContinuousNarration,
   shortenNarration,
+  type ContinuousNarrationScene,
   type ShortenNarrationOptions,
 } from './video/shorten-narration.js';
 

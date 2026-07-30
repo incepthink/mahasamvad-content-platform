@@ -81,10 +81,45 @@ async function mergeTextTerms(
     });
   }
 
+  // A one-word dictionary person can be the surname inside a different, longer person found by
+  // the extractor. In the real STPI transcript, "हरी मुंडे" caused the verified "मुंडे" row for
+  // an unrelated minister to appear as a second person and its title was later enforced. Keep
+  // the short row only when it also occurs independently outside every longer person mention.
+  const withoutNestedPeople = dropNestedPersonRows(text, [
+    ...byMarathi.values(),
+  ]);
+
   // Unverified first — those are the rows that actually need the user's eyes.
-  return [...byMarathi.values()].sort(
+  return withoutNestedPeople.sort(
     (a, b) => Number(a.verified) - Number(b.verified),
   );
+}
+
+export function dropNestedPersonRows<
+  T extends Readonly<{ marathi: string; termType: TermType }>,
+>(text: string, terms: readonly T[]): T[] {
+  const people = terms.filter((term) => term.termType === 'person');
+  return terms.filter((term) => {
+    if (term.termType !== 'person') return true;
+    const name = term.marathi.trim();
+    if (!name) return true;
+
+    const containers = people
+      .map((person) => person.marathi.trim())
+      .filter(
+        (candidate) =>
+          candidate.length > name.length &&
+          candidate.split(/\s+/u).includes(name) &&
+          text.includes(candidate),
+      );
+    if (containers.length === 0) return true;
+
+    const outsideLongerNames = containers.reduce(
+      (remaining, candidate) => remaining.split(candidate).join(' '),
+      text,
+    );
+    return mentionsWord(outsideLongerNames, name);
+  });
 }
 
 export async function prepareTranslationTerms(
@@ -109,27 +144,76 @@ export async function prepareTranslationTerms(
 // agentless passive ("निर्देश देण्यात आले") because there was nobody to attribute a directive to.
 // Meanwhile the dictionary held, verified, that मुख्यमंत्री is देवेंद्र फडणवीस.
 //
-// This is a LOOKUP, not an inference, and that distinction is what keeps the never-invent rule
-// intact: the answer comes from a row an officer verified, it is presented as a suggestion the
-// officer must accept, and nothing is written into any article until they do.
+// Portfolio ministers have one additional, common surface form: the note may name the department
+// rather than its minister ("उच्च व तंत्रशिक्षण विभागाकडे"). For a verified title ending in
+// " मंत्री", that department phrase is treated as an alias of the title. This lets the prompt
+// receive "चंद्रकांत पाटील → उच्च व तंत्रशिक्षण मंत्री" and write the accountable person rather
+// than leaving "निर्देश देण्यात आले" agentless, while preserving the department as the proposal's
+// institutional recipient.
+//
+// This is a LOOKUP, not an inference, and that distinction keeps the name grounded: the answer
+// comes only from a verified person → designation row in the dictionary. The row is applied by
+// default; the review card still shows it and lets an officer remove it when the source genuinely
+// refers to the institution rather than the office-holder.
 //
 // Four rules, each guarding a way this could go wrong:
 //   1. exactly ONE verified holder — Maharashtra has two उपमुख्यमंत्री, and guessing between
 //      them would put the wrong person's name on a government article;
-//   2. the LONGEST matching title wins — "उपमुख्यमंत्री" contains "मुख्यमंत्री" as a substring,
-//      so a naive scan proposes the Chief Minister for a note that only mentions the Deputy;
+//   2. the LONGEST matching mention wins — "उपमुख्यमंत्री" contains "मुख्यमंत्री" as a substring,
+//      and one portfolio department name may contain a shorter one;
 //   3. never propose someone the text already names, or already suggested (dedupe);
-//   4. `suggested: true`, so the card can render it unticked and labelled.
+//   4. `suggested: true`, so the card labels the dictionary-supplied name and keeps it reversible.
+//
+// Generic minister titles do not describe a portfolio department. "केंद्रीय मंत्री" must never
+// manufacture "केंद्रीय विभाग", for example. Only a substantive portfolio prefix gets the alias.
+const NON_PORTFOLIO_MINISTER_PREFIXES = new Set([
+  'केंद्रीय',
+  'कॅबिनेट',
+  'राज्य',
+  'प्रभारी',
+]);
+
+// Common code-mixed STT output for portfolio names. These aliases resolve only to the official
+// portfolio title; the current holder still comes dynamically from the verified dictionary.
+// Keeping the person out of this map means an office-holder change needs only a dictionary edit.
+function normalizePortfolioMentions(text: string): string {
+  return text.replace(
+    /(?:हायर|हायअर)\s+(?:अँड|एंड|आणि|व)\s+टेक्निकल\s+एज्यु[\p{L}\p{M}]*/giu,
+    'उच्च व तंत्रशिक्षण',
+  );
+}
+
+export function designationMentionForms(designation: string): string[] {
+  const title = designation.trim();
+  if (!title) return [];
+
+  const forms = [title];
+  const match = /^(.+?)\s+मंत्री$/u.exec(title);
+  const portfolio = match?.[1]?.trim() ?? '';
+  if (
+    portfolio &&
+    !NON_PORTFOLIO_MINISTER_PREFIXES.has(portfolio) &&
+    !portfolio.endsWith('राज्य')
+  ) {
+    forms.push(`${portfolio} विभाग`, portfolio);
+  }
+  return forms;
+}
+
 export function suggestOfficeHolders(
   text: string,
   existing: readonly { marathi: string }[],
   personsByDesignation: ReadonlyMap<string, readonly string[]>,
 ): PreparedName[] {
-  // Longest title first — rule 2. Without this, a note naming only "उपमुख्यमंत्री" also matches
-  // the substring "मुख्यमंत्री" and would propose the Chief Minister as well.
-  const titles = [...personsByDesignation.keys()].sort(
-    (a, b) => b.length - a.length,
-  );
+  const searchableText = normalizePortfolioMentions(text);
+  // Longest surface form first — rule 2. This covers both title substrings and overlapping
+  // department aliases. `title` remains the official designation emitted into the article;
+  // `mention` is only the source phrase that caused the lookup.
+  const mentions = [...personsByDesignation.keys()]
+    .flatMap((title) =>
+      designationMentionForms(title).map((mention) => ({ title, mention })),
+    )
+    .sort((a, b) => b.mention.length - a.mention.length);
 
   const taken = new Set(existing.map((name) => name.marathi.trim()));
   const suggestions: PreparedName[] = [];
@@ -139,11 +223,11 @@ export function suggestOfficeHolders(
   // rather than suppressing the shorter title outright is what keeps a note that genuinely names
   // BOTH offices from silently losing the Chief Minister. `split`/`join` matches literally, so a
   // title containing regex metacharacters needs no escaping.
-  let remaining = text;
+  let remaining = searchableText;
 
-  for (const title of titles) {
-    if (!remaining.includes(title)) continue;
-    remaining = remaining.split(title).join(' ');
+  for (const { title, mention } of mentions) {
+    if (!remaining.includes(mention)) continue;
+    remaining = remaining.split(mention).join(' ');
 
     const holders = personsByDesignation.get(title) ?? [];
     // Rule 1 — ambiguous or empty means propose nothing. Silence is the correct answer here;
@@ -487,6 +571,7 @@ if (
     ['मुख्यमंत्री', ['देवेंद्र फडणवीस']],
     ['उपमुख्यमंत्री', ['एकनाथ शिंदे', 'अजित पवार']],
     ['जिल्हाधिकारी', ['सुहास दिवसे']],
+    ['उच्च व तंत्रशिक्षण मंत्री', ['चंद्रकांत पाटील']],
   ]);
 
   console.log('\n=== the real failing case: a title with no name ===');
@@ -507,6 +592,75 @@ if (
   check(
     'marked verified + inGlossary (it came from a verified row)',
     proposed[0]?.verified === true && proposed[0]?.inGlossary === true,
+  );
+
+  console.log(
+    '\n=== a portfolio department resolves to its verified minister ===',
+  );
+  const departmentMention = suggestOfficeHolders(
+    'प्रस्ताव उच्च व तंत्रशिक्षण विभागाकडे सादर करावा.',
+    [],
+    dictionary,
+  );
+  check('department mention yields one holder', departmentMention.length === 1);
+  check(
+    'department mention yields the verified full name',
+    departmentMention[0]?.marathi === 'चंद्रकांत पाटील',
+  );
+  check(
+    'the emitted designation stays the minister title, not the department alias',
+    departmentMention[0]?.designation === 'उच्च व तंत्रशिक्षण मंत्री',
+  );
+  check(
+    'portfolio aliases include the department form',
+    designationMentionForms('उच्च व तंत्रशिक्षण मंत्री').includes(
+      'उच्च व तंत्रशिक्षण विभाग',
+    ),
+  );
+  const codeMixedDepartmentMention = suggestOfficeHolders(
+    'युनिव्हर्सिटी करत आहे म्हणून हायर अँड टेक्निकल एज्युक्लेशन कडे प्रस्ताव पाठवा.',
+    [],
+    dictionary,
+  );
+  check(
+    'code-mixed STT portfolio resolves through the verified dictionary row',
+    codeMixedDepartmentMention.length === 1 &&
+      codeMixedDepartmentMention[0]?.marathi === 'चंद्रकांत पाटील' &&
+      codeMixedDepartmentMention[0]?.designation ===
+        'उच्च व तंत्रशिक्षण मंत्री',
+  );
+  check(
+    'generic minister titles do not manufacture departments',
+    designationMentionForms('केंद्रीय मंत्री').length === 1 &&
+      designationMentionForms('राज्य मंत्री').length === 1,
+  );
+
+  console.log(
+    '\n=== a surname inside a different full name is not a second person ===',
+  );
+  const nestedPeople = dropNestedPersonRows(
+    'जी मंत्री महोदय, मी डॉक्टर हरी मुंडे, मला काही बोलायचे आहे.',
+    [
+      { marathi: 'हरी मुंडे', termType: 'person' as const },
+      { marathi: 'मुंडे', termType: 'person' as const },
+      { marathi: 'अमरावती', termType: 'place' as const },
+    ],
+  );
+  check(
+    'the unrelated one-word dictionary row is removed',
+    nestedPeople.some((term) => term.marathi === 'हरी मुंडे') &&
+      !nestedPeople.some((term) => term.marathi === 'मुंडे'),
+  );
+  const independentSurname = dropNestedPersonRows(
+    'हरी मुंडे बोलले. त्यानंतर मंत्री मुंडे यांनी आढावा घेतला.',
+    [
+      { marathi: 'हरी मुंडे', termType: 'person' as const },
+      { marathi: 'मुंडे', termType: 'person' as const },
+    ],
+  );
+  check(
+    'an independent short-name occurrence is retained for officer review',
+    independentSurname.some((term) => term.marathi === 'मुंडे'),
   );
 
   console.log('\n=== ambiguity proposes NOTHING ===');

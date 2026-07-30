@@ -1,9 +1,8 @@
 // Persistence for AI explainer-video projects (see
-// supabase/migrations/0026_video_projects.sql): a user note → per-scene script
-// (gate 1) → storyboard stills (gate 2) → Veo clips stitched into one silent
-// MP4 + SRT. Same shape and idioms as dlo-intakes.ts (camelCase rows, patch
-// updates set updated_at here); per-scene state lives in the scenes jsonb so
-// scene-shape evolution needs no migrations.
+// supabase/migrations/0026_video_projects.sql, extended by 0040): a user note
+// or exact ready narration → per-scene script (gate 1) → storyboard stills
+// (gate 2) → clips stitched into one voiced MP4 + SRT. Same shape and idioms as
+// dlo-intakes.ts; per-scene state lives in scenes jsonb.
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
@@ -18,14 +17,9 @@ export type VideoProjectStatus =
   | 'completed'
   | 'failed';
 export type VideoProjectStep =
-  | 'script'
-  | 'stills'
-  | 'animate'
-  | 'narrate'
-  | 'stitch'
-  | 'upload'
-  | 'done';
+  'script' | 'stills' | 'animate' | 'narrate' | 'stitch' | 'upload' | 'done';
 export type VideoDurationBucket = 'short' | 'long';
+export type VideoInputMode = 'note' | 'script';
 export type VideoOrientation = 'landscape' | 'vertical';
 export type VideoTier = 'fast' | 'lite' | 'standard';
 export type VideoSceneStatus =
@@ -43,6 +37,11 @@ export type VideoSceneStatus =
 export type VideoSceneEntry = Readonly<{
   narration: string;
   visualBrief: string;
+  // Duration-aware creative direction generated after narration is measured.
+  // The opening brief is what the still model sees; the motion brief is the
+  // detailed performance/camera choreography sent to the clip model.
+  openingVisualBrief?: string;
+  motionBrief?: string;
   // The end-frame description (realistic start+end interpolation flow). The
   // end frame is EDITED from the start frame so the shot's setting holds;
   // absent on legacy single-frame scenes, which animate first-frame-only.
@@ -79,16 +78,16 @@ export type VideoSceneEntry = Readonly<{
   // it to match the scene's current window (undefined = legacy clip = current),
   // so a window change can never silently desync clip and SRT.
   clipDurationSeconds?: number;
-  // Cached Sarvam-TTS narration audio (WAV) for this scene. The staleness key is
-  // (narrationAudioText, narrationAudioVoice): the audio is current only when both
-  // still match the scene's narration + the active voice, so a re-stitch reuses it
-  // without re-billing TTS, and an edited narration / changed voice regenerates it.
+  // Cached Sarvam-TTS narration audio. New projects repeat ONE shared WAV path,
+  // full joined-script staleness key and voice across every scene; that is what
+  // lets assembly distinguish continuous narration from legacy per-scene WAVs
+  // without a migration. Editing any scene invalidates the shared track.
   narrationAudioPath?: string;
   narrationAudioVersion?: number;
   narrationAudioText?: string;
   narrationAudioVoice?: string;
-  // Measured duration of the cached WAV (RIFF header, at synth time) — what
-  // the scene's durationSeconds is derived from.
+  // New continuous tracks store this scene slice's proportional share of the
+  // measured WAV for review only. Legacy rows store the scene WAV's duration.
   narrationAudioSeconds?: number;
   // Per-scene (Marathi) failure; does not sink the whole project.
   error?: string;
@@ -117,6 +116,7 @@ export type VideoProjectRow = Readonly<{
   error: string | null;
   note: string;
   heading: string | null;
+  inputMode: VideoInputMode;
   durationBucket: VideoDurationBucket;
   orientation: VideoOrientation;
   tier: VideoTier;
@@ -141,6 +141,7 @@ type VideoProjectDbRow = {
   error: string | null;
   note: string;
   heading: string | null;
+  input_mode: VideoInputMode;
   duration_bucket: VideoDurationBucket;
   orientation: VideoOrientation;
   tier: VideoTier;
@@ -166,6 +167,7 @@ function fromDbRow(row: VideoProjectDbRow): VideoProjectRow {
     error: row.error,
     note: row.note,
     heading: row.heading,
+    inputMode: row.input_mode,
     durationBucket: row.duration_bucket,
     orientation: row.orientation,
     tier: row.tier,
@@ -190,6 +192,7 @@ export async function insertVideoProject(
   input: Readonly<{
     note: string;
     heading?: string | undefined;
+    inputMode: VideoInputMode;
     durationBucket: VideoDurationBucket;
     orientation: VideoOrientation;
     tier: VideoTier;
@@ -200,6 +203,7 @@ export async function insertVideoProject(
     .insert({
       note: input.note,
       heading: input.heading ?? null,
+      input_mode: input.inputMode,
       duration_bucket: input.durationBucket,
       orientation: input.orientation,
       tier: input.tier,

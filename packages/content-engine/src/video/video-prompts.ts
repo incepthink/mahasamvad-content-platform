@@ -10,10 +10,6 @@
 
 import { pathToFileURL } from 'node:url';
 
-const NO_TEXT_RULE =
-  'No visible writing, captions, subtitles, logos or watermarks. Keep any ' +
-  'signs, papers and screens blank because verified Marathi text is added later.';
-
 const NO_TALKING_RULE =
   'Nobody speaks or addresses the camera; mouths remain naturally closed because the voiceover carries the words.';
 
@@ -27,12 +23,12 @@ const SETTING_RULE =
   'Set in Maharashtra, India, with Indian people, clothing, buildings, vehicles and public spaces that feel authentic to the location.';
 
 const WORLD_REFERENCE_RULE =
-  'An attached image comes from an earlier scene in this video. Use it only to keep the same visual world, colour treatment and production style; create the new location and action described here.';
+  'An attached image comes from an earlier scene in this video. Keep its visual world, colour treatment and production style. When the new scene uses the same recurring person or object, preserve that identity and appearance; create the new location and action described here.';
 
 export const CLIP_NEGATIVE_PROMPT =
-  'text, captions, subtitles, logos, watermark, talking, lip sync, distorted ' +
-  'anatomy, extra limbs, extra fingers, identity changes, face morphing, ' +
-  'flicker, jitter, camera shake, abrupt cuts, cartoon, illustration, 3D render, CGI look';
+  'talking, lip sync, distorted anatomy, extra limbs, extra fingers, identity ' +
+  'changes, face morphing, flicker, jitter, camera shake, abrupt cuts, cartoon, ' +
+  'illustration, 3D render, CGI look';
 
 export function buildKeyframePrompt(
   style: string,
@@ -51,7 +47,6 @@ export function buildKeyframePrompt(
     FEW_PEOPLE_RULE,
     ...(hasWorldReference ? [WORLD_REFERENCE_RULE] : []),
     NO_TALKING_RULE,
-    NO_TEXT_RULE,
   ].join('\n');
 }
 
@@ -71,13 +66,13 @@ export function buildEndFramePrompt(
     REALISM_RULE,
     FEW_PEOPLE_RULE,
     NO_TALKING_RULE,
-    NO_TEXT_RULE,
   ].join('\n');
 }
 
 const STYLE_PREFIX = 'Visual style: ';
 const OPEN_PREFIX = 'Opening scene: ';
 const END_PREFIX = 'Required final state: ';
+const MOTION_PREFIX = 'Detailed performance direction: ';
 const AVOID_PREFIX = 'Avoid all of the following';
 
 export function buildClipMotionPrompt(
@@ -85,12 +80,19 @@ export function buildClipMotionPrompt(
   visualBrief: string,
   shotHint?: string,
   endVisualBrief?: string,
+  motionBrief?: string,
 ): string {
+  const directedMotion = motionBrief?.trim().replace(/\s+/g, ' ');
   return [
     'Create one engaging, realistic live-action shot for a Government of Maharashtra explainer video.',
     SETTING_RULE,
     `${STYLE_PREFIX}${style.trim()}`,
     `${OPEN_PREFIX}${visualBrief.trim()}`,
+    ...(directedMotion
+      ? [`${MOTION_PREFIX}${directedMotion}`]
+      : [
+          'Develop the action naturally and use the available time to create meaningful subject and camera movement.',
+        ]),
     ...(endVisualBrief
       ? [
           `${END_PREFIX}${endVisualBrief.trim()}`,
@@ -110,7 +112,6 @@ export function buildClipMotionPrompt(
     'Allow realistic body movement, object movement and subtle environmental motion. Keep identities and the location coherent throughout the single shot.',
     FEW_PEOPLE_RULE,
     NO_TALKING_RULE,
-    NO_TEXT_RULE,
   ].join('\n');
 }
 
@@ -123,7 +124,7 @@ export function buildAvoidClause(negativePrompt: string): string {
 }
 
 // Keep provider-facing prompts inside the recommended character budget without
-// truncating the continuity, speech or text instructions.
+// truncating the continuity or speech instructions.
 export function fitClipPrompt(prompt: string, maxChars: number): string {
   if (prompt.length <= maxChars) return prompt;
 
@@ -137,6 +138,7 @@ export function fitClipPrompt(prompt: string, maxChars: number): string {
     [STYLE_PREFIX, 80],
     [END_PREFIX, 120],
     [OPEN_PREFIX, 120],
+    [MOTION_PREFIX, 600],
   ] as const) {
     const index = lines.findIndex((line) => line.startsWith(prefix));
     if (index === -1) continue;
@@ -158,7 +160,7 @@ export function fitClipPrompt(prompt: string, maxChars: number): string {
   console.warn(
     `[video-prompts] clip prompt is ${rendered().length} chars against a ` +
       `${maxChars} recommended budget after trimming. Sending it because the ` +
-      'remaining continuity, speech and text instructions are more important.',
+      'remaining continuity and performance instructions are more important.',
   );
   return rendered();
 }
@@ -179,12 +181,26 @@ if (
   const brief = 'A woman opens the front door of a city bus and steps aboard.';
   const endBrief = 'The bus door is fully closed after she boards.';
   const hint = 'medium tracking shot';
+  const performance =
+    'She studies the phone, her concern turns to recognition, then she relaxes into a genuine smile and nods once.';
 
   const start = buildKeyframePrompt(style, brief, hint);
   const startWithRef = buildKeyframePrompt(style, brief, hint, true);
   const end = buildEndFramePrompt(style, endBrief, hint);
-  const motion = buildClipMotionPrompt(style, brief, hint, endBrief);
-  const startOnlyMotion = buildClipMotionPrompt(style, brief, hint);
+  const motion = buildClipMotionPrompt(
+    style,
+    brief,
+    hint,
+    endBrief,
+    performance,
+  );
+  const startOnlyMotion = buildClipMotionPrompt(
+    style,
+    brief,
+    hint,
+    undefined,
+    performance,
+  );
 
   for (const [label, prompt] of [
     ['start frame', start],
@@ -198,16 +214,16 @@ if (
       `${label}: minimizes active people`,
       prompt.includes('minimum needed'),
     );
-    check(
-      `${label}: forbids model text`,
-      prompt.includes('No visible writing'),
-    );
     check(`${label}: forbids talking`, prompt.includes('Nobody speaks'));
   }
 
   check(
     'start frame: reference is conditional',
     !start.includes('earlier scene') && startWithRef.includes('earlier scene'),
+  );
+  check(
+    'start frame: recurring identity follows the reference',
+    startWithRef.includes('preserve that identity and appearance'),
   );
   check(
     'end frame: names the required destination',
@@ -220,8 +236,12 @@ if (
   check(
     'motion without end frame: gives the model freedom',
     startOnlyMotion.includes('no prescribed final frame') &&
-      startOnlyMotion.includes('meaningful subject and camera movement') &&
+      startOnlyMotion.includes(performance) &&
       !startOnlyMotion.includes(END_PREFIX),
+  );
+  check(
+    'motion prompt: carries detailed performance direction',
+    motion.includes(`${MOTION_PREFIX}${performance}`),
   );
   check(
     'motion prompt: does not freeze the scene',
@@ -246,6 +266,10 @@ if (
       CLIP_NEGATIVE_PROMPT,
     ),
   );
+  check(
+    'negative prompt: allows visible writing',
+    !/text|caption|subtitle|logo|watermark/.test(CLIP_NEGATIVE_PROMPT),
+  );
 
   const avoid = buildAvoidClause(CLIP_NEGATIVE_PROMPT);
   check('avoid clause: is an instruction', avoid.startsWith('Avoid all of'));
@@ -256,7 +280,9 @@ if (
   const fatBrief = 'B'.repeat(600);
   const fatEnd = 'E'.repeat(600);
   const fat =
-    buildClipMotionPrompt(fatStyle, fatBrief, hint, fatEnd) + '\n\n' + avoid;
+    buildClipMotionPrompt(fatStyle, fatBrief, hint, fatEnd, 'M'.repeat(2200)) +
+    '\n\n' +
+    avoid;
   const fitted = fitClipPrompt(fat, 2500);
   check('fit: worst case overflows before trimming', fat.length > 2500);
   check('fit: worst case fits after trimming', fitted.length <= 2500);
@@ -265,7 +291,6 @@ if (
     'fit: keeps the final-frame transition',
     fitted.includes('provided final frame'),
   );
-  check('fit: keeps the no-text rule', fitted.includes('No visible writing'));
   check('fit: keeps the no-talking rule', fitted.includes('Nobody speaks'));
 
   console.log(

@@ -9,7 +9,7 @@ import {
   NameDesignationsSchema,
   PreparedNameSchema,
 } from './designations.js';
-import { GenerationStatusSchema, STYLE_REFERENCE_MAX_CHARS } from './api.js';
+import { GenerationStatusSchema } from './api.js';
 
 export const DloIntakeStatusSchema = z.enum([
   'queued',
@@ -227,6 +227,9 @@ export const DloReviewDesignationExtraSchema = z.object({
 // `names` and `known` both ride on the PAID prepare call, so both are stored. `known` going
 // stale is harmless — it is only the autocomplete datalist.
 export const DloReviewDesignationsSchema = z.object({
+  // Version of the free/dictionary resolver around the paid name extraction. Old snapshots
+  // remain parseable, but the web refreshes their suggestions once when this is absent.
+  resolverVersion: z.literal(2).optional(),
   names: z.array(PreparedNameSchema),
   known: z.array(KnownDesignationSchema),
   edits: z.record(z.string(), DloReviewDesignationEditSchema),
@@ -242,7 +245,7 @@ export const DloReviewStateSchema = z.object({
   edits: z.record(z.string(), z.string()).default({}),
   excluded: z.array(z.string()).default([]),
   // Pasted style reference. Unlike category/heading this has no column of its own.
-  styleReference: z.string().max(STYLE_REFERENCE_MAX_CHARS).optional(),
+  styleReference: z.string().optional(),
   pointers: DloReviewPointersSchema.optional(),
   designations: DloReviewDesignationsSchema.optional(),
   // Who wrote this and when. The intake list is shared and there is no auth, so two people can
@@ -432,8 +435,9 @@ export const DloGenerateRequestSchema = z.object({
   designations: NameDesignationsSchema.optional(),
   // A published article the officer pasted as the STYLE reference — tier 1 of the simplified
   // generator's reference hierarchy (see CreateGenerationRequestSchema.styleReference). Style
-  // and structure only; never a factual source. Absent/empty ⇒ retrieval, then no reference.
-  styleReference: z.string().trim().max(STYLE_REFERENCE_MAX_CHARS).optional(),
+  // and structure only; never a factual source. Absent/empty ⇒ semantic retrieval, then any
+  // available article from the requested news/scheme style category.
+  styleReference: z.string().trim().optional(),
 });
 export type DloGenerateRequest = z.infer<typeof DloGenerateRequestSchema>;
 

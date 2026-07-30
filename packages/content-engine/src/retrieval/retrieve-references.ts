@@ -20,7 +20,9 @@ import { pathToFileURL } from 'node:url';
 import {
   createServiceRoleClient,
   fetchArticleChunks,
+  fetchCategoryArticleCandidates,
   matchChunks,
+  type CategoryArticleCandidateRow,
   type MatchRow,
 } from '@dgipr/database';
 import { embedTexts } from '../embedding/openai-embeddings.js';
@@ -50,7 +52,10 @@ function buildAngleWeightedQuery(
   const trimmedAngle = angle?.trim();
   if (!trimmedAngle) return query;
 
-  const emphasis = Array.from({ length: ANGLE_QUERY_REPEAT }, () => trimmedAngle).join('\n');
+  const emphasis = Array.from(
+    { length: ANGLE_QUERY_REPEAT },
+    () => trimmedAngle,
+  ).join('\n');
   return `${emphasis}\n\n${query}`;
 }
 
@@ -86,6 +91,22 @@ const NEWS_DIRECTIVE_STYLE_MARKERS = [
   'प्रलंबित',
   'नमूद केले',
   'स्पष्ट केले',
+];
+
+const NEWS_MEETING_STYLE_MARKERS = [
+  'बैठक',
+  'बैठकीत',
+  'अध्यक्षतेखाली',
+  'उपस्थित होते',
+  'सादरीकरण',
+  'यावेळी',
+];
+
+const NEWS_PROPOSAL_STYLE_MARKERS = [
+  'प्रस्ताव सादर',
+  'सविस्तर प्रस्ताव',
+  'सर्वसमावेशक प्रस्ताव',
+  'प्रस्ताव तयार',
 ];
 
 // Scheme features often place the minister/senior official's statement in the body rather
@@ -131,6 +152,98 @@ export type ReferenceArticle = Readonly<{
   text: string;
 }>;
 
+// A complete article chosen without semantic matching. This is the timeout/empty-result
+// fallback for article generation, so it deliberately carries no invented similarity score.
+export type CategoryReferenceArticle = Readonly<{
+  articleId: number;
+  title: string;
+  url: string;
+  text: string;
+}>;
+
+const FALLBACK_TOKEN_STOP_WORDS = new Set([
+  'आहे',
+  'आहेत',
+  'असून',
+  'आणि',
+  'यांनी',
+  'यावेळी',
+  'करण्यात',
+  'करावे',
+  'करून',
+  'याबाबत',
+  'यासाठी',
+  'तसेच',
+  'माहिती',
+  'सांगितले',
+  'विभाग',
+]);
+
+function lexicalTokens(text: string): Set<string> {
+  const words =
+    normalizeText(text)
+      .toLocaleLowerCase('mr')
+      .match(/[\p{L}\p{M}\p{N}]+/gu) ?? [];
+  return new Set(
+    words.filter(
+      (word) => word.length >= 4 && !FALLBACK_TOKEN_STOP_WORDS.has(word),
+    ),
+  );
+}
+
+function lexicalOverlapScore(query: string, candidate: string): number {
+  const wanted = lexicalTokens(query);
+  const available = lexicalTokens(candidate);
+  let overlap = 0;
+  for (const token of available) {
+    if (wanted.has(token)) overlap += 1;
+  }
+  return Math.min(overlap, 12) * 0.012;
+}
+
+export function rankCategoryReferenceCandidates(
+  candidates: readonly CategoryArticleCandidateRow[],
+  category: ArticleCategory,
+  query = '',
+  preferAttribution = false,
+): CategoryArticleCandidateRow[] {
+  const wanted = detectNewsReferenceShape(query);
+  const wantsNewsShape =
+    category === 'news' &&
+    (wanted.meeting || wanted.directive || wanted.proposal);
+
+  const scored = candidates.map((candidate) => {
+    const searchableText = `${candidate.title}\n${candidate.text}`;
+    const found = detectNewsReferenceShape(searchableText);
+    const compatible =
+      !wantsNewsShape ||
+      (wanted.meeting && found.meeting) ||
+      (wanted.directive && found.directive) ||
+      (wanted.proposal && found.proposal);
+    const structure =
+      category === 'news'
+        ? newsStructureScore(searchableText, wanted, preferAttribution)
+        : 0;
+    return {
+      candidate,
+      compatible,
+      score: structure + lexicalOverlapScore(query, searchableText),
+    };
+  });
+
+  const compatible = scored.filter((entry) => entry.compatible);
+  const pool = compatible.length > 0 ? compatible : scored;
+  return pool
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return (
+        Date.parse(b.candidate.publishedTime ?? '') -
+        Date.parse(a.candidate.publishedTime ?? '')
+      );
+    })
+    .map((entry) => entry.candidate);
+}
+
 // DGIPR's own end-of-copy sign-off: a rule of asterisks, then the writer/desk credit
 // ("संध्या गरवारे/विसंअ/"). It is production boilerplate, not editorial style, and an exemplar
 // that ends in a byline invites the model to sign a fabricated one onto the new article. Strip
@@ -152,10 +265,53 @@ function countMarkers(text: string, markers: readonly string[]): number {
   }, 0);
 }
 
+type NewsReferenceShape = Readonly<{
+  meeting: boolean;
+  directive: boolean;
+  proposal: boolean;
+}>;
+
+export function detectNewsReferenceShape(text: string): NewsReferenceShape {
+  return {
+    meeting: countMarkers(text, NEWS_MEETING_STYLE_MARKERS) > 0,
+    directive: countMarkers(text, NEWS_DIRECTIVE_STYLE_MARKERS) > 0,
+    proposal: countMarkers(text, NEWS_PROPOSAL_STYLE_MARKERS) > 0,
+  };
+}
+
+function newsStructureScore(
+  text: string,
+  wanted: NewsReferenceShape,
+  preferAttribution: boolean,
+): number {
+  const meetingHits = countMarkers(text, NEWS_MEETING_STYLE_MARKERS);
+  const directiveHits = countMarkers(text, NEWS_DIRECTIVE_STYLE_MARKERS);
+  const proposalHits = countMarkers(text, NEWS_PROPOSAL_STYLE_MARKERS);
+  const attributionHits = preferAttribution
+    ? countMarkers(text, SCHEME_ATTRIBUTION_STYLE_MARKERS)
+    : 0;
+  const schemeNoticeHits = countMarkers(text, NEWS_SCHEME_NOTICE_MARKERS);
+
+  let score = 0;
+  if (wanted.meeting)
+    score += meetingHits > 0 ? 0.09 + Math.min(meetingHits, 4) * 0.012 : -0.06;
+  if (wanted.directive)
+    score +=
+      directiveHits > 0 ? 0.07 + Math.min(directiveHits, 6) * 0.012 : -0.04;
+  if (wanted.proposal)
+    score +=
+      proposalHits > 0 ? 0.12 + Math.min(proposalHits, 3) * 0.015 : -0.05;
+  if (!wanted.directive) score += Math.min(directiveHits, 4) * 0.008;
+  score += Math.min(attributionHits, 4) * 0.012;
+  score -= Math.min(schemeNoticeHits, 5) * 0.01;
+  return score;
+}
+
 function scoreReferenceCandidate(
   match: MatchRow,
   category: ArticleCategory | null,
   preferAttribution = false,
+  query = '',
 ): number {
   let score = match.similarity;
 
@@ -172,24 +328,11 @@ function scoreReferenceCandidate(
 
   if (category !== 'news') return score;
 
-  const directiveHits = countMarkers(
+  score += newsStructureScore(
     searchableText,
-    NEWS_DIRECTIVE_STYLE_MARKERS,
+    detectNewsReferenceShape(query),
+    preferAttribution,
   );
-  const attributionHits = preferAttribution
-    ? countMarkers(searchableText, SCHEME_ATTRIBUTION_STYLE_MARKERS)
-    : 0;
-  const schemeNoticeHits = countMarkers(
-    searchableText,
-    NEWS_SCHEME_NOTICE_MARKERS,
-  );
-
-  // Keep similarity as the base, but nudge news selection toward directive/report
-  // shape and away from scheme-benefit notice shape. The weights are deliberately
-  // small so a clearly relevant article still wins.
-  score += Math.min(directiveHits, 6) * 0.015;
-  score += Math.min(attributionHits, 4) * 0.012;
-  score -= Math.min(schemeNoticeHits, 5) * 0.01;
 
   return score;
 }
@@ -198,6 +341,7 @@ function pickBestMatch(
   matches: MatchRow[],
   category: ArticleCategory | null,
   preferAttribution = false,
+  query = '',
 ): MatchRow | null {
   if (matches.length === 0) return null;
 
@@ -208,8 +352,8 @@ function pickBestMatch(
   return (
     [...matches].sort((a, b) => {
       return (
-        scoreReferenceCandidate(b, category, preferAttribution) -
-        scoreReferenceCandidate(a, category, preferAttribution)
+        scoreReferenceCandidate(b, category, preferAttribution, query) -
+        scoreReferenceCandidate(a, category, preferAttribution, query)
       );
     })[0] ?? null
   );
@@ -255,7 +399,7 @@ export async function retrieveReferenceArticle(
     category,
   );
 
-  const best = pickBestMatch(matches, category, preferAttribution);
+  const best = pickBestMatch(matches, category, preferAttribution, query);
   if (!best) return null;
 
   const client = createServiceRoleClient();
@@ -271,8 +415,11 @@ export async function retrieveReferenceArticle(
       best,
       category,
       preferAttribution,
+      query,
     ),
-    text: stripArticleBoilerplate(chunks.map((chunk) => chunk.text).join('\n\n')),
+    text: stripArticleBoilerplate(
+      chunks.map((chunk) => chunk.text).join('\n\n'),
+    ),
   };
 }
 
@@ -307,7 +454,12 @@ export async function retrieveReferenceArticles(
   // variety this function exists to provide.
   const bestPerArticle = new Map<number, { match: MatchRow; score: number }>();
   for (const match of matches) {
-    const score = scoreReferenceCandidate(match, category, preferAttribution);
+    const score = scoreReferenceCandidate(
+      match,
+      category,
+      preferAttribution,
+      query,
+    );
     const seen = bestPerArticle.get(match.articleId);
     if (!seen || score > seen.score) {
       bestPerArticle.set(match.articleId, { match, score });
@@ -336,7 +488,62 @@ export async function retrieveReferenceArticles(
     }),
   );
 
-  return articles.filter((article): article is ReferenceArticle => article !== null);
+  return articles.filter(
+    (article): article is ReferenceArticle => article !== null,
+  );
+}
+
+// Cheap, non-vector fallback: choose recent complete articles from the requested style bucket.
+// This path exists specifically for vector-RPC timeouts and empty/weak result sets, so it must
+// never call embedTexts or match_mahasamvad_chunks.
+export async function retrieveCategoryReferenceArticles(
+  category: ArticleCategory,
+  count = 6,
+  query = '',
+  preferAttribution = false,
+): Promise<CategoryReferenceArticle[]> {
+  if (count <= 0) return [];
+
+  const client = createServiceRoleClient();
+  const candidates = await fetchCategoryArticleCandidates(
+    client,
+    category,
+    Math.max(count * 16, 48),
+  );
+  const ranked = rankCategoryReferenceCandidates(
+    candidates,
+    category,
+    query,
+    preferAttribution,
+  ).slice(0, count);
+  const articles = await Promise.all(
+    ranked.map(async (candidate): Promise<CategoryReferenceArticle | null> => {
+      try {
+        const chunks = await fetchArticleChunks(client, candidate.articleId);
+        if (chunks.length === 0) return null;
+        const text = stripArticleBoilerplate(
+          chunks.map((chunk) => chunk.text).join('\n\n'),
+        );
+        if (!text.trim()) return null;
+        return {
+          articleId: candidate.articleId,
+          title: candidate.title,
+          url: candidate.url,
+          text,
+        };
+      } catch (error) {
+        console.warn(
+          `[style-ref] category candidate ${candidate.articleId} could not be reconstructed:`,
+          error,
+        );
+        return null;
+      }
+    }),
+  );
+
+  return articles.filter(
+    (article): article is CategoryReferenceArticle => article !== null,
+  );
 }
 
 // Run directly:
@@ -392,13 +599,53 @@ if (
     'an asterisk INSIDE a paragraph is not treated as a rule',
     stripArticleBoilerplate('पहिला * दुसरा') === 'पहिला * दुसरा',
   );
-  check(
-    'empty input stays empty',
-    stripArticleBoilerplate('') === '',
-  );
+  check('empty input stays empty', stripArticleBoilerplate('') === '');
   check(
     'a sign-off with no credit line is still removed',
     stripArticleBoilerplate(`${body}\n****`) === body,
+  );
+
+  console.log('\n=== category fallback follows the source article shape ===');
+  const fallbackCandidates: CategoryArticleCandidateRow[] = [
+    {
+      articleId: 1,
+      title: 'मुंबईतील परिस्थिती पूर्णपणे नियंत्रणात',
+      url: 'https://example.test/1',
+      text: 'नागरिकांनी सहकार्य करावे, असे आवाहन करण्यात आले.',
+      publishedTime: '2026-07-07T00:00:00Z',
+    },
+    {
+      articleId: 2,
+      title:
+        'कर्जवाटप प्रक्रियेत पतसंस्थांचा समावेश करण्यासाठी प्रस्ताव सादर करा – राज्यमंत्री',
+      url: 'https://example.test/2',
+      text: 'या विषयावरील बैठकीत सर्वसमावेशक प्रस्ताव सादर करण्याचे निर्देश राज्यमंत्र्यांनी दिले.',
+      publishedTime: '2026-07-06T00:00:00Z',
+    },
+    {
+      articleId: 3,
+      title: 'योजनेच्या लाभासाठी ऑनलाइन अर्ज करा',
+      url: 'https://example.test/3',
+      text: 'पात्र लाभार्थ्यांनी कागदपत्रांसह पोर्टलवर अर्ज करावा.',
+      publishedTime: '2026-07-08T00:00:00Z',
+    },
+  ];
+  const rankedFallback = rankCategoryReferenceCandidates(
+    fallbackCandidates,
+    'news',
+    'बैठकीत केंद्र स्थापनेसाठी सविस्तर प्रस्ताव सादर करण्याचे निर्देश दिले.',
+    true,
+  );
+  check(
+    'a meeting/proposal/directive article beats a newer generic article',
+    rankedFallback[0]?.articleId === 2,
+  );
+  const shape = detectNewsReferenceShape(
+    'बैठकीत सविस्तर प्रस्ताव सादर करण्याचे निर्देश दिले.',
+  );
+  check(
+    'meeting, proposal and directive intent are all detected',
+    shape.meeting && shape.proposal && shape.directive,
   );
 
   if (failures > 0) {

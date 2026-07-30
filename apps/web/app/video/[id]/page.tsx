@@ -39,6 +39,7 @@ import { useVideoProject } from '../../../lib/useVideoProject';
 import {
   formatCost,
   videoNarrationTotal,
+  videoReadyScriptEstimate,
   STR,
   VIDEO_STEP_LABELS,
 } from '../../../lib/strings';
@@ -46,13 +47,13 @@ import { VideoSceneCard } from '../../../components/VideoSceneCard';
 import { VideoStatusChip } from '../../../components/VideoStatusChip';
 import { VideoResultView } from '../../../components/VideoResultView';
 
-// No durationSeconds: clip windows are server-assigned — DERIVED from each
-// scene's measured narration audio — never hand-picked. Editing the narration
-// here is how a scene's length changes.
 type SceneDraft = {
   narration: string;
   visualBrief: string;
   endVisualBrief: string;
+  // The planned visual window the script writer saw. It is shown for review;
+  // the continuous voice phase normalises the complete timeline after edits.
+  durationSeconds: number;
   // The on-screen Marathi line. Blank is a real answer meaning "no overlay on
   // this scene", so it is stored as '' rather than undefined.
   keyPoint: string;
@@ -65,6 +66,7 @@ function draftsFrom(scenes: readonly VideoScene[]): SceneDraft[] {
     visualBrief: scene.visualBrief,
     endVisualBrief: scene.endVisualBrief ?? '',
     keyPoint: scene.keyPoint ?? '',
+    durationSeconds: scene.durationSeconds,
     beat: scene.beat,
   }));
 }
@@ -214,12 +216,13 @@ export default function VideoProjectPage({
   // Gate-1 budget line: what the edited drafts are estimated to speak, against
   // the project's selected total. Estimated from characters, so it is a guide,
   // not a verdict — the storyboard job measures the real WAVs.
-  const narrationTarget = VIDEO_TOTAL_SECONDS[detail.durationBucket];
   const totalNarrationSeconds = (drafts ?? []).reduce(
     (sum, draft) => sum + estimateNarrationSeconds(draft.narration),
     0,
   );
+  const narrationTarget = VIDEO_TOTAL_SECONDS[detail.durationBucket];
   const narrationOverBudget =
+    detail.inputMode === 'note' &&
     totalNarrationSeconds > narrationTarget * VIDEO_TOTAL_FIT_TOLERANCE;
   // A scene that declared an end frame must have rendered it too — animate
   // would otherwise buy a clip whose reviewed ending never existed.
@@ -259,7 +262,10 @@ export default function VideoProjectPage({
 
   const redrawStill = (index: number, brief: string) =>
     act(() =>
-      regenerateVideoStill(id, index, { frame: 'start', visualBrief: brief }),
+      regenerateVideoStill(id, index, {
+        frame: 'start',
+        openingVisualBrief: brief,
+      }),
     );
 
   const redrawEndStill = (index: number, endBrief: string) =>
@@ -315,26 +321,24 @@ export default function VideoProjectPage({
                 visualBrief: draft.visualBrief,
                 endVisualBrief: draft.endVisualBrief,
                 keyPoint: draft.keyPoint,
-                // Provisional, from this draft's own narration — the same
-                // derivation the server applies to the MEASURED audio, so the
-                // number the officer sees while editing is the one they get.
-                durationSeconds: clipSecondsForNarration(
-                  estimateNarrationSeconds(draft.narration),
-                ),
+                durationSeconds: draft.durationSeconds,
                 status: 'pending',
                 ...(draft.beat !== undefined ? { beat: draft.beat } : {}),
               }}
               mode="edit"
               busy={busy}
-              onNarrationChange={(value) =>
-                setDrafts((prev) =>
-                  prev
-                    ? prev.map((d, i) =>
-                        i === index ? { ...d, narration: value } : d,
-                      )
-                    : prev,
-                )
-              }
+              {...(detail.inputMode === 'note'
+                ? {
+                    onNarrationChange: (value: string) =>
+                      setDrafts((prev) =>
+                        prev
+                          ? prev.map((d, i) =>
+                              i === index ? { ...d, narration: value } : d,
+                            )
+                          : prev,
+                      ),
+                  }
+                : {})}
               onBriefChange={(value) =>
                 setDrafts((prev) =>
                   prev
@@ -363,7 +367,7 @@ export default function VideoProjectPage({
                 )
               }
               onRemove={
-                drafts.length > bounds.min
+                detail.inputMode === 'note' && drafts.length > bounds.min
                   ? () =>
                       setDrafts((prev) =>
                         prev ? prev.filter((_, i) => i !== index) : prev,
@@ -374,7 +378,7 @@ export default function VideoProjectPage({
           ))}
           <section className="card">
             <div className="btn-row">
-              {drafts.length < bounds.max ? (
+              {detail.inputMode === 'note' && drafts.length < bounds.max ? (
                 <button
                   type="button"
                   className="btn"
@@ -389,6 +393,7 @@ export default function VideoProjectPage({
                               visualBrief: '',
                               endVisualBrief: '',
                               keyPoint: '',
+                              durationSeconds: clipSecondsForNarration(0),
                             },
                           ]
                         : prev,
@@ -423,7 +428,12 @@ export default function VideoProjectPage({
               className={narrationOverBudget ? 'form-error' : 'hint'}
               style={{ marginTop: 8 }}
             >
-              {videoNarrationTotal(totalNarrationSeconds, narrationTarget)}
+              {detail.inputMode === 'script'
+                ? `${STR.videoScriptEstimateLabel}: ${videoReadyScriptEstimate(
+                    totalNarrationSeconds,
+                    drafts.length,
+                  )}`
+                : videoNarrationTotal(totalNarrationSeconds, narrationTarget)}
               {narrationOverBudget ? ` ${STR.videoNarrationTotalOver}` : ''}
             </p>
             <p className="hint" style={{ marginTop: 8 }}>

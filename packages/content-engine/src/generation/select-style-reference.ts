@@ -1,44 +1,36 @@
 // Which article the simplified generator studies for STYLE. One seam, three tiers:
 //
 //   1. an article the officer explicitly pasted for this run,
-//   2. otherwise the closest historical Mahasamvad article from the vector store — but only
-//      if it is actually close,
-//   3. otherwise nothing: the runtime prompt's own DGIPR rules are the complete style guide.
+//   2. otherwise close historical Mahasamvad articles from the vector store,
+//   3. otherwise any non-empty article from the requested style category.
 //
 // Two things here are deliberate and load-bearing.
 //
-// THE SIMILARITY FLOOR. Retrieval had no threshold anywhere: pickBestMatch returns the argmax
-// unconditionally, so whenever the corpus held nothing relevant an unrelated article still
-// became the exemplar. That is worse than no exemplar — the model is told to follow its
-// structure and terminology, so an off-topic reference actively drags the article off shape.
-// The floor is env-tunable BECAUSE it must be calibrated against the live corpus rather than
-// guessed: `pnpm --filter @dgipr/content-engine retrieve:test` prints per-chunk similarity, and
-// every run records what it used in generations.style_reference_meta, so the distribution is
-// observable in production and the number can be tightened without a deploy.
+// THE SIMILARITY FLOOR still separates a semantic match from a category fallback, so telemetry
+// can tell which path actually worked. It no longer means "no exemplar": if matching times out,
+// returns nothing or yields only weak candidates, a cheap non-vector query supplies real
+// Mahasamvad articles from the requested style bucket.
 //
 // THE WHOLE ARTICLE, NOT A HEAD SLICE. The old pipeline passed `reference.text.slice(0, 1500)`.
 // The specification asks the model to study paragraph sequencing and how the piece CONCLUDES —
 // both of which a head truncation removes, leaving the reference able to demonstrate only an
-// opening. Input tokens are cheap; the cap here exists to bound a pathological row, not to
-// shape the reference.
+// opening. There is no application-imposed character limit or category-length bound.
 //
 // This function is also the extension point for the future learning loop: an "approved
 // source → officer-final article" tier slots in between 1 and 2, matched on the SOURCE
 // embedding, with no change to the generator that calls this.
 
-import {
-  ARTICLE_WORD_TARGETS,
-  STYLE_REFERENCE_MAX_CHARS,
-  STYLE_REFERENCE_MIN_CHARS,
-} from '@dgipr/schemas';
 import { pathToFileURL } from 'node:url';
 import {
+  retrieveCategoryReferenceArticles,
   retrieveReferenceArticles,
+  type CategoryReferenceArticle,
   type ReferenceArticle,
 } from '../retrieval/retrieve-references.js';
 import type { ArticleCategory } from './category-prompt.js';
 
-export type StyleReferenceSource = 'officer' | 'retrieval' | 'none';
+export type StyleReferenceSource =
+  'officer' | 'retrieval' | 'category_fallback' | 'none';
 
 // One complete exemplar as the prompt receives it. `title` is the article's own HEADLINE and
 // is load-bearing, not metadata: the specification tells the model to study "headline
@@ -107,28 +99,23 @@ export function styleReferenceCount(): number {
     : DEFAULT_ARTICLE_COUNT;
 }
 
-// A paste shorter than this is a fragment, not an article: too little to demonstrate structure,
-// and far more likely to be a stray line or an accidental keystroke than an intentional
-// reference. Such input falls through to retrieval rather than being honoured as tier 1 —
-// silently ignoring it would be worse, so the caller logs the fall-through.
 export function acceptOfficerReference(
   raw: string | null | undefined,
 ): StyleReference | null {
   const text = (raw ?? '').trim();
-  if (text.length < STYLE_REFERENCE_MIN_CHARS) return null;
-  const clipped = text.slice(0, STYLE_REFERENCE_MAX_CHARS);
+  if (!text) return null;
   return {
     source: 'officer',
-    text: clipped,
+    text,
     title: null,
     url: null,
     articleId: null,
     similarity: null,
-    chars: clipped.length,
+    chars: text.length,
     // The officer pasted a whole article, headline and all, so there is no separate title to
     // carry — and no second exemplar: their explicit choice is the reference, not one vote in
     // a rotation.
-    articles: [{ title: null, text: clipped }],
+    articles: [{ title: null, text }],
   };
 }
 
@@ -142,23 +129,13 @@ export function acceptOfficerReference(
 export function acceptRetrievedReferences(
   references: readonly ReferenceArticle[] | null,
   minSimilarity: number,
-  // Genre bound — see styleReferenceMaxChars. Omitted ⇒ length is not checked at all (an
-  // over-long article is still CLIPPED to STYLE_REFERENCE_MAX_CHARS below, as it always was),
-  // which is what the single-article back-compat wrapper and the offline harness want.
-  maxChars = Number.POSITIVE_INFINITY,
 ): StyleReference | null {
   const usable = (references ?? [])
     .map((reference) => ({ reference, text: reference.text.trim() }))
     .filter(
       ({ reference, text }) =>
-        text.length > 0 &&
-        text.length <= maxChars &&
-        reference.similarity >= minSimilarity,
-    )
-    .map(({ reference, text }) => ({
-      reference,
-      text: text.slice(0, STYLE_REFERENCE_MAX_CHARS),
-    }));
+        text.length > 0 && reference.similarity >= minSimilarity,
+    );
 
   const primary = usable[0];
   if (!primary) return null;
@@ -187,23 +164,45 @@ export function acceptRetrievedReference(
   return acceptRetrievedReferences(reference ? [reference] : [], minSimilarity);
 }
 
-// A style exemplar must be the same GENRE as the article being written, and length is the
-// cheapest reliable proxy for genre in this corpus. A real retrieval for a Pune transport note
-// ranked a 12,550-character "विधानसभा लक्षवेधी" — a legislative question-and-answer document,
-// ~1,700 words — above the 835-character news report that actually demonstrated the house
-// pattern. Telling the model to copy that document's "paragraph sequencing and how it concludes"
-// is worse than giving it nothing, and it matters MORE now that the specification is short and
-// the references carry the style.
-//
-// Marathi averages roughly 6.5 characters per word in this corpus; the ×2 tolerance keeps a
-// legitimately detailed article while excluding a different kind of document altogether.
-const CHARS_PER_WORD = 6.5;
-const LENGTH_TOLERANCE = 2;
+type CategoryFallbackCandidate = Readonly<{
+  articleId: number;
+  title: string;
+  url: string;
+  text: string;
+  similarity?: number | null;
+}>;
 
-export function styleReferenceMaxChars(category: ArticleCategory): number {
-  return Math.round(
-    ARTICLE_WORD_TARGETS[category].max * CHARS_PER_WORD * LENGTH_TOLERANCE,
-  );
+// Turn weak semantic candidates or non-vector category candidates into prompt exemplars.
+// Similarity is retained only when it was genuinely measured; direct category picks report
+// null instead of fabricating a score.
+export function acceptCategoryFallbackReferences(
+  references: readonly (ReferenceArticle | CategoryReferenceArticle)[] | null,
+  count = DEFAULT_ARTICLE_COUNT,
+): StyleReference | null {
+  const usable = (references ?? [])
+    .map((reference) => ({
+      reference: reference as CategoryFallbackCandidate,
+      text: reference.text.trim(),
+    }))
+    .filter(({ text }) => text.length > 0)
+    .slice(0, count);
+
+  const primary = usable[0];
+  if (!primary) return null;
+
+  return {
+    source: 'category_fallback',
+    text: primary.text,
+    title: primary.reference.title,
+    url: primary.reference.url,
+    articleId: primary.reference.articleId,
+    similarity: primary.reference.similarity ?? null,
+    chars: primary.text.length,
+    articles: usable.map(({ reference, text }) => ({
+      title: reference.title,
+      text,
+    })),
+  };
 }
 
 export type SelectStyleReferenceInput = Readonly<{
@@ -230,15 +229,7 @@ export async function selectStyleReference(
     );
     return officer;
   }
-  if ((input.officerReference ?? '').trim().length > 0) {
-    console.log(
-      `[style-ref] officer reference too short (< ${STYLE_REFERENCE_MIN_CHARS} chars); falling through to retrieval`,
-    );
-  }
-
-  // Tier 2 — the closest historical Mahasamvad article, if it is genuinely close. Retrieval
-  // failure is not fatal: a missing style reference produces a DGIPR-styled article from the
-  // prompt's own rules, which is tier 3 and a perfectly good outcome.
+  // Tier 2 — the closest historical Mahasamvad articles, if they are genuinely close.
   const floor = styleReferenceMinSimilarity();
   let retrieved: ReferenceArticle[] = [];
   try {
@@ -251,38 +242,55 @@ export async function selectStyleReference(
     );
   } catch (error) {
     console.warn(
-      '[style-ref] retrieval failed; continuing without a style reference:',
+      '[style-ref] semantic retrieval failed; trying category fallback:',
       error,
     );
-    return NO_STYLE_REFERENCE;
   }
 
-  const maxChars = styleReferenceMaxChars(input.category);
-  const accepted = acceptRetrievedReferences(retrieved, floor, maxChars);
+  const accepted = acceptRetrievedReferences(retrieved, floor);
   if (accepted) {
     const dropped = retrieved.length - accepted.articles.length;
     console.log(
       `[style-ref] tier 2: ${accepted.articles.length} exemplar(s), primary "${accepted.title}" ` +
-        `similarity=${accepted.similarity?.toFixed(3)} (floor ${floor}, max ${maxChars} chars` +
+        `similarity=${accepted.similarity?.toFixed(3)} (floor ${floor}` +
         `${dropped > 0 ? `, ${dropped} dropped` : ''}) ` +
         `${accepted.articles.reduce((sum, a) => sum + a.text.length, 0)} chars total`,
     );
     return accepted;
   }
 
-  // Tier 3 — say WHY, so a corpus gap looks like a corpus gap rather than a silent behaviour
-  // change. This log plus style_reference_meta is how the floor gets calibrated.
-  const best = retrieved[0];
-  if (best) {
-    console.log(
-      `[style-ref] tier 3: best match "${best.title}" similarity=${best.similarity.toFixed(3)} ` +
-        `is below the floor ${floor}; generating with no style reference`,
+  // Tier 3 — the vector RPC timed out/returned nothing, or every semantic candidate missed the
+  // floor. Do NOT promote those weak candidates merely because they exist: the larger indexed
+  // fallback pool is ranked by meeting/proposal/directive shape and is safer than an off-topic
+  // low-similarity article.
+  let categoryCandidates: CategoryReferenceArticle[] = [];
+  try {
+    categoryCandidates = await retrieveCategoryReferenceArticles(
+      input.category,
+      Math.max(styleReferenceCount() * 2, 6),
+      input.note,
+      input.preferAttribution ?? false,
     );
-  } else {
-    console.log(
-      '[style-ref] tier 3: retrieval returned nothing; generating with no style reference',
-    );
+  } catch (error) {
+    console.warn('[style-ref] category fallback lookup failed:', error);
+    return NO_STYLE_REFERENCE;
   }
+
+  const categoryFallback = acceptCategoryFallbackReferences(
+    categoryCandidates,
+    styleReferenceCount(),
+  );
+  if (categoryFallback) {
+    console.log(
+      `[style-ref] tier 3: using ${categoryFallback.articles.length} available ` +
+        `${input.category} category fallback(s), primary "${categoryFallback.title}"`,
+    );
+    return categoryFallback;
+  }
+
+  console.warn(
+    `[style-ref] no non-empty ${input.category} reference exists; generating without one`,
+  );
   return NO_STYLE_REFERENCE;
 }
 
@@ -320,7 +328,7 @@ if (
   });
 
   console.log('\n=== tier 1: the officer paste ===');
-  const longPaste = 'ल'.repeat(STYLE_REFERENCE_MIN_CHARS + 50);
+  const longPaste = 'ल'.repeat(25_000);
   check(
     'a real paste is accepted',
     acceptOfficerReference(longPaste)?.source === 'officer',
@@ -336,13 +344,12 @@ if (
     acceptOfficerReference('   \n  ') === null,
   );
   check(
-    'a fragment below the minimum falls through',
-    acceptOfficerReference('ल'.repeat(STYLE_REFERENCE_MIN_CHARS - 1)) === null,
+    'a one-character reference is accepted',
+    acceptOfficerReference('ल')?.chars === 1,
   );
   check(
-    'an over-long paste is clipped to the cap',
-    acceptOfficerReference('ल'.repeat(STYLE_REFERENCE_MAX_CHARS + 500))
-      ?.chars === STYLE_REFERENCE_MAX_CHARS,
+    'a long pasted reference is preserved without clipping',
+    acceptOfficerReference(longPaste)?.chars === 25_000,
   );
 
   console.log('\n=== tier 2: the similarity floor ===');
@@ -387,11 +394,9 @@ if (
     acceptRetrievedReference(article(0.5), 0.35)?.chars === 3000,
   );
   check(
-    'an absurdly long article is still bounded by the cap',
-    acceptRetrievedReference(
-      article(0.5, 'क'.repeat(STYLE_REFERENCE_MAX_CHARS + 1000)),
-      0.35,
-    )?.chars === STYLE_REFERENCE_MAX_CHARS,
+    'a long retrieved article is preserved without clipping',
+    acceptRetrievedReference(article(0.5, 'क'.repeat(25_000)), 0.35)?.chars ===
+      25_000,
   );
 
   console.log('\n=== every exemplar carries its HEADLINE ===');
@@ -452,65 +457,108 @@ if (
     'an all-weak list is rejected outright',
     acceptRetrievedReferences(three, 0.9) === null,
   );
-  check('an empty list is rejected', acceptRetrievedReferences([], 0.35) === null);
+  check(
+    'an empty list is rejected',
+    acceptRetrievedReferences([], 0.35) === null,
+  );
   check('null is rejected', acceptRetrievedReferences(null, 0.35) === null);
   check(
     'a blank-text leader does not sink the whole list',
     (() => {
       const accepted = acceptRetrievedReferences(
-        [article(0.8, '   ', 9, 'रिकामे'), article(0.5, 'खरा मजकूर', 2, 'दुसरे')],
+        [
+          article(0.8, '   ', 9, 'रिकामे'),
+          article(0.5, 'खरा मजकूर', 2, 'दुसरे'),
+        ],
         0.35,
       );
       return accepted?.articles.length === 1 && accepted.title === 'दुसरे';
     })(),
   );
 
-  console.log('\n=== a wrong-GENRE exemplar is excluded by length ===');
-  check(
-    'news bounds an exemplar at 450 words x 6.5 x 2 chars',
-    styleReferenceMaxChars('news') === 5850,
+  console.log(
+    '\n=== weak/category candidates fall back instead of disappearing ===',
   );
   check(
-    'scheme allows a longer exemplar than news',
-    styleReferenceMaxChars('scheme') > styleReferenceMaxChars('news'),
-  );
-  check(
-    'the real 12,550-char विधानसभा लक्षवेधी is rejected for a news run',
-    acceptRetrievedReferences(
-      [article(0.465, 'क'.repeat(12_550), 7, 'विधानसभा लक्षवेधी')],
-      0.35,
-      styleReferenceMaxChars('news'),
-    ) === null,
-  );
-  check(
-    'the real 835-char news report beside it is kept',
+    'weak semantic candidates become a category fallback',
     (() => {
-      const accepted = acceptRetrievedReferences(
-        [
-          article(0.465, 'क'.repeat(12_550), 7, 'विधानसभा लक्षवेधी'),
-          article(0.442, 'क'.repeat(835), 8, 'पुणे रिंग रोडचे काम मुदतीत पूर्ण होणार –'),
-        ],
-        0.35,
-        styleReferenceMaxChars('news'),
-      );
+      const accepted = acceptCategoryFallbackReferences(three, 3);
       return (
-        accepted?.articles.length === 1 &&
-        accepted.title === 'पुणे रिंग रोडचे काम मुदतीत पूर्ण होणार –'
+        accepted?.source === 'category_fallback' &&
+        accepted.articles.length === 3 &&
+        accepted.title === 'पहिले' &&
+        accepted.similarity === 0.61
+      );
+    })(),
+  );
+  const categoryOnly: CategoryReferenceArticle[] = [
+    {
+      articleId: 21,
+      title: 'श्रेणीतील पहिले',
+      url: 'https://example.test/article/21',
+      text: 'क'.repeat(900),
+    },
+    {
+      articleId: 22,
+      title: 'श्रेणीतील दुसरे',
+      url: 'https://example.test/article/22',
+      text: 'ख'.repeat(1200),
+    },
+  ];
+  check(
+    'a direct category fallback carries no fabricated similarity',
+    (() => {
+      const accepted = acceptCategoryFallbackReferences(categoryOnly, 1);
+      return (
+        accepted?.source === 'category_fallback' &&
+        accepted.articles.length === 1 &&
+        accepted.title === 'श्रेणीतील पहिले' &&
+        accepted.similarity === null
       );
     })(),
   );
   check(
-    'an exemplar exactly at the bound is kept',
-    acceptRetrievedReferences(
-      [article(0.5, 'क'.repeat(5850), 9, 'सीमेवरचा')],
-      0.35,
-      styleReferenceMaxChars('news'),
-    )?.articles.length === 1,
+    'a long category fallback is accepted without clipping',
+    acceptCategoryFallbackReferences(
+      [
+        {
+          articleId: 23,
+          title: 'लांब पण उपलब्ध',
+          url: 'https://example.test/article/23',
+          text: 'ग'.repeat(25_000),
+        },
+      ],
+      1,
+    )?.chars === 25_000,
+  );
+
+  console.log(
+    '\n=== references have no application-imposed character bound ===',
   );
   check(
-    'omitting the bound checks no length (back-compat)',
-    acceptRetrievedReference(article(0.5, 'क'.repeat(12_550)), 0.35)
-      ?.articles.length === 1,
+    'a 12,550-character news reference is accepted',
+    acceptRetrievedReferences(
+      [article(0.465, 'क'.repeat(12_550), 7, 'विधानसभा लक्षवेधी')],
+      0.35,
+    )?.chars === 12_550,
+  );
+  check(
+    'several references are retained regardless of their relative lengths',
+    (() => {
+      const accepted = acceptRetrievedReferences(
+        [
+          article(0.465, 'क'.repeat(12_550), 7, 'विधानसभा लक्षवेधी'),
+          article(
+            0.442,
+            'क'.repeat(835),
+            8,
+            'पुणे रिंग रोडचे काम मुदतीत पूर्ण होणार –',
+          ),
+        ],
+        0.35,
+      );
+      return accepted?.articles.length === 2;
+    })(),
   );
 
   console.log('\n=== the exemplar count is env-tunable ===');
@@ -526,8 +574,14 @@ if (
   );
   check('1 is honoured (single-exemplar A/B)', withCount('1') === 1);
   check('5 is honoured', withCount('5') === 5);
-  check('0 falls back to the default', withCount('0') === DEFAULT_ARTICLE_COUNT);
-  check('6 falls back to the default', withCount('6') === DEFAULT_ARTICLE_COUNT);
+  check(
+    '0 falls back to the default',
+    withCount('0') === DEFAULT_ARTICLE_COUNT,
+  );
+  check(
+    '6 falls back to the default',
+    withCount('6') === DEFAULT_ARTICLE_COUNT,
+  );
   check(
     'junk falls back to the default',
     withCount('abc') === DEFAULT_ARTICLE_COUNT,

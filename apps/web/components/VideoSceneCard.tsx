@@ -20,14 +20,9 @@ import { useState } from 'react';
 import type { VideoScene } from '@dgipr/schemas';
 import {
   VIDEO_KEY_POINT_MAX_CHARS,
-  clipSecondsForNarration,
   estimateNarrationSeconds,
 } from '@dgipr/schemas';
-import {
-  STR,
-  videoNarrationEstimate,
-  videoSceneTiming,
-} from '../lib/strings';
+import { STR, videoNarrationEstimate, videoSceneTiming } from '../lib/strings';
 
 function SceneStatusChip({ scene }: { scene: VideoScene }) {
   if (scene.status === 'still-rendering' || scene.status === 'animating') {
@@ -68,11 +63,7 @@ function FramePreview({
         {label}
       </p>
       {url ? (
-        <img
-          src={url}
-          alt={label}
-          style={{ width: '100%', borderRadius: 8 }}
-        />
+        <img src={url} alt={label} style={{ width: '100%', borderRadius: 8 }} />
       ) : (
         <p className="hint">{pendingLabel}</p>
       )}
@@ -115,7 +106,9 @@ export function VideoSceneCard({
   // Which brief the fold edits: the start brief redraws the pair, the end
   // brief redraws only the end frame.
   const [briefOpen, setBriefOpen] = useState<'start' | 'end' | null>(null);
-  const [briefDraft, setBriefDraft] = useState(scene.visualBrief);
+  const [briefDraft, setBriefDraft] = useState(
+    scene.openingVisualBrief ?? scene.visualBrief,
+  );
 
   const heading = `${STR.videoSceneLabel} ${index + 1}`;
   const hasEndFrame = scene.endVisualBrief !== undefined;
@@ -144,17 +137,16 @@ export function VideoSceneCard({
         <label className="field-label" htmlFor={`scene-narration-${index}`}>
           {STR.videoNarrationLabel}
         </label>
-        {/* The estimate now also names the CLIP the narration will buy, since
-            the window is derived from the speech — this line is the officer's
-            only feedback on how long the scene they are editing will run. */}
+        {/* The writer saw this planned visual window. The speech estimate is a
+            guide; all boxes are synthesized later as one continuous track. */}
         <p className="hint">
-          {STR.videoNarrationHint}
+          {onNarrationChange
+            ? STR.videoNarrationHint
+            : STR.videoNarrationLockedHint}
           {scene.narration.trim().length > 0
             ? ` · ${videoNarrationEstimate(
                 estimateNarrationSeconds(scene.narration),
-                clipSecondsForNarration(
-                  estimateNarrationSeconds(scene.narration),
-                ),
+                scene.durationSeconds,
               )}`
             : ''}
         </p>
@@ -164,6 +156,7 @@ export function VideoSceneCard({
           style={{ minHeight: 70 }}
           value={scene.narration}
           disabled={busy}
+          readOnly={onNarrationChange === undefined}
           onChange={(event) => onNarrationChange?.(event.target.value)}
         />
         <label
@@ -255,6 +248,14 @@ export function VideoSceneCard({
       <p className="hint">
         {videoSceneTiming(scene.durationSeconds, scene.narrationSeconds)}
       </p>
+      {scene.motionBrief ? (
+        <details style={{ marginTop: 10 }}>
+          <summary className="field-label">{STR.videoMotionBriefLabel}</summary>
+          <p className="hint" style={{ marginTop: 6, whiteSpace: 'pre-wrap' }}>
+            {scene.motionBrief}
+          </p>
+        </details>
+      ) : null}
       {/* Since windows are derived by ceil()ing the measured narration, a NEW
           scene mathematically cannot trip this — it survives as the warning for
           a LEGACY frozen window (a scene whose paid clip predates the change),
@@ -281,7 +282,7 @@ export function VideoSceneCard({
           className="btn btn-small"
           disabled={busy}
           onClick={() => {
-            setBriefDraft(scene.visualBrief);
+            setBriefDraft(scene.openingVisualBrief ?? scene.visualBrief);
             setBriefOpen((open) => (open === 'start' ? null : 'start'));
           }}
         >

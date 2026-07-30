@@ -69,7 +69,6 @@ export const STR = {
     'आधी प्रसिद्ध झालेला एखादा लेख इथे चिकटवा; त्याची मांडणी, शीर्षक-रचना व भाषाशैली नमुना म्हणून वापरली जाईल. यातील कोणतीही माहिती, नावे किंवा आकडे नव्या लेखात घेतले जाणार नाहीत — त्यासाठी टिपणीच एकमेव आधार आहे. रिकामे ठेवल्यास मंच जुळणारा महासंवाद लेख स्वतः निवडेल.',
   styleRefPlaceholder:
     'उदा. महासंवादवर आधी प्रसिद्ध झालेल्या लेखाचा संपूर्ण मजकूर…',
-  styleRefTooLong: 'नमुना लेख खूप मोठा आहे — कृपया थोडा कमी करा.',
   categoryLabel: 'लेखाचा प्रकार?',
   categoryScheme: 'योजना-लेख',
   categorySchemeDesc: 'सविस्तर, चिंतनशील महासंवाद फीचर-लेख',
@@ -977,7 +976,21 @@ export const STR = {
   videoTitle: 'नवीन व्हिडिओ तयार करा',
   videoIntro:
     'टिपणीवरून दोन स्वतंत्र गोष्टी तयार होतील: मराठी निवेदन आणि आवाज बंद असतानाही माहिती समजावणारी साधी दृश्य-कथा. आधी दोन्ही तपासा — व्हिडिओ तयार करण्याचा खर्च फक्त तुमच्या मंजुरीनंतरच होतो.',
+  videoInputModeLabel: 'व्हिडिओ कशावरून तयार करायचा?',
+  videoInputModeNote: 'टिपणीवरून',
+  videoInputModeNoteDesc:
+    'टिपणीतील माहितीतून ३० सेकंदांची संहिता तयार केली जाईल.',
+  videoInputModeScript: 'तयार संहितेवरून',
+  videoInputModeScriptDesc:
+    'मराठी निवेदनातील प्रत्येक शब्द जशाचा तसा ठेवून व्हिडिओची वेळ ठरवली जाईल.',
   videoNoteLabel: 'टिपणी येथे लिहा किंवा चिकटवा',
+  videoScriptInputLabel: 'तयार मराठी निवेदन येथे लिहा किंवा चिकटवा',
+  videoScriptInputHint:
+    'फक्त आवाजात वाचायचे निवेदन द्या. दृश्य-सूचना, वक्त्यांची नावे किंवा रंगमंच सूचना देऊ नका.',
+  videoScriptEstimateLabel: 'मोफत अंदाज',
+  videoScriptEstimateOver:
+    'ही संहिता दोन मिनिटांपेक्षा मोठी दिसते. कृपया निवेदन लहान करा.',
+  videoScriptMarathiOnly: 'तयार निवेदन मराठीत असणे आवश्यक आहे.',
   videoHeadingLabel: 'शीर्षक / मुख्य मुद्दा (ऐच्छिक)',
   videoDurationLabel: 'व्हिडिओची लांबी',
   videoDurationShort: '३० सेकंद',
@@ -999,6 +1012,7 @@ export const STR = {
   // rendered beside each option now says so on its own.
   videoTierStandardHint: 'उच्च दर्जा — सर्व्हर सेटिंगनुसार लागू',
   videoCreate: 'संहिता तयार करा',
+  videoCreateFromScript: 'दृश्य आराखडा तयार करा',
   videoCreateHint: 'या टप्प्यावर व्हिडिओचा खर्च होत नाही.',
   videoEstimateApprox:
     'खर्च अंदाजे आहे — नक्की खर्च स्टोरीबोर्ड मंजुरीच्या वेळी दिसेल.',
@@ -1006,26 +1020,30 @@ export const STR = {
     'दुसरा व्हिडिओ प्रकल्प सध्या तयार होत आहे. तो पूर्ण झाल्यावर नवीन सुरू करता येईल.',
   videoRecent: 'मागील व्हिडिओ',
   videoNoteTooShort: 'टिपणी किमान २० अक्षरांची हवी.',
+  videoScriptTooShort: 'तयार निवेदन किमान २० अक्षरांचे हवे.',
 
   // Script gate (gate 1)
   videoScriptTitle: 'संहिता तपासा व संपादित करा',
   videoScriptIntro:
-    'निवेदन आणि दृश्य-कथा स्वतंत्र आहेत; दृश्याने त्याच क्षणी ऐकू येणारे प्रत्येक वाक्य दाखवण्याची गरज नाही. प्रत्येक चित्रात एक hero subject, एक कृती आणि शांत पार्श्वभूमी आहे का ते पहा. गर्दी, रांग, अनेक वाहने किंवा अनेक कृती असतील तर दृश्य-वर्णन साधे करा.',
+    'सर्व दृश्यांतील निवेदन एकाच सलग आवाजात वाचले जाईल; दृश्य बदलताना विराम पडणार नाही. क्रमाने वाचल्यावर संहिता नैसर्गिक वाहते आहे का ते पहा. दृश्याने त्याच क्षणी ऐकू येणारे प्रत्येक वाक्य दाखवण्याची गरज नाही.',
   videoSceneLabel: 'दृश्य',
   videoSceneBeatLabel: 'निवेदनाचा मुद्दा',
   videoNarrationLabel: 'निवेदन (मराठी)',
   videoNarrationHint:
-    'जेवढे निवेदन लिहाल तेवढी या दृश्याची क्लिप लांब होते (३–१५ सेकंद). सर्व दृश्यांचे निवेदन मिळून निवडलेल्या एकूण वेळेत बसवा.',
+    'ही सर्व निवेदन-खाने क्रमाने जोडून एकच सलग आवाज तयार होईल. दृश्याची नियोजित वेळ ३–१५ सेकंद आहे; संपूर्ण निवेदन निवडलेल्या एकूण वेळेत बसवा.',
+  videoNarrationLockedHint:
+    'हे तुम्ही दिलेले अंतिम निवेदन आहे. प्रत्येक शब्द जशाचा तसा ठेवला जाईल; फक्त दृश्य-वर्णन संपादित करता येईल.',
   videoNarrationTooFast: 'निवेदन थोडे वेगाने वाजेल — हवे असल्यास लहान करा.',
   videoNarrationListen: 'निवेदनाचा आवाज ऐका',
   videoNarrationTotalOver:
-    'निवेदन एकूण वेळेपेक्षा जास्त आहे — काही दृश्ये लहान करा, नाहीतर ती आपोआप लहान केली जातील.',
+    'सलग निवेदन एकूण वेळेपेक्षा जास्त आहे — मजकूर लहान करा, नाहीतर संपूर्ण संहिता सलगपणा राखून आपोआप संक्षिप्त केली जाईल.',
   videoBriefLabel: 'प्रारंभ दृश्य-वर्णन (इंग्रजी)',
   videoBriefHint:
-    'वास्तव चित्रीकरणासारखी साधी फ्रेम: एक प्रमुख व्यक्ती/वस्तू (अत्यावश्यक असल्यास एकाच कृतीतील दोन व्यक्ती), एकच कृती, जास्तीत जास्त एक वाहन व २–३ महत्त्वाच्या वस्तू. गर्दी, रांग, traffic, अनेक कामे आणि busy background टाळा; चित्रात मजकूर/अक्षरे नसतील.',
+    'या दृश्यातून काय दाखवायचे आहे ते लिहा. निवेदनाची खरी लांबी ठरल्यानंतर दिग्दर्शन, अभिनय, हावभाव आणि कॅमेऱ्याची हालचाल स्वतंत्रपणे तयार होईल.',
   videoEndBriefLabel: 'अंतिम दृश्य-वर्णन (इंग्रजी)',
   videoEndBriefHint:
-    'ऐच्छिक. त्याच जवळच्या फ्रेममध्ये, त्याच व्यक्ती व वस्तूंमध्ये एकच छोटा बदल शक्य असेल तर लिहा. नवीन व्यक्ती/वस्तू, प्रवेश-निर्गमन किंवा दुसरी कृती नको. रिकामे ठेवल्यास प्रारंभ फ्रेमवरूनच संयत हालचाल तयार होईल.',
+    'ऐच्छिक. दरवाजा पूर्ण बंद होणे किंवा वस्तू दुसऱ्या व्यक्तीकडे पोहोचणे यासारखी ठरावीक अंतिम स्थिती आवश्यक असेल तरच लिहा. अन्यथा रिकामे ठेवा.',
+  videoMotionBriefLabel: 'दृश्यातील हालचाल आणि अभिनय',
   videoKeyPointLabel: 'पडद्यावरील ठळक ओळ (मराठी)',
   videoKeyPointHint:
     'या दृश्यावर दिसणारा एकच ठोस तपशील — रक्कम, मुदत, संख्या, योजनेचे नाव. रिकामी ठेवली तर या दृश्यावर काहीही लिहिले जाणार नाही.',
@@ -1262,9 +1280,8 @@ export function videoSceneTiming(
   return `${clip} · निवेदन ${narrationSeconds.toFixed(1)} से.`;
 }
 
-// Gate-1 live hint under the narration textarea: the estimated spoken length
-// AND the clip it will produce, since the clip is now derived from the speech —
-// the officer's edit here is what decides how long this scene runs.
+// Gate-1 live hint: this slice's estimated speech plus the planned visual
+// window. Final audio is one continuous track, not one recording per scene.
 export function videoNarrationEstimate(
   seconds: number,
   clipSeconds?: number,
@@ -1281,4 +1298,18 @@ export function videoNarrationTotal(
   targetSeconds: number,
 ): string {
   return `एकूण निवेदन: अंदाजे ${estimatedSeconds.toFixed(0)} से. / लक्ष्य ${targetSeconds} से.`;
+}
+
+export function videoReadyScriptEstimate(
+  estimatedSeconds: number,
+  sceneCount: number,
+): string {
+  const total = Math.max(0, Math.ceil(estimatedSeconds));
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  const duration =
+    minutes > 0
+      ? `${minutes.toLocaleString('mr-IN')} मि. ${seconds.toLocaleString('mr-IN')} से.`
+      : `${seconds.toLocaleString('mr-IN')} से.`;
+  return `अंदाजे ${duration} · ${sceneCount.toLocaleString('mr-IN')} दृश्ये`;
 }

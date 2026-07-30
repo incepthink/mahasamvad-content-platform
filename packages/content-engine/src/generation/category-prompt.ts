@@ -59,7 +59,7 @@ export function designationBlock(
 // pass now enforces (apply-designations.ts, 2026-07-28). A bare surname mid-article reads as a
 // stranger in a government press note.
 export const DESIGNATION_TASK_RULE =
-  'DESIGNATIONS यादीतील व्यक्तींचा लेखातील पहिला उल्लेख "पदनाम + पूर्ण नाव" असाच करा (उदा. "मुख्यमंत्री देवेंद्र फडणवीस यांनी"). पुढील उल्लेखांत पूर्ण नाव पुन्हा लिहू नका, फक्त आडनाव वापरा — पण त्या प्रत्येक उल्लेखातही आडनावाआधी पदनाम लिहा (उदा. "असल्याचे सांगत मुख्यमंत्री फडणवीस यांनी"). टिपणीत व्यक्तीचे फक्त आडनावच आले असेल, तरी त्या आडनावापुढे हेच पदनाम वापरा; स्वतःहून पूर्ण नाव जोडू नका. ही पदनामे अधिकाऱ्याने तपासून दिली आहेत, त्यामुळे टिपणीत नसली तरी ती वापरणे बरोबर आहे; यादीत नसलेले कोणतेही पदनाम मात्र स्वतःहून जोडू नका.';
+  'DESIGNATIONS यादीतील व्यक्तींचा लेखातील पहिला उल्लेख "पदनाम + पूर्ण नाव" असाच करा (उदा. "मुख्यमंत्री देवेंद्र फडणवीस यांनी"). पुढील उल्लेखांत पूर्ण नाव पुन्हा लिहू नका, फक्त आडनाव वापरा — पण त्या प्रत्येक उल्लेखातही आडनावाआधी पदनाम लिहा (उदा. "असल्याचे सांगत मुख्यमंत्री फडणवीस यांनी"). टिपणीत व्यक्तीचे फक्त आडनावच आले असेल, तरी त्या आडनावापुढे हेच पदनाम वापरा; स्वतःहून पूर्ण नाव जोडू नका. स्रोतामध्ये DESIGNATIONS यादीतील मंत्रीपदाशी संबंधित विभागाचा उल्लेख नावाशिवाय आला असेल आणि त्या वाक्यात निर्देश देणारा मानवी निर्णयकर्ता अभिप्रेत असेल, तर विभाग/संस्था हा निर्देशाचा लक्ष्य म्हणून जसा आहे तसा ठेवा आणि फक्त agentless कर्ता "पदनाम + पूर्ण नाव" असा स्पष्ट करा (उदा. "प्रस्ताव उच्च व तंत्रशिक्षण विभागाकडे सादर करण्याचे निर्देश उच्च व तंत्रशिक्षण मंत्री चंद्रकांत पाटील यांनी दिले"). ही पदनामे अधिकाऱ्याने तपासून दिली आहेत, त्यामुळे टिपणीत नसली तरी ती वापरणे बरोबर आहे; यादीत नसलेले कोणतेही पदनाम किंवा नाव मात्र स्वतःहून जोडू नका.';
 
 // The "do not strip this" instruction for the checkers/repair passes, which otherwise see an
 // unsourced designation and correctly (but wrongly, here) flag it.
@@ -363,7 +363,9 @@ export function buildUserPrompt(
   // Facts the officer deselected in the Pointers step. Deliberately placed right before the
   // NOTES so it reads as a constraint on how to USE them: the notes remain the fact source,
   // but everything listed here must be kept out of the article.
-  const excluded = (excludeFacts ?? []).map((fact) => fact.trim()).filter(Boolean);
+  const excluded = (excludeFacts ?? [])
+    .map((fact) => fact.trim())
+    .filter(Boolean);
   const hasExcluded = excluded.length > 0;
   if (hasExcluded) {
     parts.push(

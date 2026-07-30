@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="mr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>कोयना धरण — काय बदलले?</title>
+<style>
+:root{--navy:#08243d;--ink:#122334;--paper:#f5f1e8;--white:#fffefa;--gold:#d99b22;--teal:#16766f;--red:#a94135;--muted:#64717c}
+*{box-sizing:border-box}
+html{background:#d9dde0;scroll-behavior:smooth}
+body{margin:0;color:var(--ink);font-family:"Nirmala UI","Mangal",sans-serif}
+.toolbar{position:sticky;top:0;z-index:50;display:flex;align-items:center;justify-content:center;gap:14px;padding:12px;background:rgba(8,36,61,.95);color:white;box-shadow:0 6px 24px rgba(0,0,0,.2)}
+.toolbar button,.toolbar a{border:1px solid rgba(255,255,255,.28);border-radius:999px;background:transparent;color:white;padding:8px 18px;font:600 15px "Nirmala UI","Mangal",sans-serif;text-decoration:none;cursor:pointer}
+.toolbar button:hover,.toolbar a:hover{background:white;color:var(--navy)}
+.deck{display:grid;place-items:center;padding:28px}
+.slide{position:relative;display:none;width:1080px;height:1350px;overflow:hidden;background:var(--paper);padding:86px 82px 72px;box-shadow:0 18px 55px rgba(8,36,61,.2);isolation:isolate}
+.single .slide{display:block}
+.slide::before{content:"";position:absolute;z-index:-1;inset:0;background:linear-gradient(115deg,transparent 0 68%,rgba(217,155,34,.08) 68% 70%,transparent 70%)}
+.slide::after{content:"";position:absolute;z-index:-1;width:440px;height:440px;border:1px solid rgba(8,36,61,.08);border-radius:50%;right:-240px;top:-190px;box-shadow:0 0 0 46px rgba(8,36,61,.025),0 0 0 92px rgba(8,36,61,.02)}
+.eyebrow{display:inline-flex;align-items:center;min-height:40px;margin-bottom:28px;padding:5px 16px;border-left:6px solid var(--gold);background:rgba(8,36,61,.07);font-size:23px;font-weight:700;letter-spacing:.2px;color:var(--navy)}
+.slide>h2{max-width:900px;margin:0 0 42px;font-size:61px;line-height:1.13;letter-spacing:-1.1px;color:var(--navy)}
+.slide-footer{position:absolute;left:82px;right:82px;bottom:34px;display:flex;justify-content:space-between;align-items:center;border-top:1px solid rgba(8,36,61,.15);padding-top:14px;font-size:17px;font-weight:700;color:var(--muted)}
+.slide-footer b{color:var(--navy)}
+.cover{background:var(--navy);color:white}
+.cover::before{background:linear-gradient(145deg,transparent 0 57%,rgba(217,155,34,.13) 57% 58%,transparent 58%),radial-gradient(circle at 88% 15%,rgba(22,118,111,.7),transparent 33%)}
+.cover::after{border-color:rgba(255,255,255,.15);box-shadow:0 0 0 46px rgba(255,255,255,.025),0 0 0 92px rgba(255,255,255,.02)}
+.cover .eyebrow{margin-top:48px;background:rgba(255,255,255,.1);color:white}
+.cover>h2{max-width:880px;margin-top:32px;font-size:112px;line-height:1.03;color:white}
+.cover-grid{display:grid;grid-template-columns:1fr 240px;gap:54px;align-items:end;margin-top:70px}
+.date-span{display:flex;gap:17px;align-items:center;color:#f0c870;font-size:22px;font-weight:700}
+.date-span span{color:rgba(255,255,255,.6)}
+.cover-summary{max-width:650px;margin:22px 0 0;font-size:34px;line-height:1.46}
+.cover-stat{border-left:1px solid rgba(255,255,255,.25);padding-left:44px}
+.cover-stat strong{display:block;font-size:88px;color:#f0c870}
+.cover-stat span{font-size:22px;line-height:1.3}
+.latest-strip{position:absolute;left:82px;right:82px;bottom:120px;display:grid;grid-template-columns:190px 1fr;gap:28px;border-top:1px solid rgba(255,255,255,.25);padding-top:22px}
+.latest-strip span{color:#f0c870;font-weight:700}
+.latest-strip strong{font-size:24px;line-height:1.4}
+.cover .slide-footer{color:rgba(255,255,255,.65);border-color:rgba(255,255,255,.2)}
+.cover .slide-footer b{color:white}
+.current-panel{position:relative;margin-top:70px;padding:70px 66px 62px;background:var(--navy);color:white;border-radius:4px;box-shadow:16px 16px 0 var(--gold)}
+.current-number{position:absolute;right:36px;top:-38px;width:105px;height:76px;display:grid;place-items:center;background:var(--gold);color:var(--navy);font-size:28px;font-weight:800}
+.current-panel h3{margin:0 0 30px;max-width:780px;font-size:45px;line-height:1.22}
+.current-panel p{margin:0;font-size:30px;line-height:1.55}
+.as-of{margin-top:55px;padding:24px;border-top:1px solid rgba(8,36,61,.18);font-size:22px;font-weight:700;color:var(--muted)}
+.card-stack{display:grid;gap:30px}.card-stack.compact{gap:24px}
+.card{position:relative;padding:34px 38px 32px;background:var(--white);border:1px solid rgba(8,36,61,.13);box-shadow:0 10px 30px rgba(8,36,61,.07)}
+.card-rule{position:absolute;left:0;top:0;bottom:0;width:8px;background:var(--teal)}
+.card h3{margin:0 0 16px;font-size:33px;line-height:1.23;color:var(--navy)}
+.card p{margin:0;font-size:24px;line-height:1.5}
+.label{display:inline-block;margin:0 0 16px;padding:6px 13px;background:var(--gold);color:var(--navy);font-size:18px;font-weight:800}
+.comparison{display:grid;grid-template-columns:1fr 45px 1fr;gap:12px;align-items:center;margin-top:25px;padding:22px;background:#eef1ee}
+.comparison span,.conflict-pair span{display:block;margin-bottom:8px;color:var(--teal);font-size:18px;font-weight:800}
+.comparison p{font-size:21px}.comparison .arrow{font-size:32px;font-weight:800;color:var(--gold);text-align:center}
+.change-card .explain{margin-top:22px;font-size:21px;color:#445463}
+.citations{display:flex;gap:8px;margin-top:22px}
+.cite{display:inline-grid;place-items:center;width:31px;height:31px;border-radius:50%;background:var(--navy);color:white!important;font-size:16px;font-weight:800;text-decoration:none}
+.timeline-list{position:relative;display:grid;gap:22px;margin-left:18px}
+.timeline-list::before{content:"";position:absolute;left:13px;top:24px;bottom:24px;width:3px;background:linear-gradient(var(--gold),var(--teal))}
+.timeline-item{position:relative;display:grid;grid-template-columns:30px 1fr;gap:24px}
+.timeline-dot{z-index:1;width:29px;height:29px;margin-top:9px;border:7px solid var(--paper);border-radius:50%;background:var(--gold);box-shadow:0 0 0 2px var(--navy)}
+.timeline-copy{padding:22px 28px;background:var(--white);border-bottom:2px solid rgba(8,36,61,.12)}
+.timeline-meta{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-bottom:9px;color:var(--muted);font-size:18px;font-weight:700}
+.timeline-meta span{padding:4px 10px;background:#e8eee9;color:var(--teal)}
+.timeline-copy h3{margin:0 0 8px;font-size:27px;line-height:1.25;color:var(--navy)}
+.timeline-copy p{margin:0;font-size:20px;line-height:1.42}
+.timeline-copy .citations{margin-top:12px}
+.conflict-card{border-color:rgba(169,65,53,.4)}.conflict-card .label{background:var(--red);color:white}
+.conflict-pair{display:grid;grid-template-columns:1fr 1fr;gap:18px}.conflict-pair p{padding:18px;background:#f7ece8;font-size:21px}
+.conflict-pair span{color:var(--red)}.status{margin-top:18px;font-size:21px;line-height:1.45}
+.next-card{border-top:7px solid var(--teal)}
+.empty-state{display:grid;place-items:center;min-height:650px;padding:80px;text-align:center;background:rgba(255,255,255,.55);border:2px dashed rgba(8,36,61,.22)}
+.empty-mark{font-size:120px;line-height:1;color:var(--gold)}.empty-state p{max-width:700px;font-size:31px;line-height:1.55;color:#435363}
+.source-list{display:grid;gap:18px}
+.source{display:grid;grid-template-columns:72px 1fr;gap:24px;padding:23px 26px;background:var(--white);border-left:5px solid var(--teal)}
+.source-number{display:grid;place-items:center;width:58px;height:58px;border-radius:50%;background:var(--navy);color:white;font-size:25px;font-weight:800}
+.source time{font-size:17px;font-weight:700;color:var(--muted)}
+.source h3{margin:4px 0 6px;font-size:24px;line-height:1.27;color:var(--navy)}
+.source a{color:var(--teal);font-size:17px;font-weight:800;text-decoration:none}
+.method-note{margin-top:24px;padding:18px 22px;border-top:2px solid var(--gold);font-size:18px;line-height:1.45;color:#4c5b66}
+.single .toolbar{position:fixed;left:50%;top:18px;transform:translateX(-50%);border-radius:999px}.single .deck{padding-top:88px}
+@media(max-width:1120px){.single .deck{display:block;overflow:auto}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+
+@media screen{
+  .scroll .toolbar{flex-direction:column;gap:0;padding:0;justify-content:flex-start}
+  .toolbar-inner{display:flex;align-items:center;justify-content:space-between;gap:16px;width:100%;max-width:1000px;padding:11px 16px}
+  .toolbar-title{overflow:hidden;font-size:16px;text-overflow:ellipsis;white-space:nowrap}
+  .toolbar-actions{display:flex;flex:none;align-items:center;gap:10px}
+  .scroll .toolbar button{padding:7px 14px;font-size:14px}
+  .toc-wrap{position:relative}
+  .toc-wrap>summary{list-style:none;border:1px solid rgba(255,255,255,.28);border-radius:999px;padding:7px 14px;font:600 14px "Nirmala UI","Mangal",sans-serif;cursor:pointer}
+  .toc-wrap>summary::-webkit-details-marker{display:none}
+  .toc-wrap[open]>summary,.toc-wrap>summary:hover{background:white;color:var(--navy)}
+  .toc{position:absolute;right:0;top:calc(100% + 10px);z-index:60;display:grid;gap:2px;width:max-content;max-width:min(78vw,420px);max-height:min(60vh,460px);overflow:auto;padding:8px;background:var(--white);border-radius:10px;box-shadow:0 16px 40px rgba(8,36,61,.32)}
+  .toc a{display:block;padding:9px 12px;border-radius:6px;color:var(--ink);font-size:15px;font-weight:600;text-decoration:none}
+  .toc a:hover{background:rgba(8,36,61,.08);color:var(--navy)}
+  .progress{width:100%;height:3px;background:rgba(255,255,255,.16)}
+  .progress span{display:block;width:0;height:100%;background:var(--gold)}
+  .scroll .deck{display:block;padding:clamp(16px,3vw,30px) clamp(12px,3vw,26px) 90px}
+  .scroll .slide{display:block;width:100%;max-width:960px;height:auto;margin:0 auto;padding:clamp(26px,4.4vw,62px) clamp(20px,4vw,58px) clamp(24px,3.4vw,44px);box-shadow:0 10px 34px rgba(8,36,61,.14);scroll-margin-top:76px}
+  .scroll .slide+.slide{margin-top:clamp(18px,2.6vw,32px)}
+  .scroll .slide::after{display:none}
+  .scroll .eyebrow{min-height:0;margin-bottom:clamp(14px,1.8vw,22px);font-size:clamp(13px,1.6vw,17px)}
+  .scroll .slide>h2{max-width:none;margin-bottom:clamp(20px,2.6vw,32px);font-size:clamp(26px,4.4vw,46px);letter-spacing:-.5px}
+  .scroll .slide-footer{position:static;margin-top:clamp(22px,3vw,36px);font-size:14px}
+  .scroll .cover .eyebrow{margin-top:0}
+  .scroll .cover>h2{max-width:none;margin-top:0;font-size:clamp(34px,7vw,72px)}
+  .scroll .cover-grid{gap:clamp(20px,3vw,40px);margin-top:clamp(24px,3vw,44px)}
+  .scroll .date-span{font-size:clamp(14px,1.7vw,18px)}
+  .scroll .cover-summary{max-width:none;font-size:clamp(17px,2.4vw,26px)}
+  .scroll .cover-stat{padding-left:clamp(20px,2.6vw,36px)}
+  .scroll .cover-stat strong{font-size:clamp(42px,6.4vw,72px)}
+  .scroll .cover-stat span{font-size:clamp(13px,1.6vw,17px)}
+  .scroll .latest-strip{position:static;margin-top:clamp(24px,3vw,38px)}
+  .scroll .latest-strip strong{font-size:clamp(16px,2vw,21px)}
+  .scroll .current-panel{margin-top:clamp(42px,4.4vw,60px);padding:clamp(34px,4vw,56px) clamp(24px,3.4vw,52px)}
+  .scroll .current-panel h3{max-width:none;margin-bottom:clamp(16px,2vw,24px);font-size:clamp(21px,3.2vw,36px)}
+  .scroll .current-panel p{font-size:clamp(16px,2.2vw,25px)}
+  .scroll .as-of{margin-top:clamp(24px,3vw,40px);padding:clamp(14px,1.8vw,22px) 0 0;font-size:clamp(13px,1.6vw,17px)}
+  .scroll .card-stack,.scroll .card-stack.compact{gap:clamp(16px,2vw,26px)}
+  .scroll .card{padding:clamp(20px,2.6vw,32px) clamp(22px,2.8vw,36px)}
+  .scroll .card h3{margin-bottom:clamp(10px,1.2vw,14px);font-size:clamp(18px,2.4vw,28px)}
+  .scroll .card p{font-size:clamp(15px,1.9vw,21px)}
+  .scroll .label{font-size:clamp(12px,1.4vw,15px)}
+  .scroll .comparison{margin-top:clamp(16px,2vw,22px);padding:clamp(14px,1.8vw,20px)}
+  .scroll .comparison span,.scroll .conflict-pair span{font-size:clamp(12px,1.4vw,15px)}
+  .scroll .comparison p,.scroll .conflict-pair p{font-size:clamp(14px,1.8vw,19px)}
+  .scroll .comparison .arrow{font-size:clamp(20px,2.4vw,28px)}
+  .scroll .change-card .explain{margin-top:clamp(14px,1.8vw,20px);font-size:clamp(14px,1.8vw,19px)}
+  .scroll .citations{margin-top:clamp(14px,1.6vw,18px)}
+  .scroll .cite{width:27px;height:27px;font-size:14px}
+  .scroll .timeline-list{gap:clamp(14px,1.8vw,20px)}
+  .scroll .timeline-copy{padding:clamp(16px,2vw,22px) clamp(18px,2.2vw,26px)}
+  .scroll .timeline-meta{font-size:clamp(12px,1.4vw,16px)}
+  .scroll .timeline-copy h3{font-size:clamp(17px,2.1vw,24px)}
+  .scroll .timeline-copy p{font-size:clamp(14px,1.8vw,19px)}
+  .scroll .status{font-size:clamp(14px,1.8vw,19px)}
+  .scroll .empty-state{min-height:0;padding:clamp(34px,5vw,70px) clamp(22px,3vw,50px)}
+  .scroll .empty-mark{font-size:clamp(52px,8vw,96px)}
+  .scroll .empty-state p{max-width:none;font-size:clamp(16px,2.2vw,26px)}
+  .scroll .source{padding:clamp(16px,2vw,22px) clamp(18px,2.2vw,26px);gap:clamp(14px,2vw,22px);grid-template-columns:clamp(40px,5vw,58px) 1fr}
+  .scroll .source-number{width:100%;max-width:52px;aspect-ratio:1;height:auto;font-size:clamp(16px,2vw,22px)}
+  .scroll .source time{font-size:clamp(12px,1.4vw,16px)}
+  .scroll .source h3{font-size:clamp(16px,2vw,22px)}
+  .scroll .source a{font-size:clamp(13px,1.5vw,16px)}
+  .scroll .method-note{font-size:clamp(13px,1.5vw,17px)}
+  @media(max-width:760px){
+    .scroll .cover-grid{grid-template-columns:1fr}
+    .scroll .cover-stat{border-left:0;border-top:1px solid rgba(255,255,255,.25);padding:20px 0 0}
+    .scroll .latest-strip,.scroll .comparison,.scroll .conflict-pair{grid-template-columns:1fr}
+    .scroll .comparison .arrow{text-align:left}
+    .scroll .current-number{right:auto;left:0;top:-30px}
+    .scroll .slide-footer{flex-direction:column;align-items:flex-start;gap:6px}
+    .toolbar-title{font-size:14px}
+  }
+}
+
+@media print{
+  @page{size:1080px 1350px;margin:0}
+  html,body{background:white}
+  .toolbar{display:none!important}
+  .deck{display:block;padding:0}
+  .slide{display:block!important;break-after:page;box-shadow:none}
+}
+</style>
+</head>
+<body class="single">
+<nav class="toolbar"><a href="../index.html">सर्व स्लाइड्स</a><a href="13.html">← मागे</a><a href="15.html">पुढे →</a></nav>
+<main class="deck"><section class="slide sources" id="slide-14" data-slide="14"><div class="eyebrow">पुरावे · भाग २</div><h2>वापरलेले संग्रहित लेख</h2><div class="source-list"><article class="source" id="source-6"><div class="source-number">६</div><div><time>११ जून, २०२३</time><h3>शासन कोयना प्रकल्पग्रस्तांप्रती संवेदनशील व सकारात्मक -पालकमंत्री शंभूराज देसाई</h3><a href="https://mahasamvad.in/98561/" target="_blank" rel="noreferrer">मूळ लेख उघडा ↗</a></div></article><article class="source" id="source-7"><div class="source-number">७</div><div><time>१६ जून, २०२३</time><h3>कोणतेही गाव पिण्याच्या पाण्यापासून वंचित राहणार नाही यासाठी दक्षता घ्या- पालकमंत्री डॉ. सुरेश खाडे</h3><a href="https://mahasamvad.in/99009/" target="_blank" rel="noreferrer">मूळ लेख उघडा ↗</a></div></article><article class="source" id="source-8"><div class="source-number">८</div><div><time>३१ ऑगस्ट, २०२३</time><h3>धरणातील उपलब्ध पाणी पिण्यासाठी व शेतीसाठी राखून ठेवा – पालकमंत्री शंभूराज देसाई</h3><a href="https://mahasamvad.in/105692/" target="_blank" rel="noreferrer">मूळ लेख उघडा ↗</a></div></article><article class="source" id="source-9"><div class="source-number">९</div><div><time>५ सप्टेंबर, २०२३</time><h3>शेतकऱ्यांना फायदा व्हावा अशा दृष्टीने जलसंधारणाच्या कामांचे नियोजन करावे – मुख्यमंत्री एकनाथ शिंदे</h3><a href="https://mahasamvad.in/106091/" target="_blank" rel="noreferrer">मूळ लेख उघडा ↗</a></div></article><article class="source" id="source-10"><div class="source-number">१०</div><div><time>१० ऑक्टोबर, २०२३</time><h3>सातारा जिल्हा जल पर्यटनात मोठी झेप घेईल – मुख्यमंत्री एकनाथ शिंदे</h3><a href="https://mahasamvad.in/109077/" target="_blank" rel="noreferrer">मूळ लेख उघडा ↗</a></div></article></div><div class="method-note"><strong>पद्धत:</strong> १०६२१ संग्रहित वृत्तलेख तपासले; ४५ संभाव्य जुळण्या पडताळल्या; २३ थेट संबंधित लेख या विश्लेषणात वापरले.</div><footer class="slide-footer"><b>कोयना धरण</b><span>१४ / १७</span></footer></section></main>
+
+</body>
+</html>

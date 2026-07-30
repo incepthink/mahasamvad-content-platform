@@ -2,9 +2,9 @@
 //   1. extract the useful facts for a video;
 //   2. turn those facts into the best realistic sequence for the selected time.
 //
-// The planner chooses the scene count. Durations are assigned later from the
-// measured narration, and an end frame is optional: most scenes should give the
-// clip model one approved start frame and room to create the motion itself.
+// The planner chooses the scene count. A deterministic timeline then distributes
+// the selected 30/60 seconds across those scenes, so the script writer knows the
+// visual windows before composing one continuous narration.
 
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
@@ -52,6 +52,9 @@ export type VideoScenePlanScene = Readonly<{
   endVisualBrief?: string;
   // English shot/camera direction ("close-up of a shared action, slow push-in").
   shotHint: string;
+  // Provisional visual window supplied to the script writer. The measured
+  // continuous WAV may extend the complete timeline later, never insert gaps.
+  durationSeconds: number;
 }>;
 
 export type VideoScenePlan = Readonly<{
@@ -63,6 +66,22 @@ export type VideoScenePlanOptions = Readonly<{
   heading?: string | undefined;
 }>;
 
+function plannedSceneDurations(
+  sceneCount: number,
+  totalSeconds: number,
+): number[] {
+  if (sceneCount <= 0) return [];
+  const capacity = sceneCount * VIDEO_CLIP_MAX_SECONDS;
+  const floor = sceneCount * VIDEO_CLIP_MIN_SECONDS;
+  const total = Math.max(floor, Math.min(capacity, totalSeconds));
+  const base = Math.floor(total / sceneCount);
+  const remainder = total - base * sceneCount;
+  return Array.from(
+    { length: sceneCount },
+    (_, index) => base + (index < remainder ? 1 : 0),
+  );
+}
+
 function buildFactsSystemPrompt(): string {
   return [
     'We are making the best possible explainer video from an official note.',
@@ -73,10 +92,14 @@ function buildFactsSystemPrompt(): string {
 
 function buildPlannerSystemPrompt(bucket: VideoDurationBucket): string {
   const totalSeconds = VIDEO_TOTAL_SECONDS[bucket];
+  const minimumScenesForTimeline = Math.ceil(
+    totalSeconds / VIDEO_CLIP_MAX_SECONDS,
+  );
   return [
     'Plan the best realistic live-action explainer video from the supplied facts.',
     `The complete video should fit about ${totalSeconds} seconds. Each clip can be ${VIDEO_CLIP_MIN_SECONDS}-${VIDEO_CLIP_MAX_SECONDS} seconds.`,
     `Choose freely how many scenes the story needs, from ${VIDEO_SCENE_LIMIT.min} to ${VIDEO_SCENE_LIMIT.max}.`,
+    `Use at least ${minimumScenesForTimeline} scenes so their combined visual timeline can hold the complete ${totalSeconds}-second voiceover.`,
     'Each scene should explain one useful idea through a natural, engaging action.',
     'Keep the number of active people as low as possible: prefer one person, and use two only when their interaction matters.',
     'Write beat in Marathi. Write visual_brief, end_visual_brief and shot_hint in English.',
@@ -205,6 +228,10 @@ export async function planVideoScenes(
   options: VideoScenePlanOptions,
 ): Promise<VideoScenePlan> {
   const facts = await extractNoteFacts(note);
+  const totalSeconds = VIDEO_TOTAL_SECONDS[options.durationBucket];
+  const minimumScenesForTimeline = Math.ceil(
+    totalSeconds / VIDEO_CLIP_MAX_SECONDS,
+  );
   const systemPrompt = buildPlannerSystemPrompt(options.durationBucket);
   const messages: ChatMessage[] = [
     { role: 'system', content: systemPrompt },
@@ -225,6 +252,11 @@ export async function planVideoScenes(
     if (!result.success) {
       throw new Error(
         `Video scene plan did not match the expected schema:\n${result.error.message}\n---\n${candidate}`,
+      );
+    }
+    if (result.data.scenes.length < minimumScenesForTimeline) {
+      throw new Error(
+        `Video scene plan needs at least ${minimumScenesForTimeline} scenes to hold ${totalSeconds} seconds.`,
       );
     }
     return result.data;
@@ -282,8 +314,15 @@ export async function planVideoScenes(
     plan = { scenes: kept };
   }
 
+  if (plan.scenes.length < minimumScenesForTimeline) {
+    throw new Error(
+      `Video scene plan needs at least ${minimumScenesForTimeline} scenes to hold ${totalSeconds} seconds.`,
+    );
+  }
+  const durations = plannedSceneDurations(plan.scenes.length, totalSeconds);
+
   return {
-    scenes: plan.scenes.map((scene) => {
+    scenes: plan.scenes.map((scene, index) => {
       const endVisualBrief = scene.end_visual_brief?.trim();
       const sourceQuote = facts[scene.fact_index - 1]!;
       return {
@@ -293,6 +332,7 @@ export async function planVideoScenes(
         visualBrief: scene.visual_brief,
         ...(endVisualBrief ? { endVisualBrief } : {}),
         shotHint: scene.shot_hint,
+        durationSeconds: durations[index]!,
       };
     }),
   };

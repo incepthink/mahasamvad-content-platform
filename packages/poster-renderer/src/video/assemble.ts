@@ -12,11 +12,13 @@
 import { execFile } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { createRequire } from 'node:module';
 import sharp from 'sharp';
 import { VIDEO_NARRATION_TEMPO_TOLERANCE } from '@dgipr/schemas';
+import { renderGovernmentLockup } from '../twitter-chrome.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -70,6 +72,14 @@ export type VideoValidation = Readonly<{
 
 const VIDEO_VALIDATE_TIMEOUT_MS = 300_000;
 const VIDEO_VALIDATE_MAX_BUFFER = 16 * 1024 * 1024;
+// Social posts use a 160px lockup on a 1280px canvas (12.5%). Video uses 15%:
+// visibly larger, but still clear of the lower-third information overlay.
+const VIDEO_LOCKUP_WIDTH_RATIO = 0.15;
+const VIDEO_LOCKUP_MARGIN_RATIO = 0.008;
+const VIDEO_OUTRO_PATH = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  '../../assets/video-outro.mp4',
+);
 
 function progressNumber(stdout: string, key: string): number {
   let value = 0;
@@ -217,12 +227,101 @@ export async function validateVideoOutput(
   }
 }
 
-// Stitch scene clips (in order) into one silent MP4. Returns the MP4 bytes.
+export type VideoLogoOptions = Readonly<{
+  aspectRatio?: '16:9' | '9:16';
+  expectedDurationSeconds?: number;
+}>;
+
+// Burn the shared Government of Maharashtra lockup into one generated scene
+// clip before it is uploaded. Scene clips are exposed individually in the
+// review UI, so branding only the final stitch would leave those previews
+// unbranded. Audio, when a provider returns any, is preserved unchanged.
+export async function overlayVideoLogo(
+  mp4: Buffer,
+  options: VideoLogoOptions = {},
+): Promise<Buffer> {
+  const dir = await mkdtemp(join(tmpdir(), 'dgipr-video-logo-'));
+  try {
+    const inputPath = join(dir, 'input.mp4');
+    const logoPath = join(dir, 'logo.png');
+    const outputPath = join(dir, 'branded.mp4');
+    await writeFile(inputPath, mp4);
+
+    const inputValidation = options.expectedDurationSeconds
+      ? await assertStreamDuration(
+          inputPath,
+          options.expectedDurationSeconds,
+          'Generated scene clip',
+          'video',
+        )
+      : await inspectStreamFile(inputPath, 'video');
+    const { width } = await firstClipDimensions(
+      inputPath,
+      options.aspectRatio ?? '16:9',
+    );
+    const lockup = await renderGovernmentLockup(
+      Math.round(width * VIDEO_LOCKUP_WIDTH_RATIO),
+    );
+    await writeFile(logoPath, lockup.data);
+    const margin = Math.max(4, Math.round(width * VIDEO_LOCKUP_MARGIN_RATIO));
+
+    await execFileAsync(
+      resolveFfmpeg(),
+      [
+        '-hide_banner',
+        '-loglevel',
+        'error',
+        '-i',
+        inputPath,
+        '-loop',
+        '1',
+        '-i',
+        logoPath,
+        '-filter_complex',
+        `[0:v:0][1:v:0]overlay=${width - lockup.width - margin}:${margin}:shortest=1[branded]`,
+        '-map',
+        '[branded]',
+        '-map',
+        '0:a?',
+        '-c:v',
+        'libx264',
+        '-preset',
+        'veryfast',
+        '-crf',
+        '18',
+        '-pix_fmt',
+        'yuv420p',
+        '-c:a',
+        'copy',
+        '-movflags',
+        '+faststart',
+        outputPath,
+      ],
+      {
+        timeout: VIDEO_VALIDATE_TIMEOUT_MS,
+        maxBuffer: VIDEO_VALIDATE_MAX_BUFFER,
+      },
+    );
+
+    await assertStreamDuration(
+      outputPath,
+      options.expectedDurationSeconds ?? inputValidation.durationSeconds,
+      'Branded scene clip',
+      'video',
+    );
+    return await readFile(outputPath);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+// Stitch scene clips (in order), brand the generated portion, and append the
+// fixed DGIPR contact slate as the final clip. Returns the silent MP4 bytes.
 //
 // `overlays` burns the per-scene Marathi key points in during the SAME encode:
 // the concat pass already re-encodes, and a second pass over the finished file
-// would cost a full generation of quality for nothing. Omit it (or pass an
-// empty list) and the output is byte-for-byte the old behaviour.
+// would cost a full generation of quality for nothing. Omitting them only
+// disables the key points; the mandatory video logo and outro still apply.
 export async function assembleSilentVideo(
   clips: readonly Buffer[],
   overlays: readonly SceneOverlay[] = [],
@@ -273,7 +372,15 @@ export async function assembleSilentVideo(
       clipPaths[0]!,
       options.aspectRatio ?? '16:9',
     );
-    const inputArgs = clipPaths.flatMap((path) => ['-i', path]);
+    const outroValidation = await inspectStreamFile(VIDEO_OUTRO_PATH, 'video');
+    await assertStreamDuration(
+      VIDEO_OUTRO_PATH,
+      outroValidation.durationSeconds,
+      'Video outro asset',
+      'video',
+    );
+    const videoInputPaths = [...clipPaths, VIDEO_OUTRO_PATH];
+    const inputArgs = videoInputPaths.flatMap((path) => ['-i', path]);
     const chains: string[] = [];
 
     // Normalize canvas, SAR, FPS, and timestamps before using the concat
@@ -287,9 +394,16 @@ export async function assembleSilentVideo(
           `setsar=1,format=yuv420p,setpts=N/(25*TB)[clip${index}]`,
       );
     }
+    const outroInput = clipPaths.length;
     chains.push(
-      `${clipPaths.map((_, index) => `[clip${index}]`).join('')}` +
-        `concat=n=${clipPaths.length}:v=1:a=0[joined]`,
+      `[${outroInput}:v:0]fps=25,scale=${width}:${height}:` +
+        `force_original_aspect_ratio=decrease:force_divisible_by=2,` +
+        `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=white,` +
+        `setsar=1,format=yuv420p,setpts=N/(25*TB)[outro]`,
+    );
+    chains.push(
+      `${clipPaths.map((_, index) => `[clip${index}]`).join('')}[outro]` +
+        `concat=n=${videoInputPaths.length}:v=1:a=0[joined]`,
     );
 
     let stage = 'joined';
@@ -297,7 +411,7 @@ export async function assembleSilentVideo(
       const pngPath = join(dir, `overlay-${index}.png`);
       await writeFile(pngPath, overlay.png);
       inputArgs.push('-loop', '1', '-i', pngPath);
-      const input = clipPaths.length + index;
+      const input = videoInputPaths.length + index;
       const scaled = `ov${index}`;
       const next = `v${index}`;
       chains.push(
@@ -308,6 +422,33 @@ export async function assembleSilentVideo(
       );
       stage = next;
     }
+
+    // Re-stamp the lockup on the final stitch as well. New clips already carry
+    // it for their individual review players; this makes the final logo crisp
+    // after concatenation and brands free restitches of older stored clips.
+    // It ends exactly where the generated scenes end because the supplied
+    // outro is already a full-frame DGIPR brand/contact slate.
+    const expectedSceneTotal = expectedDurations.reduce(
+      (sum, seconds) => sum + seconds,
+      0,
+    );
+    const lockup = await renderGovernmentLockup(
+      Math.round(width * VIDEO_LOCKUP_WIDTH_RATIO),
+    );
+    const logoPath = join(dir, 'video-logo.png');
+    await writeFile(logoPath, lockup.data);
+    inputArgs.push('-loop', '1', '-i', logoPath);
+    const logoInput = videoInputPaths.length + overlays.length;
+    const logoMargin = Math.max(
+      4,
+      Math.round(width * VIDEO_LOCKUP_MARGIN_RATIO),
+    );
+    chains.push(
+      `[${stage}][${logoInput}:v:0]overlay=` +
+        `${width - lockup.width - logoMargin}:${logoMargin}:shortest=1:` +
+        `enable='between(t,0,${expectedSceneTotal.toFixed(3)})'[branded]`,
+    );
+    stage = 'branded';
 
     const outPath = join(dir, 'out.mp4');
     await execFileAsync(
@@ -339,10 +480,7 @@ export async function assembleSilentVideo(
       { timeout: 300_000, maxBuffer: 16 * 1024 * 1024 },
     );
 
-    const expectedTotal = expectedDurations.reduce(
-      (sum, seconds) => sum + seconds,
-      0,
-    );
+    const expectedTotal = expectedSceneTotal + outroValidation.durationSeconds;
     await assertStreamDuration(
       outPath,
       expectedTotal,
@@ -469,9 +607,15 @@ export async function muxNarration(
       );
     }
     const concatInputs = segments.map((_, index) => `[a${index}]`).join('');
+    // The generated-scene narration ends before the fixed visual outro. Pad
+    // the joined track indefinitely and let `-shortest` stop it with the video,
+    // producing a full-length audio stream whose outro portion is silence.
+    // This prevents downstream social transcoders from trimming the slate to a
+    // shorter audio-track duration.
     const filter =
       chains.join(';') +
-      `;${concatInputs}concat=n=${segments.length}:v=0:a=1[aout]`;
+      `;${concatInputs}concat=n=${segments.length}:v=0:a=1[spoken]` +
+      ';[spoken]apad[aout]';
 
     const outPath = join(dir, 'narrated.mp4');
     await execFileAsync(
@@ -493,6 +637,7 @@ export async function muxNarration(
         'aac',
         '-b:a',
         '192k',
+        '-shortest',
         '-movflags',
         '+faststart',
         outPath,

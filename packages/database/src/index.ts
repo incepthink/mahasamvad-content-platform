@@ -13,10 +13,12 @@ export {
   upsertChunks,
   matchChunks,
   fetchArticleChunks,
+  fetchCategoryArticleCandidates,
   fetchExistingArticleIds,
   type ChunkRow,
   type MatchRow,
   type ArticleChunkRow,
+  type CategoryArticleCandidateRow,
 } from './mahasamvad-chunks.js';
 export {
   GENERATIONS_TABLE,
@@ -85,6 +87,7 @@ export {
   type VideoProjectStatus,
   type VideoProjectStep,
   type VideoDurationBucket,
+  type VideoInputMode,
   type VideoOrientation,
   type VideoTier,
   type VideoSceneStatus,

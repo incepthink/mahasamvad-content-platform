@@ -40,8 +40,7 @@
 // terms — take style and structure from the exemplars but NOT their length, be as detailed as the
 // source supports, longer only when the extra length explains something. That parity is
 // deliberate: a difference in length policy would swamp the packaging difference the two
-// variants exist to measure. There is no length knob; styleReferenceMaxChars() in
-// select-style-reference.ts still bounds an EXEMPLAR (as a genre filter), not the output.
+// variants exist to measure. There is no length knob for the output or for style exemplars.
 //
 // Everything outside the prompt is identical between the two: the same reference selection, the
 // same model, the same deterministic applyDesignations pass. That is what makes them comparable.

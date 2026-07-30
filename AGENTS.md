@@ -19,6 +19,45 @@ The long-term product will:
 Scaffolding is done. The core generation pipeline and a first web product on top of
 it are implemented and working end-to-end:
 
+- **Every video is branded and ends on the DGIPR contact slate** (2026-07-30,
+  no migration): the supplied `0730.mp4` now lives at
+  `packages/poster-renderer/assets/video-outro.mp4` and is appended by
+  `assembleSilentVideo` after every completed explainer video. It is a 2.18s
+  1080x1920 asset: vertical output uses it natively; landscape output fits the
+  complete frame on white rather than cropping away contact information. Every
+  newly generated scene clip is post-processed by `overlayVideoLogo` before its
+  versioned Storage upload, so the per-scene review players carry the logo too.
+  The final stitch re-stamps the same lockup over the generated timeline, which
+  keeps it crisp after concatenation and also brands free restitches of older
+  stored clips; the supplied outro is already fully branded and is not
+  double-stamped. The lockup comes from the SAME `renderGovernmentLockup` used
+  by Twitter/Facebook chrome, but video targets 15% of frame width versus the
+  social canvas's 12.5% (20% larger proportionally), at the top-right. All work
+  is local ffmpeg/Sharp post-processing; no model sees or paints the logo and no
+  paid generation is added. Narrated output pads the audio track with silence
+  through the outro so a downstream shortest-stream transcode cannot cut it off.
+  Verified with the assembly, narration and caption
+  harnesses in both 16:9 and 9:16; renderer lint/typecheck/build and API
+  typecheck green. Deploy API after rebuilding `@dgipr/poster-renderer`; no n8n.
+- **News dateline, portfolio attribution and meeting-shaped style retrieval** (2026-07-29,
+  migration 0039): every generated `news` article now receives `मुंबई, दि. <आजचा दिवस> :`
+  (location configurable through `ARTICLE_NEWS_DATELINE_LOCATION`) at the start of its body;
+  the day is calculated in `Asia/Kolkata`, rendered in Devanagari, supplied to the simple prompt
+  and deterministically restored after initial generation and article feedback. DLO designation
+  preparation normalizes the real code-mixed STT form `हायर अँड टेक्निकल एज्यु…` to the
+  verified `उच्च व तंत्रशिक्षण मंत्री` portfolio, so the current holder still comes dynamically
+  from the glossary (for the observed run: `चंद्रकांत पाटील`), while a one-word person row found
+  only inside a different full name is suppressed (`हरी मुंडे` no longer also selects the
+  unrelated `मुंडे` minister row). Saved DLO designation reviews carry
+  `resolverVersion: 2`; an older saved review preserves its OCR/text corrections and officer
+  edits but refreshes stale name suggestions once, so retrying an existing intake does not
+  reproduce the pre-fix attribution. Style retrieval's vector RPC had begun timing out after
+  migration 0019 removed HNSW, silently forcing arbitrary recent-category references; 0039
+  restores a 1024-dimension HNSW index. The no-vector fallback now scans a wider indexed pool
+  and ranks it by source/candidate meeting, directive and proposal shape plus lexical overlap,
+  and weak below-floor semantic hits are no longer promoted ahead of that ranked fallback.
+  Deploy: 0039, then rebuild `@dgipr/database` + `@dgipr/schemas` +
+  `@dgipr/content-engine`, then API + web; no n8n.
 - **Simple fixed-template social prompt** (2026-07-28, no migration): for Twitter DGIPR runs
   using `designMode: 'onbrand'` (UI: **ठरलेले टेम्पलेट**), the selected reference
   image is sent unchanged to the image-edit model with the original note verbatim and only
@@ -1752,6 +1791,34 @@ public-information poster'`, `'authentic skin, fabric and material textures'` in
   No migration, no n8n; deploy is API + web after rebuilding `@dgipr/schemas` →
   `@dgipr/database` → `@dgipr/poster-renderer` → `@dgipr/content-engine` dists.
 
+- **Continuous video narration across visual cuts** (2026-07-30, no migration): the
+  scene-by-scene script/TTS shape made every cut sound like a fresh paragraph: even though
+  `generate-video-script.ts` used one chat call, it asked for isolated scene narrations, then
+  `video-runner.ts` made one Sarvam WAV per scene and `muxNarration` silence-padded each WAV
+  to its clip window. The narration is now the video's single spine. The planner still
+  chooses the visual sequence, but it must choose enough scenes to hold the selected 30/60
+  seconds and a deterministic timeline (for example 8/8/7/7) is attached to the plan. The
+  script writer sees every scene's duration and is explicitly told to compose ONE continuous
+  Marathi passage first, then split it only at visual cuts; sentences may bridge cuts, and
+  the coverage judge receives adjacent narration context so it does not "repair" a natural
+  hand-off into a mini-script. The overrun repair likewise shortens all scene slices in one
+  continuity-aware call. At the voice phase, every reviewed slice is joined with one space,
+  sent to Sarvam in ONE TTS call, uploaded once as `projects/{id}/narration-v{n}.wav`, and the
+  same path/full-script/voice staleness key is repeated in the existing scenes jsonb (so no
+  column or migration). Whole-second clip windows stay proportional to the planned timeline
+  and extend only when the measured WAV needs it. Stitching detects the shared path and calls
+  the existing `muxNarration` with ONE segment spanning the complete video, so there is no
+  inter-scene padding, silence or voice/cadence restart; legacy rows with distinct per-scene
+  WAV paths retain the old assembly branch. A continuous TTS failure remains non-fatal and
+  renders silent with planned timing; completed legacy videos can be re-narrated into the new
+  shared track without re-rendering paid clips. Gate 1 now explains that the boxes form one
+  uninterrupted narration and displays the exact planned visual windows the writer saw.
+  Verified: workspace typecheck 7/7 green; targeted lint/format green; the free key-point
+  harness passes all 9 assertions; deterministic allocation cases cover 30s, 60s, extension
+  and provider-cap clamping. Full repo lint remains blocked by the pre-existing irregular
+  whitespace in `packages/content-engine/src/intake/text-file.ts:15`. Deploy: rebuild
+  `@dgipr/schemas` then `@dgipr/content-engine`, deploy API + web; no n8n.
+
 - **The /dlo page picker: grid always open, and the OCR wait made optional** (2026-07-26, no
   migration): attaching a scanned PDF on `/dlo` made the officer wait twice. The picker's chip
   grid was folded behind a `पृष्ठे निवडा` / `पृष्ठे लपवा` toggle even though on that screen the grid
@@ -2845,6 +2912,30 @@ Not implemented yet: Canva integration, authentication.
 2. `AGENTS.md` must be updated whenever a major architectural decision or implementation milestone changes.
 
 ## Latest Implementation Milestone
+
+- **Exact ready-script video input** (2026-07-30, migration 0040): `/video`
+  now offers **टिपणीवरून** and **तयार संहितेवरून**. Note mode is unchanged:
+  it writes a 30-second Marathi narration from the supplied facts. Ready-script
+  mode accepts voiceover narration only, treats it as final Marathi copy and
+  never asks a model to return or rewrite it. Whitespace is normalized, then a
+  deterministic balanced partition divides the exact words at word/sentence
+  boundaries into up to eight 3–15 second scenes; the model creates only the
+  title, shared visual style, shot briefs, beats and optional supported overlay
+  lines. Gate 1 renders narration read-only, hides add/remove-scene controls,
+  and the API independently rejects any submitted scene array whose joined
+  words differ from the original source. The create form estimates speech time
+  and scene count locally for free; scripts estimated above the provider's
+  eight-clips × 15-seconds = **two-minute** capacity are blocked before project
+  creation. At storyboard time one continuous Sarvam WAV supplies the
+  authoritative duration. Ready-script projects never enter either narration
+  shortening loop; a rare measured overrun fails before frames/video are
+  purchased and asks for a shorter new script. Small underruns become natural
+  visual holds. The old video-only `NOTE_MAX` textarea cap and the API's 60,000
+  character video-source cap are removed; other product limits are untouched,
+  and the Fastify 64 MiB body safety limit remains. `video_projects.input_mode`
+  persists `note | script` with existing rows defaulting to `note`. Deploy 0040,
+  rebuild `@dgipr/database` + `@dgipr/schemas` + `@dgipr/content-engine`, then
+  API + web; no n8n.
 
 - **Final-video assembly is validated and recoverable** (2026-07-29, no migration):
   production project `8383a0b6-9b4d-4597-9acc-994920b39b40` proved the paid assets

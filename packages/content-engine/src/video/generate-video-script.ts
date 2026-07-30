@@ -93,6 +93,7 @@ export type VideoScriptScene = Readonly<{
   // Carried through from the plan so the runner can persist them per scene.
   beat: string;
   shotHint: string;
+  plannedDurationSeconds: number;
 }>;
 
 export type GeneratedVideoScript = Readonly<{
@@ -119,8 +120,13 @@ function buildSystemPrompt(
   return [
     'Write the best clear and engaging Marathi voiceover for a realistic Government of Maharashtra explainer video.',
     'The NOTE is the factual source. Follow the supplied PLAN and make the complete narration flow naturally.',
+    'Compose ONE continuous voiceover for the complete video first; only then divide that same narration among the scene entries.',
+    'Scene boundaries are visual cuts, not pauses, paragraphs, or separate mini-scripts. A sentence may continue into the next scene.',
+    'When every scene narration is joined with a single space, it must read and sound like one uninterrupted passage.',
+    'Carry ideas naturally across visual changes. Do not restart, reintroduce the subject, summarize, or conclude at every scene boundary.',
+    'Use each PLAN scene duration as its visual window and distribute the narration accordingly, while allowing sentences to bridge those cuts.',
     `Return exactly ${sceneCount} scenes whose combined narration is about ${totalSeconds} seconds or ${totalWords} Marathi words.`,
-    `Keep each scene concise enough for a ${VIDEO_CLIP_MAX_SECONDS}-second clip.`,
+    `The visual timeline gives each scene at most ${VIDEO_CLIP_MAX_SECONDS} seconds, but optimise the complete voiceover rather than writing isolated scene speeches.`,
     `key_point is an optional Marathi on-screen phrase of at most ${VIDEO_KEY_POINT_MAX_CHARS} characters; leave it empty when it does not help.`,
     'style is one English paragraph describing a consistent, realistic live-action look in Maharashtra, India.',
     'The optional REFERENCE may inspire the writing style, but its facts are not part of the note.',
@@ -138,6 +144,7 @@ function buildPlanBlock(
       `दृश्य ${index + 1}:` +
       `\n  सांगायचा मुद्दा: ${scene.beat}` +
       `\n  तथ्य: ${scene.sourceQuote}` +
+      `\n  दृश्य कालावधी: ${scene.durationSeconds} सेकंद` +
       `\n  दृश्य: ${scene.visualBrief}` +
       (scene.endVisualBrief
         ? ` → ${scene.endVisualBrief}`
@@ -189,7 +196,9 @@ function buildUserContent(
   parts.push(
     '',
     '<TASK>',
-    'वरील टिपणी व PLAN वरून explainer व्हिडिओची दृश्यनिहाय संहिता JSON स्वरूपात तयार करा.',
+    'वरील टिपणी व PLAN वरून आधी संपूर्ण व्हिडिओसाठी एक सलग, नैसर्गिक निवेदन लिहा.',
+    'नंतर केवळ दृश्य बदलाच्या ठिकाणी ते scenes मध्ये विभागा; दृश्य बदलताना निवेदनात विराम, नव्याने सुरुवात किंवा प्रत्येक वेळी निष्कर्ष देऊ नका.',
+    'सर्व scenes मधील narration क्रमाने जोडल्यावर ते एकाच अखंड संहितेसारखे ऐकू आले पाहिजे.',
     'फक्त वैध JSON object परत करा.',
     '</TASK>',
   );
@@ -225,7 +234,16 @@ async function findUncoveredBeats(
     const pairs = plan.scenes.map((scene, index) => ({
       scene: index + 1,
       beat: scene.beat,
-      narration: script.scenes[index]?.narration ?? '',
+      // A beat may deliberately bridge a visual cut. Give the judge the
+      // neighbouring slices so it does not "repair" a good hand-off back into
+      // a self-contained mini-script.
+      narration_context: [
+        script.scenes[index - 1]?.narration ?? '',
+        script.scenes[index]?.narration ?? '',
+        script.scenes[index + 1]?.narration ?? '',
+      ]
+        .filter(Boolean)
+        .join(' '),
     }));
     const raw = await chatComplete(
       [
@@ -233,8 +251,8 @@ async function findUncoveredBeats(
           role: 'system',
           content: [
             'तुम्ही explainer व्हिडिओच्या संहितेचे परीक्षक आहात. प्रत्येक दृश्यासाठी beat',
-            '(अपेक्षित माहिती) आणि narration (प्रत्यक्ष निवेदन) दिले आहे.',
-            'ज्या दृश्यांचे narration त्याच्या beat मधील माहिती पोहोचवत नाही, त्यांचेच',
+            '(अपेक्षित माहिती) आणि त्या दृश्याभोवतीचे सलग narration_context दिले आहे.',
+            'दृश्य बदलाच्या सीमेवर वाक्य पुढे सुरू राहू शकते. संपूर्ण context पाहूनही beat मधील माहिती पोहोचत नसेल, त्यांचेच',
             'क्रमांक द्या. शब्दशः जुळणी अपेक्षित नाही — माहिती पोहोचली की नाही एवढेच पाहा.',
             'शंका असल्यास दृश्य वगळा (उत्तीर्ण माना).',
             'फक्त वैध JSON object परत करा: { "uncovered": [दृश्य क्रमांक] }',
@@ -295,7 +313,8 @@ async function repairUncoveredScenes(
             '',
             '<TASK>',
             'UNCOVERED मधील दृश्यांचे narration असे पुन्हा लिहा की VOICE beat मधील',
-            'माहिती पोहोचेल — फक्त टिपणीतील तथ्ये वापरून. VISUAL track बदलू नका; तो',
+            'माहिती पोहोचेल — फक्त टिपणीतील तथ्ये वापरून. संपूर्ण निवेदनाचा सलगपणा आणि दृश्यांमधील नैसर्गिक hand-off कायम ठेवा;',
+            'दुरुस्त दृश्याला स्वतंत्र सुरुवात किंवा निष्कर्ष देऊ नका. VISUAL track बदलू नका; तो',
             'output schema चा भागही नाही. इतर सर्व दृश्ये, title आणि style जशीच्या तशी',
             'ठेवा. संपूर्ण script चा वैध JSON object परत करा.',
             '</TASK>',
@@ -454,7 +473,7 @@ export async function generateVideoScript(
     console.warn(
       `[video-script] narration estimates to ~${totalEstimate.toFixed(0)}s ` +
         `against a ${totalTarget}s target — the narrate phase will shorten ` +
-        'the longest scenes.',
+        'the continuous script if the measured WAV confirms the overrun.',
     );
   }
 
@@ -470,6 +489,7 @@ export async function generateVideoScript(
       keyPoint: keyPointOf(scene.key_point, note),
       beat: plan.scenes[index]!.beat,
       shotHint: plan.scenes[index]!.shotHint,
+      plannedDurationSeconds: plan.scenes[index]!.durationSeconds,
     })),
     referenceTitle: reference?.title ?? null,
     referenceUrl: reference?.url ?? null,

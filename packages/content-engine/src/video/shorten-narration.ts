@@ -30,6 +30,7 @@ import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import {
   DEFAULT_NARRATION_CHARS_PER_SECOND,
+  VIDEO_NARRATION_MAX_CHARS,
   VIDEO_SCENE_REWRITE_TARGET_SECONDS,
 } from '@dgipr/schemas';
 import { chatComplete, VIDEO_CHAT_MODEL } from '../generation/openai-chat.js';
@@ -43,6 +44,14 @@ import { chatComplete, VIDEO_CHAT_MODEL } from '../generation/openai-chat.js';
 // checked deterministically below, where it belongs.
 const ResultSchema = z.object({
   narration: z.string().trim().min(1),
+});
+
+const ContinuousResultSchema = z.object({
+  scenes: z.array(
+    z.object({
+      narration: z.string().trim().min(1).max(VIDEO_NARRATION_MAX_CHARS),
+    }),
+  ),
 });
 
 function parseJson(raw: string): unknown {
@@ -161,6 +170,111 @@ export async function shortenNarration(
     return shortened;
   } catch (error) {
     console.warn('[video-narration] shorten failed (keeping the line):', error);
+    return null;
+  }
+}
+
+export type ContinuousNarrationScene = Readonly<{
+  narration: string;
+  beat?: string | undefined;
+}>;
+
+// Tighten the WHOLE voiceover without turning its scene slices back into
+// isolated mini-scripts. The returned array retains the caller's scene count,
+// but the writing instruction treats the concatenation as the deliverable:
+// boundaries are visual cuts, not pauses or paragraph endings.
+export async function shortenContinuousNarration(
+  scenes: readonly ContinuousNarrationScene[],
+  options: Readonly<{
+    measuredSeconds: number;
+    targetSeconds: number;
+  }>,
+): Promise<string[] | null> {
+  if (scenes.length === 0) return null;
+  const current = scenes.map((scene) => scene.narration.trim());
+  if (current.some((narration) => narration === '')) return null;
+  const currentChars = current.join(' ').length;
+  const ratio = options.targetSeconds / Math.max(options.measuredSeconds, 0.1);
+  const targetChars = Math.max(
+    scenes.length * 20,
+    Math.min(
+      Math.floor(options.targetSeconds * DEFAULT_NARRATION_CHARS_PER_SECOND),
+      Math.floor(currentChars * ratio * 0.96),
+    ),
+  );
+
+  try {
+    const raw = await chatComplete(
+      [
+        {
+          role: 'system',
+          content: [
+            'Shorten one continuous Marathi explainer-video voiceover to the requested total duration.',
+            'The scene entries are only visual-timeline slices. Their concatenation must sound like one uninterrupted narration.',
+            'Preserve natural transitions across scene boundaries. Do not restart, reintroduce the subject, summarize, or conclude at each boundary.',
+            'A sentence may continue from one scene entry into the next.',
+            'Keep every scene beat represented somewhere in the complete narration, prioritising the main idea and citizen-actionable facts.',
+            'Do not add information or alter names, dates, amounts or numbers.',
+            `Return exactly ${scenes.length} non-empty scene entries in the same order.`,
+            'Return only JSON: { "scenes": [ { "narration": "..." } ] }',
+          ].join('\n'),
+        },
+        {
+          role: 'user',
+          content: [
+            '<CURRENT_SCRIPT purpose="one_continuous_voiceover_split_at_visual_cuts">',
+            JSON.stringify(
+              scenes.map((scene, index) => ({
+                scene: index + 1,
+                narration: scene.narration,
+                ...(scene.beat ? { beat: scene.beat } : {}),
+              })),
+              null,
+              2,
+            ),
+            '</CURRENT_SCRIPT>',
+            '',
+            '<LENGTH>',
+            `संपूर्ण निवेदन बोलण्यास ${options.measuredSeconds.toFixed(1)} सेकंद लागतात;`,
+            `ते ${options.targetSeconds.toFixed(1)} सेकंदांच्या आत आले पाहिजे.`,
+            `म्हणजे सर्व दृश्ये मिळून सुमारे ${targetChars} अक्षरांपर्यंत (सध्या ${currentChars}).`,
+            '</LENGTH>',
+            '',
+            '<TASK>',
+            'सलगपणा कायम ठेवून संपूर्ण निवेदन लहान करा आणि वैध JSON object परत करा.',
+            '</TASK>',
+          ].join('\n'),
+        },
+      ],
+      {
+        model: VIDEO_CHAT_MODEL,
+        temperature: 0,
+        responseFormat: 'json_object',
+      },
+    );
+
+    const parsed = ContinuousResultSchema.safeParse(parseJson(raw));
+    if (!parsed.success || parsed.data.scenes.length !== scenes.length) {
+      console.warn(
+        '[video-narration] continuous shorten returned an unusable shape; keeping the script.',
+      );
+      return null;
+    }
+    const shortened = parsed.data.scenes.map((scene) => scene.narration.trim());
+    const shortenedChars = shortened.join(' ').length;
+    if (shortenedChars >= currentChars) {
+      console.warn(
+        `[video-narration] continuous shorten produced no reduction ` +
+          `(${currentChars} → ${shortenedChars} chars); keeping the script.`,
+      );
+      return null;
+    }
+    return shortened;
+  } catch (error) {
+    console.warn(
+      '[video-narration] continuous shorten failed; keeping the script:',
+      error,
+    );
     return null;
   }
 }

@@ -30,6 +30,9 @@
     "generate:test": "tsx --env-file=../../.env src/generation/generate-article.ts",
     "generate:simple": "tsx --env-file=../../.env src/generation/generate-article-simple.ts",
     "article:compare": "tsx --env-file=../../.env src/scripts/compare-article-modes.ts",
+    "poster:motion:demo": "tsx --env-file=../../.env src/scripts/motionize-poster-demo.ts",
+    "what-changed:demo": "tsx --env-file=../../.env src/scripts/what-changed-demo.ts",
+    "what-changed:test": "tsx --test src/what-changed/find-topic-articles.test.ts src/what-changed/render-carousel.test.ts",
     "polish:test": "tsx --env-file=../../.env src/generation/polish-article.ts"
   },
   "dependencies": {

@@ -25,6 +25,7 @@ import {
   UpdateVideoScriptRequestSchema,
   clipSecondsForNarration,
   estimateNarrationSeconds,
+  normalizeVideoNarrationScript,
   type VideoProjectDetail,
   type VideoProjectSummary,
 } from '@dgipr/schemas';
@@ -84,6 +85,18 @@ function toDetail(
   client: SupabaseClient,
   row: VideoProjectRow,
 ): VideoProjectDetail {
+  const joinedNarration = row.scenes
+    .map((scene) => scene.narration.trim())
+    .filter(Boolean)
+    .join(' ');
+  const sharedNarrationPath = row.scenes[0]?.narrationAudioPath;
+  const hasContinuousNarration =
+    sharedNarrationPath !== undefined &&
+    row.scenes.every(
+      (scene) =>
+        scene.narrationAudioPath === sharedNarrationPath &&
+        scene.narrationAudioText === joinedNarration,
+    );
   return {
     id: row.id,
     status: row.status,
@@ -91,6 +104,7 @@ function toDetail(
     error: row.error,
     note: row.note,
     heading: row.heading,
+    inputMode: row.inputMode,
     durationBucket: row.durationBucket,
     orientation: row.orientation,
     tier: row.tier,
@@ -98,9 +112,15 @@ function toDetail(
     style: row.style,
     referenceTitle: row.referenceTitle,
     referenceUrl: row.referenceUrl,
-    scenes: row.scenes.map((scene) => ({
+    scenes: row.scenes.map((scene, index) => ({
       narration: scene.narration,
       visualBrief: scene.visualBrief,
+      ...(scene.openingVisualBrief !== undefined
+        ? { openingVisualBrief: scene.openingVisualBrief }
+        : {}),
+      ...(scene.motionBrief !== undefined
+        ? { motionBrief: scene.motionBrief }
+        : {}),
       ...(scene.endVisualBrief !== undefined
         ? { endVisualBrief: scene.endVisualBrief }
         : {}),
@@ -112,7 +132,9 @@ function toDetail(
       ...(scene.narrationAudioSeconds !== undefined
         ? { narrationSeconds: scene.narrationAudioSeconds }
         : {}),
-      ...(scene.narrationAudioPath
+      // A continuous project has one shared WAV. Surface its player once on
+      // the first card; legacy projects retain one player per scene.
+      ...(scene.narrationAudioPath && (!hasContinuousNarration || index === 0)
         ? {
             narrationAudioUrl: publicUrlIn(
               client,
@@ -201,6 +223,7 @@ export function registerVideoRoutes(
     const row = await insertVideoProject(client, {
       note: body.note,
       heading: body.heading,
+      inputMode: body.inputMode,
       durationBucket: body.durationBucket,
       orientation: body.orientation,
       tier: body.tier,
@@ -261,6 +284,20 @@ export function registerVideoRoutes(
       ) {
         return reply.code(409).send({ error: { message: BUSY_MESSAGE } });
       }
+      if (row.inputMode === 'script') {
+        const submitted = normalizeVideoNarrationScript(
+          body.scenes.map((scene) => scene.narration).join(' '),
+        );
+        const original = normalizeVideoNarrationScript(row.note);
+        if (submitted !== original) {
+          return reply.code(400).send({
+            error: {
+              message:
+                'तयार संहितेतील निवेदन बदलता येत नाही. दृश्य-वर्णन मात्र संपादित करता येईल.',
+            },
+          });
+        }
+      }
       // The officer's edited style/setting paragraph. It is an input to EVERY
       // frame prompt, so changing it makes every rendered frame stale — which
       // matters because this route also accepts storyboard_ready, where frames
@@ -313,12 +350,14 @@ export function registerVideoRoutes(
             : existing?.keyPoint !== undefined
               ? { keyPoint: existing.keyPoint }
               : {}),
-          // Provisional: a plausible window from the edited narration's
-          // length, so the gate-2 estimate is not wild before anything is
-          // synthesized. The voice phase re-derives it from the measured WAV.
-          durationSeconds: clipSecondsForNarration(
-            estimateNarrationSeconds(incoming.narration),
-          ),
+          // Preserve the timeline the script writer saw. A genuinely new scene
+          // gets a provisional text-derived weight; the continuous voice phase
+          // normalises all weights back to the selected 30/60-second total.
+          durationSeconds:
+            existing?.durationSeconds ??
+            clipSecondsForNarration(
+              estimateNarrationSeconds(incoming.narration),
+            ),
           status: 'pending',
           ...(existing?.beat !== undefined ? { beat: existing.beat } : {}),
           ...(existing?.shotHint !== undefined
@@ -444,12 +483,19 @@ export function registerVideoRoutes(
         });
       }
 
-      if (body.visualBrief !== undefined || body.endVisualBrief !== undefined) {
+      if (
+        body.visualBrief !== undefined ||
+        body.openingVisualBrief !== undefined ||
+        body.endVisualBrief !== undefined
+      ) {
         const scenes = [...row.scenes];
         scenes[index] = {
           ...scene,
           ...(body.visualBrief !== undefined
             ? { visualBrief: body.visualBrief }
+            : {}),
+          ...(body.openingVisualBrief !== undefined
+            ? { openingVisualBrief: body.openingVisualBrief }
             : {}),
           ...(body.endVisualBrief !== undefined
             ? { endVisualBrief: body.endVisualBrief }
@@ -573,10 +619,9 @@ export function registerVideoRoutes(
   );
 
   // Add (or refresh) the Marathi TTS narration on a finished video: synthesize
-  // each scene's narration with Sarvam and re-stitch WITH audio. On-demand, from
-  // a completed project — Sarvam stays off the Veo critical path, and only the
-  // scenes whose cached audio is stale are re-synthesized. Reuses the `animating`
-  // status (step 'narrate'), flipped BEFORE the 202 (poll-race rule).
+  // the complete joined script as one Sarvam performance and re-stitch WITH
+  // that continuous track. Reuses the `animating` status (step 'narrate'),
+  // flipped BEFORE the 202 (poll-race rule).
   app.post<{ Params: { id: string } }>(
     '/video/projects/:id/narrate',
     async (request, reply) => {

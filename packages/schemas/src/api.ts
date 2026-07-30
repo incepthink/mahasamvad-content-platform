@@ -116,18 +116,6 @@ export type TranslationLanguage = z.infer<typeof TranslationLanguageSchema>;
 // web form so it can warn instead of eating a 400.
 export const POSTER_HEADING_MAX_CHARS = 120;
 
-// Hard ceiling on an officer-supplied style-reference article (the simplified article
-// generator's tier-1 reference — see select-style-reference.ts). Generous, because the whole
-// point is that the model studies a COMPLETE published article's structure: how it opens, how
-// it sequences paragraphs and how it concludes. Shared with the web form so it can warn
-// instead of eating a 400.
-export const STYLE_REFERENCE_MAX_CHARS = 20_000;
-
-// Below this a paste is a fragment, not an article — too little to demonstrate structure, and
-// far more likely to be a stray line than an intentional reference. Such input falls through
-// to retrieval rather than being honoured as tier 1.
-export const STYLE_REFERENCE_MIN_CHARS = 200;
-
 // Category-appropriate article length, handed to the generator as a GUIDELINE. `target` is
 // what the prompt asks for; `min`/`max` bound the acceptable range. The prompt states
 // explicitly that a limited source must produce a shorter article and that the target may be
@@ -205,14 +193,10 @@ export const CreateGenerationRequestSchema = z
     // Article runs only (news/scheme): a published article the officer pasted as the STYLE
     // reference — tier 1 of the simplified generator's reference hierarchy, above vector
     // retrieval. Style, structure and voice only; it is NEVER a factual source, and the
-    // prompt says so explicitly. Absent/empty ⇒ fall through to retrieval, then to the
-    // prompt's own DGIPR rules. Inert for social runs and for a pasted finished article
-    // (providedArticle), neither of which generates prose.
-    styleReference: z
-      .string()
-      .trim()
-      .max(STYLE_REFERENCE_MAX_CHARS)
-      .optional(),
+    // prompt says so explicitly. Absent/empty ⇒ semantic retrieval, then an available article
+    // from the requested style category. Inert for social runs and for a pasted finished
+    // article (providedArticle), neither of which generates prose.
+    styleReference: z.string().trim().optional(),
   })
   .superRefine((value, ctx) => {
     if (value.referenceImageId && value.referenceTypeId) {

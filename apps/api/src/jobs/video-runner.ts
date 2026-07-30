@@ -7,11 +7,10 @@
 // @dgipr/content-engine and assembly in @dgipr/poster-renderer (same boundary as
 // runner.ts, per AGENTS.md).
 //
-// AUDIO LEADS, CLIPS FOLLOW: the voice phase synthesizes and MEASURES every
-// narration first, then DERIVES each scene's clip length from its own speech
-// (clipSecondsForNarration). A line is rewritten shorter only when it busts the
-// 15s clip ceiling or the project's total-time budget — never to fit a window
-// that was chosen for it, and never sped up. See ensureNarrationAudio.
+// AUDIO LEADS, CLIPS FOLLOW: the voice phase joins every reviewed scene slice
+// and synthesizes ONE continuous performance. It measures that WAV, assigns
+// scene windows beneath it, and later muxes the WAV once across the stitched
+// clips. Visual cuts therefore introduce neither silence nor TTS cadence resets.
 //
 // Job state of record is the video_projects row (status/step/error + per-scene
 // status inside the scenes jsonb), so polling clients survive refreshes. The
@@ -30,11 +29,13 @@ import {
   buildEndFramePrompt,
   buildKeyframePrompt,
   createCostAccumulator,
+  directVideoMotion,
   generateVideoScript,
+  planReadyVideoScript,
   renderClip,
   renderFrame,
   runInCostScope,
-  shortenNarration,
+  shortenContinuousNarration,
   synthesizeMarathiNarration,
   totalCostUsd,
   ttsSpeaker,
@@ -43,6 +44,7 @@ import {
 import {
   assembleSilentVideo,
   muxNarration,
+  overlayVideoLogo,
   renderCaptionOverlay,
   validateVideoOutput,
   wavDurationSeconds,
@@ -62,11 +64,10 @@ import {
 import {
   VIDEO_CLIP_MAX_SECONDS,
   VIDEO_CLIP_MIN_SECONDS,
-  VIDEO_SCENE_REWRITE_TARGET_SECONDS,
   VIDEO_TOTAL_FIT_TOLERANCE,
   VIDEO_TOTAL_SECONDS,
+  allocateVideoSceneDurations,
   buildSrt,
-  clipSecondsForNarration,
   estimateNarrationSeconds,
   sceneTimings,
 } from '@dgipr/schemas';
@@ -101,12 +102,8 @@ function videoStoragePath(id: string, version: number): string {
 function srtStoragePath(id: string, version: number): string {
   return `projects/${id}/subtitles-v${version}.srt`;
 }
-function narrationStoragePath(
-  id: string,
-  scene: number,
-  version: number,
-): string {
-  return `projects/${id}/scene-${scene}-narration-v${version}.wav`;
+function narrationStoragePath(id: string, version: number): string {
+  return `projects/${id}/narration-v${version}.wav`;
 }
 
 function aspectOf(row: VideoProjectRow): VeoAspectRatio {
@@ -182,14 +179,18 @@ export function startVideoScriptJob(client: SupabaseClient, id: string): void {
     const row = await requireProject(client, id);
     await updateVideoProject(client, id, { step: 'script', error: null });
 
-    const script = await generateVideoScript(row.note, {
-      durationBucket: row.durationBucket,
-      heading: row.heading ?? undefined,
-    });
+    const script =
+      row.inputMode === 'script'
+        ? await planReadyVideoScript(row.note, {
+            heading: row.heading ?? undefined,
+          })
+        : await generateVideoScript(row.note, {
+            durationBucket: row.durationBucket,
+            heading: row.heading ?? undefined,
+          });
 
-    // A PROVISIONAL duration, estimated from the narration's length so gate 1
-    // can show a plausible clip length and cost. The storyboard job's voice
-    // phase replaces it with one derived from the MEASURED audio.
+    // The provisional visual timeline the script writer saw. The continuous
+    // voice phase measures the real WAV and extends the total only if needed.
     const scenes: VideoSceneEntry[] = script.scenes.map((scene) => ({
       narration: scene.narration,
       visualBrief: scene.visualBrief,
@@ -197,9 +198,7 @@ export function startVideoScriptJob(client: SupabaseClient, id: string): void {
         ? { endVisualBrief: scene.endVisualBrief }
         : {}),
       keyPoint: scene.keyPoint,
-      durationSeconds: clipSecondsForNarration(
-        estimateNarrationSeconds(scene.narration),
-      ),
+      durationSeconds: scene.plannedDurationSeconds,
       status: 'pending',
       beat: scene.beat,
       shotHint: scene.shotHint,
@@ -258,9 +257,10 @@ async function loadWorldReference(
   client: SupabaseClient,
   row: VideoProjectRow,
   index: number,
+  scenes: readonly VideoSceneEntry[],
 ): Promise<Buffer | undefined> {
   if (index === 0) return undefined;
-  const first = row.scenes[0];
+  const first = scenes[0];
   if (!first?.stillPath) return undefined;
   try {
     return await downloadFile(client, VIDEOS_BUCKET, first.stillPath);
@@ -288,17 +288,18 @@ async function renderSceneFrames(
   index: number,
   scene: VideoSceneEntry,
   which: 'pair' | 'end',
+  scenes: readonly VideoSceneEntry[],
 ): Promise<VideoSceneEntry> {
   let startPath = scene.stillPath;
   let startVersion = scene.stillVersion;
   let startPng: Buffer;
 
   if (which === 'pair') {
-    const worldReference = await loadWorldReference(client, row, index);
+    const worldReference = await loadWorldReference(client, row, index, scenes);
     startPng = await renderFrame({
       prompt: buildKeyframePrompt(
         row.style ?? '',
-        scene.visualBrief,
+        scene.openingVisualBrief ?? scene.visualBrief,
         scene.shotHint,
         worldReference !== undefined,
       ),
@@ -339,6 +340,12 @@ async function renderSceneFrames(
   return {
     narration: scene.narration,
     visualBrief: scene.visualBrief,
+    ...(scene.openingVisualBrief !== undefined
+      ? { openingVisualBrief: scene.openingVisualBrief }
+      : {}),
+    ...(scene.motionBrief !== undefined
+      ? { motionBrief: scene.motionBrief }
+      : {}),
     ...(scene.endVisualBrief !== undefined
       ? { endVisualBrief: scene.endVisualBrief }
       : {}),
@@ -387,335 +394,293 @@ function sarvamKeyPresent(): boolean {
   return typeof key === 'string' && key.trim() !== '';
 }
 
-// How many times one scene's narration may be rewritten to make it fit. Two is
-// enough in practice (the first cut is proportional to the measured overrun),
-// and bounding it matters because each attempt is a chat call plus a TTS call.
+// At most two whole-script rewrites. The first cut is proportional to the
+// measured overrun; bounding it matters because each attempt is one text call
+// plus one TTS call.
 const NARRATION_FIT_ATTEMPTS = 2;
 
-// How many scenes the TOTAL-budget pass may rewrite. Each is one chat + one TTS
-// call (cents), and the total is a soft target — a video running a few seconds
-// long is a far better outcome than an unbounded shortening loop.
-const TOTAL_FIT_ATTEMPTS = 3;
-
-// What a scene's narration must fit inside, and what to rewrite it toward when
-// it does not. The two callers differ: the storyboard voice phase lets the CLIP
-// grow to the speech, so its only ceiling is the longest clip Kling renders;
-// startNarrationJob runs after the clips are paid for, so each scene's frozen
-// window is its ceiling — the old fixed-8s semantics, generalized.
-type NarrationFit = Readonly<{
+type ContinuousNarrationFit = Readonly<{
   ceilingSeconds: number;
   rewriteTargetSeconds: number;
 }>;
 
-// Synthesize one scene's narration and, if the MEASURED audio overruns the
-// caller's ceiling, shorten the line and try again. Returns the (possibly
-// rewritten) narration with its audio and duration.
-//
-// This is the structural half of the no-fast-forward guarantee. The script was
-// already written to a budget, but a budget is an estimate: how long a given
-// Marathi sentence actually takes depends on the sentence. Only the WAV knows,
-// so this measures it and treats a shorter rewrite — not a speed-up — as the
-// way to fit. It runs at the TOP of the storyboard job, before a single frame
-// or clip is rendered, so a rewrite costs cents and never a paid render.
-async function synthesizeFittedNarration(
-  narration: string,
+function continuousNarrationText(
+  scenes: readonly Pick<VideoSceneEntry, 'narration'>[],
+): string {
+  return scenes
+    .map((scene) => scene.narration.trim())
+    .filter(Boolean)
+    .join(' ');
+}
+
+// New continuous projects point every scene at the SAME WAV and carry the
+// complete joined script as its staleness key. Legacy projects point at one WAV
+// per scene and therefore fail this predicate, but remain stitchable below.
+function continuousNarrationIsCurrent(
+  scenes: readonly VideoSceneEntry[],
   voice: string,
-  beat: string | undefined,
+): boolean {
+  const path = scenes[0]?.narrationAudioPath;
+  if (!path) return false;
+  const text = continuousNarrationText(scenes);
+  return scenes.every(
+    (scene) =>
+      scene.narrationAudioPath === path &&
+      scene.narrationAudioText === text &&
+      scene.narrationAudioVoice === voice,
+  );
+}
+
+function narrationWeights(
+  scenes: readonly Pick<VideoSceneEntry, 'narration'>[],
+): number[] {
+  return scenes.map((scene) => Math.max(1, scene.narration.trim().length));
+}
+
+async function synthesizeFittedContinuousNarration(
+  scenes: readonly VideoSceneEntry[],
+  voice: string,
   logPrefix: string,
-  fit: NarrationFit,
-): Promise<{ text: string; wav: Buffer; seconds: number }> {
-  let text = narration;
-  let wav = await synthesizeMarathiNarration(text, { speaker: voice });
+  fit: ContinuousNarrationFit,
+  preserveWords: boolean,
+): Promise<{
+  narrations: string[];
+  wav: Buffer;
+  seconds: number;
+}> {
+  let current = scenes.map((scene) => scene.narration.trim());
+  let wav = await synthesizeMarathiNarration(current.join(' '), {
+    speaker: voice,
+  });
   let seconds = wavDurationSeconds(wav);
 
-  for (let attempt = 1; attempt <= NARRATION_FIT_ATTEMPTS; attempt++) {
+  for (
+    let attempt = 1;
+    !preserveWords && attempt <= NARRATION_FIT_ATTEMPTS;
+    attempt++
+  ) {
     if (seconds <= fit.ceilingSeconds) break;
-    const shorter = await shortenNarration(text, {
-      measuredSeconds: seconds,
-      targetSeconds: fit.rewriteTargetSeconds,
-      ...(beat !== undefined ? { beat } : {}),
-    });
-    // No valid shortening (or the model gave up): keep what we have. The line
-    // is slightly long, which the mux can still absorb — losing the scene would
-    // be far worse.
+    const shorter = await shortenContinuousNarration(
+      scenes.map((scene, index) => ({
+        narration: current[index]!,
+        ...(scene.beat !== undefined ? { beat: scene.beat } : {}),
+      })),
+      {
+        measuredSeconds: seconds,
+        targetSeconds: fit.rewriteTargetSeconds,
+      },
+    );
     if (shorter === null) break;
-    const retryWav = await synthesizeMarathiNarration(shorter, {
+    const retryWav = await synthesizeMarathiNarration(shorter.join(' '), {
       speaker: voice,
     });
     const retrySeconds = wavDurationSeconds(retryWav);
     console.log(
-      `${logPrefix} narration ${seconds.toFixed(2)}s → ${retrySeconds.toFixed(2)}s ` +
+      `${logPrefix} continuous narration ${seconds.toFixed(2)}s → ${retrySeconds.toFixed(2)}s ` +
         `(attempt ${attempt}/${NARRATION_FIT_ATTEMPTS}, ceiling ${fit.ceilingSeconds}s)`,
     );
-    // Accept only a genuine improvement: a rewrite that reads faster on paper
-    // but slower aloud must not replace a better take.
     if (retrySeconds >= seconds) break;
-    text = shorter;
+    current = shorter;
     wav = retryWav;
     seconds = retrySeconds;
   }
 
   if (seconds > fit.ceilingSeconds) {
+    if (preserveWords) {
+      throw new Error(
+        `तयार निवेदनाचा प्रत्यक्ष आवाज ${seconds.toFixed(1)} सेकंदांचा आहे आणि उपलब्ध ${fit.ceilingSeconds.toFixed(0)} सेकंदांच्या दृश्य-वेळेपेक्षा मोठा आहे. निवेदन लहान करून नवीन प्रकल्प तयार करा.`,
+      );
+    }
     console.warn(
-      `${logPrefix} narration still ${seconds.toFixed(2)}s after shortening ` +
+      `${logPrefix} continuous narration is still ${seconds.toFixed(2)}s after shortening ` +
         `(ceiling ${fit.ceilingSeconds}s) — the mux may speed it up slightly.`,
     );
   }
-  return { text, wav, seconds };
+  return { narrations: current, wav, seconds };
 }
 
-// Synthesize + persist one scene's narration audio, returning the updated
-// entry. Shared by the voice phase's two shortening passes so the upload,
-// version bump and staleness fields are written in exactly one place.
-async function storeSceneNarration(
-  client: SupabaseClient,
-  id: string,
-  index: number,
-  scene: VideoSceneEntry,
-  voice: string,
-  fit: NarrationFit,
-): Promise<VideoSceneEntry> {
-  const fitted = await synthesizeFittedNarration(
-    scene.narration,
-    voice,
-    scene.beat,
-    `[video ${id}] scene ${index + 1}`,
-    fit,
-  );
-  const version = (scene.narrationAudioVersion ?? 0) + 1;
-  const path = narrationStoragePath(id, index, version);
-  await uploadFile(client, VIDEOS_BUCKET, path, fitted.wav, 'audio/wav');
-  return {
-    ...scene,
-    narration: fitted.text,
-    narrationAudioPath: path,
-    narrationAudioVersion: version,
-    narrationAudioText: fitted.text,
-    narrationAudioVoice: voice,
-    narrationAudioSeconds: fitted.seconds,
-  };
-}
-
-// A scene's spoken length: measured when audio exists, estimated otherwise.
-function narrationSecondsOf(scene: VideoSceneEntry): number {
-  return (
-    scene.narrationAudioSeconds ?? estimateNarrationSeconds(scene.narration)
-  );
-}
-
-// What a scene contributes to the finished video's running time. A scene with a
-// current clip contributes its FROZEN window regardless of its voice (the clip
-// is rendered and paid for); everything else contributes the speech its clip
-// will be derived from.
-function sceneScreenSeconds(scene: VideoSceneEntry): number {
-  return clipIsCurrent(scene)
-    ? scene.durationSeconds
-    : clipSecondsForNarration(narrationSecondsOf(scene));
-}
-
-// Pass B: bring the WHOLE video near its selected total (30s/60s) by rewriting
-// the longest scenes, once the per-scene measurements are in.
-//
-// Only scenes without a current clip are eligible: shortening a frozen scene
-// cannot shrink the video (its clip is already rendered at its old window), it
-// would only desync that clip from its own narration.
-//
-// Bounded and best-effort by design — this is a soft target. Every scene
-// already fits its OWN clip after pass A, so failing to converge here costs a
-// few seconds of running time, not a broken video.
-async function fitNarrationToTotal(
+async function storeContinuousNarration(
   client: SupabaseClient,
   id: string,
   scenes: VideoSceneEntry[],
-  totalTarget: number,
   voice: string,
+  fit: ContinuousNarrationFit,
+  totalWindowSeconds: number,
+  freezeWindows: boolean,
+  preserveWords: boolean,
 ): Promise<void> {
-  const budget = totalTarget * VIDEO_TOTAL_FIT_TOLERANCE;
-  let total = scenes.reduce((sum, scene) => sum + sceneScreenSeconds(scene), 0);
-
-  for (let attempt = 1; attempt <= TOTAL_FIT_ATTEMPTS; attempt++) {
-    if (total <= budget) return;
-
-    // The worst offender: the longest scene we are still allowed to touch.
-    let pick = -1;
-    for (const [index, scene] of scenes.entries()) {
-      if (clipIsCurrent(scene)) continue;
-      if (
-        pick === -1 ||
-        narrationSecondsOf(scene) > narrationSecondsOf(scenes[pick]!)
-      ) {
-        pick = index;
-      }
-    }
-    if (pick === -1) return; // every scene is frozen — nothing left to shorten.
-
-    const scene = scenes[pick]!;
-    const seconds = narrationSecondsOf(scene);
-    // Ask this scene for the whole excess, but never below its proportional
-    // share of the target — taking it all out of one scene would gut it while
-    // the rest stayed long.
-    const proportional = seconds * (totalTarget / Math.max(total, 0.1));
-    const target = Math.max(
-      VIDEO_CLIP_MIN_SECONDS,
-      Math.min(seconds - (total - totalTarget), proportional),
-    );
-    console.log(
-      `[video ${id}] total ${total.toFixed(1)}s over the ${totalTarget}s budget — ` +
-        `shortening scene ${pick + 1} toward ${target.toFixed(1)}s ` +
-        `(attempt ${attempt}/${TOTAL_FIT_ATTEMPTS})`,
-    );
-
-    const shorter = await shortenNarration(scene.narration, {
-      measuredSeconds: seconds,
-      targetSeconds: target,
-      ...(scene.beat !== undefined ? { beat: scene.beat } : {}),
-    });
-    if (shorter === null) return; // no valid rewrite: stop rather than loop.
-
-    try {
-      // Re-synthesize through the same helper so the ceiling still applies and
-      // the audio/text/version fields stay consistent.
-      const updated = await storeSceneNarration(
-        client,
-        id,
-        pick,
-        { ...scene, narration: shorter },
-        voice,
-        {
-          ceilingSeconds: VIDEO_CLIP_MAX_SECONDS,
-          rewriteTargetSeconds: VIDEO_SCENE_REWRITE_TARGET_SECONDS,
-        },
+  const fitted = await synthesizeFittedContinuousNarration(
+    scenes,
+    voice,
+    `[video ${id}]`,
+    fit,
+    preserveWords,
+  );
+  const version =
+    Math.max(0, ...scenes.map((scene) => scene.narrationAudioVersion ?? 0)) + 1;
+  const path = narrationStoragePath(id, version);
+  await uploadFile(client, VIDEOS_BUCKET, path, fitted.wav, 'audio/wav');
+  const joinedText = fitted.narrations.join(' ');
+  const weights = narrationWeights(
+    fitted.narrations.map((narration) => ({ narration })),
+  );
+  const weightTotal = weights.reduce((sum, weight) => sum + weight, 0);
+  const durations = freezeWindows
+    ? scenes.map((scene) => scene.durationSeconds)
+    : allocateVideoSceneDurations(
+        scenes.map((scene) => scene.durationSeconds),
+        Math.max(totalWindowSeconds, fitted.seconds),
       );
-      // Accept only a genuine improvement, the pass-A rule.
-      if ((updated.narrationAudioSeconds ?? seconds) >= seconds) return;
-      scenes[pick] = updated;
-      await updateVideoProject(client, id, { scenes });
-    } catch (error) {
-      console.warn(
-        `[video ${id}] scene ${pick + 1} total-fit TTS failed (non-fatal):`,
-        error,
-      );
-      return;
-    }
 
-    total = scenes.reduce((sum, s) => sum + sceneScreenSeconds(s), 0);
-  }
-
-  if (total > budget) {
-    console.warn(
-      `[video ${id}] narration totals ${total.toFixed(1)}s against a ` +
-        `${totalTarget}s target after ${TOTAL_FIT_ATTEMPTS} attempts — ` +
-        'shipping it long rather than cutting further.',
-    );
+  for (const [index, scene] of scenes.entries()) {
+    scenes[index] = {
+      ...scene,
+      narration: fitted.narrations[index]!,
+      durationSeconds: durations[index]!,
+      narrationAudioPath: path,
+      narrationAudioVersion: version,
+      narrationAudioText: joinedText,
+      narrationAudioVoice: voice,
+      // An informational share of the continuous WAV, used by the review UI.
+      // It is not a separately synthesized segment and introduces no pause.
+      narrationAudioSeconds: (fitted.seconds * weights[index]!) / weightTotal,
+    };
   }
 }
 
-// The TTS-first voice phase (top of the storyboard job), in three passes:
-//
-//   A. Synthesize each scene's narration (skipping audio that is already
-//      current) and MEASURE the real spoken duration from the WAV header,
-//      rewriting any line that busts the 15s clip ceiling.
-//   B. Bring the whole video near its selected total (30s/60s) by shortening
-//      the longest scenes — bounded, best-effort, soft target.
-//   C. DERIVE each scene's clip window from its own measured speech.
-//
-// This is the inversion the whole rework turns on: the window is no longer
-// chosen for the narration, it is computed FROM it. Because
-// clipSecondsForNarration ceils, the window is never shorter than the speech,
-// so muxNarration's atempo cannot fire on a scene derived here.
-//
-// Rules that keep this safe:
-// - WINDOW FREEZE: a scene whose clip is current keeps its window (muxNarration's
-//   atempo absorbs small voice drift) — measuring must never silently invalidate
-//   a paid clip, including a legacy 4s/6s one.
-// - Per-scene TTS failure is NON-FATAL: that scene simply carries no audio yet
-//   and the project still reaches gate 2 (un-voiced for that scene; the
-//   post-completion narrate button repairs it later).
-// - No SARVAM_API_KEY: pass B is skipped (nothing was measured, so a total pass
-//   would be guessing), durations derive from the char-rate estimate, and the
-//   video ships silent — exactly as before the voice-first flow.
+// Voice-first, but now as ONE performance: write/synthesize the concatenated
+// narration, measure it once, then lay the visual cuts beneath that WAV. Scene
+// entries remain useful at both review gates, but they never create TTS starts,
+// audio padding or silence between clips.
 async function ensureNarrationAudio(
   client: SupabaseClient,
   id: string,
   scenes: VideoSceneEntry[],
   totalTarget: number,
+  preserveWords: boolean,
 ): Promise<void> {
   const haveKey = sarvamKeyPresent();
+  const voice = ttsSpeaker();
+  const freezeWindows = scenes.some((scene) => clipIsCurrent(scene));
+  const frozenTotal = scenes.reduce(
+    (sum, scene) => sum + scene.durationSeconds,
+    0,
+  );
+  const providerCapacity = scenes.length * VIDEO_CLIP_MAX_SECONDS;
+  const desiredTotal = freezeWindows ? frozenTotal : totalTarget;
+
   if (!haveKey) {
     console.warn(
       `[video ${id}] SARVAM_API_KEY not set — the video will render silent.`,
     );
-  }
-  const voice = ttsSpeaker();
-
-  // Pass A: per-scene synthesis against the clip ceiling.
-  for (const [index, scene] of scenes.entries()) {
-    if (!haveKey) continue;
-    if (!narrationIsCurrent(scene, voice)) {
-      try {
-        // synthesizeMarathiNarration records TTS cost against the ambient
-        // meter. The narration comes back possibly SHORTENED — only if it
-        // exceeds what the LONGEST clip could hold, since otherwise the clip
-        // simply grows to it. The rewritten text is persisted onto the scene,
-        // so the SRT, the gate-2 card and the audio all say the same thing.
-        scenes[index] = await storeSceneNarration(
-          client,
-          id,
-          index,
-          scene,
-          voice,
-          {
-            ceilingSeconds: VIDEO_CLIP_MAX_SECONDS,
-            rewriteTargetSeconds: VIDEO_SCENE_REWRITE_TARGET_SECONDS,
-          },
-        );
-      } catch (error) {
-        console.warn(
-          `[video ${id}] scene ${index + 1} TTS failed (non-fatal):`,
-          error,
-        );
+    if (!freezeWindows) {
+      const estimated = estimateNarrationSeconds(
+        continuousNarrationText(scenes),
+      );
+      const durations = allocateVideoSceneDurations(
+        scenes.map((scene) => scene.durationSeconds),
+        Math.max(totalTarget, estimated),
+      );
+      for (const [index, scene] of scenes.entries()) {
+        scenes[index] = { ...scene, durationSeconds: durations[index]! };
       }
-    } else if (
-      scene.narrationAudioSeconds === undefined &&
-      scene.narrationAudioPath !== undefined
-    ) {
-      // Legacy audio synthesized before durations were measured: read the
-      // cached WAV instead of re-billing TTS.
-      try {
-        const wav = await downloadFile(
-          client,
-          VIDEOS_BUCKET,
-          scene.narrationAudioPath,
-        );
-        scenes[index] = {
-          ...scene,
-          narrationAudioSeconds: wavDurationSeconds(wav),
-        };
-      } catch (error) {
-        console.warn(
-          `[video ${id}] scene ${index + 1} WAV measure failed (non-fatal):`,
-          error,
-        );
+      await updateVideoProject(client, id, { scenes });
+    }
+    return;
+  }
+  if (continuousNarrationIsCurrent(scenes, voice)) return;
+
+  const ceiling = preserveWords
+    ? providerCapacity
+    : Math.min(
+        providerCapacity,
+        freezeWindows ? frozenTotal : totalTarget * VIDEO_TOTAL_FIT_TOLERANCE,
+      );
+  try {
+    await storeContinuousNarration(
+      client,
+      id,
+      scenes,
+      voice,
+      {
+        ceilingSeconds: ceiling,
+        rewriteTargetSeconds: Math.max(
+          VIDEO_CLIP_MIN_SECONDS,
+          Math.min(desiredTotal, ceiling - 0.5),
+        ),
+      },
+      preserveWords ? 0 : desiredTotal,
+      freezeWindows,
+      preserveWords,
+    );
+  } catch (error) {
+    if (preserveWords) throw error;
+    console.warn(
+      `[video ${id}] continuous TTS failed (non-fatal); the video will render silent:`,
+      error,
+    );
+    if (!freezeWindows) {
+      const durations = allocateVideoSceneDurations(
+        scenes.map((scene) => scene.durationSeconds),
+        Math.max(
+          totalTarget,
+          estimateNarrationSeconds(continuousNarrationText(scenes)),
+        ),
+      );
+      for (const [index, scene] of scenes.entries()) {
+        scenes[index] = { ...scene, durationSeconds: durations[index]! };
       }
     }
-    await updateVideoProject(client, id, { scenes });
   }
+  await updateVideoProject(client, id, { scenes });
+}
 
-  // Pass B: the total-time budget, only where there are real measurements.
-  if (haveKey) {
-    await fitNarrationToTotal(client, id, scenes, totalTarget, voice);
-  }
+// The planner supplies the idea; this pass supplies the performance. It runs
+// only after TTS has fixed the real clip durations, and only for scenes that do
+// not already carry direction so storyboard retries never rewrite or re-bill
+// successful work.
+async function ensureMotionDirection(
+  client: SupabaseClient,
+  id: string,
+  row: VideoProjectRow,
+  scenes: VideoSceneEntry[],
+): Promise<void> {
+  const missing = scenes
+    .map((scene, index) => ({ scene, index }))
+    .filter(
+      ({ scene }) =>
+        !scene.openingVisualBrief?.trim() || !scene.motionBrief?.trim(),
+    );
+  if (missing.length === 0) return;
 
-  // Pass C: derive the windows. Frozen scenes keep theirs.
-  let changed = false;
-  for (const [index, scene] of scenes.entries()) {
-    if (clipIsCurrent(scene)) continue;
-    const derived = clipSecondsForNarration(narrationSecondsOf(scene));
-    if (derived === scene.durationSeconds) continue;
-    scenes[index] = { ...scene, durationSeconds: derived };
-    changed = true;
+  const directions = await directVideoMotion({
+    title: row.title,
+    style: row.style,
+    scenes: missing.map(({ scene }) => ({
+      narration: scene.narration,
+      ...(scene.beat !== undefined ? { beat: scene.beat } : {}),
+      visualBrief: scene.visualBrief,
+      ...(scene.endVisualBrief !== undefined
+        ? { endVisualBrief: scene.endVisualBrief }
+        : {}),
+      ...(scene.shotHint !== undefined ? { shotHint: scene.shotHint } : {}),
+      durationSeconds: scene.durationSeconds,
+    })),
+  });
+
+  for (const [directionIndex, { index }] of missing.entries()) {
+    const direction = directions[directionIndex];
+    if (!direction) {
+      throw new Error(`Motion direction missing for scene ${index + 1}.`);
+    }
+    scenes[index] = {
+      ...scenes[index]!,
+      openingVisualBrief: direction.openingVisualBrief,
+      motionBrief: direction.motionBrief,
+      shotHint: direction.shotHint,
+    };
   }
-  if (changed) await updateVideoProject(client, id, { scenes });
+  await updateVideoProject(client, id, { scenes });
 }
 
 // True once a scene's declared frames actually exist in storage. This — not the
@@ -756,9 +721,13 @@ export function startStoryboardJob(client: SupabaseClient, id: string): void {
       client,
       id,
       scenes,
-      VIDEO_TOTAL_SECONDS[row.durationBucket],
+      row.inputMode === 'script'
+        ? estimateNarrationSeconds(continuousNarrationText(scenes))
+        : VIDEO_TOTAL_SECONDS[row.durationBucket],
+      row.inputMode === 'script',
     );
     await updateVideoProject(client, id, { step: 'stills' });
+    await ensureMotionDirection(client, id, row, scenes);
     for (const [index, scene] of scenes.entries()) {
       if (framesArePresent(scene)) {
         // Frames survived whatever failed last time: adopt them rather than
@@ -778,6 +747,7 @@ export function startStoryboardJob(client: SupabaseClient, id: string): void {
           index,
           scene,
           'pair',
+          scenes,
         );
       } catch (error) {
         scenes[index] = {
@@ -826,6 +796,7 @@ export function startSceneStillJob(
         index,
         scene,
         frame === 'start' ? 'pair' : 'end',
+        scenes,
       );
     } catch (error) {
       scenes[index] = {
@@ -862,23 +833,28 @@ async function renderSceneClip(
   const endStill = scene.endStillPath
     ? await downloadFile(client, VIDEOS_BUCKET, scene.endStillPath)
     : undefined;
-  const clip = await renderClip({
+  const rawClip = await renderClip({
     prompt: buildClipMotionPrompt(
       row.style ?? '',
-      scene.visualBrief,
+      scene.openingVisualBrief ?? scene.visualBrief,
       scene.shotHint,
       scene.endVisualBrief,
+      scene.motionBrief,
     ),
     startFramePng: still,
     ...(endStill ? { endFramePng: endStill } : {}),
     aspectRatio: aspectOf(row),
-    // Derived from this scene's own measured narration. The seam takes a plain
-    // number; each provider enforces its real bounds (Kling 3-15, Veo 4|6|8).
+    // Assigned from this slice's share of the continuous narration timeline.
+    // Each provider enforces its real bounds (Kling 3-15, Veo 4|6|8).
     durationSeconds: scene.durationSeconds,
     tier: row.tier,
     // Veo takes this as its negativePrompt field; Kling, which has none, folds
     // it into the prompt text. Either way the caller just supplies the list.
     negativePrompt: CLIP_NEGATIVE_PROMPT,
+  });
+  const clip = await overlayVideoLogo(rawClip, {
+    aspectRatio: aspectOf(row),
+    expectedDurationSeconds: scene.durationSeconds,
   });
 
   const version = (scene.clipVersion ?? 0) + 1;
@@ -924,14 +900,18 @@ function projectIsVoiced(scenes: readonly VideoSceneEntry[]): boolean {
   );
 }
 
-// A scene's narration audio is current when it was synthesized from the scene's
-// CURRENT narration text in the CURRENT voice — anything else needs re-synthesis.
-function narrationIsCurrent(scene: VideoSceneEntry, voice: string): boolean {
-  return (
-    scene.narrationAudioPath !== undefined &&
-    scene.narrationAudioText === scene.narration &&
-    scene.narrationAudioVoice === voice
-  );
+function sharedContinuousNarrationPath(
+  scenes: readonly VideoSceneEntry[],
+): string | null {
+  const path = scenes[0]?.narrationAudioPath;
+  if (!path) return null;
+  const text = continuousNarrationText(scenes);
+  return scenes.every(
+    (scene) =>
+      scene.narrationAudioPath === path && scene.narrationAudioText === text,
+  )
+    ? path
+    : null;
 }
 
 // One transparent PNG per scene that has a key point, with the window it is
@@ -977,9 +957,8 @@ async function buildCaptionOverlays(
 
 // Stitch every scene's current clip into video-v{n+1}.mp4 + subtitles, and flip
 // the row to completed. Shared by the full animate job and the per-scene
-// re-animation. If the project is voiced, the cached per-scene narration audio is
-// muxed onto the stitched video — so a per-scene re-animate keeps its voiceover
-// with no TTS re-billing (audio is cached per scene, unchanged here).
+// re-animation. New projects mux one shared continuous narration WAV; legacy
+// projects with one WAV per scene retain the old segmented assembly path.
 async function stitchAndPersist(
   client: SupabaseClient,
   id: string,
@@ -999,17 +978,29 @@ async function stitchAndPersist(
   const project = await requireProject(client, id);
   const overlays = await buildCaptionOverlays(project, scenes);
   const voiced = projectIsVoiced(scenes);
+  const expectedVideoSeconds = scenes.reduce(
+    (sum, scene) => sum + scene.durationSeconds,
+    0,
+  );
+  const continuousPath = sharedContinuousNarrationPath(scenes);
   const segments = voiced
-    ? await Promise.all(
-        scenes.map(async (scene) => ({
-          wav: await downloadFile(
-            client,
-            VIDEOS_BUCKET,
-            scene.narrationAudioPath!,
-          ),
-          durationSeconds: scene.durationSeconds,
-        })),
-      )
+    ? continuousPath
+      ? [
+          {
+            wav: await downloadFile(client, VIDEOS_BUCKET, continuousPath),
+            durationSeconds: expectedVideoSeconds,
+          },
+        ]
+      : await Promise.all(
+          scenes.map(async (scene) => ({
+            wav: await downloadFile(
+              client,
+              VIDEOS_BUCKET,
+              scene.narrationAudioPath!,
+            ),
+            durationSeconds: scene.durationSeconds,
+          })),
+        )
     : null;
 
   // Joining is local and free, so retry it once automatically. More
@@ -1018,10 +1009,6 @@ async function stitchAndPersist(
   // to upload merely because ffmpeg happened to exit 0.
   let video: Buffer | null = null;
   let lastAssemblyError: unknown = null;
-  const expectedVideoSeconds = scenes.reduce(
-    (sum, scene) => sum + scene.durationSeconds,
-    0,
-  );
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
       const silent = await assembleSilentVideo(clips, overlays, {
@@ -1095,6 +1082,7 @@ export function startVideoAnimateJob(client: SupabaseClient, id: string): void {
     await updateVideoProject(client, id, { step: 'animate', error: null });
 
     const scenes = [...row.scenes];
+    await ensureMotionDirection(client, id, row, scenes);
     for (const [index, scene] of scenes.entries()) {
       if (clipIsCurrent(scene)) {
         if (scene.status !== 'done') {
@@ -1151,11 +1139,14 @@ export function startSceneReanimateJob(
 ): void {
   runVideoJob(client, id, async () => {
     const row = await requireProject(client, id);
-    const scene = row.scenes[index];
-    if (!scene) throw new Error(`Video project ${id} has no scene ${index}.`);
+    if (!row.scenes[index]) {
+      throw new Error(`Video project ${id} has no scene ${index}.`);
+    }
     await updateVideoProject(client, id, { step: 'animate', error: null });
 
     const scenes = [...row.scenes];
+    await ensureMotionDirection(client, id, row, scenes);
+    const scene = scenes[index]!;
     scenes[index] = { ...scene, status: 'animating' };
     await updateVideoProject(client, id, { scenes });
     try {
@@ -1181,9 +1172,10 @@ export function startSceneReanimateJob(
 
 // ---------- narration: Sarvam TTS voiceover on a finished video ----------
 
-// Synthesize each scene's Marathi narration (skipping scenes whose cached audio
-// is already current for the chosen voice — so a re-run after a partial failure,
-// or a re-narrate with the same voice, costs nothing) and re-stitch WITH audio.
+// Synthesize the complete Marathi narration as one performance and re-stitch
+// with that uninterrupted track. Existing clips keep their paid-for windows;
+// if the full voiceover overruns their combined length, the whole script is
+// tightened coherently rather than shortening isolated scenes.
 // Runs from a completed project; on success the row returns to completed with a
 // narrated video-v{n+1}. Reuses the `animating` status (the route flips it) so no
 // migration is needed for a new status value.
@@ -1194,32 +1186,32 @@ export function startNarrationJob(client: SupabaseClient, id: string): void {
 
     const voice = ttsSpeaker();
     const scenes = [...row.scenes];
-    for (const [index, scene] of scenes.entries()) {
-      if (narrationIsCurrent(scene, voice)) continue;
-      // Same fit-by-shortening rule as the storyboard's voice phase, but here
-      // the clips are already rendered and billed, so each scene's window is
-      // FROZEN and becomes its own ceiling — the text is the only thing that
-      // can move to avoid a sped-up voiceover. (In the storyboard phase the
-      // ceiling is the longest clip Kling renders, because the clip is still
-      // free to grow.)
-      scenes[index] = await storeSceneNarration(
+    if (!continuousNarrationIsCurrent(scenes, voice)) {
+      const frozenTotal = scenes.reduce(
+        (sum, scene) => sum + scene.durationSeconds,
+        0,
+      );
+      await storeContinuousNarration(
         client,
         id,
-        index,
-        scene,
+        scenes,
         voice,
         {
-          ceilingSeconds: scene.durationSeconds,
+          ceilingSeconds: frozenTotal,
           rewriteTargetSeconds: Math.max(
             VIDEO_CLIP_MIN_SECONDS,
-            scene.durationSeconds - 0.5,
+            frozenTotal - 0.5,
           ),
         },
+        frozenTotal,
+        true,
+        row.inputMode === 'script',
       );
       await updateVideoProject(client, id, { scenes });
     }
 
-    // Every scene now has current narration audio, so stitchAndPersist muxes it.
+    // Every scene now points at the same current WAV; stitchAndPersist detects
+    // the shared path and muxes it once.
     await stitchAndPersist(client, id, scenes);
   });
 }

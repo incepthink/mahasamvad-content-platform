@@ -162,7 +162,8 @@ async function main(): Promise<void> {
   const overlays: SceneOverlay[] = [];
   for (const [index, keyPoint] of KEY_POINTS.entries()) {
     const png = await renderCaptionOverlay(keyPoint, aspect);
-    if (!png) throw new Error(`renderCaptionOverlay returned null for "${keyPoint}"`);
+    if (!png)
+      throw new Error(`renderCaptionOverlay returned null for "${keyPoint}"`);
     const pngPath = join(OUT_DIR, `caption-overlay-${index + 1}.png`);
     await writeFile(pngPath, png);
     console.log(`  ${pngPath} (${png.length} bytes) — "${keyPoint}"`);
@@ -201,8 +202,8 @@ async function main(): Promise<void> {
   await assertCaptionVisible(video, SCENE_SECONDS / 2);
 
   console.log(
-    `Open it: expect ~${KEY_POINTS.length * SCENE_SECONDS}s, one caption per ` +
-      `${SCENE_SECONDS}s band, correct Devanagari conjuncts, silent.`,
+    `Open it: expect ~${KEY_POINTS.length * SCENE_SECONDS + 2.2}s, one caption per ` +
+      `${SCENE_SECONDS}s band, then the DGIPR outro; correct Devanagari conjuncts, silent.`,
   );
 }
 

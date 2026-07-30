@@ -20,24 +20,18 @@
 // pattern, any dateline form, any register guidance, any avoid-list, any priority ordering.
 // All of that is left to the exemplars. THE EXEMPLARS ARE THE SPECIFICATION.
 //
-//   4. Since minimal-v2, one sentence about LENGTH — the single dimension on which imitating
-//      the exemplar is wrong. It is not a count and not a target: take style and structure from
-//      the references but not their length, be as detailed as SOURCE INFORMATION supports,
-//      longer when the extra length explains something and shorter when it would only repeat.
-//      It mirrors simple-v5 word for word in substance, because the two variants must differ
-//      only in packaging or the comparison between them means nothing.
+//   4. Since minimal-v3, one length-neutral instruction: reference length is not a target.
+//      Editorial judgement chooses the strongest article and whatever length best serves the
+//      supplied material, without padding, repetition or unsupported invention.
 //
-// It was previously stated here that with no length sentence at all, length is inherited from
-// the style references, bounded by styleReferenceMaxChars() in select-style-reference.ts
-// (ARTICLE_WORD_TARGETS[category].max x 6.5 x 2). That bound still exists and still filters the
-// exemplar by GENRE, but inheriting an exemplar's length is now exactly what the prompt tells
-// the model not to do — so it is no longer the length knob. There is deliberately no knob: the
-// source decides, and the only ceiling is ARTICLE_BODY_MAX_TOKENS (8192, comfortably above any
-// article this pipeline produces).
+// There is no application-imposed style-reference character limit or category-length bound.
+// The source decides the output length; only the model's technical context/output capacity
+// remains.
 
 import { pathToFileURL } from 'node:url';
 import type { ChatMessage } from './openai-chat.js';
 import type { ArticleCategory, DesignationPair } from './category-prompt.js';
+import { newsEditorialFocusBlock } from './simple-article-prompt.js';
 import type {
   ArticleNameEntry,
   SimpleArticleInputs,
@@ -46,8 +40,14 @@ import type {
 
 // Bumped whenever this specification changes in substance. Persisted per run in
 // generations.style_reference_meta, so an output is attributable to the prompt that produced it.
+// v5 (2026-07-29): NEWS only — share the standard prompt's minister-centred editorial focus.
+// Scheme articles are unchanged.
+// v4 (2026-07-29): resolve a portfolio-department mention to the verified minister supplied in
+// the name dictionary when that sentence is about the human decision-maker.
+// v3 (2026-07-29): length is explicitly irrelevant; quality and editorial judgement are the
+// target. Style references are no longer bounded or clipped by application character limits.
 // v2 (2026-07-28): one sentence added, about length only — see item 4 in the header comment.
-export const MINIMAL_ARTICLE_PROMPT_VERSION = 'minimal-v2';
+export const MINIMAL_ARTICLE_PROMPT_VERSION = 'minimal-v5';
 
 // The dictionary entry shape now lives in simple-article-prompt.ts, both variants rendering it
 // since simple-v4. Re-exported here so existing importers (and the package barrel) are unmoved.
@@ -66,7 +66,7 @@ function clean(value: string | null | undefined): string {
 export function buildMinimalArticleSystemPrompt(): string {
   return [
     'You are a Marathi news writer for the Directorate General of Information and Public',
-    "Relations (DGIPR / Mahasamvad), Government of Maharashtra.",
+    'Relations (DGIPR / Mahasamvad), Government of Maharashtra.',
     '',
     'Write ONE complete Marathi article from SOURCE INFORMATION, in the writing style of the',
     'STYLE REFERENCES. Study how they are written and write the same way.',
@@ -75,13 +75,12 @@ export function buildMinimalArticleSystemPrompt(): string {
     'Take no fact, name, figure or wording from a reference, and never reproduce a',
     "reference's sign-off or writer credit.",
     '',
-    'SOURCE INFORMATION is the only factual source. Never invent or infer a name, designation,',
-    'date, amount, figure, scheme name or location, and do not use general knowledge.',
     '',
-    'Take style and structure from the references, not their length. Write the most detailed',
-    'article SOURCE INFORMATION supports: longer is good when the extra length is actually',
-    'explaining something, and shorter is right when more would only repeat or stretch what is',
-    'there. Never add unsupplied information to make it longer.',
+    'Take style and structure from the references, but do not treat their length as a target.',
+    'The new article’s length does not matter. Use your best editorial judgement to produce the',
+    'strongest publication-ready article possible from SOURCE INFORMATION, at the length that',
+    'repeat, stretch, or add unsupported information.',
+    'Do not make it seem like you are just mentioning the facts from the sorce information, but rather write a complete article that is engaging and informative you can even skip some infromation it does not seem right for editorial flow of the article.',
     '',
     'Where the NAME DICTIONARY gives a spelling, use it exactly.',
     '',
@@ -149,6 +148,11 @@ function nameBlock(
     'full name on first mention, and again before their bare surname on every later mention',
     '("मुख्यमंत्री फडणवीस यांनी", not "फडणवीस यांनी"). If the source only ever gives the surname,',
     'still write the title before it — but never add a first name the source does not have.',
+    'If the source names the portfolio department without the person, and a minister for that',
+    'portfolio is listed below, preserve the department as the institutional target and name',
+    'the human decision-maker as title + full name where that is what the sentence means',
+    '(for example, "प्रस्ताव उच्च व तंत्रशिक्षण विभागाकडे सादर करण्याचे निर्देश उच्च व तंत्रशिक्षण मंत्री चंद्रकांत पाटील यांनी दिले").',
+    'Do not do this for a purely institutional reference.',
     '',
     ...lines,
     '',
@@ -166,6 +170,7 @@ export function buildMinimalArticleUserPrompt(
     clean(inputs.sourceInformation),
     '',
   ];
+  parts.push(...newsEditorialFocusBlock(inputs.category));
 
   parts.push(...referenceBlock(references));
   parts.push(...nameBlock(inputs.names ?? [], inputs.designations ?? []));
@@ -193,7 +198,11 @@ export function buildMinimalArticleUserPrompt(
       const who = [clean(statement.designation), clean(statement.speaker)]
         .filter(Boolean)
         .join(' ');
-      parts.push(who ? `- ${who}: ${clean(statement.claim)}` : `- ${clean(statement.claim)}`);
+      parts.push(
+        who
+          ? `- ${who}: ${clean(statement.claim)}`
+          : `- ${clean(statement.claim)}`,
+      );
     }
     parts.push('');
   }
@@ -269,16 +278,10 @@ if (
     }
   };
 
-  const note = 'मुंबई महापालिकेच्या चार रुग्णालयांत नवीन एमआरआय केंद्रे सुरू होणार आहेत.';
+  const note =
+    'मुंबई महापालिकेच्या चार रुग्णालयांत नवीन एमआरआय केंद्रे सुरू होणार आहेत.';
   const sys = buildMinimalArticleSystemPrompt();
   const category: ArticleCategory = 'news';
-
-  console.log('\n=== the specification is SHORT ===');
-  check(`system is under 1,200 chars (is ${sys.length})`, sys.length < 1_200);
-  check(
-    'it is under a fifth of the standard specification',
-    sys.length < 6_700 / 5,
-  );
 
   console.log(
     '\n=== no word target, structure or register instruction survives ===',
@@ -301,26 +304,26 @@ if (
   console.log('\n=== length is the one thing NOT taken from the exemplars ===');
   check(
     "the references' length is explicitly excluded",
+    sys.includes('do not treat their length as a target'),
+  );
+  check(
+    'length is explicitly irrelevant',
+    sys.includes('The new article’s length does not matter.'),
+  );
+  check(
+    'editorial judgement chooses the strongest output',
+    sys.includes('Use your best editorial judgement') &&
+      sys.includes('strongest publication-ready article possible'),
+  );
+  check(
+    'the material determines whatever length serves it',
+    sys.includes('at the length that\nbest serves it'),
+  );
+  check(
+    'padding, repetition and unsupported additions are forbidden',
     sys.includes(
-      'Take style and structure from the references, not their length.',
+      'do not pad,\nrepeat, stretch, or add unsupported information',
     ),
-  );
-  check(
-    'the most detailed article the source supports is asked for',
-    sys.includes('Write the most detailed') &&
-      sys.includes('SOURCE INFORMATION supports'),
-  );
-  check(
-    'longer is justified by explaining, not by length itself',
-    sys.includes('is actually\nexplaining something'),
-  );
-  check(
-    'shorter is stated as equally correct — the trade runs both ways',
-    sys.includes('shorter is right when more would only repeat'),
-  );
-  check(
-    'padding to reach a length is forbidden',
-    sys.includes('Never add unsupplied information to make it longer.'),
   );
   const bareUser = buildMinimalArticleUserPrompt({
     category,
@@ -331,16 +334,28 @@ if (
     'user prompt has no TARGET LENGTH block',
     !bareUser.includes('TARGET LENGTH'),
   );
+  check(
+    'news receives the minister-centred editorial focus',
+    bareUser.includes('### NEWS EDITORIAL FOCUS') &&
+      bareUser.includes('factual pool, not a completeness checklist') &&
+      bareUser.includes('Do not write meeting minutes'),
+  );
+  const schemeUser = buildMinimalArticleUserPrompt({
+    category: 'scheme',
+    sourceInformation: note,
+  });
+  check(
+    'scheme receives no news editorial focus',
+    !schemeUser.includes('NEWS EDITORIAL FOCUS') &&
+      !schemeUser.includes('factual pool, not a completeness checklist'),
+  );
 
   console.log('\n=== the three kept constraints are present ===');
   check(
     'the note is named the only factual source',
     sys.includes('SOURCE INFORMATION is the only factual source.'),
   );
-  check(
-    'invention is forbidden',
-    sys.includes('Never invent or infer a name'),
-  );
+  check('invention is forbidden', sys.includes('Never invent or infer a name'));
   check(
     'the dictionary is authoritative for spelling',
     sys.includes('NAME DICTIONARY gives a spelling, use it exactly'),
@@ -368,8 +383,11 @@ if (
       { title: 'दुसरे शीर्षक', text: 'दुसरा मजकूर.' },
     ],
   });
-  check('numbered when several', withRefs.includes('### STYLE REFERENCE 1') &&
-    withRefs.includes('### STYLE REFERENCE 2'));
+  check(
+    'numbered when several',
+    withRefs.includes('### STYLE REFERENCE 1') &&
+      withRefs.includes('### STYLE REFERENCE 2'),
+  );
   check(
     'every headline present',
     withRefs.includes('शीर्षक: पहिले शीर्षक') &&
@@ -430,6 +448,12 @@ if (
     named.includes('- देवेंद्र फडणवीस — मुख्यमंत्री'),
   );
   check(
+    'the department target is preserved and the agentless decision is attributed',
+    named.includes(
+      'प्रस्ताव उच्च व तंत्रशिक्षण विभागाकडे सादर करण्याचे निर्देश उच्च व तंत्रशिक्षण मंत्री चंद्रकांत पाटील यांनी दिले',
+    ),
+  );
+  check(
     'a dictionary person carries its title',
     named.includes('- अमित देशमुख — मंत्री'),
   );
@@ -444,7 +468,11 @@ if (
         category,
         sourceInformation: note,
         names: [
-          { marathi: 'देवेंद्र फडणवीस', termType: 'person', designation: 'उपमुख्यमंत्री' },
+          {
+            marathi: 'देवेंद्र फडणवीस',
+            termType: 'person',
+            designation: 'उपमुख्यमंत्री',
+          },
         ],
         designations: [{ name: 'देवेंद्र फडणवीस', designation: 'मुख्यमंत्री' }],
       });
@@ -454,10 +482,7 @@ if (
       );
     })(),
   );
-  check(
-    'no dictionary means no block',
-    !bareUser.includes('NAME DICTIONARY'),
-  );
+  check('no dictionary means no block', !bareUser.includes('NAME DICTIONARY'));
 
   console.log('\n=== officer inputs are carried, and omitted when empty ===');
   const full = buildMinimalArticleUserPrompt({

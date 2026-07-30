@@ -4,11 +4,11 @@
 // directly — a base64-encoded WAV per input text — so this is a thin transport:
 // one call, decode, return the bytes.
 //
-// A scene's narration is capped at VIDEO_NARRATION_MAX_CHARS (@dgipr/schemas),
-// well under bulbul:v3's 2500-char / bulbul:v2's 1500-char limit, so one scene =
-// one call. This file only synthesizes: the caller MEASURES the returned WAV
-// (wavDurationSeconds) and, if the line overruns its 8s clip, shortens the text
-// and comes back — narration is never sped up to fit.
+// The video runner supplies the complete joined narration in one call so scene
+// cuts do not reset the voice or insert silence. A normal 60-second script is
+// ~990 characters, below bulbul:v3's 2500-char / bulbul:v2's 1500-char limit.
+// This file only synthesizes; the caller measures the returned WAV and can
+// coherently shorten the whole script before trying again.
 //
 // This is the video's ONLY audio. Veo renders silent (generateAudio:false in
 // veo-client.ts), so nothing here competes with a model-generated track.
@@ -46,7 +46,9 @@ export function ttsModel(): string {
 
 export function ttsSpeaker(): string {
   const speaker = process.env.SARVAM_TTS_SPEAKER;
-  return speaker && speaker.trim() !== '' ? speaker.trim() : DEFAULT_TTS_SPEAKER;
+  return speaker && speaker.trim() !== ''
+    ? speaker.trim()
+    : DEFAULT_TTS_SPEAKER;
 }
 
 function readNumber(name: string, fallback: number): number {
@@ -70,10 +72,8 @@ export type NarrationOptions = Readonly<{
   pace?: number;
 }>;
 
-// Synthesize one Marathi narration line. Returns WAV bytes and records the
+// Synthesize one Marathi narration passage. Returns WAV bytes and records the
 // character count against the ambient cost meter (no-op outside a cost scope).
-// Throws on an empty/failed response so the caller marks the scene, never ships
-// a silent clip pretending to be voiced.
 export async function synthesizeMarathiNarration(
   text: string,
   options?: NarrationOptions,

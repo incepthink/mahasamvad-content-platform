@@ -1,22 +1,31 @@
 'use client';
 
-// Explainer-video entry: the create form and recent-project list. New projects
-// always use the 30-second, landscape, balanced configuration. Submitting only
-// writes the script (a text call — no video spend); the expensive steps sit
-// behind the two review gates on the project page. One project renders at a
-// time (the API enforces it server-side; the form reads the same fact from the
-// list and says so instead of letting the submit bounce).
+// Explainer-video entry: note mode writes a 30-second narration; ready-script
+// mode preserves supplied Marathi narration and estimates its natural duration
+// for free. Both keep expensive rendering behind the two review gates.
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import type { VideoProjectSummary } from '@dgipr/schemas';
+import {
+  VIDEO_CLIP_MAX_SECONDS,
+  VIDEO_SCRIPT_MAX_SECONDS,
+  estimateNarrationSeconds,
+  isMarathiVideoNarration,
+  normalizeVideoNarrationScript,
+  type VideoInputMode,
+  type VideoProjectSummary,
+} from '@dgipr/schemas';
 import { createVideoProject, listVideoProjects } from '../../lib/api';
-import { formatCost, formatDate, STR } from '../../lib/strings';
+import {
+  formatCost,
+  formatDate,
+  STR,
+  videoReadyScriptEstimate,
+} from '../../lib/strings';
 import { VideoStatusChip } from '../../components/VideoStatusChip';
 
 const NOTE_MIN = 20;
-const NOTE_MAX = 60_000;
 
 function isWorking(status: VideoProjectSummary['status']): boolean {
   return (
@@ -28,6 +37,7 @@ function isWorking(status: VideoProjectSummary['status']): boolean {
 
 export default function VideoPage() {
   const router = useRouter();
+  const [inputMode, setInputMode] = useState<VideoInputMode>('note');
   const [note, setNote] = useState('');
   const [heading, setHeading] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -50,10 +60,35 @@ export default function VideoPage() {
     () => projects.find((project) => isWorking(project.status)) ?? null,
     [projects],
   );
+  const scriptEstimateSeconds = estimateNarrationSeconds(
+    normalizeVideoNarrationScript(note),
+  );
+  const scriptSceneCount = Math.max(
+    1,
+    Math.ceil(scriptEstimateSeconds / VIDEO_CLIP_MAX_SECONDS),
+  );
+  const scriptTooLong =
+    inputMode === 'script' && scriptEstimateSeconds > VIDEO_SCRIPT_MAX_SECONDS;
+  const scriptNotMarathi =
+    inputMode === 'script' &&
+    note.trim() !== '' &&
+    !isMarathiVideoNarration(note);
 
   const submit = async () => {
     if (note.trim().length < NOTE_MIN) {
-      setError(STR.videoNoteTooShort);
+      setError(
+        inputMode === 'script'
+          ? STR.videoScriptTooShort
+          : STR.videoNoteTooShort,
+      );
+      return;
+    }
+    if (scriptTooLong) {
+      setError(STR.videoScriptEstimateOver);
+      return;
+    }
+    if (scriptNotMarathi) {
+      setError(STR.videoScriptMarathiOnly);
       return;
     }
     setSubmitting(true);
@@ -62,6 +97,7 @@ export default function VideoPage() {
       const id = await createVideoProject({
         note: note.trim(),
         ...(heading.trim() ? { heading: heading.trim() } : {}),
+        inputMode,
         durationBucket: 'short',
         orientation: 'landscape',
         tier: 'fast',
@@ -91,21 +127,74 @@ export default function VideoPage() {
             </p>
           </div>
         ) : null}
+        <p className="field-label" style={{ marginTop: 16 }}>
+          {STR.videoInputModeLabel}
+        </p>
+        <div className="segmented" style={{ marginTop: 10 }}>
+          <button
+            type="button"
+            className="output-option"
+            aria-pressed={inputMode === 'note'}
+            onClick={() => {
+              setInputMode('note');
+              setError(null);
+            }}
+          >
+            <span className="name">{STR.videoInputModeNote}</span>
+            <span className="desc">{STR.videoInputModeNoteDesc}</span>
+          </button>
+          <button
+            type="button"
+            className="output-option"
+            aria-pressed={inputMode === 'script'}
+            onClick={() => {
+              setInputMode('script');
+              setError(null);
+            }}
+          >
+            <span className="name">{STR.videoInputModeScript}</span>
+            <span className="desc">{STR.videoInputModeScriptDesc}</span>
+          </button>
+        </div>
         <label
           className="field-label"
           htmlFor="video-note"
           style={{ marginTop: 16 }}
         >
-          {STR.videoNoteLabel}
+          {inputMode === 'script'
+            ? STR.videoScriptInputLabel
+            : STR.videoNoteLabel}
         </label>
+        {inputMode === 'script' ? (
+          <p className="hint" style={{ marginTop: 4 }}>
+            {STR.videoScriptInputHint}
+          </p>
+        ) : null}
         <textarea
           id="video-note"
           className="note-input"
           value={note}
-          maxLength={NOTE_MAX}
           onChange={(event) => setNote(event.target.value)}
           style={{ marginTop: 10 }}
         />
+        {inputMode === 'script' && note.trim() !== '' ? (
+          <>
+            <p
+              className={scriptTooLong ? 'form-error' : 'hint'}
+              style={{ marginTop: 8 }}
+            >
+              {STR.videoScriptEstimateLabel}:{' '}
+              {videoReadyScriptEstimate(
+                scriptEstimateSeconds,
+                scriptSceneCount,
+              )}
+              {scriptTooLong ? ` · ${STR.videoScriptEstimateOver}` : ''}
+            </p>
+            {scriptNotMarathi ? (
+              <p className="form-error">{STR.videoScriptMarathiOnly}</p>
+            ) : null}
+          </>
+        ) : null}
         <label
           className="field-label"
           htmlFor="video-heading"
@@ -129,9 +218,18 @@ export default function VideoPage() {
             type="button"
             className="btn btn-primary"
             onClick={submit}
-            disabled={submitting || activeProject !== null}
+            disabled={
+              submitting ||
+              activeProject !== null ||
+              scriptTooLong ||
+              scriptNotMarathi
+            }
           >
-            {submitting ? STR.submitting : STR.videoCreate}
+            {submitting
+              ? STR.submitting
+              : inputMode === 'script'
+                ? STR.videoCreateFromScript
+                : STR.videoCreate}
           </button>
         </div>
         <p className="hint" style={{ marginTop: 8 }}>

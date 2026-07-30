@@ -78,7 +78,9 @@ async function makeStubWav(
 async function main(): Promise<void> {
   await mkdir(OUT_DIR, { recursive: true });
 
-  console.log('Building a silent 2-scene video with UNEQUAL windows (5s + 12s)…');
+  console.log(
+    'Building a silent 2-scene video with UNEQUAL windows (5s + 12s)…',
+  );
   const silent = await assembleSilentVideo([
     await makeStubClip('red', 5),
     await makeStubClip('blue', 12),
@@ -103,8 +105,8 @@ async function main(): Promise<void> {
 
   console.log(`Wrote ${outPath} (${narrated.length} bytes).`);
   console.log(
-    'Open it in a browser: expect ~17s, a SHORT red band then a long blue one, ' +
-      'WITH audio (tone A then E), each tone inside its own window.',
+    'Open it in a browser: expect ~19.2s, a SHORT red band then a long blue one, ' +
+      'the DGIPR outro, and audio (tone A then E) inside the generated windows.',
   );
 }
 

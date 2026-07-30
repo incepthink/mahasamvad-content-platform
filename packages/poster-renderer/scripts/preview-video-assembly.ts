@@ -1,8 +1,8 @@
 // Free harness for the video assembly path: synthesizes three stub clips with
 // ffmpeg's testsrc + sine generators (colored bars WITH audio, so the -an strip
 // is actually exercised), stitches them with assembleSilentVideo, and writes
-// out/video-assembly-preview.mp4 to eyeball in a browser (should be 3 scenes,
-// silent, plays in Chrome AND Safari).
+// out/video-assembly-preview.mp4 to eyeball in a browser (should be 3 branded
+// scenes followed by the fixed DGIPR outro, silent, plays in Chrome AND Safari).
 //
 //   pnpm --filter @dgipr/poster-renderer video:preview:assemble
 
@@ -12,7 +12,11 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { assembleSilentVideo, resolveFfmpeg } from '../src/video/assemble.js';
+import {
+  assembleSilentVideo,
+  overlayVideoLogo,
+  resolveFfmpeg,
+} from '../src/video/assemble.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -60,6 +64,10 @@ async function main(): Promise<void> {
     makeStubClip('green', 2, '1920x1080'),
     makeStubClip('blue', 2),
   ]);
+  clips[0] = await overlayVideoLogo(clips[0]!, {
+    aspectRatio: '16:9',
+    expectedDurationSeconds: 2,
+  });
 
   console.log('Stitching…');
   const video = await assembleSilentVideo(clips, [], {
@@ -70,9 +78,12 @@ async function main(): Promise<void> {
   await writeFile(outPath, video);
 
   // ffprobe-free sanity: report size; duration/audio are checked by eye (and the
-  // stitched file must show ~6s, three color bands, NO audio track).
+  // stitched file must show ~8.2s, three color bands + outro, NO audio track).
   console.log(`Wrote ${outPath} (${video.length} bytes).`);
-  console.log('Open it in a browser: expect ~6s, red→green→blue, silent.');
+  console.log(
+    'Open it in a browser: expect ~8.2s, red→green→blue→DGIPR outro, ' +
+      'a top-right logo on the generated scenes, and silence.',
+  );
   const oneFrame = await makeStubClip('black', 0.04);
   await assert.rejects(
     () =>

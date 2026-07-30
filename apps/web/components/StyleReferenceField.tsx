@@ -1,8 +1,7 @@
 'use client';
 
 // The officer-supplied STYLE reference — tier 1 of the simplified article generator's reference
-// hierarchy (select-style-reference.ts), above vector retrieval and above generating from the
-// DGIPR rules alone.
+// hierarchy (select-style-reference.ts), above vector retrieval and the same-category fallback.
 //
 // It is rendered on /dlo only, and that is not an oversight: the media room always submits
 // `providedArticle: true`, meaning its note IS the finished article and the generator never
@@ -14,7 +13,6 @@
 // details to be reused would be misreading the field, and the prompt would (correctly) ignore
 // them, so the misunderstanding has to be prevented here rather than explained afterwards.
 
-import { STYLE_REFERENCE_MAX_CHARS } from '@dgipr/schemas';
 import { useId } from 'react';
 import { STR } from '../lib/strings';
 
@@ -28,7 +26,6 @@ export function StyleReferenceField({
   // Both /dlo steps can mount this field, and a fixed id would make one step's label focus the
   // other step's input — the bug PageRangeSelector already hit.
   const id = useId();
-  const tooLong = value.length > STYLE_REFERENCE_MAX_CHARS;
 
   return (
     <section className="card">
@@ -45,14 +42,6 @@ export function StyleReferenceField({
         onChange={(event) => onChange(event.target.value)}
         style={{ marginTop: 10 }}
       />
-      {/* Warn client-side rather than letting the API 400 — the cap is shared from
-          @dgipr/schemas, so the two can never disagree. */}
-      {tooLong ? (
-        <p className="form-error">
-          {STR.styleRefTooLong} ({value.length.toLocaleString('mr-IN')} /{' '}
-          {STYLE_REFERENCE_MAX_CHARS.toLocaleString('mr-IN')})
-        </p>
-      ) : null}
     </section>
   );
 }

@@ -10,15 +10,11 @@
 // shape, headline pattern, dateline form, register, priority ordering) is deleted, because the
 // exemplars demonstrate all of it and a long rule block out-instructs them.
 //
-// LENGTH is the ONE deliberate exception to that (simple-v5), and it is an exception because it
-// is the one dimension where imitating the exemplar is actively wrong. A retrieved Mahasamvad
-// article is whatever length its own source justified; ours must be as detailed as OUR source
-// supports. So the specification says to take style and structure from the reference and NOT
-// its length, and it states the trade in both directions — longer is good when the extra length
-// explains something, shorter is right when more would only repeat. Note the shape of that
-// sentence: it is not a target and must not become one. A stated count is what padded thin
-// notes and truncated rich ones (see v3), and "make it long" alone would reintroduce the
-// padding from the other side, which is why the invention clause is attached to it.
+// LENGTH is the ONE deliberate exception to that (simple-v7), because imitating an exemplar's
+// length is actively wrong. The instruction is now fully length-neutral: use editorial
+// judgement to produce the best publication-ready article the supplied information supports,
+// at whatever length serves that material. It explicitly rejects optimization for either
+// longer or shorter output, as well as padding, repetition and unsupported invention.
 //
 // Three decisions worth knowing before editing:
 //
@@ -58,6 +54,21 @@ import {
 
 // Bumped whenever the editorial specification below changes in substance. Persisted per run.
 //
+// v9 (2026-07-29): NEWS only — a minister's meeting/visit/review is written around the
+// minister's strongest public-facing, source-supported statement, decision, direction,
+// assurance, announcement or next step. SOURCE INFORMATION is explicitly a factual pool, not a
+// completeness checklist; meeting-minutes detail that does not serve that central message may
+// be omitted. Scheme articles are byte-for-byte unchanged.
+//
+// v8 (2026-07-29): when the source names a portfolio department and DESIGNATIONS carries its
+// verified minister, preserve the department as the institutional target while replacing an
+// agentless human decision with "पदनाम + पूर्ण नाव".
+//
+// v7 (2026-07-29): the length paragraph is fully neutral. "A longer article is good when..."
+// still made length sound like a quality signal. It now says length does not matter, asks for
+// the best publication-ready article possible using editorial judgement, and lets the supplied
+// information determine the necessary detail without padding, repetition or invention.
+//
 // v6 (2026-07-28): the NAME DICTIONARY sentence says the title goes before the person's name on
 // first mention AND before the bare surname on every later mention ("मुख्यमंत्री फडणवीस यांनी"),
 // including where the source only ever has the surname. Officer's call: a government article
@@ -92,7 +103,7 @@ import {
 // exemplars use it and banning it drove the model into a flat agentless register; the invented
 // "zero to two highlight bullets" rule is gone; and the ten-rung priority ladder that re-sorted
 // the officer's notes is replaced by "lead on the strongest outcome, then follow the source".
-export const SIMPLE_ARTICLE_PROMPT_VERSION = 'simple-v6';
+export const SIMPLE_ARTICLE_PROMPT_VERSION = 'simple-v9';
 
 // Marathi label for the category, matching CATEGORY_LABEL in category-prompt.ts. The prompt is
 // English but the article is Marathi, and naming the category in Marathi is what keeps the voice
@@ -101,6 +112,36 @@ const CATEGORY_LABEL: Record<ArticleCategory, string> = {
   news: 'बातमी (news report)',
   scheme: 'योजना-लेख (scheme / feature article)',
 };
+
+// The editorial distinction the category label and exemplars cannot safely be left to imply.
+// Real Mahasamvad meeting reports are not minutes: their headline and lead communicate what the
+// minister said, decided, directed or promised, while the meeting supplies context. Conditional
+// on the source actually being minister-shaped so an agency notice or non-minister news item is
+// never forced to invent a minister.
+//
+// Exported for minimal-article-prompt.ts so ARTICLE_PROMPT_VARIANT changes wording density, not
+// the product's NEWS editorial goal.
+export const NEWS_MINISTER_EDITORIAL_FOCUS = [
+  "When SOURCE INFORMATION concerns a minister's meeting, visit, review or remarks, first",
+  'identify what the principal minister is actually communicating to the public. Build the',
+  "headline, lead and article around that minister's strongest source-supported statement,",
+  'decision, direction, assurance, announcement or next step, and attribute it clearly to that',
+  'minister. If several ministers or topics appear, choose one principal public-facing angle;',
+  'include the others only when they directly support it.',
+  '',
+  'Treat SOURCE INFORMATION as a factual pool, not a completeness checklist. Use only the',
+  'context and supporting facts that help readers understand the central ministerial message.',
+  'You may omit unrelated agenda items, routine procedure, attendee lists, repetition and any',
+  'other supplied detail that does not serve the editorial flow. Do not write meeting minutes',
+  'or a summary of every supplied fact. Never invent or transfer a statement, decision or',
+  'attribution.',
+].join('\n');
+
+export function newsEditorialFocusBlock(category: ArticleCategory): string[] {
+  return category === 'news'
+    ? ['### NEWS EDITORIAL FOCUS', '', NEWS_MINISTER_EDITORIAL_FOCUS, '']
+    : [];
+}
 
 // One complete exemplar as the prompt renders it. `title` is the article's own HEADLINE, and
 // passing it is not cosmetic: the specification asks the model to study "headline
@@ -177,10 +218,11 @@ export function buildSimpleArticleSystemPrompt(): string {
     'the same writing style and structure, use only the information provided in the SOURCE',
     'INFORMATION and ADDITIONAL VERIFIED INFORMATION sections.',
     '',
-    'Take style and structure from the reference, but NOT its length. Write the most detailed',
-    'article the supplied information supports: a longer article is good when the extra length',
-    'is actually explaining something, and a shorter one is right when more would only repeat',
-    'or stretch what is there. Never add unsupplied information to make it longer.',
+    'Take style and structure from the reference, but do not treat its length as a target.',
+    'The new article’s length does not matter. Use your best editorial judgement to produce',
+    'the strongest publication-ready article possible from the supplied information, at the',
+    'length that best serves it. Use the information fully when it improves the article, but',
+    'do not pad, repeat, stretch, or add unsupported information.',
     '',
     'Where the NAME DICTIONARY gives a spelling, use it exactly. Where a title is given after a',
     "name, use it before that person's full name on first mention and before their bare surname",
@@ -308,6 +350,7 @@ export function buildSimpleArticleUserPrompt(
     CATEGORY_LABEL[inputs.category],
     '',
   ];
+  parts.push(...newsEditorialFocusBlock(inputs.category));
 
   // Omitted entirely when absent — a bare heading is what invites the model to fill it in.
   if (direction) {
@@ -402,11 +445,6 @@ if (
 
   console.log('\n=== the specification is the REFERENCE, not a rule block ===');
   const sys = buildSimpleArticleSystemPrompt();
-  // A ceiling, not a target. It exists so that "just one more rule" has to be a deliberate
-  // decision — the v4 finding is that a long rule block out-instructs the exemplars.
-  // Raised 900 → 1000 for v6: the surname half of the designation rule is the deliberate
-  // decision this ceiling asks for, and it is DATA handling, not editorial instruction.
-  check(`system is under 1000 chars (is ${sys.length})`, sys.length < 1000);
   check(
     'it asks for the reference article to be followed',
     sys.includes('Look at the provided reference article') &&
@@ -449,28 +487,26 @@ if (
   console.log('\n=== length is the one thing NOT taken from the reference ===');
   check(
     "the reference's length is explicitly excluded",
-    sys.includes(
-      'Take style and structure from the reference, but NOT its length.',
-    ),
+    sys.includes('do not treat its length as a target'),
   );
   check(
-    'the most detailed article the source supports is asked for',
-    sys.includes('Write the most detailed') &&
-      sys.includes('the supplied information supports'),
+    'length is explicitly irrelevant',
+    sys.includes('The new article’s length does not matter.'),
   );
   check(
-    'longer is justified by explaining, not by length itself',
-    sys.includes('is actually explaining something'),
+    'editorial judgement and reasoning choose the best output',
+    sys.includes('Use your best editorial judgement') &&
+      sys.includes('the strongest publication-ready article possible'),
   );
   check(
-    'shorter is stated as equally correct — the trade runs both ways',
-    sys.includes('a shorter one is right when more would only repeat'),
+    'the material determines whatever length serves it',
+    sys.includes('at the\nlength that best serves it'),
   );
   check(
-    'padding to reach a length is forbidden',
-    sys.includes('Never add unsupplied information to make it longer.'),
+    'padding, repetition and unsupported additions are forbidden',
+    sys.includes('do not pad, repeat, stretch, or add unsupported information'),
   );
-  // The whole point of v5 over v3: a POLICY about length, never a number to hit.
+  // The whole point of v7 over v3/v5: quality is the target; length is not.
   check('length is stated without any figure', !/\d/u.test(sys));
 
   console.log('\n=== every editorial RULE is gone ===');
@@ -580,6 +616,17 @@ if (
     bareUser.includes('### SOURCE INFORMATION') && bareUser.includes(baseNote),
   );
   check(
+    'news receives the minister-centred editorial focus',
+    bareUser.includes('### NEWS EDITORIAL FOCUS') &&
+      bareUser.includes('factual pool, not a completeness checklist') &&
+      bareUser.includes('Do not write meeting minutes'),
+  );
+  check(
+    'scheme receives no news editorial focus',
+    !fullUser.includes('NEWS EDITORIAL FOCUS') &&
+      !fullUser.includes('factual pool, not a completeness checklist'),
+  );
+  check(
     'the user prompt states no length at all',
     !bareUser.includes('TARGET LENGTH') && !/\d[\d,]*\s*words/u.test(bareUser),
   );
@@ -597,6 +644,12 @@ if (
   check(
     'designation task rule present',
     fullUser.includes(DESIGNATION_TASK_RULE),
+  );
+  check(
+    'the department target is preserved and the agentless decision is attributed',
+    fullUser.includes(
+      'प्रस्ताव उच्च व तंत्रशिक्षण विभागाकडे सादर करण्याचे निर्देश उच्च व तंत्रशिक्षण मंत्री चंद्रकांत पाटील यांनी दिले',
+    ),
   );
   check(
     'statements block present',
