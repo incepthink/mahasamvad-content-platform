@@ -87,7 +87,14 @@ export function registerReferenceRoutes(
       });
     }
 
-    const file = await request.file();
+    // No size ceiling on a master template: an officer's source poster can be a
+    // full-resolution export, and refusing it at the door is a failure they can do
+    // nothing about (the DOCUMENT_MAX_BYTES reasoning in @dgipr/schemas). busboy
+    // treats Infinity as "unlimited", so this override exists purely to LIFT the
+    // global 10 MiB multipart cap in index.ts. The MIME check below is the only
+    // gate; the remaining bound is the box's memory, since toBuffer() holds the
+    // whole image in process for the length of one request.
+    const file = await request.file({ limits: { fileSize: Infinity } });
     if (!file) {
       return reply
         .code(400)

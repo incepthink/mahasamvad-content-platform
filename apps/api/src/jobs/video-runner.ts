@@ -441,6 +441,9 @@ async function renderSceneFrames(
     ...(scene.clipDurationSeconds !== undefined
       ? { clipDurationSeconds: scene.clipDurationSeconds }
       : {}),
+    ...(scene.clipMotionBrief !== undefined
+      ? { clipMotionBrief: scene.clipMotionBrief }
+      : {}),
     ...(scene.narrationAudioPath !== undefined
       ? { narrationAudioPath: scene.narrationAudioPath }
       : {}),
@@ -958,6 +961,10 @@ async function renderSceneClip(
       ? { clipEndStillVersion: scene.endStillVersion }
       : {}),
     clipDurationSeconds: scene.durationSeconds,
+    // The direction this clip actually performs. Recorded so a later hand-edit
+    // of the motion brief invalidates it (clipIsCurrent) instead of the resume
+    // path skipping the scene and shipping the old movement again.
+    clipMotionBrief: scene.motionBrief ?? '',
   };
 }
 
@@ -973,7 +980,13 @@ function clipIsCurrent(scene: VideoSceneEntry): boolean {
     (scene.endStillPath === undefined ||
       scene.clipEndStillVersion === scene.endStillVersion) &&
     (scene.clipDurationSeconds === undefined ||
-      scene.clipDurationSeconds === scene.durationSeconds)
+      scene.clipDurationSeconds === scene.durationSeconds) &&
+    // The motion brief has no frame version behind it, so its lineage is the
+    // text itself. undefined = untouched legacy clip = current (no re-bill);
+    // the motion-save route records what the clip was rendered from as soon as
+    // an officer edits the direction, which is what makes the edit take effect.
+    (scene.clipMotionBrief === undefined ||
+      scene.clipMotionBrief === (scene.motionBrief ?? ''))
   );
 }
 

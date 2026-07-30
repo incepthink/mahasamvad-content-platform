@@ -78,6 +78,14 @@ export type VideoSceneEntry = Readonly<{
   // it to match the scene's current window (undefined = legacy clip = current),
   // so a window change can never silently desync clip and SRT.
   clipDurationSeconds?: number;
+  // The motionBrief this clip was RENDERED from. The motion brief feeds the
+  // clip prompt only, so it has no frame version to key off — without this the
+  // animate job's resume path saw a "current" clip and silently reused the old
+  // movement after an officer edited the direction. undefined = the clip
+  // predates this lineage and no edit has happened since, so it stays current
+  // (legacy projects are never re-billed); the motion-save route backfills it
+  // with the brief the clip was actually rendered from the moment an edit lands.
+  clipMotionBrief?: string;
   // Cached Sarvam-TTS narration audio. New projects repeat ONE shared WAV path,
   // full joined-script staleness key and voice across every scene; that is what
   // lets assembly distinguish continuous narration from legacy per-scene WAVs

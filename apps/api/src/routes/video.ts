@@ -162,13 +162,16 @@ function toDetail(
       ...(scene.clipPath
         ? { clipUrl: publicUrlIn(client, VIDEOS_BUCKET, scene.clipPath) }
         : {}),
-      // A clip animated from an older frame (start OR end) than the one on
-      // screen — the fix panel's re-animate affordance keys off this.
+      // A clip animated from an older frame (start OR end) — or from an older
+      // motion brief — than the one on screen; the fix panel's re-animate
+      // affordance keys off this.
       ...(scene.clipPath !== undefined &&
       ((scene.stillVersion !== undefined &&
         scene.clipStillVersion !== scene.stillVersion) ||
         (scene.endStillPath !== undefined &&
-          scene.clipEndStillVersion !== scene.endStillVersion))
+          scene.clipEndStillVersion !== scene.endStillVersion) ||
+        (scene.clipMotionBrief !== undefined &&
+          scene.clipMotionBrief !== (scene.motionBrief ?? '')))
         ? { clipStale: true }
         : {}),
       ...(scene.error !== undefined ? { error: scene.error } : {}),
@@ -581,7 +584,18 @@ export function registerVideoRoutes(
         return reply.code(409).send({ error: { message: BUSY_MESSAGE } });
       }
       const scenes = [...row.scenes];
-      scenes[index] = { ...scene, motionBrief: body.motionBrief };
+      // If a clip already exists it was rendered from the brief being replaced
+      // here, so record that as the clip's lineage before overwriting it. That
+      // is what makes clipIsCurrent see the edit: without it the animate job's
+      // resume path skips the scene and re-ships the movement the officer just
+      // rejected. A scene with no clip needs no lineage — nothing was rendered.
+      scenes[index] = {
+        ...scene,
+        motionBrief: body.motionBrief,
+        ...(scene.clipPath !== undefined && scene.clipMotionBrief === undefined
+          ? { clipMotionBrief: scene.motionBrief ?? '' }
+          : {}),
+      };
       await updateVideoProject(client, row.id, { scenes });
       const updated = await getVideoProject(client, row.id);
       return toDetail(client, updated!);

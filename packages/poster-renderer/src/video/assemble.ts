@@ -71,6 +71,7 @@ export type VideoValidation = Readonly<{
 }>;
 
 const VIDEO_VALIDATE_TIMEOUT_MS = 300_000;
+const VIDEO_STITCH_TIMEOUT_MS = 900_000;
 const VIDEO_VALIDATE_MAX_BUFFER = 16 * 1024 * 1024;
 // Social posts use a 160px lockup on a 1280px canvas (12.5%). Video uses 15%:
 // visibly larger, but still clear of the lower-third information overlay.
@@ -80,6 +81,45 @@ const VIDEO_OUTRO_PATH = resolve(
   dirname(fileURLToPath(import.meta.url)),
   '../../assets/video-outro.mp4',
 );
+
+// Run one ffmpeg encode, translating a KILLED child into an error that says so.
+// execFile's own message is "Command failed: <the whole command line>" plus
+// stderr — and a process stopped by SIGKILL/SIGTERM writes no stderr, so a
+// timeout and an out-of-memory kill both reached the officer (and the
+// video_projects.error column) as a screenful of filter graph with no reason in
+// it. That is what one real production failure looked like.
+async function runFfmpeg(
+  args: readonly string[],
+  label: string,
+  timeoutMs: number = VIDEO_VALIDATE_TIMEOUT_MS,
+): Promise<void> {
+  try {
+    await execFileAsync(resolveFfmpeg(), [...args], {
+      timeout: timeoutMs,
+      maxBuffer: VIDEO_VALIDATE_MAX_BUFFER,
+    });
+  } catch (error) {
+    const detail = error as NodeJS.ErrnoException & {
+      signal?: NodeJS.Signals | null;
+      stderr?: string;
+    };
+    const stderr = (detail.stderr ?? '').trim();
+    if (detail.signal) {
+      const cause =
+        detail.signal === 'SIGTERM'
+          ? `it exceeded the ${Math.round(timeoutMs / 1000)}s limit`
+          : 'it was killed by the operating system, most likely out of memory';
+      throw new Error(
+        `${label} was stopped by ${detail.signal}: ${cause}.` +
+          (stderr === '' ? '' : ` ffmpeg said: ${stderr}`),
+      );
+    }
+    throw new Error(
+      `${label} failed` +
+        (stderr === '' ? ` (${detail.message})` : `: ${stderr}`),
+    );
+  }
+}
 
 function progressNumber(stdout: string, key: string): number {
   let value = 0;
@@ -265,8 +305,7 @@ export async function overlayVideoLogo(
     await writeFile(logoPath, lockup.data);
     const margin = Math.max(4, Math.round(width * VIDEO_LOCKUP_MARGIN_RATIO));
 
-    await execFileAsync(
-      resolveFfmpeg(),
+    await runFfmpeg(
       [
         '-hide_banner',
         '-loglevel',
@@ -297,10 +336,7 @@ export async function overlayVideoLogo(
         '+faststart',
         outputPath,
       ],
-      {
-        timeout: VIDEO_VALIDATE_TIMEOUT_MS,
-        maxBuffer: VIDEO_VALIDATE_MAX_BUFFER,
-      },
+      'Scene clip branding',
     );
 
     await assertStreamDuration(
@@ -409,14 +445,24 @@ export async function assembleSilentVideo(
     let stage = 'joined';
     for (const [index, overlay] of overlays.entries()) {
       const pngPath = join(dir, `overlay-${index}.png`);
-      await writeFile(pngPath, overlay.png);
+      // Resized ONCE here rather than by an ffmpeg `scale` filter, which would
+      // rescale the looped still on every frame of the whole video — and hold a
+      // full-size RGBA frame per overlay while doing it. Resizing must still
+      // happen: caption-overlay.ts typesets at a fixed 1080p reference, so on
+      // 720p footage an unscaled panel lands below the bottom edge and the key
+      // point vanishes with no ffmpeg error at all.
+      await writeFile(
+        pngPath,
+        await sharp(overlay.png)
+          .resize(width, height, { fit: 'fill' })
+          .png()
+          .toBuffer(),
+      );
       inputArgs.push('-loop', '1', '-i', pngPath);
       const input = videoInputPaths.length + index;
-      const scaled = `ov${index}`;
       const next = `v${index}`;
       chains.push(
-        `[${input}:v]scale=${width}:${height}[${scaled}]`,
-        `[${stage}][${scaled}]overlay=0:0:shortest=1:enable='between(t,` +
+        `[${stage}][${input}:v]overlay=0:0:shortest=1:enable='between(t,` +
           `${overlay.startSeconds.toFixed(3)},${overlay.endSeconds.toFixed(3)})'` +
           `[${next}]`,
       );
@@ -451,8 +497,7 @@ export async function assembleSilentVideo(
     stage = 'branded';
 
     const outPath = join(dir, 'out.mp4');
-    await execFileAsync(
-      resolveFfmpeg(),
+    await runFfmpeg(
       [
         '-hide_banner',
         '-loglevel',
@@ -475,9 +520,12 @@ export async function assembleSilentVideo(
         '+faststart',
         outPath,
       ],
-      // 8 scenes of 720p re-encode in well under a minute; the timeout is the
-      // release valve so a hung ffmpeg fails the job instead of wedging it.
-      { timeout: 300_000, maxBuffer: 16 * 1024 * 1024 },
+      'Video stitch',
+      // A minute or two of 720p re-encode on a dev box, but this runs on a small
+      // shared instance beside n8n and Chromium, so the release valve is
+      // generous: an over-eager timeout throws away nothing but this free local
+      // step, yet costs the officer a whole paid run's deliverable.
+      VIDEO_STITCH_TIMEOUT_MS,
     );
 
     const expectedTotal = expectedSceneTotal + outroValidation.durationSeconds;
@@ -572,6 +620,18 @@ export async function muxNarration(
     const videoPath = join(dir, 'video.mp4');
     await writeFile(videoPath, silentMp4);
 
+    // The silent video's REAL decoded length, measured rather than assumed: the
+    // narration segments only cover the generated scenes, while the video also
+    // carries the fixed DGIPR outro. This is what the padded audio is trimmed
+    // to below, so it must come from the file and not from the scene windows.
+    const videoSeconds = (await inspectStreamFile(videoPath, 'video'))
+      .durationSeconds;
+    if (!(videoSeconds > 0)) {
+      throw new Error(
+        'muxNarration could not measure the silent video duration.',
+      );
+    }
+
     const inputArgs: string[] = ['-i', videoPath];
     const chains: string[] = [];
     for (const [index, segment] of segments.entries()) {
@@ -607,19 +667,26 @@ export async function muxNarration(
       );
     }
     const concatInputs = segments.map((_, index) => `[a${index}]`).join('');
-    // The generated-scene narration ends before the fixed visual outro. Pad
-    // the joined track indefinitely and let `-shortest` stop it with the video,
-    // producing a full-length audio stream whose outro portion is silence.
-    // This prevents downstream social transcoders from trimming the slate to a
-    // shorter audio-track duration.
+    // The generated-scene narration ends before the fixed visual outro, so the
+    // joined track is padded with silence across the slate: a full-length audio
+    // stream stops a downstream social transcoder trimming the slate away to a
+    // shorter audio duration.
+    //
+    // The pad is TRIMMED to the measured video length, and `-shortest` is NOT
+    // used to end it. `apad` alone is INFINITE, and `-shortest` does not stop an
+    // infinite encoded stream when the video is `-c copy` — the copy finishes at
+    // once and the aac encoder then runs forever. That combination hung ffmpeg
+    // until the 300s timeout SIGKILLed it, which surfaced as a bare
+    // "Command failed" with empty stderr and failed the whole paid run at the
+    // one step that spends nothing.
     const filter =
       chains.join(';') +
       `;${concatInputs}concat=n=${segments.length}:v=0:a=1[spoken]` +
-      ';[spoken]apad[aout]';
+      `;[spoken]apad,atrim=0:${videoSeconds.toFixed(3)},` +
+      'asetpts=PTS-STARTPTS[aout]';
 
     const outPath = join(dir, 'narrated.mp4');
-    await execFileAsync(
-      resolveFfmpeg(),
+    await runFfmpeg(
       [
         '-hide_banner',
         '-loglevel',
@@ -637,27 +704,25 @@ export async function muxNarration(
         'aac',
         '-b:a',
         '192k',
-        '-shortest',
         '-movflags',
         '+faststart',
         outPath,
       ],
-      { timeout: 300_000, maxBuffer: 16 * 1024 * 1024 },
+      'Narration mux',
     );
 
-    const expectedSeconds = segments.reduce(
-      (sum, segment) => sum + segment.durationSeconds,
-      0,
-    );
+    // Both streams are checked against the measured video length, not the sum
+    // of the narration windows: the audio is now padded across the outro, so a
+    // track that stops at the last scene is a defect this must catch.
     await assertStreamDuration(
       outPath,
-      expectedSeconds,
+      videoSeconds,
       'Narrated video',
       'video',
     );
     await assertStreamDuration(
       outPath,
-      expectedSeconds,
+      videoSeconds,
       'Narration track',
       'audio',
     );
