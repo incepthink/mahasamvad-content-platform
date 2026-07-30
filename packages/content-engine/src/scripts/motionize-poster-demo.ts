@@ -12,7 +12,8 @@
 //     src/scripts/motionize-poster-demo.ts "C:\path\to\poster.png" --execute
 
 import { execFile } from 'node:child_process';
-import { readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { basename, dirname, extname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { resolveFfmpeg } from '@dgipr/poster-renderer';
@@ -28,25 +29,22 @@ import {
 const execFileAsync = promisify(execFile);
 
 export const POSTER_MOTION_PROMPT = [
-  'Create a cheerful seamless 5-second Instagram-Boomerang-style loop from this Marathi voter-information poster. Use one locked camera shot. The supplied poster must be the exact first and last frame.',
+  'Create a clearly animated 5-second image-to-video shot from this Marathi voter-information poster. Use one locked camera shot. Motion must begin within the first second and be plainly visible; do not return a static or almost-static image.',
   '',
   'LOCK ALL OFFICIAL GRAPHICS:',
   'Keep the crop, headline panel, all Marathi text and numerals, dates, information cards, icons, government emblem, QR code, footer, background, lines, and decorations fixed at exact source coordinates.',
   'Every glyph, logo, icon, QR module, colour, edge, and spacing remains identical and sharp. Treat all graphics as one still overlay: never redraw, translate, morph, blur, crop, flicker, or animate them. Keep the QR code scannable. Add no text, logo, watermark, person, animal, or object.',
   '',
   'ANIMATE ONLY THE EXISTING FOUR PEOPLE:',
-  'Confine motion to the photographed family at upper right. Preserve each identity, face, skin tone, hair, clothing, anatomy, hands, and position. Never add, remove, duplicate, swap, or deform anyone.',
-  'They share one warm reaction to the tablet: heads and shoulders lean inward by only a few pixels, existing smiles gently broaden, eyes brighten, and shoulders lift slightly as if sharing a quiet laugh. No speech, open mouths, teeth changes, blinking, waving, or large gestures.',
-  'Everyone keeps looking at the tablet. The seated man makes only a minute hand adjustment while holding it. Keep the tablet, clipboard, papers, pen, table, chairs, and clothing fixed; no floating, bending, sliding, or new screen content.',
+  'The only people are inside the upper-right photographic region, approximately x=52%-99% and y=10%-52% of the full canvas. Confine human motion to that box. Preserve each identity, face, skin tone, hair, clothing, anatomy, and hands. Never add, remove, duplicate, swap, or deform anyone.',
+  'Show one clear, warm shared reaction to the tablet. The older man and woman visibly lean a little closer. The standing young man leans forward and his grin broadens. The seated man tilts the tablet slightly toward them and smiles more. Their heads and shoulders move naturally by a small but unmistakable amount, as if sharing a quiet laugh.',
+  'Keep all eyes on the tablet. Allow natural cheek, eye, and clothing movement, but no speech, exaggerated open mouths, changed teeth, waving, or large gestures. Hands retain correct anatomy and contact with the tablet or table. The tablet may tilt slightly but its screen gains no new content. Keep the clipboard, papers, pen, table, and chairs still.',
   '',
-  'BOOMERANG MOTION:',
-  'Start at the source pose. Ease into the closer lean and brighter smiles, briefly reach the happy peak, then ease back along the same motion to the source pose. Make the reversal playful, subtle, synchronized, and seamless, with no pause, jump, or snap.',
+  'MOTION PERFORMANCE:',
+  'Start from the exact supplied pose, then move continuously toward the closer, happier group reaction. Prioritize visible human motion over complete stillness. Make it friendly, restrained, realistic, synchronized, and suitable for an official Instagram post.',
   '',
   'CAMERA AND IMAGE LOCK:',
   'No pan, zoom, shake, crop change, parallax, focus pull, background motion, warping, lighting change, colour shift, glow, or new shadows. Preserve the clean public-information-poster look.',
-  '',
-  'SEAMLESS LOOP:',
-  'At exactly 5 seconds, every face, smile, head, shoulder, hand, and pixel returns to its source position. First and final frames match exactly with no dissolve, duplicate feature, brightness pulse, or frozen endpoint.',
 ].join('\n');
 
 type Options = {
@@ -192,12 +190,15 @@ function printReview(
         input: options.imagePath,
         inputDimensions: `${dimensions.width}x${dimensions.height}`,
         firstFrame: 'the supplied poster',
-        lastFrame: 'the same supplied poster (for a seamless loop)',
+        lastFrame: 'not supplied, so Kling has room to create visible motion',
         settings: {
-          duration: options.durationSeconds,
+          klingSourceDuration: options.durationSeconds,
+          finalBoomerangDuration: options.durationSeconds,
           resolution: klingResolution('fast'),
           audio: 'off',
           multi_shot: false,
+          localLoop:
+            'first half of the Kling clip followed by its FFmpeg reversal',
         },
         outputs: {
           mp4: options.mp4Path,
@@ -210,6 +211,42 @@ function printReview(
       2,
     ),
   );
+}
+
+async function convertMp4ToBoomerang(
+  sourcePath: string,
+  outputPath: string,
+  durationSeconds: number,
+): Promise<void> {
+  const forwardSeconds = durationSeconds / 2;
+  const filter = [
+    `[0:v]trim=start=0:duration=${forwardSeconds},setpts=PTS-STARTPTS,split[forward][reverse_source]`,
+    '[reverse_source]reverse,setpts=PTS-STARTPTS[backward]',
+    '[forward][backward]concat=n=2:v=1:a=0,format=yuv420p[video]',
+  ].join(';');
+
+  await execFileAsync(resolveFfmpeg(), [
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-y',
+    '-i',
+    sourcePath,
+    '-filter_complex',
+    filter,
+    '-map',
+    '[video]',
+    '-an',
+    '-c:v',
+    'libx264',
+    '-crf',
+    '18',
+    '-preset',
+    'medium',
+    '-movflags',
+    '+faststart',
+    outputPath,
+  ]);
 }
 
 async function convertMp4ToGif(
@@ -250,11 +287,8 @@ async function main(): Promise<void> {
     options.durationSeconds === 5
       ? POSTER_MOTION_PROMPT
       : POSTER_MOTION_PROMPT.replace(
-          'seamless 5-second',
-          `seamless ${options.durationSeconds}-second`,
-        ).replace(
-          'at exactly 5 seconds',
-          `at exactly ${options.durationSeconds} seconds`,
+          '5-second',
+          `${options.durationSeconds}-second`,
         );
   printReview(options, info, prompt);
 
@@ -271,9 +305,6 @@ async function main(): Promise<void> {
   const clip = await generateKlingClip({
     prompt,
     imagePng: image,
-    // Identical endpoints encourage a seamless loop and restore the exact
-    // source poster at the end of the model-generated motion.
-    lastFramePng: image,
     aspectRatio: info.aspectRatio,
     durationSeconds: options.durationSeconds,
     tier: 'fast',
@@ -282,7 +313,20 @@ async function main(): Promise<void> {
     },
   });
 
-  await writeFile(options.mp4Path, clip);
+  const temporaryDirectory = await mkdtemp(
+    join(tmpdir(), 'dgipr-poster-motion-'),
+  );
+  try {
+    const sourcePath = join(temporaryDirectory, 'kling-source.mp4');
+    await writeFile(sourcePath, clip);
+    await convertMp4ToBoomerang(
+      sourcePath,
+      options.mp4Path,
+      options.durationSeconds,
+    );
+  } finally {
+    await rm(temporaryDirectory, { recursive: true, force: true });
+  }
   console.log(`Wrote ${options.mp4Path}`);
   await convertMp4ToGif(
     options.mp4Path,
