@@ -110,6 +110,57 @@ function aspectOf(row: VideoProjectRow): VeoAspectRatio {
   return row.orientation === 'vertical' ? '9:16' : '16:9';
 }
 
+type VersionedAsset = { path: string; data: Buffer; contentType: string };
+
+const MAX_VERSION_PROBES = 25;
+
+function isAlreadyExistsError(error: unknown): boolean {
+  return /already exists|duplicate/i.test(errorMessage(error));
+}
+
+// Every versioned asset is uploaded BEFORE the row that records its version, so
+// any failure in between (an end-frame render, the logo overlay, a crash, an
+// aborted request) leaves an ORPHAN at the next version — and the retry then
+// computes the same version and dies on `The resource already exists`, which is
+// how a storyboard redraw could get permanently stuck. The orphan was never
+// written to the row and therefore never served to anyone, so stepping past it
+// is safe; overwriting its path is not (the videos bucket is public and
+// CDN-cached — see the versioned-path rule above). So probe upward instead.
+// The callback rebuilds every path for a version because some writes are a set
+// (the video and its .srt share one version and must land together).
+async function uploadVersioned(
+  client: SupabaseClient,
+  firstVersion: number,
+  build: (version: number) => VersionedAsset[],
+): Promise<number> {
+  let version = firstVersion;
+  for (let probe = 0; probe < MAX_VERSION_PROBES; probe += 1) {
+    try {
+      for (const asset of build(version)) {
+        await uploadFile(
+          client,
+          VIDEOS_BUCKET,
+          asset.path,
+          asset.data,
+          asset.contentType,
+        );
+      }
+      return version;
+    } catch (error) {
+      if (!isAlreadyExistsError(error)) throw error;
+      console.warn(
+        `[video] storage already holds v${version} from an earlier failed ` +
+          `attempt; writing v${version + 1} instead.`,
+      );
+      version += 1;
+    }
+  }
+  throw new Error(
+    `Could not find a free storage version after ${MAX_VERSION_PROBES} ` +
+      `attempts from v${firstVersion}.`,
+  );
+}
+
 // Wrap a job body with the shared bookkeeping: claim the id, run in a cost
 // scope, persist an unexpected failure onto the row, always persist the accrued
 // cost (additively — a failed job still spent money) and release the id.
@@ -296,7 +347,7 @@ async function renderSceneFrames(
 
   if (which === 'pair') {
     const worldReference = await loadWorldReference(client, row, index, scenes);
-    startPng = await renderFrame({
+    const rendered = await renderFrame({
       prompt: buildKeyframePrompt(
         row.style ?? '',
         scene.openingVisualBrief ?? scene.visualBrief,
@@ -306,9 +357,19 @@ async function renderSceneFrames(
       aspect: aspectOf(row),
       ...(worldReference ? { referenceFramePng: worldReference } : {}),
     });
-    startVersion = (scene.stillVersion ?? 0) + 1;
+    startPng = rendered;
+    startVersion = await uploadVersioned(
+      client,
+      (scene.stillVersion ?? 0) + 1,
+      (version) => [
+        {
+          path: stillPath(row.id, index, version),
+          data: rendered,
+          contentType: 'image/png',
+        },
+      ],
+    );
     startPath = stillPath(row.id, index, startVersion);
-    await uploadFile(client, VIDEOS_BUCKET, startPath, startPng, 'image/png');
   } else {
     if (!scene.stillPath) {
       throw new Error(`दृश्य ${index + 1} चे प्रारंभ चित्र अजून तयार नाही.`);
@@ -325,9 +386,18 @@ async function renderSceneFrames(
       startPng,
       scene.endVisualBrief,
     );
-    endVersion = (scene.endStillVersion ?? 0) + 1;
+    endVersion = await uploadVersioned(
+      client,
+      (scene.endStillVersion ?? 0) + 1,
+      (version) => [
+        {
+          path: endStillStoragePath(row.id, index, version),
+          data: croppedEnd,
+          contentType: 'image/png',
+        },
+      ],
+    );
     endPath = endStillStoragePath(row.id, index, endVersion);
-    await uploadFile(client, VIDEOS_BUCKET, endPath, croppedEnd, 'image/png');
   } else if (which === 'end') {
     throw new Error(`दृश्य ${index + 1} ला अंतिम फ्रेमचे वर्णन नाही.`);
   }
@@ -516,10 +586,18 @@ async function storeContinuousNarration(
     fit,
     preserveWords,
   );
-  const version =
-    Math.max(0, ...scenes.map((scene) => scene.narrationAudioVersion ?? 0)) + 1;
+  const version = await uploadVersioned(
+    client,
+    Math.max(0, ...scenes.map((scene) => scene.narrationAudioVersion ?? 0)) + 1,
+    (candidate) => [
+      {
+        path: narrationStoragePath(id, candidate),
+        data: fitted.wav,
+        contentType: 'audio/wav',
+      },
+    ],
+  );
   const path = narrationStoragePath(id, version);
-  await uploadFile(client, VIDEOS_BUCKET, path, fitted.wav, 'audio/wav');
   const joinedText = fitted.narrations.join(' ');
   const weights = narrationWeights(
     fitted.narrations.map((narration) => ({ narration })),
@@ -857,9 +935,18 @@ async function renderSceneClip(
     expectedDurationSeconds: scene.durationSeconds,
   });
 
-  const version = (scene.clipVersion ?? 0) + 1;
+  const version = await uploadVersioned(
+    client,
+    (scene.clipVersion ?? 0) + 1,
+    (candidate) => [
+      {
+        path: clipStoragePath(row.id, index, candidate),
+        data: clip,
+        contentType: 'video/mp4',
+      },
+    ],
+  );
   const path = clipStoragePath(row.id, index, version);
-  await uploadFile(client, VIDEOS_BUCKET, path, clip, 'video/mp4');
 
   return {
     ...scene,
@@ -1050,17 +1137,24 @@ async function stitchAndPersist(
 
   await updateVideoProject(client, id, { step: 'upload' });
   const row = await requireProject(client, id);
-  const version = row.videoVersion + 1;
+  const version = await uploadVersioned(
+    client,
+    row.videoVersion + 1,
+    (candidate) => [
+      {
+        path: videoStoragePath(id, candidate),
+        data: video,
+        contentType: 'video/mp4',
+      },
+      {
+        path: srtStoragePath(id, candidate),
+        data: Buffer.from(srt, 'utf8'),
+        contentType: 'application/x-subrip',
+      },
+    ],
+  );
   const videoPath = videoStoragePath(id, version);
   const srtPath = srtStoragePath(id, version);
-  await uploadFile(client, VIDEOS_BUCKET, videoPath, video, 'video/mp4');
-  await uploadFile(
-    client,
-    VIDEOS_BUCKET,
-    srtPath,
-    Buffer.from(srt, 'utf8'),
-    'application/x-subrip',
-  );
 
   await updateVideoProject(client, id, {
     status: 'completed',
