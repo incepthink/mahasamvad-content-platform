@@ -461,10 +461,20 @@ export type UpdateVideoScriptRequest = z.infer<
 // (default start). Redrawing the START also regenerates the end frame — the
 // end is an EDIT of the start, so a new start orphans it; redrawing the END
 // alone re-edits from the current start (one image call).
+//
+// `openingVisualBrief` is deliberately UNCAPPED. No provider imposes a limit
+// near the old 1200: it reaches the frame models (Gemini / gpt-image) whose
+// text budgets are orders of magnitude larger, and the one real budget on the
+// path — Kling's 3072-char prompt cap — is already absorbed downstream by
+// fitClipPrompt, which sheds the opening brief BEFORE the setting/no-talking/
+// no-text rules. So a long brief degrades at render time instead of being
+// rejected at save time. The other two briefs keep their caps: they are the
+// short single-shot descriptions the script writer emits, not the officer's
+// free-form direction.
 export const RegenerateStillRequestSchema = z.object({
   frame: z.enum(['start', 'end']).optional(),
   visualBrief: z.string().trim().min(1).max(600).optional(),
-  openingVisualBrief: z.string().trim().min(1).max(1200).optional(),
+  openingVisualBrief: z.string().trim().min(1).optional(),
   endVisualBrief: z.string().trim().min(1).max(600).optional(),
 });
 export type RegenerateStillRequest = z.infer<
