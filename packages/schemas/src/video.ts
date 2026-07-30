@@ -481,6 +481,23 @@ export type RegenerateStillRequest = z.infer<
   typeof RegenerateStillRequestSchema
 >;
 
+// The officer's edit of one scene's motion direction (the director stage's
+// motion_brief). It is an input to the CLIP prompt only — no frame is rendered
+// from it — so saving one is synchronous, spends nothing and invalidates
+// nothing; it takes effect on the next animate / re-animate of that scene.
+//
+// UNCAPPED, like openingVisualBrief above: the only real budget on this path is
+// Kling's 3072-char prompt cap, and fitClipPrompt already absorbs it downstream
+// by shedding the briefs BEFORE the setting/no-talking/no-text rules. A long
+// direction therefore degrades at render time instead of being rejected at save
+// time — and rejecting the officer's own words is the worse of the two.
+export const UpdateSceneMotionRequestSchema = z.object({
+  motionBrief: z.string().trim().min(1),
+});
+export type UpdateSceneMotionRequest = z.infer<
+  typeof UpdateSceneMotionRequestSchema
+>;
+
 // ---------- deterministic timing + SRT ----------
 //
 // Cue boundaries come from the scenes' own durationSeconds (the clip providers

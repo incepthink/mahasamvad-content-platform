@@ -72,6 +72,7 @@ import {
   VideoProjectSummarySchema,
   type CreateVideoProjectRequest,
   type RegenerateStillRequest,
+  type UpdateSceneMotionRequest,
   type UpdateVideoScriptRequest,
   type VideoProjectDetail,
   type VideoProjectSummary,
@@ -865,6 +866,20 @@ export async function regenerateVideoStill(
 ): Promise<void> {
   await requestJson(`/api/video/projects/${id}/scenes/${index}/still`, {
     method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+// One scene's motion direction, hand-edited. Free and synchronous — it is an
+// input to the clip prompt only, so no frame is discarded; it applies to the
+// next animation of that scene.
+export async function saveVideoSceneMotion(
+  id: string,
+  index: number,
+  input: UpdateSceneMotionRequest,
+): Promise<void> {
+  await requestJson(`/api/video/projects/${id}/scenes/${index}/motion`, {
+    method: 'PUT',
     body: JSON.stringify(input),
   });
 }

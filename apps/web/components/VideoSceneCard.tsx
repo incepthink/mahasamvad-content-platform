@@ -16,7 +16,7 @@
 // Per-scene status/error chips render in both modes — a failed scene must say
 // so on ITS card, not sink the project.
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { VideoScene } from '@dgipr/schemas';
 import {
   VIDEO_KEY_POINT_MAX_CHARS,
@@ -83,6 +83,7 @@ export function VideoSceneCard({
   onRemove,
   onRedraw,
   onRedrawEnd,
+  onMotionBriefSave,
   onReanimate,
   reanimateLabel,
 }: {
@@ -100,6 +101,9 @@ export function VideoSceneCard({
   // edited start brief; onRedrawEnd re-edits only the end frame.
   onRedraw?: (brief: string) => void;
   onRedrawEnd?: ((endBrief: string) => void) | undefined;
+  // Saves the scene's motion direction. Free — it feeds the CLIP prompt only,
+  // so no frame is discarded and the edit lands on the next animation.
+  onMotionBriefSave?: ((motionBrief: string) => void) | undefined;
   onReanimate?: (() => void) | undefined;
   reanimateLabel?: string;
 }) {
@@ -109,6 +113,17 @@ export function VideoSceneCard({
   const [briefDraft, setBriefDraft] = useState(
     scene.openingVisualBrief ?? scene.visualBrief,
   );
+  // The motion direction is edited in place (no redraw follows it), so the
+  // draft must re-seed when a save lands and the refreshed prop comes back —
+  // and only then, or every poll would discard what is being typed.
+  const [motionDraft, setMotionDraft] = useState(scene.motionBrief ?? '');
+  const [motionSaved, setMotionSaved] = useState(false);
+  const lastMotionProp = useRef(scene.motionBrief);
+  useEffect(() => {
+    if (lastMotionProp.current === scene.motionBrief) return;
+    lastMotionProp.current = scene.motionBrief;
+    setMotionDraft(scene.motionBrief ?? '');
+  }, [scene.motionBrief]);
 
   const heading = `${STR.videoSceneLabel} ${index + 1}`;
   const hasEndFrame = scene.endVisualBrief !== undefined;
@@ -248,12 +263,55 @@ export function VideoSceneCard({
       <p className="hint">
         {videoSceneTiming(scene.durationSeconds, scene.narrationSeconds)}
       </p>
-      {scene.motionBrief ? (
+      {onMotionBriefSave || scene.motionBrief ? (
         <details style={{ marginTop: 10 }}>
           <summary className="field-label">{STR.videoMotionBriefLabel}</summary>
-          <p className="hint" style={{ marginTop: 6, whiteSpace: 'pre-wrap' }}>
-            {scene.motionBrief}
-          </p>
+          {onMotionBriefSave ? (
+            <>
+              <p className="hint" style={{ marginTop: 6 }}>
+                {STR.videoMotionBriefEditHint}
+              </p>
+              <textarea
+                className="note-input"
+                style={{ marginTop: 6, minHeight: 120 }}
+                value={motionDraft}
+                disabled={busy}
+                onChange={(event) => {
+                  setMotionDraft(event.target.value);
+                  setMotionSaved(false);
+                }}
+              />
+              <div className="btn-row" style={{ marginTop: 8 }}>
+                <button
+                  type="button"
+                  className="btn btn-small"
+                  disabled={
+                    busy ||
+                    motionDraft.trim().length === 0 ||
+                    motionDraft.trim() === (scene.motionBrief ?? '').trim()
+                  }
+                  onClick={() => {
+                    setMotionSaved(true);
+                    onMotionBriefSave(motionDraft.trim());
+                  }}
+                >
+                  {STR.videoMotionBriefSave}
+                </button>
+              </div>
+              {motionSaved ? (
+                <p className="hint" style={{ marginTop: 6 }}>
+                  {STR.videoMotionBriefSaved}
+                </p>
+              ) : null}
+            </>
+          ) : (
+            <p
+              className="hint"
+              style={{ marginTop: 6, whiteSpace: 'pre-wrap' }}
+            >
+              {scene.motionBrief}
+            </p>
+          )}
         </details>
       ) : null}
       {/* Since windows are derived by ceil()ing the measured narration, a NEW

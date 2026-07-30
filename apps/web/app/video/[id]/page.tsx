@@ -31,6 +31,7 @@ import {
   regenerateVideoStill,
   restitchVideo,
   saveVideoScript,
+  saveVideoSceneMotion,
   startVideoAnimation,
   startVideoStoryboard,
 } from '../../../lib/api';
@@ -266,6 +267,11 @@ export default function VideoProjectPage({
       }),
     );
 
+  // Free and frame-preserving: the motion direction only feeds the clip
+  // prompt, so the saved text applies to the next animation of that scene.
+  const saveMotionBrief = (index: number, motionBrief: string) =>
+    act(() => saveVideoSceneMotion(id, index, { motionBrief }));
+
   const redrawEndStill = (index: number, endBrief: string) =>
     act(() =>
       regenerateVideoStill(id, index, {
@@ -457,6 +463,9 @@ export default function VideoProjectPage({
               busy={busy}
               onRedraw={(brief) => void redrawStill(index, brief)}
               onRedrawEnd={(endBrief) => void redrawEndStill(index, endBrief)}
+              onMotionBriefSave={(motionBrief) =>
+                void saveMotionBrief(index, motionBrief)
+              }
             />
           ))}
           <section className="card">
@@ -518,6 +527,9 @@ export default function VideoProjectPage({
           onRedrawStill={(index, brief) => void redrawStill(index, brief)}
           onRedrawEndStill={(index, endBrief) =>
             void redrawEndStill(index, endBrief)
+          }
+          onSaveMotionBrief={(index, motionBrief) =>
+            void saveMotionBrief(index, motionBrief)
           }
           onReanimateScene={(index) =>
             void act(() => reanimateVideoScene(id, index))

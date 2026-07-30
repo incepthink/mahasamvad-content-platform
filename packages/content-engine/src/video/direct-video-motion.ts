@@ -10,14 +10,15 @@ import {
 } from '../generation/openai-chat.js';
 
 const DirectedSceneSchema = z.object({
-  // Uncapped, matching RegenerateStillRequestSchema: no provider on this path
-  // imposes a limit near the old 1200 (the frame models take far more, and
-  // Kling's 3072-char prompt cap is absorbed by fitClipPrompt, which sheds the
-  // opening brief before the protected rules). A long brief must not fail the
-  // parse and burn a repair round.
+  // All three UNCAPPED, matching RegenerateStillRequestSchema: no provider on
+  // this path imposes a limit of our own making (the frame models take far
+  // more, and Kling's 3072-char prompt cap is absorbed by fitClipPrompt, which
+  // sheds the briefs before the protected setting/no-talking/no-text rules). A
+  // long brief must not fail the parse and burn a repair round — it degrades at
+  // render time instead.
   opening_visual_brief: z.string().trim().min(1),
-  motion_brief: z.string().trim().min(1).max(2200),
-  camera_direction: z.string().trim().min(1).max(600),
+  motion_brief: z.string().trim().min(1),
+  camera_direction: z.string().trim().min(1),
 });
 
 function resultSchemaFor(sceneCount: number) {

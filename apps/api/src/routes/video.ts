@@ -22,6 +22,7 @@ import {
 import {
   CreateVideoProjectRequestSchema,
   RegenerateStillRequestSchema,
+  UpdateSceneMotionRequestSchema,
   UpdateVideoScriptRequestSchema,
   clipSecondsForNarration,
   estimateNarrationSeconds,
@@ -546,6 +547,44 @@ export function registerVideoRoutes(
       });
       startSceneStillJob(client, row.id, index, returnTo, frame);
       return reply.code(202).send({ id: row.id });
+    },
+  );
+
+  // One scene's motion direction, hand-edited. Synchronous and free: the
+  // motion brief is an input to the CLIP prompt only (buildClipMotionPrompt) —
+  // no frame is rendered from it — so unlike a changed visual brief this does
+  // NOT send the scene back to pending or orphan a rendered frame. It takes
+  // effect on the next animate / re-animate of that scene, which is why
+  // 'completed' is accepted too: the fix panel is where an officer learns the
+  // movement was wrong.
+  app.put<{ Params: { id: string; index: string } }>(
+    '/video/projects/:id/scenes/:index/motion',
+    async (request, reply) => {
+      const body = UpdateSceneMotionRequestSchema.parse(request.body);
+      const row = await getVideoProject(client, request.params.id);
+      if (!row) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'Video project not found.' } });
+      }
+      const index = Number(request.params.index);
+      const scene = Number.isInteger(index) ? row.scenes[index] : undefined;
+      if (!scene) {
+        return reply.code(404).send({ error: { message: 'Scene not found.' } });
+      }
+      if (
+        (row.status !== 'storyboard_ready' &&
+          row.status !== 'completed' &&
+          row.status !== 'failed') ||
+        isVideoJobRunning(row.id)
+      ) {
+        return reply.code(409).send({ error: { message: BUSY_MESSAGE } });
+      }
+      const scenes = [...row.scenes];
+      scenes[index] = { ...scene, motionBrief: body.motionBrief };
+      await updateVideoProject(client, row.id, { scenes });
+      const updated = await getVideoProject(client, row.id);
+      return toDetail(client, updated!);
     },
   );
 

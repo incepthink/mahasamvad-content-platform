@@ -24,6 +24,7 @@ export function VideoResultView({
   busy,
   onRedrawStill,
   onRedrawEndStill,
+  onSaveMotionBrief,
   onReanimateScene,
   onNarrate,
   onRestitch,
@@ -35,6 +36,9 @@ export function VideoResultView({
   // from the start); onRedrawEndStill re-edits only the end frame.
   onRedrawStill: (index: number, brief: string) => void;
   onRedrawEndStill: (index: number, endBrief: string) => void;
+  // Saves one scene's motion direction. Free and frame-preserving; it applies
+  // when that scene is re-animated from the same panel.
+  onSaveMotionBrief: (index: number, motionBrief: string) => void;
   onReanimateScene: (index: number) => void;
   // Add or refresh the Marathi TTS narration on the finished video.
   onNarrate: () => void;
@@ -167,6 +171,9 @@ export function VideoResultView({
               busy={busy}
               onRedraw={(brief) => onRedrawStill(index, brief)}
               onRedrawEnd={(endBrief) => onRedrawEndStill(index, endBrief)}
+              onMotionBriefSave={(motionBrief) =>
+                onSaveMotionBrief(index, motionBrief)
+              }
               onReanimate={
                 scene.stillUrl
                   ? () => {
