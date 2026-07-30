@@ -14,6 +14,7 @@ import {
   isMarathiVideoNarration,
   normalizeVideoNarrationScript,
   type VideoInputMode,
+  type VideoOrientation,
   type VideoProjectSummary,
 } from '@dgipr/schemas';
 import { createVideoProject, listVideoProjects } from '../../lib/api';
@@ -21,6 +22,26 @@ import { formatDate, STR, videoReadyScriptEstimate } from '../../lib/strings';
 import { VideoStatusChip } from '../../components/VideoStatusChip';
 
 const NOTE_MIN = 20;
+
+// Landscape stays the default; vertical (9:16) is the reels/status shape. The
+// frame provider takes an ASPECT rather than a pixel size, so this is the only
+// thing an officer has to choose for it.
+const ORIENTATION_OPTIONS: ReadonlyArray<{
+  value: VideoOrientation;
+  name: string;
+  desc: string;
+}> = [
+  {
+    value: 'landscape',
+    name: STR.videoOrientationLandscape,
+    desc: STR.videoOrientationLandscapeHint,
+  },
+  {
+    value: 'vertical',
+    name: STR.videoOrientationVertical,
+    desc: STR.videoOrientationVerticalHint,
+  },
+];
 
 // मागील व्हिडिओ shows the runs worth keeping, not every experiment the pipeline
 // ever produced: the named projects below plus everything created from now on.
@@ -55,6 +76,7 @@ export default function VideoPage() {
   const [inputMode, setInputMode] = useState<VideoInputMode>('note');
   const [note, setNote] = useState('');
   const [heading, setHeading] = useState('');
+  const [orientation, setOrientation] = useState<VideoOrientation>('landscape');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [projects, setProjects] = useState<VideoProjectSummary[]>([]);
@@ -115,7 +137,7 @@ export default function VideoPage() {
         ...(heading.trim() ? { heading: heading.trim() } : {}),
         inputMode,
         durationBucket: 'short',
-        orientation: 'landscape',
+        orientation,
         tier: 'fast',
       });
       router.push(`/video/${id}`);
@@ -226,6 +248,25 @@ export default function VideoPage() {
           onChange={(event) => setHeading(event.target.value)}
           style={{ marginTop: 8 }}
         />
+      </section>
+
+      <section className="card">
+        <h2>{STR.videoOrientationLabel}</h2>
+        <div className="output-picker">
+          {ORIENTATION_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className="output-option"
+              aria-pressed={orientation === option.value}
+              disabled={submitting}
+              onClick={() => setOrientation(option.value)}
+            >
+              <span className="name">{option.name}</span>
+              <span className="desc">{option.desc}</span>
+            </button>
+          ))}
+        </div>
       </section>
 
       <section className="card">
