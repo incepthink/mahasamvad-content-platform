@@ -32,6 +32,7 @@
     "poster:preview:chrome": "tsx scripts/preview-article-chrome.ts",
     "poster:preview:chrome:twitter": "tsx scripts/preview-twitter-chrome.ts",
     "poster:preview:chrome:cmo": "tsx scripts/preview-cmo-chrome.ts",
+    "poster:preview:chrome:youtube": "tsx scripts/preview-youtube-chrome.ts",
     "poster:preview:markers": "tsx scripts/preview-feedback-marker.ts",
     "poster:preview:colours": "tsx src/poster-colours.ts",
     "pdf:preview": "tsx scripts/preview-article-pdf.ts",

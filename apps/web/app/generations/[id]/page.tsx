@@ -2,7 +2,7 @@
 
 import { use } from 'react';
 import { useRouter } from 'next/navigation';
-import { isSocialCategory } from '@dgipr/schemas';
+import { isArticleCategory, isSocialCategory } from '@dgipr/schemas';
 import { useGeneration } from '../../../lib/useGeneration';
 import { useGenerationThread } from '../../../lib/useGenerationThread';
 import { createGeneration } from '../../../lib/api';
@@ -99,7 +99,7 @@ export default function GenerationDetailPage({
   // of the step list. Step-scoped so a revise_article run keeps its existing
   // path; posterBusy can't overlap because it requires posterUrl.
   const posterPending =
-    !isSocialCategory(detail.category) &&
+    isArticleCategory(detail.category) &&
     detail.outputType !== 'article' &&
     (detail.status === 'queued' || detail.status === 'running') &&
     !!detail.article &&
@@ -112,7 +112,7 @@ export default function GenerationDetailPage({
   // stored on those rows is the poster's source, not the officer's primary requested output,
   // so keep it available without letting it lead the page.
   const posterFocused =
-    !isSocialCategory(detail.category) && detail.outputType === 'poster';
+    isArticleCategory(detail.category) && detail.outputType === 'poster';
 
   return (
     <main className="page">
@@ -131,7 +131,9 @@ export default function GenerationDetailPage({
       {(detail.status === 'queued' || detail.status === 'running') &&
         !posterBusy &&
         !posterPending &&
-        (isSocialCategory(detail.category) ? (
+        // A यूट्यूब थंबनेल run has no article stages to list, so it takes the compact
+        // bar the social lane uses rather than ProgressSteps' news/scheme step list.
+        (!isArticleCategory(detail.category) ? (
           <section className="card" aria-live="polite">
             <h2>{STR.progressTitle}</h2>
             <p className="hint">{STR.progressHint}</p>

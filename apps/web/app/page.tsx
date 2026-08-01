@@ -17,7 +17,9 @@ import {
 import {
   POSTER_HEADING_MAX_CHARS,
   UPLOAD_FILE_MAX_BYTES,
+  isArticleCategory,
   isSocialCategory,
+  referenceCategoryOf,
 } from '@dgipr/schemas';
 import type { Category } from '@dgipr/schemas';
 import { createGeneration, getGeneration } from '../lib/api';
@@ -38,10 +40,10 @@ import { XLogo } from '../components/XLogo';
 // the shared CATEGORY_OPTIONS (reused by the detail page's next-step panel and /dlo) is
 // left untouched.
 //
-// 'youtube' is not a Category and never reaches the API: the card is a placeholder for
-// work not built yet, rendered disabled. Every other value IS a Category value, so the
-// request needs no mapping table.
-type Format = Category | 'youtube' | 'video';
+// Every value except 'video' IS a Category value, so the request needs no mapping table.
+// 'video' is a shortcut to /video, which runs its own two-gate flow and cannot be submitted
+// from here.
+type Format = Category | 'video';
 
 type FormatIcon = ComponentType<{
   size?: number;
@@ -86,9 +88,12 @@ const FORMATS = [
   desc: string;
 }>;
 
-// What the picker can actually leave selected. 'youtube' is disabled and 'video' navigates
-// away on click, so neither is ever held in state.
-type SelectableFormat = Extract<Format, 'twitter' | 'facebook' | 'scheme'>;
+// What the picker can actually leave selected. 'video' navigates away on click, so it is
+// never held in state.
+type SelectableFormat = Extract<
+  Format,
+  'twitter' | 'facebook' | 'scheme' | 'youtube'
+>;
 
 // Where the upload card remembers its in-flight job across a refresh. The page also clears
 // it by hand after a submit (see clearDocument), so it is named once.
@@ -98,7 +103,10 @@ const DOC_STORAGE_KEY = 'dgipr.mediaRoom.document';
 // target, so a stale or hand-typed link can never put the form into a state the picker
 // cannot show.
 function selectableFormatOf(value: string | null): SelectableFormat | null {
-  return value === 'twitter' || value === 'facebook' || value === 'scheme'
+  return value === 'twitter' ||
+    value === 'facebook' ||
+    value === 'scheme' ||
+    value === 'youtube'
     ? value
     : null;
 }
@@ -177,15 +185,16 @@ export default function NewGenerationPage() {
   // ट्विटर and फेसबुक are one lane: same n8n workflow, same master library — only the
   // recorded category differs.
   const isSocial = isSocialCategory(category);
+  // The लेख पोस्टर lane. Asked positively rather than as !isSocial, which silently swept
+  // यूट्यूब थंबनेल in with it — a thumbnail writes no article and locks no poster heading.
+  const isArticle = isArticleCategory(category);
 
   // Which library the template picker shows: twitter masters for the two social formats,
-  // article masters for the लेख पोस्टर. Every format on this page renders a poster, so it
-  // is never hidden. रचना-शैली and विभाग are gone from this form — a social post here is
-  // always the DGIPR 'onbrand' template, which is what makes the pinned reference the only
-  // template question left to ask.
-  const pickerCategory: 'twitter' | 'article' = isSocial
-    ? 'twitter'
-    : 'article';
+  // article masters for the लेख पोस्टर, youtube masters for the थंबनेल. Every format on this
+  // page renders an image, so it is never hidden. रचना-शैली and विभाग are gone from this
+  // form — a social post here is always the DGIPR 'onbrand' template, which is what makes
+  // the pinned reference the only template question left to ask.
+  const pickerCategory = referenceCategoryOf(category);
 
   // A pin is only meaningful for the format it was chosen under.
   useEffect(() => {
@@ -226,7 +235,7 @@ export default function NewGenerationPage() {
       setError(STR.noteTooShort);
       return;
     }
-    if (!isSocial && posterHeading.trim().length > POSTER_HEADING_MAX_CHARS) {
+    if (isArticle && posterHeading.trim().length > POSTER_HEADING_MAX_CHARS) {
       setError(STR.posterHeadingTooLong);
       return;
     }
@@ -250,14 +259,14 @@ export default function NewGenerationPage() {
         outputType: 'poster',
         // The लेख पोस्टर path uses the pasted article verbatim (skip generateArticle);
         // inert for social, whose caption is always written fresh.
-        providedArticle: !isSocial,
+        providedArticle: isArticle,
         // Social only, and opt-in: the caption is a second paid call and can be added
         // afterwards from the detail page.
         generateCaption: isSocial ? wantCaption : undefined,
         // लेख पोस्टर only, and only when actually typed — an empty string would be a
         // meaningless "clear" on a run that has nothing to clear.
         posterHeading:
-          !isSocial && posterHeading.trim() ? posterHeading.trim() : undefined,
+          isArticle && posterHeading.trim() ? posterHeading.trim() : undefined,
         // Both template questions are now fixed rather than asked: a social poster from
         // this form always follows the chosen DGIPR template (ठरलेले टेम्पलेट).
         designMode: isSocial ? 'onbrand' : undefined,
@@ -359,16 +368,15 @@ export default function NewGenerationPage() {
         <div className="output-picker output-picker-flow">
           {FORMATS.map((option) => {
             // व्हिडिओ is a shortcut, not a format this form can submit — /video runs its
-            // own two-gate flow. यूट्यूब थंबनेल is not built yet.
+            // own two-gate flow.
             const isLink = option.value === 'video';
-            const notBuilt = option.value === 'youtube';
             // One active task per lane: the two social cards are gated by an in-flight
-            // social run (they share one n8n workflow), लेख पोस्टर by an in-flight article
-            // run. A selected card that becomes disabled is left selected — submit()
-            // re-checks both flags, and moving the choice under the cursor would be worse.
+            // social run (they share one n8n workflow), लेख पोस्टर and यूट्यूब थंबनेल by an
+            // in-flight article-lane run. A selected card that becomes disabled is left
+            // selected — submit() re-checks both flags, and moving the choice under the
+            // cursor would be worse.
             const busy =
               !isLink &&
-              !notBuilt &&
               (isSocialCategory(option.value)
                 ? hasActiveSocialTask
                 : hasActiveArticleTask);
@@ -376,17 +384,12 @@ export default function NewGenerationPage() {
               <button
                 key={option.value}
                 type="button"
-                className={
-                  notBuilt
-                    ? 'output-option output-option-soon'
-                    : 'output-option'
-                }
-                aria-pressed={!isLink && !notBuilt && category === option.value}
-                disabled={notBuilt || busy}
+                className="output-option"
+                aria-pressed={!isLink && category === option.value}
+                disabled={busy}
                 onClick={() => {
                   if (isLink) router.push('/video');
-                  else if (!notBuilt)
-                    setCategory(option.value as SelectableFormat);
+                  else setCategory(option.value as SelectableFormat);
                 }}
               >
                 <span className="icon" aria-hidden="true">
@@ -423,7 +426,7 @@ export default function NewGenerationPage() {
             it — their headline is written into a multi-field copy object with no single line
             to lock. Left blank (the normal case) the run reads the योजना / पुरस्कार / उपक्रम
             name out of the note itself. */}
-        {!isSocial ? (
+        {isArticle ? (
           <div className="option-field">
             <label className="field-label" htmlFor="poster-heading">
               {STR.posterHeadingLabel}

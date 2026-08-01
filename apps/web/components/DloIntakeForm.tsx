@@ -18,8 +18,15 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import type { DloCategory, DloPreReadDocument } from '@dgipr/schemas';
-import { UPLOAD_FILE_MAX_BYTES } from '@dgipr/schemas';
+import type {
+  DloCategory,
+  DloPreReadDocument,
+  YouTubeVideo,
+} from '@dgipr/schemas';
+import {
+  ARTICLE_INSTRUCTIONS_MAX_CHARS,
+  UPLOAD_FILE_MAX_BYTES,
+} from '@dgipr/schemas';
 import { createDloIntake } from '../lib/api';
 import {
   EMPTY_DRAFT,
@@ -31,10 +38,12 @@ import {
   setPendingAudio,
   writeDraft,
 } from '../lib/dloDraft';
+import { AiInstructionsField } from './AiInstructionsField';
 import { AudioFilePicker } from './AudioFilePicker';
 import { DloCategoryPicker } from './DloCategoryPicker';
 import { DocumentIntake, type DocumentSnapshot } from './DocumentIntake';
 import { StyleReferenceField } from './StyleReferenceField';
+import { YouTubeLinkInput } from './YouTubeLinkInput';
 import { STR } from '../lib/strings';
 
 // This picker takes recordings only; documents go through <DocumentIntake>. Which
@@ -110,12 +119,19 @@ export function DloIntakeForm() {
   const [documents, setDocuments] = useState<DocumentSlot[]>(() =>
     draft.documentSlotIds.map((id) => ({ id, snapshot: null })),
   );
+  // YouTube sources. Restored from the draft in full, unlike the recordings — a link is a
+  // string, so a reload loses nothing.
+  const [youtube, setYoutube] = useState<readonly YouTubeVideo[]>(draft.youtube);
   const nextSlotId = useRef(draft.nextSlotId);
   const [category, setCategory] = useState<DloCategory>(draft.category);
   const [heading, setHeading] = useState(draft.heading);
   // Tier 1 of the article's style-reference hierarchy: a published article the officer wants
   // this one shaped like. Style only — never a factual source (see StyleReferenceField).
   const [styleReference, setStyleReference] = useState(draft.styleReference);
+  // The officer's own direction for the article (generations.instructions, 0041). Like the
+  // style reference it is only USED at generate time, so both are handed to the review step
+  // through the intake's saved review state rather than being asked for twice.
+  const [instructions, setInstructions] = useState(draft.instructions);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -127,13 +143,24 @@ export function DloIntakeForm() {
         category,
         heading,
         styleReference,
+        instructions,
         documentSlotIds: documents.map((slot) => slot.id),
         nextSlotId: nextSlotId.current,
         audioNames: files.map((file) => file.name),
+        youtube,
       });
     }, 500);
     return () => clearTimeout(timer);
-  }, [notes, category, heading, styleReference, documents, files]);
+  }, [
+    notes,
+    category,
+    heading,
+    styleReference,
+    instructions,
+    documents,
+    files,
+    youtube,
+  ]);
 
   // Recordings ride in a module variable so client-side navigation away and back keeps them.
   useEffect(() => {
@@ -185,6 +212,7 @@ export function DloIntakeForm() {
       window.sessionStorage.removeItem(documentStorageKey(slot.id));
     }
     setDocuments([]);
+    setYoutube([]);
     clearPendingAudio();
     clearDraft();
   };
@@ -196,9 +224,16 @@ export function DloIntakeForm() {
     if (
       notes.trim().length === 0 &&
       files.length === 0 &&
-      attachedDocuments.length === 0
+      attachedDocuments.length === 0 &&
+      youtube.length === 0
     ) {
       setError(STR.dloNeedInput);
+      return;
+    }
+    // Checked here as well as server-side so the officer gets a Marathi message instead of an
+    // opaque 400 after the whole upload has gone up.
+    if (instructions.trim().length > ARTICLE_INSTRUCTIONS_MAX_CHARS) {
+      setError(STR.aiInstructionsTooLong);
       return;
     }
     setSubmitting(true);
@@ -208,6 +243,13 @@ export function DloIntakeForm() {
       form.append('notes', notes);
       form.append('category', category);
       form.append('heading', heading);
+      // Neither is used until the article is generated, and neither has a column on
+      // dlo_intakes — the create route seeds them into the intake's review state, which is
+      // what makes the review step open with what was typed here instead of empty boxes.
+      if (instructions.trim()) form.append('instructions', instructions.trim());
+      if (styleReference.trim()) {
+        form.append('styleReference', styleReference.trim());
+      }
       for (const file of files) form.append('files', file, file.name);
       // Documents were handled here, at the input step, so read ones travel as text rather
       // than bytes — which stops a scanned PDF being OCR'd a second time by the job. A scan
@@ -218,6 +260,11 @@ export function DloIntakeForm() {
           'documents',
           JSON.stringify(attachedDocuments.map(toPreReadDocument)),
         );
+      }
+      // Links, not bytes: nothing about the video travels in this request or is stored, and
+      // the transcriber fetches the media itself during प्रक्रिया.
+      if (youtube.length > 0) {
+        form.append('youtube', JSON.stringify(youtube));
       }
       const id = await createDloIntake(form);
       clearInputs();
@@ -290,6 +337,15 @@ export function DloIntakeForm() {
         }
       />
 
+      {/* Directly under the recordings, because it is the same kind of source arriving a
+          different way: a pasted link is transcribed in the very same phase. Nothing is
+          downloaded here or by the job — the transcriber fetches the video itself. */}
+      <YouTubeLinkInput
+        videos={youtube}
+        onChange={setYoutube}
+        onError={setError}
+      />
+
       {/* One card per document, each probing its file HERE — so a scanned PDF asks which pages
           are worth OCR'ing the moment it is attached. The selected pages are handed to the
           intake job unread by default; reading them in this card remains optional. */}
@@ -355,6 +411,11 @@ export function DloIntakeForm() {
           style={{ marginTop: 10 }}
         />
       </section>
+
+      {/* The two style-side inputs, in the order an officer thinks about them: what the
+          article should do, then what it should read like. Both travel to the review step,
+          where they can still be changed before anything is generated. */}
+      <AiInstructionsField value={instructions} onChange={setInstructions} />
 
       <StyleReferenceField
         value={styleReference}

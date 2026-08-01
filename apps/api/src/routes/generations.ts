@@ -43,11 +43,15 @@ import {
   PosterFeedbackRequestSchema,
   PosterImageFeedbackRequestSchema,
   RegeneratePosterRequestSchema,
+  RestorePosterVersionRequestSchema,
   TWEET_MAX_LENGTH,
   TranslateGenerationRequestSchema,
   UpdateCaptionRequestSchema,
   UpdateCopyRequestSchema,
+  isArticleCategory,
   isSocialCategory,
+  isYoutubeCategory,
+  referenceCategoryOf,
   tweetWeightedLength,
   type GenerationDetail,
   type GenerationStep,
@@ -60,6 +64,7 @@ import {
   getTranslateError,
   getTranslateWarnings,
   getDesignationWarnings,
+  getPosterCapacityWarning,
   nameDesignationsOf,
   getTranslatingLanguage,
   isJobRunning,
@@ -77,6 +82,7 @@ import {
   startPosterImageFeedbackJob,
   startPosterRegenerateJob,
   startSocialPostJob,
+  startYoutubeThumbnailJob,
   startTranslateJob,
 } from '../jobs/runner.js';
 import { rememberDesignations } from '../jobs/designation-writeback.js';
@@ -148,6 +154,27 @@ function toSummary(
   };
 }
 
+// Every poster render of a run, oldest→newest, as { storage path, when }. Renders are
+// immutable versioned PNGs: the original is always poster-v1 (its path is deterministic —
+// the row's posterPath moves on with each revision, but v1 must have existed for any poster
+// to exist), later versions are the poster-bearing revision snapshots. Empty when the run
+// has no poster. Shared by the detail payload and the restore route so a version INDEX means
+// the same thing on both sides.
+function posterVersionPaths(
+  row: GenerationRow,
+  revisions: readonly { posterPath: string | null; createdAt: string }[],
+): { path: string; createdAt: string }[] {
+  if (!row.posterPath) return [];
+  return [
+    { path: `generations/${row.id}/poster-v1.png`, createdAt: row.createdAt },
+    ...revisions.flatMap((revision) =>
+      revision.posterPath
+        ? [{ path: revision.posterPath, createdAt: revision.createdAt }]
+        : [],
+    ),
+  ];
+}
+
 async function toDetail(
   client: SupabaseClient,
   row: GenerationRow,
@@ -155,28 +182,10 @@ async function toDetail(
   const revisions = await listRevisions(client, row.id);
   const copy = CopySchema.safeParse(row.copy);
   const fiveWOneH = FiveWOneHSchema.safeParse(row.fiveWOneH);
-  // Every poster render, oldest→newest. Renders are immutable versioned PNGs:
-  // the original is always poster-v1 (its path is deterministic — the row's
-  // posterPath moves on with each revision, but v1 must have existed for any
-  // poster to exist), later versions are the poster-bearing revision snapshots.
-  const posterVersions = row.posterPath
-    ? [
-        {
-          posterUrl: publicUrl(client, `generations/${row.id}/poster-v1.png`),
-          createdAt: row.createdAt,
-        },
-        ...revisions.flatMap((revision) =>
-          revision.posterPath
-            ? [
-                {
-                  posterUrl: publicUrl(client, revision.posterPath),
-                  createdAt: revision.createdAt,
-                },
-              ]
-            : [],
-        ),
-      ]
-    : [];
+  const posterVersions = posterVersionPaths(row, revisions).map((version) => ({
+    posterUrl: publicUrl(client, version.path),
+    createdAt: version.createdAt,
+  }));
   return {
     id: row.id,
     status: row.status,
@@ -217,6 +226,10 @@ async function toDetail(
     // in-process registry as translateWarnings — any that could not be applied.
     nameDesignations: nameDesignationsOf(row),
     designationWarnings: getDesignationWarnings(row.id),
+    // Set when this poster's information held more items than any master template lays out.
+    // Same in-process registry, for the same reason: the poster is on the row and was rendered
+    // with every item, but only the officer can decide to split the note into two posters.
+    posterCapacityWarning: getPosterCapacityWarning(row.id),
     // Article revision can run beside the poster render (same registry pattern as
     // translation), so its liveness/failure also come from the runner, not the row.
     articleRevising: isRevisingArticle(row.id),
@@ -255,8 +268,8 @@ export function registerGenerationRoutes(
       ? (body.templateBrand ?? 'dgipr')
       : 'dgipr';
     // Optional pin: must reference an existing library image of the matching
-    // category (social↔twitter library, news/scheme↔article), and only for runs
-    // that actually render a poster.
+    // library (referenceCategoryOf — social↔twitter, news/scheme↔article,
+    // youtube↔youtube), and only for runs that actually render a poster.
     //
     // outputType 'article' says the run renders none — on the article lane (the poster
     // phase is skipped) and on the social lane (the कॅप्शन run) alike. Storing a pin
@@ -272,9 +285,7 @@ export function registerGenerationRoutes(
         });
       }
       const image = await getReferenceImageRow(client, body.referenceImageId);
-      const expectedCategory = isSocialCategory(body.category)
-        ? 'twitter'
-        : 'article';
+      const expectedCategory = referenceCategoryOf(body.category);
       if (!image || image.category !== expectedCategory) {
         return reply.code(400).send({
           error: { message: 'Unknown or mismatched reference image.' },
@@ -327,12 +338,12 @@ export function registerGenerationRoutes(
       threadRootId = source.threadRootId ?? source.id;
     }
     // Person → पदनाम pairs the officer approved in the pre-generation name check. Article runs
-    // only: a social poster's headline is written by generatePosterCopy and a caption is not
-    // the place for an official title, so accepting them there would silently do nothing —
-    // the posterHeading reasoning directly above.
-    const designations = isSocialCategory(body.category)
-      ? []
-      : (body.designations ?? []);
+    // only: a social poster's headline is written by generatePosterCopy, a caption is not
+    // the place for an official title, and a youtube thumbnail reproduces the officer's own
+    // text verbatim — so accepting them on any other lane would silently do nothing.
+    const designations = isArticleCategory(body.category)
+      ? (body.designations ?? [])
+      : [];
     // Ticked pairs go to the dictionary before the insert, so the next article about the same
     // person starts pre-filled even if this run later fails.
     await rememberDesignations(client, designations);
@@ -351,11 +362,11 @@ export function registerGenerationRoutes(
         designation: pair.designation,
       })),
       // Hand-typed poster text — article/poster runs only. A social poster's headline is
-      // written by generatePosterCopy and has no equivalent lock, so accepting it there would
-      // silently do nothing.
-      posterHeading: isSocialCategory(body.category)
-        ? undefined
-        : body.posterHeading,
+      // written by generatePosterCopy and has no equivalent lock, and a youtube thumbnail's
+      // text IS the note, so accepting it on either would silently do nothing.
+      posterHeading: isArticleCategory(body.category)
+        ? body.posterHeading
+        : undefined,
       referenceImageId: body.referenceImageId,
       referenceTypeId: body.referenceTypeId,
       sourceGenerationId: body.sourceGenerationId,
@@ -363,7 +374,7 @@ export function registerGenerationRoutes(
       // Media-room flow: the note is a finished article the runner should use
       // verbatim. Only meaningful on the article/poster path — inert for social.
       articleProvided:
-        body.providedArticle && !isSocialCategory(body.category)
+        body.providedArticle && isArticleCategory(body.category)
           ? true
           : undefined,
       // Tier-1 style reference (migration 0035) — article runs that actually generate prose.
@@ -371,9 +382,17 @@ export function registerGenerationRoutes(
       // so storing it on either would be dead data that a later reader could misread as
       // "this run was styled on that". insertGeneration omits the column when absent.
       styleReference:
-        isSocialCategory(body.category) || body.providedArticle
-          ? undefined
-          : body.styleReference,
+        isArticleCategory(body.category) && !body.providedArticle
+          ? body.styleReference
+          : undefined,
+      // The officer's direction for this article (migration 0041) — same scope as the style
+      // reference above, and for the same reason: a social run writes no article and a
+      // providedArticle run skips generation, so storing it on either would be dead data a
+      // later reader could misread as "this run was written to that direction".
+      instructions:
+        isArticleCategory(body.category) && !body.providedArticle
+          ? body.instructions
+          : undefined,
     });
     // Twitter/Facebook → external n8n social-post job; news/scheme → in-process
     // article pipeline. A social run is poster-only unless the caller asked for a
@@ -383,6 +402,10 @@ export function registerGenerationRoutes(
       startSocialPostJob(client, row.id, {
         generateCaption: body.generateCaption === true,
       });
+    } else if (isYoutubeCategory(row.category)) {
+      // One image and nothing else: no article, no caption, no n8n. See
+      // startYoutubeThumbnailJob.
+      startYoutubeThumbnailJob(client, row.id);
     } else {
       startGenerationJob(client, row.id);
     }
@@ -822,10 +845,11 @@ export function registerGenerationRoutes(
           .code(409)
           .send({ error: { message: 'A job is already running.' } });
       }
-      if (isSocialCategory(row.category)) {
+      if (!isArticleCategory(row.category)) {
         return reply.code(400).send({
           error: {
-            message: 'A social post cannot be given an article poster.',
+            message:
+              'Only a news/scheme run can be given an article poster (a social post and a YouTube thumbnail have their own).',
           },
         });
       }
@@ -955,15 +979,17 @@ export function registerGenerationRoutes(
           .code(404)
           .send({ error: { message: 'Generation not found.' } });
       }
-      if (body.posterHeading !== undefined && isSocialCategory(row.category)) {
+      if (body.posterHeading !== undefined && !isArticleCategory(row.category)) {
         return reply.code(400).send({
           error: {
             message:
-              'पोस्टरवरील मजकूर फक्त लेख-पोस्टरसाठी बदलता येतो (सोशल पोस्टसाठी नाही).',
+              'पोस्टरवरील मजकूर फक्त लेख-पोस्टरसाठी बदलता येतो (सोशल पोस्ट किंवा यूट्यूब थंबनेलसाठी नाही).',
           },
         });
       }
-      if (!isSocialCategory(row.category) && !row.article) {
+      // A thumbnail is regenerated from the note, like a social poster — only the article
+      // lane re-derives its poster copy from the finished article.
+      if (isArticleCategory(row.category) && !row.article) {
         return reply
           .code(409)
           .send({ error: { message: 'No article to regenerate the poster from.' } });
@@ -995,6 +1021,64 @@ export function registerGenerationRoutes(
           : { posterHeading: body.posterHeading }),
       });
       return reply.code(202).send({});
+    },
+  );
+
+  // Bring an older poster render back as the current one, so every edit path — image
+  // feedback, marker feedback, redesign, publish, download — continues from THAT poster
+  // instead of the latest. They all read `row.posterPath` and needed no change: this route
+  // simply moves it.
+  //
+  // It is ONE column update and nothing else — no storage read, no upload, no revision row,
+  // no model call, no n8n, no spend. It used to copy the chosen bytes forward as a new
+  // version, which cost a ~6 MB download + upload per click (seconds of waiting on a
+  // pointer move) and, because the strip is derived from the poster-bearing revisions,
+  // ADDED a duplicate thumbnail every time an officer switched. Selecting a version is not
+  // an edit and must not look like one.
+  //
+  // Repointing is safe precisely because the versioned objects are immutable: nothing is
+  // lost, the strip keeps its exact contents, and switching back is the same one-line move.
+  // The next real render still appends, since it names itself off the revision count.
+  app.post<{ Params: { id: string } }>(
+    '/generations/:id/poster/restore',
+    async (request, reply) => {
+      const body = RestorePosterVersionRequestSchema.parse(request.body);
+      const row = await getGeneration(client, request.params.id);
+      if (!row) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'Generation not found.' } });
+      }
+      if (isJobRunning(row.id)) {
+        return reply
+          .code(409)
+          .send({ error: { message: 'A job is already running.' } });
+      }
+      if (!row.posterPath) {
+        return reply
+          .code(409)
+          .send({ error: { message: 'No poster to restore yet.' } });
+      }
+
+      const revisions = await listRevisions(client, row.id);
+      const versions = posterVersionPaths(row, revisions);
+      const chosen = versions[body.version - 1];
+      if (!chosen) {
+        return reply.code(400).send({
+          error: {
+            message: `या कामाला ${versions.length} पोस्टर आवृत्त्या आहेत; ${body.version} क्रमांकाची आवृत्ती नाही.`,
+          },
+        });
+      }
+      if (chosen.path === row.posterPath) {
+        return reply.code(409).send({
+          error: { message: 'हीच आवृत्ती सध्या वापरात आहे.' },
+        });
+      }
+
+      await updateGeneration(client, row.id, { posterPath: chosen.path });
+
+      return reply.send({ posterUrl: publicUrl(client, chosen.path) });
     },
   );
 
@@ -1095,12 +1179,12 @@ export function registerGenerationRoutes(
         return reply.code(404).send({ error: { message: 'हे काम सापडले नाही.' } });
       }
       // A social run's `article` column holds the CAPTION, not an article — a letterhead PDF
-      // of a tweet is wrong. isSocialCategory(), never category === 'twitter', or the
-      // facebook lane slips through.
-      if (isSocialCategory(row.category)) {
+      // of a tweet is wrong — and a youtube run has no text at all. Asked positively, so a
+      // future lane cannot slip through the way a `=== 'twitter'` check let facebook.
+      if (!isArticleCategory(row.category)) {
         return reply
           .code(400)
-          .send({ error: { message: 'सोशल पोस्टसाठी PDF उपलब्ध नाही.' } });
+          .send({ error: { message: 'या प्रकारासाठी PDF उपलब्ध नाही.' } });
       }
 
       // The gate is the TEXT, not row.status. The article is final long before the poster is

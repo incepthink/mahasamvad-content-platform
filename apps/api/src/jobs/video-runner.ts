@@ -36,9 +36,10 @@ import {
   renderFrame,
   runInCostScope,
   shortenContinuousNarration,
-  synthesizeMarathiNarration,
+  narrationKeyPresent,
+  narrationVoice,
+  synthesizeNarration,
   totalCostUsd,
-  ttsSpeaker,
   type VeoAspectRatio,
 } from '@dgipr/content-engine';
 import {
@@ -64,8 +65,10 @@ import {
 import {
   VIDEO_CLIP_MAX_SECONDS,
   VIDEO_CLIP_MIN_SECONDS,
+  VIDEO_SCRIPT_MAX_SECONDS,
   VIDEO_TOTAL_FIT_TOLERANCE,
   VIDEO_TOTAL_SECONDS,
+  UPLOADED_NARRATION_VOICE,
   allocateVideoSceneDurations,
   buildSrt,
   estimateNarrationSeconds,
@@ -225,15 +228,101 @@ async function requireProject(
 
 // ---------- gate 1: script ----------
 
-export function startVideoScriptJob(client: SupabaseClient, id: string): void {
+// READY-SCRIPT MODE VOICES THE NARRATION BEFORE IT PLANS THE CUTS.
+//
+// The words are already final here, so how many clips the project needs is not
+// an editorial question — it is the length of one WAV. Deriving it from
+// DEFAULT_NARRATION_CHARS_PER_SECOND instead was a guess that is wrong by ~50%
+// between the two TTS providers (bulbul ~16.5 chars/s, ElevenLabs v3 ~10.9), and
+// wrong in the expensive direction: too few clips at gate 1, then a hard refusal
+// at the narrate gate after the officer had approved the script.
+//
+// So the TTS call is MOVED, not added. It lands at `projects/{id}/narration-v1
+// .wav` and every scene carries it as its narration-audio cache, which is
+// exactly what `continuousNarrationIsCurrent` checks — so the storyboard job's
+// voice phase reuses this WAV and synthesizes nothing. Net spend is unchanged
+// and the failure now happens before a single frame is bought.
+//
+// Without a TTS key there is nothing to measure and the video renders silent
+// anyway, so that deployment keeps the char-rate estimate.
+type MeasuredNarration = Readonly<{
+  seconds: number;
+  path: string;
+  version: number;
+  voice: string;
+}>;
+
+async function measureReadyScriptSeconds(
+  client: SupabaseClient,
+  id: string,
+  note: string,
+): Promise<MeasuredNarration | null> {
+  if (!narrationKeyPresent()) return null;
+  const text = note.trim().replace(/\s+/g, ' ');
+  const wav = await synthesizeNarration(text, { speaker: narrationVoice() });
+  const seconds = wavDurationSeconds(wav);
+  const version = await uploadVersioned(client, 1, (candidate) => [
+    {
+      path: narrationStoragePath(id, candidate),
+      data: wav,
+      contentType: 'audio/wav',
+    },
+  ]);
+  console.log(
+    `[video ${id}] ready narration measured ${seconds.toFixed(2)}s ` +
+      `(${(text.length / Math.max(seconds, 0.001)).toFixed(1)} chars/s, voice ${narrationVoice()})`,
+  );
+  return {
+    seconds,
+    path: narrationStoragePath(id, version),
+    version,
+    voice: narrationVoice(),
+  };
+}
+
+// The officer's own voiceover, already decoded to WAV and stored by the create
+// route. It substitutes for the TTS call above and for nothing else: the
+// duration it reports is what plans the scene count, the char cap and the clip
+// windows, exactly as a synthesized track's would.
+export type UploadedNarration = Readonly<{
+  path: string;
+  version: number;
+  seconds: number;
+}>;
+
+export function startVideoScriptJob(
+  client: SupabaseClient,
+  id: string,
+  // Create-time only, and deliberately a job argument rather than a column: the
+  // route uploads the file and starts this job in the same call, and there is
+  // no retry route for scripting that could lose it. Once the scenes are
+  // written the track is on the ROW (narrationAudioVoice = UPLOADED_NARRATION_
+  // VOICE), which is what every later phase and every restart reads.
+  uploaded?: UploadedNarration | undefined,
+): void {
   runVideoJob(client, id, async () => {
     const row = await requireProject(client, id);
     await updateVideoProject(client, id, { step: 'script', error: null });
+
+    const measured: MeasuredNarration | null =
+      uploaded !== undefined
+        ? { ...uploaded, voice: UPLOADED_NARRATION_VOICE }
+        : row.inputMode === 'script'
+          ? await measureReadyScriptSeconds(client, id, row.note)
+          : null;
+    if (measured && measured.seconds > VIDEO_SCRIPT_MAX_SECONDS) {
+      throw new Error(
+        `तयार निवेदनाचा प्रत्यक्ष आवाज ${measured.seconds.toFixed(1)} सेकंदांचा आहे आणि ` +
+          `कमाल ${VIDEO_SCRIPT_MAX_SECONDS} सेकंदांच्या मर्यादेपेक्षा मोठा आहे. ` +
+          `निवेदन लहान करून नवीन प्रकल्प तयार करा.`,
+      );
+    }
 
     const script =
       row.inputMode === 'script'
         ? await planReadyVideoScript(row.note, {
             heading: row.heading ?? undefined,
+            ...(measured ? { measuredSeconds: measured.seconds } : {}),
           })
         : await generateVideoScript(row.note, {
             durationBucket: row.durationBucket,
@@ -241,7 +330,17 @@ export function startVideoScriptJob(client: SupabaseClient, id: string): void {
           });
 
     // The provisional visual timeline the script writer saw. The continuous
-    // voice phase measures the real WAV and extends the total only if needed.
+    // voice phase measures the real WAV and extends the total only if needed —
+    // on the ready-script lane it is already measured and attached below, so
+    // that phase finds the cache current and buys nothing.
+    const narrationText = script.scenes
+      .map((scene) => scene.narration.trim())
+      .filter(Boolean)
+      .join(' ');
+    const weightTotal = script.scenes.reduce(
+      (sum, scene) => sum + Math.max(1, scene.narration.trim().length),
+      0,
+    );
     const scenes: VideoSceneEntry[] = script.scenes.map((scene) => ({
       narration: scene.narration,
       visualBrief: scene.visualBrief,
@@ -253,6 +352,17 @@ export function startVideoScriptJob(client: SupabaseClient, id: string): void {
       status: 'pending',
       beat: scene.beat,
       shotHint: scene.shotHint,
+      ...(measured
+        ? {
+            narrationAudioPath: measured.path,
+            narrationAudioVersion: measured.version,
+            narrationAudioText: narrationText,
+            narrationAudioVoice: measured.voice,
+            narrationAudioSeconds:
+              (measured.seconds * Math.max(1, scene.narration.trim().length)) /
+              weightTotal,
+          }
+        : {}),
     }));
 
     await updateVideoProject(client, id, {
@@ -462,10 +572,9 @@ async function renderSceneFrames(
   };
 }
 
-function sarvamKeyPresent(): boolean {
-  const key = process.env.SARVAM_API_KEY;
-  return typeof key === 'string' && key.trim() !== '';
-}
+// Whichever provider NARRATION_TTS_PROVIDER selects owns the key check — an
+// ElevenLabs deployment legitimately holds no Sarvam key at all.
+const sarvamKeyPresent = narrationKeyPresent;
 
 // At most two whole-script rewrites. The first cut is proportional to the
 // measured overrun; bounding it matters because each attempt is one text call
@@ -477,7 +586,7 @@ type ContinuousNarrationFit = Readonly<{
   rewriteTargetSeconds: number;
 }>;
 
-function continuousNarrationText(
+export function continuousNarrationText(
   scenes: readonly Pick<VideoSceneEntry, 'narration'>[],
 ): string {
   return scenes
@@ -504,6 +613,30 @@ function continuousNarrationIsCurrent(
   );
 }
 
+// True when this project's narration is the officer's OWN recording rather than
+// a synthesized one. Read off the scenes jsonb (no column, no migration), so it
+// survives restarts and is answered identically by the voice phase, the re-voice
+// route and the stitch.
+export function narrationIsUploaded(
+  scenes: readonly VideoSceneEntry[],
+): boolean {
+  return (
+    scenes.length > 0 &&
+    scenes.every(
+      (scene) => scene.narrationAudioVoice === UPLOADED_NARRATION_VOICE,
+    )
+  );
+}
+
+// The voice this project's narration is CURRENT under. An uploaded track has no
+// TTS voice, and asking narrationVoice() for one would report a mismatch and
+// re-synthesize over the officer's audio.
+function effectiveNarrationVoice(scenes: readonly VideoSceneEntry[]): string {
+  return narrationIsUploaded(scenes)
+    ? UPLOADED_NARRATION_VOICE
+    : narrationVoice();
+}
+
 function narrationWeights(
   scenes: readonly Pick<VideoSceneEntry, 'narration'>[],
 ): number[] {
@@ -522,7 +655,7 @@ async function synthesizeFittedContinuousNarration(
   seconds: number;
 }> {
   let current = scenes.map((scene) => scene.narration.trim());
-  let wav = await synthesizeMarathiNarration(current.join(' '), {
+  let wav = await synthesizeNarration(current.join(' '), {
     speaker: voice,
   });
   let seconds = wavDurationSeconds(wav);
@@ -544,7 +677,7 @@ async function synthesizeFittedContinuousNarration(
       },
     );
     if (shorter === null) break;
-    const retryWav = await synthesizeMarathiNarration(shorter.join(' '), {
+    const retryWav = await synthesizeNarration(shorter.join(' '), {
       speaker: voice,
     });
     const retrySeconds = wavDurationSeconds(retryWav);
@@ -641,7 +774,7 @@ async function ensureNarrationAudio(
   preserveWords: boolean,
 ): Promise<void> {
   const haveKey = sarvamKeyPresent();
-  const voice = ttsSpeaker();
+  const voice = effectiveNarrationVoice(scenes);
   const freezeWindows = scenes.some((scene) => clipIsCurrent(scene));
   const frozenTotal = scenes.reduce(
     (sum, scene) => sum + scene.durationSeconds,
@@ -649,6 +782,21 @@ async function ensureNarrationAudio(
   );
   const providerCapacity = scenes.length * VIDEO_CLIP_MAX_SECONDS;
   const desiredTotal = freezeWindows ? frozenTotal : totalTarget;
+
+  // Checked BEFORE the key gate, because an uploaded narration is current
+  // whether or not this deployment holds a TTS key at all — that is the whole
+  // point of the feature, and a key check first would render such a project
+  // silent while its audio sat in Storage.
+  if (continuousNarrationIsCurrent(scenes, voice)) return;
+  if (narrationIsUploaded(scenes)) {
+    // Unreachable in practice: ready-script mode cannot change the narration
+    // text, which is the only thing that could invalidate the shared track. If
+    // it ever happens, stop — silently re-synthesizing would replace the
+    // officer's own voice with a machine one.
+    throw new Error(
+      'तुम्ही दिलेला निवेदन-ऑडिओ आणि संहिता जुळत नाहीत. नवीन प्रकल्प तयार करा.',
+    );
+  }
 
   if (!haveKey) {
     console.warn(
@@ -669,7 +817,6 @@ async function ensureNarrationAudio(
     }
     return;
   }
-  if (continuousNarrationIsCurrent(scenes, voice)) return;
 
   const ceiling = preserveWords
     ? providerCapacity
@@ -780,6 +927,41 @@ function framesArePresent(scene: VideoSceneEntry): boolean {
   );
 }
 
+// How many storyboard frames may render at once. Scene 1 is always rendered
+// alone first (it is every later scene's world reference); the rest are
+// independent calls to a model that takes minutes each, so rendering them one
+// at a time made an eight-scene storyboard an eight-times-one-frame wait for no
+// reason. The image provider's own lane limiter is the real ceiling — this only
+// decides how many the runner offers it.
+function frameConcurrency(): number {
+  const raw = process.env.VIDEO_FRAME_CONCURRENCY;
+  const value = raw === undefined || raw.trim() === '' ? NaN : Number(raw);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 3;
+}
+
+// Run `task` over `items` with at most `limit` in flight. Every task is
+// expected to handle its own failure — one flaky frame must not sink the other
+// seven, exactly as the serial loop this replaces guaranteed.
+async function runWithConcurrency<T>(
+  items: readonly T[],
+  limit: number,
+  task: (item: T) => Promise<void>,
+): Promise<void> {
+  let cursor = 0;
+  const workers = Array.from(
+    { length: Math.max(1, Math.min(limit, items.length)) },
+    async () => {
+      for (;;) {
+        const index = cursor;
+        cursor += 1;
+        if (index >= items.length) return;
+        await task(items[index]!);
+      }
+    },
+  );
+  await Promise.all(workers);
+}
+
 // Drop a stale per-scene error without writing `error: undefined`, which
 // exactOptionalPropertyTypes rejects on an `error?: string` field.
 function withoutError(scene: VideoSceneEntry): VideoSceneEntry {
@@ -809,20 +991,41 @@ export function startStoryboardJob(client: SupabaseClient, id: string): void {
     );
     await updateVideoProject(client, id, { step: 'stills' });
     await ensureMotionDirection(client, id, row, scenes);
+    // Renders overlap; the WRITES must not. Every row update sends the whole
+    // `scenes` array and is last-writer-wins, so two frames finishing together
+    // would clobber each other's entry. This chain keeps the updates strictly
+    // ordered while leaving the model calls concurrent.
+    let writes: Promise<void> = Promise.resolve();
+    const commit = (mutate: () => void): Promise<void> => {
+      writes = writes.then(async () => {
+        mutate();
+        await updateVideoProject(client, id, { scenes });
+      });
+      return writes;
+    };
+
+    const pending: number[] = [];
     for (const [index, scene] of scenes.entries()) {
       if (framesArePresent(scene)) {
         // Frames survived whatever failed last time: adopt them rather than
         // re-buying them, so the run can move straight on to animate.
         if (scene.status !== 'still-ready' && scene.status !== 'done') {
-          scenes[index] = { ...withoutError(scene), status: 'still-ready' };
-          await updateVideoProject(client, id, { scenes });
+          await commit(() => {
+            scenes[index] = { ...withoutError(scene), status: 'still-ready' };
+          });
         }
         continue;
       }
-      scenes[index] = { ...scene, status: 'still-rendering' };
-      await updateVideoProject(client, id, { scenes });
+      pending.push(index);
+    }
+
+    const renderOne = async (index: number): Promise<void> => {
+      const scene = scenes[index]!;
+      await commit(() => {
+        scenes[index] = { ...scene, status: 'still-rendering' };
+      });
       try {
-        scenes[index] = await renderSceneFrames(
+        const rendered = await renderSceneFrames(
           client,
           row,
           index,
@@ -830,15 +1033,30 @@ export function startStoryboardJob(client: SupabaseClient, id: string): void {
           'pair',
           scenes,
         );
+        await commit(() => {
+          scenes[index] = rendered;
+        });
       } catch (error) {
-        scenes[index] = {
-          ...scene,
-          status: 'failed',
-          error: `चित्र तयार करता आले नाही: ${errorMessage(error)}`,
-        };
+        await commit(() => {
+          scenes[index] = {
+            ...scene,
+            status: 'failed',
+            error: `चित्र तयार करता आले नाही: ${errorMessage(error)}`,
+          };
+        });
       }
-      await updateVideoProject(client, id, { scenes });
+    };
+
+    // Scene 1 goes first and alone: loadWorldReference attaches its frame to
+    // every later scene, so starting the others beside it would render them
+    // against nothing and lose the cross-scene consistency the reference
+    // exists to provide. After it lands the rest are independent.
+    if (pending[0] === 0) {
+      await renderOne(0);
+      pending.shift();
     }
+    await runWithConcurrency(pending, frameConcurrency(), renderOne);
+    await writes;
 
     await updateVideoProject(client, id, {
       status: 'storyboard_ready',
@@ -1296,8 +1514,11 @@ export function startNarrationJob(client: SupabaseClient, id: string): void {
     const row = await requireProject(client, id);
     await updateVideoProject(client, id, { step: 'narrate', error: null });
 
-    const voice = ttsSpeaker();
+    // An uploaded narration reports its own "voice", so it reads as current and
+    // this job degrades to a free re-stitch instead of synthesizing over the
+    // officer's recording. The route refuses first; this is the backstop.
     const scenes = [...row.scenes];
+    const voice = effectiveNarrationVoice(scenes);
     if (!continuousNarrationIsCurrent(scenes, voice)) {
       const frozenTotal = scenes.reduce(
         (sum, scene) => sum + scene.durationSeconds,

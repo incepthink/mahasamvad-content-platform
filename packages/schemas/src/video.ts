@@ -205,7 +205,31 @@ export function allocateVideoSceneDurations(
 // at 2.0, so the surplus was not sped up — it was TRIMMED, cutting words off the
 // end of scenes. Re-measure with the calibration harness if the voice, the model
 // or the pace ever changes; do not adjust this by intuition.
-export const DEFAULT_NARRATION_CHARS_PER_SECOND = 16.5;
+//
+// THE RATE IS PER-VOICE, SO IT IS CONFIGURABLE (2026-07-31). 16.5 is bulbul's
+// number and stays the default; ElevenLabs reads the same Marathi at ~10.9
+// chars/s, and the difference is not cosmetic on the READY-SCRIPT lane. There
+// the scene count is ceil(estimateNarrationSeconds(script) / 15) and the words
+// may never be trimmed or sped up, so a rate that is 50% too fast plans too few
+// clips and the narrate gate REFUSES the project after the officer has already
+// approved it. Set NARRATION_CHARS_PER_SECOND beside NARRATION_TTS_PROVIDER.
+//
+// Read from env rather than keyed off the provider because @dgipr/schemas must
+// not import content-engine, and the browser (which only shows a create-form
+// hint) cannot see server env at all: NEXT_PUBLIC_ is checked first so a
+// deployment can keep the hint honest, and an unset browser value falls back to
+// the default, where being wrong costs an estimate and never a render — the
+// server measures the real WAV.
+function readNarrationCharsPerSecond(): number {
+  const raw =
+    process.env['NEXT_PUBLIC_NARRATION_CHARS_PER_SECOND'] ??
+    process.env['NARRATION_CHARS_PER_SECOND'];
+  if (raw === undefined || raw.trim() === '') return 16.5;
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 ? value : 16.5;
+}
+
+export const DEFAULT_NARRATION_CHARS_PER_SECOND = readNarrationCharsPerSecond();
 
 // The hard per-scene ceiling: the LONGEST clip's worth of speech at the
 // measured rate (15s × 16.5 ≈ 248 chars). Feeds BOTH the script generator's
@@ -225,7 +249,11 @@ export const VIDEO_NARRATION_MAX_CHARS = Math.round(
 // fits one scene or needs two) and the script writer (filling a scene) must work
 // to the identical number; when they drifted, the planner packed scenes the
 // writer could not narrate in time.
-export const NARRATION_WORDS_PER_SECOND = 2.3;
+// Scaled off the char rate so a configured voice moves BOTH numbers together —
+// the two describe one voice, and the drift they were moved here to prevent
+// would come straight back if only one of them followed the provider.
+export const NARRATION_WORDS_PER_SECOND =
+  Math.round(2.3 * (DEFAULT_NARRATION_CHARS_PER_SECOND / 16.5) * 100) / 100;
 
 // The whole video's narration budget — what the planner and the script writer
 // author toward, and what the narrate phase's total-fit pass enforces with
@@ -384,6 +412,62 @@ export const VideoProjectSummarySchema = z.object({
 });
 export type VideoProjectSummary = z.infer<typeof VideoProjectSummarySchema>;
 
+// ---------- officer-supplied narration audio (ready-script mode) ----------
+//
+// A department may hold a voice this pipeline cannot buy — an ElevenLabs plan
+// whose free tier has no API access, a studio recording, a presenter reading the
+// script themselves. Ready-script mode therefore accepts the finished voiceover
+// as a FILE, and everything downstream then treats it exactly as it treats a WAV
+// this system synthesized: it is measured, it decides the scene split and the
+// clip windows, and it is the single continuous track muxed onto the stitch.
+//
+// The containers are wider than /dlo's recording list on purpose. That list is
+// narrow because Sarvam's STT must auto-detect the codec; here the file is only
+// ever DECODED by ffmpeg, which reads all of these — and an officer exporting
+// from a TTS product gets whichever of them that product emits.
+export const NARRATION_AUDIO_MIME_BY_EXTENSION: Readonly<
+  Record<string, string>
+> = {
+  '.mp3': 'audio/mpeg',
+  '.m4a': 'audio/mp4',
+  '.aac': 'audio/aac',
+  '.wav': 'audio/wav',
+  '.ogg': 'audio/ogg',
+  '.opus': 'audio/ogg',
+  '.flac': 'audio/flac',
+  '.webm': 'audio/webm',
+};
+
+export const NARRATION_AUDIO_EXTENSIONS: readonly string[] = Object.keys(
+  NARRATION_AUDIO_MIME_BY_EXTENSION,
+);
+
+// The picker's `accept`: extensions AND media types, because browsers differ
+// over which they honour and offering both is what stops the picker greying out
+// a file the server would have taken.
+export const NARRATION_AUDIO_ACCEPT: string = [
+  ...NARRATION_AUDIO_EXTENSIONS,
+  ...new Set(Object.values(NARRATION_AUDIO_MIME_BY_EXTENSION)),
+].join(',');
+
+// Extension-driven, never the browser's reported type, which is empty or wrong
+// for several of these containers. Null ⇒ not a recording this route accepts.
+export function narrationAudioMimeForFileName(fileName: string): string | null {
+  const dot = fileName.lastIndexOf('.');
+  if (dot === -1) return null;
+  return (
+    NARRATION_AUDIO_MIME_BY_EXTENSION[fileName.slice(dot).toLowerCase()] ?? null
+  );
+}
+
+// The staleness key an uploaded track is stored under, where a synthesized one
+// stores its voice id. It is what tells every later phase "this narration is the
+// officer's own": the voice phase must not re-synthesize it, the re-voice route
+// must refuse to replace it, and the SAME check works after a restart because it
+// lives on the scenes jsonb — no column, no migration. It can never collide with
+// a real voice id (`shubh`, a 20-char ElevenLabs id).
+export const UPLOADED_NARRATION_VOICE = 'upload';
+
 // There is no generic video character ceiling. Ready narration is guarded by
 // its estimated spoken duration because that determines scene/render capacity.
 export const CreateVideoProjectRequestSchema = z
@@ -394,6 +478,11 @@ export const CreateVideoProjectRequestSchema = z
     durationBucket: VideoDurationBucketSchema,
     orientation: VideoOrientationSchema,
     tier: VideoTierSchema,
+    // Set by the create route when the request carried a narration file. It
+    // only suppresses the char-rate estimate below: with real audio in hand the
+    // estimate is not merely imprecise but the wrong measurement entirely, and
+    // the route rejects an over-long file against the DECODED duration.
+    narrationAudioUploaded: z.boolean().default(false),
   })
   .superRefine((value, context) => {
     if (value.inputMode === 'script' && !isMarathiVideoNarration(value.note)) {
@@ -403,8 +492,16 @@ export const CreateVideoProjectRequestSchema = z
         message: 'तयार निवेदन मराठीत असणे आवश्यक आहे.',
       });
     }
+    if (value.inputMode !== 'script' && value.narrationAudioUploaded) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['narrationAudioUploaded'],
+        message: 'निवेदनाचा ऑडिओ फक्त तयार संहितेसोबत देता येतो.',
+      });
+    }
     if (
       value.inputMode === 'script' &&
+      !value.narrationAudioUploaded &&
       estimateNarrationSeconds(normalizeVideoNarrationScript(value.note)) >
         VIDEO_SCRIPT_MAX_SECONDS
     ) {
@@ -416,6 +513,13 @@ export const CreateVideoProjectRequestSchema = z
     }
   });
 export type CreateVideoProjectRequest = z.infer<
+  typeof CreateVideoProjectRequestSchema
+>;
+// What a CLIENT sends. `narrationAudioUploaded` is server-derived — the route
+// sets it from whether the request actually carried a file, so a caller stating
+// it could only disagree with the bytes — and the defaulted fields are optional
+// on the way in.
+export type CreateVideoProjectInput = z.input<
   typeof CreateVideoProjectRequestSchema
 >;
 
@@ -438,6 +542,20 @@ export const UpdateVideoScriptRequestSchema = z.object({
   scenes: z
     .array(
       z.object({
+        // Which entry of the STORED scenes array this card came from, so the
+        // route can reconcile by identity instead of by array position. An
+        // insert shifts every later card's position, and position-matching then
+        // compares each one against its neighbour's briefs, finds them
+        // different, and resets a whole storyboard of PAID frames to pending.
+        // Omitted for a genuinely new scene; omitted entirely by an older
+        // client, which falls back to the positional behaviour unchanged.
+        sourceIndex: z.number().int().min(0).optional(),
+        // Never blank. An inserted scene carries narration moved out of a
+        // neighbour, which is what keeps the joined script byte-identical (so
+        // the measured WAV stays current) AND keeps every visual cut aligned
+        // with the voice. A blank-narration scene would add visual time that
+        // the single continuous narration track has no silence for, pushing
+        // every later scene out of step with the words it belongs to.
         narration: z.string().trim().min(1).max(VIDEO_NARRATION_MAX_CHARS),
         // Uncapped, like `openingVisualBrief` below: no provider imposes a
         // limit near the old 600, and Kling's 3072-char prompt cap is absorbed

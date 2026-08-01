@@ -38,6 +38,7 @@ export type DloReviewSnapshot = Readonly<{
   edits: Readonly<Record<string, string>>;
   excluded: ReadonlySet<string>;
   styleReference: string;
+  instructions: string;
   pointers: DloReviewState['pointers'];
   designations: DloReviewState['designations'];
   category: DloCategory;
@@ -90,6 +91,9 @@ export function useDloReviewAutosave(
       excluded: current.excluded,
       ...(current.styleReference.trim()
         ? { styleReference: current.styleReference }
+        : {}),
+      ...(current.instructions.trim()
+        ? { instructions: current.instructions }
         : {}),
       ...(current.pointers ? { pointers: current.pointers } : {}),
       ...(current.designations ? { designations: current.designations } : {}),

@@ -15,10 +15,11 @@
 // itself survives a reload — it is a row, and the list below finds it again.
 
 import { useState } from 'react';
-import { TRANSCRIPTION_MAX_FILES } from '@dgipr/schemas';
+import { TRANSCRIPTION_MAX_FILES, type YouTubeVideo } from '@dgipr/schemas';
 import { createTranscription } from '../lib/api';
 import { AudioFilePicker } from './AudioFilePicker';
 import { TranscriptionSubmit } from './TranscriptionSubmit';
+import { YouTubeLinkInput } from './YouTubeLinkInput';
 import { STR } from '../lib/strings';
 
 export function TranscriptionForm({
@@ -30,11 +31,12 @@ export function TranscriptionForm({
   busy: boolean;
 }) {
   const [files, setFiles] = useState<File[]>([]);
+  const [youtube, setYoutube] = useState<readonly YouTubeVideo[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const submit = async () => {
-    if (files.length === 0) {
+    if (files.length === 0 && youtube.length === 0) {
       setError(STR.transcribeNeedFile);
       return;
     }
@@ -43,10 +45,13 @@ export function TranscriptionForm({
     try {
       const form = new FormData();
       for (const file of files) form.append('files', file, file.name);
+      // Links, not bytes — nothing about the video travels in this request.
+      if (youtube.length > 0) form.append('youtube', JSON.stringify(youtube));
       const id = await createTranscription(form);
-      // The run owns the recordings now, so the picker is emptied — otherwise the next
-      // submit would silently transcribe (and archive) the same files again.
+      // The run owns these sources now, so both lists are emptied — otherwise the next
+      // submit would silently transcribe (and archive) the same ones again.
       setFiles([]);
+      setYoutube([]);
       onStarted(id);
     } catch (e) {
       setError(e instanceof Error ? e.message : STR.genericError);
@@ -67,6 +72,14 @@ export function TranscriptionForm({
         onError={setError}
         maxFiles={TRANSCRIPTION_MAX_FILES}
         disabled={submitting}
+      />
+
+      <YouTubeLinkInput
+        videos={youtube}
+        onChange={setYoutube}
+        onError={setError}
+        disabled={submitting}
+        maxLinks={TRANSCRIPTION_MAX_FILES}
       />
 
       <TranscriptionSubmit

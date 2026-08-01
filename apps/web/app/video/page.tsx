@@ -4,10 +4,12 @@
 // mode preserves supplied Marathi narration and estimates its natural duration
 // for free. Both keep expensive rendering behind the two review gates.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
+  NARRATION_AUDIO_ACCEPT,
+  UPLOAD_FILE_MAX_BYTES,
   VIDEO_CLIP_MAX_SECONDS,
   VIDEO_SCRIPT_MAX_SECONDS,
   estimateNarrationSeconds,
@@ -80,6 +82,13 @@ export default function VideoPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [projects, setProjects] = useState<VideoProjectSummary[]>([]);
+  // The officer's own voiceover (ready-script mode). `audioSeconds` is what the
+  // BROWSER measured — null when the container has no decoder here, which is not
+  // a refusal: the server decodes with ffmpeg and is the authority. Measuring at
+  // all is what lets an over-long file be refused before it is uploaded.
+  const [narrationAudio, setNarrationAudio] = useState<File | null>(null);
+  const [audioSeconds, setAudioSeconds] = useState<number | null>(null);
+  const audioInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -98,19 +107,63 @@ export default function VideoPage() {
     [projects],
   );
   const listedProjects = useMemo(() => projects.filter(isListed), [projects]);
-  const scriptEstimateSeconds = estimateNarrationSeconds(
-    normalizeVideoNarrationScript(note),
-  );
+  // With a recording in hand its measured length IS the video's length, so the
+  // char-rate estimate is not merely less precise — it is the wrong number, and
+  // showing it beside the file would contradict what the server will do.
+  const usingUploadedAudio = inputMode === 'script' && narrationAudio !== null;
+  const scriptEstimateSeconds =
+    usingUploadedAudio && audioSeconds !== null
+      ? audioSeconds
+      : estimateNarrationSeconds(normalizeVideoNarrationScript(note));
   const scriptSceneCount = Math.max(
     1,
     Math.ceil(scriptEstimateSeconds / VIDEO_CLIP_MAX_SECONDS),
   );
   const scriptTooLong =
-    inputMode === 'script' && scriptEstimateSeconds > VIDEO_SCRIPT_MAX_SECONDS;
+    inputMode === 'script' &&
+    // An unmeasurable upload is never blocked here — the server decodes it.
+    !(usingUploadedAudio && audioSeconds === null) &&
+    scriptEstimateSeconds > VIDEO_SCRIPT_MAX_SECONDS;
   const scriptNotMarathi =
     inputMode === 'script' &&
     note.trim() !== '' &&
     !isMarathiVideoNarration(note);
+
+  const clearAudio = () => {
+    setNarrationAudio(null);
+    setAudioSeconds(null);
+    if (audioInputRef.current) audioInputRef.current.value = '';
+  };
+
+  // Read the file's duration locally before anything is uploaded. A container
+  // this browser cannot decode leaves `audioSeconds` null and the file is still
+  // sent — ffmpeg on the server reads more formats than any one browser does.
+  const pickAudio = (file: File | null) => {
+    setError(null);
+    if (!file) {
+      clearAudio();
+      return;
+    }
+    if (file.size > UPLOAD_FILE_MAX_BYTES) {
+      setError(STR.videoNarrationAudioTooBig);
+      clearAudio();
+      return;
+    }
+    setNarrationAudio(file);
+    setAudioSeconds(null);
+    const url = URL.createObjectURL(file);
+    const probe = new Audio();
+    probe.preload = 'metadata';
+    probe.onloadedmetadata = () => {
+      const seconds = probe.duration;
+      URL.revokeObjectURL(url);
+      if (Number.isFinite(seconds) && seconds > 0) setAudioSeconds(seconds);
+    };
+    probe.onerror = () => {
+      URL.revokeObjectURL(url);
+    };
+    probe.src = url;
+  };
 
   const submit = async () => {
     if (note.trim().length < NOTE_MIN) {
@@ -122,7 +175,11 @@ export default function VideoPage() {
       return;
     }
     if (scriptTooLong) {
-      setError(STR.videoScriptEstimateOver);
+      setError(
+        usingUploadedAudio
+          ? STR.videoNarrationAudioTooLong
+          : STR.videoScriptEstimateOver,
+      );
       return;
     }
     if (scriptNotMarathi) {
@@ -132,14 +189,19 @@ export default function VideoPage() {
     setSubmitting(true);
     setError(null);
     try {
-      const id = await createVideoProject({
-        note: note.trim(),
-        ...(heading.trim() ? { heading: heading.trim() } : {}),
-        inputMode,
-        durationBucket: 'short',
-        orientation,
-        tier: 'fast',
-      });
+      const id = await createVideoProject(
+        {
+          note: note.trim(),
+          ...(heading.trim() ? { heading: heading.trim() } : {}),
+          inputMode,
+          durationBucket: 'short',
+          orientation,
+          tier: 'fast',
+        },
+        // Only ever with a ready script — a note run has no final words for a
+        // recording to be of.
+        inputMode === 'script' ? narrationAudio : null,
+      );
       router.push(`/video/${id}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : STR.genericError);
@@ -176,6 +238,9 @@ export default function VideoPage() {
             onClick={() => {
               setInputMode('note');
               setError(null);
+              // A note run rewrites the narration, so a recording of the old
+              // words would be silently wrong; drop it rather than carry it.
+              clearAudio();
             }}
           >
             <span className="name">{STR.videoInputModeNote}</span>
@@ -217,19 +282,66 @@ export default function VideoPage() {
         />
         {inputMode === 'script' && note.trim() !== '' ? (
           <>
-            <p
-              className={scriptTooLong ? 'form-error' : 'hint'}
-              style={{ marginTop: 8 }}
-            >
-              {STR.videoScriptEstimateLabel}:{' '}
-              {videoReadyScriptEstimate(
-                scriptEstimateSeconds,
-                scriptSceneCount,
-              )}
-              {scriptTooLong ? ` · ${STR.videoScriptEstimateOver}` : ''}
-            </p>
+            {usingUploadedAudio && audioSeconds === null ? null : (
+              <p
+                className={scriptTooLong ? 'form-error' : 'hint'}
+                style={{ marginTop: 8 }}
+              >
+                {usingUploadedAudio
+                  ? STR.videoNarrationAudioMeasured
+                  : STR.videoScriptEstimateLabel}
+                :{' '}
+                {videoReadyScriptEstimate(
+                  scriptEstimateSeconds,
+                  scriptSceneCount,
+                )}
+                {scriptTooLong
+                  ? ` · ${
+                      usingUploadedAudio
+                        ? STR.videoNarrationAudioTooLong
+                        : STR.videoScriptEstimateOver
+                    }`
+                  : ''}
+              </p>
+            )}
             {scriptNotMarathi ? (
               <p className="form-error">{STR.videoScriptMarathiOnly}</p>
+            ) : null}
+          </>
+        ) : null}
+        {inputMode === 'script' ? (
+          <>
+            <p className="field-label" style={{ marginTop: 16 }}>
+              {STR.videoNarrationAudioLabel}
+            </p>
+            <p className="hint" style={{ marginTop: 4 }}>
+              {STR.videoNarrationAudioHint}
+            </p>
+            <input
+              ref={audioInputRef}
+              type="file"
+              accept={NARRATION_AUDIO_ACCEPT}
+              disabled={submitting}
+              onChange={(event) => pickAudio(event.target.files?.[0] ?? null)}
+              style={{ marginTop: 8 }}
+            />
+            {narrationAudio ? (
+              <div className="btn-row" style={{ marginTop: 8 }}>
+                <span className="hint">{narrationAudio.name}</span>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={submitting}
+                  onClick={clearAudio}
+                >
+                  {STR.videoNarrationAudioRemove}
+                </button>
+              </div>
+            ) : null}
+            {narrationAudio && audioSeconds === null ? (
+              <p className="hint" style={{ marginTop: 6 }}>
+                {STR.videoNarrationAudioUnreadable}
+              </p>
             ) : null}
           </>
         ) : null}

@@ -583,6 +583,59 @@ export function wavDurationSeconds(wav: Buffer): number {
   return dataBytes / byteRate;
 }
 
+// Decode an officer-supplied narration recording (MP3 from a TTS product, M4A
+// from a phone, a studio WAV) into the same 16-bit PCM WAV a synthesized track
+// arrives as.
+//
+// The conversion is not a convenience: WAV is the narration contract of this
+// whole pipeline, because the measured duration is what the scene split and the
+// clip windows are derived from, and `wavDurationSeconds` reads RIFF chunks. An
+// MP3's duration is not in its header at all. Normalizing here — once, at
+// upload — means no later phase has to know where its audio came from.
+//
+// Mono 44.1 kHz matches what Sarvam returns, so `muxNarration` resamples
+// nothing. `-vn` drops cover art, which is otherwise a video stream in an MP3.
+export async function decodeAudioToWav(
+  audio: Buffer,
+  extension: string,
+): Promise<Buffer> {
+  const suffix = extension.startsWith('.') ? extension : `.${extension}`;
+  const dir = await mkdtemp(join(tmpdir(), 'dgipr-audio-'));
+  try {
+    const inPath = join(dir, `source${suffix}`);
+    // Distinct basenames, not just extensions: an officer may upload a WAV, and
+    // ffmpeg refuses to edit a file in place ("Output ... same as Input").
+    const outPath = join(dir, 'narration.wav');
+    await writeFile(inPath, audio);
+    await runFfmpeg(
+      [
+        '-y',
+        '-i',
+        inPath,
+        '-vn',
+        '-ac',
+        '1',
+        '-ar',
+        '44100',
+        '-c:a',
+        'pcm_s16le',
+        outPath,
+      ],
+      'narration audio decode',
+    );
+    const wav = await readFile(outPath);
+    // A container ffmpeg opened but found no audio in decodes to an empty WAV
+    // rather than failing, and an empty narration would silently become a video
+    // with no voice — after the officer had approved a script for it.
+    if (wavDurationSeconds(wav) <= 0) {
+      throw new Error('narration audio decode produced no audio.');
+    }
+    return wav;
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
 // One scene's narration audio + the clip window it must occupy.
 export type NarrationSegment = Readonly<{
   wav: Buffer;

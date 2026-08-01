@@ -21,6 +21,7 @@ import {
   Palette,
   RotateCw,
   Share2,
+  SquareDashed,
   SquarePen,
 } from 'lucide-react';
 import {
@@ -35,7 +36,11 @@ import {
 import { STR } from '../lib/strings';
 import { usePosterMarkers } from '../lib/usePosterMarkers';
 import { CrossFormatLinks } from './CrossFormatLinks';
-import { PosterAnnotator } from './PosterAnnotator';
+import {
+  CLEAR_LETTERS,
+  PosterAnnotator,
+  type AnnotatorMode,
+} from './PosterAnnotator';
 import { PosterVersionStrip } from './PosterVersionStrip';
 
 type ChangeTab = 'caption' | 'poster';
@@ -68,12 +73,21 @@ export function SocialPostView({
     addMarker,
     removeMarker,
     setNote,
+    clearRegions,
+    submittedClearRegions,
+    addClearRegion,
+    removeClearRegion,
+    setClearNote,
     markSubmitted,
     dismissSubmitted,
   } = usePosterMarkers(detail);
-  // Armed by the pencil icon under the poster (which shows as pressed while on),
-  // not by opening a fold — marking is now its own explicit mode.
-  const [annotOpen, setAnnotOpen] = useState(false);
+  // Armed by the pencil / dashed-square icons under the poster (which show as
+  // pressed while on), not by opening a fold — annotating is its own explicit
+  // mode. `null` = nothing armed; the two are mutually exclusive because one
+  // pointer gesture has to mean exactly one thing, but BOTH sets are sent in one
+  // round, so switching between them never discards anything.
+  const [annotMode, setAnnotMode] = useState<AnnotatorMode | null>(null);
+  const annotOpen = annotMode !== null;
   // The caption is always live. `baseline` is the server's text: when it changes —
   // an AI revision landed, or the page reloaded — both reset, but ONLY while the box
   // is clean, so a refresh can never wipe something half-typed.
@@ -223,7 +237,7 @@ export function SocialPostView({
       return;
     }
     const text = posterChange.trim();
-    if (markers.length === 0 && text.length < 3) {
+    if (markers.length === 0 && clearRegions.length === 0 && text.length < 3) {
       setChangeError(STR.feedbackTooShort);
       return;
     }
@@ -231,7 +245,9 @@ export function SocialPostView({
       setChangeError(STR.markerNoteTooShort);
       return;
     }
-    // The schema wants absent keys, not '' / [] (min lengths reject those).
+    // The schema wants absent keys, not '' / [] (min lengths reject those). A
+    // clear region's note is genuinely optional — an empty one means "you decide
+    // where that content goes" — so it is omitted rather than sent blank.
     const payload: PosterImageFeedbackRequest = {
       ...(text.length >= 3 ? { feedback: text } : {}),
       ...(markers.length > 0
@@ -242,6 +258,14 @@ export function SocialPostView({
             })),
           }
         : {}),
+      ...(clearRegions.length > 0
+        ? {
+            clearRegions: clearRegions.map((c) => ({
+              region: c.region,
+              ...(c.note.trim().length > 0 ? { note: c.note.trim() } : {}),
+            })),
+          }
+        : {}),
     };
     setSendingChange(true);
     setPending(true);
@@ -249,7 +273,7 @@ export function SocialPostView({
       await sendPosterImageFeedback(detail.id, payload);
       markSubmitted();
       setPosterChange('');
-      setAnnotOpen(false);
+      setAnnotMode(null);
       await onChanged();
     } catch (e) {
       setChangeError(e instanceof Error ? e.message : STR.genericError);
@@ -280,6 +304,21 @@ export function SocialPostView({
       {/* A कॅप्शन run has no poster, so "तयार झालेले पोस्टर" would head a card that
           contains only a caption. */}
       <h2>{detail.posterUrl ? STR.posterTitle : STR.captionLabel}</h2>
+      {/* The information carried more items than any master template lays out. Every item IS on
+          the poster (the image prompt is told to extend the reference's row pattern rather than
+          drop content) — this says the design was stretched, so the officer can check it reads
+          well or split the note. Same transient in-process registry as the article warnings. */}
+      {detail.posterUrl && detail.posterCapacityWarning ? (
+        <div className="info-callout warn" style={{ marginBottom: 12 }}>
+          <p className="field-label">{STR.posterCapacityWarnTitle}</p>
+          <p className="hint">
+            {STR.posterCapacityWarnBody(
+              detail.posterCapacityWarning.needed,
+              detail.posterCapacityWarning.available,
+            )}
+          </p>
+        </div>
+      ) : null}
       <div className="poster-layout">
         {detail.posterUrl ? (
           <div>
@@ -298,6 +337,11 @@ export function SocialPostView({
                 disabled={showSpinner}
                 submittedMarkers={submittedMarkers}
                 onDismissSubmitted={dismissSubmitted}
+                mode={annotMode ?? 'mark'}
+                clearRegions={clearRegions}
+                onAddClear={addClearRegion}
+                onRemoveClear={removeClearRegion}
+                submittedClearRegions={submittedClearRegions}
               />
               {showSpinner ? (
                 <div
@@ -357,20 +401,53 @@ export function SocialPostView({
                 type="button"
                 className="icon-btn"
                 // Pressed state = marking is armed, so the poster reads as editable.
-                aria-pressed={annotOpen}
-                title={annotOpen ? STR.iconEditPosterOn : STR.iconEditPoster}
+                aria-pressed={annotMode === 'mark'}
+                title={
+                  annotMode === 'mark'
+                    ? STR.iconEditPosterOn
+                    : STR.iconEditPoster
+                }
                 aria-label={
-                  annotOpen ? STR.iconEditPosterOn : STR.iconEditPoster
+                  annotMode === 'mark'
+                    ? STR.iconEditPosterOn
+                    : STR.iconEditPoster
                 }
                 disabled={showSpinner}
                 onClick={() => {
-                  const next = !annotOpen;
-                  setAnnotOpen(next);
+                  const next = annotMode === 'mark' ? null : 'mark';
+                  setAnnotMode(next);
                   // Marking only feeds the poster request, so send the fold there too.
                   if (next) setChangeTab('poster');
                 }}
               >
                 <SquarePen size={18} strokeWidth={1.9} aria-hidden="true" />
+              </button>
+              {/* The blue gesture: free a rectangle of the poster so the officer can
+                  place their own logo or photograph there by hand. Its own button
+                  rather than a mode inside the pencil, because it is a different
+                  request — nothing is being edited, space is being made. */}
+              <button
+                type="button"
+                className="icon-btn icon-btn-clear"
+                aria-pressed={annotMode === 'clear'}
+                title={
+                  annotMode === 'clear'
+                    ? STR.iconClearSpaceOn
+                    : STR.iconClearSpace
+                }
+                aria-label={
+                  annotMode === 'clear'
+                    ? STR.iconClearSpaceOn
+                    : STR.iconClearSpace
+                }
+                disabled={showSpinner}
+                onClick={() => {
+                  const next = annotMode === 'clear' ? null : 'clear';
+                  setAnnotMode(next);
+                  if (next) setChangeTab('poster');
+                }}
+              >
+                <SquareDashed size={18} strokeWidth={1.9} aria-hidden="true" />
               </button>
               {/* Last in the row, and the only entry that navigates rather than acting
                   on this run — the trailing arrow is what says so. */}
@@ -379,7 +456,7 @@ export function SocialPostView({
                 category={detail.category}
               />
             </div>
-            {markers.length > 0 ? (
+            {markers.length > 0 || clearRegions.length > 0 ? (
               <div className="btn-row marker-submit-action">
                 <button
                   type="button"
@@ -580,12 +657,75 @@ export function SocialPostView({
                       </button>
                     </div>
                   ))}
-                  {changeError ? (
-                    <p className="form-error">{changeError}</p>
-                  ) : null}
                 </>
               )}
             </div>
+          ) : null}
+
+          {/* The blue "free this space" boxes. Their note is OPTIONAL — an empty
+              one means "you decide where that content goes" — so there is no
+              too-short validation here and none of these rows can block a send. */}
+          {detail.posterUrl &&
+          (clearRegions.length > 0 || submittedClearRegions.length > 0) ? (
+            <div className="marker-notes">
+              <p className="hint">
+                {clearRegions.length > 0
+                  ? STR.clearRegionHint
+                  : STR.clearRegionSubmittedHint}
+              </p>
+              {clearRegions.length === 0
+                ? submittedClearRegions.map((c, i) => (
+                    <div
+                      className="marker-note-row marker-note-submitted"
+                      key={`sc-${c.id}`}
+                    >
+                      <span
+                        className="marker-note-badge clear-badge"
+                        aria-hidden="true"
+                      >
+                        {CLEAR_LETTERS[i] ?? i + 1}
+                      </span>
+                      <span className="marker-note-text">
+                        {c.note || STR.clearRegionLabel}
+                      </span>
+                    </div>
+                  ))
+                : clearRegions.map((c, i) => (
+                    <div className="marker-note-row" key={c.id}>
+                      <span
+                        className="marker-note-badge clear-badge"
+                        aria-hidden="true"
+                      >
+                        {CLEAR_LETTERS[i] ?? i + 1}
+                      </span>
+                      <input
+                        type="text"
+                        value={c.note}
+                        placeholder={STR.clearRegionNotePlaceholder}
+                        aria-label={`${STR.clearRegionLabel} ${CLEAR_LETTERS[i] ?? i + 1}`}
+                        maxLength={500}
+                        disabled={showSpinner || sendingChange}
+                        onChange={(e) => setClearNote(c.id, e.target.value)}
+                      />
+                      <button
+                        type="button"
+                        className="marker-note-remove"
+                        aria-label={STR.clearRegionRemove}
+                        disabled={showSpinner || sendingChange}
+                        onClick={() => removeClearRegion(c.id)}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+            </div>
+          ) : null}
+
+          {/* One place for the error whenever anything is annotated — the submit
+              button for that case sits under the poster, and the fold below shows
+              it instead when there is nothing annotated. */}
+          {changeError && (markers.length > 0 || clearRegions.length > 0) ? (
+            <p className="form-error">{changeError}</p>
           ) : null}
 
           {/* One fold for both change requests. The pills only swap the view — each
@@ -688,7 +828,9 @@ export function SocialPostView({
                     {sendingChange ? STR.sendingFeedback : STR.sendFeedback}
                   </button>
                 </div>
-                {changeError && markers.length === 0 ? (
+                {changeError &&
+                markers.length === 0 &&
+                clearRegions.length === 0 ? (
                   <p className="form-error">{changeError}</p>
                 ) : null}
               </div>
@@ -696,7 +838,14 @@ export function SocialPostView({
           ) : null}
         </div>
       </div>
-      <PosterVersionStrip detail={detail} />
+      {/* Switching version reuses `pending` — it means the same thing here as it does for a
+          poster re-render: the poster on screen is about to be replaced. */}
+      <PosterVersionStrip
+        detail={detail}
+        onChanged={onChanged}
+        onRestoringChange={setPending}
+        busy={showSpinner || sendingChange}
+      />
     </section>
   );
 }

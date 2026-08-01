@@ -28,6 +28,7 @@ export function VideoResultView({
   onReanimateScene,
   onNarrate,
   onRestitch,
+  onBackToStoryboard,
 }: {
   detail: VideoProjectDetail;
   // A job is in flight (re-still / re-animate / narrate) — actions disabled, note shown.
@@ -44,6 +45,8 @@ export function VideoResultView({
   onNarrate: () => void;
   // Rejoin already-generated clips/audio without another paid render.
   onRestitch: () => void;
+  // Returns the finished project to gate 2 so the storyboard can be revisited.
+  onBackToStoryboard: () => void;
 }) {
   const [fixOpen, setFixOpen] = useState(false);
   // Two-step confirm per scene: first click arms, second fires (outward spend).
@@ -115,7 +118,21 @@ export function VideoResultView({
               {STR.videoRestitch}
             </button>
           ) : null}
+          {/* Back to gate 2, where the frames, the narration split and scene
+              insertion live. A pure state flip — this video and every clip stay
+              in Storage, so a visit that changes nothing costs nothing. */}
+          <button
+            type="button"
+            className="btn"
+            disabled={busy}
+            onClick={onBackToStoryboard}
+          >
+            {STR.videoBackToStoryboard}
+          </button>
         </div>
+        <p className="hint" style={{ marginTop: 10 }}>
+          {STR.videoBackToStoryboardDoneHint}
+        </p>
         <p className="hint" style={{ marginTop: 10 }}>
           {detail.voiced ? STR.videoSrtHintVoiced : STR.videoSrtHint}
         </p>

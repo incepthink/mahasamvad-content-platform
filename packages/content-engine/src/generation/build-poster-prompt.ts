@@ -11,14 +11,26 @@ import type { ArtDirection } from './art-direction.js';
 import type { PosterPalette } from './poster-palettes.js';
 import type { PosterLayout } from './poster-layouts.js';
 import { stripColourMentions } from './strip-colour-words.js';
+import { clearSpaceRuleLines } from './clear-space-rule.js';
 
 export type DesignMode = 'fresh' | 'adaptive' | 'onbrand';
 
 export type BuildPosterPromptInput = Readonly<{
   copy: PosterCopy;
-  // The original source note. In Twitter DGIPR 'onbrand' mode this is passed to the image
-  // model with the reference image; no generated poster-copy or design rules are added.
+  // The officer's information, VERBATIM. In social DGIPR 'onbrand' mode this is passed to the
+  // image model with the reference image; no generated poster-copy or design rules are added.
+  //
+  // On that path this string is not a "note about" the poster — it IS the poster's content, and
+  // every item of it must appear. See the onbrand branch below.
   information?: string | undefined;
+  // How many distinct items `information` contains, counted by the reference selector
+  // (select-by-information.ts). Stated to the image model so "show all of it" is a number it
+  // can check its own output against rather than a sentiment.
+  itemCount?: number | undefined;
+  // Set only when NO reference in the library can show that many items. The model is then told
+  // to extend the reference's item pattern — explicitly, because its default response to too
+  // much content is to drop some, which is the failure this whole path exists to prevent.
+  slotShortfall?: { needed: number; available: number } | undefined;
   copyStyle: string;
   designMode: DesignMode;
   brand: TemplateBrand;
@@ -231,14 +243,44 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
   }
 
   if (designMode === 'onbrand' && input.information !== undefined) {
-    console.log('HIIIIIIIIIIIIIIIIIIIIIIIIIII');
-
     const information = input.information.trim();
+    const itemCount = input.itemCount;
+    const shortfall = input.slotShortfall;
+
+    // COMPLETENESS. The officer's text is the poster's content, not source material to edit
+    // down — so the two clauses that used to sit at the end of this prompt ("never paste the
+    // entire input article", "select only the most important information") are gone: they were
+    // an instruction to drop the officer's own points, and a seven-point note was coming back
+    // as a four-point poster. The reference is now chosen for its capacity to hold every item
+    // (select-by-information.ts), so "show all of it" is a request the layout can honour.
+    const completeness = [
+      'SHOW ALL OF THE INFORMATION. Every distinct point, instruction, measure, figure and fact in the supplied information must appear on the poster. Do not omit any of it, do not summarise it, and do not merge two points into one because the layout feels tight. If space is short, reduce type size, tighten spacing, or use more of the canvas — never drop content.',
+    ];
+    if (typeof itemCount === 'number' && itemCount > 0) {
+      completeness.push(
+        `The supplied information contains ${itemCount} distinct item(s). The finished poster must show all ${itemCount}. Count them in your output before finishing.`,
+      );
+    }
+    if (shortfall) {
+      completeness.push(
+        `IMPORTANT: the reference image lays out about ${shortfall.available} item(s), but there are ${shortfall.needed} to show. EXTEND the reference's item pattern — repeat its rows/cards to the number needed, keeping their styling, alignment and spacing consistent, and shrink them proportionally so all ${shortfall.needed} fit within the usable canvas. Adding rows in the reference's own style is correct here; dropping items is not.`,
+      );
+    }
+
     return [
       'Using the given reference image, generate an image for this information:',
       '',
       information,
       '',
+      ...completeness,
+      // TEXT FIDELITY. The officer's requirement is that not one character or matra is
+      // misplaced, and Marathi is unforgiving here: a misplaced matra or a broken conjunct
+      // changes or destroys the word. This is the strongest instruction the prompt can give —
+      // note that it is an instruction, not a guarantee. The repo's poster doctrine (paint no
+      // text; typeset Devanagari with Chromium) is what would make it a guarantee, and this
+      // template-editing path deliberately trades that away for design fidelity.
+      'REPRODUCE THE MARATHI TEXT EXACTLY. Copy every word character for character from the supplied information: every Devanagari letter, every matra and vowel sign, every conjunct (जोडाक्षर), every anusvara and every numeral, exactly as written and in the same order. Do not re-spell, re-word, translate, transliterate, correct, abbreviate, or "improve" any word. Do not drop or reposition a matra. Do not break a conjunct into separate letters. Marathi words rendered with a misplaced or missing matra are wrong even if they look plausible — re-read each word against the supplied text before finishing.',
+      "MAKE THE DESIGN SUIT THE MESSAGE. Judge from the supplied information what kind of poster this is — a public warning, a health advisory, a scheme launch, an achievement, an invitation, a deadline — and make the finished poster read unmistakably as that kind of poster through its colour choice, imagery and emphasis. Take this from the INFORMATION, never from whatever the reference image happens to be about: the reference's own topic is unrelated placeholder content.",
       "Use the provided reference image as the AUTHORITATIVE VISUAL STRUCTURE for the poster. Preserve its overall composition, section placement, proportions, content distribution, imagery zones, visual balance, and density while replacing its information. STRUCTURE means only geometry and visual hierarchy—not the meaning, factual content, or element type of any reference slot. Do not redesign the structure, compress everything onto one side, or leave large blank or unused areas. Fill the usable canvas as efficiently as the reference image does.",
       "The reference image controls STRUCTURE ONLY, not colour. Choose the poster's colour palette freely and creatively; ensure strong contrast and easy readability for every Marathi word and Devanagari numeral.",
       "REFERENCE-CONTENT FIREWALL: treat every word, numeral, date, year, URL, domain, app name, contact detail, identifier, logo, emblem, QR code, barcode, and factual claim visible in the reference image as unrelated placeholder content. Copy NONE of it. Every textual, numeric, coded, or factual element in the output must be directly supported by the supplied information. Never invent or infer a missing date, link, QR code, identifier, or fact merely to fill a reference slot. If the supplied information has no matching content for a reference element, KEEP the successful reference layout and its surrounding spacing, but make that slot visually neutral using the poster's background/design treatment, or fill it only with other source-supported poster content or relevant non-informational imagery. Do not reflow or redesign the overall composition just because a reference slot is unsupported.",
@@ -247,7 +289,6 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
       'Do not add a footer.',
       "MANDATORY EMPTY COVER ZONES: only the top-right 180 × 170 pixels and the full-width bottom 120 pixels of the 1280 × 1600 output are reserved for branding added later by software. The software-added footer has TWO parts: a navy-blue ministry title pill that rises above a white social-media strip. Together they cover the full canvas width at the bottom; do NOT treat only the white strip as the footer. All text, cards, panels, icons, photographs, subjects, and other meaningful content must end above y=1480 and must not sit behind either footer part. These are the ONLY areas that may be intentionally empty: use all remaining space right up to their boundaries, following the reference structure. Leave both zones COMPLETELY EMPTY of content and continue the poster's immediately surrounding background through them seamlessly, with the same colour and visual treatment as the adjacent background. Do NOT create a separate colour, white space, patch, box, panel, band, reserved-space marker, or visible boundary in either zone. ABSOLUTELY NO text, numbers, logos, footer, photographs, faces, people, objects, icons, borders, shapes, or decoration may enter, sit behind, or cross either zone.",
       'Use only Marathi text and Devanagari numerals in the output. Use Nirmala UI for all text.',
-      'Never paste the entire input article into the image; select only the most important information for the poster.',
     ].join('\n');
   }
 
@@ -366,6 +407,9 @@ export type BuildFeedbackPromptInput = Readonly<{
   brand: TemplateBrand;
   // 0-3 numbered red markers drawn on the current poster (annotated pixel feedback).
   markerCount?: number | undefined;
+  // 0-2 lettered BLUE rectangles: space to be freed for the officer's own logo or
+  // photograph. Independent of markerCount — one round may carry both.
+  clearCount?: number | undefined;
 }>;
 
 // The prompt that edits an EXISTING poster to apply a requested visual change. Mirrors the
@@ -373,17 +417,29 @@ export type BuildFeedbackPromptInput = Readonly<{
 // byte-for-byte).
 export function buildFeedbackPrompt(input: BuildFeedbackPromptInput): string {
   const imageFeedback = input.imageFeedback.trim();
-  if (imageFeedback.length === 0)
-    throw new Error('No image feedback provided.');
   const markerCount = Math.max(
     0,
     Math.min(3, Math.trunc(Number(input.markerCount) || 0)),
   );
+  const clearCount = Math.max(
+    0,
+    Math.min(2, Math.trunc(Number(input.clearCount) || 0)),
+  );
+  // A clear-space round is a complete request on its own — the blue rectangles say
+  // what to do and the note is optional — so text is required only without them.
+  if (imageFeedback.length === 0 && clearCount === 0)
+    throw new Error('No image feedback provided.');
+  const clearRule = clearSpaceRuleLines(clearCount);
 
   const reservedZones =
     input.brand === 'cmo'
       ? 'RESERVED ZONES: the TOP HEADER BAND (the full-width blue leader lockup and the महाराष्ट्र शासन emblem) occupies the top ~19% of the poster, the full-width BOTTOM ~8% footer strip, and the UPPER-RIGHT PHOTO CIRCLE — all three are stamped onto the poster by software (the circle holds a photograph placed by software). Do NOT alter, move, redraw or remove them; keep the upper-right circle a quiet plain background with no text, subject, ring or outline; and do NOT move any text or important content into those areas.'
       : 'RESERVED ZONES: the white rounded-square महाराष्ट्र शासन emblem-and-wordmark badge in the top-right (approx 280x270 px) and the footer strip along the bottom (full width, approx 130 px tall) are official branding stamped onto the poster by software — do NOT alter, move, redraw or remove them, and do NOT move any text or important content into those areas.';
+
+  // With clear rectangles present, "keep the exact layout unchanged" would contradict the
+  // relocation the officer asked for — a contradictory pair degrades compliance with both.
+  const exceptClause =
+    clearCount > 0 ? ' or the SPACE TO FREE block below' : '';
 
   if (markerCount > 0) {
     return [
@@ -391,8 +447,9 @@ export function buildFeedbackPrompt(input: BuildFeedbackPromptInput): string {
       `The input image carries ${markerCount} numbered red annotation marker(s): thin red outline rectangles, each with a small red circular badge showing its number. They were drawn onto the poster by editing software and are NOT part of the poster design.`,
       'Each marker is a pointing gesture showing where one requested change applies — not a hard boundary. For each marker, identify the design element at or around that spot and apply the correspondingly numbered change from the request below to that WHOLE element, even where the element extends beyond the rectangle.',
       `REQUESTED CHANGES: «${imageFeedback}».`,
-      'Make ONLY these changes. Keep the exact layout, existing Marathi text and figures, colours, typography, and imagery unchanged except where a requested change explicitly requires it.',
+      `Make ONLY these changes. Keep the exact layout, existing Marathi text and figures, colours, typography, and imagery unchanged except where a requested change${exceptClause} explicitly requires it.`,
       reservedZones,
+      ...clearRule,
       'ERASE every red marker rectangle and numbered badge completely from the output, restoring whatever they overlapped — no red outlines, red circles, or annotation numbers may remain anywhere on the poster.',
       'Add no new text, letters, numbers, captions, logos, borders, or decorative elements beyond the requested changes. Preserve all other existing Devanagari text exactly. Output ONE complete 4:5 portrait poster filling the canvas.',
     ].join('\n');
@@ -400,9 +457,12 @@ export function buildFeedbackPrompt(input: BuildFeedbackPromptInput): string {
 
   return [
     'You are editing an existing finished DGIPR Maharashtra government social-media poster provided as the input image: a single 4:5 portrait poster.',
-    `Apply ONLY this requested change: «${imageFeedback}».`,
-    'Keep the exact layout, existing Marathi text and figures, colours, typography, and imagery unchanged except where the requested change explicitly requires it.',
+    ...(imageFeedback.length > 0
+      ? [`Apply ONLY this requested change: «${imageFeedback}».`]
+      : []),
+    `Keep the exact layout, existing Marathi text and figures, colours, typography, and imagery unchanged except where the requested change${exceptClause} explicitly requires it.`,
     reservedZones,
+    ...clearRule,
     'Add no new text, letters, numbers, captions, logos, borders, or decorative elements. Preserve all existing Devanagari text exactly. Output ONE complete 4:5 portrait poster filling the canvas.',
   ].join('\n');
 }
@@ -503,6 +563,62 @@ if (
         }
       }
     }
+
+    // 5. The clear-space (blue box) feedback path. The properties that matter are that the
+    //    block only appears when asked for, that it survives beside red markers, that it can
+    //    stand alone with no typed text at all, and that it never proposes emptying the area
+    //    into a panel or a different colour — the failure mode this feature exists to avoid.
+    const plainFeedback = buildFeedbackPrompt({
+      imageFeedback: 'शीर्षक मोठे करा',
+      brand: 'dgipr',
+    });
+    if (/blue/i.test(plainFeedback))
+      failures.push('plain feedback prompt mentions blue clear boxes');
+
+    const cleared = buildFeedbackPrompt({
+      imageFeedback: '',
+      brand: 'dgipr',
+      clearCount: 2,
+    });
+    for (const needle of [
+      'SPACE TO FREE',
+      '2 translucent BLUE rectangle',
+      '(A, B)',
+      'RELOCATE',
+      'PLAIN BACKGROUND',
+      'ERASE the blue rectangles',
+      'RESERVED ZONES',
+    ]) {
+      if (!cleared.includes(needle))
+        failures.push(`clear-space prompt lost "${needle}"`);
+    }
+    if (cleared.includes('Apply ONLY this requested change'))
+      failures.push('clear-space-only prompt invented a requested change');
+
+    const both = buildFeedbackPrompt({
+      imageFeedback: 'शीर्षक मोठे करा',
+      brand: 'dgipr',
+      markerCount: 2,
+      clearCount: 1,
+    });
+    if (!both.includes('2 numbered red annotation marker'))
+      failures.push('combined prompt lost the marker count');
+    if (!both.includes('1 translucent BLUE rectangle'))
+      failures.push('combined prompt lost the clear count');
+    if (!both.includes('SPACE TO FREE block below'))
+      failures.push('combined prompt kept the contradictory keep-layout rule');
+    // The clear rule must come AFTER the reserved zones it refers to.
+    if (both.indexOf('SPACE TO FREE:') < both.indexOf('RESERVED ZONES'))
+      failures.push('clear rule precedes the reserved zones it refers to');
+
+    let threw = false;
+    try {
+      buildFeedbackPrompt({ imageFeedback: '   ', brand: 'dgipr' });
+    } catch {
+      threw = true;
+    }
+    if (!threw)
+      failures.push('empty feedback with no clear boxes was accepted');
 
     if (failures.length > 0) {
       console.error(`\n${failures.length} FAILURE(S):`);

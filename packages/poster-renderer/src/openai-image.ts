@@ -94,23 +94,39 @@ export async function generateImage(
 // END frame: editing the start frame instead of generating fresh is what keeps
 // the pair inside ONE shot, so Veo's interpolation reads as motion rather than
 // a crossfade between two different places.
+//
+// Several buffers may be passed: gpt-image's edits endpoint accepts a repeated
+// `image[]` field, and the FIRST one is the image being edited while the rest
+// are context the model may draw on. That is what lets the video frame provider
+// hand gpt-image the same cross-scene world reference the Gemini path gets,
+// instead of dropping it. Order therefore matters — never reorder the array.
 export async function editImage(
-  imagePng: Buffer,
+  imagePng: Buffer | readonly Buffer[],
   prompt: string,
   opts: GenerateImageOptions = {},
 ): Promise<Buffer> {
   const apiKey = requireApiKey();
+  const images = Array.isArray(imagePng) ? imagePng : [imagePng as Buffer];
+  if (images.length === 0) {
+    throw new Error('editImage was called with no image.');
+  }
   const form = new FormData();
   form.append('model', IMAGE_MODEL);
   form.append('prompt', prompt);
   form.append('size', opts.size ?? SIZE);
   form.append('quality', QUALITY);
   form.append('n', '1');
-  form.append(
-    'image',
-    new Blob([new Uint8Array(imagePng)], { type: 'image/png' }),
-    'frame.png',
-  );
+  // A single image keeps the scalar `image` field (byte-for-byte the old
+  // request); only a multi-image call uses the array form, so nothing that
+  // works today changes shape.
+  const field = images.length === 1 ? 'image' : 'image[]';
+  images.forEach((png, index) => {
+    form.append(
+      field,
+      new Blob([new Uint8Array(png)], { type: 'image/png' }),
+      `frame-${index + 1}.png`,
+    );
+  });
   const response = await fetch(EDITS_URL, {
     method: 'POST',
     headers: { authorization: `Bearer ${apiKey}` },

@@ -46,7 +46,7 @@ export const STR = {
   // "पोस्टर + कॅप्शन": the caption is now an opt-in checkbox under those two cards.
   mediaOutputLabel: 'काय तयार करायचे?',
   mediaFormatYoutube: 'यूट्यूब थंबनेल',
-  mediaFormatYoutubeDesc: 'लवकरच उपलब्ध होईल',
+  mediaFormatYoutubeDesc: 'यूट्यूब व्हिडिओसाठी मराठी थंबनेल',
   mediaFormatTwitter: 'ट्विटर पोस्ट',
   mediaFormatTwitterDesc: 'X (ट्विटर) साठी मराठी पोस्टर',
   mediaFormatFacebook: 'फेसबुक पोस्ट',
@@ -69,6 +69,16 @@ export const STR = {
     'आधी प्रसिद्ध झालेला एखादा लेख इथे चिकटवा; त्याची मांडणी, शीर्षक-रचना व भाषाशैली नमुना म्हणून वापरली जाईल. यातील कोणतीही माहिती, नावे किंवा आकडे नव्या लेखात घेतले जाणार नाहीत — त्यासाठी टिपणीच एकमेव आधार आहे. रिकामे ठेवल्यास मंच जुळणारा महासंवाद लेख स्वतः निवडेल.',
   styleRefPlaceholder:
     'उदा. महासंवादवर आधी प्रसिद्ध झालेल्या लेखाचा संपूर्ण मजकूर…',
+  // The officer's own instructions to the model for ONE article. The hint has the same job as
+  // the style reference's: make it unmistakable that this steers the WRITING and is never a
+  // source of facts, so nobody types a name or a figure here expecting it to be published.
+  aiInstructionsLabel: 'AI साठी सूचना (ऐच्छिक)',
+  aiInstructionsHint:
+    'लेख कसा लिहावा याविषयी सूचना द्या — कशावर भर द्यायचा, कोणता मुद्दा आधी घ्यायचा, भाषा कशी असावी, काय थोडक्यात लिहायचे. या सूचना फक्त लेखनशैलीसाठी वापरल्या जातात; येथे लिहिलेली नावे, आकडे किंवा तारखा लेखात घेतल्या जाणार नाहीत — त्यासाठी टिपणी व कागदपत्रेच एकमेव आधार आहेत.',
+  aiInstructionsPlaceholder:
+    'उदा. पहिल्या परिच्छेदात निधीचा आकडा घ्या; समितीच्या रचनेबद्दल थोडक्यात लिहा; भाषा सोपी ठेवा.',
+  aiInstructionsTooLong: 'सूचना खूप मोठ्या आहेत — कृपया थोडक्यात लिहा.',
+
   categoryLabel: 'लेखाचा प्रकार?',
   categoryScheme: 'योजना-लेख',
   categorySchemeDesc: 'सविस्तर, चिंतनशील महासंवाद फीचर-लेख',
@@ -151,9 +161,30 @@ export const STR = {
     'PDF, DOCX किंवा TXT फाईल निवडा (कमाल ५० MB). स्कॅन केलेली PDF देखील चालते. फाईल या बैठकीसोबत जतन केली जाईल.',
   dloDocsAdd: 'आणखी कागदपत्र जोडा',
   dloRemoveFile: 'फाईल काढा',
+
+  // YouTube links as a source, shared by /dlo and /transcribe (components/YouTubeLinkInput).
+  // The hint says plainly that nothing is downloaded and nothing is stored — an officer
+  // pasting a public link deserves to know the video itself is not being copied anywhere.
+  ytTitle: 'यूट्युब व्हिडिओ',
+  ytHint:
+    'पत्रकार परिषद किंवा कार्यक्रमाची यूट्युब लिंक द्या — त्यातील बोलणे मराठीत उतरवले जाईल. लिंक चिकटवताच ती आपोआप तपासली जाते. व्हिडिओ डाउनलोड किंवा जतन केला जात नाही; फक्त लिंक साठवली जाते.',
+  ytPlaceholder: 'लिंक इथे चिकटवा — https://www.youtube.com/watch?v=…',
+  ytAdding: 'तपासत आहोत…',
+  ytRemove: 'लिंक काढा',
+  ytClear: 'लिंक पुसा',
+  ytListTitle: 'जोडलेले व्हिडिओ',
+  ytInvalid:
+    'ही यूट्युब व्हिडिओची लिंक वाटत नाही. उदा. https://www.youtube.com/watch?v=… किंवा https://youtu.be/…',
+  ytDuplicate: 'ही लिंक आधीच जोडली आहे.',
+  ytAtLimit: 'एकावेळी कमाल १० लिंक जोडता येतील.',
+  // Shown in place of the channel when the probe could not describe the video — a private,
+  // unlisted or region-blocked one. The source still works; only its name is unknown.
+  ytUnknown: 'व्हिडिओची माहिती मिळाली नाही — लिंक तपासून पाहा.',
+  ytSourceLabel: 'यूट्युब व्हिडिओ',
+  ytOpen: 'यूट्युबवर पाहा',
   dloFileTypeError:
     'कृपया ध्वनिमुद्रण फाईल निवडा (MP3, WAV, M4A, AAC, FLAC, OGG, OPUS, WEBM, AIFF, AMR, WMA).',
-  dloNeedInput: 'कृपया टिपणी लिहा किंवा किमान एक फाईल जोडा.',
+  dloNeedInput: 'कृपया टिपणी लिहा, किमान एक फाईल जोडा किंवा यूट्युब लिंक द्या.',
   dloSubmit: 'पुढे जा →',
   dloProcessingTitle: 'माहितीवर प्रक्रिया सुरू आहे…',
   dloProcessingHint:
@@ -258,6 +289,12 @@ export const STR = {
   designationWarnNotFound:
     'यांचे पूर्ण नाव लेखात आढळले नाही, त्यामुळे पदनाम जोडता आले नाही:',
   designationWarnCorrected: 'लेखातील चुकीचे पदनाम बदलले:',
+  // Shown on a social poster whose information held more items than any master template lays
+  // out. The poster DOES carry every item — the design was stretched to fit — so this is a
+  // "check it reads well, or split the note" prompt, not an error.
+  posterCapacityWarnTitle: 'मुद्दे टेम्पलेटच्या क्षमतेपेक्षा जास्त आहेत',
+  posterCapacityWarnBody: (needed: number, available: number) =>
+    `तुम्ही दिलेल्या माहितीत ${needed} मुद्दे आहेत, पण उपलब्ध टेम्पलेटमध्ये साधारण ${available} मुद्दे मावतात. सर्व मुद्दे पोस्टरवर दाखवले आहेत, मात्र मजकूर दाटीवाटीने आला असू शकतो. पोस्टर तपासून पाहा — गरज वाटल्यास माहिती दोन पोस्टरमध्ये विभागून पुन्हा तयार करा.`,
   dloGenerate: 'लेख तयार करा →',
   dloOutputTitle: 'तयार झालेला लेख',
   dloViewDetail: 'सविस्तर पाहा (अभिप्राय, भाषांतर, पोस्टर)',
@@ -374,13 +411,15 @@ export const STR = {
   docRemove: 'हे कागदपत्र काढा',
   docUnsupported: 'फक्त PDF, DOCX आणि TXT फाईल्स चालतात.',
   docGone: 'ही फाईल आता उपलब्ध नाही. कृपया पुन्हा अपलोड करा.',
-  // The pre-OCR selection step. Only a SCANNED PDF reaches it: a file whose text can be
-  // read directly costs nothing, so it is read at once. Here the text does not exist yet —
+  // The pre-OCR selection step. EVERY PDF reaches it now (PDF_EXTRACTION_MODE=ocr): PDFs are
+  // read by OCR whether or not they are scanned, because that is the only backend that keeps
+  // a table's columns. So the hint no longer claims the file is scanned — that was true when
+  // only scans came here and is now wrong on most uploads. The text does not exist yet —
   // showing it would mean running the very OCR being approved — so the choice is by page
   // number alone.
   docSelectTitle: 'कोणती पृष्ठे वाचायची?',
   docSelectHint:
-    'ही स्कॅन केलेली PDF आहे, त्यामुळे प्रत्येक पृष्ठ OCR ने वाचावे लागेल. फक्त निवडलेलीच पृष्ठे वाचली जातील, म्हणून नको असलेली पृष्ठे आताच वगळा.',
+    'PDF मधील प्रत्येक पृष्ठ OCR ने वाचले जाते — त्यामुळे तक्ते जसेच्या तसे राहतात. फक्त निवडलेलीच पृष्ठे वाचली जातील, म्हणून नको असलेली पृष्ठे आताच वगळा.',
   docSelectTotal: 'एकूण पृष्ठे',
   docSelectCount: 'पृष्ठे निवडली',
   docReadSelected: 'निवडलेली पृष्ठे वाचा',
@@ -425,6 +464,12 @@ export const STR = {
   docClearAll: 'निवड काढा',
   docEdit: 'मजकूर पाहा / दुरुस्त करा',
   docEditClose: 'बंद करा',
+  // A page holding a table opens as a rendered table, not as raw Markdown pipes: that is
+  // the only form in which an officer can check one figure against its heading. These two
+  // switch between that view and the editor, which stays the only thing that changes text.
+  docHasTable: 'तक्ता',
+  docEditText: 'मजकूर दुरुस्त करा',
+  docShowTable: 'तक्ता म्हणून पाहा',
   docEdited: 'दुरुस्त केले',
   docLangMr: 'मराठी',
   docLangEn: 'English',
@@ -521,6 +566,10 @@ export const STR = {
   translatingHindi: 'हिंदी भाषांतर सुरू आहे…',
   revisingArticle: 'लेख सुधारला जात आहे…',
   posterTitle: 'तयार झालेले पोस्टर',
+  // Same panel, यूट्यूब lane: calling a thumbnail a "पोस्टर" is simply wrong to the officer
+  // who chose यूट्यूब थंबनेल on the form.
+  thumbnailTitle: 'तयार झालेले थंबनेल',
+  downloadThumbnail: 'थंबनेल डाउनलोड करा',
   // Poster-skeleton label while the article is shown but the poster still renders
   posterPreparing: 'पोस्टर तयार होत आहे…',
   downloadPoster: 'पोस्टर डाउनलोड करा',
@@ -555,6 +604,22 @@ export const STR = {
   markersSubmittedHint:
     'पाठवलेल्या खुणा पोस्टरवर दाखवल्या आहेत — नवीन खूण केल्यास त्या हटतील.',
   markersDismiss: 'खुणा लपवा',
+
+  // "Free this space" — the BLUE box gesture (PosterAnnotator mode 'clear').
+  // The point of it: the officer wants to place their OWN logo or photograph at
+  // that spot by hand afterwards, so the design there is moved elsewhere and the
+  // rectangle is left as plain background.
+  clearRegionHint:
+    'पोस्टरवर जी जागा मोकळी हवी आहे तिथे ओढून निळी चौकट काढा (जास्तीत जास्त २). त्या भागातील मजकूर व चित्रे रचनेनुसार दुसरीकडे हलवली जातील आणि ती जागा पार्श्वभूमीसारखीच मोकळी राहील — तिथे तुम्ही स्वतःचा लोगो किंवा फोटो नंतर लावू शकता.',
+  clearRegionLabel: 'मोकळी जागा',
+  clearRegionNotePlaceholder: 'तो भाग कुठे हलवायचा? (ऐच्छिक)…',
+  clearRegionRemove: 'मोकळी जागा काढा',
+  clearRegionSubmittedHint:
+    'पाठवलेल्या मोकळ्या जागा पोस्टरवर दाखवल्या आहेत — नवीन चौकट काढल्यास त्या हटतील.',
+  clearRegionReservedZoneWarning:
+    'टीप: वरचा लोगो आणि खालची पट्टी नंतर सॉफ्टवेअरने छापली जाते — तिथली जागा मोकळी करता येत नाही.',
+  iconClearSpace: 'जागा मोकळी करा (स्वतःच्या लोगोसाठी)',
+  iconClearSpaceOn: 'जागा मोकळी करणे बंद करा',
   feedbackPlaceholder: 'येथे आपला अभिप्राय लिहा…',
   sendFeedback: 'बदल करा',
   sendingFeedback: 'पाठवत आहोत…',
@@ -640,7 +705,9 @@ export const STR = {
   posterVersionLabel: 'आवृत्ती',
   posterVersionOriginal: 'मूळ',
   posterVersionCurrent: 'सद्य',
-  posterVersionOpen: 'मोठ्या आकारात पाहा',
+  // Says what pressing a thumbnail does, because the strip used to only open the PNG.
+  posterVersionsHint:
+    'जुनी आवृत्ती निवडा — तीच सद्य पोस्टर होईल आणि पुढील बदल तिच्यावर होतील. कोणतीही आवृत्ती हरवत नाही.',
 
   // Generation thread: all runs spawned from the same note lineage, shown as a
   // horizontal rail on the detail page (hidden when the run has no follow-ups)
@@ -821,6 +888,12 @@ export const STR = {
   refFileTypeError: 'कृपया PNG, JPEG किंवा WebP चित्र निवडा.',
   refUploadedOn: 'अपलोड',
   refCustomChip: 'नवीन प्रकार',
+  // A type's rotation can hold dozens of masters, so its card opens on ONE row and
+  // grows two rows at a time. The count tells the operator how much is still folded
+  // away — without it, "आणखी दाखवा" gives no idea whether one image is hidden or forty.
+  refShowMore: 'आणखी दाखवा',
+  refShowLess: 'कमी दाखवा',
+  refHiddenCount: (n: number) => `आणखी ${n} चित्रे`,
   // Template brand family. A type tagged CMO renders the मंत्रिमंडळ निर्णय lockup
   // (code-stamped leader header + DGIPR footer) and is kept out of the DGIPR
   // classifier pool — it appears only when a run picks विभाग = CMO.
@@ -935,13 +1008,13 @@ export const STR = {
   // rewritten or summarised here, which the intro says plainly so nobody expects an article.
   transcribeTitle: 'ध्वनिलेखन',
   transcribeIntro:
-    'ध्वनिमुद्रण जोडा — त्याचा मराठी मजकूर याच पानावर मिळेल. मजकूर जसाच्या तसा उतरवला जातो; त्यात कोणताही बदल, सारांश किंवा भर घातली जात नाही. फाईल जतन केली जाते.',
+    'ध्वनिमुद्रण जोडा किंवा यूट्युब लिंक द्या — त्याचा मराठी मजकूर याच पानावर मिळेल. मजकूर जसाच्या तसा उतरवला जातो; त्यात कोणताही बदल, सारांश किंवा भर घातली जात नाही. जोडलेली फाईल जतन केली जाते; यूट्युब व्हिडिओ मात्र डाउनलोड किंवा जतन केला जात नाही.',
   transcribeNewTitle: 'नवीन ध्वनिलेखन',
   transcribeUpload: 'ध्वनिफीत जोडा',
   transcribeHint:
     'एकावेळी अनेक फाईल जोडता येतील (कमाल १० फाईल्स, प्रत्येकी ५० MB). फक्त MP3, AAC व M4A चालतात.',
   transcribeFilesTitle: 'जोडलेली ध्वनिमुद्रणे',
-  transcribeNeedFile: 'कृपया किमान एक ध्वनिमुद्रण जोडा.',
+  transcribeNeedFile: 'कृपया किमान एक ध्वनिमुद्रण जोडा किंवा यूट्युब लिंक द्या.',
   transcribeSubmit: 'मजकूर तयार करा',
   transcribeRunning:
     'मजकूर तयार होत आहे… मोठ्या ध्वनिमुद्रणाला काही मिनिटे लागू शकतात.',
@@ -961,6 +1034,11 @@ export const STR = {
   transcribeOpen: 'उघडा',
   transcribeClose: 'बंद करा',
   transcribeDownloadName: 'ध्वनिलेखन',
+  // Carries this transcript to /dlo as the note of a new intake. Named for what the officer
+  // gets at the end of that flow, not for what the button does to the text.
+  transcribeToArticle: 'बातमी तयार करा',
+  transcribeToArticleHint:
+    'हा मजकूर लेखाच्या टिपणीत जाईल. तिथे तो तपासून व दुरुस्त करून बातमी तयार करता येईल.',
 
   // Errors
   // Said at the picker, before the upload starts — the whole point of checking the size in
@@ -991,6 +1069,19 @@ export const STR = {
   videoScriptEstimateOver:
     'ही संहिता दोन मिनिटांपेक्षा मोठी दिसते. कृपया निवेदन लहान करा.',
   videoScriptMarathiOnly: 'तयार निवेदन मराठीत असणे आवश्यक आहे.',
+  // Officer-supplied voiceover: the department's own voice, or a TTS product
+  // whose plan gives no API access. The file replaces the synthesized track
+  // entirely and decides the video's length.
+  videoNarrationAudioLabel: 'निवेदनाची ध्वनिफीत (ऐच्छिक)',
+  videoNarrationAudioHint:
+    'तुमच्याकडे या निवेदनाची तयार ध्वनिफीत असेल तर ती द्या — तीच व्हिडिओत वापरली जाईल आणि तिच्या लांबीवरून दृश्ये ठरतील. काहीही न दिल्यास आवाज आपोआप तयार होईल.',
+  videoNarrationAudioRemove: 'ध्वनिफीत काढा',
+  videoNarrationAudioMeasured: 'दिलेल्या ध्वनिफीतीवरून',
+  videoNarrationAudioUnreadable:
+    'ही ध्वनिफीत ब्राउझरला वाचता आली नाही; तरीही पाठवून पाहता येईल.',
+  videoNarrationAudioTooLong:
+    'ही ध्वनिफीत दोन मिनिटांपेक्षा मोठी आहे. कृपया लहान ध्वनिफीत द्या.',
+  videoNarrationAudioTooBig: 'ध्वनिफीत ५० MB पेक्षा मोठी असू शकत नाही.',
   videoHeadingLabel: 'शीर्षक / मुख्य मुद्दा (ऐच्छिक)',
   videoDurationLabel: 'व्हिडिओची लांबी',
   videoDurationShort: '३० सेकंद',
@@ -1058,6 +1149,27 @@ export const STR = {
     'सर्व दृश्ये याच वास्तव, live-action चित्रपट-शैलीत तयार होतात. महाराष्ट्र/भारत, नैसर्गिक प्रकाश, वास्तव भारतीय व्यक्ती व संयत documentary look स्पष्ट ठेवा. ही ओळ बदलली की सर्व दृश्ये पुन्हा काढावी लागतात.',
   videoAddScene: 'दृश्य जोडा',
   videoRemoveScene: 'हे दृश्य काढा',
+  videoInsertSceneAfter: 'यानंतर नवीन दृश्य जोडा',
+  videoNarrationResplitHint:
+    'या दृश्यावर कोणते वाक्य ऐकू यावे ते ठरवा. शेजारच्या दृश्यातून मजकूर कापून इथे चिकटवा — शब्द तेच राहिले तर आवाज पुन्हा तयार करावा लागत नाही; फक्त दृश्यांची वेळ आवाजाशी जुळवली जाते.',
+  videoInsertedSceneHint:
+    'नवीन दृश्य. शेजारच्या दृश्यातील मजकूर कापून इथे चिकटवा आणि दृश्य-वर्णन लिहा. नवीन शब्द लिहू नका — तसे केल्यास संपूर्ण निवेदन पुन्हा तयार करावे लागेल.',
+  videoSaveStoryboardScript: 'बदल जतन करा',
+  videoSaveStoryboardScriptHint:
+    'निवेदनाचे शब्द तेच ठेवून फक्त विभागणी बदलली, तर आवाज पुन्हा तयार होत नाही. ज्या दृश्यांची वेळ बदलेल तेवढीच दृश्ये पुन्हा तयार करावी लागतील.',
+  videoSceneNeedsFrames:
+    'या दृश्याची चित्रे अजून काढलेली नाहीत — खालील “या दृश्याची चित्रे तयार करा” वापरा.',
+  // A stored scene with no frames yet (a just-saved inserted scene). The redraw
+  // fold is the same control, but "पुन्हा काढा" is the wrong word when nothing
+  // has been drawn at all.
+  videoRenderSceneFrames: 'या दृश्याची चित्रे तयार करा',
+  // Page-level: renders the frames of every scene that is still missing them.
+  // The storyboard job skips scenes whose frames are current, so only the new
+  // scene is paid for; the narration audio is already measured and is not
+  // re-synthesized.
+  videoRenderMissingFrames: 'उरलेल्या दृश्यांची चित्रे तयार करा',
+  videoRenderMissingFramesHint:
+    'चित्रे नसलेल्या दृश्यांचीच चित्रे तयार होतील (अल्प खर्च). आधी तयार झालेली चित्रे, आवाज व क्लिप्स तशाच राहतात.',
   videoToStoryboard: 'स्टोरीबोर्ड तयार करा',
   videoToStoryboardHint:
     'प्रत्येक दृश्याचे नमुना चित्र तयार होईल (अल्प खर्च, व्हिडिओ नाही).',
@@ -1072,6 +1184,12 @@ export const STR = {
   videoRedrawStillNote:
     'प्रारंभ फ्रेम बदलली की या दृश्याला अंतिम फ्रेम असल्यास तीही तिच्यावरून नव्याने काढली जाते.',
   videoRedrawEndStill: 'अंतिम फ्रेम पुन्हा काढा',
+  // The fold's TOGGLE. Deliberately different from the two labels above, which
+  // belong to the primary button inside the fold — the one that actually spends.
+  videoEditStartBrief: 'प्रारंभ फ्रेमचे वर्णन बदला',
+  videoEditEndBrief: 'अंतिम फ्रेमचे वर्णन बदला',
+  videoInsertedSceneSaveFirst:
+    'हे नवीन दृश्य अजून जतन झालेले नाही. खालील “बदल जतन करा” दाबल्यावर या दृश्याची चित्रे काढता येतील.',
   videoEndStillPending: 'अंतिम फ्रेम अजून काढलेली नाही',
   videoEditBrief: 'वर्णन बदला',
   videoAnimate: 'व्हिडिओ तयार करा',
@@ -1109,6 +1227,8 @@ export const STR = {
   videoRetryAnimate: 'पुन्हा प्रयत्न करा',
   videoResumeHint: 'आधी तयार झालेली दृश्ये पुन्हा वापरली जातील.',
   videoBackToStoryboard: 'स्टोरीबोर्डवर परत जा',
+  videoBackToStoryboardDoneHint:
+    'चित्रे बदलणे, निवेदनाची विभागणी बदलणे किंवा नवीन दृश्य जोडण्यासाठी स्टोरीबोर्डवर परत जा. सध्याचा व्हिडिओ व सर्व क्लिप्स जतन राहतात.',
   videoBackToStoryboardHint:
     'दृश्यांची चित्रे व हालचालीची सूचना पुन्हा तपासून बदलता येईल. आधी तयार झालेल्या क्लिप्स जतन राहतात — पुन्हा ॲनिमेशन केल्यास फक्त उरलेली दृश्ये तयार होतील.',
   videoStillPending: 'चित्र अजून काढलेले नाही',
@@ -1229,6 +1349,7 @@ export const PROOFREAD_TYPE_LABELS: Record<ProofreadIssueType, string> = {
 export const REF_CATEGORY_LABELS: Record<ReferenceCategory, string> = {
   twitter: 'ट्विटर पोस्टर टेम्पलेट',
   article: 'लेख पोस्टर टेम्पलेट',
+  youtube: 'यूट्यूब थंबनेल टेम्पलेट',
 };
 
 // Short Marathi category labels for the history-card gradient banner (image-less
@@ -1238,6 +1359,7 @@ export const CATEGORY_LABELS: Record<Category, string> = {
   news: 'बातमी',
   twitter: 'ट्विटर',
   facebook: 'फेसबुक',
+  youtube: 'यूट्यूब',
 };
 
 export const STATUS_LABELS: Record<GenerationStatus, string> = {
@@ -1297,6 +1419,15 @@ export function videoNarrationEstimate(
   const spoken = `अंदाजे ${seconds.toFixed(0)} से. बोलणे`;
   if (clipSeconds === undefined) return spoken;
   return `${spoken} → क्लिप ~${clipSeconds} से.`;
+}
+
+// A single scene's narration past the per-scene ceiling. This one is NOT
+// advisory: the save route rejects it (no clip can be longer than 15 seconds),
+// and without this the officer only saw the raw zod `too_big` payload. The
+// remedy is stated because it is not obvious — the text has to be split across
+// two scenes, not deleted.
+export function videoNarrationTooLong(chars: number, max: number): string {
+  return `हे निवेदन ${chars.toLocaleString('mr-IN')} अक्षरांचे आहे. एका दृश्याचे निवेदन जास्तीत जास्त ${max.toLocaleString('mr-IN')} अक्षरे असू शकते — एक क्लिप १५ सेकंदांपेक्षा मोठी होत नाही. “यानंतर नवीन दृश्य जोडा” वापरून हा मजकूर दोन दृश्यांत विभागा.`;
 }
 
 // Gate-1 running total against the project's selected length. Advisory only:

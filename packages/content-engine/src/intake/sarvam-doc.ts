@@ -32,6 +32,14 @@
 // page would otherwise silently shift every page number after it. When the count
 // disagrees, the metadata blocks are the authority — they carry the real page
 // boundaries (and their own page_num), at the cost of Markdown structure.
+//
+// KEEPING THE MARKDOWN MATTERS MORE THAN IT USED TO. Since PDF_EXTRACTION_MODE defaulted to
+// 'ocr' (pdf-pages.ts) this is the only PDF backend, and it was made the only one because
+// government material is full of TABLES that must survive into the article prompt. So the
+// split is attempted twice — once permissively, then requiring a blank line before the rule
+// (a setext heading underline, `Heading` over `-----`, is the false positive that costs a
+// whole document its Markdown) — and the metadata fallback reads each block's `layout_tag`
+// so a table block is kept verbatim instead of being flattened into a paragraph.
 
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -70,8 +78,31 @@ function pageOrderKey(entryName: string): number {
 // declared — the file also carries coordinates, confidence and layout tags.
 type PageMetadata = {
   page_num?: number;
-  blocks?: Array<{ text?: unknown; reading_order?: unknown }>;
+  blocks?: Array<{
+    text?: unknown;
+    reading_order?: unknown;
+    layout_tag?: unknown;
+  }>;
 };
+
+// Does this block hold a table? Sarvam's layout tags are not contractually documented, so
+// the test is deliberately loose (anything containing 'table') and is BACKED UP by looking
+// at the text itself — a block whose lines are pipe-delimited or which carries an HTML
+// table is one whatever it is labelled. Getting this wrong in either direction is cheap:
+// a false positive keeps a paragraph's line breaks, a false negative loses a table's
+// columns exactly as the old code did for every block.
+function isTableBlock(block: { text?: unknown; layout_tag?: unknown }): boolean {
+  const tag =
+    typeof block.layout_tag === 'string' ? block.layout_tag.toLowerCase() : '';
+  if (tag.includes('table')) return true;
+  const text = typeof block.text === 'string' ? block.text : '';
+  if (/<\/?(table|tr|td|th)\b/i.test(text)) return true;
+  // Two or more lines that both open and close with a pipe: a Markdown table.
+  const piped = text
+    .split('\n')
+    .filter((line) => /^\s*\|.*\|\s*$/.test(line)).length;
+  return piped >= 2;
+}
 
 function metadataEntries(zip: AdmZip) {
   return zip
@@ -86,26 +117,33 @@ function metadataEntries(zip: AdmZip) {
 }
 
 // Rebuild a page's text from its OCR blocks, in reading order, and take the page's own
-// number with it. Loses Markdown structure, which is why this is the fallback rather than
-// the primary path.
-function pageFromMetadata(raw: string, fallbackPage: number): PdfPage {
+// number with it. Loses the DOCUMENT-level Markdown (headings, the page's overall shape),
+// which is why this is the fallback rather than the primary path — but a block that is
+// itself a table keeps its own rows: its internal line breaks are the table, so they are
+// preserved verbatim rather than trimmed per line, and it is separated from its neighbours
+// by a blank line so no prose can be pulled into the first row.
+function pageFromMetadata(
+  raw: string,
+  fallbackPage: number,
+): PdfPage & { hasTable: boolean } {
   let parsed: PageMetadata;
   try {
     parsed = JSON.parse(raw) as PageMetadata;
   } catch {
-    return { page: fallbackPage, text: '' };
+    return { page: fallbackPage, text: '', hasTable: false };
   }
-  const text = (parsed.blocks ?? [])
+  const blocks = (parsed.blocks ?? [])
     .map((block, index) => ({
       text: typeof block.text === 'string' ? block.text.trim() : '',
+      table: isTableBlock(block),
       order:
         typeof block.reading_order === 'number' ? block.reading_order : index,
     }))
     .filter((block) => block.text.length > 0)
-    .sort((a, b) => a.order - b.order)
-    .map((block) => block.text)
-    .join('\n\n');
+    .sort((a, b) => a.order - b.order);
+  const text = blocks.map((block) => block.text).join('\n\n');
   return {
+    hasTable: blocks.some((block) => block.table),
     page:
       typeof parsed.page_num === 'number' && parsed.page_num > 0
         ? parsed.page_num
@@ -141,22 +179,35 @@ function pagesFromOutputZip(zipPath: string, expectedPages: number): PdfPage[] {
   // Preferred: split the Markdown on the page rule, but only when the number of parts
   // agrees with a known page count (a stray `---` inside a page would otherwise renumber
   // everything after it).
-  const parts = markdown
-    .split(/\n\s*-{3,}\s*\n/)
-    .map((part) => unwrapSoftLineBreaks(part).trim());
+  //
+  // Two candidate rules, tried in order. The permissive one is the original. The strict one
+  // additionally requires a BLANK line before the rule, which is what distinguishes a
+  // CommonMark thematic break from a setext heading underline — `शीर्षक` over `-----` is a
+  // heading, not a page boundary, and one of them in a document used to cost every page its
+  // Markdown (and therefore its tables) by pushing the whole read onto the metadata path.
   const known = metadata.length > 0 ? metadata.length : expectedPages;
-  if (parts.length === known && parts.some((part) => part.length > 0)) {
-    return parts.map((text, index) => ({ page: index + 1, text }));
+  for (const rule of [/\n\s*-{3,}\s*\n/, /\n[ \t]*\n[ \t]*-{3,}[ \t]*\n/]) {
+    const parts = markdown
+      .split(rule)
+      .map((part) => unwrapSoftLineBreaks(part).trim());
+    if (parts.length === known && parts.some((part) => part.length > 0)) {
+      return parts.map((text, index) => ({ page: index + 1, text }));
+    }
   }
 
   // Fallback: the metadata blocks, which own the real page boundaries and page numbers.
   if (metadata.length > 0) {
-    console.warn(
-      `[sarvam-doc] markdown split gave ${parts.length} part(s) for ${metadata.length} page(s); using page metadata instead.`,
-    );
-    return metadata.map((entry, index) =>
+    const pages = metadata.map((entry, index) =>
       pageFromMetadata(entry.getData().toString('utf8'), index + 1),
     );
+    console.warn(
+      `[sarvam-doc] markdown page split did not match ${metadata.length} page(s); using page metadata instead.${
+        pages.some((page) => page.hasTable)
+          ? ' Some pages contain tables — check their columns survived.'
+          : ''
+      }`,
+    );
+    return pages.map(({ page, text }) => ({ page, text }));
   }
 
   // Neither shape available: hand back whatever Markdown there was as one page.

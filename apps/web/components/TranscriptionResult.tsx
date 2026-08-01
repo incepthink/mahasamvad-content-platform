@@ -9,8 +9,12 @@
 // before it becomes an article is /dlo's review step, which exists for exactly that.
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+// CirclePlay stands in for a YouTube mark: lucide 1.x carries no brand icons.
+import { CirclePlay } from 'lucide-react';
 import type { TranscriptionDetail } from '@dgipr/schemas';
 import { downloadBlob } from '../lib/download';
+import { seedDraftNotes } from '../lib/dloDraft';
 import { STR, TRANSCRIPTION_STATUS_LABELS } from '../lib/strings';
 
 function StatusChip({ status }: { status: TranscriptionDetail['status'] }) {
@@ -30,6 +34,7 @@ export function TranscriptionResult({
   error: string | null;
   onClose: () => void;
 }) {
+  const router = useRouter();
   const [copied, setCopied] = useState(false);
 
   // Reset the "copied ✓" flash when a different run is opened, or it would greet the next
@@ -60,6 +65,20 @@ export function TranscriptionResult({
     await navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  // Hand this transcript to /dlo as the note of a new intake. The text travels through the
+  // draft rather than through the URL: it is a whole meeting's worth of Marathi, which no
+  // query string can carry, and the draft is already what /dlo's form reads on mount — so
+  // the officer lands on a form that opens with the transcript in it and every other input
+  // untouched.
+  //
+  // Whatever produced that text — an uploaded recording or a pasted YouTube link — only the
+  // TEXT goes. The words have already been transcribed and paid for; re-attaching the source
+  // would have the intake job transcribe it again and show it twice at review.
+  const toArticle = () => {
+    seedDraftNotes(text);
+    router.push('/dlo');
   };
 
   return (
@@ -113,7 +132,21 @@ export function TranscriptionResult({
                 .filter((file) => file.status === 'done')
                 .map((file) => (
                   <li key={file.name}>
-                    <span className="file-name">{file.name}</span>
+                    {/* A source that came from a link is named as one and stays clickable,
+                        so the transcript can be checked against what was actually said. */}
+                    {file.sourceUrl ? (
+                      <a
+                        className="file-name yt-source-link"
+                        href={file.sourceUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        <CirclePlay size={14} aria-hidden="true" />
+                        {file.name}
+                      </a>
+                    ) : (
+                      <span className="file-name">{file.name}</span>
+                    )}
                     <span className="file-size">
                       {(file.chars ?? 0).toLocaleString('mr-IN')}{' '}
                       {STR.transcribeCharsSuffix}
@@ -132,6 +165,15 @@ export function TranscriptionResult({
           </p>
 
           <div className="btn-row" style={{ marginTop: 16 }}>
+            {/* First and primary: reading the transcript is the step before writing the
+                article, so this is what the officer reaches for next. */}
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={toArticle}
+            >
+              {STR.transcribeToArticle}
+            </button>
             <button type="button" className="btn" onClick={copy}>
               {copied ? STR.copied : STR.copyText}
             </button>
@@ -152,6 +194,9 @@ export function TranscriptionResult({
               {STR.transcribeClose}
             </button>
           </div>
+          <p className="hint" style={{ marginTop: 8 }}>
+            {STR.transcribeToArticleHint}
+          </p>
         </>
       ) : null}
     </section>

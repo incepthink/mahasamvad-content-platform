@@ -57,6 +57,33 @@ function parseJson(raw: string): unknown {
   }
 }
 
+// How long the supplied script ACTUALLY speaks, and therefore how many clips it
+// needs. `measuredSeconds` is the duration of a real synthesized WAV of this
+// exact text in the configured voice; the char-rate estimate is only the
+// fallback for a deployment with no TTS key (which renders silent anyway).
+//
+// This distinction is the whole point of the parameter. DEFAULT_NARRATION_CHARS_
+// PER_SECOND is one number for every voice, and the voices genuinely differ —
+// bulbul reads this Marathi at ~16.5 chars/s where ElevenLabs v3 reads it at
+// ~10.9. On the ready-script lane the words may never be trimmed or sped up, so
+// a rate 50% too fast plans too few clips and the narrate gate then REFUSES a
+// project the officer has already approved. Measuring first removes the guess.
+function scriptSeconds(normalized: string, measuredSeconds?: number): number {
+  return measuredSeconds !== undefined && measuredSeconds > 0
+    ? measuredSeconds
+    : estimateNarrationSeconds(normalized);
+}
+
+// Chars a single clip's worth of speech can hold, at the rate this very script
+// was measured at. Falls back to the configured rate's ceiling when nothing was
+// measured. Bounding the DP by this rather than by VIDEO_NARRATION_MAX_CHARS is
+// what keeps the per-scene cap honest for a slow voice.
+function maxSceneChars(normalized: string, seconds: number): number {
+  if (seconds <= 0) return VIDEO_NARRATION_MAX_CHARS;
+  const charsPerSecond = normalized.length / seconds;
+  return Math.max(1, Math.floor(VIDEO_CLIP_MAX_SECONDS * charsPerSecond));
+}
+
 function segmentLength(words: readonly string[], start: number, end: number) {
   let length = Math.max(0, end - start - 1);
   for (let index = start; index < end; index++) {
@@ -71,21 +98,25 @@ function endsSentence(word: string): boolean {
 
 // Balanced contiguous partition with a preference for sentence endings. The
 // returned chunks rejoin byte-for-byte to the whitespace-normalized script.
-export function splitReadyVideoScript(script: string): string[] {
+export function splitReadyVideoScript(
+  script: string,
+  measuredSeconds?: number,
+): string[] {
   const normalized = normalizeVideoNarrationScript(script);
-  const estimatedSeconds = estimateNarrationSeconds(normalized);
-  if (estimatedSeconds > VIDEO_SCRIPT_MAX_SECONDS) {
+  const seconds = scriptSeconds(normalized, measuredSeconds);
+  if (seconds > VIDEO_SCRIPT_MAX_SECONDS) {
     throw new Error('Ready narration exceeds the two-minute video limit.');
   }
 
   const requestedScenes = Math.max(
     1,
-    Math.ceil(estimatedSeconds / VIDEO_CLIP_MAX_SECONDS),
+    Math.ceil(seconds / VIDEO_CLIP_MAX_SECONDS),
   );
+  const sceneCharCap = maxSceneChars(normalized, seconds);
   const words = normalized.split(' ');
-  if (words.some((word) => word.length > VIDEO_NARRATION_MAX_CHARS)) {
+  if (words.some((word) => word.length > sceneCharCap)) {
     throw new Error(
-      `Ready narration contains a word longer than ${VIDEO_NARRATION_MAX_CHARS} characters.`,
+      `Ready narration contains a word longer than ${sceneCharCap} characters.`,
     );
   }
   const sceneCount = Math.min(
@@ -111,7 +142,7 @@ export function splitReadyVideoScript(script: string): string[] {
         const prior = costs[parts - 1]![start]!;
         if (!Number.isFinite(prior)) continue;
         const length = segmentLength(words, start, end);
-        if (length > VIDEO_NARRATION_MAX_CHARS) continue;
+        if (length > sceneCharCap) continue;
         const distance = length - target;
         const sentenceReward =
           parts < sceneCount && endsSentence(words[end - 1]!)
@@ -186,10 +217,17 @@ function userContent(
 
 export async function planReadyVideoScript(
   script: string,
-  options: Readonly<{ heading?: string | undefined }> = {},
+  options: Readonly<{
+    heading?: string | undefined;
+    // Duration of a real synthesized WAV of this exact script in the configured
+    // voice. Supply it whenever TTS is available: it decides the scene count,
+    // the per-scene char cap and the clip windows, none of which a fixed
+    // chars-per-second constant can get right across two TTS providers.
+    measuredSeconds?: number | undefined;
+  }> = {},
 ): Promise<GeneratedVideoScript> {
   const normalized = normalizeVideoNarrationScript(script);
-  const chunks = splitReadyVideoScript(normalized);
+  const chunks = splitReadyVideoScript(normalized, options.measuredSeconds);
   const schema = visualPlanSchema(chunks.length);
   const messages: ChatMessage[] = [
     { role: 'system', content: systemPrompt(chunks.length) },
@@ -207,9 +245,12 @@ export async function planReadyVideoScript(
     );
   }
 
+  // Weights stay char-derived (they are relative, so the rate cancels out), but
+  // the TOTAL is the measured one when we have it — that is what the clip
+  // windows have to cover.
   const plannedDurations = allocateVideoSceneDurations(
     chunks.map((chunk) => Math.max(1, estimateNarrationSeconds(chunk))),
-    Math.ceil(estimateNarrationSeconds(normalized)),
+    Math.ceil(scriptSeconds(normalized, options.measuredSeconds)),
   );
   return {
     title: options.heading ?? result.data.title,

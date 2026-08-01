@@ -13,7 +13,11 @@ export type DloIntakeStep =
 // 'txt' only ever reaches here through a document the officer uploaded and read at the
 // input step (the shared ephemeral service reads a .txt locally and for free); the intake
 // job itself has no .txt reader and never needs one.
-export type DloIntakeFileKind = 'audio' | 'pdf' | 'docx' | 'txt';
+// 'youtube' is a recording we never hold: the officer pasted a link and the transcriber
+// fetches the media itself (ElevenLabs Scribe's source_url). So such an entry carries a
+// `sourceUrl` and no `storagePath`, and is transcribed in the same phase as an uploaded
+// recording — see the transcribe phase in apps/api/src/jobs/dlo-runner.ts.
+export type DloIntakeFileKind = 'audio' | 'youtube' | 'pdf' | 'docx' | 'txt';
 // 'needs-selection' is a PDF that was probed but deliberately NOT read: its text layer was
 // unusable, so reading it means paid OCR, and the officer chooses which pages are worth it
 // before a single one is sent. Only PDFs ever hold this status.
@@ -62,6 +66,15 @@ export type DloIntakeFileEntry = Readonly<{
   // Only ever set on a 'pending' PDF, and gone once the file is read — extractPdfEntry rebuilds
   // the entry rather than spreading it.
   pendingPages?: readonly number[];
+  // ---------- 'youtube' sources ----------
+  // The canonical watch URL, which is what is handed to the transcriber. Present on exactly
+  // the 'youtube' entries; they have no storagePath, having never been downloaded.
+  sourceUrl?: string;
+  // What the oEmbed probe found when the officer pasted the link, kept so the review card can
+  // name the video rather than showing a bare URL. Both absent when the probe failed (a
+  // private or unlisted video), which never blocks the source.
+  sourceAuthor?: string;
+  sourceThumbnailUrl?: string;
 }>;
 
 export type DloIntakeRow = Readonly<{

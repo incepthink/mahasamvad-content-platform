@@ -30,7 +30,8 @@
 // contributes nothing to the assembled note, which is why generate is blocked while one is
 // outstanding.
 
-import { FileText, Music } from 'lucide-react';
+// CirclePlay stands in for a YouTube mark: lucide 1.x carries no brand icons.
+import { CirclePlay, FileText, Music } from 'lucide-react';
 import type { DloIntakeDetail, DloIntakeFile } from '@dgipr/schemas';
 import {
   NOTES_KEY,
@@ -48,6 +49,9 @@ function marathiNumber(value: number): string {
 
 const KIND_LABEL: Record<DloIntakeFile['kind'], string> = {
   audio: STR.dloReviewKindAudio,
+  // A transcribed YouTube video behaves exactly like a recording from here on — one card,
+  // one editable transcript — so only the badge and the icon distinguish it.
+  youtube: STR.ytSourceLabel,
   pdf: STR.dloReviewKindPdf,
   docx: STR.dloReviewKindDocx,
   txt: STR.dloReviewKindTxt,
@@ -120,7 +124,9 @@ export function DloSourceReview({
           <section className="card" key={`${file.name}-${index}`}>
             <SourceHead
               icon={
-                file.kind === 'audio' ? (
+                file.kind === 'youtube' ? (
+                  <CirclePlay size={20} aria-hidden="true" />
+                ) : file.kind === 'audio' ? (
                   <Music size={20} aria-hidden="true" />
                 ) : (
                   <FileText size={20} aria-hidden="true" />
@@ -150,6 +156,24 @@ export function DloSourceReview({
                 needsSelection ? STR.dloReviewNeedsSelectionChip : undefined
               }
             />
+
+            {/* The video this transcript came from. Worth a line of its own: the card
+                header shows the TITLE, and checking a name or a figure against what was
+                actually said means going back to the source. */}
+            {file.sourceUrl ? (
+              <a
+                className="yt-source-link"
+                href={file.sourceUrl}
+                target="_blank"
+                rel="noreferrer"
+                style={{ marginTop: 8 }}
+              >
+                <CirclePlay size={14} aria-hidden="true" />
+                {file.sourceAuthor
+                  ? `${file.sourceAuthor} · ${STR.ytOpen}`
+                  : STR.ytOpen}
+              </a>
+            ) : null}
 
             {file.status === 'failed' ? (
               <p className="form-error" style={{ marginTop: 10 }}>

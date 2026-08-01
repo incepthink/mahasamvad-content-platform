@@ -13,9 +13,16 @@ export const OutputTypeSchema = z.enum(['article', 'poster', 'both']);
 export type OutputType = z.infer<typeof OutputTypeSchema>;
 
 // Which Mahasamvad voice to write in: 'scheme' (योजना-लेख feature), 'news' (बातमी
-// report), or the social lanes 'twitter'/'facebook' (n8n-backed poster + caption,
-// background task).
-export const CategorySchema = z.enum(['news', 'scheme', 'twitter', 'facebook']);
+// report), the social lanes 'twitter'/'facebook' (n8n-backed poster + caption,
+// background task), or 'youtube' — a 1280x720 video thumbnail, which writes no
+// article and no caption at all (migration 0042).
+export const CategorySchema = z.enum([
+  'news',
+  'scheme',
+  'twitter',
+  'facebook',
+  'youtube',
+]);
 export type Category = z.infer<typeof CategorySchema>;
 
 // Categories rendered by the external social-post n8n workflow (poster + caption,
@@ -23,8 +30,34 @@ export type Category = z.infer<typeof CategorySchema>;
 // pipeline. 'facebook' runs the identical workflow today and exists as its own
 // value so the two can diverge later; every social/article branch in apps/api and
 // apps/web routes through this predicate.
-export function isSocialCategory(category: Category): boolean {
+// Written as a type predicate on purpose: the compiler then narrows the ELSE branch of
+// every lane check, which is what makes adding a new Category (0042's 'youtube') surface
+// as type errors at the call sites that quietly assumed "not social ⇒ article".
+export function isSocialCategory(
+  category: Category,
+): category is 'twitter' | 'facebook' {
   return category === 'twitter' || category === 'facebook';
+}
+
+// The YouTube-thumbnail lane (migration 0042). Deliberately NOT a social category: it
+// shares no workflow, no master library, no caption, no publishing and no chrome with
+// twitter/facebook — only the "edit a reference template with the officer's information"
+// idea. It is its own predicate for the same reason isSocialCategory exists: every
+// lane branch in apps/api and apps/web must ask a named question, never
+// `category === 'youtube'`, so adding a second thumbnail format later is one edit here.
+export function isYoutubeCategory(
+  category: Category,
+): category is 'youtube' {
+  return category === 'youtube';
+}
+
+// The article pipeline's own categories — everything that writes Marathi prose. Stated
+// positively rather than as `!isSocialCategory(...)`, which silently swallowed 'youtube'
+// at every call site the day it was added.
+export function isArticleCategory(
+  category: Category,
+): category is 'news' | 'scheme' {
+  return category === 'news' || category === 'scheme';
 }
 
 // Template brand family for the social-poster flow, orthogonal to the platform lane
@@ -135,6 +168,12 @@ export const ARTICLE_WORD_TARGETS: Readonly<
   scheme: { target: 600, min: 450, max: 750 },
 };
 
+// How much free-text instruction an officer may attach to one article run. Generous enough
+// for a paragraph of real direction and small enough that it cannot become a second note —
+// this text steers the writing, it is never a factual source. Shared so the API's 400 and the
+// form's own counter enforce the same number.
+export const ARTICLE_INSTRUCTIONS_MAX_CHARS = 2000;
+
 export const CreateGenerationRequestSchema = z
   .object({
     // The Marathi note (टिपणी) — sole factual source for everything generated.
@@ -197,6 +236,15 @@ export const CreateGenerationRequestSchema = z
     // from the requested style category. Inert for social runs and for a pasted finished
     // article (providedArticle), neither of which generates prose.
     styleReference: z.string().trim().optional(),
+    // Article runs only (news/scheme): free-text instructions the officer wants the model to
+    // follow for THIS article — emphasis, ordering, tone, what to keep short. It is an
+    // INSTRUCTION, never a factual source: the prompt says so, so an officer who types a fact
+    // here does not get it published. Absent/empty ⇒ the article the pipeline writes today.
+    instructions: z
+      .string()
+      .trim()
+      .max(ARTICLE_INSTRUCTIONS_MAX_CHARS)
+      .optional(),
   })
   .superRefine((value, ctx) => {
     if (value.referenceImageId && value.referenceTypeId) {
@@ -337,10 +385,28 @@ export type RegeneratePosterRequest = z.infer<
 
 export const POSTER_FEEDBACK_MAX_MARKERS = 3;
 
+// A rectangle the officer wants FREED, not edited: whatever design elements sit
+// inside it are relocated elsewhere in the composition and the rectangle is left
+// as plain background, so the officer can drop their own logo or photograph
+// there afterwards. The opposite gesture to a marker — a marker says "change the
+// thing here", this says "move the thing here somewhere else".
+//
+// The note is OPTIONAL and is a steer, not an instruction: with none, the image
+// model chooses where the displaced content belongs.
+export const POSTER_FEEDBACK_MAX_CLEAR_REGIONS = 2;
+
+export const PosterClearRegionSchema = z.object({
+  region: FeedbackRegionSchema,
+  note: z.string().trim().min(1).max(500).optional(),
+});
+export type PosterClearRegion = z.infer<typeof PosterClearRegionSchema>;
+
 // Pixel-level feedback for an already rendered poster. Unlike the legacy
 // copy/scene route, this edits the latest complete poster through n8n and works
-// for both article and Twitter generations. Either free text, numbered marker
-// annotations, or both; clients omit empty keys (min lengths reject '' / []).
+// for both article and Twitter generations. Free text, numbered marker
+// annotations, clear-space rectangles, or any combination — the three travel in
+// ONE round so a single paid render can carry all of them; clients omit empty
+// keys (min lengths reject '' / []).
 export const PosterImageFeedbackRequestSchema = z
   .object({
     feedback: z.string().trim().min(3).max(4_000).optional(),
@@ -349,18 +415,47 @@ export const PosterImageFeedbackRequestSchema = z
       .min(1)
       .max(POSTER_FEEDBACK_MAX_MARKERS)
       .optional(),
+    clearRegions: z
+      .array(PosterClearRegionSchema)
+      .min(1)
+      .max(POSTER_FEEDBACK_MAX_CLEAR_REGIONS)
+      .optional(),
   })
   .superRefine((v, ctx) => {
-    if (!v.feedback && !v.annotations?.length) {
+    if (!v.feedback && !v.annotations?.length && !v.clearRegions?.length) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'Provide feedback text or at least one annotation.',
+        message:
+          'Provide feedback text, at least one annotation, or a region to clear.',
         path: ['feedback'],
       });
     }
   });
 export type PosterImageFeedbackRequest = z.infer<
   typeof PosterImageFeedbackRequestSchema
+>;
+
+// Bring an OLDER poster render back as the current one, so the next edit continues from
+// it instead of from the latest render. `version` is a 1-based index into the detail
+// payload's `posterVersions` (oldest→newest) — an index, not a storage path, because the
+// server already derives that list and must not take a bucket path from the browser.
+//
+// It REPOINTS the row at that existing object — no copy, no new version. Every poster path
+// is immutable, so the history is unchanged by selecting within it and nothing is lost;
+// switching back is the same move. (It used to copy the bytes forward, which cost a multi-MB
+// round trip per click and grew the strip by a duplicate every time an officer switched.)
+export const RestorePosterVersionRequestSchema = z.object({
+  version: z.number().int().min(1),
+});
+export type RestorePosterVersionRequest = z.infer<
+  typeof RestorePosterVersionRequestSchema
+>;
+
+export const RestorePosterVersionResponseSchema = z.object({
+  posterUrl: z.string(),
+});
+export type RestorePosterVersionResponse = z.infer<
+  typeof RestorePosterVersionResponseSchema
 >;
 
 // Manual poster text edit: the full edited Copy JSON.
@@ -509,6 +604,15 @@ export const GenerationDetailSchema = z.object({
   // registry, lost on restart) because the doubt matters when the officer reads the fresh
   // article. Empty = every approved designation applied cleanly.
   designationWarnings: z.array(DesignationWarningSchema).default([]),
+  // Set when this social poster's information carried MORE items than any master template is
+  // built to lay out. The poster was still rendered with every item (the image prompt is told
+  // to extend the reference's row pattern rather than drop content) — this exists so the
+  // officer knows the design was stretched and can split the note into two posters instead.
+  // Transient like the two registries above, and defaulted so an older API's payload parses.
+  posterCapacityWarning: z
+    .object({ needed: z.number().int(), available: z.number().int() })
+    .nullable()
+    .default(null),
   // Article revision can also run alongside the main job: while the poster is still
   // rendering the article is already final, so the user may refine it without waiting
   // out the render. Like `translating`, it can't own status/step/error and is reported
@@ -703,8 +807,25 @@ export type TranslateTextResponse = z.infer<typeof TranslateTextResponseSchema>;
 
 // ---------- Reference types + images ----------
 
-export const ReferenceCategorySchema = z.enum(['twitter', 'article']);
+// Which master library a reference image belongs to. Distinct from the generation
+// Category: the two social lanes both draw from 'twitter'. 'youtube' is the
+// 1280x720 thumbnail library (migration 0042).
+export const ReferenceCategorySchema = z.enum([
+  'twitter',
+  'article',
+  'youtube',
+]);
 export type ReferenceCategory = z.infer<typeof ReferenceCategorySchema>;
+
+// Which master library a generation of this category draws from. One function so the
+// create route's pin check, the runner's selection and the web picker cannot disagree —
+// they were three separate `isSocial ? 'twitter' : 'article'` ternaries, each of which
+// would have silently sent a youtube run to the article library.
+export function referenceCategoryOf(category: Category): ReferenceCategory {
+  if (isSocialCategory(category)) return 'twitter';
+  if (isYoutubeCategory(category)) return 'youtube';
+  return 'article';
+}
 
 // Which copy schema/layout the n8n social-post workflow renders a type with.
 // Builtin twitter types keep their bespoke layout; custom types are 'generic'

@@ -424,8 +424,12 @@ label.field-label {
   margin-bottom: 6px;
 }
 
+/* `url` sits here beside `text` deliberately: it was missing, so the YouTube link field was
+   the one input in the product rendered in the browser's default chrome — a thin square box
+   among rounded ones. Any new input type must be added here, not styled at its call site. */
 textarea,
-input[type='text'] {
+input[type='text'],
+input[type='url'] {
   width: 100%;
   font: inherit;
   color: inherit;
@@ -436,9 +440,17 @@ input[type='text'] {
 }
 
 textarea:focus,
-input[type='text']:focus {
+input[type='text']:focus,
+input[type='url']:focus {
   outline: 3px solid var(--accent-soft);
   border-color: var(--accent);
+}
+
+textarea:disabled,
+input[type='text']:disabled,
+input[type='url']:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 textarea.note-input {
@@ -1638,6 +1650,35 @@ details.fold[aria-disabled='true'] summary {
   pointer-events: none;
 }
 
+/* "Free this space" boxes. Blue + a translucent fill, deliberately unlike the
+   red outline markers: red says "change the thing here", blue says "move the
+   thing here away". The colour and the 20% fill mirror CLEAR_COLOR / CLEAR_FILL
+   in poster-renderer/src/feedback-marker.ts, so what the officer draws is what
+   the image model is shown — keep the two in sync. */
+.clear-box {
+  border-color: #1a56db;
+  background: rgba(26, 86, 219, 0.2);
+}
+
+.clear-box-submitted {
+  border-style: dashed;
+  opacity: 0.65;
+}
+
+.marker-badge.clear-badge,
+.marker-note-badge.clear-badge {
+  background: #1a56db;
+}
+
+.marker-remove.clear-remove {
+  color: #1a56db;
+}
+
+.clear-ghost {
+  border-color: #1a56db;
+  background: rgba(26, 86, 219, 0.2);
+}
+
 .marker-note-row {
   display: flex;
   align-items: center;
@@ -2658,6 +2699,20 @@ textarea.ref-desc-input {
   gap: 14px;
 }
 
+/* Fold control under a type's rotation. Centred rather than left-aligned, so it reads
+   as a continuation of the grid above it instead of a fourth card action. */
+.ref-thumb-more {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.ref-thumb-more-count {
+  color: var(--muted);
+  font-size: 0.85em;
+}
+
 .ref-thumb {
   overflow: hidden;
   border: 1.5px solid var(--border);
@@ -2684,6 +2739,10 @@ textarea.ref-desc-input {
 
 .ref-thumb-frame-article {
   aspect-ratio: 3 / 2; /* 1536x1024 masters */
+}
+
+.ref-thumb-frame-youtube {
+  aspect-ratio: 16 / 9; /* 1280x720 masters */
 }
 
 .ref-thumb img {
@@ -3050,6 +3109,10 @@ textarea.ref-desc-input {
   aspect-ratio: 3 / 2; /* 1536x1024 masters */
 }
 
+.ref-picker-thumb-youtube {
+  aspect-ratio: 16 / 9; /* 1280x720 masters */
+}
+
 /* Hover lifts but does NOT paint the accent border — that border means selected. */
 .ref-picker-thumb:hover {
   transform: translateY(-2px);
@@ -3147,15 +3210,25 @@ textarea.ref-desc-input {
   padding-bottom: 6px;
 }
 
+/* Every thumbnail is one button — pressing it makes that version current. Selection is
+   the accent border, the same way the rest of the app marks a chosen card. */
 .poster-versions-thumb {
   flex-shrink: 0;
   display: block;
   width: 120px;
+  padding: 0;
   border: 2px solid var(--border);
   border-radius: 12px;
   overflow: hidden;
   background: #fff;
-  text-decoration: none;
+  font: inherit;
+  text-align: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+
+.poster-versions-hint {
+  margin: -4px 0 10px;
 }
 
 .poster-versions-thumb img {
@@ -3163,6 +3236,23 @@ textarea.ref-desc-input {
   width: 100%;
   height: 90px;
   object-fit: cover;
+}
+
+.poster-versions-thumb:hover:not(:disabled),
+.poster-versions-thumb:focus-visible {
+  border-color: var(--accent);
+}
+
+/* Disabled = the current version (nothing to do) or a restore already in flight;
+   neither is an error state, so it stays fully legible rather than dimmed. */
+.poster-versions-thumb:disabled {
+  cursor: default;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .poster-versions-thumb {
+    transition: none;
+  }
 }
 
 .poster-versions-thumb[aria-current='true'] {
@@ -3691,6 +3781,189 @@ a.thread-node:hover {
   border-color: var(--err);
 }
 
+/* ---------- YouTube links as a source (components/YouTubeLinkInput) ----------
+   Deliberately built on the .file-row idiom above rather than a look of its own: a pasted
+   link and an uploaded recording become the same kind of source, so the two lists sitting
+   one above the other in the same form should read as siblings. What differs is only the
+   thumbnail in place of an icon, and the input row in place of an upload button. */
+
+.yt-add {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+
+/* The field and its leading icon are one control, so the icon lives INSIDE the box and the
+   box carries the focus ring — a separate icon beside the input would read as decoration and
+   would not move with the focus state. `focus-within` is what lets the wrapper own a ring the
+   real <input> paints, so the input itself drops its own border and background. */
+.yt-field {
+  flex: 1 1 280px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  border: 1.5px solid var(--border);
+  border-radius: 14px;
+  background: #fffdfa;
+  color: var(--muted);
+}
+
+.yt-field:focus-within {
+  outline: 3px solid var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-dark);
+}
+
+.yt-field--invalid,
+.yt-field--invalid:focus-within {
+  border-color: var(--err);
+  outline-color: var(--err-soft);
+}
+
+.yt-field input[type='url'] {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 14px 0;
+  border: none;
+  outline: none;
+  background: transparent;
+}
+
+.yt-field input[type='url']:focus {
+  outline: none;
+}
+
+/* The probe reports inside the field, there being no button to report in: a pasted link starts
+   its own check. `flex-shrink: 0` so the label is never squeezed by a long URL beside it. */
+.yt-probing {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.yt-clear {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.yt-clear:hover {
+  background: var(--err-soft);
+  color: var(--err);
+}
+
+.yt-list {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.yt-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fffdfa;
+}
+
+/* 16:9, so the thumbnail reads as a video frame at a glance. Fixed width rather than a
+   percentage: these rows sit in a column of cards and a proportional image would resize
+   with the sidebar. */
+.yt-thumb {
+  width: 96px;
+  height: 54px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  object-fit: cover;
+  background: var(--border);
+}
+
+.yt-thumb--empty {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+
+.yt-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.yt-item .yt-name {
+  font-weight: 600;
+  color: inherit;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.yt-item .yt-name:hover {
+  text-decoration: underline;
+}
+
+.yt-item .yt-channel {
+  color: var(--muted);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+.yt-item .file-remove {
+  margin-left: auto;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--card);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.yt-item .file-remove:hover {
+  background: var(--err-soft);
+  color: var(--err);
+  border-color: var(--err);
+}
+
+/* The review/result card's badge for a source that came from a link rather than a file.
+   Inline so it can sit beside the source name without taking a row of its own. */
+.yt-source-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.85rem;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.yt-source-link:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
 .dlo-processing {
   display: flex;
   flex-direction: column;
@@ -3880,6 +4153,45 @@ a.thread-node:hover {
   color: var(--muted);
   font-size: 0.85rem;
   white-space: nowrap;
+}
+
+/* ---------- extracted document text (ExtractedText) ----------
+   A read-only view of a page's extracted text, whose whole reason for existing is the
+   TABLE: a wide one must scroll inside its own box rather than push the card sideways,
+   which is the same rule the artifact/wide-content convention states. */
+
+.extracted-text {
+  margin-top: 10px;
+  line-height: 1.75;
+}
+
+.extracted-para {
+  margin: 0 0 10px;
+  white-space: pre-wrap;
+}
+
+.extracted-table-wrap {
+  overflow-x: auto;
+  margin: 0 0 12px;
+}
+
+.extracted-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.95rem;
+}
+
+.extracted-table th,
+.extracted-table td {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.extracted-table th {
+  background: var(--ok-soft, #f2f7f2);
+  font-weight: 600;
 }
 
 /* ---------- page range selector (PageRangeSelector) ---------- */

@@ -225,6 +225,31 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
   verbatim"; correcting text before it becomes an article is /dlo's review step.
   Audio container rules are NOT redefined here: `AUDIO_FILE_ACCEPT`/`audioMimeForFileName`
   come from `schemas/src/dlo.ts`, so the picker can never offer a file the API refuses.
+- **YouTube links as a source (both /dlo and /transcribe) — no downloader, by design.**
+  ElevenLabs Scribe takes a **`source_url`** and fetches the media itself (its docs name
+  YouTube explicitly; `source_url` supersedes the presigned-only `cloud_storage_url`), so a
+  pasted link never becomes bytes on our side: no yt-dlp in the API image, no bot-check
+  exposure, no archive object. **Check this before adding any downloader.** Link recognition
+  + the probe shapes → `packages/schemas/src/youtube.ts` (`parseYouTubeVideoId` —
+  `youtu.be`/no-scheme/`m.`/`music.`/`nocookie`/`/embed/`/`/shorts/`/`/live/`, strict
+  11-char id; `canonicalYouTubeUrl`, which is what is STORED so a pasted `&t=` cannot ask
+  the transcriber to start partway in); it lives in schemas because both sides run it and
+  `apps/web` cannot import content-engine. Probe route → `apps/api/src/routes/youtube.ts`
+  (`POST /api/youtube/probe`, public oEmbed — no key, no quota, title/channel/thumbnail and
+  deliberately **no duration**, which would need a YouTube Data API key; a failed probe
+  answers **200 with the id alone** so a private/unlisted video still submits). The STT seam
+  takes either shape (`intake/audio-input.ts`, a UNION not optional fields); `elevenlabs-stt.ts`
+  swaps its multipart `file` field for `source_url`; **Sarvam cannot serve one**, so
+  `transcribeAudio` fails those inputs individually with a Marathi message while the
+  intake's uploaded recordings still deliver. Two consequences to keep: the 0031 transcript
+  cache is keyed on the audio BYTES, so it does not apply (empty hash, skipped on read and
+  write-back), and **no migration** was needed — `files` is jsonb on both tables, so
+  `kind: 'youtube'` + `sourceUrl`/`sourceAuthor`/`sourceThumbnailUrl` were additive and
+  everything from the review step onward treats such a source exactly like a recording.
+  Both create routes re-derive the video id server-side rather than trusting the client.
+  Web → `components/YouTubeLinkInput.tsx` (shared by both forms, the `AudioFilePicker`
+  precedent). Free harness: `npx tsx packages/schemas/src/youtube.ts` (run it from
+  `packages/content-engine`, which has tsx).
 - Proof Read (ad-hoc grammar/name/style check of pasted Marathi/English text):
   route → `apps/api/src/routes/proofread.ts` (`POST /api/proofread`, synchronous,
   nothing stored; assembles the verified-glossary context); engine →
@@ -365,10 +390,17 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   text-only generates the START, text+image EDITS it into the END.
   **`referenceFramePng` is scene 1's approved frame, attached to scenes 2..N**
   (`loadWorldReference` in the runner) so the video reads as one production — the
-  `style` paragraph alone let four scenes come back as four unrelated worlds. Passed
-  ONLY on a fresh generation, NEVER beside `sourceFramePng`: two inline images plus
-  "edit this" is ambiguous, and the client throws rather than send both. Best-effort
-  everywhere, and the `openai` branch drops it (`editImage` takes one buffer);
+  `style` paragraph alone let four scenes come back as four unrelated worlds. On the
+  **gemini** path it is passed ONLY on a fresh generation, NEVER beside
+  `sourceFramePng`: two inline images plus "edit this" is ambiguous, and the client
+  throws rather than send both. The **openai** path carries it in both cases —
+  `editImage` now takes several buffers and posts them as gpt-image's `image[]`,
+  whose FIRST entry is the canvas and the rest context (a single image still posts
+  the old scalar `image` field, so nothing else changed shape); a fresh frame with a
+  reference goes through `/v1/images/edits` with the reference as the canvas, which
+  is exactly what `WORLD_REFERENCE_RULE` is worded for. So the two providers differ
+  in cost and look, not capability, and `VIDEO_IMAGE_PROVIDER=openai` is a real
+  one-line switch. Best-effort everywhere;
   `veo-client.ts` raw-REST long-running-op client
   over `http/gemini-request.ts`, model ids env-overridable `VEO_MODEL_*`, key
   `GEMINI_API_KEY`; **per-model params are LEARNED, not declared** — `negativePrompt`
@@ -932,6 +964,15 @@ Both additive + nullable; `insertGeneration` omits `style_reference` unless one 
 meta write is a SEPARATE best-effort update after the article write, so an un-applied 0035 costs
 the officer tier and the telemetry rather than a generated article (the 0028 principle). Apply
 before the API deploy anyway.
+`0041` — `generations.instructions` (text: the officer's free-text direction for ONE article —
+emphasis, ordering, tone, what to keep short. An INSTRUCTION, never a factual source; the prompt
+block says so and the note stays the sole authority). Insert-only for the same reason as
+`style_reference`: `startGenerationJob` re-reads the row, so a retry must reproduce the same
+article. Additive + nullable, and `insertGeneration` omits the column unless something was typed
+— verified live, an un-applied 0041 fails only a run that carries instructions and leaves every
+other create working. Typed on `/dlo`'s intake form (`AiInstructionsField`) and again at the
+review step; the form's copy reaches the review step through the intake's `review_state` (0036)
+blob, which the create route seeds as a separate best-effort update. Apply before the API deploy.
 `0037` — `transcriptions` (new table: standalone recording → Marathi text runs behind
 `/transcribe`). Self-contained and additive — nothing else reads it, and it provisions no
 bucket (the recordings go into 0018's private `dlo-uploads` under a `transcriptions/` prefix),

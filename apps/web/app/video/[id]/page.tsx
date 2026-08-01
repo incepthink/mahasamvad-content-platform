@@ -18,9 +18,11 @@ import { use, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { VideoProjectDetail, VideoScene } from '@dgipr/schemas';
 import {
+  VIDEO_NARRATION_MAX_CHARS,
   VIDEO_SCENE_LIMIT,
   VIDEO_STYLE_MAX_CHARS,
   VIDEO_TOTAL_FIT_TOLERANCE,
+  UPLOADED_NARRATION_VOICE,
   VIDEO_TOTAL_SECONDS,
   clipSecondsForNarration,
   estimateNarrationSeconds,
@@ -48,6 +50,10 @@ import { VideoStatusChip } from '../../../components/VideoStatusChip';
 import { VideoResultView } from '../../../components/VideoResultView';
 
 type SceneDraft = {
+  // Which STORED scene this card is, so the API can keep its frames and clip
+  // lineage when an insert shifts every later card's position. Undefined marks
+  // a scene the officer just inserted, which has nothing rendered yet.
+  sourceIndex?: number | undefined;
   narration: string;
   visualBrief: string;
   endVisualBrief: string;
@@ -61,7 +67,8 @@ type SceneDraft = {
 };
 
 function draftsFrom(scenes: readonly VideoScene[]): SceneDraft[] {
-  return scenes.map((scene) => ({
+  return scenes.map((scene, index) => ({
+    sourceIndex: index,
     narration: scene.narration,
     visualBrief: scene.visualBrief,
     endVisualBrief: scene.endVisualBrief ?? '',
@@ -162,14 +169,15 @@ export default function VideoProjectPage({
   const [animateArmed, setAnimateArmed] = useState(false);
   const lastStatus = useRef<VideoProjectDetail['status'] | null>(null);
 
-  // Seed gate 1's drafts on each transition INTO script_ready ("per
-  // transition", the useDloIntake rule, so a later regeneration reseeds).
+  // Seed the drafts on each transition INTO a review gate ("per transition",
+  // the useDloIntake rule, so a later regeneration reseeds). Gate 2 is seeded
+  // too, because the narration is editable there as well — that is where the
+  // officer can re-split it against the frames they are looking at.
   useEffect(() => {
     if (!detail) return;
-    if (
-      detail.status === 'script_ready' &&
-      lastStatus.current !== 'script_ready'
-    ) {
+    const atGate =
+      detail.status === 'script_ready' || detail.status === 'storyboard_ready';
+    if (atGate && lastStatus.current !== detail.status) {
       setDrafts(draftsFrom(detail.scenes));
       setStyleDraft(detail.style ?? '');
     }
@@ -217,10 +225,26 @@ export default function VideoProjectPage({
     (sum, draft) => sum + estimateNarrationSeconds(draft.narration),
     0,
   );
+  // This project speaks in a recording the officer supplied, not a synthesized
+  // voice — so its length is measured rather than estimated, and the re-voice
+  // action must not be offered (the API refuses it too).
+  const narrationIsUploaded = detail.voiceSpeaker === UPLOADED_NARRATION_VOICE;
+  const measuredNarrationSeconds = detail.scenes.reduce(
+    (sum, scene) => sum + (scene.narrationSeconds ?? 0),
+    0,
+  );
   const narrationTarget = VIDEO_TOTAL_SECONDS[detail.durationBucket];
   const narrationOverBudget =
     detail.inputMode === 'note' &&
     totalNarrationSeconds > narrationTarget * VIDEO_TOTAL_FIT_TOLERANCE;
+  // Unlike the running total above, this one BLOCKS: the save route rejects a
+  // narration longer than one clip's worth of speech (no clip may exceed
+  // VIDEO_CLIP_MAX_SECONDS), so letting the press through only produced a raw
+  // zod `too_big` payload. The card that is over says so, and the remedy is to
+  // split the line across two scenes.
+  const narrationTooLong = (drafts ?? []).some(
+    (d) => d.narration.trim().length > VIDEO_NARRATION_MAX_CHARS,
+  );
   // A scene that declared an end frame must have rendered it too — animate
   // would otherwise buy a clip whose reviewed ending never existed.
   const allStillsReady =
@@ -230,11 +254,90 @@ export default function VideoProjectPage({
         scene.stillUrl !== undefined &&
         (scene.endVisualBrief === undefined || scene.endStillUrl !== undefined),
     );
+  // Gate 2 holds unsaved script edits. Until they are committed the redraw
+  // routes (which act on STORED scenes) cannot reach an inserted card, and
+  // animating would render the scene list as it was before the edit — so the
+  // animate button waits for the save.
+  const storyboardDirty =
+    drafts !== null &&
+    detail.status === 'storyboard_ready' &&
+    (drafts.length !== detail.scenes.length ||
+      drafts.some((draft, index) => {
+        const stored =
+          draft.sourceIndex === undefined
+            ? undefined
+            : detail.scenes[draft.sourceIndex];
+        return (
+          stored === undefined ||
+          draft.sourceIndex !== index ||
+          stored.narration !== draft.narration ||
+          (stored.keyPoint ?? '') !== draft.keyPoint
+        );
+      }));
   const allClipsReady =
     detail.scenes.length > 0 &&
     detail.scenes.every((scene) => scene.clipUrl !== undefined);
   // A per-scene re-render on a finished video: keep showing the result view.
   const reRendering = detail.status === 'animating' && detail.videoUrl !== null;
+
+  const patchDraft = (index: number, patch: Partial<SceneDraft>) =>
+    setDrafts((prev) =>
+      prev ? prev.map((d, i) => (i === index ? { ...d, ...patch } : d)) : prev,
+    );
+
+  // A new card carries no sourceIndex, so the API treats it as new rather than
+  // adopting a neighbour's frames. It starts blank on purpose: its narration is
+  // moved out of a neighbour by the officer (which is what keeps the joined
+  // script — and therefore the measured audio — byte-identical), and its frames
+  // are bought only when the officer presses redraw.
+  const insertSceneAfter = (index: number) =>
+    setDrafts((prev) =>
+      prev
+        ? [
+            ...prev.slice(0, index + 1),
+            {
+              narration: '',
+              visualBrief: '',
+              endVisualBrief: '',
+              keyPoint: '',
+              durationSeconds: clipSecondsForNarration(0),
+            },
+            ...prev.slice(index + 1),
+          ]
+        : prev,
+    );
+
+  const scriptPayload = (list: SceneDraft[]) =>
+    list.map((draft) => ({
+      ...(draft.sourceIndex !== undefined
+        ? { sourceIndex: draft.sourceIndex }
+        : {}),
+      narration: draft.narration,
+      visualBrief: draft.visualBrief,
+      // Blank = single-frame scene (legacy semantics); the schema takes
+      // the field only when it says something.
+      ...(draft.endVisualBrief.trim() !== ''
+        ? { endVisualBrief: draft.endVisualBrief.trim() }
+        : {}),
+      // Always sent, INCLUDING blank — an officer clearing this line means
+      // "drop the overlay on this scene", which omitting the field would
+      // silently discard.
+      keyPoint: draft.keyPoint.trim(),
+    }));
+
+  // Gate 2's save. Same route as gate 1 (it already accepts storyboard_ready)
+  // but it does NOT start the storyboard job: the officer stays on this page
+  // and buys frames per scene with the redraw button. Reseeds afterwards,
+  // because an insert renumbers the stored scenes this page's sourceIndexes
+  // point at.
+  const saveStoryboardScript = () =>
+    act(async () => {
+      if (!drafts) return;
+      const updated = await saveVideoScript(id, {
+        scenes: scriptPayload(drafts),
+      });
+      setDrafts(draftsFrom(updated.scenes));
+    });
 
   const submitScript = () =>
     act(async () => {
@@ -243,19 +346,7 @@ export default function VideoProjectPage({
         // Sent only when it says something: the schema rejects an empty style,
         // and omitting it leaves the stored paragraph alone.
         ...(styleDraft.trim() !== '' ? { style: styleDraft.trim() } : {}),
-        scenes: drafts.map((draft) => ({
-          narration: draft.narration,
-          visualBrief: draft.visualBrief,
-          // Blank = single-frame scene (legacy semantics); the schema takes
-          // the field only when it says something.
-          ...(draft.endVisualBrief.trim() !== ''
-            ? { endVisualBrief: draft.endVisualBrief.trim() }
-            : {}),
-          // Always sent, INCLUDING blank — an officer clearing this line means
-          // "drop the overlay on this scene", which omitting the field would
-          // silently discard.
-          keyPoint: draft.keyPoint.trim(),
-        })),
+        scenes: scriptPayload(drafts),
       });
       await startVideoStoryboard(id);
     });
@@ -332,44 +423,26 @@ export default function VideoProjectPage({
               }}
               mode="edit"
               busy={busy}
-              {...(detail.inputMode === 'note'
-                ? {
-                    onNarrationChange: (value: string) =>
-                      setDrafts((prev) =>
-                        prev
-                          ? prev.map((d, i) =>
-                              i === index ? { ...d, narration: value } : d,
-                            )
-                          : prev,
-                      ),
-                  }
-                : {})}
+              // Editable on EVERY lane now, because moving words between scenes
+              // is a re-split, not a rewrite: the joined script stays identical
+              // and the API's word-identity guard passes. A genuine word change
+              // on a ready-script project is still refused there, in Marathi.
+              onNarrationChange={(value: string) =>
+                patchDraft(index, { narration: value })
+              }
               onBriefChange={(value) =>
-                setDrafts((prev) =>
-                  prev
-                    ? prev.map((d, i) =>
-                        i === index ? { ...d, visualBrief: value } : d,
-                      )
-                    : prev,
-                )
+                patchDraft(index, { visualBrief: value })
               }
               onEndBriefChange={(value) =>
-                setDrafts((prev) =>
-                  prev
-                    ? prev.map((d, i) =>
-                        i === index ? { ...d, endVisualBrief: value } : d,
-                      )
-                    : prev,
-                )
+                patchDraft(index, { endVisualBrief: value })
               }
               onKeyPointChange={(value) =>
-                setDrafts((prev) =>
-                  prev
-                    ? prev.map((d, i) =>
-                        i === index ? { ...d, keyPoint: value } : d,
-                      )
-                    : prev,
-                )
+                patchDraft(index, { keyPoint: value })
+              }
+              onInsertAfter={
+                drafts.length < bounds.max
+                  ? () => insertSceneAfter(index)
+                  : undefined
               }
               onRemove={
                 detail.inputMode === 'note' && drafts.length > bounds.min
@@ -413,6 +486,7 @@ export default function VideoProjectPage({
                 className="btn btn-primary"
                 disabled={
                   busy ||
+                  narrationTooLong ||
                   drafts.some(
                     (d) =>
                       d.narration.trim().length === 0 ||
@@ -433,12 +507,21 @@ export default function VideoProjectPage({
               className={narrationOverBudget ? 'form-error' : 'hint'}
               style={{ marginTop: 8 }}
             >
-              {detail.inputMode === 'script'
-                ? `${STR.videoScriptEstimateLabel}: ${videoReadyScriptEstimate(
-                    totalNarrationSeconds,
-                    drafts.length,
+              {/* With the officer's own recording the length is no longer an
+                  estimate — it was MEASURED at create time, and the per-scene
+                  shares of that WAV sum to it. Labelling it "अंदाज" would
+                  understate what the pipeline actually knows. */}
+              {narrationIsUploaded
+                ? `${STR.videoNarrationAudioMeasured}: ${videoReadyScriptEstimate(
+                    measuredNarrationSeconds,
+                    detail.scenes.length,
                   )}`
-                : videoNarrationTotal(totalNarrationSeconds, narrationTarget)}
+                : detail.inputMode === 'script'
+                  ? `${STR.videoScriptEstimateLabel}: ${videoReadyScriptEstimate(
+                      totalNarrationSeconds,
+                      drafts.length,
+                    )}`
+                  : videoNarrationTotal(totalNarrationSeconds, narrationTarget)}
               {narrationOverBudget ? ` ${STR.videoNarrationTotalOver}` : ''}
             </p>
             <p className="hint" style={{ marginTop: 8 }}>
@@ -455,28 +538,125 @@ export default function VideoProjectPage({
             <h2>{STR.videoStoryboardTitle}</h2>
             <p className="hint">{STR.videoStoryboardIntro}</p>
           </section>
-          {detail.scenes.map((scene, index) => (
-            <VideoSceneCard
-              key={index}
-              index={index}
-              scene={scene}
-              mode="review"
-              busy={busy}
-              onRedraw={(brief) => void redrawStill(index, brief)}
-              onRedrawEnd={(endBrief) => void redrawEndStill(index, endBrief)}
-              onMotionBriefSave={(motionBrief) =>
-                void saveMotionBrief(index, motionBrief)
-              }
-            />
-          ))}
+          {(drafts ?? draftsFrom(detail.scenes)).map((draft, index) => {
+            // The card shows the STORED scene's frames and timing, overlaid
+            // with the edited narration. A card the officer just inserted has
+            // no stored scene behind it, so it renders as pending with no
+            // frames until the save lands and its redraw is pressed.
+            const stored =
+              draft.sourceIndex === undefined
+                ? undefined
+                : detail.scenes[draft.sourceIndex];
+            return (
+              <VideoSceneCard
+                key={draft.sourceIndex ?? `new-${index}`}
+                index={index}
+                scene={{
+                  ...(stored ?? {
+                    durationSeconds: draft.durationSeconds,
+                    status: 'pending' as const,
+                  }),
+                  narration: draft.narration,
+                  visualBrief: draft.visualBrief,
+                  endVisualBrief: draft.endVisualBrief,
+                  keyPoint: draft.keyPoint,
+                }}
+                mode="review"
+                busy={busy}
+                onNarrationChange={(value) =>
+                  patchDraft(index, { narration: value })
+                }
+                {...(stored
+                  ? {
+                      onRedraw: (brief: string) =>
+                        void redrawStill(draft.sourceIndex!, brief),
+                      onRedrawEnd: (endBrief: string) =>
+                        void redrawEndStill(draft.sourceIndex!, endBrief),
+                      onMotionBriefSave: (motionBrief: string) =>
+                        void saveMotionBrief(draft.sourceIndex!, motionBrief),
+                    }
+                  : {})}
+                {...(stored
+                  ? {}
+                  : {
+                      // No stored scene to redraw yet, so the brief is edited
+                      // in the card itself and travels with the save — without
+                      // this an inserted scene had no way to state its prompt
+                      // at all, and would be saved with an empty one.
+                      onBriefChange: (value: string) =>
+                        patchDraft(index, { visualBrief: value }),
+                      onEndBriefChange: (value: string) =>
+                        patchDraft(index, { endVisualBrief: value }),
+                      redrawUnavailableHint: STR.videoInsertedSceneSaveFirst,
+                    })}
+                onInsertAfter={
+                  (drafts ?? []).length < bounds.max
+                    ? () => insertSceneAfter(index)
+                    : undefined
+                }
+              />
+            );
+          })}
           <section className="card">
+            {/* Unsaved edits must be committed before the frames of a new scene
+                can be bought — the redraw routes act on STORED scenes. */}
+            <div className="btn-row" style={{ marginBottom: 12 }}>
+              <button
+                type="button"
+                className="btn"
+                disabled={
+                  busy ||
+                  !storyboardDirty ||
+                  narrationTooLong ||
+                  // Same emptiness rules as gate 1's submit: the save route
+                  // rejects a blank narration or brief, so an inserted scene
+                  // must state both here rather than fail server-side.
+                  (drafts ?? []).some(
+                    (d) =>
+                      d.narration.trim().length === 0 ||
+                      d.visualBrief.trim().length === 0,
+                  )
+                }
+                onClick={saveStoryboardScript}
+              >
+                {busy ? STR.submitting : STR.videoSaveStoryboardScript}
+              </button>
+            </div>
+            {storyboardDirty ? (
+              <p className="hint" style={{ marginBottom: 12 }}>
+                {STR.videoSaveStoryboardScriptHint}
+              </p>
+            ) : null}
+            {/* A scene added (or re-briefed) at this gate has no frames yet, and
+                animate is blocked until every scene does. The storyboard job
+                skips scenes whose frames are current and finds the measured
+                narration current too, so this buys the missing frames ONLY. It
+                waits for the save, like animate: the job renders the STORED
+                scene list. */}
+            {!allStillsReady ? (
+              <>
+                <div className="btn-row" style={{ marginBottom: 8 }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={busy || storyboardDirty}
+                    onClick={() => void act(() => startVideoStoryboard(id))}
+                  >
+                    {busy ? STR.submitting : STR.videoRenderMissingFrames}
+                  </button>
+                </div>
+                <p className="hint" style={{ marginBottom: 12 }}>
+                  {STR.videoRenderMissingFramesHint}
+                </p>
+              </>
+            ) : null}
             <div className="btn-row">
               {animateArmed ? (
                 <>
                   <button
                     type="button"
                     className="btn btn-primary"
-                    disabled={busy || !allStillsReady}
+                    disabled={busy || !allStillsReady || storyboardDirty}
                     onClick={() =>
                       void act(async () => {
                         setAnimateArmed(false);
@@ -499,7 +679,7 @@ export default function VideoProjectPage({
                 <button
                   type="button"
                   className="btn btn-primary"
-                  disabled={busy || !allStillsReady}
+                  disabled={busy || !allStillsReady || storyboardDirty}
                   onClick={() => setAnimateArmed(true)}
                 >
                   {STR.videoAnimate}
@@ -537,6 +717,9 @@ export default function VideoProjectPage({
           }
           onNarrate={() => void act(() => narrateVideo(id))}
           onRestitch={() => void act(() => restitchVideo(id))}
+          onBackToStoryboard={() =>
+            void act(() => reopenVideoStoryboard(id).then(() => undefined))
+          }
         />
       ) : null}
 

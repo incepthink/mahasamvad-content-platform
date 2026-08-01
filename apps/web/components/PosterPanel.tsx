@@ -4,7 +4,7 @@
 // ("मजकूर सुधारा" cheap re-render vs "चित्र बदला" new background image).
 
 import { useState } from 'react';
-import { POSTER_HEADING_MAX_CHARS } from '@dgipr/schemas';
+import { POSTER_HEADING_MAX_CHARS, isYoutubeCategory } from '@dgipr/schemas';
 import type { GenerationDetail } from '@dgipr/schemas';
 import {
   posterDownloadUrl,
@@ -20,8 +20,10 @@ import { CrossFormatLinks } from './CrossFormatLinks';
 import { FeedbackBox } from './FeedbackBox';
 import {
   ARTICLE_RESERVED_ZONES,
+  YOUTUBE_RESERVED_ZONES,
   PosterAnnotator,
   markerInZones,
+  type AnnotatorMode,
 } from './PosterAnnotator';
 import { PosterImageFeedbackBox } from './PosterImageFeedbackBox';
 import { PosterVersionStrip } from './PosterVersionStrip';
@@ -50,29 +52,49 @@ export function PosterPanel({
     addMarker,
     removeMarker,
     setNote,
+    clearRegions,
+    submittedClearRegions,
+    addClearRegion,
+    removeClearRegion,
+    setClearNote,
     markSubmitted,
     dismissSubmitted,
   } = usePosterMarkers(detail);
   const [annotOpen, setAnnotOpen] = useState(false);
+  // Which gesture the overlay captures while the fold is open: red "change this"
+  // markers or blue "free this space" rectangles. Both sets travel in one round.
+  const [annotMode, setAnnotMode] = useState<AnnotatorMode>('mark');
 
-  if (!detail.posterUrl || !detail.copy) return null;
+  if (!detail.posterUrl) return null;
 
+  // This panel also serves the यूट्यूब थंबनेल lane, which shares almost all of it — one
+  // image, a download, a redo and pixel feedback. What it does NOT have is structured
+  // poster copy, a palette assignment or a heading lock, so those three affordances are
+  // hidden rather than shown inert.
+  const isThumbnail = isYoutubeCategory(detail.category);
   const showSpinner = busy || pending;
   // Poster text-edit + feedback (copy/scene) both re-render from the CACHED scene
   // image, so they only work when a scene was produced locally (ARTICLE_POSTER_MODE
   // = html). In n8n mode the poster is baked by the workflow with no separate scene
   // (sceneUrl null), so replace them with pixel-level feedback against the latest
-  // complete poster rather than pretending structured copy remains editable.
-  const canRevise = !!detail.sceneUrl;
+  // complete poster rather than pretending structured copy remains editable. A thumbnail
+  // never has either, so it always takes the pixel-feedback path.
+  const canRevise = !!detail.sceneUrl && !!detail.copy;
+  // Which chrome the marker warning is about. The article poster's lockup is top-LEFT and
+  // the thumbnail's is top-RIGHT, so this is not a cosmetic difference — the wrong constant
+  // warns about the wrong corner.
+  const reservedZones = isThumbnail
+    ? YOUTUBE_RESERVED_ZONES
+    : ARTICLE_RESERVED_ZONES;
 
   return (
     <section className="card">
-      <h2>{STR.posterTitle}</h2>
+      <h2>{isThumbnail ? STR.thumbnailTitle : STR.posterTitle}</h2>
       <div className="poster-layout">
         <div className="poster-frame">
           <img
             src={detail.posterUrl}
-            alt={STR.posterTitle}
+            alt={isThumbnail ? STR.thumbnailTitle : STR.posterTitle}
             className="poster-image"
             draggable={false}
           />
@@ -85,6 +107,11 @@ export function PosterPanel({
               disabled={showSpinner}
               submittedMarkers={submittedMarkers}
               onDismissSubmitted={dismissSubmitted}
+              mode={annotMode}
+              clearRegions={clearRegions}
+              onAddClear={addClearRegion}
+              onRemoveClear={removeClearRegion}
+              submittedClearRegions={submittedClearRegions}
             />
           ) : null}
           {showSpinner ? (
@@ -96,7 +123,7 @@ export function PosterPanel({
         <div>
           <div className="btn-row">
             <a className="btn btn-primary" href={posterDownloadUrl(detail.id)}>
-              {STR.downloadPoster}
+              {isThumbnail ? STR.downloadThumbnail : STR.downloadPoster}
             </a>
             {canRevise ? (
               <button
@@ -115,7 +142,9 @@ export function PosterPanel({
             />
           </div>
 
-          {canRevise && editing ? (
+          {/* `canRevise` already requires detail.copy; the explicit test is what narrows
+              it for the compiler now that a copy-less lane (the thumbnail) reaches here. */}
+          {canRevise && editing && detail.copy ? (
             <div style={{ marginTop: 18 }}>
               <CopyEditForm
                 copy={detail.copy}
@@ -207,42 +236,53 @@ export function PosterPanel({
                     >
                       {STR.posterRedesign}
                     </button>
-                    <button
-                      type="button"
-                      className="btn btn-small"
-                      disabled={showSpinner}
-                      onClick={async () => {
-                        setPending(true);
-                        try {
-                          await regeneratePoster(detail.id, { recolour: true });
-                          await onChanged();
-                        } finally {
-                          setPending(false);
-                        }
-                      }}
-                    >
-                      {STR.posterRecolour}
-                    </button>
+                    {/* A thumbnail has no assigned colour family to bar — the reference
+                        and the message decide its palette — so a "different colours" redo
+                        would be indistinguishable from the plain one. */}
+                    {isThumbnail ? null : (
+                      <button
+                        type="button"
+                        className="btn btn-small"
+                        disabled={showSpinner}
+                        onClick={async () => {
+                          setPending(true);
+                          try {
+                            await regeneratePoster(detail.id, {
+                              recolour: true,
+                            });
+                            await onChanged();
+                          } finally {
+                            setPending(false);
+                          }
+                        }}
+                      >
+                        {STR.posterRecolour}
+                      </button>
+                    )}
                   </div>
                   {/* The third redo, and the one that fixes a wrong heading: print exactly
                       this text. It lives here rather than on the create form alone because
                       the officer only discovers the automatic text is wrong once the poster
                       exists. */}
-                  <PosterHeadingEditor
-                    current={detail.posterHeading}
-                    disabled={showSpinner}
-                    onApply={async (heading) => {
-                      setPending(true);
-                      try {
-                        await regeneratePoster(detail.id, {
-                          posterHeading: heading,
-                        });
-                        await onChanged();
-                      } finally {
-                        setPending(false);
-                      }
-                    }}
-                  />
+                  {/* Article lane only: a thumbnail's text IS the officer's note, so
+                      there is no single automatic line to override. */}
+                  {isThumbnail ? null : (
+                    <PosterHeadingEditor
+                      current={detail.posterHeading}
+                      disabled={showSpinner}
+                      onApply={async (heading) => {
+                        setPending(true);
+                        try {
+                          await regeneratePoster(detail.id, {
+                            posterHeading: heading,
+                          });
+                          await onChanged();
+                        } finally {
+                          setPending(false);
+                        }
+                      }}
+                    />
+                  )}
                 </div>
               ) : null}
               <PosterImageFeedbackBox
@@ -252,9 +292,18 @@ export function PosterPanel({
                 onOpenChange={setAnnotOpen}
                 disabled={showSpinner}
                 showReservedWarning={markers.some((m) =>
-                  markerInZones(m.region, ARTICLE_RESERVED_ZONES),
+                  markerInZones(m.region, reservedZones),
                 )}
                 submittedMarkers={submittedMarkers}
+                mode={annotMode}
+                onModeChange={setAnnotMode}
+                clearRegions={clearRegions}
+                onClearNoteChange={setClearNote}
+                onRemoveClearRegion={removeClearRegion}
+                submittedClearRegions={submittedClearRegions}
+                showClearReservedWarning={clearRegions.some((c) =>
+                  markerInZones(c.region, reservedZones),
+                )}
                 onSubmit={async (payload) => {
                   setPending(true);
                   try {
@@ -272,7 +321,14 @@ export function PosterPanel({
           )}
         </div>
       </div>
-      <PosterVersionStrip detail={detail} />
+      {/* Switching version reuses `pending` — it means the same thing here as it does for a
+          synchronous copy edit: the poster on screen is about to be replaced. */}
+      <PosterVersionStrip
+        detail={detail}
+        onChanged={onChanged}
+        onRestoringChange={setPending}
+        busy={showSpinner}
+      />
     </section>
   );
 }

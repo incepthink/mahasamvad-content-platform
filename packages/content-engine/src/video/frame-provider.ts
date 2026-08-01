@@ -38,9 +38,12 @@ export type FrameRenderInput = Readonly<{
   // is what keeps a scene's two reviewed frames inside one continuous shot.
   sourceFramePng?: Buffer | undefined;
   // An earlier scene's approved frame, attached so THIS scene inherits the same
-  // visual world (country, people, colour treatment). Ignored when
-  // sourceFramePng is set: an edit already inherits everything from what it
-  // edits, and two attached images would make "edit this" ambiguous.
+  // visual world (country, people, colour treatment). On the gemini path it is
+  // ignored when sourceFramePng is set — an edit already inherits everything
+  // from what it edits, and two inline images plus "edit this" is ambiguous
+  // enough that the client refuses to send both. gpt-image's edits endpoint has
+  // an explicit first-image-is-the-canvas ordering, so the openai path can pass
+  // both; see below.
   referenceFramePng?: Buffer | undefined;
 }>;
 
@@ -104,15 +107,31 @@ export async function renderFrame(input: FrameRenderInput): Promise<Buffer> {
       return cropToAspect(png, input.aspect);
     }
     case 'openai': {
-      // referenceFramePng is deliberately DROPPED here: editImage/generateImage
-      // take a single image, so there is nowhere to attach a second one without
-      // changing what the call means. The gemini path is the default; a project
-      // rendered on this one simply gets the older behaviour, where the style
-      // paragraph alone carries cross-scene consistency.
+      // Three shapes, mirroring the gemini branch so a project rendered here is
+      // not quietly a lesser video:
+      //   - an END frame  -> edit the start frame (plus the world reference as
+      //     trailing context when there is one, which costs nothing and keeps
+      //     recurring people looking like themselves across the pair);
+      //   - a START frame with a world reference -> the edits endpoint with the
+      //     reference as the image, which is what WORLD_REFERENCE_RULE in the
+      //     prompt is already written for ("keep its visual world … create the
+      //     new location and action described here");
+      //   - a START frame with nothing to inherit -> a plain generation.
+      // The reference used to be dropped here because editImage took one
+      // buffer; it now takes several, so the style paragraph is no longer the
+      // only thing carrying cross-scene consistency on this provider.
       const size = openAiSizeFor(input.aspect);
-      const png = input.sourceFramePng
-        ? await editImage(input.sourceFramePng, input.prompt, { size })
-        : await generateImage(input.prompt, { size });
+      let png: Buffer;
+      if (input.sourceFramePng) {
+        const images = input.referenceFramePng
+          ? [input.sourceFramePng, input.referenceFramePng]
+          : [input.sourceFramePng];
+        png = await editImage(images, input.prompt, { size });
+      } else if (input.referenceFramePng) {
+        png = await editImage(input.referenceFramePng, input.prompt, { size });
+      } else {
+        png = await generateImage(input.prompt, { size });
+      }
       recordImageCost('article', imageQuality());
       return cropToAspect(png, input.aspect);
     }

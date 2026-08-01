@@ -25,6 +25,11 @@ export const MASTER_DIMENSIONS: Record<
   twitter: { width: 1280, height: 1600 },
   // Matches the gpt-image-2 edit size in article-poster-v1-api.
   article: { width: 1536, height: 1024 },
+  // The YouTube thumbnail frame (migration 0042). Uploaded references are normalised to it,
+  // so an operator can upload the 4000x2250 export they already have and the model is
+  // handed the aspect it must answer in. Keep in sync with YOUTUBE_THUMBNAIL_DIMENSIONS
+  // (build-youtube-thumbnail-prompt.ts) and youtube-chrome.ts.
+  youtube: { width: 1280, height: 720 },
 };
 
 export const ACCEPTED_UPLOAD_MIME_TYPES = [

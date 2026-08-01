@@ -57,6 +57,7 @@ import { useDloIntake } from '../lib/useDloIntake';
 import { useDloReviewAutosave } from '../lib/useDloReviewAutosave';
 import { useGeneration } from '../lib/useGeneration';
 import { useTasks } from '../lib/TasksProvider';
+import { AiInstructionsField } from './AiInstructionsField';
 import { DloCategoryPicker } from './DloCategoryPicker';
 import { DloSourceReview } from './DloSourceReview';
 import {
@@ -355,6 +356,10 @@ export default function DloWorkspace({ intakeId }: { intakeId: string }) {
   // Tier 1 of the article's style-reference hierarchy: a published article the officer wants
   // this one shaped like. Style only — never a factual source (see StyleReferenceField).
   const [styleReference, setStyleReference] = useState('');
+  // The officer's free-text direction for this article (generations.instructions, 0041).
+  // Seeded from the saved review state, which is also how anything typed on the intake FORM
+  // reaches this step — the create route writes it there.
+  const [instructions, setInstructions] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [combinedText, setCombinedText] = useState('');
@@ -434,6 +439,7 @@ export default function DloWorkspace({ intakeId }: { intakeId: string }) {
     setEdits({ ...saved.edits });
     setExcluded(new Set(saved.excluded));
     if (saved.styleReference) setStyleReference(saved.styleReference);
+    if (saved.instructions) setInstructions(saved.instructions);
     if (saved.designations) {
       const currentResolver = saved.designations.resolverVersion === 2;
       restoredFromSave.current.designations = currentResolver;
@@ -530,6 +536,7 @@ export default function DloWorkspace({ intakeId }: { intakeId: string }) {
       edits,
       excluded,
       styleReference,
+      instructions,
       // The key-point summary is no longer produced, so nothing is written here. A blob saved
       // before that change keeps its `pointers` field untouched — the PATCH is per field.
       pointers: undefined,
@@ -788,6 +795,9 @@ export default function DloWorkspace({ intakeId }: { intakeId: string }) {
         ...(styleReference.trim()
           ? { styleReference: styleReference.trim() }
           : {}),
+        // Same treatment: an empty string would be stored on the run as a direction that
+        // isn't one, and every later reader would have to re-derive "none" from it.
+        ...(instructions.trim() ? { instructions: instructions.trim() } : {}),
       });
       setGenerationId(id);
       setArticle(null);
@@ -1083,6 +1093,13 @@ export default function DloWorkspace({ intakeId }: { intakeId: string }) {
               style={{ marginTop: 10 }}
             />
           </section>
+
+          {/* Both carry over from the intake form and stay editable here — this is the last
+              screen before anything is paid for. */}
+          <AiInstructionsField
+            value={instructions}
+            onChange={setInstructions}
+          />
 
           <StyleReferenceField
             value={styleReference}

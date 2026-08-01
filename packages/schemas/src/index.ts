@@ -23,6 +23,11 @@ export * from './designations.js';
 // Generation API request/response schemas (apps/api + apps/web).
 export * from './api.js';
 
+// YouTube links as an intake source (recognising/canonicalising a link + the oEmbed probe
+// shapes). Exported BEFORE dlo.js and transcription.js, both of which carry these sources on
+// their create requests, so each name has exactly one definition in this barrel.
+export * from './youtube.js';
+
 // DLO intake API schemas (file transcription/extraction → reviewed note).
 export * from './dlo.js';
 

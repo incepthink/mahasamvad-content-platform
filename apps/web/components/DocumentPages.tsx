@@ -22,6 +22,7 @@ import { useState } from 'react';
 import type { PdfTextSourceValue } from '@dgipr/schemas';
 import { type PageLike, defaultPageKey } from '../lib/documentSelection';
 import { STR } from '../lib/strings';
+import { ExtractedText, hasTable } from './ExtractedText';
 import { PageRangeSelector } from './PageRangeSelector';
 
 function marathiNumber(value: number): string {
@@ -74,6 +75,12 @@ export function DocumentPages({
   onReextract?: (() => void) | undefined;
 }) {
   const [openKey, setOpenKey] = useState<string | null>(null);
+  // Which open page is being EDITED rather than read. A page with a table opens rendered,
+  // because a table is what an officer can actually check a figure against; the textarea is
+  // one click away and is still the only thing that changes the text. A page with no table
+  // has nothing to render that the textarea does not already show, so it opens straight
+  // into the editor exactly as before.
+  const [editingKey, setEditingKey] = useState<string | null>(null);
   const [confirmingReextract, setConfirmingReextract] = useState(false);
 
   // One row per page, carrying its text when there is text to carry. Built as a single
@@ -200,6 +207,8 @@ export function DocumentPages({
               const key = keyOf(number);
               const text = page ? (edits?.[key] ?? page.text) : null;
               const isOpen = openKey === key;
+              const tabular = text !== null && hasTable(text);
+              const isEditing = !tabular || editingKey === key;
               return (
                 <li key={key} className="page-row">
                   <label className="page-row-head">
@@ -229,6 +238,11 @@ export function DocumentPages({
                         {marathiNumber(text.length)} {STR.docChars}
                       </span>
                     ) : null}
+                    {/* A page whose columns matter says so before it is opened — that is
+                        the page most worth checking. */}
+                    {tabular ? (
+                      <span className="chip chip-queued">{STR.docHasTable}</span>
+                    ) : null}
                     {text !== null && onEdit ? (
                       <button
                         type="button"
@@ -236,6 +250,7 @@ export function DocumentPages({
                         onClick={(event) => {
                           event.preventDefault();
                           setOpenKey(isOpen ? null : key);
+                          setEditingKey(null);
                         }}
                       >
                         {isOpen ? STR.docEditClose : STR.docEdit}
@@ -243,13 +258,42 @@ export function DocumentPages({
                     ) : null}
                   </label>
                   {isOpen && text !== null && onEdit ? (
-                    <textarea
-                      className="note-input"
-                      value={text}
-                      disabled={busy}
-                      onChange={(event) => onEdit(key, event.target.value)}
-                      style={{ marginTop: 10, minHeight: 220 }}
-                    />
+                    isEditing ? (
+                      <>
+                        <textarea
+                          className="note-input"
+                          value={text}
+                          disabled={busy}
+                          onChange={(event) => onEdit(key, event.target.value)}
+                          style={{ marginTop: 10, minHeight: 220 }}
+                        />
+                        {tabular ? (
+                          <div className="btn-row" style={{ marginTop: 8 }}>
+                            <button
+                              type="button"
+                              className="btn btn-small"
+                              onClick={() => setEditingKey(null)}
+                            >
+                              {STR.docShowTable}
+                            </button>
+                          </div>
+                        ) : null}
+                      </>
+                    ) : (
+                      <>
+                        <ExtractedText text={text} />
+                        <div className="btn-row" style={{ marginTop: 8 }}>
+                          <button
+                            type="button"
+                            className="btn btn-small"
+                            disabled={busy}
+                            onClick={() => setEditingKey(key)}
+                          >
+                            {STR.docEditText}
+                          </button>
+                        </div>
+                      </>
+                    )
                   ) : null}
                 </li>
               );

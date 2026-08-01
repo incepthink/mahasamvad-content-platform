@@ -1,14 +1,16 @@
-// Offline preview of the numbered feedback markers WITHOUT any model call — for
-// tuning the stroke/badge constants in src/feedback-marker.ts for free.
+// Offline preview of the feedback annotations WITHOUT any model call — for
+// tuning the stroke/badge/fill constants in src/feedback-marker.ts for free.
 //
 //   pnpm --filter @dgipr/poster-renderer poster:preview:markers [poster.png]
 //
-// With a PNG argument (e.g. a real render) the markers are stamped onto it and
-// written as <input>.markers-preview.png next to it. Without one, two stand-in
-// canvases at the real poster sizes (article 1536x1024, twitter 1280x1600) are
-// used and the results go to content-engine/data/output/ (gitignored). Sample
-// regions cover the cases that matter: mid-canvas box, edge-clamped box, and a
-// small click-default box.
+// With a PNG argument (e.g. a real render) the annotations are stamped onto it
+// and written as <input>.markers-preview.png next to it. Without one, two
+// stand-in canvases at the real poster sizes (article 1536x1024, twitter
+// 1280x1600) are used and the results go to content-engine/data/output/
+// (gitignored). Sample regions cover the cases that matter: mid-canvas box,
+// edge-clamped box, and a small click-default box — plus the two BLUE
+// clear-space boxes, one of which deliberately overlaps a red marker so the
+// draw order (blue last) can be checked by eye.
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
@@ -28,6 +30,11 @@ const SAMPLE_REGIONS: readonly NormalizedRegion[] = [
   { x: 0.55, y: 0.62, width: 0.16, height: 0.16 }, // click-default box
 ];
 
+const SAMPLE_CLEAR_REGIONS: readonly NormalizedRegion[] = [
+  { x: 0.06, y: 0.06, width: 0.24, height: 0.18 }, // A — a corner logo slot
+  { x: 0.5, y: 0.55, width: 0.3, height: 0.28 }, // B — overlaps marker 3
+];
+
 async function placeholderPoster(width: number, height: number): Promise<Buffer> {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
     <rect width="${width}" height="${height}" fill="#bcd9ef"/>
@@ -42,7 +49,14 @@ async function main(): Promise<void> {
     const full = resolve(inputPath);
     const poster = await readFile(full);
     const outPath = full.replace(/\.png$/i, '') + '.markers-preview.png';
-    await writeFile(outPath, await annotateFeedbackRegions(poster, SAMPLE_REGIONS));
+    await writeFile(
+      outPath,
+      await annotateFeedbackRegions(
+        poster,
+        SAMPLE_REGIONS,
+        SAMPLE_CLEAR_REGIONS,
+      ),
+    );
     console.log(`Wrote ${outPath}`);
     return;
   }
@@ -54,7 +68,14 @@ async function main(): Promise<void> {
   ] as const) {
     const poster = await placeholderPoster(width, height);
     const outPath = join(DEFAULT_OUT_DIR, `feedback-markers-${name}.png`);
-    await writeFile(outPath, await annotateFeedbackRegions(poster, SAMPLE_REGIONS));
+    await writeFile(
+      outPath,
+      await annotateFeedbackRegions(
+        poster,
+        SAMPLE_REGIONS,
+        SAMPLE_CLEAR_REGIONS,
+      ),
+    );
     console.log(`Wrote ${outPath}`);
   }
 }

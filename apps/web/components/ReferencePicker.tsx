@@ -10,6 +10,7 @@
 import { useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, Images, Sparkles } from 'lucide-react';
 import type {
+  ReferenceCategory,
   ReferenceImage,
   ReferenceType,
   TemplateBrand,
@@ -29,7 +30,10 @@ import {
 } from './ReferenceSearchBar';
 import { STR } from '../lib/strings';
 
-type PickerCategory = 'twitter' | 'article';
+// The three master libraries. 'twitter' is the only one with several types, so it is also
+// the only one that offers a whole-TYPE pin (the API rejects a type pin on any other lane);
+// 'article' and 'youtube' render as one flat grid of images.
+type PickerCategory = ReferenceCategory;
 
 export type ReferenceSelection =
   | { kind: 'image'; id: string }

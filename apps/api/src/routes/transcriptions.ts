@@ -21,11 +21,14 @@ import {
 import {
   audioMimeForFileName,
   isAudioFileName,
+  parseYouTubeVideoId,
   TRANSCRIPTION_MAX_FILES,
   UPLOAD_FILE_MAX_BYTES,
   UPLOAD_FILE_MAX_MB,
+  YouTubeSourcesSchema,
   type TranscriptionDetail,
   type TranscriptionSummary,
+  type YouTubeVideo,
 } from '@dgipr/schemas';
 import {
   isTranscriptionJobRunning,
@@ -86,6 +89,15 @@ function toDetail(
       ...(entry.chars !== undefined ? { chars: entry.chars } : {}),
       ...(entry.error !== undefined ? { error: entry.error } : {}),
       ...(entry.cached !== undefined ? { cached: entry.cached } : {}),
+      // A YouTube source's link and probe details, so the card can name and link the video
+      // instead of showing a bare URL. Cheap enough for the progress poll.
+      ...(entry.sourceUrl !== undefined ? { sourceUrl: entry.sourceUrl } : {}),
+      ...(entry.sourceAuthor !== undefined
+        ? { sourceAuthor: entry.sourceAuthor }
+        : {}),
+      ...(entry.sourceThumbnailUrl !== undefined
+        ? { sourceThumbnailUrl: entry.sourceThumbnailUrl }
+        : {}),
       ...(includeText && entry.text !== undefined ? { text: entry.text } : {}),
     })),
     combinedText: includeText ? row.combinedText : null,
@@ -100,15 +112,39 @@ export function registerTranscriptionRoutes(
 ): void {
   app.post('/transcriptions', async (request, reply) => {
     const uploads: Array<{ name: string; data: Buffer }> = [];
+    // Pasted YouTube links, already probed by the form. Nothing is downloaded here or ever:
+    // the transcriber fetches the media itself (@dgipr/schemas' youtube.ts).
+    let youtube: YouTubeVideo[] = [];
 
     const parts = request.parts({
       limits: { fileSize: MAX_FILE_BYTES, files: TRANSCRIPTION_MAX_FILES },
     });
     try {
       for await (const part of parts) {
-        // This request carries recordings and nothing else; any stray field is ignored
-        // rather than rejected, so adding one later cannot break an older client.
-        if (part.type === 'field') continue;
+        if (part.type === 'field') {
+          // Any other field is ignored rather than rejected, so adding one later cannot
+          // break an older client.
+          if (part.fieldname !== 'youtube') continue;
+          const value = typeof part.value === 'string' ? part.value : '';
+          if (value.trim().length === 0) continue;
+          try {
+            youtube = YouTubeSourcesSchema.parse(JSON.parse(value));
+          } catch {
+            return reply.code(400).send({
+              error: { message: 'यूट्युब लिंकची माहिती वाचता आली नाही.' },
+            });
+          }
+          // Re-derived from the URL rather than trusted, so a hand-crafted payload cannot
+          // put an arbitrary URL in front of the transcriber.
+          for (const video of youtube) {
+            if (parseYouTubeVideoId(video.url) === null) {
+              return reply
+                .code(400)
+                .send({ error: { message: 'यूट्युब लिंक वैध नाही.' } });
+            }
+          }
+          continue;
+        }
         const name = part.filename ?? '';
         if (!isAudioFileName(name)) {
           return reply.code(400).send({
@@ -138,9 +174,9 @@ export function registerTranscriptionRoutes(
       throw error;
     }
 
-    if (uploads.length === 0) {
+    if (uploads.length === 0 && youtube.length === 0) {
       return reply.code(400).send({
-        error: { message: 'किमान एक ध्वनिमुद्रण जोडा.' },
+        error: { message: 'किमान एक ध्वनिमुद्रण जोडा किंवा यूट्युब लिंक द्या.' },
       });
     }
 
@@ -148,7 +184,11 @@ export function registerTranscriptionRoutes(
     // private bucket, then attach the per-file entries and start the job — the job reads
     // everything back off the row, so a restart between the two loses nothing silently.
     const row = await insertTranscription(client, {
-      title: transcriptionTitle(uploads.map((upload) => upload.name)),
+      title: transcriptionTitle([
+        ...uploads.map((upload) => upload.name),
+        // A video's probed title where there is one; the link itself otherwise.
+        ...youtube.map((video) => video.title ?? video.url),
+      ]),
       files: [],
     });
     const entries: TranscriptionFileEntry[] = [];
@@ -167,6 +207,20 @@ export function registerTranscriptionRoutes(
         name: upload.name,
         storagePath,
         status: 'pending',
+      });
+    }
+
+    // Then the links, beside the recordings — the job transcribes both in one pass. No
+    // upload and no archive: there are no bytes on our side at any point, only a URL.
+    for (const video of youtube) {
+      entries.push({
+        name: video.title ?? video.url,
+        status: 'pending',
+        sourceUrl: video.url,
+        ...(video.author !== undefined ? { sourceAuthor: video.author } : {}),
+        ...(video.thumbnailUrl !== undefined
+          ? { sourceThumbnailUrl: video.thumbnailUrl }
+          : {}),
       });
     }
 

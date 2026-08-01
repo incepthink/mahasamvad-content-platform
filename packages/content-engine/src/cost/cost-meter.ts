@@ -10,6 +10,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import {
   estimateGeminiImageCostUsd,
   estimateImageCostUsd,
+  estimateSttCostUsd,
   estimateTtsCostUsd,
   estimateVideoCostUsd,
   priceText,
@@ -32,6 +33,8 @@ export type CostAccumulator = {
   videoCostUsd: number;
   ttsCharacters: number;
   ttsCostUsd: number;
+  sttSeconds: number;
+  sttCostUsd: number;
 };
 
 const storage = new AsyncLocalStorage<CostAccumulator>();
@@ -49,6 +52,8 @@ export function createCostAccumulator(): CostAccumulator {
     videoCostUsd: 0,
     ttsCharacters: 0,
     ttsCostUsd: 0,
+    sttSeconds: 0,
+    sttCostUsd: 0,
   };
 }
 
@@ -64,7 +69,11 @@ export function runInCostScope<T>(
 
 export function totalCostUsd(acc: CostAccumulator): number {
   return (
-    acc.textCostUsd + acc.imageCostUsd + acc.videoCostUsd + acc.ttsCostUsd
+    acc.textCostUsd +
+    acc.imageCostUsd +
+    acc.videoCostUsd +
+    acc.ttsCostUsd +
+    acc.sttCostUsd
   );
 }
 
@@ -145,4 +154,15 @@ export function recordTtsCost(characters: number): void {
   if (!acc) return;
   acc.ttsCharacters += characters;
   acc.ttsCostUsd += estimateTtsCostUsd(characters);
+}
+
+// Record one transcribed recording: billed per second of AUDIO, measured off
+// the provider's word timestamps rather than the transcript's length (ElevenLabs
+// returns no usage object; the recording's spoken length IS the usage). The
+// Sarvam batch path does not call this — see the note in pricing.ts.
+export function recordSttCost(seconds: number): void {
+  const acc = storage.getStore();
+  if (!acc) return;
+  acc.sttSeconds += seconds;
+  acc.sttCostUsd += estimateSttCostUsd(seconds);
 }

@@ -54,6 +54,11 @@ import {
 
 // Bumped whenever the editorial specification below changes in substance. Persisted per run.
 //
+// v10 (2026-08-01): the officer's own free-text instructions for this run
+// (generations.instructions, migration 0041) are rendered as the LAST block of the user
+// message, carrying the two rules that make the field safe — they may not supply facts, and
+// they lose to the supplied information on a conflict. Absent ⇒ byte-for-byte v9.
+//
 // v9 (2026-07-29): NEWS only — a minister's meeting/visit/review is written around the
 // minister's strongest public-facing, source-supported statement, decision, direction,
 // assurance, announcement or next step. SOURCE INFORMATION is explicitly a factual pool, not a
@@ -103,7 +108,7 @@ import {
 // exemplars use it and banning it drove the model into a flat agentless register; the invented
 // "zero to two highlight bullets" rule is gone; and the ten-rung priority ladder that re-sorted
 // the officer's notes is replaced by "lead on the strongest outcome, then follow the source".
-export const SIMPLE_ARTICLE_PROMPT_VERSION = 'simple-v9';
+export const SIMPLE_ARTICLE_PROMPT_VERSION = 'simple-v10';
 
 // Marathi label for the category, matching CATEGORY_LABEL in category-prompt.ts. The prompt is
 // English but the article is Marathi, and naming the category in Marathi is what keeps the voice
@@ -180,6 +185,12 @@ export type SimpleArticleInputs = Readonly<{
   styleReferences?: readonly SimpleArticleReference[] | undefined;
   // The officer's optional heading / angle. Not an independent factual source.
   editorialDirection?: string | undefined;
+  // The officer's free-text instructions for THIS article (generations.instructions, 0041):
+  // emphasis, ordering, tone, what to keep short. Rendered LAST, because a late block is what
+  // a model weights most and this is the one input written for this run alone — but rendered
+  // as an instruction with the never-a-fact rule attached, so typing a fact here cannot
+  // publish it.
+  officerInstructions?: string | undefined;
   // Officer-approved supporting information. All three are things a person confirmed inside the
   // product, which is what makes them admissible beside the note. Retrieval output NEVER
   // appears here — a historical article is a style model, not a fact.
@@ -223,6 +234,10 @@ export function buildSimpleArticleSystemPrompt(): string {
     'the strongest publication-ready article possible from the supplied information, at the',
     'length that best serves it. Use the information fully when it improves the article, but',
     'do not pad, repeat, stretch, or add unsupported information.',
+    '',
+    'SOURCE INFORMATION may contain Markdown tables (pipe-delimited rows). Read them as tables:',
+    'each figure belongs to its own column heading and row label. Never read a row as a',
+    'sentence, and never attach a figure to the wrong heading.',
     '',
     'Where the NAME DICTIONARY gives a spelling, use it exactly. Where a title is given after a',
     "name, use it before that person's full name on first mention and before their bare surname",
@@ -332,6 +347,32 @@ function nameBlock(
   return ['### NAME DICTIONARY', '', 'Verified spellings.', '', ...lines, ''];
 }
 
+// The officer's own instructions for this run. Two rules travel with them, and both are the
+// point rather than boilerplate: they may not add facts (otherwise this field becomes a second,
+// unreviewed note that bypasses every factual guard), and they lose to the factual rules on a
+// conflict (an officer asking for something the source does not support must not get it
+// invented). Everything else — emphasis, order, tone, length, what to leave short — is theirs.
+//
+// Exported so minimal-article-prompt.ts renders the SAME block: ARTICLE_PROMPT_VARIANT changes
+// how densely the specification is worded, never what the officer is allowed to ask for.
+export function officerInstructionsBlock(
+  instructions: string | undefined,
+): string[] {
+  const text = clean(instructions);
+  if (!text) return [];
+  return [
+    '### OFFICER INSTRUCTIONS FOR THIS ARTICLE',
+    '',
+    text,
+    '',
+    'Follow these instructions when writing. They may direct emphasis, order, tone, length and',
+    'what to treat briefly. They are NOT a factual source: take no name, date, amount,',
+    'designation, scheme name or location from them, and where they ask for something the',
+    'supplied information does not support, follow the information instead.',
+    '',
+  ];
+}
+
 export function buildSimpleArticleUserPrompt(
   inputs: SimpleArticleInputs,
 ): string {
@@ -407,6 +448,10 @@ export function buildSimpleArticleUserPrompt(
       '',
     );
   }
+
+  // Last, immediately before the ask: this is the one block written for this run alone, and a
+  // late block is what the model weights most.
+  parts.push(...officerInstructionsBlock(inputs.officerInstructions));
 
   parts.push('Write the article now.');
   return parts.join('\n');
@@ -853,6 +898,68 @@ if (
   check(
     'a style reference alone does not open ADDITIONAL VERIFIED INFORMATION',
     !refOnly.includes('ADDITIONAL VERIFIED INFORMATION'),
+  );
+
+  console.log('\n=== the officer instructions for this run ===');
+  const instruction =
+    'पहिल्या परिच्छेदात निधीचा आकडा घ्या; समितीबद्दल थोडक्यात लिहा.';
+  const withInstructions = buildSimpleArticleUserPrompt({
+    category: 'news',
+    sourceInformation: baseNote,
+    officerInstructions: instruction,
+  });
+  check(
+    'the instructions are rendered verbatim under their own heading',
+    withInstructions.includes('### OFFICER INSTRUCTIONS FOR THIS ARTICLE') &&
+      withInstructions.includes(instruction),
+  );
+  check(
+    'they are stated NOT to be a factual source',
+    withInstructions.includes('They are NOT a factual source') &&
+      withInstructions.includes(
+        'take no name, date, amount,\ndesignation, scheme name or location from them',
+      ),
+  );
+  check(
+    'the supplied information wins on a conflict',
+    withInstructions.includes(
+      'the\nsupplied information does not support, follow the information instead',
+    ),
+  );
+  // Last position is what the model weights most, and it is the one block written for this
+  // run alone — so the ask must be the only thing after it.
+  check(
+    'they are the last block before "Write the article now."',
+    withInstructions
+      .trimEnd()
+      .endsWith('follow the information instead.\n\nWrite the article now.'),
+  );
+  check(
+    'an absent instruction adds no heading at all',
+    !buildSimpleArticleUserPrompt({
+      category: 'news',
+      sourceInformation: baseNote,
+    }).includes('OFFICER INSTRUCTIONS'),
+  );
+  check(
+    'a whitespace-only instruction is treated as absent',
+    !buildSimpleArticleUserPrompt({
+      category: 'news',
+      sourceInformation: baseNote,
+      officerInstructions: '   \n  ',
+    }).includes('OFFICER INSTRUCTIONS'),
+  );
+  check(
+    'omitting it leaves the prompt byte-for-byte as it was',
+    buildSimpleArticleUserPrompt({
+      category: 'news',
+      sourceInformation: baseNote,
+      officerInstructions: '',
+    }) ===
+      buildSimpleArticleUserPrompt({
+        category: 'news',
+        sourceInformation: baseNote,
+      }),
   );
 
   console.log('\n=== message shape ===');

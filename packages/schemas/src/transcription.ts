@@ -34,6 +34,12 @@ export const TranscriptionFileSchema = z.object({
   // This transcript was reused from the content-addressed cache (migration 0031) rather than
   // transcribed afresh — worth surfacing, since it is the difference between minutes and none.
   cached: z.boolean().optional(),
+  // A pasted YouTube link, and what the probe knew about it. Present instead of an archived
+  // upload — the transcriber fetches the media itself, so nothing was ever downloaded. Its
+  // presence is what makes the result card render a video chip rather than a file name.
+  sourceUrl: z.string().optional(),
+  sourceAuthor: z.string().optional(),
+  sourceThumbnailUrl: z.string().optional(),
 });
 export type TranscriptionFile = z.infer<typeof TranscriptionFileSchema>;
 

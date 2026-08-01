@@ -48,6 +48,8 @@ import {
 import { REF_CATEGORY_LABELS, STR } from '../../lib/strings';
 
 const ACCEPTED_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+// A card opens on one row and grows by this many rows per press.
+const ROWS_PER_STEP = 2;
 const DATE_FORMAT = new Intl.DateTimeFormat('mr-IN', {
   day: 'numeric',
   month: 'long',
@@ -226,6 +228,37 @@ function LayoutBadge({
   );
 }
 
+// How many tiles the grid currently fits on one row. It cannot be a constant: the grid
+// is `repeat(auto-fill, minmax(200px, 1fr))`, so the count follows the viewport — and it
+// is read off the RESOLVED track list rather than computed from the card's width, which
+// would mean writing the gap and the minimum down a second time. `auto-fill` (unlike
+// `auto-fit`) keeps its empty tracks, so this reports the true column count even while
+// the card is showing a single tile — which is what lets one row stay one row.
+function useGridColumns(ref: React.RefObject<HTMLDivElement | null>): number {
+  // Assumed until measured; the correction lands in the effect below on first paint.
+  const [columns, setColumns] = useState(4);
+
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+
+    const measure = () => {
+      const tracks = window
+        .getComputedStyle(element)
+        .gridTemplateColumns.split(' ')
+        .filter((track) => track.length > 0);
+      if (tracks.length > 0) setColumns(tracks.length);
+    };
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [ref]);
+
+  return columns;
+}
+
 // One image tile: preview + date + layout reading + enable/disable/delete actions.
 function ImageTile({
   image,
@@ -322,12 +355,23 @@ function TypeCard({
   onChanged: () => Promise<void>;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
+  const columns = useGridColumns(gridRef);
+  const [rows, setRows] = useState(1);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [labelDraft, setLabelDraft] = useState(type.labelMr);
   const [descDraft, setDescDraft] = useState(type.description);
   const [brandDraft, setBrandDraft] = useState(type.brand);
+
+  // A new result set is a new list, so it opens folded again — otherwise a card left
+  // expanded on a previous query keeps showing rows the officer did not ask to see.
+  // Deliberately NOT keyed on the image count: an upload or a toggle must not collapse
+  // the rows the operator is working in.
+  useEffect(() => {
+    setRows(1);
+  }, [query, searching]);
 
   // Reports whether the action succeeded, so a caller holding an open editor
   // (the subject-line one) keeps the operator's draft on screen after a failure
@@ -383,6 +427,8 @@ function TypeCard({
       );
   const shown = [...sorted, ...unsearchable];
   const enabledCount = images.filter((image) => image.isActive).length;
+  const visible = shown.slice(0, columns * rows);
+  const hidden = shown.length - visible.length;
 
   return (
     <div className="card ref-type-card">
@@ -517,8 +563,8 @@ function TypeCard({
 
       {shown.length === 0 ? <p className="hint">{STR.refEmpty}</p> : null}
       {shown.length > 0 ? (
-        <div className="ref-thumb-grid">
-          {shown.map((image) => (
+        <div className="ref-thumb-grid" ref={gridRef}>
+          {visible.map((image) => (
             <ImageTile
               key={image.id}
               image={image}
@@ -551,6 +597,32 @@ function TypeCard({
               }
             />
           ))}
+        </div>
+      ) : null}
+
+      {hidden > 0 || rows > 1 ? (
+        <div className="ref-thumb-more">
+          {hidden > 0 ? (
+            <button
+              type="button"
+              className="btn btn-small"
+              onClick={() => setRows((current) => current + ROWS_PER_STEP)}
+            >
+              {STR.refShowMore}
+              <span className="ref-thumb-more-count">
+                {STR.refHiddenCount(hidden)}
+              </span>
+            </button>
+          ) : null}
+          {rows > 1 ? (
+            <button
+              type="button"
+              className="btn btn-small"
+              onClick={() => setRows(1)}
+            >
+              {STR.refShowLess}
+            </button>
+          ) : null}
         </div>
       ) : null}
 
@@ -752,7 +824,10 @@ export default function ReferencesPage() {
   );
 
   const loaded = types !== null && images !== null;
-  const categories: ReferenceCategory[] = ['twitter', 'article'];
+  // Section order on the page. 'youtube' (migration 0042) holds ONE builtin type, so it
+  // gets no "new type" card — the rotation is the images inside it, chosen by matching the
+  // officer's information against each one.
+  const categories: ReferenceCategory[] = ['twitter', 'article', 'youtube'];
 
   return (
     <main className="page">

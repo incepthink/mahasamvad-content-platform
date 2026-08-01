@@ -12,6 +12,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createSarvamClient } from './sarvam-client.js';
+import type { AudioFileInput, AudioTranscription } from './audio-input.js';
 
 // Overall ceiling on one batch job (upload → transcribe → download). Long
 // recordings transcribe in minutes, not seconds; default 20 min.
@@ -21,16 +22,11 @@ const STT_TIMEOUT_MS = Number.parseInt(
 );
 const STT_POLL_SECONDS = 10;
 
-export type AudioFileInput = Readonly<{
-  // Display name (may be Devanagari); results come back in input order, so the
-  // name is only for error messages.
-  name: string;
-  data: Buffer;
-}>;
-
-export type AudioTranscription =
-  | Readonly<{ text: string }>
-  | Readonly<{ error: string }>;
+// The input/result shapes moved to audio-input.ts when a second kind of source (a URL the
+// provider fetches for itself) arrived; they are re-exported here so the many existing
+// importers — and the package barrel — did not have to move with them. This client takes
+// AudioFileInput only, by nature: its batch API uploads bytes.
+export type { AudioFileInput, AudioTranscription } from './audio-input.js';
 
 // Presigned-upload file names must be storage-safe; the index prefix keeps them
 // unique (two uploads may share a display name) and maps results back.

@@ -22,10 +22,16 @@
 // detection for the detail route.
 
 import {
+  createCostAccumulator,
   extractDocxText,
   extractPdfPagesDetailed,
   probePdf,
-  transcribeAudioFiles,
+  runInCostScope,
+  sttProviderName,
+  totalCostUsd,
+  isAudioUrlInput,
+  transcribeAudio,
+  type AudioInput,
 } from '@dgipr/content-engine';
 import {
   DLO_UPLOADS_BUCKET,
@@ -39,6 +45,8 @@ import {
   type SupabaseClient,
 } from '@dgipr/database';
 import { combineIntakeSources, type IntakeSource } from '@dgipr/schemas';
+
+import { transcriptCacheMode } from './transcript-cache-mode.js';
 
 const running = new Set<string>();
 
@@ -214,32 +222,63 @@ export function startDloIntakeJob(client: SupabaseClient, id: string): void {
       ...entry,
     }));
 
-    // --- transcribe: all audio files in ONE Sarvam batch job. A job-level
-    // failure (auth/timeout) marks every audio file failed instead of sinking
-    // the documents too.
+    // --- transcribe: every recording through the configured STT provider
+    // (STT_PROVIDER; ElevenLabs by default, Sarvam's batch job as the rollback).
+    // A job-level failure (auth/timeout) marks every audio file failed instead
+    // of sinking the documents too.
+    // Uploaded recordings AND pasted YouTube links, in one pass — they are the same job
+    // to the STT seam, which takes either bytes we hold or a URL the provider fetches for
+    // itself. The two differ in exactly two places below: a link has nothing to download,
+    // and nothing to hash, so audio_transcript_cache (keyed on the bytes) does not apply
+    // to it and its position is always a miss.
     const audioIndexes = entries.flatMap((entry, index) =>
-      entry.kind === 'audio' ? [index] : [],
+      entry.kind === 'audio' || entry.kind === 'youtube' ? [index] : [],
     );
     if (audioIndexes.length > 0) {
       try {
-        // Download every recording (needed for the batch anyway) and hash its bytes.
-        // The hash is a cache key: an MP3 seen before — in this or any past intake —
-        // already has a transcript, so it skips the slow, paid Sarvam job entirely.
-        const inputs = await Promise.all(
-          audioIndexes.map(async (index) => ({
-            name: entries[index]!.name,
-            data: await downloadEntry(client, entries[index]!),
-          })),
+        // Download every uploaded recording (needed for the batch anyway) and hash its
+        // bytes. The hash is a cache key, but it is only CONSULTED under
+        // TRANSCRIPT_CACHE_MODE=read; by default every recording is transcribed
+        // afresh and the hash serves the write-back alone.
+        const inputs: AudioInput[] = await Promise.all(
+          audioIndexes.map(async (index) => {
+            const entry = entries[index]!;
+            if (entry.kind === 'youtube') {
+              // Never downloaded here or anywhere: the transcriber fetches it. A 'youtube'
+              // entry always carries a sourceUrl (the create route sets both together), so
+              // the fallback is unreachable defence rather than a real case.
+              return { name: entry.name, sourceUrl: entry.sourceUrl ?? '' };
+            }
+            return {
+              name: entry.name,
+              data: await downloadEntry(client, entry),
+            };
+          }),
         );
-        const hashes = inputs.map((input) => hashAudioContent(input.data));
+        // A URL source has no bytes, so it has no cache key. The empty string is never
+        // looked up as one — the loop below skips those positions outright.
+        const hashes = inputs.map((input) =>
+          isAudioUrlInput(input) ? '' : hashAudioContent(input.data),
+        );
 
-        // A cache read failure (e.g. an un-applied 0031) must not sink transcription:
-        // treat it as an empty cache and transcribe everything, exactly as before.
+        // Off by default: nothing is reused, so every position below is a miss. Under
+        // TRANSCRIPT_CACHE_MODE=read a cache read failure (e.g. an un-applied 0031)
+        // must not sink transcription — treat it as an empty cache and transcribe all.
         let cached: Map<string, string>;
-        try {
-          cached = await getCachedTranscripts(client, hashes);
-        } catch (error) {
-          console.error(`[dlo-intake ${id}] transcript cache read failed:`, error);
+        if (transcriptCacheMode() === 'read') {
+          try {
+            cached = await getCachedTranscripts(
+              client,
+              hashes.filter((hash) => hash !== ''),
+            );
+          } catch (error) {
+            console.error(
+              `[dlo-intake ${id}] transcript cache read failed:`,
+              error,
+            );
+            cached = new Map();
+          }
+        } else {
           cached = new Map();
         }
 
@@ -247,7 +286,8 @@ export function startDloIntakeJob(client: SupabaseClient, id: string): void {
         // remembering each miss's position so a result maps back to its file.
         const missPositions: number[] = [];
         for (const [position, index] of audioIndexes.entries()) {
-          const hit = cached.get(hashes[position]!);
+          const hash = hashes[position]!;
+          const hit = hash === '' ? undefined : cached.get(hash);
           if (hit !== undefined) {
             entries[index] = {
               ...entries[index]!,
@@ -261,9 +301,20 @@ export function startDloIntakeJob(client: SupabaseClient, id: string): void {
         }
 
         if (missPositions.length > 0) {
-          const results = await transcribeAudioFiles(
-            missPositions.map((position) => inputs[position]!),
+          // A cost scope purely for visibility: `dlo_intakes` has no cost column, so the
+          // metered figure is LOGGED rather than persisted. Only the ElevenLabs path
+          // records (it returns word timestamps to measure); a Sarvam run logs nothing.
+          const cost = createCostAccumulator();
+          const results = await runInCostScope(cost, () =>
+            transcribeAudio(missPositions.map((position) => inputs[position]!)),
           );
+          if (cost.sttSeconds > 0) {
+            console.log(
+              `[dlo-intake ${id}] ${sttProviderName()} STT: ` +
+                `${(cost.sttSeconds / 60).toFixed(1)} min, ` +
+                `~$${totalCostUsd(cost).toFixed(4)}.`,
+            );
+          }
           await Promise.all(
             results.map(async (result, resultIndex) => {
               const position = missPositions[resultIndex]!;
@@ -276,13 +327,17 @@ export function startDloIntakeJob(client: SupabaseClient, id: string): void {
                   text: result.text,
                 };
                 // Cache the fresh transcript for next time. Best-effort: a write
-                // failure must not fail a file that just transcribed fine.
+                // failure must not fail a file that just transcribed fine. A URL source
+                // has no bytes and therefore no key, so it is simply not cached — the
+                // cache is content-addressed and there is no content on our side.
                 try {
-                  await putCachedTranscript(
-                    client,
-                    hashes[position]!,
-                    result.text,
-                  );
+                  if (hashes[position] !== '') {
+                    await putCachedTranscript(
+                      client,
+                      hashes[position]!,
+                      result.text,
+                    );
+                  }
                 } catch (error) {
                   console.error(
                     `[dlo-intake ${id}] transcript cache write failed:`,
@@ -303,7 +358,8 @@ export function startDloIntakeJob(client: SupabaseClient, id: string): void {
         const message = errorMessage(error);
         for (const index of audioIndexes) {
           // A job-level failure (download/auth/timeout) fails only the recordings
-          // still awaiting a result — files already resolved from cache stay done.
+          // still awaiting a result — anything already resolved (a cache hit in read
+          // mode, a transcript that landed before the throw) stays done.
           if (entries[index]!.status === 'done') continue;
           entries[index] = {
             ...entries[index]!,

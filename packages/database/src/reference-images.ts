@@ -2,7 +2,10 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 export const REFERENCE_IMAGES_TABLE = 'reference_images';
 
-export type ReferenceCategory = 'twitter' | 'article';
+// 'youtube' is the 1280x720 thumbnail library (migration 0042). Mirrors
+// ReferenceCategorySchema in @dgipr/schemas; kept structural here so this package
+// stays dependency-free.
+export type ReferenceCategory = 'twitter' | 'article' | 'youtube';
 // A reference_types slug (builtin or custom); the composite FK added in
 // migration 0013 is the source of truth, so this stays a plain string.
 export type ReferenceSubtype = string;

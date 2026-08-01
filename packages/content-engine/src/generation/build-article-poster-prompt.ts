@@ -24,6 +24,7 @@ import type { PosterPalette } from './poster-palettes.js';
 import type { ArticlePosterLayout } from './article-poster-layouts.js';
 import type { ArtDirection } from './art-direction.js';
 import { stripColourMentions } from './strip-colour-words.js';
+import { clearSpaceRuleLines } from './clear-space-rule.js';
 
 // 'fresh' generates the poster from scratch (no n8n); 'onbrand' edits the picked master.
 export type ArticleDesignMode = 'fresh' | 'onbrand';
@@ -282,6 +283,9 @@ export type BuildArticleFeedbackPromptInput = Readonly<{
   imageFeedback: string;
   // 0-3 numbered red markers drawn on the current poster (annotated pixel feedback).
   markerCount?: number | undefined;
+  // 0-2 lettered BLUE rectangles: space to be freed for the officer's own logo or
+  // photograph. Independent of markerCount — one round may carry both.
+  clearCount?: number | undefined;
 }>;
 
 // The prompt that edits an EXISTING article poster to apply a requested visual change. Ported
@@ -291,15 +295,27 @@ export function buildArticleFeedbackPrompt(
   input: BuildArticleFeedbackPromptInput,
 ): string {
   const imageFeedback = input.imageFeedback.trim();
-  if (imageFeedback.length === 0)
-    throw new Error('No image feedback provided.');
   const markerCount = Math.max(
     0,
     Math.min(3, Math.trunc(Number(input.markerCount) || 0)),
   );
+  const clearCount = Math.max(
+    0,
+    Math.min(2, Math.trunc(Number(input.clearCount) || 0)),
+  );
+  // A clear-space round is a complete request on its own — the blue rectangles say
+  // what to do and the note is optional — so text is required only without them.
+  if (imageFeedback.length === 0 && clearCount === 0)
+    throw new Error('No image feedback provided.');
+  const clearRule = clearSpaceRuleLines(clearCount);
 
   const reservedZones =
     'RESERVED ZONES: the महासंवाद logo in the top-left (approx 420x180 px) and the footer strip along the bottom (full width, approx 150 px tall) are official branding stamped onto the poster by software — do NOT alter, move, redraw or remove them, and do NOT move any text or important content into those areas.';
+
+  // With clear rectangles present, "keep the exact layout unchanged" would contradict the
+  // relocation the officer asked for — a contradictory pair degrades compliance with both.
+  const exceptClause =
+    clearCount > 0 ? ' or the SPACE TO FREE block below' : '';
 
   if (markerCount > 0) {
     return [
@@ -307,18 +323,22 @@ export function buildArticleFeedbackPrompt(
       `The input image carries ${markerCount} numbered red annotation marker(s): thin red outline rectangles, each with a small red circular badge showing its number. They were drawn onto the poster by editing software and are NOT part of the poster design.`,
       'Each marker is a pointing gesture showing where one requested change applies — not a hard boundary. For each marker, identify the design element at or around that spot and apply the correspondingly numbered change from the request below to that WHOLE element, even where the element extends beyond the rectangle.',
       `REQUESTED CHANGES: «${imageFeedback}».`,
-      "Make ONLY these changes. Keep the exact layout, the poster's existing panels and accent shapes, existing Marathi headline text, colours, typography, and any photograph unchanged except where a requested change explicitly requires it.",
+      `Make ONLY these changes. Keep the exact layout, the poster's existing panels and accent shapes, existing Marathi headline text, colours, typography, and any photograph unchanged except where a requested change${exceptClause} explicitly requires it.`,
       'ERASE every red marker rectangle and numbered badge completely from the output, restoring whatever they overlapped — no red outlines, red circles, or annotation numbers may remain anywhere on the poster.',
       reservedZones,
+      ...clearRule,
       'Add no new text, letters, numbers, captions, logos, borders, or decorative elements beyond the requested changes. Preserve all other existing Devanagari text exactly. Output ONE complete landscape poster filling the canvas.',
     ].join('\n');
   }
 
   return [
     'You are editing an existing finished DGIPR Maharashtra government ARTICLE poster provided as the input image.',
-    `Apply ONLY this requested change: «${imageFeedback}».`,
-    "Keep the exact layout, the poster's existing panels and accent shapes, existing Marathi headline text, colours, typography, and any photograph unchanged except where the requested change explicitly requires it.",
+    ...(imageFeedback.length > 0
+      ? [`Apply ONLY this requested change: «${imageFeedback}».`]
+      : []),
+    `Keep the exact layout, the poster's existing panels and accent shapes, existing Marathi headline text, colours, typography, and any photograph unchanged except where the requested change${exceptClause} explicitly requires it.`,
     reservedZones,
+    ...clearRule,
     'Add no new text, letters, numbers, captions, logos, borders, or decorative elements. Preserve all existing Devanagari text exactly. Output ONE complete landscape poster filling the canvas.',
   ].join('\n');
 }
@@ -534,6 +554,51 @@ if (
     if (!plain.includes('RESERVED ZONES')) {
       failures.push('plain feedback prompt lost the reserved zones');
     }
+    if (/blue/i.test(plain))
+      failures.push('plain feedback prompt mentions blue clear boxes');
+
+    // The clear-space (blue box) path — the article twin of the social assertions.
+    const cleared = buildArticleFeedbackPrompt({
+      imageFeedback: '',
+      clearCount: 1,
+    });
+    for (const needle of [
+      'SPACE TO FREE',
+      '1 translucent BLUE rectangle',
+      '(A)',
+      'RELOCATE',
+      'PLAIN BACKGROUND',
+      'ERASE the blue rectangles',
+      'RESERVED ZONES',
+    ]) {
+      if (!cleared.includes(needle))
+        failures.push(`clear-space prompt lost "${needle}"`);
+    }
+    if (cleared.includes('Apply ONLY this requested change'))
+      failures.push('clear-space-only prompt invented a requested change');
+    if (cleared.indexOf('SPACE TO FREE:') < cleared.indexOf('RESERVED ZONES'))
+      failures.push('clear rule precedes the reserved zones it refers to');
+
+    const both = buildArticleFeedbackPrompt({
+      imageFeedback: 'शीर्षक मोठे करा',
+      markerCount: 2,
+      clearCount: 2,
+    });
+    if (!both.includes('2 numbered red annotation marker'))
+      failures.push('combined prompt lost the marker count');
+    if (!both.includes('2 translucent BLUE rectangle'))
+      failures.push('combined prompt lost the clear count');
+    if (!both.includes('SPACE TO FREE block below'))
+      failures.push('combined prompt kept the contradictory keep-layout rule');
+
+    let threw = false;
+    try {
+      buildArticleFeedbackPrompt({ imageFeedback: '   ' });
+    } catch {
+      threw = true;
+    }
+    if (!threw)
+      failures.push('empty feedback with no clear boxes was accepted');
   }
 
   if (failures.length > 0) {

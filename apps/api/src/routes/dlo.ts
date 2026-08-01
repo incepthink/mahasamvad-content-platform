@@ -21,6 +21,7 @@ import {
   type SupabaseClient,
 } from '@dgipr/database';
 import {
+  ARTICLE_INSTRUCTIONS_MAX_CHARS,
   AUDIO_FILE_EXTENSIONS,
   audioMimeForFileName,
   DLO_REVIEW_STATE_MAX_CHARS,
@@ -31,12 +32,16 @@ import {
   DloReextractFileRequestSchema,
   DloReviewPatchRequestSchema,
   parseDloReviewState,
+  parseYouTubeVideoId,
+  serializeDloReviewState,
   UPLOAD_FILE_MAX_BYTES,
   UPLOAD_FILE_MAX_MB,
+  YouTubeSourcesSchema,
   type DloIntakeDetail,
   type DloIntakeGeneration,
   type DloIntakeSummary,
   type DloPreReadDocument,
+  type YouTubeVideo,
 } from '@dgipr/schemas';
 import {
   isIntakeJobRunning,
@@ -61,7 +66,13 @@ const MAX_FILES = 10;
 // field is now the largest thing in the request.
 const MAX_FIELD_BYTES = 64 * 1024 * 1024;
 
-const KIND_BY_EXTENSION: Record<string, DloIntakeFileKind> = {
+// The kinds that arrive as BYTES and are archived in the private bucket. 'youtube' is
+// deliberately excluded rather than given a placeholder content type: such a source is a
+// link the transcriber fetches for itself, so it has no file name, no content type and no
+// storage object, and the two tables below would have to lie about all three.
+type UploadedFileKind = Exclude<DloIntakeFileKind, 'youtube'>;
+
+const KIND_BY_EXTENSION: Record<string, UploadedFileKind> = {
   // MP3/AAC/M4A only. The list lives in @dgipr/schemas so the web picker offers exactly
   // what this accepts.
   ...Object.fromEntries(
@@ -74,14 +85,14 @@ const KIND_BY_EXTENSION: Record<string, DloIntakeFileKind> = {
 // Fallback per kind. Recordings are stored under their OWN container's type
 // (`audioMimeForFileName`); this entry only covers a name with no known extension,
 // which `kindOf` cannot classify as audio in the first place.
-const CONTENT_TYPE_BY_KIND: Record<DloIntakeFileKind, string> = {
+const CONTENT_TYPE_BY_KIND: Record<UploadedFileKind, string> = {
   audio: 'audio/mpeg',
   pdf: 'application/pdf',
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   txt: 'text/plain',
 };
 
-function kindOf(fileName: string): DloIntakeFileKind | null {
+function kindOf(fileName: string): UploadedFileKind | null {
   const dot = fileName.lastIndexOf('.');
   if (dot === -1) return null;
   return KIND_BY_EXTENSION[fileName.slice(dot).toLowerCase()] ?? null;
@@ -170,6 +181,15 @@ function toDetail(
       ...(entry.kind === 'pdf' && entry.storagePath !== undefined
         ? { canReextract: true }
         : {}),
+      // A YouTube source's link and what the probe knew about it, so the review card can
+      // name and link the video. Cheap enough for the poll — a URL and a title.
+      ...(entry.sourceUrl !== undefined ? { sourceUrl: entry.sourceUrl } : {}),
+      ...(entry.sourceAuthor !== undefined
+        ? { sourceAuthor: entry.sourceAuthor }
+        : {}),
+      ...(entry.sourceThumbnailUrl !== undefined
+        ? { sourceThumbnailUrl: entry.sourceThumbnailUrl }
+        : {}),
       ...(includeText && entry.text !== undefined ? { text: entry.text } : {}),
       ...(includeText && entry.pages !== undefined
         ? { pages: [...entry.pages] }
@@ -195,15 +215,25 @@ export function registerDloRoutes(
   app.post('/dlo/intakes', async (request, reply) => {
     const uploads: Array<{
       name: string;
-      kind: DloIntakeFileKind;
+      kind: UploadedFileKind;
       data: Buffer;
     }> = [];
     let notes = '';
     let category = 'news';
     let heading = '';
+    // Two fields the officer can fill in on the intake FORM even though they are only used at
+    // generate time: the free-text direction for the article and the pasted style model.
+    // Neither has a column on dlo_intakes, so they are handed on through the review-state blob
+    // (see the seed below) rather than being lost the moment the form is submitted.
+    let instructions = '';
+    let styleReference = '';
     // Documents the officer uploaded and READ at the input step, through the shared
     // ephemeral service. They arrive already extracted — see the entry-building loop below.
     let documents: DloPreReadDocument[] = [];
+    // YouTube links, already probed by the input step. Nothing is downloaded here or ever:
+    // the transcriber fetches the media itself (@dgipr/schemas' youtube.ts), so these become
+    // entries with a URL and no archive.
+    let youtube: YouTubeVideo[] = [];
 
     const parts = request.parts({
       limits: {
@@ -219,6 +249,8 @@ export function registerDloRoutes(
           if (part.fieldname === 'notes') notes = value;
           if (part.fieldname === 'category') category = value;
           if (part.fieldname === 'heading') heading = value;
+          if (part.fieldname === 'instructions') instructions = value;
+          if (part.fieldname === 'styleReference') styleReference = value;
           if (part.fieldname === 'documents' && value.trim().length > 0) {
             try {
               documents = DloCreateDocumentsSchema.parse(JSON.parse(value));
@@ -226,6 +258,25 @@ export function registerDloRoutes(
               return reply.code(400).send({
                 error: { message: 'कागदपत्रांची माहिती वाचता आली नाही.' },
               });
+            }
+          }
+          if (part.fieldname === 'youtube' && value.trim().length > 0) {
+            try {
+              youtube = YouTubeSourcesSchema.parse(JSON.parse(value));
+            } catch {
+              return reply.code(400).send({
+                error: { message: 'यूट्युब लिंकची माहिती वाचता आली नाही.' },
+              });
+            }
+            // The client sends what it probed; this re-derives the id from the URL rather
+            // than trusting it, so a malformed or hand-crafted payload cannot put an
+            // arbitrary URL in front of the transcriber.
+            for (const video of youtube) {
+              if (parseYouTubeVideoId(video.url) === null) {
+                return reply.code(400).send({
+                  error: { message: 'यूट्युब लिंक वैध नाही.' },
+                });
+              }
             }
           }
           continue;
@@ -270,7 +321,8 @@ export function registerDloRoutes(
     if (
       notes.trim().length === 0 &&
       uploads.length === 0 &&
-      documents.length === 0
+      documents.length === 0 &&
+      youtube.length === 0
     ) {
       return reply.code(400).send({
         error: { message: 'टिपणी लिहा किंवा किमान एक फाईल जोडा.' },
@@ -301,6 +353,26 @@ export function registerDloRoutes(
         storagePath,
         kind: upload.kind,
         status: 'pending',
+      });
+    }
+
+    // Then the YouTube links, beside the recordings because that is what they are — the
+    // transcribe phase reads them in the same pass. Nothing is uploaded and nothing is
+    // archived: there are no bytes on our side at any point, only a URL.
+    //
+    // The display name is the probed title where there is one, so the review card and the
+    // `=== स्रोत: … ===` header name the video rather than repeating a URL. A probe that
+    // failed leaves the link itself, which is still a usable label.
+    for (const video of youtube) {
+      entries.push({
+        name: video.title ?? video.url,
+        kind: 'youtube',
+        status: 'pending',
+        sourceUrl: video.url,
+        ...(video.author !== undefined ? { sourceAuthor: video.author } : {}),
+        ...(video.thumbnailUrl !== undefined
+          ? { sourceThumbnailUrl: video.thumbnailUrl }
+          : {}),
       });
     }
 
@@ -393,6 +465,40 @@ export function registerDloRoutes(
     }
 
     await updateDloIntake(client, row.id, { files: entries });
+
+    // Carry the form's generate-time fields over to the review step. A SEPARATE, best-effort
+    // update rather than part of the insert or of the files write above: `review_state` is
+    // 0036's column, so on a database without it this costs the handover alone instead of the
+    // whole intake (the 0028 principle). Trimmed to the same ceiling the generate route
+    // enforces, so an over-long paste cannot make every later autosave fail.
+    const seededInstructions = instructions
+      .trim()
+      .slice(0, ARTICLE_INSTRUCTIONS_MAX_CHARS);
+    const seededStyleReference = styleReference.trim();
+    if (seededInstructions || seededStyleReference) {
+      try {
+        await updateDloIntake(client, row.id, {
+          reviewState: serializeDloReviewState({
+            edits: {},
+            excluded: [],
+            ...(seededInstructions ? { instructions: seededInstructions } : {}),
+            ...(seededStyleReference
+              ? { styleReference: seededStyleReference }
+              : {}),
+            // Named rather than a random per-tab id: the officer's own browser adopts this
+            // writer when it seeds, so resuming its own submission is never reported as a
+            // second officer's edit.
+            writer: 'intake-form',
+          }),
+        });
+      } catch (error) {
+        console.error(
+          `[dlo ${row.id}] could not seed review state (is 0036 applied?):`,
+          error,
+        );
+      }
+    }
+
     startDloIntakeJob(client, row.id);
     return reply.code(202).send({ id: row.id });
   });
@@ -663,6 +769,9 @@ export function registerDloRoutes(
         // The article the officer pasted as the STYLE model (migration 0035) — tier 1 of the
         // simplified generator's reference hierarchy. Same omit-when-empty treatment again.
         styleReference: body.styleReference,
+        // The officer's free-text direction for this article (migration 0041). Same
+        // omit-when-empty treatment again.
+        instructions: body.instructions,
       });
       startGenerationJob(client, generation.id);
       return reply.code(202).send({ generationId: generation.id });

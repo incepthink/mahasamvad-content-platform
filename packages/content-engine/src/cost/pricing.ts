@@ -58,9 +58,11 @@ export function priceText(
 
 // Image cost is a FIXED per-render tier price, not measured: the default poster
 // render happens inside n8n (no usage returned) and gpt-image pricing is effectively
-// a flat price per (size, quality) tier anyway. `kind` maps to the two render sizes
-// in use — `article` = 1536x1024, `twitter` = 1280x1600. Values from the cost model.
-export type ImageKind = 'article' | 'twitter';
+// a flat price per (size, quality) tier anyway. `kind` maps to the render sizes in use —
+// `article` = 1536x1024, `twitter` = 1280x1600, `youtube` = 1280x720. Values from the cost
+// model; youtube is the smallest canvas of the three and priced a touch under `article`,
+// whose 1536x1024 is the nearest landscape tier.
+export type ImageKind = 'article' | 'twitter' | 'youtube';
 export type ImageQuality = 'high' | 'medium' | 'low';
 
 const IMAGE_COST_USD: Readonly<
@@ -68,6 +70,7 @@ const IMAGE_COST_USD: Readonly<
 > = {
   article: { high: 0.25, medium: 0.063, low: 0.016 },
   twitter: { high: 0.25, medium: 0.065, low: 0.017 },
+  youtube: { high: 0.2, medium: 0.05, low: 0.013 },
 };
 
 export function estimateImageCostUsd(
@@ -107,4 +110,18 @@ export const SARVAM_TTS_PRICE_PER_1K_CHARS_USD = 0.05;
 
 export function estimateTtsCostUsd(characters: number): number {
   return (Math.max(characters, 0) / 1000) * SARVAM_TTS_PRICE_PER_1K_CHARS_USD;
+}
+
+// Speech-to-text is billed per HOUR of audio, not per character or token — the
+// one dimension in this file that is measured off the media rather than the
+// text. Approximate public price for ElevenLabs Scribe, captured 2026-07-31;
+// edit here if the rate changes or ELEVENLABS_STT_MODEL is repointed.
+//
+// Only the ElevenLabs path records into this line. Sarvam's batch STT has never
+// been metered (its jobs run outside any cost scope and it returns no usage),
+// and inventing a Sarvam figure here would report a cost nobody measured.
+export const ELEVENLABS_STT_PRICE_PER_HOUR_USD = 0.4;
+
+export function estimateSttCostUsd(seconds: number): number {
+  return (Math.max(seconds, 0) / 3600) * ELEVENLABS_STT_PRICE_PER_HOUR_USD;
 }

@@ -1,11 +1,13 @@
-// Dev CLI for the DLO intake pipeline — exercises Sarvam batch STT / document
+// Dev CLI for the DLO intake pipeline — exercises speech-to-text / document
 // digitization / mammoth on local files without the web UI or the API.
 //
 //   pnpm --filter @dgipr/content-engine intake:test <recording|file.pdf|file.docx> [...]
 //
-// Recordings may be any container Sarvam auto-detects (AUDIO_FILE_EXTENSIONS).
+// Recordings go through the same provider seam production uses, so this harness
+// transcribes with whatever STT_PROVIDER names (ElevenLabs by default).
 //
-// Requires SARVAM_API_KEY in the root .env (the script loads it via --env-file).
+// Requires SARVAM_API_KEY in the root .env for the document paths (the script loads it
+// via --env-file), plus the key the configured STT provider needs.
 
 import { readFile } from 'node:fs/promises';
 import { basename } from 'node:path';
@@ -17,7 +19,8 @@ import {
 } from '@dgipr/schemas';
 import { extractDocxText } from './docx.js';
 import { extractPdfPagesDetailed } from './pdf-pages.js';
-import { transcribeAudioFiles, type AudioFileInput } from './sarvam-stt.js';
+import type { AudioFileInput } from './sarvam-stt.js';
+import { sttProviderName, transcribeAudio } from './stt-provider.js';
 
 async function main(): Promise<void> {
   const paths = process.argv.slice(2);
@@ -60,9 +63,9 @@ async function main(): Promise<void> {
 
   if (audio.length > 0) {
     console.log(
-      `[intake:test] transcribing ${audio.length} audio file(s) via Sarvam batch STT…`,
+      `[intake:test] transcribing ${audio.length} audio file(s) via ${sttProviderName()}…`,
     );
-    const results = await transcribeAudioFiles(audio);
+    const results = await transcribeAudio(audio);
     results.forEach((result, index) => {
       const name = audio[index]!.name;
       if ('text' in result) {

@@ -13,6 +13,9 @@ import {
   buildArticlePosterPrompt,
   buildFeedbackPrompt,
   buildPosterPrompt,
+  buildYoutubeThumbnailPrompt,
+  buildYoutubeFeedbackPrompt,
+  resolveYoutubeReference,
   classifyPosterType,
   createCostAccumulator,
   extractGlossaryCandidates,
@@ -60,8 +63,12 @@ import {
 } from '@dgipr/content-engine';
 import {
   annotateFeedbackRegions,
+  CLEAR_REGION_LETTERS,
   buildArticleScenePrompt,
   buildCmoCirclePhotoPrompt,
+  editImage,
+  fitToYoutubeThumbnail,
+  overlayYoutubeChrome,
   generateImage,
   generateArticlePoster,
   headStrings,
@@ -94,6 +101,7 @@ import {
   NameDesignationsSchema,
   SelectedFactsSchema,
   isSocialCategory,
+  isYoutubeCategory,
   type Copy,
   type AttributedStatement,
   type DesignationWarning,
@@ -129,6 +137,17 @@ const translateWarnings = new Map<string, string[]>();
 // while the officer is reading the fresh output. A [] entry means every designation applied
 // cleanly; absent means this run predates the session (or approved none).
 const designationWarnings = new Map<string, DesignationWarning[]>();
+
+// A social poster whose information held MORE items than any master template can lay out. The
+// render still happens — the image prompt is told to extend the reference's item pattern rather
+// than drop anything — but the officer is the one who can act on it, by splitting the note into
+// two posters. Transient for the same reason the two registries above are: the poster is on the
+// row, and this is a "check this one" prompt that matters while the fresh render is on screen.
+// Absent means the run fitted, or predates this session.
+const posterCapacityWarnings = new Map<
+  string,
+  { needed: number; available: number }
+>();
 
 // Article revision may likewise run *alongside* the poster render: the article is
 // final and persisted before the poster phase starts, so the user can refine it
@@ -280,6 +299,14 @@ export function getTranslateWarnings(id: string): string[] | null {
 // Approved designations the latest article/revision could not apply as approved.
 export function getDesignationWarnings(id: string): DesignationWarning[] {
   return designationWarnings.get(id) ?? [];
+}
+
+// Set when the latest social poster carried more items than any master can lay out (null when
+// it fitted, or when no render happened this session).
+export function getPosterCapacityWarning(
+  id: string,
+): { needed: number; available: number } | null {
+  return posterCapacityWarnings.get(id) ?? null;
 }
 
 export function isRevisingArticle(id: string): boolean {
@@ -629,6 +656,11 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
               // Tier 1 of the style-reference hierarchy (migration 0035). Read off the ROW, so
               // a retry reproduces the same reference rather than silently re-styling.
               styleReference: row.styleReference,
+              // The officer's own direction for this article (migration 0041). Read off the
+              // ROW for the same reason as the style reference: a retry must reproduce the
+              // same article rather than a differently-directed one. The `full` pipeline does
+              // not take it — it is the legacy opt-out, deliberately left byte-for-byte.
+              instructions: row.instructions,
               // The verified dictionary rows this note actually mentions. Read by both prompt
               // variants: neither spells out name rules, both are handed the spellings.
               names: await articleNameDictionary(client, row.note),
@@ -1243,11 +1275,14 @@ async function renderSocialPosterFeedbackViaN8n(
   // CMO only: the cached circle photograph (cmoPhotoPath), re-composited so a text/layout
   // feedback edit never changes the photo. Required when brand === 'cmo'.
   cmoPhoto?: Buffer,
+  // > 0 when currentPosterUrl also carries blue clear-space rectangles.
+  clearCount = 0,
 ): Promise<Buffer> {
   const prompt = buildFeedbackPrompt({
     imageFeedback: feedback,
     brand,
     markerCount,
+    clearCount,
   });
   const rawPoster = await renderSocialPosterViaN8n(
     id,
@@ -1487,13 +1522,28 @@ async function renderAndStoreSocialPoster(
     })}`,
   );
 
-  // Twitter DGIPR's fixed-template mode deliberately gives the image model only the unchanged
-  // reference image and the original note, with two chrome exclusions. It therefore skips
-  // poster-copy generation entirely: generated structured copy would be hidden editorial work
-  // and an unnecessary model charge for a prompt that must contain the note verbatim.
-  // Adaptive, fresh and CMO runs keep the established copy pipeline.
+  // Record the capacity shortfall (if any) so the detail payload can warn the officer that this
+  // poster is carrying more items than any template is built to lay out.
+  if (resolved.shortfall) {
+    posterCapacityWarnings.set(id, { ...resolved.shortfall });
+  } else {
+    posterCapacityWarnings.delete(id);
+  }
+
+  // The fixed-template mode ("ठरलेले टेम्पलेट") deliberately gives the image model only the
+  // unchanged reference image and the officer's information, with two chrome exclusions. It
+  // therefore skips poster-copy generation entirely: generated structured copy would be hidden
+  // editorial work — and, worse, generatePosterCopy condenses the information to the master's
+  // slot count, which is exactly the content loss this path must not have. Adaptive, fresh and
+  // CMO runs keep the established copy pipeline.
+  //
+  // BOTH social categories take this branch. It was 'twitter'-only, which silently gave a
+  // Facebook run the copy pipeline instead — the same ठरलेले टेम्पलेट choice producing a
+  // different poster depending on the platform. isSocialCategory is the repo's standing rule
+  // for exactly this class of bug; the two lanes are meant to be indistinguishable here, and
+  // merging the two UI options later is now purely a web change.
   const isSimpleTemplateEdit =
-    row.category === 'twitter' && brand === 'dgipr' && designMode === 'onbrand';
+    isSocialCategory(row.category) && brand === 'dgipr' && designMode === 'onbrand';
   let copyResult: Awaited<ReturnType<typeof generatePosterCopy>> | null = null;
   if (!isSimpleTemplateEdit) {
     // 2. Scheme-name lock source: verified glossary scheme/org names present in the note.
@@ -1571,6 +1621,9 @@ async function renderAndStoreSocialPoster(
   const prompt = buildPosterPrompt({
     copy: copyResult?.copy ?? {},
     information: isSimpleTemplateEdit ? row.note : undefined,
+    // Both only reach the fixed-template branch, which is the one that must show every item.
+    itemCount: isSimpleTemplateEdit ? resolved.itemCount : undefined,
+    slotShortfall: isSimpleTemplateEdit ? resolved.shortfall : undefined,
     copyStyle: copyResult?.copyStyle ?? resolved.type.copyStyle,
     designMode,
     brand,
@@ -1739,6 +1792,136 @@ export function startSocialPostJob(
   });
 }
 
+// --- YouTube thumbnails (migration 0042) ------------------------------------------------
+//
+// The lane in one line: pick the reference that can hold the officer's information, edit it
+// with a prompt built here, fit the result to 1280x720, stamp the chrome, upload. No
+// article, no caption, no classification, no n8n, no publishing — one paid image call per
+// render and nothing else.
+//
+// It reuses the social lane's capacity-first selection (resolveYoutubeReference →
+// selectReferenceByInformation) rather than a second algorithm, because the problem is the
+// same one: the reference's content slots must be able to show every item the officer wrote.
+// What it does NOT reuse is renderAndStoreSocialPoster, and deliberately — that function
+// carries the palette rotation, the composition rotation, art direction, colour measurement,
+// poster copy, CMO circle photos and the n8n edit call, every one of which is either a
+// 4:5-poster concept or a thing this lane has decided not to do. Threading a fifth mode
+// through it would have made both harder to read.
+//
+// The edit is a DIRECT call (editImage) rather than the n8n round-trip the social/article
+// lanes make: the workflows exist because those prompts used to live inside them, and there
+// is no reason to add a third.
+const YOUTUBE_RECENCY_KEY = 'youtube:library';
+
+async function renderAndStoreYoutubeThumbnail(
+  client: SupabaseClient,
+  id: string,
+  row: GenerationRow,
+  version: number,
+  // Diversifies selection per run (id on a first render, `${id}:v${n}` on a redo).
+  seed: string,
+): Promise<{ title: string | null }> {
+  // 1. Which reference. A pinned exact image wins outright (resolvePinnedImage is
+  //    category-agnostic and resolves the type off the image itself); otherwise the whole
+  //    enabled youtube library is ranked against the officer's information.
+  await updateGeneration(client, id, { step: 'classify' });
+  //    A pin from another library is rejected at create time (referenceCategoryOf), so it
+  //    is not re-checked here.
+  let resolved: ResolvedReference | null = row.referenceImageId
+    ? await resolvePinnedImage(client, row.referenceImageId, seed)
+    : null;
+  if (!resolved) {
+    resolved = await resolveYoutubeReference(
+      client,
+      seed,
+      row.note,
+      recentMasters(YOUTUBE_RECENCY_KEY),
+    );
+    rememberMaster(
+      YOUTUBE_RECENCY_KEY,
+      resolved.master.id,
+      resolved.poolSize ?? 1,
+    );
+  }
+
+  console.log(
+    `[job ${id}] youtube thumbnail reference: ${JSON.stringify({
+      forced: resolved.forced,
+      type: resolved.type.slug,
+      analyzed: Boolean(resolved.master.layoutSpec),
+      pick: resolved.master.reason,
+    })}`,
+  );
+
+  // Same warning channel as the poster lanes: the officer is told when their information has
+  // more items than any template lays out, so they can split it into two thumbnails.
+  if (resolved.shortfall) {
+    posterCapacityWarnings.set(id, { ...resolved.shortfall });
+  } else {
+    posterCapacityWarnings.delete(id);
+  }
+
+  // 2. Prompt (pure string assembly, no model call). The officer's note IS the content.
+  const prompt = buildYoutubeThumbnailPrompt({
+    information: row.note,
+    itemCount: resolved.itemCount,
+    slotShortfall: resolved.shortfall,
+  });
+
+  // 3. Render: edit the chosen reference. The reference is fetched here rather than handed to
+  //    a workflow as a URL, so the only thing that can fail is a fetch we control.
+  await updateGeneration(client, id, { step: 'image' });
+  const reference = await fetchReferencePng(resolved.master.url);
+  const edited = await editImage(reference, prompt, { size: '1280x720' });
+  recordImageCost('youtube', imageQuality());
+
+  // 4. Fit + chrome. fitToYoutubeThumbnail is normally a no-op; it exists so a model that
+  //    answers in another aspect cannot put the footer band at the wrong height silently.
+  const thumbnailPng = await overlayYoutubeChrome(
+    await fitToYoutubeThumbnail(edited),
+  );
+  const objectPath = posterPath(id, version);
+  await uploadPng(client, objectPath, thumbnailPng);
+
+  await updateGeneration(client, id, {
+    referenceTitle: resolved.title ?? null,
+    posterPath: objectPath,
+  });
+  return { title: resolved.title ?? null };
+}
+
+// Fetch a library master over its public Storage URL. Small and explicit rather than routed
+// through downloadPng: SelectedMaster carries a URL (what the n8n lanes are handed), not a
+// storage path.
+async function fetchReferencePng(url: string): Promise<Buffer> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(
+      `Could not fetch the reference template (${response.status}).`,
+    );
+  }
+  return Buffer.from(await response.arrayBuffer());
+}
+
+// The YouTube-thumbnail pipeline. One image, nothing else.
+export function startYoutubeThumbnailJob(
+  client: SupabaseClient,
+  id: string,
+): void {
+  runJob(client, id, async () => {
+    const row = await getGeneration(client, id);
+    if (!row) throw new Error(`Generation ${id} not found.`);
+
+    await updateGeneration(client, id, {
+      status: 'running',
+      step: null,
+      error: null,
+    });
+
+    await renderAndStoreYoutubeThumbnail(client, id, row, 1, id);
+  });
+}
+
 // Regenerate a completed run's poster as a brand-new, differently-designed version. On the
 // fully-AI path this re-selects (avoiding the recently-used master), rewrites the copy and
 // invents a FRESH art direction seeded on this version, so the redo does not resemble the
@@ -1780,6 +1963,29 @@ export function startPosterRegenerateJob(
     // this row is not yet in it.
     const current = options.recolour ? parsePosterStyle(row.posterStyle) : null;
     const avoidFamilies: PaletteFamily[] = current ? [current.family] : [];
+
+    // Thumbnail lane. There is no palette or composition assignment to re-roll here (the
+    // reference and the message decide the look), so a redo is a fresh selection + render at
+    // a new seed — which is exactly what the officer wants from it: a different template's
+    // arrangement of the same information, or a clean retry after garbled Devanagari.
+    // `recolour` is accepted and ignored rather than refused: the web offers one redo button
+    // on this lane, and failing a request that means "give me another one" would be perverse.
+    if (isYoutubeCategory(row.category)) {
+      await renderAndStoreYoutubeThumbnail(
+        client,
+        id,
+        row,
+        version,
+        `${id}:v${version}`,
+      );
+      await insertRevision(client, {
+        generationId: id,
+        target: 'poster_image',
+        feedback: 'पुन्हा तयार केले (नवीन रचना)',
+        posterPath: posterPath(id, version),
+      });
+      return;
+    }
 
     if (!isSocialCategory(row.category)) {
       // Article lane. 'html' mode has its own copy/scene feedback loop and no assignment to
@@ -2318,6 +2524,19 @@ export function startPosterFeedbackJob(
 // element-aware instruction (interpretImageFeedback, raw notes on failure), and
 // n8n edits the MARKED image under marker-count prompt semantics. Without
 // annotations every value below equals the old behaviour byte-for-byte.
+//
+// `clearRegions` are the second gesture: BLUE lettered rectangles saying "free
+// this space" — the content inside is relocated elsewhere in the design and the
+// rectangle is left as plain continuing background, so the officer can place
+// their own logo or photograph there afterwards. They ride the SAME round as the
+// red markers (one paid render carries both) and take the same route: drawn on
+// the poster, named by the vision pass, and governed by a fixed rule appended in
+// the prompt builders, where a model cannot paraphrase it away.
+// What a clear-space gesture reads as in the revision history. The note beside a
+// blue box is optional, so without this such a round would be logged blank —
+// and the history is the officer's record of what they asked for.
+const STR_CLEAR_SPACE_HISTORY = 'ही जागा मोकळी करा';
+
 export function startPosterImageFeedbackJob(
   client: SupabaseClient,
   id: string,
@@ -2337,17 +2556,19 @@ export function startPosterImageFeedbackJob(
     });
 
     const annotations = input.annotations ?? [];
+    const clearRegions = input.clearRegions ?? [];
     const version = await nextVersion(client, id);
     let inputUrl = publicUrl(client, row.posterPath);
     let feedbackText = input.feedback ?? '';
     // Revision history keeps the user's own words, never the machine text.
     let historyFeedback = feedbackText;
 
-    if (annotations.length > 0) {
+    if (annotations.length > 0 || clearRegions.length > 0) {
       const cleanPoster = await downloadPng(client, row.posterPath);
       const marked = await annotateFeedbackRegions(
         cleanPoster,
         annotations.map((a) => a.region),
+        clearRegions.map((c) => c.region),
       );
       // Throwaway n8n input — never a posterPath / revision snapshot, so it
       // can't enter the version strip. The version counter only advances when
@@ -2367,7 +2588,14 @@ export function startPosterImageFeedbackJob(
           note: a.note,
           region: a.region,
         })),
+        clearRegions: clearRegions.map((c, i) => ({
+          letter: CLEAR_REGION_LETTERS[i] ?? String(i + 1),
+          note: c.note,
+          region: c.region,
+        })),
         overallNote: input.feedback,
+        // The interpreter only needs to know the canvas it is looking at. A thumbnail is
+        // landscape like the article poster, so it reads that way.
         posterKind: isSocialCategory(row.category) ? 'twitter' : 'article',
       });
       console.log(
@@ -2376,12 +2604,37 @@ export function startPosterImageFeedbackJob(
       feedbackText = interpreted.instruction;
       historyFeedback = [
         ...annotations.map((a, i) => `[${i + 1}] ${a.note}`),
+        // A clear box may carry no note at all, so the gesture itself is what is
+        // recorded — otherwise the history row for such a round would be empty.
+        ...clearRegions.map(
+          (c, i) =>
+            `[${CLEAR_REGION_LETTERS[i] ?? i + 1}] ${STR_CLEAR_SPACE_HISTORY}` +
+            (c.note ? ` — ${c.note}` : ''),
+        ),
         ...(input.feedback ? [input.feedback] : []),
       ].join('\n');
     }
 
     let posterPng: Buffer;
-    if (isSocialCategory(row.category)) {
+    if (isYoutubeCategory(row.category)) {
+      // Thumbnail lane: edit the CURRENT thumbnail directly (no n8n). The marker and
+      // clear-space semantics are the shared ones — clearSpaceRuleLines is the same block
+      // both poster lanes get — so a gesture the officer drew means the same thing here.
+      const prompt = buildYoutubeFeedbackPrompt({
+        imageFeedback: feedbackText,
+        markerCount: annotations.length,
+        clearCount: clearRegions.length,
+      });
+      // The input is the poster ALREADY carrying the chrome (or the marked-up copy of it),
+      // and the chrome is re-stamped after the edit — which is what keeps it crisp through
+      // repeated rounds, exactly as the two poster lanes do.
+      const current = await fetchReferencePng(inputUrl);
+      const edited = await editImage(current, prompt, { size: '1280x720' });
+      recordImageCost('youtube', imageQuality());
+      posterPng = await overlayYoutubeChrome(
+        await fitToYoutubeThumbnail(edited),
+      );
+    } else if (isSocialCategory(row.category)) {
       // CMO re-composites the SAME cached circle photo so a visual/text edit never swaps
       // the photograph (the workflow leaves the circle zone quiet on feedback too).
       const cmoPhoto =
@@ -2395,6 +2648,7 @@ export function startPosterImageFeedbackJob(
         annotations.length,
         row.templateBrand,
         cmoPhoto,
+        clearRegions.length,
       );
       recordImageCost('twitter', imageQuality());
     } else {
@@ -2405,6 +2659,7 @@ export function startPosterImageFeedbackJob(
       const prompt = buildArticleFeedbackPrompt({
         imageFeedback: feedbackText,
         markerCount: annotations.length,
+        clearCount: clearRegions.length,
       });
       posterPng = await renderArticlePosterEditViaN8n(id, inputUrl, prompt, {
         imageFeedback: feedbackText,

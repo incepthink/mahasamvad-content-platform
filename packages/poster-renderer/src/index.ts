@@ -33,7 +33,16 @@ export type { BuildArticlePosterHtmlInput } from './article-template.js';
 export { overlayArticleChrome } from './article-chrome.js';
 export { overlayTwitterChrome } from './twitter-chrome.js';
 export { overlayCmoChrome } from './cmo-chrome.js';
-export { annotateFeedbackRegions } from './feedback-marker.js';
+export {
+  overlayYoutubeChrome,
+  fitToYoutubeThumbnail,
+  YOUTUBE_THUMBNAIL_WIDTH,
+  YOUTUBE_THUMBNAIL_HEIGHT,
+} from './youtube-chrome.js';
+export {
+  annotateFeedbackRegions,
+  CLEAR_REGION_LETTERS,
+} from './feedback-marker.js';
 export type { NormalizedRegion } from './feedback-marker.js';
 // Measures what colours a rendered poster actually uses, so the palette rotation can spread away
 // from what SHIPPED rather than from what was merely assigned (see poster-colours.ts).
@@ -74,6 +83,7 @@ export type {
 export {
   assembleSilentVideo,
   cropToAspect,
+  decodeAudioToWav,
   muxNarration,
   overlayVideoLogo,
   validateVideoOutput,

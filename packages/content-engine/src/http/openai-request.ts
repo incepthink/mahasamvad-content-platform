@@ -75,10 +75,34 @@ function createLimiter(concurrency: number): Limiter {
   };
 }
 
+// LANES. The default lane is the article/poster pipeline described above and keeps its
+// serialized behaviour exactly. The 'ocr' lane exists because PDF reading is a different
+// shape of work: one call PER PAGE, each carrying one page's bytes and returning that page's
+// text, with no call depending on another. Funnelling a 20-page document through a
+// concurrency-1 gate would make the per-page design — chosen because it is the only way page
+// identity can be exact by construction — also the slowest way to read a document.
+//
+// Sharing this transport rather than opening a second one is deliberate: the retry ladder and
+// the header-driven waits are the reason this module exists, and an OCR burst is exactly the
+// traffic that trips a 429. What a lane changes is HOW MANY may be in flight, never what
+// happens when the server pushes back.
+//
 // Built on first use, not at import time, so `--env-file` / dotenv have run by then.
-let limiter: Limiter | null = null;
-function getLimiter(): Limiter {
-  limiter ??= createLimiter(readInt('OPENAI_MAX_CONCURRENCY', 1));
+export type OpenAiLane = 'default' | 'ocr';
+
+const LANE_CONCURRENCY: Readonly<Record<OpenAiLane, [string, number]>> = {
+  default: ['OPENAI_MAX_CONCURRENCY', 1],
+  ocr: ['OCR_MAX_CONCURRENCY', 4],
+};
+
+const limiters = new Map<OpenAiLane, Limiter>();
+function getLimiter(lane: OpenAiLane): Limiter {
+  let limiter = limiters.get(lane);
+  if (!limiter) {
+    const [envName, fallback] = LANE_CONCURRENCY[lane];
+    limiter = createLimiter(readInt(envName, fallback));
+    limiters.set(lane, limiter);
+  }
   return limiter;
 }
 
@@ -162,6 +186,13 @@ export type OpenAiRequest = Readonly<{
   label: string;
   apiKey: string;
   body: unknown;
+  // Which concurrency lane this call queues in. Omitted = 'default', so every existing
+  // caller is unchanged. See OpenAiLane above.
+  lane?: OpenAiLane | undefined;
+  // Per-call override of the release valve below. Omitted = OPENAI_REQUEST_TIMEOUT_MS. Only
+  // the OCR path sets it: its calls are short and independent, so a page that hangs should
+  // give up long before an article-length generation would.
+  timeoutMs?: number | undefined;
 }>;
 
 // POST a JSON body to an OpenAI endpoint, serialized against every other call from this
@@ -171,7 +202,7 @@ export type OpenAiRequest = Readonly<{
 // polish-article.ts — behaves exactly as before.
 export async function openAiFetch(
   url: string,
-  { label, apiKey, body }: OpenAiRequest,
+  { label, apiKey, body, lane, timeoutMs: timeoutOverride }: OpenAiRequest,
 ): Promise<Response> {
   const attempts = readInt('OPENAI_MAX_RETRIES', 5) + 1;
   // Serialized calls queue behind one another, so a hung request would stall the whole
@@ -179,9 +210,12 @@ export async function openAiFetch(
   // original 3: on gpt-5.6 a full-length Marathi article body at 'medium' reasoning spends
   // real time thinking before the first token, and a timeout here aborts paid work
   // mid-generation — the failure mode this valve is least meant to cause.
-  const timeoutMs = readInt('OPENAI_REQUEST_TIMEOUT_MS', 300_000);
+  const timeoutMs =
+    timeoutOverride !== undefined && timeoutOverride > 0
+      ? timeoutOverride
+      : readInt('OPENAI_REQUEST_TIMEOUT_MS', 300_000);
 
-  return getLimiter()(async () => {
+  return getLimiter(lane ?? 'default')(async () => {
     for (let attempt = 1; attempt <= attempts; attempt++) {
       let response: Response;
       try {

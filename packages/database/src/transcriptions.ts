@@ -20,9 +20,16 @@ export type TranscriptionFileStatus = 'pending' | 'done' | 'failed';
 // the whole run.
 export type TranscriptionFileEntry = Readonly<{
   name: string;
-  // Where the original is archived. Always present — unlike a DLO document, a recording is
-  // always uploaded through this API and never arrives pre-read.
-  storagePath: string;
+  // Where the original is archived. Present for an UPLOADED recording, which is most of
+  // them; absent for a YouTube source, which was never downloaded — the transcriber fetches
+  // the media itself from `sourceUrl` below, so there are no bytes on our side to archive.
+  // `sourceUrl` is therefore the discriminator between the two, and exactly one is set.
+  storagePath?: string | undefined;
+  // The canonical watch URL of a pasted YouTube link, and what the oEmbed probe knew about
+  // it — kept so the result card can name and link the video rather than repeating a URL.
+  sourceUrl?: string;
+  sourceAuthor?: string;
+  sourceThumbnailUrl?: string;
   status: TranscriptionFileStatus;
   chars?: number;
   error?: string;

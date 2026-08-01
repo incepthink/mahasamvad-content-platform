@@ -68,9 +68,11 @@ import {
   TranscriptionListResponseSchema,
   type TranscriptionDetail,
   type TranscriptionSummary,
+  YouTubeVideoSchema,
+  type YouTubeVideo,
   VideoProjectDetailSchema,
   VideoProjectSummarySchema,
-  type CreateVideoProjectRequest,
+  type CreateVideoProjectInput,
   type RegenerateStillRequest,
   type UpdateSceneMotionRequest,
   type UpdateVideoScriptRequest,
@@ -162,6 +164,17 @@ export async function getDloIntake(
 export async function listDloIntakes(): Promise<DloIntakeSummary[]> {
   const body = await requestJson('/api/dlo/intakes');
   return DloIntakeListResponseSchema.parse(body);
+}
+
+// "What is this YouTube link?" — the title/channel/thumbnail behind the source cards on
+// /dlo and /transcribe. Stores nothing and spends nothing; the route answers 400 only when
+// the URL is not a YouTube video at all, and otherwise degrades to the id alone.
+export async function probeYouTubeVideo(url: string): Promise<YouTubeVideo> {
+  const body = await requestJson('/api/youtube/probe', {
+    method: 'POST',
+    body: JSON.stringify({ url }),
+  });
+  return YouTubeVideoSchema.parse(body);
 }
 
 // Transcription: multipart create (recordings only). No content-type header — the browser
@@ -428,6 +441,21 @@ export async function regeneratePoster(
         : { posterHeading: options.posterHeading }),
     }),
   });
+}
+
+// Bring an older poster render back as the current one (1-based index into
+// detail.posterVersions, oldest→newest), so the next feedback/redesign/publish acts on it.
+// Synchronous and near-instant — it repoints the row at an existing immutable object, so
+// there is no copy, no new version, and switching back is the same move again.
+export async function restorePosterVersion(
+  id: string,
+  version: number,
+): Promise<string> {
+  const body = await requestJson(`/api/generations/${id}/poster/restore`, {
+    method: 'POST',
+    body: JSON.stringify({ version }),
+  });
+  return z.object({ posterUrl: z.string() }).parse(body).posterUrl;
 }
 
 export async function updatePosterCopy(
@@ -817,9 +845,29 @@ export async function deleteReferenceImage(id: string): Promise<void> {
 
 // ---------- explainer videos (/video) ----------
 
+// JSON normally; multipart when the officer supplied their own narration
+// recording (ready-script mode), because that file has to travel with the same
+// request that creates the project — the script job measures it to decide the
+// scene count. No content-type header on that branch: the browser sets the
+// multipart boundary (the createDloIntake rule).
 export async function createVideoProject(
-  input: CreateVideoProjectRequest,
+  input: CreateVideoProjectInput,
+  narrationAudio?: File | null,
 ): Promise<string> {
+  if (narrationAudio) {
+    const form = new FormData();
+    for (const [key, value] of Object.entries(input)) {
+      if (value === undefined) continue;
+      form.append(key, String(value));
+    }
+    form.append('narration', narrationAudio, narrationAudio.name);
+    const response = await fetch(`${API_URL}/api/video/projects`, {
+      method: 'POST',
+      body: form,
+    });
+    const body = await readJsonResponse(response);
+    return z.object({ id: z.string() }).parse(body).id;
+  }
   const body = await requestJson('/api/video/projects', {
     method: 'POST',
     body: JSON.stringify(input),

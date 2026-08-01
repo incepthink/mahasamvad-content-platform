@@ -116,11 +116,28 @@ export {
 // combiner that assembles the reviewable Marathi text is in @dgipr/schemas: the
 // web rebuilds the same string from the officer's edits, and cannot import this
 // package.
+// Speech-to-text goes through the PROVIDER SEAM (transcribeAudio), not a
+// provider directly — STT_PROVIDER picks between ElevenLabs Scribe (default)
+// and Sarvam's batch job. transcribeAudioFiles stays exported for the offline
+// intake:test harness.
 export {
-  transcribeAudioFiles,
+  transcribeAudio,
+  sttProviderName,
+  sttProviderApiKeyEnv,
+  sttKeyPresent,
+  sttSupportsSourceUrl,
+} from './intake/stt-provider.js';
+export { transcribeAudioFiles } from './intake/sarvam-stt.js';
+// A recording reaches the seam either as bytes we hold or as a URL the provider fetches for
+// itself (a YouTube link — see audio-input.ts and @dgipr/schemas' youtube.ts).
+export {
+  isAudioUrlInput,
   type AudioFileInput,
+  type AudioInput,
   type AudioTranscription,
-} from './intake/sarvam-stt.js';
+  type AudioUrlInput,
+} from './intake/audio-input.js';
+export { transcribeAudioFilesViaElevenLabs } from './intake/elevenlabs-stt.js';
 export {
   extractPdfPages,
   extractPdfPagesDetailed,
@@ -128,6 +145,15 @@ export {
   type PdfExtraction,
   type PdfProbe,
 } from './intake/pdf-pages.js';
+// The PDF equivalent of the STT seam above: callers read PDFs through pdf-pages.ts and
+// never name a provider, but a route or job that has to report a missing key needs to know
+// WHICH key OCR_PROVIDER is asking for.
+export {
+  extractPdfPagesViaProvider,
+  ocrProviderName,
+  ocrProviderApiKeyEnv,
+  ocrKeyPresent,
+} from './intake/ocr-provider.js';
 export {
   type PdfPage,
   type PdfTextSource,
@@ -225,6 +251,20 @@ export {
   type NarrationOptions,
 } from './video/sarvam-tts.js';
 export {
+  elevenLabsModel,
+  elevenLabsVoiceId,
+  pcmToWav,
+  synthesizeElevenLabsNarration,
+  type ElevenLabsNarrationOptions,
+} from './video/elevenlabs-tts.js';
+export {
+  narrationKeyPresent,
+  narrationProviderApiKeyEnv,
+  narrationProviderName,
+  narrationVoice,
+  synthesizeNarration,
+} from './video/narration-provider.js';
+export {
   shortenContinuousNarration,
   shortenNarration,
   type ContinuousNarrationScene,
@@ -239,6 +279,7 @@ export {
   recordGeminiImageCost,
   recordVideoCost,
   recordTtsCost,
+  recordSttCost,
   totalCostUsd,
   type CostAccumulator,
 } from './cost/cost-meter.js';
@@ -248,6 +289,7 @@ export {
   estimateGeminiImageCostUsd,
   estimateVideoCostUsd,
   estimateTtsCostUsd,
+  estimateSttCostUsd,
   type ImageKind,
   type ImageQuality,
 } from './cost/pricing.js';
@@ -285,6 +327,7 @@ export {
   resolvePinnedImage,
   resolvePinnedType,
   resolveSocialReferenceByInformation,
+  resolveYoutubeReference,
   masterUrl,
   type SocialTypeInfo,
   type ResolvedType,
@@ -326,6 +369,16 @@ export {
   type BuildPosterPromptInput,
   type BuildFeedbackPromptInput,
 } from './generation/build-poster-prompt.js';
+// The YouTube-thumbnail image prompts (migration 0042). The ट्विटर fixed-template prompt
+// re-cut for a 1280x720 frame; the reserved-zone numbers must stay in sync with
+// poster-renderer/src/youtube-chrome.ts, whose harness asserts them.
+export {
+  buildYoutubeThumbnailPrompt,
+  buildYoutubeFeedbackPrompt,
+  YOUTUBE_THUMBNAIL_DIMENSIONS,
+  type BuildYoutubeThumbnailPromptInput,
+  type BuildYoutubeFeedbackPromptInput,
+} from './generation/build-youtube-thumbnail-prompt.js';
 // Per-run AI art direction: the colours/background/composition the fully-AI-generated poster
 // uses, so every render looks different (the master is only a loose structural idea).
 export {

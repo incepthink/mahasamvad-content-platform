@@ -15,6 +15,7 @@ import { registerDesignationRoutes } from './routes/designations.js';
 import { registerReferenceRoutes } from './routes/references.js';
 import { registerTranscriptionRoutes } from './routes/transcriptions.js';
 import { registerVideoRoutes } from './routes/video.js';
+import { registerYouTubeRoutes } from './routes/youtube.js';
 
 export async function createServer() {
   const app = Fastify({
@@ -75,6 +76,8 @@ export async function createServer() {
       registerTranslateRoutes(instance, client);
       // Generic file upload → pages of text. No Supabase client: it persists nothing.
       registerDocumentRoutes(instance);
+      // "What is this YouTube link?" for the intake cards. Persists nothing either.
+      registerYouTubeRoutes(instance);
       registerProofreadRoutes(instance, client);
       registerPointerRoutes(instance);
       registerDesignationRoutes(instance, client);

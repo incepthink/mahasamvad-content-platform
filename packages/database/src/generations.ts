@@ -7,7 +7,14 @@ export const GENERATIONS_TABLE = 'generations';
 export const GENERATION_REVISIONS_TABLE = 'generation_revisions';
 
 export type OutputType = 'article' | 'poster' | 'both';
-export type Category = 'news' | 'scheme' | 'twitter' | 'facebook';
+// 'youtube' is the 1280x720 thumbnail lane (migration 0042). Mirrors CategorySchema in
+// @dgipr/schemas; kept structural here so this package stays dependency-free.
+export type Category =
+  | 'news'
+  | 'scheme'
+  | 'twitter'
+  | 'facebook'
+  | 'youtube';
 export type DesignMode = 'onbrand' | 'adaptive' | 'fresh';
 // Template brand family (migration 0024); mirrors TemplateBrand in reference-types.ts.
 export type TemplateBrand = 'dgipr' | 'cmo';
@@ -76,6 +83,12 @@ export type GenerationRow = Readonly<{
   // structure only; never a factual source. Insert-only, because a retry re-reads the row and
   // must reproduce the same reference. Null when the officer pasted nothing and on pre-0035 rows.
   styleReference: string | null;
+  // The officer's free-text direction for this article (migration 0041): emphasis, ordering,
+  // tone, what to keep short. An instruction, never a factual source — the prompt says so, so
+  // a fact typed there is not published. Insert-only for the same reason as styleReference: a
+  // retry re-reads the row and must write the same article, not a differently-directed one.
+  // Null when nothing was typed and on pre-0041 rows.
+  instructions: string | null;
   // Which style reference the run ACTUALLY used (migration 0035): the officer's paste, a
   // retrieved Mahasamvad article above the similarity floor, or none — plus the similarity and
   // the prompt version. `unknown` for the same reason as `copy`/`posterStyle`: the database
@@ -167,6 +180,7 @@ type GenerationDbRow = {
   name_designations: unknown;
   style_reference: string | null;
   style_reference_meta: unknown;
+  instructions: string | null;
   article_provided: boolean | null;
   poster_style: unknown;
   status: GenerationStatus;
@@ -229,6 +243,8 @@ function fromDbRow(row: GenerationDbRow): GenerationRow {
     // already treats as "no officer reference / nothing recorded".
     styleReference: row.style_reference ?? null,
     styleReferenceMeta: row.style_reference_meta ?? null,
+    // ?? null on a pre-0041 database for the same reason: "the officer typed no direction".
+    instructions: row.instructions ?? null,
     // ?? false: a pre-0027 database returns no such column (undefined), and an
     // ordinary run is not article-provided anyway.
     articleProvided: row.article_provided ?? false,
@@ -372,6 +388,8 @@ export async function insertGeneration(
     // Read again on every retry, which is why it lives on the row rather than in the create
     // request alone.
     styleReference?: string | undefined;
+    // Insert-only (migration 0041): the officer's free-text direction for this article.
+    instructions?: string | undefined;
     // Insert-only: the note is a finished article; the runner skips generation.
     articleProvided?: boolean | undefined;
   }>,
@@ -422,6 +440,9 @@ export async function insertGeneration(
       ...(input.styleReference
         ? { style_reference: input.styleReference }
         : {}),
+      // Same omit-unless-typed treatment (migration 0041), so an un-applied 0041 costs this
+      // one field rather than every create.
+      ...(input.instructions ? { instructions: input.instructions } : {}),
       article_provided: input.articleProvided ?? false,
     })
     .select()

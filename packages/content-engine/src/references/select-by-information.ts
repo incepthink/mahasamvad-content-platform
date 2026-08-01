@@ -1,55 +1,61 @@
-// INFORMATION-FIRST reference selection for social (twitter/facebook) posters.
+// CAPACITY-FIRST reference selection for social (twitter/facebook) posters.
 //
-// This replaces the classify → point_count → wants_photo → select-within-type flow on the
-// ordinary DGIPR social path. That flow decided things ABOUT the note before it had chosen a
-// reference — which post type it was, how many bullets it supported, whether it wanted a
-// photograph — and every one of those predictions then constrained the pool. A wrong
-// point_count excluded the right template; a wrong post_type excluded a whole family of them.
+// SUPERSEDES the subject-first design this file carried between 2026-07-28 and 2026-07-31,
+// which made the reference's own TOPIC the deciding factor ("a note about mosquitoes must land
+// on the dengue master even if a different template would arrange its points more neatly").
+// That was built on an assumption which turned out to be false in practice: that the officer
+// supplies an ARTICLE and the pipeline decides what belongs on the poster. It does not. What
+// the officer types IS the poster's content — every line of it is meant to appear.
 //
-// The order is now the other way round:
+// Once that is true, topic matching is actively harmful. A note about mosquitoes carrying SEVEN
+// points was being routed to the three-slot dengue poster, and four of the officer's points were
+// then dropped to fit — the reference's capacity was shrinking the content. The relationship has
+// to run the other way: the content's SIZE decides which references are even eligible.
 //
-//   raw note → the reference whose SUBJECT (then information structure) fits it best → the
-//   copy arranged to fit that reference
+//   the information → how many items it contains → the references that can SHOW that many
+//   → the one whose arrangement presents this shape best
 //
-// Nothing is predicted first. The note is compared, exactly as the officer wrote it, against
-// EVERY enabled social master of the brand (across all types) using the vision-derived
-// descriptions already cached on reference_images.layout_spec (migration 0016) —
-// `contentSummary` (what that poster is about) and `layoutSummary` (how it arranges
-// information). The winner's own type is then resolved from its `subtype`, and the existing
-// copy step arranges the note's information into the sections that reference actually has
-// (copyStyle, bulletSlots, hasPhotoZone) — the same mechanism the CMO path has always used.
+// So the order is now:
 //
-// SUBJECT IS THE DECIDING FACTOR, not a co-equal one. A note about mosquitoes must land on the
-// dengue master even if a different template would arrange its points more neatly: a reference
-// on the right subject with an imperfect layout beats a well-arranged reference about something
-// else. So the prompt is staged — narrow by subject, then choose within that set on structure —
-// rather than asking for a single blended judgement, which is what let a strong structural fit
-// out-argue the right topic. `contentSummary` is therefore the primary key and leads each
-// candidate line; it is operator-editable for exactly that reason, and a master without one
-// announces itself as having no subject to match on.
+//   STAGE 1 (capacity, a HARD GATE): a reference with fewer content slots than the information
+//     has items is EXCLUDED, not scored down. It was a scored preference before, and a scored
+//     preference is exactly how a four-slot template kept beating a seven-slot one.
+//   STAGE 2 (presentation): among what survives, which arrangement suits this shape of
+//     information — a photograph zone or not, a quotation with a speaker, a date/venue, figures.
 //
-// When the library genuinely holds nothing on the note's subject, the model must SAY SO
-// (`subject_match: false`) and fall back to structure alone, rather than stretching a link — a
-// road-tender note must not become "public-health adjacent" because the dengue poster is the
-// nearest thing available. That flag lands in the selection reason, so a missing master shows up
-// in the job log instead of as a quietly wrong poster.
+// SUBJECT IS NO LONGER A CRITERION AT ALL, and `contentSummary` is deliberately not shown to the
+// ranker. Making the poster FEEL like an alert (or a scheme launch, or a celebration) is the
+// image prompt's job, not the librarian's: the reference contributes structure, and
+// build-poster-prompt.ts tells the model to make the design read as the right kind of poster.
+// That is the same division the onbrand prompt already draws for colour ("the reference image
+// controls STRUCTURE ONLY, not colour") — this extends it to subject and mood.
 //
-// Tone/mood/colour are deliberately NOT criteria here (rank-master.ts's tone-based tie-break
-// is a different job for a different flow). Colour is additionally stripped from the
-// descriptions on a 'fresh' render, where the palette is assigned separately and the master
-// contributes structure only.
+// THE GATE IS ENFORCED IN CODE, NOT BY THE PROMPT. The model is told the rule and normally
+// obeys it, but its answer is then checked: a pick that cannot hold the items is replaced with
+// the tightest eligible reference. Same doctrine as lock-scheme-names.ts and the video
+// fact_index guard — an instruction steers, a deterministic post-filter guarantees.
 //
-// RECENCY IS A TIE-BREAK, NEVER A FILTER. Recently-used masters used to be removed from the pool
-// before ranking, which — with subject deciding — removed the RIGHT ANSWER: one mosquito master
-// used last run meant the next mosquito note could not see it at all (the old guard only stepped
-// aside when the whole library would empty, not when the subject-appropriate subset would). The
-// recent ids are now handed to the model as a lowest-priority preference between candidates of
-// EQUAL subject fit, and the pool it ranks over is always complete. They still filter the SEEDED
-// FALLBACK pick, where no subject reasoning is happening and across-run variety is free.
+// WHEN NOTHING FITS (9 items, biggest master has 6) the render still happens: the
+// highest-capacity reference is chosen and the shortfall is REPORTED — to the image prompt, so
+// it is told to extend the item pattern rather than drop anything, and to the officer, so they
+// can split the note into two posters. Never a silent truncation, which is what this whole
+// change exists to end.
 //
-// Ranking is a QUALITY step over a pool that is already correct: an un-analysed library, a
-// bad model read or a failed call all fall back to the seeded hash pick, so a render never
-// depends on it succeeding.
+// The item COUNT comes from the same call that picks, deliberately: a separate counting call
+// would be a second charge, and the count and the pick could then disagree about the very thing
+// the gate is computed from.
+//
+// Colour is additionally stripped from the descriptions on a 'fresh' render, where the palette
+// is assigned separately and the master contributes structure only.
+//
+// RECENCY IS A TIE-BREAK, NEVER A FILTER. Recently-used masters are handed to the model as a
+// lowest-priority preference between EQUALLY capable candidates; the pool it ranks over is
+// always complete. They still filter the SEEDED FALLBACK pick, where no reasoning is happening
+// and across-run variety is free.
+//
+// Ranking is a QUALITY step over a pool that is already correct: an un-analysed library, a bad
+// model read or a failed call all fall back to the seeded hash pick, so a render never depends
+// on it succeeding.
 
 import { pathToFileURL } from 'node:url';
 import {
@@ -66,43 +72,68 @@ import {
   type SelectedMaster,
 } from './select-master.js';
 
-// One reference as the ranker sees it. `id` is opaque to the model (it answers with an
-// index); the two summaries plus the structural facts are what it reasons over.
+// One reference as the ranker sees it. `id` is opaque to the model (it answers with an index);
+// the capacity plus the structural description are what it reasons over.
+//
+// NOTE the absence of `contentSummary`: the reference's own subject is not a selection
+// criterion any more, so it is not shown. See the module header.
 export type InformationCandidate = Readonly<{
   id: string;
   // The type this reference belongs to, named so the model can see that the library offers
-  // genuinely different formats — NOT so it classifies the note into one first.
+  // genuinely different formats — NOT so it classifies the information into one first.
   typeLabel: string;
   layoutSummary: string;
-  contentSummary?: string | undefined;
   hasPhotoZone: boolean;
   bulletSlots: number;
 }>;
 
 export type InformationRanking = Readonly<{
-  // The chosen candidate's id (mapped back from the model's index).
+  // The chosen candidate's id (mapped back from the model's index). This is the model's
+  // PREFERENCE; selectReferenceByInformation enforces the capacity gate over it.
   id: string;
+  // How many distinct items the supplied information contains — the number the gate is
+  // computed from, and the number the poster must end up showing.
+  itemCount: number;
   // A short Marathi (Devanagari) working title for the post. This is the run's
-  // `referenceTitle`, previously produced by the classifier this step replaces.
+  // `referenceTitle`, previously produced by the classifier this step replaced.
   title: string;
   // One short English sentence on why it fits (log/debug only).
   reason: string;
-  // False when NO reference in the library was on the note's subject, so the pick was made on
-  // structure alone. Not a failure — the render proceeds — but it is the signal that the
-  // library has a gap, so it is surfaced in the selection reason rather than swallowed.
-  subjectMatch: boolean;
+}>;
+
+// Reported when NO reference in the library can hold every item, so the officer can be told and
+// the image prompt can be instructed to extend the pattern instead of dropping content.
+export type SlotShortfall = Readonly<{
+  // Items the information contains.
+  needed: number;
+  // Content slots the chosen (highest-capacity) reference actually has.
+  available: number;
 }>;
 
 export type SelectedByInformation = Readonly<{
   master: SelectedMaster;
   // Null when the pick fell back to the seeded hash (no ranking happened, so no title).
   title: string | null;
+  // Null when no ranking happened, so nothing counted the items.
+  itemCount: number | null;
+  // Null when the chosen reference can hold everything (the normal case).
+  shortfall: SlotShortfall | null;
 }>;
 
-// The note is the whole input to this decision, so it is sent generously rather than
-// summarised — but a 60,000-char DLO note would dominate the prompt for no gain, and the
-// subject of a press note is established early. Bounded, not sampled.
+// The information is the whole input to this decision, so it is sent generously rather than
+// summarised — but a 60,000-char note would dominate the prompt for no gain. Bounded, not
+// sampled.
 const NOTE_MAX_CHARS = 6000;
+
+// Below this the capacity gate means nothing: a single-message poster is not a list, and a
+// third of the library legitimately reports `bulletSlots: 0` ("the body is not a repeating
+// list" — quote posters, one-statement posters). Gating those out for a one-item note would
+// exclude exactly the references built for it.
+const MIN_GATED_ITEMS = 2;
+
+// A miscount cannot be allowed to empty the library through the gate. Nothing in the catalog
+// exceeds 12 slots, so a count far above that is a bad read, not a big poster.
+const MAX_ITEM_COUNT = 24;
 
 function buildSystemPrompt(
   candidates: readonly InformationCandidate[],
@@ -111,26 +142,24 @@ function buildSystemPrompt(
   recentIndices: readonly number[],
 ): string {
   const lines = candidates.map((c, i) => {
-    // SUBJECT LEADS THE LINE. It is the primary key of the decision, so it must not sit in a
-    // trailing clause the model can skim past — and an undescribed master must announce that
-    // it cannot be judged on subject rather than silently reading as "no particular subject".
-    const subject = c.contentSummary ?? 'not described';
+    // CAPACITY LEADS THE LINE. It is the primary key of the decision, so it must not sit in a
+    // trailing clause the model can skim past.
+    const slots =
+      c.bulletSlots > 0
+        ? `shows up to ${c.bulletSlots} item(s)`
+        : 'not an item list (a single-message or quotation layout)';
     const photo = c.hasPhotoZone
       ? 'has a photograph area'
       : 'text-only (no photograph area)';
-    const slots =
-      c.bulletSlots > 0
-        ? `${c.bulletSlots} repeating content slot(s)`
-        : 'no repeating content list';
-    // On a from-scratch run the master's colours are irrelevant AND misleading: the palette
-    // is assigned separately, and the DGIPR library is overwhelmingly saffron/maroon/cream,
-    // so a colour-carrying description is a live channel for the house look to re-enter a
-    // poster meant to be in a different family.
+    // On a from-scratch run the master's colours are irrelevant AND misleading: the palette is
+    // assigned separately, and the DGIPR library is overwhelmingly saffron/maroon/cream, so a
+    // colour-carrying description is a live channel for the house look to re-enter a poster
+    // meant to be in a different family.
     const layout = ignoreColour ? stripColourMentions(c.layoutSummary) : c.layoutSummary;
     return [
       `- index ${i} [group: ${c.typeLabel}]`,
-      `  SUBJECT: ${subject}`,
-      `  STRUCTURE: ${photo}, ${slots}. ${layout}`,
+      `  CAPACITY: ${slots}`,
+      `  STRUCTURE: ${photo}. ${layout}`,
     ].join('\n');
   });
 
@@ -140,40 +169,44 @@ function buildSystemPrompt(
           '',
           'VARIETY (lowest priority, applies only after the two stages above):',
           `- Recent posts already used: ${recentIndices.map((i) => `index ${i}`).join(', ')}.`,
-          '- Between references that fit the subject EQUALLY well, prefer one that is not in that list.',
-          '- NEVER reject a better subject match to satisfy this. Repeating a reference for a repeated topic is correct.',
+          '- Between references that hold the information EQUALLY well, prefer one that is not in that list.',
+          '- NEVER reject a reference that fits the item count better in order to satisfy this.',
         ]
       : [];
 
   return [
     'You are a designer for DGIPR Maharashtra (Directorate General of Information & Public Relations).',
-    "You are given a raw government note and the department's library of existing poster reference templates.",
-    'Choose the ONE reference that best fits this note.',
+    "You are given the exact information an officer wants shown on a poster, and the department's library of poster reference templates.",
+    'Choose the ONE reference that can DISPLAY THIS INFORMATION BEST.',
     '',
-    'SUBJECT IS THE DECIDING FACTOR. Work in two stages, strictly in this order.',
+    'THE INFORMATION IS THE POSTER. Everything the officer wrote is meant to appear on it. Your choice must not force any of it to be left out.',
     '',
-    'STAGE 1 — SUBJECT (decides).',
-    '- Read the note first, as written. Do not decide what kind of post it is before looking at the references.',
-    '- Identify what the note is ABOUT: its topic and its domain (health, disease and prevention, agriculture, roads and transport, welfare, education, disaster, employment, awards, civic services...).',
-    '- Keep every reference whose own SUBJECT line is the same topic, or clearly the same domain. Judge this from the SUBJECT line first and the group name second.',
-    '- A reference whose SUBJECT is "not described" cannot be judged on subject. Keep it only if nothing else matches.',
+    'STAGE 0 — COUNT.',
+    '- Count the distinct items of information: the separate points, instructions, measures, facts or list entries the officer wants shown.',
+    '- Count what is there. Do not merge two points into one, do not split one point into two, and do not judge whether a point is important enough to keep — that is not your decision.',
+    '- A heading, a title line or an introductory sentence that frames the rest is NOT one of the items; the points under it are.',
+    '- Report this number as "item_count".',
     '',
-    'STAGE 2 — STRUCTURE (chooses among the ones stage 1 kept).',
-    '- ONLY among the references kept by stage 1, pick the one whose arrangement can actually hold the information this note contains: how much of it there is, whether it is one message or a set of points, whether it carries a quotation with a speaker, a date/time/venue, figures or amounts, eligibility or a call to action.',
-    '- A reference with a photograph area suits a note about an event, place, people or built thing; a text-only reference suits an advisory, a rule list or a plain statement. Judge this from the note, not as a rule.',
-    '- If stage 1 kept exactly one reference, CHOOSE IT, even if its arrangement is not ideal. A reference on the right subject with an imperfect layout is a better choice than a well-arranged reference about something else.',
+    'STAGE 1 — CAPACITY (a hard rule, not a preference).',
+    '- A reference whose CAPACITY is smaller than item_count CANNOT be chosen. It has nowhere to put the remaining points, and they would be dropped.',
+    '- Choose only from references whose capacity is item_count or more.',
+    '- Prefer the SMALLEST capacity that still fits, so the poster is not mostly empty slots.',
+    '- If item_count is 1 or 0, capacity does not apply — any reference may be chosen.',
     '',
-    'IF NOTHING MATCHES THE SUBJECT:',
-    '- Do not stretch a link and do not rationalise a weak one. A note about road tenders is not "public-health adjacent" merely because a dengue poster is the nearest thing in the library.',
-    '- Set "subject_match" to false and choose purely on structure (stage 2 over ALL references).',
-    '- Otherwise set "subject_match" to true.',
+    'STAGE 2 — PRESENTATION (chooses among the ones stage 1 allows).',
+    '- Pick the arrangement that suits THIS SHAPE of information: whether it is a set of parallel points, a quotation with a named speaker, a sequence of dates, figures or amounts, an instruction list, or a single announcement.',
+    '- A reference with a photograph area suits information about an event, place, people or a built thing; a text-only reference suits an advisory, a rule list or a plain statement. Judge this from the information, not as a rule.',
     '',
+    'IF NO REFERENCE IS BIG ENOUGH:',
+    '- Choose the one with the LARGEST capacity, and still report the true item_count. Never reduce item_count to make a reference fit.',
+    '',
+    'NEVER choose a reference because its existing placeholder content is about the same topic as this information. The topic of the reference is irrelevant — its placeholder text will be replaced entirely, and the design will be restyled to suit this information. Choosing a same-topic reference that cannot hold every point is a serious error.',
     'NEVER choose on tone, mood or colour, and never because a reference is visually attractive.',
     ...variety,
     '',
-    'Also return a short Marathi (Devanagari) working title for the post, taken from the note. Never invent a name, figure or date that is not in the note.',
+    'Also return a short Marathi (Devanagari) working title for the post, taken from the information. Never invent a name, figure or date that is not in it.',
     '',
-    'Respond with STRICT JSON only: {"index": <one of the candidate indices>, "subject_match": <true|false>, "title": "<short Marathi title>", "reason": "<one short English sentence naming the subject link, or its absence>"}.',
+    'Respond with STRICT JSON only: {"item_count": <integer>, "index": <one of the candidate indices>, "title": "<short Marathi title>", "reason": "<one short English sentence: the item count and why this reference holds it>"}.',
     '',
     'Reference templates:',
     ...lines,
@@ -193,9 +226,13 @@ function parseJson(raw: string): Record<string, unknown> {
   }
 }
 
-// Rank every candidate against the note and return the winner, or null when ranking could not
-// produce a usable answer (the caller then falls back to the seeded hash pick). Never throws
-// for a model slip — a bad read must not sink a render.
+// Count the information's items and rank every candidate against it. Returns the model's
+// preference, or null when ranking could not produce a usable answer (the caller then falls back
+// to the seeded hash pick). Never throws for a model slip — a bad read must not sink a render.
+//
+// The capacity gate is NOT applied here: this returns what the model chose, and
+// selectReferenceByInformation enforces the rule over it. Keeping the two apart is what makes
+// the enforcement testable without a model call.
 export async function rankReferenceByInformation(
   note: string,
   candidates: readonly InformationCandidate[],
@@ -225,15 +262,17 @@ export async function rankReferenceByInformation(
             recentIndices,
           ),
         },
-        { role: 'user', content: `Government note:\n${trimmed.slice(0, NOTE_MAX_CHARS)}` },
+        {
+          role: 'user',
+          content: `Information to show on the poster:\n${trimmed.slice(0, NOTE_MAX_CHARS)}`,
+        },
       ],
       {
-        // This is now the DECISIVE routing call on the social path — it replaces the
-        // classifier, and the reference it picks determines the poster's whole information
-        // structure. It therefore inherits the classifier's authoring tier and deliberation
-        // rather than the utility tier rank-master.ts uses for a tie-break inside an
-        // already-filtered band. maxTokens is the ANSWER budget; reasoning gets its own
-        // headroom in openai-chat.ts.
+        // This is the DECISIVE routing call on the social path — it replaces the classifier,
+        // and the reference it picks determines the poster's whole information structure. It
+        // therefore inherits the classifier's authoring tier and deliberation rather than the
+        // utility tier rank-master.ts uses for a tie-break inside an already-filtered band.
+        // maxTokens is the ANSWER budget; reasoning gets its own headroom in openai-chat.ts.
         model: POSTER_COPY_MODEL,
         reasoningEffort: 'medium',
         maxTokens: 400,
@@ -243,12 +282,12 @@ export async function rankReferenceByInformation(
             type: 'object',
             additionalProperties: false,
             properties: {
+              item_count: { type: 'integer' },
               index: { type: 'integer', enum: indices },
-              subject_match: { type: 'boolean' },
               title: { type: 'string' },
               reason: { type: 'string' },
             },
-            required: ['index', 'subject_match', 'title', 'reason'],
+            required: ['item_count', 'index', 'title', 'reason'],
           },
         },
       },
@@ -258,14 +297,17 @@ export async function rankReferenceByInformation(
     if (!Number.isInteger(index) || index < 0 || index >= candidates.length) {
       return null;
     }
+    const rawCount = Number(parsed.item_count);
+    // A miscount must degrade to "no gate", never to an empty pool: 0 disables the gate below.
+    const itemCount =
+      Number.isFinite(rawCount) && rawCount > 0
+        ? Math.min(MAX_ITEM_COUNT, Math.round(rawCount))
+        : 0;
     return {
       id: (candidates[index] as InformationCandidate).id,
+      itemCount,
       title: typeof parsed.title === 'string' ? parsed.title : '',
       reason: typeof parsed.reason === 'string' ? parsed.reason : '',
-      // Only an explicit true is a subject match. A model that omits the field or answers with
-      // something other than a boolean has not asserted one, and the honest reading of that is
-      // "unclaimed" — which logs the library gap rather than hiding it behind a default.
-      subjectMatch: parsed.subject_match === true,
     };
   } catch (error) {
     console.warn(
@@ -276,9 +318,52 @@ export async function rankReferenceByInformation(
   }
 }
 
+// Enforce the capacity gate over the model's preference. Pure and synchronous, so the rule that
+// actually protects the officer's content is testable for free.
+//
+// Returns the id to use plus, when the library simply cannot hold the information, the
+// shortfall to report. `preferredId` is honoured whenever it is eligible — the model chose it
+// on presentation fit, which this function has no way to judge.
+export function enforceCapacity<T extends { id: string; bulletSlots: number }>(
+  candidates: readonly T[],
+  preferredId: string,
+  itemCount: number,
+  // Tie-break seed, so an otherwise-equal correction is reproducible across a retry.
+  seed: string,
+): { id: string; shortfall: SlotShortfall | null; corrected: boolean } {
+  const preferred = candidates.find((c) => c.id === preferredId);
+  if (!preferred || itemCount < MIN_GATED_ITEMS) {
+    return { id: preferredId, shortfall: null, corrected: false };
+  }
+  if (preferred.bulletSlots >= itemCount) {
+    return { id: preferredId, shortfall: null, corrected: false };
+  }
+
+  // The model picked something that cannot hold the content. Take the TIGHTEST reference that
+  // can — the smallest capacity at or above the count, so the poster is not mostly empty slots.
+  const eligible = candidates.filter((c) => c.bulletSlots >= itemCount);
+  if (eligible.length > 0) {
+    const tightest = Math.min(...eligible.map((c) => c.bulletSlots));
+    const band = eligible.filter((c) => c.bulletSlots === tightest);
+    const chosen = band[hashString(seed) % band.length] as T;
+    return { id: chosen.id, shortfall: null, corrected: true };
+  }
+
+  // Nothing in the library is big enough. Take the largest and report the gap: the image prompt
+  // is told to extend the item pattern rather than drop anything, and the officer is warned.
+  const largest = Math.max(...candidates.map((c) => c.bulletSlots));
+  const band = candidates.filter((c) => c.bulletSlots === largest);
+  const chosen = band[hashString(seed) % band.length] as T;
+  return {
+    id: chosen.id,
+    shortfall: { needed: itemCount, available: largest },
+    corrected: chosen.id !== preferredId,
+  };
+}
+
 // A candidate the ranker can reason over: it must already carry vision-derived summaries (a
-// null-spec master has nothing to match on, so it is invisible to an information-first pick —
-// which is why one un-analysed master is warmed per run below, filling the library over time).
+// null-spec master has nothing to match on, so it is invisible to selection — which is why one
+// un-analysed master is warmed per run below, filling the library over time).
 function candidateFor(
   image: ReferenceImageRow,
   typeLabelFor: (image: ReferenceImageRow) => string,
@@ -290,30 +375,29 @@ function candidateFor(
     id: image.id,
     typeLabel: typeLabelFor(image),
     layoutSummary: spec.layoutSummary,
-    contentSummary: spec.contentSummary,
     hasPhotoZone: spec.hasPhotoZone,
     bulletSlots: spec.bulletSlots,
   };
 }
 
-// Choose ONE reference for this note from a pool spanning every enabled type of the brand.
+// Choose ONE reference for this information from a pool spanning every enabled type of the brand.
 //
-// At most ONE vision analysis is spent per call, exactly as select-master.ts does it: the
-// picked master is analysed if it has no spec (so copy/prompt get real structure); otherwise
-// one other un-analysed image is warmed opportunistically, so an un-described library becomes
-// rankable over successive runs instead of needing a bulk backfill first.
+// At most ONE vision analysis is spent per call, exactly as select-master.ts does it: the picked
+// master is analysed if it has no spec (so the prompt gets real structure); otherwise one other
+// un-analysed image is warmed opportunistically, so an un-described library becomes rankable over
+// successive runs instead of needing a bulk backfill first.
 export async function selectReferenceByInformation(
   client: SupabaseClient,
   images: readonly ReferenceImageRow[],
   // Names the type each image belongs to, for the candidate lines.
   typeLabelFor: (image: ReferenceImageRow) => string,
-  // Seed for the deterministic fallback pick (the generation id) — a retry re-renders the
-  // same template rather than rolling a new one.
+  // Seed for the deterministic fallback pick (the generation id) — a retry re-renders the same
+  // template rather than rolling a new one.
   seed: string,
   note: string,
   // Master ids used by the last few runs of this brand (across-run variety). Best-effort,
-  // in-process on the caller's side. NOT a filter on the ranked pool — it reaches the model as
-  // a lowest-priority tie-break between equal subject fits, and only narrows the SEEDED
+  // in-process on the caller's side. NOT a filter on the ranked pool — it reaches the model as a
+  // lowest-priority tie-break between equally capable references, and only narrows the SEEDED
   // fallback pick. See the recency note in the module header for why.
   avoidIds?: readonly string[],
   options: Readonly<{ ignoreColour?: boolean | undefined }> = {},
@@ -322,17 +406,17 @@ export async function selectReferenceByInformation(
     throw new Error('selectReferenceByInformation called with no enabled images.');
   }
 
-  // Deterministic ordering (newest first) so the seeded fallback and the candidate indices
-  // are stable across calls. THE RANKED POOL IS ALWAYS THE WHOLE LIBRARY — recency must not
-  // remove a master before the subject has been considered, or the one reference on the note's
-  // topic disappears exactly when it is used twice running.
+  // Deterministic ordering (newest first) so the seeded fallback and the candidate indices are
+  // stable across calls. THE RANKED POOL IS ALWAYS THE WHOLE LIBRARY — recency must not remove a
+  // master before capacity has been considered, or the one reference big enough for this note
+  // disappears exactly when it is used twice running.
   const pool = [...images].sort((a, b) =>
     a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0,
   );
-  const reasonPrefix = `information-first (pool=${pool.length})`;
+  const reasonPrefix = `capacity-first (pool=${pool.length})`;
 
-  // The seeded fallback keeps the old spread behaviour: no subject reasoning happens on that
-  // path, so across-run variety is free there and costs nothing correct.
+  // The seeded fallback keeps the old spread behaviour: no reasoning happens on that path, so
+  // across-run variety is free there and costs nothing correct.
   let fallbackPool = pool;
   let fallbackNote = 'seeded';
   if (avoidIds && avoidIds.length > 0) {
@@ -347,6 +431,8 @@ export async function selectReferenceByInformation(
   let picked = fallbackPool[hashString(seed) % fallbackPool.length] as ReferenceImageRow;
   let pickMethod = fallbackNote;
   let title: string | null = null;
+  let itemCount: number | null = null;
+  let shortfall: SlotShortfall | null = null;
 
   const candidates = pool
     .map((image) => candidateFor(image, typeLabelFor))
@@ -358,19 +444,38 @@ export async function selectReferenceByInformation(
       ignoreColour: options.ignoreColour,
       recentIds: avoidIds,
     });
-    const match = ranked && pool.find((img) => img.id === ranked.id);
-    if (match && ranked) {
-      picked = match;
-      // A structure-only pick is named as such: it means the library holds nothing on this
-      // note's subject, which is a gap to fill rather than a normal outcome.
-      const gap = ranked.subjectMatch ? '' : ' [NO SUBJECT MATCH — structure only]';
-      pickMethod = `information-ranked${gap} (${ranked.reason})`;
-      title = ranked.title.trim() === '' ? null : ranked.title.trim();
-      if (!ranked.subjectMatch) {
-        console.warn(
-          '[select-by-information] no reference matched the subject of this note; picked on ' +
-            `structure alone (${picked.storagePath}). Consider adding a master for this topic.`,
-        );
+    if (ranked) {
+      // The model's answer is a preference; this is the rule.
+      const verdict = enforceCapacity(
+        candidates,
+        ranked.id,
+        ranked.itemCount,
+        seed,
+      );
+      const match = pool.find((img) => img.id === verdict.id);
+      if (match) {
+        picked = match;
+        itemCount = ranked.itemCount > 0 ? ranked.itemCount : null;
+        shortfall = verdict.shortfall;
+        const fixed = verdict.corrected ? ' [capacity-corrected]' : '';
+        const gap = shortfall
+          ? ` [SHORTFALL — ${shortfall.needed} items, largest reference shows ${shortfall.available}]`
+          : '';
+        pickMethod = `information-ranked${fixed}${gap} (items=${ranked.itemCount}; ${ranked.reason})`;
+        title = ranked.title.trim() === '' ? null : ranked.title.trim();
+        if (verdict.corrected) {
+          console.warn(
+            '[select-by-information] the ranked reference could not hold ' +
+              `${ranked.itemCount} item(s); corrected to ${picked.storagePath}.`,
+          );
+        }
+        if (shortfall) {
+          console.warn(
+            `[select-by-information] NO reference can show ${shortfall.needed} items ` +
+              `(largest shows ${shortfall.available}); rendering into ${picked.storagePath} ` +
+              'with an instruction to extend its item pattern. Consider adding a larger master.',
+          );
+        }
       }
     }
   }
@@ -394,18 +499,19 @@ export async function selectReferenceByInformation(
       reason: `${reasonPrefix} → ${pickMethod} → ${picked.storagePath}`,
     },
     title,
+    itemCount,
+    shortfall,
   };
 }
 
 // --- CLI harness -----------------------------------------------------------
-//   tsx --env-file=../../.env src/references/select-by-information.ts
-// Live (cents per case): ranks a real-shaped library against three notes and ASSERTS the
-// properties this module exists for, rather than printing output to be eyeballed:
-//   1. SUBJECT WINS over a neater structural fit  (mosquito note -> the dengue master, not the
-//      stat-callout master, even though the note carries figures the latter would arrange well)
-//   2. RECENCY DOES NOT VETO A SUBJECT MATCH      (same note, dengue master marked as recently
-//      used -> still chosen)
-//   3. NO FORCED MATCH                            (road-tender note -> subject_match false)
+//   tsx src/references/select-by-information.ts            (free — the capacity gate only)
+//   tsx --env-file=../../.env src/references/select-by-information.ts --live   (cents)
+//
+// The FREE half asserts enforceCapacity, which is the rule that actually protects the officer's
+// content: the model may prefer whatever it likes, but a reference that cannot show every item
+// must never survive. The LIVE half asserts the model's own behaviour on the case this rewrite
+// exists for — a mosquito note with seven points must NOT land on the three-slot dengue master.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const CANDIDATES: InformationCandidate[] = [
     {
@@ -415,7 +521,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       bulletSlots: 5,
       layoutSummary:
         'A large stacked headline over a full-bleed sky image, a warning strip, and five advisory cards below.',
-      contentSummary: 'अतिवृष्टीबाबत नागरिकांसाठी सार्वजनिक सुरक्षा सूचना.',
     },
     {
       id: 'quote-leader',
@@ -424,7 +529,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       bulletSlots: 0,
       layoutSummary:
         'A single large quotation block with an attribution line and a portrait at the lower right; no repeating list.',
-      contentSummary: 'मंत्र्यांचे वक्तव्य.',
     },
     {
       id: 'health-stats',
@@ -433,32 +537,34 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       bulletSlots: 4,
       layoutSummary:
         'A headline on a panel, four stat callouts with figures and short labels, a facility photo zone on the right, and a footer call-to-action.',
-      contentSummary: 'सार्वजनिक आरोग्य सुविधांच्या विस्ताराची आकडेवारी.',
     },
     {
-      // The subject match for case 1 — deliberately the WEAKER structural fit (3 slots for a
-      // note carrying more than three points), so a pass proves subject outranked structure.
+      // The old design's winner: the mosquito note's TOPIC match, and far too small for it.
       id: 'dengue-mosquito',
       typeLabel: 'Information about insects, reptiles, animals, etc',
       hasPhotoZone: true,
       bulletSlots: 3,
       layoutSummary:
         'A large stylised headline across the upper content area, a circular illustration of the insect, and three short explanatory callouts joined by arrows.',
-      contentSummary:
-        'डेंग्यूबाबत जनजागृती पोस्टर — एडिस डास, त्यांची उत्पत्ती आणि प्रसार टाळण्याचे उपाय.',
+    },
+    {
+      // The correct winner for a seven-point note: big enough, and the tightest such fit.
+      id: 'points-seven',
+      typeLabel: 'माहिती',
+      hasPhotoZone: true,
+      bulletSlots: 7,
+      layoutSummary:
+        'A headline band above seven numbered rows, each a short line of text with a small leading icon, over a plain ground.',
+    },
+    {
+      id: 'points-twelve',
+      typeLabel: 'माहिती',
+      hasPhotoZone: false,
+      bulletSlots: 12,
+      layoutSummary:
+        'A dense two-column checklist of twelve compact rows under a narrow heading strip; text-only.',
     },
   ];
-
-  const MOSQUITO_NOTE = [
-    'राज्यात डासांमुळे पसरणाऱ्या डेंग्यू आजाराच्या रुग्णसंख्येत वाढ झाल्याने आरोग्य विभागाने जनजागृती मोहीम सुरू केली आहे.',
-    'घराभोवती साचलेल्या स्वच्छ पाण्यात एडिस डासांची उत्पत्ती होते, त्यामुळे आठवड्यातून एकदा पाणीसाठे रिकामे करावेत.',
-    'जुलै अखेरपर्यंत १.०८ लाख घरांची तपासणी करण्यात आली असून ४ जिल्ह्यांत मोहीम राबवली जात आहे.',
-  ].join(' ');
-
-  const ROAD_NOTE = [
-    'मुंबई-पुणे महामार्गाच्या रुंदीकरणासाठी निविदा प्रक्रिया सुरू करण्यास मान्यता देण्यात आली आहे.',
-    'या कामासाठी ४५० कोटी रुपयांची तरतूद करण्यात आली असून काम २०२८ पर्यंत पूर्ण होणार आहे.',
-  ].join(' ');
 
   const failures: string[] = [];
   const check = (ok: boolean, label: string, got: unknown) => {
@@ -466,29 +572,91 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     if (!ok) failures.push(label);
   };
 
-  (async () => {
-    const subjectWins = await rankReferenceByInformation(MOSQUITO_NOTE, CANDIDATES);
-    check(
-      subjectWins?.id === 'dengue-mosquito' && subjectWins.subjectMatch,
-      'subject outranks a neater structural fit',
-      subjectWins,
-    );
+  // --- free: the capacity gate ---------------------------------------------
+  const tooSmall = enforceCapacity(CANDIDATES, 'dengue-mosquito', 7, 'seed-a');
+  check(
+    tooSmall.id === 'points-seven' && tooSmall.corrected && !tooSmall.shortfall,
+    'a topic-matched but too-small pick is corrected to the tightest reference that fits',
+    tooSmall,
+  );
 
-    const despiteRecency = await rankReferenceByInformation(MOSQUITO_NOTE, CANDIDATES, {
-      recentIds: ['dengue-mosquito'],
-    });
-    check(
-      despiteRecency?.id === 'dengue-mosquito',
-      'recency does not veto the only subject match',
-      despiteRecency,
-    );
+  const fits = enforceCapacity(CANDIDATES, 'points-twelve', 7, 'seed-a');
+  check(
+    fits.id === 'points-twelve' && !fits.corrected,
+    'an eligible pick is honoured even when a tighter one exists (presentation is the model’s call)',
+    fits,
+  );
 
-    const noMatch = await rankReferenceByInformation(ROAD_NOTE, CANDIDATES);
-    check(
-      noMatch !== null && !noMatch.subjectMatch,
-      'an unmatched subject is reported, not stretched',
-      noMatch,
-    );
+  const short = enforceCapacity(CANDIDATES, 'dengue-mosquito', 20, 'seed-a');
+  check(
+    short.id === 'points-twelve' &&
+      short.shortfall?.needed === 20 &&
+      short.shortfall.available === 12,
+    'when nothing is big enough the largest is used and the shortfall is reported',
+    short,
+  );
+
+  const ungated = enforceCapacity(CANDIDATES, 'quote-leader', 1, 'seed-a');
+  check(
+    ungated.id === 'quote-leader' && !ungated.corrected,
+    'a single-item note is not gated, so a 0-slot quotation layout stays selectable',
+    ungated,
+  );
+
+  const uncounted = enforceCapacity(CANDIDATES, 'dengue-mosquito', 0, 'seed-a');
+  check(
+    uncounted.id === 'dengue-mosquito' && !uncounted.corrected,
+    'a failed count disables the gate rather than emptying the pool',
+    uncounted,
+  );
+
+  const exact = enforceCapacity(CANDIDATES, 'health-stats', 4, 'seed-a');
+  check(
+    exact.id === 'health-stats' && !exact.corrected,
+    'a reference with exactly enough slots is eligible (>=, not >)',
+    exact,
+  );
+
+  const deterministic =
+    enforceCapacity(CANDIDATES, 'dengue-mosquito', 7, 'seed-b').id ===
+    enforceCapacity(CANDIDATES, 'dengue-mosquito', 7, 'seed-b').id;
+  check(deterministic, 'the correction is deterministic for one seed', deterministic);
+
+  // --- live: the model's own counting + choosing ----------------------------
+  const live = process.argv.includes('--live');
+  const MOSQUITO_NOTE = [
+    'डेंग्यू प्रतिबंधासाठी नागरिकांनी पुढील उपाययोजना कराव्यात:',
+    '१. घराभोवती साचलेले स्वच्छ पाणी आठवड्यातून एकदा रिकामे करावे.',
+    '२. पाण्याच्या टाक्या व भांडी घट्ट झाकून ठेवावीत.',
+    '३. कुलर व फ्रिजच्या ट्रेमधील पाणी नियमित बदलावे.',
+    '४. घराभोवतीचे टायर, नारळाच्या करवंट्या व भंगार हटवावे.',
+    '५. दिवसा झोपताना मच्छरदाणीचा वापर करावा.',
+    '६. ताप आल्यास तात्काळ जवळच्या शासकीय रुग्णालयात तपासणी करावी.',
+    '७. स्वतःच्या मनाने औषध घेऊ नये.',
+  ].join('\n');
+
+  void (async () => {
+    if (live) {
+      const ranked = await rankReferenceByInformation(MOSQUITO_NOTE, CANDIDATES);
+      check(
+        ranked !== null && ranked.itemCount === 7,
+        'the model counts the officer’s seven points',
+        ranked,
+      );
+      check(
+        ranked !== null && ranked.id !== 'dengue-mosquito',
+        'topic no longer beats capacity (the 3-slot dengue master is NOT chosen)',
+        ranked?.id,
+      );
+      check(
+        ranked !== null &&
+          (CANDIDATES.find((c) => c.id === ranked.id)?.bulletSlots ?? 0) >= 7,
+        'the model’s own pick already satisfies the capacity rule',
+        ranked?.id,
+      );
+    } else {
+      console.log('\n(skipping live model checks — pass --live with --env-file to run them)');
+    }
 
     if (failures.length > 0) {
       console.error(`\n${failures.length} check(s) failed.`);

@@ -1,17 +1,26 @@
 'use client';
 
 // Feedback fold for pixel-level (n8n) poster edits: per-marker note inputs for
-// the numbered marks placed on the poster via PosterAnnotator, plus an optional
-// overall note. Purpose-built rather than extending the shared FeedbackBox —
-// the marker rows and the either/or validation (notes OR overall text) don't
-// fit its single-textarea contract. Opening the fold activates the annotator.
+// the marks placed on the poster via PosterAnnotator, plus an optional overall
+// note. Purpose-built rather than extending the shared FeedbackBox — the marker
+// rows and the either/or validation (notes OR overall text) don't fit its
+// single-textarea contract. Opening the fold activates the annotator.
+//
+// Two gestures share the fold, chosen by a pill pair that only decides what the
+// NEXT drawn box becomes: red "change the element here" markers, and blue "free
+// this space" rectangles whose content the image model relocates so the officer
+// can place their own logo or photo there. Both are sent in ONE round, so
+// switching pills never discards anything.
 
 import { useState } from 'react';
-import type {
-  PosterImageFeedbackRequest,
-} from '@dgipr/schemas';
+import type { PosterImageFeedbackRequest } from '@dgipr/schemas';
 import { STR } from '../lib/strings';
-import type { PosterMarkerDraft } from './PosterAnnotator';
+import {
+  CLEAR_LETTERS,
+  type AnnotatorMode,
+  type PosterClearDraft,
+  type PosterMarkerDraft,
+} from './PosterAnnotator';
 
 export function PosterImageFeedbackBox({
   markers,
@@ -22,6 +31,13 @@ export function PosterImageFeedbackBox({
   disabled = false,
   showReservedWarning = false,
   submittedMarkers = [],
+  mode = 'mark',
+  onModeChange,
+  clearRegions = [],
+  onClearNoteChange,
+  onRemoveClearRegion,
+  submittedClearRegions = [],
+  showClearReservedWarning = false,
 }: {
   markers: readonly PosterMarkerDraft[];
   onNoteChange: (id: number, note: string) => void;
@@ -35,6 +51,15 @@ export function PosterImageFeedbackBox({
   showReservedWarning?: boolean;
   // The last sent round, echoed read-only so the user can see what they asked.
   submittedMarkers?: readonly PosterMarkerDraft[];
+  mode?: AnnotatorMode;
+  onModeChange?: (mode: AnnotatorMode) => void;
+  clearRegions?: readonly PosterClearDraft[];
+  onClearNoteChange?: (id: number, note: string) => void;
+  onRemoveClearRegion?: (id: number) => void;
+  submittedClearRegions?: readonly PosterClearDraft[];
+  // Unlike the marker warning this one is a real limitation, not a hint: the
+  // chrome is re-stamped in code after the edit, so that space cannot be freed.
+  showClearReservedWarning?: boolean;
 }) {
   const [feedback, setFeedback] = useState('');
   const [sending, setSending] = useState(false);
@@ -43,7 +68,7 @@ export function PosterImageFeedbackBox({
   const submit = async () => {
     if (disabled || sending) return;
     const trimmed = feedback.trim();
-    if (markers.length === 0 && trimmed.length < 3) {
+    if (markers.length === 0 && clearRegions.length === 0 && trimmed.length < 3) {
       setError(STR.feedbackTooShort);
       return;
     }
@@ -51,7 +76,9 @@ export function PosterImageFeedbackBox({
       setError(STR.markerNoteTooShort);
       return;
     }
-    // The schema wants absent keys, not '' / [] (min lengths reject those).
+    // The schema wants absent keys, not '' / [] (min lengths reject those). A
+    // clear region's note is genuinely optional — an empty one means "you decide
+    // where that content goes" — so it is omitted rather than sent blank.
     const payload: PosterImageFeedbackRequest = {
       ...(trimmed.length >= 3 ? { feedback: trimmed } : {}),
       ...(markers.length > 0
@@ -59,6 +86,14 @@ export function PosterImageFeedbackBox({
             annotations: markers.map((m) => ({
               region: m.region,
               note: m.note.trim(),
+            })),
+          }
+        : {}),
+      ...(clearRegions.length > 0
+        ? {
+            clearRegions: clearRegions.map((c) => ({
+              region: c.region,
+              ...(c.note.trim().length > 0 ? { note: c.note.trim() } : {}),
             })),
           }
         : {}),
@@ -83,7 +118,31 @@ export function PosterImageFeedbackBox({
     >
       <summary>{STR.posterImageFeedbackTitle}</summary>
       <div className="fold-body">
-        <p className="hint">{STR.posterAnnotateHint}</p>
+        {onModeChange ? (
+          <div className="segmented annot-mode-row">
+            <button
+              type="button"
+              className="output-option"
+              aria-pressed={mode === 'mark'}
+              disabled={disabled || sending}
+              onClick={() => onModeChange('mark')}
+            >
+              <span className="name">{STR.posterImageFeedbackTitle}</span>
+            </button>
+            <button
+              type="button"
+              className="output-option"
+              aria-pressed={mode === 'clear'}
+              disabled={disabled || sending}
+              onClick={() => onModeChange('clear')}
+            >
+              <span className="name">{STR.iconClearSpace}</span>
+            </button>
+          </div>
+        ) : null}
+        <p className="hint">
+          {mode === 'clear' ? STR.clearRegionHint : STR.posterAnnotateHint}
+        </p>
         {submittedMarkers.length > 0 && markers.length === 0 ? (
           <>
             <p className="hint">{STR.markersSubmittedHint}</p>
@@ -125,6 +184,56 @@ export function PosterImageFeedbackBox({
               aria-label={STR.markerRemove}
               disabled={disabled || sending}
               onClick={() => onRemoveMarker(marker.id)}
+            >
+              ✕
+            </button>
+          </div>
+        ))}
+        {showClearReservedWarning ? (
+          <p className="hint marker-zone-warning">
+            {STR.clearRegionReservedZoneWarning}
+          </p>
+        ) : null}
+        {/* Blue "free this space" rows. The note is optional here, so none of
+            these can block a send — an empty one means "you decide". */}
+        {submittedClearRegions.length > 0 && clearRegions.length === 0 ? (
+          <>
+            <p className="hint">{STR.clearRegionSubmittedHint}</p>
+            {submittedClearRegions.map((c, i) => (
+              <div
+                className="marker-note-row marker-note-submitted"
+                key={`sc-${c.id}`}
+              >
+                <span className="marker-note-badge clear-badge" aria-hidden="true">
+                  {CLEAR_LETTERS[i] ?? i + 1}
+                </span>
+                <span className="marker-note-text">
+                  {c.note || STR.clearRegionLabel}
+                </span>
+              </div>
+            ))}
+          </>
+        ) : null}
+        {clearRegions.map((c, i) => (
+          <div className="marker-note-row" key={`c-${c.id}`}>
+            <span className="marker-note-badge clear-badge" aria-hidden="true">
+              {CLEAR_LETTERS[i] ?? i + 1}
+            </span>
+            <input
+              type="text"
+              value={c.note}
+              placeholder={STR.clearRegionNotePlaceholder}
+              aria-label={`${STR.clearRegionLabel} ${CLEAR_LETTERS[i] ?? i + 1}`}
+              maxLength={500}
+              disabled={disabled || sending}
+              onChange={(e) => onClearNoteChange?.(c.id, e.target.value)}
+            />
+            <button
+              type="button"
+              className="marker-note-remove"
+              aria-label={STR.clearRegionRemove}
+              disabled={disabled || sending}
+              onClick={() => onRemoveClearRegion?.(c.id)}
             >
               ✕
             </button>

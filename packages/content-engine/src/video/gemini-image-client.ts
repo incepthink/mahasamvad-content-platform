@@ -175,6 +175,11 @@ export async function generateGeminiImage(
     const response = await geminiFetch(`models/${model}:generateContent`, {
       label: 'gemini image',
       apiKey,
+      // The image lane: its own concurrency pool and its own, much longer
+      // clock. A frame carrying an inline reference image regularly runs past
+      // Veo's two-minute timeout, and frames must not queue behind the
+      // one-at-a-time concurrency Veo's preview rate limits need.
+      lane: 'image',
       body: buildBody(withImageConfig),
     });
     return (await response.json()) as GeminiImageResponse;

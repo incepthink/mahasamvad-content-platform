@@ -115,6 +115,10 @@ export type SimpleGenerateArticleOptions = Readonly<{
   heading?: string | undefined;
   // The officer's pasted style-reference article (generations.style_reference). Tier 1.
   styleReference?: string | null | undefined;
+  // The officer's free-text direction for this article (generations.instructions, 0041).
+  // Steers emphasis, order, tone and length; never a factual source — the prompt block carries
+  // that rule, so this is safe to pass through untouched.
+  instructions?: string | null | undefined;
   // Officer-approved inputs, all threaded into the one prompt.
   excludeFacts?: readonly string[] | undefined;
   includeFacts?: readonly SelectedFact[] | undefined;
@@ -193,6 +197,7 @@ export async function generateArticleSimple(
     // the model to learn lives in the headline, and for a long time only the bodies were sent.
     styleReferences: styleReference.articles,
     editorialDirection: options?.heading,
+    officerInstructions: options?.instructions ?? undefined,
     designations,
     statements,
     includeFacts: selectedFacts,

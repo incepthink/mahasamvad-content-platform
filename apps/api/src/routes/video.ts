@@ -7,12 +7,14 @@
 // poll and sit there).
 
 import type { FastifyInstance } from 'fastify';
+
 import {
   findActiveVideoProject,
   getVideoProject,
   insertVideoProject,
   publicUrlIn,
   updateVideoProject,
+  uploadFile,
   VIDEOS_BUCKET,
   listVideoProjects,
   type SupabaseClient,
@@ -21,18 +23,26 @@ import {
 } from '@dgipr/database';
 import {
   CreateVideoProjectRequestSchema,
+  NARRATION_AUDIO_EXTENSIONS,
   RegenerateStillRequestSchema,
+  UPLOAD_FILE_MAX_BYTES,
   UpdateSceneMotionRequestSchema,
   UpdateVideoScriptRequestSchema,
+  VIDEO_SCRIPT_MAX_SECONDS,
+  allocateVideoSceneDurations,
   clipSecondsForNarration,
   estimateNarrationSeconds,
+  narrationAudioMimeForFileName,
   normalizeVideoNarrationScript,
   type VideoProjectDetail,
   type VideoProjectSummary,
 } from '@dgipr/schemas';
+import { decodeAudioToWav, wavDurationSeconds } from '@dgipr/poster-renderer';
 import {
   clipProviderApiKeyEnv,
   frameProviderApiKeyEnv,
+  narrationKeyPresent,
+  narrationProviderApiKeyEnv,
 } from '@dgipr/content-engine';
 import {
   isVideoJobRunning,
@@ -43,6 +53,9 @@ import {
   startVideoAnimateJob,
   startVideoScriptJob,
   startVideoStitchJob,
+  continuousNarrationText,
+  narrationIsUploaded,
+  type UploadedNarration,
 } from '../jobs/video-runner.js';
 
 // Clip rendering needs the configured provider's paid API key; without one the
@@ -78,11 +91,95 @@ function hasEverySceneClip(row: VideoProjectRow): boolean {
   );
 }
 
-// Narration needs a Sarvam key (TTS); fail the narrate gate with a setup message
-// BEFORE the row is flipped, mirroring clipProviderKeyMissing for animate.
-function sarvamKeyPresent(): boolean {
-  const key = process.env.SARVAM_API_KEY;
-  return typeof key === 'string' && key.trim() !== '';
+// What a scene's status SHOULD be, read off what it actually has in Storage.
+// The project-level orphan check below cannot see a scene left mid-render: a
+// still/animate job that died after its "now rendering" write leaves that one
+// scene claiming to be working while the row itself is back at an idle status,
+// and nothing else ever recomputes it — so its card spins forever and the
+// officer is told frames are coming that nobody is rendering.
+function settledSceneStatus(
+  scene: VideoProjectRow['scenes'][number],
+): VideoProjectRow['scenes'][number]['status'] {
+  if (scene.clipPath !== undefined) return 'done';
+  const wantsEndFrame =
+    scene.endVisualBrief !== undefined && scene.endVisualBrief !== '';
+  if (
+    scene.stillPath !== undefined &&
+    (!wantsEndFrame || scene.endStillPath !== undefined)
+  ) {
+    return 'still-ready';
+  }
+  return 'pending';
+}
+
+// Narration needs the configured TTS provider's key; fail the narrate gate with
+// a setup message BEFORE the row is flipped, mirroring clipProviderKeyMissing
+// for animate. The seam names the key so an ElevenLabs deployment is not asked
+// for a Sarvam one.
+const sarvamKeyPresent = narrationKeyPresent;
+
+// A voiceover of a two-minute script is a couple of MB as MP3; the ceiling is
+// the shared upload cap the /dlo and /transcribe pickers already enforce, so a
+// file the browser accepted can never be refused here.
+const NARRATION_MAX_BYTES = UPLOAD_FILE_MAX_BYTES;
+
+type MultipartCreate = Readonly<{
+  raw: Record<string, unknown>;
+  audio: { data: Buffer; extension: string } | null;
+  // A refusal the officer must READ, so it is carried back as a plain Marathi
+  // sentence rather than thrown as a ZodError — the shared error handler sends
+  // a ZodError's message verbatim, which is a JSON array of issue objects.
+  reject: string | null;
+}>;
+
+// Collect the create form's fields plus its one optional `narration` file.
+// Fields arrive as strings, so the two booleans/enums are left as-is for the
+// schema and only `heading` is dropped when empty (an empty string would fail
+// nothing but would be stored as a heading nobody typed).
+async function readMultipartCreate(request: {
+  parts: (options?: {
+    limits?: { fileSize?: number; files?: number };
+  }) => AsyncIterableIterator<
+    | { type: 'field'; fieldname: string; value: unknown }
+    | {
+        type: 'file';
+        fieldname: string;
+        filename: string;
+        toBuffer: () => Promise<Buffer>;
+      }
+  >;
+}): Promise<MultipartCreate> {
+  const raw: Record<string, unknown> = {};
+  let audio: { data: Buffer; extension: string } | null = null;
+  let reject: string | null = null;
+  const parts = request.parts({
+    limits: { fileSize: NARRATION_MAX_BYTES, files: 1 },
+  });
+  for await (const part of parts) {
+    if (part.type === 'field') {
+      const value = typeof part.value === 'string' ? part.value : '';
+      if (part.fieldname === 'heading' && value.trim() === '') continue;
+      raw[part.fieldname] = value;
+      continue;
+    }
+    if (part.fieldname !== 'narration') {
+      await part.toBuffer();
+      continue;
+    }
+    if (narrationAudioMimeForFileName(part.filename) === null) {
+      // Drain the part so busboy is not left mid-stream, then refuse by name —
+      // but keep reading, or the remaining fields never arrive.
+      await part.toBuffer();
+      reject = `ही ध्वनिफीत स्वीकारता येत नाही. ${NARRATION_AUDIO_EXTENSIONS.join(', ')} पैकी एक द्या.`;
+      continue;
+    }
+    const dot = part.filename.lastIndexOf('.');
+    audio = {
+      data: await part.toBuffer(),
+      extension: part.filename.slice(dot).toLowerCase(),
+    };
+  }
+  return { raw, audio, reject };
 }
 
 const BUSY_MESSAGE = 'या प्रकल्पावर आधीच काम सुरू आहे.';
@@ -220,8 +317,20 @@ export function registerVideoRoutes(
   app: FastifyInstance,
   client: SupabaseClient,
 ): void {
+  // JSON, or multipart when the officer supplies their own narration recording
+  // (ready-script mode only). The two forms carry the same fields; multipart
+  // adds one `narration` file part.
   app.post('/video/projects', async (request, reply) => {
-    const body = CreateVideoProjectRequestSchema.parse(request.body);
+    const parsed = request.isMultipart()
+      ? await readMultipartCreate(request)
+      : { raw: request.body, audio: null, reject: null };
+    if (parsed.reject) {
+      return reply.code(400).send({ error: { message: parsed.reject } });
+    }
+    const body = CreateVideoProjectRequestSchema.parse({
+      ...(parsed.raw as Record<string, unknown>),
+      narrationAudioUploaded: parsed.audio !== null,
+    });
     // One project in a working status at a time: the Veo lane renders serially
     // (low preview rate limits) and the gate must survive refreshes, so it is
     // DB-backed rather than a TasksProvider-style client gate.
@@ -231,6 +340,41 @@ export function registerVideoRoutes(
         .code(409)
         .send({ error: { message: ANOTHER_ACTIVE_MESSAGE } });
     }
+
+    // Decode + length-check BEFORE the row exists, so a rejected recording
+    // leaves nothing behind and the officer keeps the create form they are
+    // standing on. This is also the ONLY duration gate that matters for an
+    // uploaded track: the char-rate estimate the schema applies to a typed
+    // script is not a worse measurement here, it is the wrong one.
+    let narrationWav: Buffer | null = null;
+    let narrationSeconds = 0;
+    if (parsed.audio) {
+      try {
+        narrationWav = await decodeAudioToWav(
+          parsed.audio.data,
+          parsed.audio.extension,
+        );
+      } catch (error) {
+        request.log.error(error);
+        return reply.code(400).send({
+          error: {
+            message:
+              'निवेदनाची ध्वनिफीत वाचता आली नाही. दुसऱ्या स्वरूपात (उदा. MP3) पुन्हा द्या.',
+          },
+        });
+      }
+      narrationSeconds = wavDurationSeconds(narrationWav);
+      if (narrationSeconds > VIDEO_SCRIPT_MAX_SECONDS) {
+        return reply.code(400).send({
+          error: {
+            message:
+              `दिलेली ध्वनिफीत ${narrationSeconds.toFixed(0)} सेकंदांची आहे आणि ` +
+              `कमाल ${VIDEO_SCRIPT_MAX_SECONDS} सेकंदांच्या मर्यादेपेक्षा मोठी आहे.`,
+          },
+        });
+      }
+    }
+
     const row = await insertVideoProject(client, {
       note: body.note,
       heading: body.heading,
@@ -239,7 +383,18 @@ export function registerVideoRoutes(
       orientation: body.orientation,
       tier: body.tier,
     });
-    startVideoScriptJob(client, row.id);
+
+    // The uploaded track lands where a synthesized one would (narration-v1),
+    // so nothing downstream — the voice phase's staleness check, the stitch's
+    // shared-path detection, the gate-2 audition player — needs to know which
+    // it is looking at.
+    let uploaded: UploadedNarration | undefined;
+    if (narrationWav) {
+      const path = `projects/${row.id}/narration-v1.wav`;
+      await uploadFile(client, VIDEOS_BUCKET, path, narrationWav, 'audio/wav');
+      uploaded = { path, version: 1, seconds: narrationSeconds };
+    }
+    startVideoScriptJob(client, row.id, uploaded);
     return reply.code(202).send({ id: row.id });
   });
 
@@ -299,6 +454,29 @@ export function registerVideoRoutes(
         await updateVideoProject(client, row.id, { status: 'failed', error });
         return toDetail(client, { ...row, status: 'failed', error });
       }
+      // The row is idle and nothing is running here, so no scene can still be
+      // mid-render. Settle any that claims to be (an orphaned per-scene still or
+      // animate job), from what it actually has — otherwise that card keeps a
+      // spinner and a "चित्रे तयार होत आहेत…" label indefinitely. A stale `step`
+      // is cleared with it, for the same reason.
+      if (
+        !isVideoJobRunning(row.id) &&
+        row.status !== 'scripting' &&
+        row.status !== 'storyboarding' &&
+        row.status !== 'animating' &&
+        row.scenes.some(
+          (scene) =>
+            scene.status === 'still-rendering' || scene.status === 'animating',
+        )
+      ) {
+        const scenes = row.scenes.map((scene) =>
+          scene.status === 'still-rendering' || scene.status === 'animating'
+            ? { ...scene, status: settledSceneStatus(scene) }
+            : scene,
+        );
+        await updateVideoProject(client, row.id, { scenes, step: null });
+        return toDetail(client, { ...row, scenes, step: null });
+      }
       return toDetail(client, row);
     },
   );
@@ -350,8 +528,29 @@ export function registerVideoRoutes(
       // officer at gate 1 knows best). Incoming durationSeconds is IGNORED:
       // windows are server-assigned by the storyboard job's voice phase from
       // the measured narration audio.
+      // Reject a payload that claims the same stored scene twice: two cards
+      // would inherit ONE scene's frames and clip lineage, and the second
+      // animate would then reuse a clip rendered for different narration.
+      const claimed = new Set<number>();
+      for (const scene of body.scenes) {
+        if (scene.sourceIndex === undefined) continue;
+        if (claimed.has(scene.sourceIndex)) {
+          return reply.code(400).send({
+            error: { message: 'एकच दृश्य दोनदा पाठवले आहे.' },
+          });
+        }
+        claimed.add(scene.sourceIndex);
+      }
+
       const scenes: VideoSceneEntry[] = body.scenes.map((incoming, index) => {
-        const existing = row.scenes[index];
+        // Identity first, position only as the legacy fallback: an inserted
+        // scene shifts every later card, and matching by position would then
+        // compare each against its neighbour and discard a storyboard of paid
+        // frames. A sourceIndex past the stored array is treated as new.
+        const existing =
+          incoming.sourceIndex === undefined
+            ? row.scenes[index]
+            : row.scenes[incoming.sourceIndex];
         // Same BOTH briefs + an existing still ⇒ keep the frames (and their
         // clip lineage); anything else starts over as pending. The end brief
         // counts because the end frame is rendered from it — an edited end
@@ -419,6 +618,57 @@ export function registerVideoRoutes(
             : {}),
         };
       });
+
+      // Re-splitting the narration across scenes (the officer moving words into
+      // an inserted card) leaves the JOINED script byte-identical, so the
+      // measured WAV stays current and the voice phase returns early without
+      // touching a thing — including the windows. Those windows are where the
+      // visual cuts fall against one continuous narration track, so leaving
+      // them alone is a silent de-sync: the picture would cut to the new scene
+      // while the donor's sentence is still being spoken. Nothing errors.
+      //
+      // So the split is re-weighted here, against the SAME measured total. The
+      // sum is unchanged, which is what keeps every later cut aligned; only the
+      // scenes whose share moved get a new window, and clipIsCurrent then
+      // invalidates exactly those clips (it compares clipDurationSeconds) so
+      // the next animate re-renders the donor and the newcomer and nothing else.
+      const previousJoined = continuousNarrationText(row.scenes);
+      const nextJoined = continuousNarrationText(scenes);
+      const measuredSeconds = row.scenes.reduce(
+        (sum, scene) => sum + (scene.narrationAudioSeconds ?? 0),
+        0,
+      );
+      const splitChanged =
+        scenes.length !== row.scenes.length ||
+        scenes.some(
+          (scene, index) => scene.narration !== row.scenes[index]?.narration,
+        );
+      if (
+        splitChanged &&
+        previousJoined === nextJoined &&
+        previousJoined !== '' &&
+        measuredSeconds > 0
+      ) {
+        const durations = allocateVideoSceneDurations(
+          scenes.map((scene) => Math.max(1, scene.narration.trim().length)),
+          measuredSeconds,
+        );
+        const weightTotal = scenes.reduce(
+          (sum, scene) => sum + Math.max(1, scene.narration.trim().length),
+          0,
+        );
+        for (const [index, scene] of scenes.entries()) {
+          scenes[index] = {
+            ...scene,
+            durationSeconds: durations[index]!,
+            // The card's "निवेदन X.X से." share. Recomputed with the windows or
+            // it would keep quoting the donor's pre-split length.
+            narrationAudioSeconds:
+              (measuredSeconds * Math.max(1, scene.narration.trim().length)) /
+              weightTotal,
+          };
+        }
+      }
 
       await updateVideoProject(client, row.id, {
         scenes,
@@ -716,8 +966,7 @@ export function registerVideoRoutes(
       if (!sarvamKeyPresent()) {
         return reply.code(503).send({
           error: {
-            message:
-              'निवेदन सेवा अजून जोडलेली नाही (SARVAM_API_KEY). प्रशासकाशी संपर्क साधा.',
+            message: `निवेदन सेवा अजून जोडलेली नाही (${narrationProviderApiKeyEnv()}). प्रशासकाशी संपर्क साधा.`,
           },
         });
       }
@@ -735,6 +984,17 @@ export function registerVideoRoutes(
           .code(409)
           .send({ error: { message: 'आधी व्हिडिओ तयार व्हायला हवा.' } });
       }
+      // This project speaks in the officer's own recording. Re-voicing would
+      // silently replace it with a synthesized one — and the free re-stitch
+      // (POST /stitch) is what they actually want if the container is bad.
+      if (narrationIsUploaded(row.scenes)) {
+        return reply.code(409).send({
+          error: {
+            message:
+              'या व्हिडिओसाठी तुम्ही दिलेली ध्वनिफीत वापरली आहे; ती बदलता येणार नाही.',
+          },
+        });
+      }
       await updateVideoProject(client, row.id, {
         status: 'animating',
         step: 'narrate',
@@ -745,11 +1005,14 @@ export function registerVideoRoutes(
     },
   );
 
-  // Send a FAILED project back to gate 2 so the officer can fix what broke the
-  // render — most often an over-long motion direction — and animate again. It
-  // is a pure state flip: no job runs, nothing is re-rendered, and every clip,
-  // frame and narration already in Storage stays on the row, so the resume-aware
-  // animate job then renders only the scenes still missing a current clip.
+  // Send a project back to gate 2 so the officer can work on the storyboard
+  // again — fix what broke a failed render (most often an over-long motion
+  // direction), or revisit a FINISHED video to redraw a frame, re-split the
+  // narration or insert a scene. It is a pure state flip: no job runs, nothing
+  // is re-rendered, and every clip, frame and narration already in Storage
+  // stays on the row, so the resume-aware animate job then renders only the
+  // scenes still missing a current clip. The finished video stays on the row
+  // too, so a project reopened and left alone is unchanged by the visit.
   app.post<{ Params: { id: string } }>(
     '/video/projects/:id/reopen-storyboard',
     async (request, reply) => {
@@ -759,7 +1022,10 @@ export function registerVideoRoutes(
           .code(404)
           .send({ error: { message: 'Video project not found.' } });
       }
-      if (row.status !== 'failed' || isVideoJobRunning(row.id)) {
+      if (
+        (row.status !== 'failed' && row.status !== 'completed') ||
+        isVideoJobRunning(row.id)
+      ) {
         return reply.code(409).send({ error: { message: BUSY_MESSAGE } });
       }
       const active = await findActiveVideoProject(client);

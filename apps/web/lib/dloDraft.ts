@@ -28,7 +28,7 @@
 // unmounts it — and across a reload only their NAMES survive, so the form can ask for them
 // back by name rather than silently submitting without them.
 
-import type { DloCategory } from '@dgipr/schemas';
+import { YouTubeSourcesSchema, type DloCategory, type YouTubeVideo } from '@dgipr/schemas';
 
 const DRAFT_KEY = 'dgipr.dlo.draft';
 const MINE_KEY = 'dgipr.dlo.mine';
@@ -41,10 +41,16 @@ export type DloDraft = Readonly<{
   category: DloCategory;
   heading: string;
   styleReference: string;
+  // The officer's free-text direction for the article (generations.instructions, 0041).
+  instructions: string;
   documentSlotIds: readonly number[];
   nextSlotId: number;
   // Names only — see the header. Used to ask for the recordings back after a reload.
   audioNames: readonly string[];
+  // YouTube sources, in full. Unlike a picked recording these ARE serializable — a link and
+  // the title/thumbnail the probe returned are just strings — so they survive a reload
+  // intact and need no "please add these again" callout.
+  youtube: readonly YouTubeVideo[];
 }>;
 
 export const EMPTY_DRAFT: DloDraft = {
@@ -52,9 +58,11 @@ export const EMPTY_DRAFT: DloDraft = {
   category: 'news',
   heading: '',
   styleReference: '',
+  instructions: '',
   documentSlotIds: [0],
   nextSlotId: 1,
   audioNames: [],
+  youtube: [],
 };
 
 // Recordings picked but not yet submitted. Module scope, so they survive client-side
@@ -95,6 +103,8 @@ export function readDraft(): DloDraft | null {
       heading: typeof parsed.heading === 'string' ? parsed.heading : '',
       styleReference:
         typeof parsed.styleReference === 'string' ? parsed.styleReference : '',
+      instructions:
+        typeof parsed.instructions === 'string' ? parsed.instructions : '',
       documentSlotIds:
         slotIds.length > 0 ? slotIds : EMPTY_DRAFT.documentSlotIds,
       nextSlotId:
@@ -106,6 +116,10 @@ export function readDraft(): DloDraft | null {
             (name): name is string => typeof name === 'string',
           )
         : [],
+      // The one field worth schema-parsing rather than hand-checking: it is a nested shape
+      // that is submitted to the API as-is, so a malformed draft should restore as "no
+      // links" instead of being posted.
+      youtube: YouTubeSourcesSchema.safeParse(parsed.youtube).data ?? [],
     };
   } catch {
     return null;
@@ -119,6 +133,23 @@ export function writeDraft(draft: DloDraft): void {
   } catch {
     // A full or disabled sessionStorage must not break the form.
   }
+}
+
+// Put text into the draft's notes box from ANOTHER page — today /transcribe's
+// "बातमी तयार करा", which hands a finished transcript to /dlo as the note of a new intake.
+//
+// It REPLACES the notes and leaves every other field of the draft alone. Replacing is the
+// officer's call (a transcript is the whole source, not an addition to one), and keeping the
+// rest is what stops a carry-over quietly discarding a category, heading or instructions
+// typed earlier — none of which the transcript has anything to say about.
+//
+// The recordings are deliberately untouched: `pendingAudio` is module state and the YouTube
+// links stay as they were, because the text handed over here has already been transcribed.
+// Re-attaching either source would make the intake job transcribe it a second time and put
+// the same words in the review step twice.
+export function seedDraftNotes(notes: string): void {
+  const current = readDraft() ?? EMPTY_DRAFT;
+  writeDraft({ ...current, notes });
 }
 
 export function clearDraft(): void {

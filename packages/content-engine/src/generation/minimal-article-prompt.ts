@@ -31,7 +31,10 @@
 import { pathToFileURL } from 'node:url';
 import type { ChatMessage } from './openai-chat.js';
 import type { ArticleCategory, DesignationPair } from './category-prompt.js';
-import { newsEditorialFocusBlock } from './simple-article-prompt.js';
+import {
+  newsEditorialFocusBlock,
+  officerInstructionsBlock,
+} from './simple-article-prompt.js';
 import type {
   ArticleNameEntry,
   SimpleArticleInputs,
@@ -81,6 +84,10 @@ export function buildMinimalArticleSystemPrompt(): string {
     'strongest publication-ready article possible from SOURCE INFORMATION, at the length that',
     'repeat, stretch, or add unsupported information.',
     'Do not make it seem like you are just mentioning the facts from the sorce information, but rather write a complete article that is engaging and informative you can even skip some infromation it does not seem right for editorial flow of the article.',
+    '',
+    'SOURCE INFORMATION may contain Markdown tables (pipe-delimited rows). Read them as tables:',
+    'each figure belongs to its own column heading and row label. Never read a row as a',
+    'sentence, and never attach a figure to the wrong heading.',
     '',
     'Where the NAME DICTIONARY gives a spelling, use it exactly.',
     '',
@@ -228,6 +235,10 @@ export function buildMinimalArticleUserPrompt(
   if (location && date) {
     parts.push('### DATELINE', '', `${location}, दि. ${date} :`, '');
   }
+
+  // Same block, same position as the standard variant — the variant changes wording density,
+  // never what the officer is allowed to ask for.
+  parts.push(...officerInstructionsBlock(inputs.officerInstructions));
 
   parts.push('Write the article now.');
   return parts.join('\n');

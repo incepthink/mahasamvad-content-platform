@@ -20,12 +20,14 @@ import { useEffect, useRef, useState } from 'react';
 import type { VideoScene } from '@dgipr/schemas';
 import {
   VIDEO_KEY_POINT_MAX_CHARS,
+  VIDEO_NARRATION_MAX_CHARS,
   estimateNarrationSeconds,
 } from '@dgipr/schemas';
 import {
   STR,
   videoMotionBriefLength,
   videoNarrationEstimate,
+  videoNarrationTooLong,
   videoSceneTiming,
 } from '../lib/strings';
 
@@ -90,13 +92,17 @@ export function VideoSceneCard({
   onRedrawEnd,
   onMotionBriefSave,
   onReanimate,
+  onInsertAfter,
+  redrawUnavailableHint,
   reanimateLabel,
 }: {
   index: number;
   scene: VideoScene;
   mode: 'edit' | 'review';
   busy: boolean;
-  // gate 1 (mode 'edit')
+  // gate 1 (mode 'edit'). The two brief handlers are also taken in 'review'
+  // mode by a card with no stored scene, where they are the only way its
+  // prompt can be written before the save that unlocks the redraw buttons.
   onNarrationChange?: (value: string) => void;
   onBriefChange?: (value: string) => void;
   onEndBriefChange?: (value: string) => void;
@@ -110,14 +116,36 @@ export function VideoSceneCard({
   // so no frame is discarded and the edit lands on the next animation.
   onMotionBriefSave?: ((motionBrief: string) => void) | undefined;
   onReanimate?: (() => void) | undefined;
+  // Inserts a blank scene directly after this one. Its narration is moved out
+  // of a neighbour by the officer, never invented and never left empty.
+  onInsertAfter?: (() => void) | undefined;
+  // Shown in place of the redraw buttons when this card has no stored scene
+  // behind it yet, so an officer is told what to do instead of being handed a
+  // button that cannot reach the API.
+  redrawUnavailableHint?: string | undefined;
   reanimateLabel?: string;
 }) {
   // Which brief the fold edits: the start brief redraws the pair, the end
-  // brief redraws only the end frame.
+  // brief redraws only the end frame. Each keeps its OWN draft, re-seeded only
+  // when the stored brief changes (the motionDraft pattern below) — reseeding
+  // on every open discarded whatever the officer had just typed.
   const [briefOpen, setBriefOpen] = useState<'start' | 'end' | null>(null);
-  const [briefDraft, setBriefDraft] = useState(
-    scene.openingVisualBrief ?? scene.visualBrief,
-  );
+  const storedStartBrief = scene.openingVisualBrief ?? scene.visualBrief;
+  const storedEndBrief = scene.endVisualBrief ?? '';
+  const [startDraft, setStartDraft] = useState(storedStartBrief);
+  const [endDraft, setEndDraft] = useState(storedEndBrief);
+  const lastStartProp = useRef(storedStartBrief);
+  const lastEndProp = useRef(storedEndBrief);
+  useEffect(() => {
+    if (lastStartProp.current === storedStartBrief) return;
+    lastStartProp.current = storedStartBrief;
+    setStartDraft(storedStartBrief);
+  }, [storedStartBrief]);
+  useEffect(() => {
+    if (lastEndProp.current === storedEndBrief) return;
+    lastEndProp.current = storedEndBrief;
+    setEndDraft(storedEndBrief);
+  }, [storedEndBrief]);
   // The motion direction is edited in place (no redraw follows it), so the
   // draft must re-seed when a save lands and the refreshed prop comes back —
   // and only then, or every poll would discard what is being typed.
@@ -130,8 +158,15 @@ export function VideoSceneCard({
     setMotionDraft(scene.motionBrief ?? '');
   }, [scene.motionBrief]);
 
+  const openDraft = briefOpen === 'end' ? endDraft : startDraft;
+
   const heading = `${STR.videoSceneLabel} ${index + 1}`;
   const hasEndFrame = scene.endVisualBrief !== undefined;
+  // Nothing has been drawn for this scene yet — a stored scene the officer just
+  // inserted, or one whose brief changed. The control is the same fold, but
+  // "पुन्हा काढा" ("redraw") is the wrong word when there is no frame to redraw,
+  // and it was the only affordance on such a card.
+  const needsFirstFrames = mode === 'review' && scene.stillUrl === undefined;
 
   if (mode === 'edit') {
     return (
@@ -170,6 +205,10 @@ export function VideoSceneCard({
               )}`
             : ''}
         </p>
+        {/* Deliberately no maxLength on the textarea: silently truncating a
+            pasted paragraph loses the officer's words, which is worse than
+            saying the line is too long. The save button is disabled while any
+            scene is over, so this is the only place the count has to be seen. */}
         <textarea
           id={`scene-narration-${index}`}
           className="note-input"
@@ -179,6 +218,14 @@ export function VideoSceneCard({
           readOnly={onNarrationChange === undefined}
           onChange={(event) => onNarrationChange?.(event.target.value)}
         />
+        {scene.narration.trim().length > VIDEO_NARRATION_MAX_CHARS ? (
+          <p className="form-error">
+            {videoNarrationTooLong(
+              scene.narration.trim().length,
+              VIDEO_NARRATION_MAX_CHARS,
+            )}
+          </p>
+        ) : null}
         <label
           className="field-label"
           htmlFor={`scene-key-point-${index}`}
@@ -228,6 +275,18 @@ export function VideoSceneCard({
           disabled={busy}
           onChange={(event) => onEndBriefChange?.(event.target.value)}
         />
+        {onInsertAfter ? (
+          <div className="btn-row" style={{ marginTop: 12 }}>
+            <button
+              type="button"
+              className="btn btn-small"
+              disabled={busy}
+              onClick={onInsertAfter}
+            >
+              {STR.videoInsertSceneAfter}
+            </button>
+          </div>
+        ) : null}
       </section>
     );
   }
@@ -259,7 +318,41 @@ export function VideoSceneCard({
           />
         ) : null}
       </div>
-      <p style={{ marginTop: 10 }}>{scene.narration}</p>
+      {/* Editable at gate 2 as well, so the officer can re-split the narration
+          against the frames they are actually looking at. Moving words between
+          scenes leaves the joined script byte-identical, so the measured WAV
+          stays current and no TTS is re-bought — only the affected windows are
+          re-weighted, which is what keeps the cuts aligned with the voice. */}
+      {onNarrationChange ? (
+        <>
+          <label
+            className="field-label"
+            htmlFor={`scene-review-narration-${index}`}
+            style={{ marginTop: 10 }}
+          >
+            {STR.videoNarrationLabel}
+          </label>
+          <p className="hint">{STR.videoNarrationResplitHint}</p>
+          <textarea
+            id={`scene-review-narration-${index}`}
+            className="note-input"
+            style={{ minHeight: 70 }}
+            value={scene.narration}
+            disabled={busy}
+            onChange={(event) => onNarrationChange(event.target.value)}
+          />
+          {scene.narration.trim().length > VIDEO_NARRATION_MAX_CHARS ? (
+            <p className="form-error">
+              {videoNarrationTooLong(
+                scene.narration.trim().length,
+                VIDEO_NARRATION_MAX_CHARS,
+              )}
+            </p>
+          ) : null}
+        </>
+      ) : (
+        <p style={{ marginTop: 10 }}>{scene.narration}</p>
+      )}
       {scene.keyPoint && scene.keyPoint.trim() !== '' ? (
         <p className="hint">
           {STR.videoKeyPointReviewLabel}: {scene.keyPoint}
@@ -342,42 +435,112 @@ export function VideoSceneCard({
       ) : null}
       {scene.error ? <p className="form-error">{scene.error}</p> : null}
 
-      <div className="btn-row" style={{ marginTop: 12 }}>
-        <button
-          type="button"
-          className="btn btn-small"
-          disabled={busy}
-          onClick={() => {
-            setBriefDraft(scene.openingVisualBrief ?? scene.visualBrief);
-            setBriefOpen((open) => (open === 'start' ? null : 'start'));
-          }}
-        >
-          {STR.videoRedrawStill}
-        </button>
-        {hasEndFrame && onRedrawEnd ? (
-          <button
-            type="button"
-            className="btn btn-small"
-            disabled={busy}
-            onClick={() => {
-              setBriefDraft(scene.endVisualBrief ?? '');
-              setBriefOpen((open) => (open === 'end' ? null : 'end'));
-            }}
+      {/* Every button here is guarded on the handler that makes it work: a card
+          with no stored scene behind it (a just-inserted one) gets the hint
+          instead, because its redraw could only close the fold silently. */}
+      {onRedraw && needsFirstFrames ? (
+        <p className="hint" style={{ marginTop: 12 }}>
+          {STR.videoSceneNeedsFrames}
+        </p>
+      ) : null}
+      {onRedraw || (hasEndFrame && onRedrawEnd) || onReanimate ? (
+        <div className="btn-row" style={{ marginTop: 12 }}>
+          {onRedraw ? (
+            <button
+              type="button"
+              className={
+                needsFirstFrames ? 'btn btn-small btn-primary' : 'btn btn-small'
+              }
+              disabled={busy}
+              onClick={() =>
+                setBriefOpen((open) => (open === 'start' ? null : 'start'))
+              }
+            >
+              {needsFirstFrames
+                ? STR.videoRenderSceneFrames
+                : STR.videoEditStartBrief}
+            </button>
+          ) : null}
+          {hasEndFrame && onRedrawEnd ? (
+            <button
+              type="button"
+              className="btn btn-small"
+              disabled={busy}
+              onClick={() =>
+                setBriefOpen((open) => (open === 'end' ? null : 'end'))
+              }
+            >
+              {STR.videoEditEndBrief}
+            </button>
+          ) : null}
+          {onReanimate ? (
+            <button
+              type="button"
+              className="btn btn-small"
+              disabled={busy}
+              onClick={onReanimate}
+            >
+              {reanimateLabel ?? STR.videoReanimateScene}
+            </button>
+          ) : null}
+        </div>
+      ) : onBriefChange ? (
+        // A just-inserted card has no stored scene, so it has no redraw fold to
+        // hold its brief — but the brief is exactly what the officer must write
+        // before the save that makes the redraw reachable. The textareas are
+        // therefore shown open, editing the DRAFT (the save sends them), rather
+        // than behind a toggle whose spend button could not work yet.
+        <>
+          <p className="hint" style={{ marginTop: 12 }}>
+            {STR.videoInsertedSceneHint}
+          </p>
+          <label
+            className="field-label"
+            htmlFor={`scene-review-brief-${index}`}
+            style={{ marginTop: 10 }}
           >
-            {STR.videoRedrawEndStill}
-          </button>
-        ) : null}
-        {onReanimate ? (
-          <button
-            type="button"
-            className="btn btn-small"
+            {STR.videoBriefLabel}
+          </label>
+          <p className="hint">{STR.videoBriefHint}</p>
+          <textarea
+            id={`scene-review-brief-${index}`}
+            className="note-input"
+            style={{ minHeight: 70 }}
+            value={scene.visualBrief}
             disabled={busy}
-            onClick={onReanimate}
-          >
-            {reanimateLabel ?? STR.videoReanimateScene}
-          </button>
-        ) : null}
-      </div>
+            onChange={(event) => onBriefChange(event.target.value)}
+          />
+          {onEndBriefChange ? (
+            <>
+              <label
+                className="field-label"
+                htmlFor={`scene-review-end-brief-${index}`}
+                style={{ marginTop: 12 }}
+              >
+                {STR.videoEndBriefLabel}
+              </label>
+              <p className="hint">{STR.videoEndBriefHint}</p>
+              <textarea
+                id={`scene-review-end-brief-${index}`}
+                className="note-input"
+                style={{ minHeight: 70 }}
+                value={scene.endVisualBrief ?? ''}
+                disabled={busy}
+                onChange={(event) => onEndBriefChange(event.target.value)}
+              />
+            </>
+          ) : null}
+          {redrawUnavailableHint ? (
+            <p className="hint" style={{ marginTop: 12 }}>
+              {redrawUnavailableHint}
+            </p>
+          ) : null}
+        </>
+      ) : redrawUnavailableHint ? (
+        <p className="hint" style={{ marginTop: 12 }}>
+          {redrawUnavailableHint}
+        </p>
+      ) : null}
 
       {briefOpen ? (
         <>
@@ -389,29 +552,52 @@ export function VideoSceneCard({
           <textarea
             className="note-input"
             style={{ marginTop: 6, minHeight: 70 }}
-            value={briefDraft}
+            value={openDraft}
             disabled={busy}
-            onChange={(event) => setBriefDraft(event.target.value)}
+            onChange={(event) =>
+              briefOpen === 'start'
+                ? setStartDraft(event.target.value)
+                : setEndDraft(event.target.value)
+            }
           />
           <div className="btn-row" style={{ marginTop: 8 }}>
             <button
               type="button"
               className="btn btn-small btn-primary"
-              disabled={busy || briefDraft.trim().length === 0}
+              disabled={busy || openDraft.trim().length === 0}
               onClick={() => {
-                const brief = briefDraft.trim();
                 const which = briefOpen;
+                const brief = openDraft.trim();
                 setBriefOpen(null);
                 if (which === 'start') onRedraw?.(brief);
                 else onRedrawEnd?.(brief);
               }}
             >
               {briefOpen === 'start'
-                ? STR.videoRedrawStill
+                ? needsFirstFrames
+                  ? STR.videoRenderSceneFrames
+                  : STR.videoRedrawStill
                 : STR.videoRedrawEndStill}
             </button>
           </div>
         </>
+      ) : null}
+
+      {/* Insert a scene AFTER this one. Only "after" is offered and that is not
+          a gap: a new scene must carry words moved out of a neighbour, so
+          inserting before scene 1 and taking its opening words is the same
+          result as inserting after scene 1 and taking its closing ones. */}
+      {onInsertAfter ? (
+        <div className="btn-row" style={{ marginTop: 12 }}>
+          <button
+            type="button"
+            className="btn btn-small"
+            disabled={busy}
+            onClick={onInsertAfter}
+          >
+            {STR.videoInsertSceneAfter}
+          </button>
+        </div>
       ) : null}
     </section>
   );

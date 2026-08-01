@@ -9,7 +9,10 @@ import {
   NameDesignationsSchema,
   PreparedNameSchema,
 } from './designations.js';
-import { GenerationStatusSchema } from './api.js';
+import {
+  ARTICLE_INSTRUCTIONS_MAX_CHARS,
+  GenerationStatusSchema,
+} from './api.js';
 
 export const DloIntakeStatusSchema = z.enum([
   'queued',
@@ -53,7 +56,11 @@ export const DloIntakeFileSchema = z.object({
   name: z.string(),
   // 'txt' arrives only through the pre-read document path below — the intake job has no
   // reader for it, because a .txt is read locally and free at upload time.
-  kind: z.enum(['audio', 'pdf', 'docx', 'txt']),
+  //
+  // 'youtube' is a recording that was never uploaded: the officer pasted a link and the
+  // transcriber fetches the media itself. It behaves exactly like 'audio' from the review
+  // step onward — one card, one editable transcript — so nothing downstream branches on it.
+  kind: z.enum(['audio', 'youtube', 'pdf', 'docx', 'txt']),
   // 'needs-selection': a scanned PDF that was probed but deliberately NOT read, because
   // reading it costs OCR credits per page. It waits here until the officer picks pages.
   status: z.enum(['pending', 'needs-selection', 'done', 'failed']),
@@ -75,6 +82,11 @@ export const DloIntakeFileSchema = z.object({
   // when the intake was created — there is nothing left to re-read, so the review step
   // hides the override rather than offering a button that can only fail.
   canReextract: z.boolean().optional(),
+  // A 'youtube' source's link and what the probe knew about it, so the review card can name
+  // and link the video instead of showing a bare URL. Absent on every other kind.
+  sourceUrl: z.string().optional(),
+  sourceAuthor: z.string().optional(),
+  sourceThumbnailUrl: z.string().optional(),
 });
 export type DloIntakeFile = z.infer<typeof DloIntakeFileSchema>;
 
@@ -246,6 +258,11 @@ export const DloReviewStateSchema = z.object({
   excluded: z.array(z.string()).default([]),
   // Pasted style reference. Unlike category/heading this has no column of its own.
   styleReference: z.string().optional(),
+  // Free-text instructions for the article model (see ARTICLE_INSTRUCTIONS_MAX_CHARS). Stored
+  // here rather than in a column for the same reason as the style reference — and this is also
+  // how something typed on the intake FORM reaches the review step: the create route seeds an
+  // initial blob with it.
+  instructions: z.string().optional(),
   pointers: DloReviewPointersSchema.optional(),
   designations: DloReviewDesignationsSchema.optional(),
   // Who wrote this and when. The intake list is shared and there is no auth, so two people can
@@ -287,6 +304,7 @@ export function serializeDloReviewState(
     edits: Readonly<Record<string, string>>;
     excluded: Iterable<string>;
     styleReference?: string | undefined;
+    instructions?: string | undefined;
     pointers?: z.infer<typeof DloReviewPointersSchema> | undefined;
     designations?: z.infer<typeof DloReviewDesignationsSchema> | undefined;
     writer: string;
@@ -298,6 +316,7 @@ export function serializeDloReviewState(
     edits: { ...input.edits },
     excluded: [...input.excluded].sort(),
     ...(input.styleReference ? { styleReference: input.styleReference } : {}),
+    ...(input.instructions ? { instructions: input.instructions } : {}),
     ...(input.pointers ? { pointers: input.pointers } : {}),
     ...(input.designations ? { designations: input.designations } : {}),
     writer: input.writer,
@@ -438,6 +457,14 @@ export const DloGenerateRequestSchema = z.object({
   // and structure only; never a factual source. Absent/empty ⇒ semantic retrieval, then any
   // available article from the requested news/scheme style category.
   styleReference: z.string().trim().optional(),
+  // Free-text instructions for the article model — emphasis, ordering, tone, what to keep
+  // short. An instruction, never a fact (see CreateGenerationRequestSchema.instructions).
+  // Absent/empty ⇒ the article this intake would have produced before this field existed.
+  instructions: z
+    .string()
+    .trim()
+    .max(ARTICLE_INSTRUCTIONS_MAX_CHARS)
+    .optional(),
 });
 export type DloGenerateRequest = z.infer<typeof DloGenerateRequestSchema>;
 

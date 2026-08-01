@@ -5,19 +5,41 @@
 //   text layer (pdf-text-layer.ts)  the characters already stored in the PDF. Instant,
 //                                   free, no page limit, and EXACT — names, amounts and
 //                                   dates come out as typed.
-//   OCR (sarvam-doc.ts)             Sarvam reading the PIXELS. Necessary for scanned
+//   OCR (ocr-provider.ts)           a model reading the PIXELS. Necessary for scanned
 //                                   documents, which are routine in government material.
-//                                   Minutes per document, costs credits, misreads names,
-//                                   and is capped at 10 pages per job (hence the chunking).
+//                                   Costs money per page and can misread. Which backend
+//                                   runs is OCR_PROVIDER's business, not this file's:
+//                                   openai-doc.ts (default, one call per page) or
+//                                   sarvam-doc.ts (≤10-page async jobs).
 //
 // So: try the text layer, use it when it reads cleanly, and fall back to OCR otherwise.
 // The gate cannot be perfect — a PDF typeset in a legacy non-Unicode Marathi font extracts
 // as convincing-looking junk — so /translate also offers the user an explicit "read it
 // with OCR instead", which arrives here as source: 'ocr'.
 //
+// EXCEPT that the default is now `PDF_EXTRACTION_MODE=ocr`, which sends EVERY PDF to the OCR
+// provider and never consults the text layer at all. The reason is TABLES. pdf.js hands back
+// text items with no structure — the x-coordinates that mark a table's columns are the only
+// clue and they are not in the string — so a table of figures comes out as one run-on line,
+// its numbers detached from their headings. Government material is full of such tables and
+// the whole product rests on reading them correctly. Both OCR backends return Markdown,
+// tables included.
+//
+// A SECOND reason, which is why flipping this back to 'auto' is not the harmless saving it
+// looks like: the documents this product actually receives are routinely typeset in a legacy
+// non-Unicode Marathi font, and their text layer decodes to convincing junk — नोंदणी as
+// `नोंिणी`, निर्णय as `ननणणय`. textLayerVerdict catches much of that, but not all of it, and
+// what it misses flows into an article as a corrupted name. Reading the pixels is the only
+// backend that gets those characters right.
+//
+// What this costs, so nobody rediscovers it as a bug: every PDF is now billed per page,
+// born-digital ones included; probePdf can no longer hand the UI free text, so every upload
+// stops at the page picker. `PDF_EXTRACTION_MODE=auto` restores the text-layer-first policy
+// exactly.
+//
 // PAGE SELECTION. Because OCR is billed per page, the user chooses which pages are worth
 // reading BEFORE any job runs, and that choice arrives as options.pages. Only those pages
-// are sent to Sarvam. probePdf is the other half of that arrangement: it reports, for free,
+// are sent to the provider. probePdf is the other half of that arrangement: it reports, for free,
 // how many pages there are and whether reading them will cost anything — which is what lets
 // the UI show a born-digital document's text while the user picks, and offer a scanned one
 // nothing but page numbers.
@@ -31,7 +53,10 @@ import {
   type PdfTextSource,
 } from './pdf-shared.js';
 import { extractTextLayerPages, textLayerVerdict } from './pdf-text-layer.js';
-import { extractPdfPagesViaOcr } from './sarvam-doc.js';
+import {
+  extractPdfPagesViaProvider,
+  ocrProviderName,
+} from './ocr-provider.js';
 import { countPdfPages } from './pdf-split.js';
 
 export type PdfExtraction = Readonly<{
@@ -48,6 +73,19 @@ export type PdfProbe = Readonly<{
   source: PdfTextSource;
   pages: PdfPage[] | null;
 }>;
+
+// Whether the text layer is consulted at all. Read per call rather than cached at module
+// load, so a deployment can flip it with a restart and a harness can set it inline.
+//
+//   'ocr'  (default) every PDF goes to the OCR provider, for the fidelity described above.
+//   'auto'           the original policy: text layer first, OCR only on a bad verdict.
+//
+// An explicit options.source still wins over both — that is the user's own override.
+function pdfExtractionMode(): 'ocr' | 'auto' {
+  return process.env.PDF_EXTRACTION_MODE?.trim().toLowerCase() === 'auto'
+    ? 'auto'
+    : 'ocr';
+}
 
 // Narrows extracted pages to the user's selection, preserving document order.
 function filterToSelection(
@@ -67,10 +105,12 @@ export async function extractPdfPagesDetailed(
 ): Promise<PdfExtraction> {
   const source = options?.source ?? 'auto';
 
-  if (source === 'ocr') {
+  // The default mode never looks at the text layer. `source: 'text-layer'` is still
+  // honoured — it is an explicit caller/user override, not the policy default.
+  if (source === 'ocr' || (source === 'auto' && pdfExtractionMode() === 'ocr')) {
     return {
       source: 'ocr',
-      pages: await extractPdfPagesViaOcr(name, data, options),
+      pages: await extractPdfPagesViaProvider(name, data, options),
     };
   }
 
@@ -106,13 +146,13 @@ export async function extractPdfPagesDetailed(
   }
 
   console.log(
-    `[pdf-pages] ${name}: text layer verdict '${verdict}' — falling back to Sarvam OCR${
+    `[pdf-pages] ${name}: text layer verdict '${verdict}' — falling back to ${ocrProviderName()} OCR${
       options?.pages ? ` for ${options.pages.length} selected page(s)` : ''
     }.`,
   );
   return {
     source: 'ocr',
-    pages: await extractPdfPagesViaOcr(name, data, options),
+    pages: await extractPdfPagesViaProvider(name, data, options),
   };
 }
 
@@ -124,6 +164,18 @@ export async function extractPdfPagesDetailed(
 // (costing nothing), whereas a scanned one can only offer page numbers — showing its text
 // would mean running the very OCR the user is being asked to authorise.
 export async function probePdf(name: string, data: Buffer): Promise<PdfProbe> {
+  // In the default OCR mode there is nothing to probe FOR: the text layer will not be used
+  // however it reads, so reading it could only produce a preview of text the extraction is
+  // going to discard — and showing the user text that the paid read then contradicts is
+  // worse than showing none. Page count comes from pdf-lib, which is free.
+  if (pdfExtractionMode() === 'ocr') {
+    const pageCount = await countPdfPages(data);
+    console.log(
+      `[pdf-pages] ${name}: ${pageCount} page(s), ${ocrProviderName()} OCR (PDF_EXTRACTION_MODE=ocr).`,
+    );
+    return { pageCount, source: 'ocr', pages: null };
+  }
+
   let pages: PdfPage[] | null = null;
   try {
     pages = await extractTextLayerPages(data);

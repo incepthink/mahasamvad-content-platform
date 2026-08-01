@@ -2913,6 +2913,316 @@ Not implemented yet: Canva integration, authentication.
 
 ## Latest Implementation Milestone
 
+- **"AI साठी सूचना" — the officer directs one article in their own words** (2026-08-01,
+  migration 0041): every officer-side input on /dlo said what the article is ABOUT (notes,
+  files, links, category, heading) or what it should READ like (the pasted style reference).
+  Nothing said what it should DO — "lead with the funding figure", "keep the committee
+  paragraph short", "plainer language". `generations.instructions` (0041, insert-only like
+  `style_reference` 0035 and for the same reason: `startGenerationJob` re-reads the row, so a
+  retry must reproduce the same article rather than a differently-directed one) plus one prompt
+  block carry that.
+  - **The block is rendered LAST, immediately before "Write the article now."** — a late block
+    is what these models weight most, and this is the one input written for this run alone. It
+    carries the two rules that make the field safe rather than dangerous: the instructions may
+    supply NO name, date, amount, designation, scheme name or location (otherwise this becomes a
+    second, unreviewed note that walks past every factual guard), and where they ask for
+    something the supplied information does not support, the information wins. Both variants
+    render the identical block (`officerInstructionsBlock`, exported from
+    `simple-article-prompt.ts`): `ARTICLE_PROMPT_VARIANT` changes how densely the specification
+    is worded, never what an officer may ask for. `SIMPLE_ARTICLE_PROMPT_VERSION` →
+    **`simple-v10`**; absent ⇒ byte-for-byte v9, asserted.
+  - **The `full` pipeline deliberately does not take it.** It is the legacy opt-out and is kept
+    byte-for-byte; the field reaches `generateArticleSimple` only.
+  - **The field is on the intake FORM and on the review step, and the handoff between them is
+    the interesting part.** `dlo_intakes` has no column for it — so the create route seeds it
+    into `review_state` (0036) as a SEPARATE best-effort update after the files write, the 0028
+    principle, and `DloWorkspace` restores it there like every other saved review field. That
+    seed writes `writer: 'intake-form'`, which the officer's own browser adopts, so a resumed
+    submission is never reported as a second officer's edit; and it carries only fields the
+    seeding effect does not gate a paid call on, so `restoredFromSave.designations` stays false
+    and the name lookup still fires exactly once.
+  - **Fixed in passing, same mechanism: the intake form's style-reference box was DEAD.** It was
+    drafted to sessionStorage and never submitted (`clearDraft()` on success took it), so an
+    officer who pasted an exemplar on the form got an article styled by retrieval and no sign
+    anything had been ignored. It now travels through the same seed.
+  - **And the YouTube link field was the one input in the product rendered in browser default
+    chrome** — `globals.css` styled `input[type='text']` and never `input[type='url']`, so a
+    thin square box sat among rounded ones. `url` joins that selector (any new input type goes
+    there, not at its call site), and the card gains a focus-ring-carrying `.yt-field` wrapper
+    with a leading icon and an inline clear button, a primary Add button that keeps its width
+    while probing, and a named + counted list to match the recordings above it.
+  Verified 2026-08-01, all free: workspace typecheck **7/7 green**, lint clean on all 16 touched
+  files, prettier clean on every hunk of mine (`strings.ts`/`dlo.ts`/`generations.ts`/
+  `minimal-article-prompt.ts`/`routes/generations.ts` report whole-file CRLF complaints that are
+  pre-existing — do NOT `--write` them); 7 new prompt assertions (verbatim rendering, the
+  never-a-fact rule, information-wins-on-conflict, last-block position, absent/whitespace-only
+  omission, and byte-identity when omitted); and a LIVE create through the running API proving
+  both fields land in `review_state` under `writer: 'intake-form'`, plus /dlo rendering the new
+  card. **Left to do: 0041 is NOT applied** — verified live, the blast radius is exactly as
+  designed (a generate WITH instructions returns `Could not find the 'instructions' column`;
+  every run without one is untouched, since `insertGeneration` omits the column). After applying
+  it: one /dlo article with a real instruction, and one feedback round — `reviseArticle` does not
+  receive the instructions today, so a revision is not held to them. Deploy: **0041 → API → web**
+  (rebuild `@dgipr/schemas` → `@dgipr/database` → `@dgipr/content-engine` dists first); no n8n.
+
+- **YouTube links are an intake source, on /dlo and /transcribe** (2026-08-01, no migration):
+  officers wanted to turn a press conference already on YouTube into an article without
+  first obtaining the recording. The expected cost of this was a video downloader —
+  yt-dlp in `deploy/api.Dockerfile`, plus exposure to YouTube's bot checks from a
+  datacentre IP — and **that turned out to be unnecessary**: ElevenLabs Scribe takes a
+  **`source_url`** and fetches the media itself, its docs listing YouTube explicitly
+  ("Supports hosted video or audio files, YouTube video URLs, TikTok video URLs, and other
+  video hosting services"). `source_url` supersedes the deprecated `cloud_storage_url`,
+  which accepted only presigned cloud-storage URLs and is what a reading of the older docs
+  would have concluded was the whole story. **Check this before adding any downloader.**
+  So a YouTube source never becomes bytes on our side, and every consequence follows from
+  that one fact:
+  - **`AudioFileInput` became a UNION** (`intake/audio-input.ts`): bytes we hold, or a URL
+    the provider fetches. Modelled as a union rather than one type with two optional fields
+    deliberately — an optional-fields shape can represent "neither" and "both", and would
+    let the Sarvam client keep compiling while reading `undefined` bytes. It cost one
+    changed line in `sarvam-stt.ts`, whose `.data` had exactly one use.
+  - **Sarvam refuses per-input, never per-job.** `transcribeAudio` partitions on the sarvam
+    path: URL inputs come back as `{ error }` in position with a Marathi message naming
+    ElevenLabs, while the uploaded recordings in the same intake transcribe normally. That
+    is what keeps `STT_PROVIDER=sarvam` a working rollback rather than a broken deployment,
+    and it runs free — with no byte inputs there is no Sarvam call to make.
+  - **The transcript cache (0031) does not apply**, and that is a property of the design,
+    not a gap: it is keyed on a SHA-256 of the audio bytes, and there are none. URL sources
+    carry an empty hash, are skipped on read and never written back. Both runners.
+  - **No migration.** `files` is jsonb on both tables (the `.txt` precedent), so
+    `DloIntakeFileKind` gained `'youtube'` and both entry types gained
+    `sourceUrl`/`sourceAuthor`/`sourceThumbnailUrl` with `storagePath` becoming optional.
+    From the review step onward a YouTube source behaves exactly like a recording — one
+    card, one editable transcript — so `DloSourceReview`, `combineIntakeSources`,
+    `assembleDloText`, lineage and `/:id/generate` needed **no changes**.
+  - **The probe is oEmbed, not the YouTube Data API** (`routes/youtube.ts`, no key, no
+    quota): title, channel and thumbnail — **and deliberately no DURATION**, since that
+    needs a Data API key and the card's question is only "is this the video I meant?". So
+    there is no cost estimate either; that was a considered trade, not an oversight. A
+    failed probe answers **200 with the id alone**, because a private, unlisted or
+    region-blocked video has no oEmbed record while remaining perfectly transcribable — the
+    card degrades to a bare link chip and the source still submits. It 400s only for
+    something that is not a YouTube video link.
+  - **The client is not trusted about which URL it probed**: both create routes re-run
+    `parseYouTubeVideoId` over the submitted payload, so a hand-crafted request cannot put
+    an arbitrary URL in front of the transcriber. The stored URL is always the CANONICAL
+    watch URL, never the pasted string — a link copied from the app carries `?si=`/`&list=`
+    and, worse, `&t=`, which is a request to start partway into the video.
+  - Web: one shared `YouTubeLinkInput` card on both surfaces (the `AudioFilePicker`
+    precedent), built on the `.file-row` idiom so a pasted link and an uploaded recording
+    read as siblings. Links ride in /dlo's sessionStorage draft **in full**, unlike the
+    recordings — a link is a string, so a reload loses nothing and no "please re-attach"
+    callout is needed. `CirclePlay` stands in for a brand mark: lucide 1.x has no brand
+    icons.
+  Verified 2026-08-01, all free: workspace typecheck **7/7 green**, lint clean on all 17
+  touched files; 31 URL-parser assertions (`npx tsx ../schemas/src/youtube.ts` from
+  content-engine, which has tsx — the `dlo-review-state.ts` split) covering every shape a
+  link is actually copied in (`youtu.be`, no scheme, `m.`/`music.`/`nocookie` hosts,
+  `/embed/`, `/shorts/`, `/live/`, tracking and playlist params) and the near-misses that
+  matter (a channel page, a playlist with no video, a short/over-long/illegal id, and a
+  `youtube.com.evil.example` lookalike host); 9 STT-dispatch assertions including the
+  sarvam refusal arriving one-per-input in order; and a **live API pass** — a real
+  `youtu.be` link with `?si=&t=` probed to its canonical URL with title, channel and
+  thumbnail, a well-formed-but-unknown id correctly returning 200 with no title (the
+  degradation path), and every guard on both create routes (channel/vimeo/junk 400,
+  malformed payload 400, and a non-YouTube URL inside a well-formed payload rejected by the
+  server-side re-derivation). **Left for a real run** (ElevenLabs spend, a few cents): one
+  short Marathi video end to end, confirming Scribe accepts `source_url`, that the
+  transcript lands under the video's title in the review step, and — the one live unknown —
+  which of the two answers Scribe gives for a video whose audio it cannot fetch. New
+  harness: `npx tsx packages/schemas/src/youtube.ts`. No migration, no n8n, no new env;
+  deploy is `@dgipr/schemas` → `@dgipr/database` → `@dgipr/content-engine` dists → API +
+  web, and API and web must ship **together** (the create routes' `youtube` field is a
+  shared contract).
+
+- **"Free this space" — a second poster gesture, for the officer's own logo** (2026-08-01, no
+  migration): pixel feedback had exactly one gesture, the RED numbered marker, which says
+  *change the element here*. Officers wanted the opposite: **clear a rectangle** so they can
+  paste their own logo or photograph into it afterwards. Expressed as a marker note
+  ("इथे काही नको") it fails, because the image model's response to "remove this" is to delete
+  content or to paint a tidy white panel where it was — and a white panel is not free space, it
+  is a new design element the officer then has to cover.
+  So the annotator gained a `mode`, and the new mode draws a **BLUE lettered box with a 20%
+  translucent fill** (A, B — capped at 2). What is inside is RELOCATED elsewhere in the
+  composition, never deleted or shrunk, and the rectangle is left as ordinary background
+  continuing what surrounds it. Its own blue toolbar icon on `SocialPostView` beside the pencil
+  (a mode pill pair inside the fold on `PosterPanel`'s article lane), and both gestures ride
+  **one round**, so a single paid render carries markers and cleared space together.
+  Decisions worth keeping:
+  - **The rule that frees the space lives in CODE, not in the interpreted user text**
+    (`generation/clear-space-rule.ts`, shared verbatim by `buildFeedbackPrompt` and
+    `buildArticleFeedbackPrompt`). The `SETTING_RULE`/`NO_TEXT_RULE` precedent: a rule that
+    travels through a model can be paraphrased away. The vision pass
+    (`interpretImageFeedback`) is given the blue boxes too, but only to NAME what occupies each
+    one and propose where it should go.
+  - **It is phrased POSITIVELY about the freed area**, which is the `NO_TEXT_RULE` lesson
+    again: a bare "leave it empty" is exactly what makes an image model paint a placeholder
+    frame there. It says what to SHOW — the same colour, gradient, pattern and texture as the
+    background immediately around it, no panel/patch/outline/shadow/watermark — and adds "do
+    not change the background anywhere else", which is the officer's stated requirement.
+  - **The note is OPTIONAL**, unlike a marker's. An empty one means "you decide where that
+    content goes", which is the common case, so no clear row can block a send and the request
+    schema omits a blank note rather than sending `''`. That also means a clear-only round can
+    carry no text at all, so both prompt builders now throw only when text AND clear boxes are
+    absent.
+  - **The two contradictory rules were reconciled.** "Keep the exact layout unchanged" is the
+    first thing an edit prompt says and it directly fights a relocation; with clear boxes
+    present it gains an "or the SPACE TO FREE block below" exception, and the block sits last —
+    the position these models weight most. Harness-asserted, along with the clear rule coming
+    AFTER the reserved zones it refers to.
+  - **Blue is drawn LAST** in both the browser overlay and `feedback-marker.ts`, so an overlap
+    reads as the more destructive gesture. The badges are **Latin A/B, not अ/ब**, because the
+    poster-side badge is hardcoded vector strokes (no `<text>`, which would depend on a font
+    inside the deploy container) — and the on-poster mark must match what the officer drew.
+  - A blue box over the chrome gets a Marathi warning that is a real limitation rather than the
+    marker path's soft hint: the logo and footer are re-stamped in code after the edit, so that
+    space cannot be freed.
+  **No n8n push**: both lanes build their feedback prompt in the API and the workflows are thin
+  image-edit services. Verified 2026-08-01, all free: workspace typecheck **7/7 green**, lint
+  clean on all 15 touched files, prettier clean on every hunk of mine (the two whole-file
+  complaints are pre-existing CRLF, confirmed per file — do NOT `--write` them); the extended
+  `poster:preview:markers` render (A/B glyphs, 20% fill, red boxes byte-identically unchanged,
+  overlap order); 11 schema assertions (clear-only accepted, cap enforced at 2, blank note and
+  off-canvas rejected, legacy shapes untouched); the social and article prompt harnesses
+  extended and green; and **27 live browser assertions** across both lanes (icon arms and
+  disarms, modes mutually exclusive, fill/border match the renderer's constants exactly, badges
+  A/B, cap holds, submit appears with no note typed, a red marker coexists and survives a mode
+  switch, removal works, no page errors). **Left for a real run** (one image charge): a clear-only
+  round on a live poster, confirming the freed rectangle comes back as continuing background
+  rather than a panel, and that the displaced content lands somewhere sensible. Deploy is
+  `@dgipr/schemas` → `@dgipr/poster-renderer` → `@dgipr/content-engine` dists → API → web.
+
+- **The poster reference is chosen for CAPACITY, not topic — the input IS the poster**
+  (2026-07-31, no migration — SUPERSEDES the subject-first half of the 2026-07-28
+  information-first milestone): a note about mosquitoes carrying SEVEN points was landing on
+  the three-slot dengue master and shipping four of them. That was the design working as
+  specified — `select-by-information.ts` said in its own header *"SUBJECT IS THE DECIDING
+  FACTOR"*, ran a two-stage prompt that narrowed by topic BEFORE looking at structure, told the
+  model *"If stage 1 kept exactly one reference, CHOOSE IT, even if its arrangement is not
+  ideal"*, and its live harness **asserted** the mosquito→dengue pick.
+  The specification rested on an assumption that is false in practice: that the officer supplies
+  an ARTICLE and the pipeline decides what belongs on the poster. It does not — **what the
+  officer types IS the poster's content**, every line meant to appear (the PDF/article-upload
+  path on क्रिएटिव्ह आणि सोशल is, in the operator's report, not used at all). Once that is true,
+  topic matching is actively harmful: the reference's capacity was shrinking the content.
+  The relationship is inverted — the content's SIZE now decides which references are eligible.
+  - **Capacity is a HARD GATE in code, not a scored preference.** A reference with fewer content
+    slots than the information has items is EXCLUDED. It was a *scored* preference before
+    (`scoreMaster`'s doubled overflow penalty), and a scored preference is exactly how a
+    four-slot template kept beating a seven-slot one. `enforceCapacity` (pure, synchronous,
+    free to test) replaces the model's pick with the TIGHTEST eligible reference when the model
+    picks something too small — the lock-scheme-names doctrine, an instruction steers and a
+    deterministic post-filter guarantees.
+  - **Subject is no longer a criterion at all**, and `contentSummary` is deliberately not shown
+    to the ranker. Making the poster FEEL like an alert is the image prompt's job, not the
+    librarian's: a new `MAKE THE DESIGN SUIT THE MESSAGE` clause tells the model to read the
+    kind of poster off the INFORMATION and never off the reference, whose own topic is
+    unrelated placeholder content. That is the same division the onbrand prompt already drew
+    for colour ("the reference image controls STRUCTURE ONLY, not colour"), extended to subject.
+  - **The item count comes from the SAME call that picks** — a separate counting call would be a
+    second charge, and the count and the pick could then disagree about the very thing the gate
+    is computed from. This is NOT the `point_count` prediction deleted on 2026-07-28: that
+    forecast what an article *should* say before any reference was seen; this counts what the
+    officer actually wrote.
+  - **Two clauses that caused the loss are deleted** from the onbrand prompt: *"Never paste the
+    entire input article into the image"* and *"select only the most important information"* —
+    an explicit instruction to drop the officer's own points. In their place: show every item,
+    the exact item count as a number the model can check itself against, and a
+    `REPRODUCE THE MARATHI TEXT EXACTLY` rule (every matra, conjunct, anusvara and numeral).
+    **That last one is an instruction, not a guarantee, and the file says so**: this path has
+    gpt-image painting the Devanagari, which opts out of the poster doctrine (paint no text;
+    typeset with Chromium) that exists precisely to prevent mangled Marathi. Accepted knowingly
+    — design fidelity traded against text fidelity. If misplaced matras become a real problem,
+    the fix is the Chromium path, not a stronger sentence.
+  - **Overflow renders, never truncates.** When nothing is big enough the largest reference is
+    used, the prompt is told to EXTEND its row pattern to the number needed (its default
+    response to too much content is to drop some), and the officer gets a Marathi warning naming
+    both numbers so they can split the note — in-process registry beside `translateWarnings` /
+    `designationWarnings`, plus `posterCapacityWarning` on the detail payload.
+  - **`isSimpleTemplateEdit` was `'twitter'`-only**, so a **Facebook** run with ठरलेले टेम्पलेट
+    silently took the copy pipeline instead — the same choice producing a different poster
+    depending on platform, and the copy pipeline is the one that condenses to the master's slot
+    count. Now `isSocialCategory`, the repo's standing rule for exactly this class of bug;
+    merging the two UI options later is now purely a web change.
+  - Also removed: a stray `console.log('HIIIIIIIIIIIIIIIIIIIIIIIIIII')` shipping in the onbrand
+    prompt builder.
+  **The library needed nothing done to it** — all 91 masters (89 active) already carry a
+  `layout_spec`, verified free; the active slot histogram is `0:29 2:5 3:14 4:14 5:8 6:5 7:5
+  8:2 9:3 10:1 11:1 12:2`, so a seven-item note has 14 eligible masters. The 29 zero-slot
+  masters are legitimately *"not a repeating list"* (quote/single-message layouts), which is why
+  the gate only applies from **2 items up** — gating those out for a one-item note would exclude
+  exactly the references built for it. A failed count degrades to "no gate" rather than an empty
+  pool. Verified 2026-07-31, all free: workspace typecheck **7/7 green**, lint clean on all
+  eight touched files, prettier clean on every hunk of mine (the residual complaints in those
+  files are pre-existing unformatted lines — do NOT `--write` them, and note `git show HEAD:` is
+  a useless prettier baseline here since blobs are LF and the working tree is CRLF); 7
+  capacity-gate assertions (too-small pick corrected to the tightest fit, an eligible pick left
+  alone, shortfall reported when nothing fits, 1-item and failed-count both ungated, `>=` not
+  `>`, deterministic per seed) and 9 prompt assertions. **Left for a real run**: the `--live`
+  half of the harness (cents — asserts the model itself counts seven points and does not choose
+  the 3-slot dengue master), then one twitter and one facebook ठरलेले टेम्पलेट E2E on a
+  genuinely 7-point note. No migration, no n8n; deploy is `@dgipr/schemas` →
+  `@dgipr/content-engine` dists → API → web.
+
+- **gpt-image is a real alternative for the storyboard frames, switchable in one env
+  line** (2026-07-31, no migration): the `openai` branch of `frame-provider.ts` had
+  existed since the seam was written, but it was not a peer of the Gemini default — it
+  **dropped `referenceFramePng`**, scene 1's approved frame, because `editImage` took a
+  single buffer. So a `VIDEO_IMAGE_PROVIDER=openai` deployment silently fell back to
+  the pre-2026-07-26 behaviour where the `style` paragraph alone carried cross-scene
+  consistency, which is exactly the configuration that let four scenes come back as
+  four unrelated worlds. `editImage` now accepts several buffers and posts them as
+  gpt-image's repeated **`image[]`** field, whose FIRST entry is the canvas and the rest
+  context — a single image still posts the scalar `image` field, so the poster paths and
+  the end-frame edit send a byte-for-byte unchanged request. The branch now renders all
+  three shapes the gemini one does: an END frame edits the start (with the reference
+  appended as trailing context), a START frame **with** a reference goes through
+  `/v1/images/edits` with the reference as the canvas — which is what
+  `WORLD_REFERENCE_RULE` was already worded for ("keep its visual world … create the new
+  location and action described here") — and a START frame with nothing to inherit is a
+  plain generation. The remaining differences are real but are cost and look, not
+  capability: gpt-image renders 3:2 / 2:3 and is centre-cropped to the video aspect,
+  and it bills per image at `OPENAI_IMAGE_QUALITY` where Gemini bills flat.
+  `VIDEO_IMAGE_PROVIDER` is now an ACTIVE line in `.env.example` (and in `.env`) rather
+  than a commented one, so switching is editing a value and restarting; the storyboard
+  gate already asks `frameProviderApiKeyEnv()`, so a gpt-image deployment needs no
+  `GEMINI_API_KEY` for frames. Verified free: workspace typecheck **7/7 green**, lint +
+  prettier clean on both touched files, and a dispatch probe over
+  unset/`gemini`/`openai`/`OpenAI `/`kling` confirming the branch, the trim-and-lowercase,
+  the gate naming `OPENAI_API_KEY` instead of `GEMINI_API_KEY`, and an unknown value
+  failing with `Supported: gemini, openai`. **Left for a real run** (image spend): one
+  storyboard on `openai` to confirm the multi-image `image[]` edit is accepted and that
+  scene 2 inherits scene 1's world. Deploy: rebuild `@dgipr/poster-renderer` →
+  `@dgipr/content-engine`, then API; no migration, no n8n, no web change.
+
+- **Ready-script clip count comes from a MEASURED WAV, not a chars/second constant**
+  (2026-07-31, no migration): `splitReadyVideoScript` decided the scene count as
+  `ceil(estimateNarrationSeconds(script) / 15)` off `DEFAULT_NARRATION_CHARS_PER_SECOND`.
+  That constant is one number for every voice and the voices differ by ~50% (bulbul
+  ~16.5 chars/s, ElevenLabs v3 ~10.9), so an ElevenLabs deployment planned too few clips
+  at gate 1 and the narrate gate then REFUSED the project — after the officer had already
+  approved the script — because the words may never be trimmed or sped up on that lane.
+  `startVideoScriptJob` now, for `inputMode === 'script'`, synthesizes the whole
+  narration through the provider seam FIRST, measures the WAV
+  (`measureReadyScriptSeconds`), and passes that duration into `planReadyVideoScript`,
+  where it decides the scene count, the per-scene character cap (`maxSceneChars`, the
+  measured rate of this very script rather than the configured constant) and the clip
+  windows. The TTS call is **moved, not added**: the WAV is uploaded as
+  `projects/{id}/narration-v1.wav` and every scene carries it as its narration-audio
+  cache, which is exactly what `continuousNarrationIsCurrent` checks — so the storyboard
+  job's voice phase finds it current and synthesizes nothing. The two-minute limit is
+  enforced against the measured duration at gate 1, before a single frame is bought.
+  A deployment with no TTS key keeps the char-rate estimate (it renders silent anyway),
+  and the note lane is unchanged — there the narration is written to a char budget and
+  the narrate phase's measure-then-shorten pass already owns the fit.
+  `NEXT_PUBLIC_NARRATION_CHARS_PER_SECOND` survives as the create form's pre-flight hint
+  only; being wrong there costs an estimate, never a render. Verified free: workspace
+  typecheck **7/7 green**, lint + prettier clean on both touched files, and a split check
+  where one 1,061-char script plans **5 scenes at 16.5 chars/s and 7 at 10.9**, with the
+  chunks rejoining byte-for-byte in every case. Deploy: rebuild `@dgipr/content-engine`,
+  then API; no migration, no n8n, no web change.
+
 - **Exact ready-script video input** (2026-07-30, migration 0040): `/video`
   now offers **टिपणीवरून** and **तयार संहितेवरून**. Note mode is unchanged:
   it writes a 30-second Marathi narration from the supplied facts. Ready-script
