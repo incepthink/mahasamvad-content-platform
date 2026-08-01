@@ -133,7 +133,9 @@ export function YouTubeLinkInput({
 
   return (
     <section className="card">
-      <p className="field-label">{STR.ytTitle}</p>
+      {/* An <h2>, matching the recording picker above it and every other card heading — see
+          AudioFilePicker for why .field-label on a <p> rendered unweighted. */}
+      <h2>{STR.ytTitle}</h2>
       <p className="hint">{STR.ytHint}</p>
 
       <div className="yt-add" style={{ marginTop: 12 }}>

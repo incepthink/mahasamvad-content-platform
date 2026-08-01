@@ -126,8 +126,9 @@ export default function NewGenerationPage() {
   const readRequestedForSubmitRef = useRef(false);
   // Remounts the upload card to drop a finished document (its own state is internal).
   const [docKey, setDocKey] = useState(0);
-  // The chosen format IS the category — one flat picker, no derivation.
-  const [category, setCategory] = useState<SelectableFormat>('scheme');
+  // The chosen format IS the category — one flat picker, no derivation. ट्विटर पोस्ट is the
+  // default because it is by far the most-used format on this page.
+  const [category, setCategory] = useState<SelectableFormat>('twitter');
   // A social post is poster-only unless asked otherwise: the caption is a separate
   // paid model call, and plenty of posts are published as an image. It can also be added
   // afterwards from the detail page, so off is a cheap default rather than a lossy one.

@@ -285,6 +285,24 @@ export function DloIntakeForm() {
         <DloCategoryPicker value={category} onChange={setCategory} />
       </section>
 
+      {/* The action sits directly under the type, at the top of the form: everything below it
+          is optional material, so an officer who has only pasted notes can start the run
+          without scrolling past every card they did not fill in. Any complaint (nothing
+          supplied, instructions too long) is rendered here, where the button is. */}
+      <section className="card">
+        <div className="btn-row">
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={submit}
+            disabled={submitting}
+          >
+            {submitting ? STR.submitting : STR.dloSubmit}
+          </button>
+        </div>
+        {error ? <p className="form-error">{error}</p> : null}
+      </section>
+
       <section className="card">
         <h2>{STR.dloNewWorkTitle}</h2>
         <p className="hint">{STR.dloIntro}</p>
@@ -421,20 +439,6 @@ export function DloIntakeForm() {
         value={styleReference}
         onChange={setStyleReference}
       />
-
-      <section className="card">
-        <div className="btn-row">
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={submit}
-            disabled={submitting}
-          >
-            {submitting ? STR.submitting : STR.dloSubmit}
-          </button>
-        </div>
-        {error ? <p className="form-error">{error}</p> : null}
-      </section>
     </>
   );
 }

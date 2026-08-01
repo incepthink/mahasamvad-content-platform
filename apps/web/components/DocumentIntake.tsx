@@ -454,7 +454,10 @@ export function DocumentIntake({
   if (!jobId) {
     return (
       <section className="card">
-        <p className="field-label">{title ?? STR.docUploadTitle}</p>
+        {/* An <h2>, like every other card heading on the surfaces this appears on:
+            .field-label is scoped to <label> in globals.css, so a <p> carrying it rendered
+            unweighted. The two later states below use the same element for the same reason. */}
+        <h2>{title ?? STR.docUploadTitle}</h2>
         <p className="hint">{hint ?? STR.docUploadHint}</p>
         <div className="btn-row" style={{ marginTop: 12 }}>
           {fileButton}
@@ -504,7 +507,7 @@ export function DocumentIntake({
   if (isSelecting) {
     return (
       <section className="card">
-        <p className="field-label">{STR.docSelectTitle}</p>
+        <h2>{STR.docSelectTitle}</h2>
         <p className="hint">
           {reselecting ? STR.docChangeSelectionHint : STR.docSelectHint}
         </p>
@@ -564,7 +567,7 @@ export function DocumentIntake({
 
   return (
     <section className="card">
-      <p className="field-label">{STR.docReviewTitle}</p>
+      <h2>{STR.docReviewTitle}</h2>
       <p className="hint">{STR.docReviewHint}</p>
       <p className="hint" style={{ marginTop: 8 }}>
         <FileText size={16} aria-hidden="true" /> {detail.fileName}

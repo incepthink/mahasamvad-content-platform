@@ -87,7 +87,10 @@ export function AudioFilePicker({
 
   return (
     <section className="card">
-      <p className="field-label">{title}</p>
+      {/* An <h2>, like every other card heading on both surfaces this picker appears on.
+          .field-label is scoped to <label> in globals.css, so a <p> carrying it got no
+          weight at all and this card's title read as body text beside its neighbours. */}
+      <h2>{title}</h2>
       <p className="hint">{hint}</p>
 
       <div className="btn-row" style={{ marginTop: 12 }}>
