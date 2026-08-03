@@ -19,6 +19,24 @@ The long-term product will:
 Scaffolding is done. The core generation pipeline and a first web product on top of
 it are implemented and working end-to-end:
 
+- **Analytics reports the work the current UI actually performs** (2026-08-02,
+  migration 0043 unchanged): the single `वापरलेल्या सेवा` table no longer collapses
+  a workflow into vague `मजकूर निर्मिती` / `प्रतिमा निर्मिती` rows. Every paid call is
+  recorded under its user-facing task through the ambient cost meter (for example audio
+  transcription, YouTube transcription, scanned-document OCR, designation extraction,
+  article drafting/verification, article feedback, translation name extraction, English or
+  Hindi translation, proofreading, social poster/caption work, YouTube thumbnails, and each
+  video script/storyboard/clip/narration phase). Each row carries service, provider, configured
+  model, actual invocation count, natural processed unit and attributable cost in the SAME
+  table. `usage_events.action = task:<task>` plus enumerable jsonb detail is sufficient, so
+  no migration after 0043 and no content/resource id is stored. Exact task history begins at
+  this deployment (`TASK_TRACKING_STARTED_AT`); older generation/video cost breakdowns remain
+  as explicitly labelled `पूर्वीची एकत्रित AI नोंद` rows because they cannot truthfully be
+  reconstructed. `/dlo` is article-only in the current UI: its historical image breakdown is
+  excluded and its displayed cost is rebuilt from its valid workflow rows, so a poster later
+  attached elsewhere cannot make `लेख / बातमी` claim image generation. Task writes are
+  fire-and-forget and never fail the officer's work. Deploy 0043 if not already applied, then
+  rebuild `@dgipr/database` + `@dgipr/schemas` + `@dgipr/content-engine`, API and web; no n8n.
 - **Every video is branded and ends on the DGIPR contact slate** (2026-07-30,
   no migration): the supplied `0730.mp4` now lives at
   `packages/poster-renderer/assets/video-outro.mp4` and is appended by
@@ -120,6 +138,7 @@ it are implemented and working end-to-end:
   `overlayArticleChrome` (`packages/poster-renderer/src/article-chrome.ts`) stamps
   `article-logo.png` (top-left) + `poster-footer.png` (full-width bottom) — on
   initial renders and image-feedback re-renders alike.
+
 - Feedback/revision loops for the article and poster text/scene
   (`packages/content-engine/src/generation/revise-*.ts`), plus iterative pixel-level
   image feedback for n8n-rendered article and twitter posters: each edit uses the
@@ -406,7 +425,7 @@ it are implemented and working end-to-end:
   (and in `NextActions`' cross-format fold), carried as `generateCaption` on
   `POST /generations` — a **job parameter, not a column**, so no migration; a re-run infers
   it from whether the source run ended up with a caption.
-  (3) The reason it *couldn't* be optional: the prompt lived inside `social-post-v2-api` as
+  (3) The reason it _couldn't_ be optional: the prompt lived inside `social-post-v2-api` as
   four nodes welded between the image render and the webhook response, so a caption was
   whatever the poster render happened to produce. It now lives in
   `packages/content-engine/src/generation/generate-caption.ts` (`generateSocialCaption`,
@@ -437,7 +456,7 @@ it are implemented and working end-to-end:
   `@dgipr/schemas` + `@dgipr/content-engine` dists first).
 
 - **One upload UI everywhere, and page selection by RANGE** (2026-07-24, no migration):
-  the previous milestone shared the upload *plumbing* but left each surface presenting it
+  the previous milestone shared the upload _plumbing_ but left each surface presenting it
   differently — `/translate` behind a **"PDF फाईल" tab** wired to its own parallel backend,
   the media room and `/proofread` behind a **"फाईलमधून मजकूर घ्या" fold**, `/dlo` behind one
   combined `.pdf,.mp3,.docx` picker. Same capability, four appearances. Worse, the page
@@ -885,11 +904,11 @@ it are implemented and working end-to-end:
     visual-brief rule forbids depicting anyone speaking. If Veo starts refusing people
     entirely, trim `close-up face` from the negative list first.
   Scenes jsonb gained `beat`/`shotHint`/`narrationAudioSeconds`/`clipDurationSeconds` —
-  additive, NO migration; legacy scenes degrade to the old behaviour at every consumer.
-  Deploy: API + web (rebuild `@dgipr/schemas` + `@dgipr/content-engine` +
-  `@dgipr/poster-renderer` dists first); no n8n. New env (optional):
-  `VIDEO_NARRATION_CHARS_PER_SECOND`. Harness additions: `plan-video-scenes.ts` CLI;
-  calibrate the char rate against real bulbul WAVs before trusting silent-video pacing.
+    additive, NO migration; legacy scenes degrade to the old behaviour at every consumer.
+    Deploy: API + web (rebuild `@dgipr/schemas` + `@dgipr/content-engine` +
+    `@dgipr/poster-renderer` dists first); no n8n. New env (optional):
+    `VIDEO_NARRATION_CHARS_PER_SECOND`. Harness additions: `plan-video-scenes.ts` CLI;
+    calibrate the char rate against real bulbul WAVs before trusting silent-video pacing.
 
 - **Video scene planner split into extract-then-arrange** (2026-07-23, no migration):
   editorial review of the first real run found three faults — the middle scenes dwelt on
@@ -926,8 +945,8 @@ it are implemented and working end-to-end:
   `कृपया किमान २० अक्षरांची टिपणी लिहा` — the document had been read, its pages reviewed, and
   it still counted for nothing. The cause was that `DocumentIntake` only ever handed its text
   over on a **button press inside its own card** ("हा मजकूर लेखात जोडा"), so an officer who
-  treated the upload as the note — which the page's own hint invites: *"चिकटवा किंवा
-  फाईलमधून घ्या — दोन्ही एकत्रही करता येईल"* — got a form that silently ignored their file.
+  treated the upload as the note — which the page's own hint invites: _"चिकटवा किंवा
+  फाईलमधून घ्या — दोन्ही एकत्रही करता येईल"_ — got a form that silently ignored their file.
   A confirm-then-commit step is right where the file REPLACES a surface's single text box
   (/translate, /proofread — the click authorises the overwrite), and wrong where the file is
   a second source beside a box that may also be empty.
@@ -1048,7 +1067,7 @@ it are implemented and working end-to-end:
   = image input. `POSTER_COPY_MODEL` moved **luna → terra** (it writes the poster
   headline — the most-read text the product ships) but keeps `OPENAI_COPY_MODEL` so the
   poster path can be traded back for latency in one env line. `run-finetune.ts`'s
-  `BASE_MODEL` deliberately stays gpt-4o-mini: it is a *fine-tuning base*, a different
+  `BASE_MODEL` deliberately stays gpt-4o-mini: it is a _fine-tuning base_, a different
   list, and self-serve fine-tuning is 403 on this account anyway. **Image (`gpt-image-2`)
   and embeddings (`text-embedding-3-large`) are deliberately untouched** — different model
   families, and re-embedding would invalidate every stored vector (0019 `halfvec(1024)`).
@@ -1082,7 +1101,7 @@ it are implemented and working end-to-end:
   (1) **The assigned palette never reached the image prompt.** `build-poster-prompt.ts` emitted
   `fmtArtDirection(artDirection)` when art direction succeeded — the normal path — with
   `assignedPalette` only in the `else`. So the rotation's choice arrived as the art director's
-  *paraphrase*, produced by a model explicitly told it "may refine within this family". The
+  _paraphrase_, produced by a model explicitly told it "may refine within this family". The
   forcing function was laundered before use. **This one bug made the whole rotation nearly
   inert**, and is the thing to check first if colours ever converge again.
   (2) **The library was itself low-variance**: all 12 entries were "light warm-neutral ground +
@@ -1091,7 +1110,7 @@ it are implemented and working end-to-end:
   which is what "same background colour as well" actually meant.
   (3) **Colour leaked back in from the master**: `analyze-template.ts` asks `layoutSummary` to
   state "the dominant colour theme", that string was injected as structure inspiration under a
-  soft "IGNORE any colours it mentions", and `rank-master.ts` *selected* the master on "mood,
+  soft "IGNORE any colours it mentions", and `rank-master.ts` _selected_ the master on "mood,
   **colour theme** and topic" — from a library that is overwhelmingly saffron/maroon/cream.
   (4) **Colours were adjectives, never hex.** (5) **The recency ring was in-process and
   id-only** — reset on every restart (constant under `tsx watch`), and
@@ -1139,22 +1158,22 @@ it are implemented and working end-to-end:
     re-roll could legitimately land back in the family just rejected, since the recency ring only
     knows about OTHER runs.
   **The style write is deliberately NOT bundled with the poster write**: it is a separate
-  best-effort update, because bundling them would mean that on a database without 0028 the whole
-  update fails and the already-paid poster never lands on the row. Losing rotation memory for one
-  run is acceptable; losing a render is not. Same principle as the caption ordering.
-  Verified 2026-07-24: full workspace typecheck green (7/7), lint green on every touched file;
-  five offline harnesses with assertions (palette rotation — no family repeat within 3, warm at
-  4/30, no back-to-back ground repeat, non-warm families provably not warm-grounded; layout
-  rotation — photo filter absolute both ways, quote-capable archetype for quote runs, determinism;
-  colour strip — 7 synthetic + 25 real rows; poster-style round trip incl. junk/empty; prompt
-  assembly — hexes present, spec before art direction, composition before structure hint, no
-  master colour word in the hint); and a LIVE art-direction run of five seeds which returned
-  `palette: ""` every time and **named no colour at all** across all five (it says "the dominant
-  assigned tone"), each realising its assigned archetype. **Not yet done: 0028 is NOT applied**
-  (applied by hand in Supabase; the code degrades cleanly without it — verified, the read throws
-  and falls back to empty history), and the six-consecutive-run spread test needs it. Deploy:
-  0028 → API → web (rebuild `@dgipr/schemas` + `@dgipr/database` + `@dgipr/content-engine` +
-  `@dgipr/poster-renderer` dists first). No n8n — the fresh path calls `generateImage` directly.
+    best-effort update, because bundling them would mean that on a database without 0028 the whole
+    update fails and the already-paid poster never lands on the row. Losing rotation memory for one
+    run is acceptable; losing a render is not. Same principle as the caption ordering.
+    Verified 2026-07-24: full workspace typecheck green (7/7), lint green on every touched file;
+    five offline harnesses with assertions (palette rotation — no family repeat within 3, warm at
+    4/30, no back-to-back ground repeat, non-warm families provably not warm-grounded; layout
+    rotation — photo filter absolute both ways, quote-capable archetype for quote runs, determinism;
+    colour strip — 7 synthetic + 25 real rows; poster-style round trip incl. junk/empty; prompt
+    assembly — hexes present, spec before art direction, composition before structure hint, no
+    master colour word in the hint); and a LIVE art-direction run of five seeds which returned
+    `palette: ""` every time and **named no colour at all** across all five (it says "the dominant
+    assigned tone"), each realising its assigned archetype. **Not yet done: 0028 is NOT applied**
+    (applied by hand in Supabase; the code degrades cleanly without it — verified, the read throws
+    and falls back to empty history), and the six-consecutive-run spread test needs it. Deploy:
+    0028 → API → web (rebuild `@dgipr/schemas` + `@dgipr/database` + `@dgipr/content-engine` +
+    `@dgipr/poster-renderer` dists first). No n8n — the fresh path calls `generateImage` directly.
 
 - **The ARTICLE poster gets the same treatment: fresh generation, two rotations, and a scheme-name
   lock** (2026-07-24, no migration — SUPERSEDES the "Article poster via n8n" notes and retires
@@ -1165,7 +1184,7 @@ it are implemented and working end-to-end:
   pixels survived into every render — the precise mechanism that made social posters look alike;
   its colour "rotation" was `ARTICLE_POSTER_THEMES`, 7 entries picked by a bare `Math.random()`
   with no recency memory, applied only as a CONDITIONAL "recolour the headline panel **if** the
-  master has one", which left the *background* — the thing actually complained about — untouched on
+  master has one", which left the _background_ — the thing actually complained about — untouched on
   every master that had no solid panel. And when the article was about one named scheme it still
   wrote an editorial headline, so
   `पुण्यश्लोक अहिल्यादेवी होळकर शेतकरी कर्जमुक्ती योजना २०२६` shipped as `शेतकऱ्यांना कर्जमुक्ती`.
@@ -1201,11 +1220,11 @@ it are implemented and working end-to-end:
     carries a `TEXT LOCK` block: reproduce this exact string, year included, and add no subtitle,
     tagline, department name, date or English version.
     **Tier note:** this call runs on `POSTER_COPY_MODEL` (gpt-5.6-terra), NOT the utility tier —
-    only its name output is code-checked; the *judgement* ("about a scheme" vs "mentions one") is
+    only its name output is code-checked; the _judgement_ ("about a scheme" vs "mentions one") is
     not re-checkable and decides a poster's entire visible text, the same reasoning that moved
     `POSTER_COPY_MODEL` luna → terra.
   - **Style history is now SCOPED by poster kind** (`listRecentPosterStyles(client, limit,
-    categories)`). Both lanes share `generations.poster_style` (0028) but draw compositions from
+categories)`). Both lanes share `generations.poster_style` (0028) but draw compositions from
     different libraries, so an unscoped read let a social `cards` coverage bar an article pick —
     spreading each rotation against a vocabulary the other cannot produce. `poster-style.ts`
     resolves a layout id through BOTH libraries (`anyLayoutById`); `art_` namespacing keeps that
@@ -1217,23 +1236,23 @@ it are implemented and working end-to-end:
     having no assignment to re-roll). The style write stays a SEPARATE best-effort update after the
     poster write — on a database without 0028, losing rotation memory is acceptable, losing a paid
     render is not.
-  Verified 2026-07-24: full workspace typecheck green (7/7), lint clean on every touched file, and
-  8 offline harnesses green — the 4 new/changed ones plus `poster-palettes`/`poster-layouts`/
-  `strip-colour-words`/`lock-scheme-names` unchanged. New assertions worth knowing: the article
-  prompt carries the assigned hexes with COLOUR SPEC before ART DIRECTION and COMPOSITION before
-  the master's structure hint (the social bug, which was emitting the art director's paraphrase
-  INSTEAD of the assignment — check this FIRST if article colours ever converge); no master colour
-  word survives into the hint; the scheme lock preserves `२०२६` and refuses an invented name; the
-  photo filter is absolute both ways. n8n `validate_workflow` returns 0 errors and
-  `n8n:push --dry-run` reports 6 → 5 nodes with the credential resolved by name.
-  **Not yet done** (needs spend/a live instance): 0028 is still unapplied, the
-  `analyze:references` backfill for article masters, and the six-consecutive-run spread test +
-  a real scheme-note E2E. **Deploy order is the NORMAL one — API first, then `pnpm n8n:push`** —
-  and the window between them is safe because the API still sends the legacy
-  `reference_url`/`image_feedback`/`marker_count` fields, so a new API against an un-pushed
-  workflow degrades article-poster FEEDBACK to the old in-workflow prompt instead of throwing
-  "No reference_url received". Initial renders never touch n8n at all. No migration; rebuild
-  `@dgipr/database` + `@dgipr/content-engine` dists first.
+    Verified 2026-07-24: full workspace typecheck green (7/7), lint clean on every touched file, and
+    8 offline harnesses green — the 4 new/changed ones plus `poster-palettes`/`poster-layouts`/
+    `strip-colour-words`/`lock-scheme-names` unchanged. New assertions worth knowing: the article
+    prompt carries the assigned hexes with COLOUR SPEC before ART DIRECTION and COMPOSITION before
+    the master's structure hint (the social bug, which was emitting the art director's paraphrase
+    INSTEAD of the assignment — check this FIRST if article colours ever converge); no master colour
+    word survives into the hint; the scheme lock preserves `२०२६` and refuses an invented name; the
+    photo filter is absolute both ways. n8n `validate_workflow` returns 0 errors and
+    `n8n:push --dry-run` reports 6 → 5 nodes with the credential resolved by name.
+    **Not yet done** (needs spend/a live instance): 0028 is still unapplied, the
+    `analyze:references` backfill for article masters, and the six-consecutive-run spread test +
+    a real scheme-note E2E. **Deploy order is the NORMAL one — API first, then `pnpm n8n:push`** —
+    and the window between them is safe because the API still sends the legacy
+    `reference_url`/`image_feedback`/`marker_count` fields, so a new API against an un-pushed
+    workflow degrades article-poster FEEDBACK to the old in-workflow prompt instead of throwing
+    "No reference_url received". Initial renders never touch n8n at all. No migration; rebuild
+    `@dgipr/database` + `@dgipr/content-engine` dists first.
 
 - **The article poster's heading: named SUBJECT, not just schemes — and a hand override**
   (2026-07-24, migration 0029 — SUPERSEDES the scheme-lock half of the milestone above): the
@@ -1252,57 +1271,57 @@ it are implemented and working end-to-end:
     and for "several different schemes" — and this note is a विधानसभा announcement naming two
     (the older ज्योतिराव फुले… as comparison). It hit both exclusions while being exactly the
     shape of a DGIPR press note.
-  `resolve-scheme-subject.ts` → **`resolve-poster-subject.ts`** (`resolvePosterSubject` /
-  `validatePosterSubject` / `PosterSubject`; `schemeLocked` → `textLocked` at every call site).
-  What changed, in order of importance:
-  (1) **The question is broader**: any NAMED subject — scheme, campaign, mission, **award**,
-  **service/model**, **portal**, fund, project (`SUBJECT_KINDS`, reported for the log). The accept
-  rules now name the three failing shapes directly: a statement/announcement/launch/review ABOUT
-  a named thing counts (the thing is the subject, not the meeting); an invitation for
-  applications counts; and where several are named, pick the one the news **acts on** — a change
-  to A that cites older B for background has subject **A**. False stays for a genuine roundup, a
-  passing mention, and generic wording with no proper name.
-  (2) **Grounding is structural, per the repo's usual move**: the model must return an `evidence`
-  sentence copied verbatim from the source, checked (whitespace-normalised) to occur in it and to
-  contain the name. Reported, not fatal — the name check is strictly stronger.
-  (3) **Quotes come off** (`stripEdgePunctuation`): these notes mark official names with ‘…’, and
-  the model returns them attached, which nothing downstream can match. That is also why quoting
-  is now given to the model as a positive SIGNAL.
-  (4) **It reads the NOTE, not only the article** — the officer's expectation is expressed
-  against their own text, and a note→article run can reword. The name is nominated from the note
-  and must be accountable in note ∪ article; on a media-room run they are the same string, so
-  nothing is paid twice.
-  (5) **A lenient false-positive backstop** (`isProminent`), needed because broadening the rule
-  risks putting a passing mention on a poster: reject only when the name occurs exactly ONCE and
-  after the 75% mark of a source longer than 800 chars. Short sources exempt.
-  (6) The `TEXT LOCK` block no longer says "scheme" — telling the model it is looking at a scheme
-  name invites it to correct an award name into scheme-shaped wording.
-  **Plus the escape hatch the operator asked for: `generations.poster_heading` (0029)** — type
-  the exact poster text. On the media room it appears only when the **पोस्टर** output is selected
-  (a social poster's headline lives inside a multi-field copy object with no single line to lock,
-  so the API 400s a social run that sends one); on `PosterPanel` it is a third redo beside the two
-  style ones, which is where it actually gets used — you only learn the heading is wrong once the
-  poster exists. It wins outright and skips the model call entirely. It is a **column, not a job
-  parameter** (the `generateCaption` precedent does not apply): `startPosterRegenerateJob`
-  re-derives everything from the row, so a heading held only in the request would vanish on the
-  first "वेगळ्या रंगात तयार करा". Deliberately NOT `generations.heading`, which is the article's
-  editorial ANGLE and is already surfaced in the edit-and-re-run fold — an angle is not poster
-  text. `insertGeneration` **omits the column unless a heading was typed**, so a database without
-  0029 loses only this feature instead of failing every create (the 0028 principle), and the
-  regenerate job persists it BEFORE rendering so a failed render does not lose the typed text.
-  Verified 2026-07-24: full workspace typecheck green (7/7), lint clean on all 11 touched files,
-  18 offline assertions (quote stripping incl. the ‘भारत टॅक्सी’ and hyphenated-year
-  `पुरस्कार-२०२६` cases, glossary truncation expansion, invented-name refusal, all four prominence
-  cases, name found in the note half); the article prompt harness still green; **live on all three
-  real notes** — `भारत टॅक्सी` (service), `दिव्यांग सशक्तीकरण राष्ट्रीय पुरस्कार-२०२६` (award),
-  `पुण्यश्लोक अहिल्यादेवी होळकर शेतकरी कर्जमुक्ती योजना` (scheme), each `model+verbatim` with its
-  evidence matched — and **two negative controls returning `null`** (a flood-inspection note, and
-  a planning-committee review that names three schemes in passing), so ordinary news keeps its
-  editorial headline. Live API guards: social+heading 400, unknown id 404, >120-char heading 400.
-  **E2E**: re-rendering the real भारत टॅक्सी run produced `poster-v2.png` reading exactly
-  `भारत टॅक्सी` and nothing else, chrome and reserved zones intact. Deploy: **0029 → API → web**
-  (rebuild `@dgipr/schemas` + `@dgipr/database` + `@dgipr/content-engine` dists first); no n8n —
-  the fresh path calls `generateImage` directly.
+    `resolve-scheme-subject.ts` → **`resolve-poster-subject.ts`** (`resolvePosterSubject` /
+    `validatePosterSubject` / `PosterSubject`; `schemeLocked` → `textLocked` at every call site).
+    What changed, in order of importance:
+    (1) **The question is broader**: any NAMED subject — scheme, campaign, mission, **award**,
+    **service/model**, **portal**, fund, project (`SUBJECT_KINDS`, reported for the log). The accept
+    rules now name the three failing shapes directly: a statement/announcement/launch/review ABOUT
+    a named thing counts (the thing is the subject, not the meeting); an invitation for
+    applications counts; and where several are named, pick the one the news **acts on** — a change
+    to A that cites older B for background has subject **A**. False stays for a genuine roundup, a
+    passing mention, and generic wording with no proper name.
+    (2) **Grounding is structural, per the repo's usual move**: the model must return an `evidence`
+    sentence copied verbatim from the source, checked (whitespace-normalised) to occur in it and to
+    contain the name. Reported, not fatal — the name check is strictly stronger.
+    (3) **Quotes come off** (`stripEdgePunctuation`): these notes mark official names with ‘…’, and
+    the model returns them attached, which nothing downstream can match. That is also why quoting
+    is now given to the model as a positive SIGNAL.
+    (4) **It reads the NOTE, not only the article** — the officer's expectation is expressed
+    against their own text, and a note→article run can reword. The name is nominated from the note
+    and must be accountable in note ∪ article; on a media-room run they are the same string, so
+    nothing is paid twice.
+    (5) **A lenient false-positive backstop** (`isProminent`), needed because broadening the rule
+    risks putting a passing mention on a poster: reject only when the name occurs exactly ONCE and
+    after the 75% mark of a source longer than 800 chars. Short sources exempt.
+    (6) The `TEXT LOCK` block no longer says "scheme" — telling the model it is looking at a scheme
+    name invites it to correct an award name into scheme-shaped wording.
+    **Plus the escape hatch the operator asked for: `generations.poster_heading` (0029)** — type
+    the exact poster text. On the media room it appears only when the **पोस्टर** output is selected
+    (a social poster's headline lives inside a multi-field copy object with no single line to lock,
+    so the API 400s a social run that sends one); on `PosterPanel` it is a third redo beside the two
+    style ones, which is where it actually gets used — you only learn the heading is wrong once the
+    poster exists. It wins outright and skips the model call entirely. It is a **column, not a job
+    parameter** (the `generateCaption` precedent does not apply): `startPosterRegenerateJob`
+    re-derives everything from the row, so a heading held only in the request would vanish on the
+    first "वेगळ्या रंगात तयार करा". Deliberately NOT `generations.heading`, which is the article's
+    editorial ANGLE and is already surfaced in the edit-and-re-run fold — an angle is not poster
+    text. `insertGeneration` **omits the column unless a heading was typed**, so a database without
+    0029 loses only this feature instead of failing every create (the 0028 principle), and the
+    regenerate job persists it BEFORE rendering so a failed render does not lose the typed text.
+    Verified 2026-07-24: full workspace typecheck green (7/7), lint clean on all 11 touched files,
+    18 offline assertions (quote stripping incl. the ‘भारत टॅक्सी’ and hyphenated-year
+    `पुरस्कार-२०२६` cases, glossary truncation expansion, invented-name refusal, all four prominence
+    cases, name found in the note half); the article prompt harness still green; **live on all three
+    real notes** — `भारत टॅक्सी` (service), `दिव्यांग सशक्तीकरण राष्ट्रीय पुरस्कार-२०२६` (award),
+    `पुण्यश्लोक अहिल्यादेवी होळकर शेतकरी कर्जमुक्ती योजना` (scheme), each `model+verbatim` with its
+    evidence matched — and **two negative controls returning `null`** (a flood-inspection note, and
+    a planning-committee review that names three schemes in passing), so ordinary news keeps its
+    editorial headline. Live API guards: social+heading 400, unknown id 404, >120-char heading 400.
+    **E2E**: re-rendering the real भारत टॅक्सी run produced `poster-v2.png` reading exactly
+    `भारत टॅक्सी` and nothing else, chrome and reserved zones intact. Deploy: **0029 → API → web**
+    (rebuild `@dgipr/schemas` + `@dgipr/database` + `@dgipr/content-engine` dists first); no n8n —
+    the fresh path calls `generateImage` directly.
 
 - **/dlo reads its documents at the INPUT step, and takes `.txt`** (2026-07-25, no
   migration): every other upload surface probes a file the moment it is attached — the media
@@ -1459,7 +1478,7 @@ it are implemented and working end-to-end:
   `मुख्यमंत्री → Chief Minister` among the known titles. **Left for a real run** (needs the
   migrations applied + OpenAI spend): the end-to-end /dlo check that the first mention publishes
   as `मुख्यमंत्री देवेंद्र फडणवीस`, survives the coverage and faithfulness passes, survives an
-  article-feedback revision, and translates to *Chief Minister Devendra Fadnavis* / Hindi with
+  article-feedback revision, and translates to _Chief Minister Devendra Fadnavis_ / Hindi with
   no code change. **Deploy: 0032 + 0033 → API → web** (rebuild `@dgipr/schemas`,
   `@dgipr/database`, `@dgipr/content-engine` dists first). No n8n.
 
@@ -1502,7 +1521,7 @@ it are implemented and working end-to-end:
   - **GET, so the web side is a plain `<a href>`** with no JavaScript. `content-disposition`
     is the only way to force a cross-origin download (the reason already documented on
     `poster.png`), and because the route is a real navigation its error bodies are what the
-    officer *sees* — hence Marathi, unlike the fetch-backed routes.
+    officer _sees_ — hence Marathi, unlike the fetch-backed routes.
   - **`A4_MARGIN` is one constant with three consumers** (`page.pdf()`, the template's
     `@page` block, the harness's `--png` padding), so a browser Ctrl+P preview cannot drift
     from the printed output.
@@ -1510,26 +1529,26 @@ it are implemented and working end-to-end:
     otherwise be dated the previous day; proven on a real row created 20:39 UTC that
     correctly prints २५ जुलै) and Hindi pins `hi-IN-u-nu-deva`, because `hi-IN` alone
     resolves Latin digits beside a body Sarvam translated with `numerals_format: native`.
-  Free harness `pdf:preview` (built-in Marathi sample, `--html`, `--png`) — build the layout
-  there before touching the route; it costs nothing.
-  Verified 2026-07-25: typecheck green 7/7, lint clean on every touched file. Offline — all
-  hard conjuncts shape correctly (कर्जमुक्ती ऱ्या महाराष्ट्र विद्यार्थ्यांच्या ज्ञानज्योती हृदयरोग श्री),
-  Devanagari digits in the date line, the double rule renders, a 4-page article puts the
-  letterhead on page 1 and starts pages 2-4 straight into the body, English renders with no
-  tofu (the embedded font carries 551 codepoints incl. all of Basic Latin), and a text layer
-  is present on every page at ~350 KB — vector, not raster. Live API — 200 with correct
-  `content-type`/`content-disposition`/`no-store` on a real completed run in both मराठी and
-  English, plus every guard: bad lang 400, unknown id 404, twitter 400, **facebook 400**
-  (proving `isSocialCategory()` rather than `=== 'twitter'`), untranslated Hindi 404.
-  **The one genuinely new operational fact: the API image now ships Chromium**
-  (`deploy/api.Dockerfile`, which deliberately excluded it) — ~400-500 MB larger, ~200-300 MB
-  peak RSS per export; check the box's memory headroom, it also runs n8n. If that layer is
-  ever missing the route returns a Marathi 503 rather than crashing, and no env flag gates it
-  (a declaration can disagree with reality; the catch cannot — the "params are LEARNED, not
-  declared" reasoning). **Expected, not a defect:** Chromium writes Marathi into the text
-  layer in visual order, so `probePdf` may call an exported article `garbled`; appearance and
-  print are unaffected. No migration, no n8n; deploy is API + web (rebuild
-  `@dgipr/poster-renderer` dist first).
+    Free harness `pdf:preview` (built-in Marathi sample, `--html`, `--png`) — build the layout
+    there before touching the route; it costs nothing.
+    Verified 2026-07-25: typecheck green 7/7, lint clean on every touched file. Offline — all
+    hard conjuncts shape correctly (कर्जमुक्ती ऱ्या महाराष्ट्र विद्यार्थ्यांच्या ज्ञानज्योती हृदयरोग श्री),
+    Devanagari digits in the date line, the double rule renders, a 4-page article puts the
+    letterhead on page 1 and starts pages 2-4 straight into the body, English renders with no
+    tofu (the embedded font carries 551 codepoints incl. all of Basic Latin), and a text layer
+    is present on every page at ~350 KB — vector, not raster. Live API — 200 with correct
+    `content-type`/`content-disposition`/`no-store` on a real completed run in both मराठी and
+    English, plus every guard: bad lang 400, unknown id 404, twitter 400, **facebook 400**
+    (proving `isSocialCategory()` rather than `=== 'twitter'`), untranslated Hindi 404.
+    **The one genuinely new operational fact: the API image now ships Chromium**
+    (`deploy/api.Dockerfile`, which deliberately excluded it) — ~400-500 MB larger, ~200-300 MB
+    peak RSS per export; check the box's memory headroom, it also runs n8n. If that layer is
+    ever missing the route returns a Marathi 503 rather than crashing, and no env flag gates it
+    (a declaration can disagree with reality; the catch cannot — the "params are LEARNED, not
+    declared" reasoning). **Expected, not a defect:** Chromium writes Marathi into the text
+    layer in visual order, so `probePdf` may call an exported article `garbled`; appearance and
+    print are unaffected. No migration, no n8n; deploy is API + web (rebuild
+    `@dgipr/poster-renderer` dist first).
 
 - **DLO approved facts become the article contract, with attributed statements**
   (2026-07-25, migration 0034): the Pointers call now returns both its existing 5W1H
@@ -1599,7 +1618,7 @@ it are implemented and working end-to-end:
   rows.
   (5) **The Kling seam** (`packages/content-engine/src/video/clip-provider.ts`): the
   runner now calls a neutral `renderClip({prompt, startFramePng, endFramePng?, aspectRatio,
-  durationSeconds, tier, negativePrompt?})` dispatched on `VIDEO_CLIP_PROVIDER` (default
+durationSeconds, tier, negativePrompt?})` dispatched on `VIDEO_CLIP_PROVIDER` (default
   `veo`). Kling's image-to-video API takes the same inputs (start image + `image_tail`),
   so adding it is one adapter branch + one env line with no runner change. Deliberately
   thin — no capability tables; per-provider quirks live inside each client, learned from
@@ -1623,8 +1642,8 @@ it are implemented and working end-to-end:
 - **Silent Veo, Nano Banana frames, and a narration budget that matches the voice**
   (2026-07-26, no migration — SUPERSEDES the frame-generation and narration-budget halves
   of the 2026-07-26 interpolation milestone above): a real run died at scene 3 with
-  *"Veo blocked this render: We encountered an issue with the **audio** for your prompt …
-  safety filters"*. Four independent problems, of which the reported error was the smallest.
+  _"Veo blocked this render: We encountered an issue with the **audio** for your prompt …
+  safety filters"_. Four independent problems, of which the reported error was the smallest.
   (1) **Veo was generating audio we throw away.** Veo 3.x synthesizes native audio unless
   told otherwise, and `startVeoOperation` never sent `generateAudio: false` — while
   `assembleSilentVideo` strips the track (`-an`) and `muxNarration` lays the Sarvam Marathi
@@ -1736,8 +1755,8 @@ public-information poster'`, `'authentic skin, fabric and material textures'` in
     unprinted blank sheets; screens are switched off) and is emitted as its own final
     block rather than tacked onto a paragraph, last position being what these models weight
     most. Re-rendered live: the door plate came back blank, the clipboard blank, the
-    handed-over receipt a blank ruled form. The end-frame prompt additionally says *remove
-    any writing already visible* — an edit prompt silent about text faithfully preserves
+    handed-over receipt a blank ruled form. The end-frame prompt additionally says _remove
+    any writing already visible_ — an edit prompt silent about text faithfully preserves
     whatever the generator slipped in. The planner is now told never to plan a shot whose
     SUBJECT is writing ("push-in toward the sign", "pan across the displayed charges" —
     both real outputs), and never a **montage** (a scene is one interpolated shot; a cut is
@@ -1769,27 +1788,27 @@ public-information poster'`, `'authentic skin, fabric and material textures'` in
     overlay), never fails the run — `shorten-narration.ts`'s rule that a best-effort step
     must not become a gate. Timings come from `sceneTimings`, the same function the SRT is
     built from, so caption, cue and footage cannot disagree.
-  Plus the escape hatch: **`style` is editable at gate 1** (`UpdateVideoScriptRequestSchema`
-  gained it; no migration, `video_projects.style` is an existing column). It was previously
-  written once by the LLM and neither shown nor editable, so a wrong setting could only be
-  escaped by regenerating the whole script. Changing it **skips the keep-frames branch and
-  sends every scene back to `pending`** — it is an input to every frame prompt, and the
-  route also accepts `storyboard_ready`, where frames exist. `keyPoint` is deliberately NOT
-  in that staleness test: it is burned on at stitch time and no frame is rendered from it,
-  so editing one must never discard a paid frame.
-  Verified 2026-07-26: typecheck 7/7 green, lint clean on every touched file; 22 offline
-  prompt assertions (`tsx src/video/video-prompts.ts` — setting/no-writing/no-talking/style
-  present in all three prompts, the reference clause present ONLY with a reference) and 9
-  key-point guard assertions (`tsx src/video/generate-video-script.ts --check`); the free
-  caption harness (`video:preview:captions`) rendering `कर्जमुक्ती`/`रुग्णालयांत` with correct
-  conjuncts and burning them onto light/dark/light stub clips in their own windows; a live
-  script run on a real MRI note whose `style` named Maharashtra, whose every
-  `end_visual_brief` advanced the ACTION rather than the camera, and whose four key points
-  were all note-grounded; and three live Nano Banana frames before and after the no-text
-  rewrite. **Left for a real run** (Veo spend): the burned-in caption on genuinely animated
-  footage. New harness: `pnpm --filter @dgipr/poster-renderer video:preview:captions`.
-  No migration, no n8n; deploy is API + web after rebuilding `@dgipr/schemas` →
-  `@dgipr/database` → `@dgipr/poster-renderer` → `@dgipr/content-engine` dists.
+    Plus the escape hatch: **`style` is editable at gate 1** (`UpdateVideoScriptRequestSchema`
+    gained it; no migration, `video_projects.style` is an existing column). It was previously
+    written once by the LLM and neither shown nor editable, so a wrong setting could only be
+    escaped by regenerating the whole script. Changing it **skips the keep-frames branch and
+    sends every scene back to `pending`** — it is an input to every frame prompt, and the
+    route also accepts `storyboard_ready`, where frames exist. `keyPoint` is deliberately NOT
+    in that staleness test: it is burned on at stitch time and no frame is rendered from it,
+    so editing one must never discard a paid frame.
+    Verified 2026-07-26: typecheck 7/7 green, lint clean on every touched file; 22 offline
+    prompt assertions (`tsx src/video/video-prompts.ts` — setting/no-writing/no-talking/style
+    present in all three prompts, the reference clause present ONLY with a reference) and 9
+    key-point guard assertions (`tsx src/video/generate-video-script.ts --check`); the free
+    caption harness (`video:preview:captions`) rendering `कर्जमुक्ती`/`रुग्णालयांत` with correct
+    conjuncts and burning them onto light/dark/light stub clips in their own windows; a live
+    script run on a real MRI note whose `style` named Maharashtra, whose every
+    `end_visual_brief` advanced the ACTION rather than the camera, and whose four key points
+    were all note-grounded; and three live Nano Banana frames before and after the no-text
+    rewrite. **Left for a real run** (Veo spend): the burned-in caption on genuinely animated
+    footage. New harness: `pnpm --filter @dgipr/poster-renderer video:preview:captions`.
+    No migration, no n8n; deploy is API + web after rebuilding `@dgipr/schemas` →
+    `@dgipr/database` → `@dgipr/poster-renderer` → `@dgipr/content-engine` dists.
 
 - **Continuous video narration across visual cuts** (2026-07-30, no migration): the
   scene-by-scene script/TTS shape made every cut sound like a fresh paragraph: even though
@@ -1896,7 +1915,7 @@ public-information poster'`, `'authentic skin, fabric and material textures'` in
   pixels in the lower third with the old filter, 14.7% after. The fix is a `scale2ref` pair per
   overlay (`[ov][stage]scale2ref` then `overlay=0:0`), whose default `w=iw:h=ih` resolves
   against the REFERENCE input — so no footage size is written down anywhere and it is provably
-  a no-op at 1080p. `caption-overlay.ts`'s 1080p is now documented as a *reference* size, which
+  a no-op at 1080p. `caption-overlay.ts`'s 1080p is now documented as a _reference_ size, which
   is also the right direction (typeset high, scale down; the reverse softens conjuncts). The
   harness gained `--720p` and, more importantly, an **assertion** — it extracts a frame and
   measures dark pixels in the lower third — because "go and look at the MP4" is exactly the
@@ -1981,8 +2000,8 @@ public-information poster'`, `'authentic skin, fabric and material textures'` in
   label and the explanation in a hover/tap popover, and a default-on
   **हायलाइट बंद करा** toggle that returns the text to plain prose.
   The interesting half is not the UI. **No positional data existed anywhere** — the engine
-  patched and discarded every offset — and the patch is a *cumulative, longest-first,
-  global* `split/join`, which defeats the obvious client-side approach in three separate
+  patched and discarded every offset — and the patch is a _cumulative, longest-first,
+  global_ `split/join`, which defeats the obvious client-side approach in three separate
   ways: replacement is global (one issue can own several runs of the output), fixes apply
   against the accumulating string (a later short fix can hit text an earlier fix INSERTED,
   and can match ACROSS an insertion boundary), and a swallowed fix is skipped while still
@@ -2005,7 +2024,7 @@ public-information poster'`, `'authentic skin, fabric and material textures'` in
   pointing at the wrong words. Copy and .txt download were deliberately left reading
   `result.correctedText` directly.
   Visual rules, inherited verbatim from the `.issue-*` block the new CSS sits under
-  (*"Background tints only — no strikethrough, Devanagari stays legible"*): one
+  (_"Background tints only — no strikethrough, Devanagari stays legible"_): one
   `--ok-soft` tint + **solid** underline for corrections (no per-type colours — four tints
   in running Devanagari is unreadable, and the palette's fourth semantic tint is the red
   that already means "wrong"), `--warn-soft` + **dotted** for advisories. Solid-vs-dotted
@@ -2029,7 +2048,7 @@ public-information poster'`, `'authentic skin, fabric and material textures'` in
   and the /video text calls on gpt-5.6-sol** (2026-07-26, no migration — SUPERSEDES the
   fixed-8s window and the photoreal look in every video milestone above): the pipeline had
   the relationship backwards. Every scene was a fixed 8s clip and the Marathi voiceover was
-  measured and *shortened* until it fit 7.6s of it — the speech served the footage. The
+  measured and _shortened_ until it fit 7.6s of it — the speech served the footage. The
   officer's actual goal is the inverse: the narration should explain the article as well as
   possible within a chosen total length, and the footage should serve the narration. The 8s
   pin was never a product decision either; it was **Veo's** constraint (its first+last-frame
@@ -2103,23 +2122,23 @@ public-information poster'`, `'authentic skin, fabric and material textures'` in
     gate-1 narration hint names the clip the officer's edit will buy (`→ क्लिप ~Y से.`); and
     a new running-total line under the submit warns past ×1.15 but **never blocks** — a
     character estimate must not veto a script the real voice might well fit.
-  Also fixed in passing: the clip-provider harness asserted `unset defaults to veo`, which
-  had been wrong since the Kling swap.
-  Verified 2026-07-26, all free: dists rebuilt in order, **workspace typecheck 7/7 green**,
-  **lint clean on all 16 touched files**; 45 prompt assertions (the existing set plus
-  per-prompt "demands the animated-film look" / "rules out live-action" and three negative-list
-  checks); 11 clip-provider assertions including the veo duration guard rejecting 5s free of
-  charge and naming Kling as the fix; kling-client's 12 pre-flight checks and the key-point
-  digit guard's 9, both unchanged and still green; and the mux harness reworked to
-  **UNEQUAL windows (5s + 12s)** — two equal windows would have hidden a mux that assumed
-  one size for the whole video — producing a probe-verified **17.00s** MP4 with an AAC track,
-  exercising atempo (6s into 5s) and apad (9s into 12s) in one run. **Left for a real run**
-  (spend): a full 30s project end-to-end, confirming gate-2 per-scene `क्लिप X से.` equals
-  `ceil(narrationSeconds)`, the estimate lands near $3, the SRT cues match the variable
-  clips, and no atempo warning appears in the API log. New env (optional):
-  `OPENAI_VIDEO_MODEL`. Rollback for the model is env-only; the style and the audio-led flow
-  are code. No migration, no n8n; deploy is API + web after rebuilding `@dgipr/schemas` →
-  `@dgipr/database` → `@dgipr/poster-renderer` → `@dgipr/content-engine` dists.
+    Also fixed in passing: the clip-provider harness asserted `unset defaults to veo`, which
+    had been wrong since the Kling swap.
+    Verified 2026-07-26, all free: dists rebuilt in order, **workspace typecheck 7/7 green**,
+    **lint clean on all 16 touched files**; 45 prompt assertions (the existing set plus
+    per-prompt "demands the animated-film look" / "rules out live-action" and three negative-list
+    checks); 11 clip-provider assertions including the veo duration guard rejecting 5s free of
+    charge and naming Kling as the fix; kling-client's 12 pre-flight checks and the key-point
+    digit guard's 9, both unchanged and still green; and the mux harness reworked to
+    **UNEQUAL windows (5s + 12s)** — two equal windows would have hidden a mux that assumed
+    one size for the whole video — producing a probe-verified **17.00s** MP4 with an AAC track,
+    exercising atempo (6s into 5s) and apad (9s into 12s) in one run. **Left for a real run**
+    (spend): a full 30s project end-to-end, confirming gate-2 per-scene `क्लिप X से.` equals
+    `ceil(narrationSeconds)`, the estimate lands near $3, the SRT cues match the variable
+    clips, and no atempo warning appears in the API log. New env (optional):
+    `OPENAI_VIDEO_MODEL`. Rollback for the model is env-only; the style and the audio-led flow
+    are code. No migration, no n8n; deploy is API + web after rebuilding `@dgipr/schemas` →
+    `@dgipr/database` → `@dgipr/poster-renderer` → `@dgipr/content-engine` dists.
 
 - **Realistic video look restored** (2026-07-26, no migration): this supersedes only the
   **stylized-3D visual-style half** of the audio-led milestone above. Variable clip lengths,
@@ -2137,8 +2156,8 @@ public-information poster'`, `'authentic skin, fabric and material textures'` in
 - **Creative and Social: a two-level output picker and a caption-only lane**
   (2026-07-26, no migration): the media room offered one flat row of three cards
   (पोस्टर / ट्विटर पोस्ट / फेसबुक पोस्ट) plus a "कॅप्शनही तयार करा" checkbox that appeared
-  only on the two social ones. That conflated two independent questions — *what artifact
-  am I making* and *what platform is it for* — and it had no way at all to ask for the
+  only on the two social ones. That conflated two independent questions — _what artifact
+  am I making_ and _what platform is it for_ — and it had no way at all to ask for the
   thing officers actually wanted often enough to name it: **a caption with no poster.**
   The sidebar label becomes **Creative and Social**, the one English entry in a
   Marathi-first nav (by request; `navNew` is still the only source of that string, so
@@ -2176,7 +2195,7 @@ public-information poster'`, `'authentic skin, fabric and material textures'` in
     `outputType` forty lines away. The pin-reset `useEffect` needed no change (`category` is
     still a string primitive compared with `Object.is`), and `captionOnly` is deliberately
     NOT in its deps: a पोस्टर→ट्विटर pin should survive a look at the कॅप्शन branch, and the
-    pin is instead simply not *sent* on a caption-only run.
+    pin is instead simply not _sent_ on a caption-only run.
   - **Busy gating across two levels:** the level-1 पोस्टर card is never `disabled` — its
     children straddle both lanes, so a single flag would be a lie whenever one lane is free.
     कॅप्शन takes `hasActiveSocialTask` (both its children are social) and the existing
@@ -2186,13 +2205,13 @@ public-information poster'`, `'authentic skin, fabric and material textures'` in
     one-social-task-at-a-time gate is kept as-is even though a caption-only run touches no
     n8n — carving out an exception would change that rule in both directions for a ~15s job.
   - **Three things that assumed a completed social run has a poster**, all found by walking
-    the readers rather than by running it: `TasksMenu` would have parked a *completed*
+    the readers rather than by running it: `TasksMenu` would have parked a _completed_
     caption-only run behind its grey `task-thumb--pending` placeholder forever (now gated on
     `outputType !== 'article'`); `SocialPostView` headed the card "तयार झालेले पोस्टर" (now
     falls back to कॅप्शन); and `STEP_LABELS.caption` said "ट्विटर कॅप्शन…" — always wrong for
     facebook, but on a caption-only run it is the ONLY progress line the officer ever sees.
     Everything else degrades correctly untouched: the poster frame, `canPublish`, the
-    history card, `ProgressSteps` (unreachable for social), a *failed* caption-only run.
+    history card, `ProgressSteps` (unreachable for social), a _failed_ caption-only run.
   - **Guards.** The create route's pin check keyed off `!isSocialCategory && outputType ===
 'article'`; the category test is now noise and it had a hole, so it becomes one
     `rendersPoster` flag covering both `referenceImageId` and `referenceTypeId`. One
@@ -2208,16 +2227,16 @@ public-information poster'`, `'authentic skin, fabric and material textures'` in
     idiom for the same subordinate-block relationship and `.segmented`'s denser padding; the
     sub-cards drop the icon, which is what gives the two rows their hierarchy for free (the
     `/video` pickers' precedent) and is why `Bird`/`ThumbsUp` left the import.
-  Verified 2026-07-26, all free: workspace typecheck **7/7 green**; lint clean on every
-  touched file (the only failures are the pre-existing untracked
-  `content-engine/src/intake/text-file.ts` irregular-whitespace error and two
-  poster-template warnings); prettier clean on all eight touched files, with the two API
-  files confirmed **already** unformatted at HEAD and every remaining complaint outside my
-  hunks. **Left for a real run** (one cheap chat call, no image spend): the कॅप्शन → ट्विटर
-  E2E asserting `output_type='article'` / `poster_path` null / caption present, no poster
-  frame or publish button on the detail page, the tasks panel showing no pending thumb, and
-  a retry staying caption-only. **No migration, no n8n**; deploy is `@dgipr/schemas` dist →
-  API → web.
+    Verified 2026-07-26, all free: workspace typecheck **7/7 green**; lint clean on every
+    touched file (the only failures are the pre-existing untracked
+    `content-engine/src/intake/text-file.ts` irregular-whitespace error and two
+    poster-template warnings); prettier clean on all eight touched files, with the two API
+    files confirmed **already** unformatted at HEAD and every remaining complaint outside my
+    hunks. **Left for a real run** (one cheap chat call, no image spend): the कॅप्शन → ट्विटर
+    E2E asserting `output_type='article'` / `poster_path` null / caption present, no poster
+    frame or publish button on the detail page, the tasks panel showing no pending thumb, and
+    a retry staying caption-only. **No migration, no n8n**; deploy is `@dgipr/schemas` dist →
+    API → web.
 
 - **A simplified single-call article baseline, on gpt-5.6-sol** (2026-07-27, migration 0035):
   the article pipeline had grown to as many as **14 + N** sequential `gpt-5.6-terra` calls — 5W1H
@@ -2287,7 +2306,7 @@ public-information poster'`, `'authentic skin, fabric and material textures'` in
     pointers — `[id]/page.tsx:168` gates that card on truthiness, so an all-empty object would
     render six "टिपणीत नाही" placeholder rows.
   - **One consistency fix found by walking the readers:** `reviseArticle` rebuilt the appendix for
-    every scheme run, so a simple-mode article would have *sprouted* a तथ्य-तपासणी fold — and
+    every scheme run, so a simple-mode article would have _sprouted_ a तथ्य-तपासणी fold — and
     bought an extra model pass — on its first feedback round. It gained a `withFactCheck`
     parameter (default `true`, so full mode is byte-for-byte unchanged) fed by `rowHasFactCheck(row)`,
     which keys off the STORED article rather than the current mode so a row keeps behaving like
@@ -2296,31 +2315,31 @@ public-information poster'`, `'authentic skin, fabric and material textures'` in
     separate, separately-verifiable change.
   - **Evaluation is built in**: `article:compare` runs BOTH pipelines on one note and prints
     wall-clock, chat calls, measured cost, length, and `findUnsupportedClaims` run as a
-    **read-only judge** over each output. Simple mode removes the faithfulness *repair*, so that
+    **read-only judge** over each output. Simple mode removes the faithfulness _repair_, so that
     count is the evidence the removal is safe; the harness warns explicitly when simple mode's
     count is worse, and the fix is then the specification rather than restoring the loop.
-  Verified 2026-07-27, all free: workspace typecheck **7/7 green**; lint clean on all 14 touched
-  files; 50 prompt assertions (`tsx src/generation/simple-article-prompt.ts` — every rule block
-  present, no `{{` survives in any slot combination, the dateline degrades correctly with either
-  half missing, per-category targets and ranges, empty optionals omitted, officer-approved blocks
-  and their task rules reaching the prompt, and a style reference alone never opening ADDITIONAL
-  VERIFIED INFORMATION) and 22 resolver assertions (`tsx src/generation/select-style-reference.ts`
-  — tier order, fragment fall-through, the floor accepting/rejecting/boundary, telemetry carried
-  through, the 3000-char article NOT truncated to 1500, and every env-parse fallback).
-  **Left for a real run** (spend): the `article:compare` sweep over ~6 real notes incl. a long DLO
-  transcript and a thin note, the `retrieve:test` calibration of the similarity floor, and a /dlo
-  E2E (article renders, PDF exports, en+hi translate, poster attaches, one feedback round adds no
-  appendix, `style_reference_meta` populated). **Deploy: 0035 → API → web**, rebuilding
-  `@dgipr/schemas` → `@dgipr/database` → `@dgipr/content-engine` dists first. No n8n. New env, all
-  optional: `ARTICLE_GENERATION_MODE`, `OPENAI_ARTICLE_MODEL`,
-  `OPENAI_ARTICLE_REASONING_EFFORT`, `ARTICLE_STYLE_REFERENCE_MIN_SIMILARITY`.
-  **Designed for, not built:** the future approved-example loop. `selectStyleReference()` is the
-  single seam — a "similar approved source → officer-final article" tier slots in above
-  retrieval, matched on the SOURCE embedding (`embedTexts` 1024-dim and the `halfvec(1024)` match
-  RPC already exist). `style_reference_meta` is its join key. The named gap: there is still **no
-  manual article-edit path and no approval state**, so "final approved article", "manual edits"
-  and "approval/publication status" have nowhere to live — that is the next migration when the
-  loop starts, and it is additive to this design rather than a replacement for it.
+    Verified 2026-07-27, all free: workspace typecheck **7/7 green**; lint clean on all 14 touched
+    files; 50 prompt assertions (`tsx src/generation/simple-article-prompt.ts` — every rule block
+    present, no `{{` survives in any slot combination, the dateline degrades correctly with either
+    half missing, per-category targets and ranges, empty optionals omitted, officer-approved blocks
+    and their task rules reaching the prompt, and a style reference alone never opening ADDITIONAL
+    VERIFIED INFORMATION) and 22 resolver assertions (`tsx src/generation/select-style-reference.ts`
+    — tier order, fragment fall-through, the floor accepting/rejecting/boundary, telemetry carried
+    through, the 3000-char article NOT truncated to 1500, and every env-parse fallback).
+    **Left for a real run** (spend): the `article:compare` sweep over ~6 real notes incl. a long DLO
+    transcript and a thin note, the `retrieve:test` calibration of the similarity floor, and a /dlo
+    E2E (article renders, PDF exports, en+hi translate, poster attaches, one feedback round adds no
+    appendix, `style_reference_meta` populated). **Deploy: 0035 → API → web**, rebuilding
+    `@dgipr/schemas` → `@dgipr/database` → `@dgipr/content-engine` dists first. No n8n. New env, all
+    optional: `ARTICLE_GENERATION_MODE`, `OPENAI_ARTICLE_MODEL`,
+    `OPENAI_ARTICLE_REASONING_EFFORT`, `ARTICLE_STYLE_REFERENCE_MIN_SIMILARITY`.
+    **Designed for, not built:** the future approved-example loop. `selectStyleReference()` is the
+    single seam — a "similar approved source → officer-final article" tier slots in above
+    retrieval, matched on the SOURCE embedding (`embedTexts` 1024-dim and the `halfvec(1024)` match
+    RPC already exist). `style_reference_meta` is its join key. The named gap: there is still **no
+    manual article-edit path and no approval state**, so "final approved article", "manual edits"
+    and "approval/publication status" have nowhere to live — that is the next migration when the
+    loop starts, and it is additive to this design rather than a replacement for it.
 
 - **Pointers simplified to one flat Marathi key-point list, on gpt-5.6-sol** (2026-07-27, no
   migration): `/dlo`'s Pointers step classified the reviewed note into six 5W1H groups
@@ -2388,28 +2407,28 @@ public-information poster'`, `'authentic skin, fabric and material textures'` in
     rendering it (`full` mode still populates it via `extractFiveWOneH`, so the card is
     mode-dependent). And with no inventory, `preferAttribution` flips false and
     `simple-article-prompt.ts`'s `### ADDITIONAL VERIFIED INFORMATION` / `### EXCLUDED BY THE
-    OFFICER` blocks can vanish entirely — the note is the source again. Latent: an
+OFFICER` blocks can vanish entirely — the note is the source again. Latent: an
     `ARTICLE_GENERATION_MODE=full` DLO article gains +4 to +6 chat calls (restored
     `extractFiveWOneH`, restored brief tier-audit, coverage back to the 3-way check); nothing
     errors, since every restored path is the pre-0034 default that non-DLO runs exercise today.
   - `apps/web/components/PointerSelector.tsx` → **`PointerList.tsx`** (`git mv`, so blame
     follows): the repo names components after what they render, and a "Selector" that selects
     nothing is an actively false name.
-  Verified 2026-07-27, all free: `@dgipr/schemas` dist rebuilt, then **typecheck green on
-  schemas, database, social-publisher, poster-renderer, content-engine and api**, with `apps/web`
-  failing ONLY on the pre-existing untracked `components/GenerationUsedNames.tsx` (it references
-  six `usedNames*` strings that have never existed in `strings.ts`, at HEAD or now — unrelated
-  in-progress work, deliberately not "fixed" here); zero pointer-related errors anywhere. Lint
-  and prettier clean on every touched file. **Left for a real run** (one paid sol call): the
-  engine harness on a genuine 20-page multi-article Marathi PDF, checking that every distinct
-  article is represented **including the last**, that nothing repeats, that names/dates/amounts
-  survive verbatim, and that the cost meter logs `gpt-5.6-sol` rather than terra (the proof the
-  explicit `model` argument reached `chatComplete`); plus the `/dlo` browser pass and one article
-  feedback round on a legacy row to prove `findMissingApprovedFacts` still fires. **No migration,
-  no n8n**; deploy is `@dgipr/schemas` dist → API → web, and API and web must ship **together** —
-  the response shape is a shared contract parsed by `apps/web/lib/api.ts` with the same schema the
-  engine produces, so a half-deploy makes the card error on every review. New env (optional):
-  `OPENAI_POINTERS_MODEL`.
+    Verified 2026-07-27, all free: `@dgipr/schemas` dist rebuilt, then **typecheck green on
+    schemas, database, social-publisher, poster-renderer, content-engine and api**, with `apps/web`
+    failing ONLY on the pre-existing untracked `components/GenerationUsedNames.tsx` (it references
+    six `usedNames*` strings that have never existed in `strings.ts`, at HEAD or now — unrelated
+    in-progress work, deliberately not "fixed" here); zero pointer-related errors anywhere. Lint
+    and prettier clean on every touched file. **Left for a real run** (one paid sol call): the
+    engine harness on a genuine 20-page multi-article Marathi PDF, checking that every distinct
+    article is represented **including the last**, that nothing repeats, that names/dates/amounts
+    survive verbatim, and that the cost meter logs `gpt-5.6-sol` rather than terra (the proof the
+    explicit `model` argument reached `chatComplete`); plus the `/dlo` browser pass and one article
+    feedback round on a legacy row to prove `findMissingApprovedFacts` still fires. **No migration,
+    no n8n**; deploy is `@dgipr/schemas` dist → API → web, and API and web must ship **together** —
+    the response shape is a shared contract parsed by `apps/web/lib/api.ts` with the same schema the
+    engine produces, so a half-deploy makes the card error on every review. New env (optional):
+    `OPENAI_POINTERS_MODEL`.
 
 - **Concurrent /dlo work: a list of intakes, each at its own URL, resumable for free**
   (2026-07-27, migration 0036): `/dlo` behaved as if the platform could hold exactly ONE piece of
@@ -2460,7 +2479,7 @@ public-information poster'`, `'authentic skin, fabric and material textures'` in
     never detect anything (this was a real bug caught in review). Optimistic concurrency on the
     row's `updated_at` was rejected: the intake job stamps that column too, so an OCR re-read would
     spuriously reject the officer's own save.
-  - **Navigation** (§1.4 of the plan, and the half that decides whether this *feels* concurrent):
+  - **Navigation** (§1.4 of the plan, and the half that decides whether this _feels_ concurrent):
     `/dlo` renders a conditional **सुरू असलेले काम** resume card → the new-intake form → the list
     split into **तुमचे काम** / **इतर कामे**. Deliberately **no auto-redirect** — an officer whose
     first intake is transcribing very often came back to start a SECOND one. The workspace header
@@ -2506,25 +2525,25 @@ public-information poster'`, `'authentic skin, fabric and material textures'` in
     Expect `[openai] … got 429` warnings to become ROUTINE at 5 — the mechanism working, but it does
     mean the log stops being a useful signal. Worse throughput after deploying = overshot the tier,
     drop to 3. On tier 1 raising it makes things worse.
-  Verified 2026-07-27, all free: workspace typecheck **7/7 green**, lint clean on every touched file
-  (prettier's complaints on the four pre-existing files were confirmed **already failing at HEAD**);
-  23 offline assertions (`tsx src/intake/dlo-review-state.ts` — deterministic serialization, the
-  restored overlay reproducing a **byte-identical** assembled note including its `=== स्रोत: … ===`
-  headers, empty/unknown-key tolerance, wrong-`v`/junk/null rejection); and a **live API run against
-  a database WITHOUT 0036 applied**, which is this repo's own blast-radius standard: the list
-  returns correct titles/counts/lineage and provably no text, the detail returns
-  `reviewState: null` + `generations`, **create still reaches `ready` and lists**, and the PATCH is
-  the ONLY thing that fails. Guards: unknown id 404, wrong `v` 400, oversized blob 400.
-  **`DLO_REVIEW_STATE_MAX_CHARS` was lowered 400k → 300k as a result of that run**: Devanagari is 3
-  bytes/char and `apps/api` caps bodies at 1 MiB, so a 400k cap was *unreachable* for Marathi — the
-  body limit fired first and the officer would have got an opaque English 413 instead of the Marathi
-  message. Confirmed both ways live (410k Devanagari → 413; 410k ASCII → the intended 400) and now
-  pinned by a harness assertion.
-  **Left for a real run**: applying 0036, then the resume E2E proving **zero** new `/api/pointers`
-  and `/api/designations/prepare` requests after a reload (the claim that cannot be shown offline),
-  the two-officer conflict banner, an OCR re-read against a restored blob, and the
-  `OPENAI_MAX_CONCURRENCY=1 vs 5` wall-clock measurement against the real org's tier.
-  **Deploy: 0036 → API → web** (rebuild `@dgipr/schemas` → `@dgipr/database` dists first). No n8n.
+    Verified 2026-07-27, all free: workspace typecheck **7/7 green**, lint clean on every touched file
+    (prettier's complaints on the four pre-existing files were confirmed **already failing at HEAD**);
+    23 offline assertions (`tsx src/intake/dlo-review-state.ts` — deterministic serialization, the
+    restored overlay reproducing a **byte-identical** assembled note including its `=== स्रोत: … ===`
+    headers, empty/unknown-key tolerance, wrong-`v`/junk/null rejection); and a **live API run against
+    a database WITHOUT 0036 applied**, which is this repo's own blast-radius standard: the list
+    returns correct titles/counts/lineage and provably no text, the detail returns
+    `reviewState: null` + `generations`, **create still reaches `ready` and lists**, and the PATCH is
+    the ONLY thing that fails. Guards: unknown id 404, wrong `v` 400, oversized blob 400.
+    **`DLO_REVIEW_STATE_MAX_CHARS` was lowered 400k → 300k as a result of that run**: Devanagari is 3
+  bytes/char and `apps/api` caps bodies at 1 MiB, so a 400k cap was _unreachable_ for Marathi — the
+    body limit fired first and the officer would have got an opaque English 413 instead of the Marathi
+    message. Confirmed both ways live (410k Devanagari → 413; 410k ASCII → the intended 400) and now
+    pinned by a harness assertion.
+    **Left for a real run**: applying 0036, then the resume E2E proving **zero** new `/api/pointers`
+    and `/api/designations/prepare` requests after a reload (the claim that cannot be shown offline),
+    the two-officer conflict banner, an OCR re-read against a restored blob, and the
+    `OPENAI_MAX_CONCURRENCY=1 vs 5` wall-clock measurement against the real org's tier.
+    **Deploy: 0036 → API → web** (rebuild `@dgipr/schemas` → `@dgipr/database` dists first). No n8n.
 
 - **The article stopped out-instructing its own style example** (2026-07-27, no migration): DLOs
   reported that platform articles read like reshuffled minutes, and that pasting the same note into
@@ -2534,7 +2553,7 @@ public-information poster'`, `'authentic skin, fabric and material textures'` in
   same model family. Five causes, four of them ours:
   (1) **The exemplar's HEADLINE was never sent.** `retrieveReferenceArticle` returned
   `chunks.map(c => c.text).join('\n\n')` — bodies only — while the specification told the model to
-  study *"how it presents the main news in the headline"*. The retrieved article's title was
+  study _"how it presents the main news in the headline"_. The retrieved article's title was
   `…गैरसोय टाळावी – पालकमंत्री मंगलप्रभात लोढा`; that `– पदनाम नाव` pattern is the single most
   recognisable DGIPR habit and the model had never seen it. Fixed by carrying `title` through
   `StyleReference.articles[]` and rendering it as a `शीर्षक:` line.
@@ -2561,7 +2580,7 @@ public-information poster'`, `'authentic skin, fabric and material textures'` in
   with the article silently reverting to the agentless prose the whole feature exists to
   prevent. The officer had also ticked **यापुढेही हेच वापरा** on that run, and it changed nothing
   for later ones: for a reverse-lookup row the write-back only creates the glossary row the
-  suggestion is *generated from*, so the row comes back `suggested: true` and unticked forever.
+  suggestion is _generated from_, so the row comes back `suggested: true` and unticked forever.
   Pre-filling only ever helped notes that already spell the name out — i.e. the case that never
   needed help. Review is preserved by making the suggestion **visible and untickable** (named on
   the card before any spend, labelled शब्दकोशातून सुचवलेले) rather than inert. Two construction
@@ -2696,7 +2715,7 @@ public-information poster'`, `'authentic skin, fabric and material textures'` in
   message's char ceiling was raised 900 → 1000 deliberately: that check exists so "just one more
   rule" has to be an explicit decision, and this is one — it is DATA handling, not editorial
   instruction. Found in passing and restored while there: `Never add unsupplied information to
-  make it longer.`, which v5's own harness asserts and the v5 system message had lost.
+make it longer.`, which v5's own harness asserts and the v5 system message had lost.
   Verified 2026-07-28, all free: workspace typecheck **7/7 green**, lint clean on all six touched
   files, and both harnesses green — `tsx src/generation/apply-designations.ts` (the six new cases:
   every-surname-mention beside an already-titled full name, a surname-only article, a one-word
@@ -2726,7 +2745,7 @@ public-information poster'`, `'authentic skin, fabric and material textures'` in
   point**: `generatePosterCopy` already pins the body-slot count to the chosen master's real
   `bulletSlots`, drops `scene_brief` when it has no photo zone, and takes its layout from the
   resolved type's `copyStyle` — so "the reference decides how the information is arranged" was
-  already true; it was only ever the *selection* that ran backwards.
+  already true; it was only ever the _selection_ that ran backwards.
   Decisions worth keeping:
   - **Tone, mood and colour are explicitly NOT criteria**, stated as a negative rule in the
     prompt. That is `rank-master.ts`'s job for a different flow (a tie-break inside an
@@ -2761,19 +2780,19 @@ public-information poster'`, `'authentic skin, fabric and material textures'` in
     the choice and never reach this path.
   - The `classify` step's Marathi label became **संदर्भ टेम्पलेट निवडत आहोत…** — "विषय ओळखत आहोत"
     named precisely the thing that no longer happens first.
-  Verified 2026-07-28, all free except the harness: workspace typecheck **7/7 green**, lint clean
-  on all six touched files, and a live run of `tsx --env-file=../../.env
-  src/references/select-by-information.ts` (cents) on the MRI note against an alert master, a
-  quote master and a stats master — it chose the stats master, citing the note's four locations,
-  budget figure and deadline as fitting its stat callouts, and returned
-  `चार रुग्णालयांत अत्याधुनिक एमआरआय केंद्रे` as the title. **Left for a real run** (image spend): a
-  full twitter E2E against the live library confirming the log's `information-ranked (...)` reason
-  and that the resolved type matches the picked image's subtype. No migration, no n8n; deploy is
-  `@dgipr/content-engine` dist → API → web, with `analyze:references` run first. New env
-  (optional): `SOCIAL_REFERENCE_MODE`.
+    Verified 2026-07-28, all free except the harness: workspace typecheck **7/7 green**, lint clean
+    on all six touched files, and a live run of `tsx --env-file=../../.env
+src/references/select-by-information.ts` (cents) on the MRI note against an alert master, a
+    quote master and a stats master — it chose the stats master, citing the note's four locations,
+    budget figure and deadline as fitting its stat callouts, and returned
+    `चार रुग्णालयांत अत्याधुनिक एमआरआय केंद्रे` as the title. **Left for a real run** (image spend): a
+    full twitter E2E against the live library confirming the log's `information-ranked (...)` reason
+    and that the resolved type matches the picked image's subtype. No migration, no n8n; deploy is
+    `@dgipr/content-engine` dist → API → web, with `analyze:references` run first. New env
+    (optional): `SOCIAL_REFERENCE_MODE`.
 
 - **Transcription as its own product (`/transcribe`)** (2026-07-28, migration 0037): officers
-  wanted a recording turned into Marathi text *without* the article machinery around it —
+  wanted a recording turned into Marathi text _without_ the article machinery around it —
   /dlo can do the transcription, but only as step one of a multi-step workspace that then
   asks for a category, a heading, a review pass and a generation. The new page is upload →
   transcript → copy/download, on ONE screen, plus a history list of past runs.
@@ -2913,6 +2932,126 @@ Not implemented yet: Canva integration, authentication.
 
 ## Latest Implementation Milestone
 
+- **One design system across all ten index routes** (2026-08-03, no migration, web only): the
+  UI was deliberately plain for non-technical staff, and had drifted into looking unfinished
+  rather than simple. **No UI library was added** — Tailwind/shadcn over a hand-written
+  5,000-line `globals.css` means either two competing systems or 55 rewritten components, so
+  the existing stylesheet was refined instead. The large-target accessibility stance at the top
+  of `globals.css` is UNCHANGED and must stay: 18px base, 56px primary buttons, status as text
+  + colour.
+  - **Tokens.** The canvas moved from `#e9dcc9 → #d8c3a8` (dark enough to muddy the white cards
+    on it) to a calm `#f4eee5 → #ebe1d3`, `background-attachment: fixed` so a long page does not
+    re-gradient as it scrolls. New tokens, all additive: `--surface` (the tinted well for rows
+    nested INSIDE a white card — reach for this, not `--bg`, which is the page canvas),
+    `--border-strong`, a three-rung elevation scale (`--shadow-sm/md/lg`, each a tight contact
+    shadow plus a wide ambient one rather than one big blur), a radius scale (`--r-sm/md/lg/xl`)
+    and `--ring`. `--shadow` still resolves to `--shadow-md`, so ~40 existing consumers were
+    untouched. One `:focus-visible` rule now serves the whole product.
+  - **`.page-head` is the new shared primitive and every index route uses it** — accent rule +
+    `.page-title` + `.page-sub` + optional `.page-head-actions`. It is the single thing making
+    ten separately-built pages read as one product, so **a new page must use it rather than a
+    bare `<h1 class="page-title">`**. Four subtitles were added (`mediaRoomIntro`,
+    `translatePageIntro`, `proofreadPageIntro`, `historyIntro`) and the existing intros moved
+    into it; `.page-intro`, `.gl-intro` and `.ref-intro` are deleted. `/dlo` gets its own
+    `dloPageIntro` deliberately — reusing `dloIntro` would print it twice, since that string is
+    the "नवीन काम" card's own hint. `/generations` gained the "+ नवीन तयार करा" action there
+    and `/analytics`'s range picker moved into it as a segmented control on a tinted track.
+  - **`.card-action`** exists because several forms deliberately put the primary action in its
+    own block above the optional material below it (see the comment in `DloIntakeForm`) — that
+    ordering is a product decision and is kept, but as a plain `.card` it was a full-width sheet
+    of white holding one button. Applied on `/`, `/dlo`, `/transcribe`, `/proofread`, `/video`.
+    `.card-compact` is its secondary-control counterpart. Also new: `.card-head`,
+    `.card-eyebrow`, `.empty-state`, `.char-count`, `.btn-ghost`, `.btn-danger`.
+  - **Three real bugs found by looking at the rendered pages, not by reading code.** The footer
+    set `--muted` on a maroon band, which the markup worked around with an inline `color:#fff`
+    (the colour now lives in `.powered-by`). `.dlo-work-row` bordered with `var(--line)`, a
+    token defined **nowhere**, so that divider had never rendered. And `.dlo-work-title` holds
+    an uploaded filename with no break opportunity (`0-CM_Review_Meeting_PMAY_U__2.0…`) —
+    `min-width: 0` lets the flex ITEM shrink but cannot break a word, so `/dlo` scrolled 147px
+    sideways on a 390px phone; fixed with `overflow-wrap: anywhere`.
+  - Two heavy pages were also de-noised: `.gl-row.is-open` marked its accent on all four sides,
+    and an unverified glossary list is 200+ rows all open, so the page was a wall of maroon
+    boxes (now a tint + left bar); and a run with no poster painted a full-bleed saturated
+    maroon block that outshouted the real posters beside it on `/generations` (now a quiet
+    dotted placeholder panel).
+    Verified 2026-08-03, all free: workspace typecheck **7/7 green**; lint 0 errors (the only 3
+    warnings are pre-existing unused imports in `analytics/[feature]/page.tsx`, untouched);
+    prettier clean on every hunk of mine — the residual whole-file complaints are CRLF and the
+    three real ones are at pre-existing lines, so do **not** `--write` those files; and a
+    rendered pass over all ten routes at 1360px and 390px with **zero page errors and zero
+    horizontal overflow** at either width. No migration, no n8n, no API change; deploy is web
+    only.
+
+- **वापर विश्लेषण — department usage analytics (`/analytics`)** (2026-08-02, migration 0043):
+  a page that answers "how much is this department actually using the platform", built to be
+  presented to the head of department as well as read day to day. Six KPI tiles → one daily
+  activity chart → a ranked share list → one card per sidebar feature, each opening
+  `/analytics/[feature]` for its own detail.
+  - **Department-wide totals per feature, because there is no other honest option.** There is
+    no auth and no owner column anywhere in this phase (`0002_generations.sql` says so
+    explicitly), so per-officer figures do not exist and are not approximated. Nothing on this
+    page counts, infers or estimates individual people, and `dgipr.dlo.mine` stays what it has
+    always been — localStorage ORDERING, never identity. Adding real attribution later is a
+    separate change; faking it from a browser id would have been worse than not having it.
+  - **The two generation lanes are split by `dlo_intake_id`, not by category** — no new column.
+    A run created on क्रिएटिव्ह आणि सोशल has none; one generated from a /dlo intake has one.
+    So `news`/`scheme` legitimately appear under BOTH cards: a poster made from a pasted
+    article on the media room is creative work, the same category through /dlo is the article
+    lane. That matches how an officer reads the sidebar, which is the whole organising idea.
+  - **Migration 0043 `usage_events` exists because three features deliberately persist
+    nothing**: /proofread ("nothing stored" is its stated contract), ad-hoc /translate, and
+    actions taken against an existing row (article PDF, poster download). Without it, three of
+    six cards would read as never used. **It may never contain content** — the shape has no
+    free-text field at all, only `feature`/`action`/`char_count`/`count`/a small enumerable
+    `detail` — which is a stronger guarantee than a comment asking callers not to send any.
+    Writes are FIRE-AND-FORGET (`recordUsageEvent` returns `void`, swallows every error):
+    verified live against a database WITHOUT 0043, a poster download still returned 200 and
+    all 4.8 MB while the insert failed in the background. `eventsAvailable: false` then makes
+    the page say so rather than report zero.
+  - **Everything else needed no backfill and no rollup table.** Every other figure is derived
+    per request from `generations`, `dlo_intakes`, `transcriptions`, `video_projects` and
+    `generation_revisions`, which have been recording this since each feature shipped — so the
+    page had real history the moment it was opened (421 outputs / 226 posters / 67 articles in
+    the last 30 days, at ~0.5–1.1 s per request across every range).
+  - **The rule every query in `packages/database/src/analytics.ts` follows: never select a text
+    column.** `note`, `article`, `combined_text`, `files` and `scenes` hold whole articles and
+    whole meeting transcripts. The four metrics that genuinely depend on a text column being
+    non-null (does this social run have a caption? was this article translated?) use a
+    head-only `count: 'exact'`, which transfers no rows. Costs: the /dlo source mix (recordings
+    vs documents vs YouTube) and exact rendered video seconds, both deliberately given up.
+    Every list PAGES explicitly — PostgREST silently caps a select at 1000 rows, and a silently
+    truncated analytics page reports a decline that did not happen.
+  - **Day boundaries are Indian**, everywhere, in the API and the web (`ANALYTICS_TIME_ZONE`):
+    the container is UTC, so bucketing on the raw timestamp files an 01:30 IST run under the
+    previous day — the trap the article PDF's date line already hit. Windows are half-open
+    `[from, to)` with `to` set to the start of TOMORROW so today counts.
+  - **Cost is framed as efficiency** (₹ per poster/article/video, total as support), converted
+    at one stated constant `ANALYTICS_INR_PER_USD`. Features whose work is not metered to a row
+    report `costInr: null` and say "not measured" — **never ₹0**, which would read as "free".
+  - **No categorical colour palette, and that was a decision.** The daily chart is a SINGLE
+    series and every bar in a ranked list carries its own name and value as text, so nothing
+    here encodes identity by colour. Two tints of the brand maroon were run through the palette
+    validator and FAIL as categories (normal-vision ΔE 12.2, below the 15 floor) — a
+    colour-coded variant would have failed full-colour readers, not just colour-blind ones.
+    Charts are HTML/CSS, not SVG: the bars reflow at any width and the labels are ordinary text
+    in the page's Marathi font. Every chart ships a `<details>` table view.
+  - **Two presentation bugs found by measuring rather than by looking.** The first real render
+    showed **"+42,000%"** (421 against a previous period of 1) — arithmetically true, reads as
+    broken; past 500% the change is now stated as a plain difference instead. And the daily
+    chart's tooltips are `position: absolute` and so contribute to `scrollWidth` **at opacity
+    0**, which gave the whole page a horizontal scrollbar on a phone from a tip nobody had
+    hovered (body 403px in a 390px viewport); the edge columns' tips are now anchored inward.
+    Verified 2026-08-02, all free: workspace typecheck **7/7 green**, lint clean on all 14 new
+    files, prettier clean (the `strings.ts` complaint is pre-existing CRLF, confirmed against
+    `git show HEAD:` — do NOT `--write` it); the live API across all four ranges plus the Marathi
+    400 on a bad one; and **19 browser assertions** (Marathi title, 6 tiles, 6 cards, Devanagari
+    numerals, no absurd percentage, 30 bars redrawing to 7 on a range switch, the range in the
+    URL, every ranked bar directly labelled, a card's number equalling its drill-down's, no
+    overflow at 1280 or 390, no page errors). **Left for a real run**: applying 0043, then one
+    /proofread and one pasted-text /translate to confirm those two cards leave zero.
+    **Deploy: 0043 → API → web** (rebuild `@dgipr/schemas` → `@dgipr/database` dists first).
+    No n8n, no new env.
+
 - **"AI साठी सूचना" — the officer directs one article in their own words** (2026-08-01,
   migration 0041): every officer-side input on /dlo said what the article is ABOUT (notes,
   files, links, category, heading) or what it should READ like (the pasted style reference).
@@ -2951,19 +3090,19 @@ Not implemented yet: Canva integration, authentication.
     there, not at its call site), and the card gains a focus-ring-carrying `.yt-field` wrapper
     with a leading icon and an inline clear button, a primary Add button that keeps its width
     while probing, and a named + counted list to match the recordings above it.
-  Verified 2026-08-01, all free: workspace typecheck **7/7 green**, lint clean on all 16 touched
-  files, prettier clean on every hunk of mine (`strings.ts`/`dlo.ts`/`generations.ts`/
-  `minimal-article-prompt.ts`/`routes/generations.ts` report whole-file CRLF complaints that are
-  pre-existing — do NOT `--write` them); 7 new prompt assertions (verbatim rendering, the
-  never-a-fact rule, information-wins-on-conflict, last-block position, absent/whitespace-only
-  omission, and byte-identity when omitted); and a LIVE create through the running API proving
-  both fields land in `review_state` under `writer: 'intake-form'`, plus /dlo rendering the new
-  card. **Left to do: 0041 is NOT applied** — verified live, the blast radius is exactly as
-  designed (a generate WITH instructions returns `Could not find the 'instructions' column`;
-  every run without one is untouched, since `insertGeneration` omits the column). After applying
-  it: one /dlo article with a real instruction, and one feedback round — `reviseArticle` does not
-  receive the instructions today, so a revision is not held to them. Deploy: **0041 → API → web**
-  (rebuild `@dgipr/schemas` → `@dgipr/database` → `@dgipr/content-engine` dists first); no n8n.
+    Verified 2026-08-01, all free: workspace typecheck **7/7 green**, lint clean on all 16 touched
+    files, prettier clean on every hunk of mine (`strings.ts`/`dlo.ts`/`generations.ts`/
+    `minimal-article-prompt.ts`/`routes/generations.ts` report whole-file CRLF complaints that are
+    pre-existing — do NOT `--write` them); 7 new prompt assertions (verbatim rendering, the
+    never-a-fact rule, information-wins-on-conflict, last-block position, absent/whitespace-only
+    omission, and byte-identity when omitted); and a LIVE create through the running API proving
+    both fields land in `review_state` under `writer: 'intake-form'`, plus /dlo rendering the new
+    card. **Left to do: 0041 is NOT applied** — verified live, the blast radius is exactly as
+    designed (a generate WITH instructions returns `Could not find the 'instructions' column`;
+    every run without one is untouched, since `insertGeneration` omits the column). After applying
+    it: one /dlo article with a real instruction, and one feedback round — `reviseArticle` does not
+    receive the instructions today, so a revision is not held to them. Deploy: **0041 → API → web**
+    (rebuild `@dgipr/schemas` → `@dgipr/database` → `@dgipr/content-engine` dists first); no n8n.
 
 - **YouTube links are an intake source, on /dlo and /transcribe** (2026-08-01, no migration):
   officers wanted to turn a press conference already on YouTube into an article without
@@ -3015,30 +3154,30 @@ Not implemented yet: Canva integration, authentication.
     recordings — a link is a string, so a reload loses nothing and no "please re-attach"
     callout is needed. `CirclePlay` stands in for a brand mark: lucide 1.x has no brand
     icons.
-  Verified 2026-08-01, all free: workspace typecheck **7/7 green**, lint clean on all 17
-  touched files; 31 URL-parser assertions (`npx tsx ../schemas/src/youtube.ts` from
-  content-engine, which has tsx — the `dlo-review-state.ts` split) covering every shape a
-  link is actually copied in (`youtu.be`, no scheme, `m.`/`music.`/`nocookie` hosts,
-  `/embed/`, `/shorts/`, `/live/`, tracking and playlist params) and the near-misses that
-  matter (a channel page, a playlist with no video, a short/over-long/illegal id, and a
-  `youtube.com.evil.example` lookalike host); 9 STT-dispatch assertions including the
-  sarvam refusal arriving one-per-input in order; and a **live API pass** — a real
-  `youtu.be` link with `?si=&t=` probed to its canonical URL with title, channel and
-  thumbnail, a well-formed-but-unknown id correctly returning 200 with no title (the
-  degradation path), and every guard on both create routes (channel/vimeo/junk 400,
-  malformed payload 400, and a non-YouTube URL inside a well-formed payload rejected by the
-  server-side re-derivation). **Left for a real run** (ElevenLabs spend, a few cents): one
-  short Marathi video end to end, confirming Scribe accepts `source_url`, that the
-  transcript lands under the video's title in the review step, and — the one live unknown —
-  which of the two answers Scribe gives for a video whose audio it cannot fetch. New
-  harness: `npx tsx packages/schemas/src/youtube.ts`. No migration, no n8n, no new env;
-  deploy is `@dgipr/schemas` → `@dgipr/database` → `@dgipr/content-engine` dists → API +
-  web, and API and web must ship **together** (the create routes' `youtube` field is a
-  shared contract).
+    Verified 2026-08-01, all free: workspace typecheck **7/7 green**, lint clean on all 17
+    touched files; 31 URL-parser assertions (`npx tsx ../schemas/src/youtube.ts` from
+    content-engine, which has tsx — the `dlo-review-state.ts` split) covering every shape a
+    link is actually copied in (`youtu.be`, no scheme, `m.`/`music.`/`nocookie` hosts,
+    `/embed/`, `/shorts/`, `/live/`, tracking and playlist params) and the near-misses that
+    matter (a channel page, a playlist with no video, a short/over-long/illegal id, and a
+    `youtube.com.evil.example` lookalike host); 9 STT-dispatch assertions including the
+    sarvam refusal arriving one-per-input in order; and a **live API pass** — a real
+    `youtu.be` link with `?si=&t=` probed to its canonical URL with title, channel and
+    thumbnail, a well-formed-but-unknown id correctly returning 200 with no title (the
+    degradation path), and every guard on both create routes (channel/vimeo/junk 400,
+    malformed payload 400, and a non-YouTube URL inside a well-formed payload rejected by the
+    server-side re-derivation). **Left for a real run** (ElevenLabs spend, a few cents): one
+    short Marathi video end to end, confirming Scribe accepts `source_url`, that the
+    transcript lands under the video's title in the review step, and — the one live unknown —
+    which of the two answers Scribe gives for a video whose audio it cannot fetch. New
+    harness: `npx tsx packages/schemas/src/youtube.ts`. No migration, no n8n, no new env;
+    deploy is `@dgipr/schemas` → `@dgipr/database` → `@dgipr/content-engine` dists → API +
+    web, and API and web must ship **together** (the create routes' `youtube` field is a
+    shared contract).
 
 - **"Free this space" — a second poster gesture, for the officer's own logo** (2026-08-01, no
   migration): pixel feedback had exactly one gesture, the RED numbered marker, which says
-  *change the element here*. Officers wanted the opposite: **clear a rectangle** so they can
+  _change the element here_. Officers wanted the opposite: **clear a rectangle** so they can
   paste their own logo or photograph into it afterwards. Expressed as a marker note
   ("इथे काही नको") it fails, because the image model's response to "remove this" is to delete
   content or to paint a tidy white panel where it was — and a white panel is not free space, it
@@ -3078,29 +3217,29 @@ Not implemented yet: Canva integration, authentication.
   - A blue box over the chrome gets a Marathi warning that is a real limitation rather than the
     marker path's soft hint: the logo and footer are re-stamped in code after the edit, so that
     space cannot be freed.
-  **No n8n push**: both lanes build their feedback prompt in the API and the workflows are thin
-  image-edit services. Verified 2026-08-01, all free: workspace typecheck **7/7 green**, lint
-  clean on all 15 touched files, prettier clean on every hunk of mine (the two whole-file
-  complaints are pre-existing CRLF, confirmed per file — do NOT `--write` them); the extended
-  `poster:preview:markers` render (A/B glyphs, 20% fill, red boxes byte-identically unchanged,
-  overlap order); 11 schema assertions (clear-only accepted, cap enforced at 2, blank note and
-  off-canvas rejected, legacy shapes untouched); the social and article prompt harnesses
-  extended and green; and **27 live browser assertions** across both lanes (icon arms and
-  disarms, modes mutually exclusive, fill/border match the renderer's constants exactly, badges
-  A/B, cap holds, submit appears with no note typed, a red marker coexists and survives a mode
-  switch, removal works, no page errors). **Left for a real run** (one image charge): a clear-only
-  round on a live poster, confirming the freed rectangle comes back as continuing background
-  rather than a panel, and that the displaced content lands somewhere sensible. Deploy is
-  `@dgipr/schemas` → `@dgipr/poster-renderer` → `@dgipr/content-engine` dists → API → web.
+    **No n8n push**: both lanes build their feedback prompt in the API and the workflows are thin
+    image-edit services. Verified 2026-08-01, all free: workspace typecheck **7/7 green**, lint
+    clean on all 15 touched files, prettier clean on every hunk of mine (the two whole-file
+    complaints are pre-existing CRLF, confirmed per file — do NOT `--write` them); the extended
+    `poster:preview:markers` render (A/B glyphs, 20% fill, red boxes byte-identically unchanged,
+    overlap order); 11 schema assertions (clear-only accepted, cap enforced at 2, blank note and
+    off-canvas rejected, legacy shapes untouched); the social and article prompt harnesses
+    extended and green; and **27 live browser assertions** across both lanes (icon arms and
+    disarms, modes mutually exclusive, fill/border match the renderer's constants exactly, badges
+    A/B, cap holds, submit appears with no note typed, a red marker coexists and survives a mode
+    switch, removal works, no page errors). **Left for a real run** (one image charge): a clear-only
+    round on a live poster, confirming the freed rectangle comes back as continuing background
+    rather than a panel, and that the displaced content lands somewhere sensible. Deploy is
+    `@dgipr/schemas` → `@dgipr/poster-renderer` → `@dgipr/content-engine` dists → API → web.
 
 - **The poster reference is chosen for CAPACITY, not topic — the input IS the poster**
   (2026-07-31, no migration — SUPERSEDES the subject-first half of the 2026-07-28
   information-first milestone): a note about mosquitoes carrying SEVEN points was landing on
   the three-slot dengue master and shipping four of them. That was the design working as
-  specified — `select-by-information.ts` said in its own header *"SUBJECT IS THE DECIDING
-  FACTOR"*, ran a two-stage prompt that narrowed by topic BEFORE looking at structure, told the
-  model *"If stage 1 kept exactly one reference, CHOOSE IT, even if its arrangement is not
-  ideal"*, and its live harness **asserted** the mosquito→dengue pick.
+  specified — `select-by-information.ts` said in its own header _"SUBJECT IS THE DECIDING
+  FACTOR"_, ran a two-stage prompt that narrowed by topic BEFORE looking at structure, told the
+  model _"If stage 1 kept exactly one reference, CHOOSE IT, even if its arrangement is not
+  ideal"_, and its live harness **asserted** the mosquito→dengue pick.
   The specification rested on an assumption that is false in practice: that the officer supplies
   an ARTICLE and the pipeline decides what belongs on the poster. It does not — **what the
   officer types IS the poster's content**, every line meant to appear (the PDF/article-upload
@@ -3108,7 +3247,7 @@ Not implemented yet: Canva integration, authentication.
   topic matching is actively harmful: the reference's capacity was shrinking the content.
   The relationship is inverted — the content's SIZE now decides which references are eligible.
   - **Capacity is a HARD GATE in code, not a scored preference.** A reference with fewer content
-    slots than the information has items is EXCLUDED. It was a *scored* preference before
+    slots than the information has items is EXCLUDED. It was a _scored_ preference before
     (`scoreMaster`'s doubled overflow penalty), and a scored preference is exactly how a
     four-slot template kept beating a seven-slot one. `enforceCapacity` (pure, synchronous,
     free to test) replaces the model's pick with the TIGHTEST eligible reference when the model
@@ -3123,10 +3262,10 @@ Not implemented yet: Canva integration, authentication.
   - **The item count comes from the SAME call that picks** — a separate counting call would be a
     second charge, and the count and the pick could then disagree about the very thing the gate
     is computed from. This is NOT the `point_count` prediction deleted on 2026-07-28: that
-    forecast what an article *should* say before any reference was seen; this counts what the
+    forecast what an article _should_ say before any reference was seen; this counts what the
     officer actually wrote.
-  - **Two clauses that caused the loss are deleted** from the onbrand prompt: *"Never paste the
-    entire input article into the image"* and *"select only the most important information"* —
+  - **Two clauses that caused the loss are deleted** from the onbrand prompt: _"Never paste the
+    entire input article into the image"_ and _"select only the most important information"_ —
     an explicit instruction to drop the officer's own points. In their place: show every item,
     the exact item count as a number the model can check itself against, and a
     `REPRODUCE THE MARATHI TEXT EXACTLY` rule (every matra, conjunct, anusvara and numeral).
@@ -3147,23 +3286,23 @@ Not implemented yet: Canva integration, authentication.
     merging the two UI options later is now purely a web change.
   - Also removed: a stray `console.log('HIIIIIIIIIIIIIIIIIIIIIIIIIII')` shipping in the onbrand
     prompt builder.
-  **The library needed nothing done to it** — all 91 masters (89 active) already carry a
-  `layout_spec`, verified free; the active slot histogram is `0:29 2:5 3:14 4:14 5:8 6:5 7:5
-  8:2 9:3 10:1 11:1 12:2`, so a seven-item note has 14 eligible masters. The 29 zero-slot
-  masters are legitimately *"not a repeating list"* (quote/single-message layouts), which is why
-  the gate only applies from **2 items up** — gating those out for a one-item note would exclude
-  exactly the references built for it. A failed count degrades to "no gate" rather than an empty
-  pool. Verified 2026-07-31, all free: workspace typecheck **7/7 green**, lint clean on all
-  eight touched files, prettier clean on every hunk of mine (the residual complaints in those
-  files are pre-existing unformatted lines — do NOT `--write` them, and note `git show HEAD:` is
-  a useless prettier baseline here since blobs are LF and the working tree is CRLF); 7
-  capacity-gate assertions (too-small pick corrected to the tightest fit, an eligible pick left
-  alone, shortfall reported when nothing fits, 1-item and failed-count both ungated, `>=` not
-  `>`, deterministic per seed) and 9 prompt assertions. **Left for a real run**: the `--live`
-  half of the harness (cents — asserts the model itself counts seven points and does not choose
-  the 3-slot dengue master), then one twitter and one facebook ठरलेले टेम्पलेट E2E on a
-  genuinely 7-point note. No migration, no n8n; deploy is `@dgipr/schemas` →
-  `@dgipr/content-engine` dists → API → web.
+    **The library needed nothing done to it** — all 91 masters (89 active) already carry a
+    `layout_spec`, verified free; the active slot histogram is `0:29 2:5 3:14 4:14 5:8 6:5 7:5
+8:2 9:3 10:1 11:1 12:2`, so a seven-item note has 14 eligible masters. The 29 zero-slot
+  masters are legitimately _"not a repeating list"_ (quote/single-message layouts), which is why
+    the gate only applies from **2 items up** — gating those out for a one-item note would exclude
+    exactly the references built for it. A failed count degrades to "no gate" rather than an empty
+    pool. Verified 2026-07-31, all free: workspace typecheck **7/7 green**, lint clean on all
+    eight touched files, prettier clean on every hunk of mine (the residual complaints in those
+    files are pre-existing unformatted lines — do NOT `--write` them, and note `git show HEAD:` is
+    a useless prettier baseline here since blobs are LF and the working tree is CRLF); 7
+    capacity-gate assertions (too-small pick corrected to the tightest fit, an eligible pick left
+    alone, shortfall reported when nothing fits, 1-item and failed-count both ungated, `>=` not
+    `>`, deterministic per seed) and 9 prompt assertions. **Left for a real run**: the `--live`
+    half of the harness (cents — asserts the model itself counts seven points and does not choose
+    the 3-slot dengue master), then one twitter and one facebook ठरलेले टेम्पलेट E2E on a
+    genuinely 7-point note. No migration, no n8n; deploy is `@dgipr/schemas` →
+    `@dgipr/content-engine` dists → API → web.
 
 - **gpt-image is a real alternative for the storyboard frames, switchable in one env
   line** (2026-07-31, no migration): the `openai` branch of `frame-provider.ts` had

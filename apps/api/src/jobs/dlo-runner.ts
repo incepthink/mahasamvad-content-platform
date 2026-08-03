@@ -27,6 +27,7 @@ import {
   extractPdfPagesDetailed,
   probePdf,
   runInCostScope,
+  runInCostTask,
   sttProviderName,
   totalCostUsd,
   isAudioUrlInput,
@@ -46,6 +47,7 @@ import {
 } from '@dgipr/database';
 import { combineIntakeSources, type IntakeSource } from '@dgipr/schemas';
 
+import { recordTasksFromCost } from './service-usage.js';
 import { transcriptCacheMode } from './transcript-cache-mode.js';
 
 const running = new Set<string>();
@@ -129,9 +131,7 @@ async function downloadEntry(
   entry: DloIntakeFileEntry,
 ): Promise<Buffer> {
   if (!entry.storagePath) {
-    throw new Error(
-      `या फाईलची मूळ प्रत उपलब्ध नाही: ${entry.name}`,
-    );
+    throw new Error(`या फाईलची मूळ प्रत उपलब्ध नाही: ${entry.name}`);
   }
   return downloadFile(client, DLO_UPLOADS_BUCKET, entry.storagePath);
 }
@@ -179,10 +179,22 @@ async function extractPdfEntry(
   source: 'auto' | 'ocr' = 'auto',
 ): Promise<DloIntakeFileEntry> {
   const data = await downloadEntry(client, entry);
-  const extracted = await extractPdfPagesDetailed(entry.name, data, {
-    source,
-    pages,
-  });
+  // A cost scope around the read itself rather than around the whole job: this function is
+  // the ONE place all three /dlo document paths meet (the intake job's deferred pages, the
+  // explicit extract job, and the per-file OCR re-read), so metering here counts every paid
+  // page exactly once no matter which pressed the button. `dlo_intakes` has no cost column,
+  // so the event is the only record. A born-digital PDF read from its text layer spends
+  // nothing and records nothing — recordOcrCost only fires on the pixel path.
+  const cost = createCostAccumulator();
+  const extracted = await runInCostScope(cost, () =>
+    runInCostTask('document_ocr', () =>
+      extractPdfPagesDetailed(entry.name, data, {
+        source,
+        pages,
+      }),
+    ),
+  );
+  recordTasksFromCost(client, 'article', cost);
   return {
     name: entry.name,
     storagePath: entry.storagePath,
@@ -305,8 +317,18 @@ export function startDloIntakeJob(client: SupabaseClient, id: string): void {
           // metered figure is LOGGED rather than persisted. Only the ElevenLabs path
           // records (it returns word timestamps to measure); a Sarvam run logs nothing.
           const cost = createCostAccumulator();
+          const missedInputs = missPositions.map(
+            (position) => inputs[position]!,
+          );
+          const transcriptionTask = missedInputs.every(isAudioUrlInput)
+            ? 'youtube_transcription'
+            : missedInputs.some(isAudioUrlInput)
+              ? 'audio_youtube_transcription'
+              : 'audio_transcription';
           const results = await runInCostScope(cost, () =>
-            transcribeAudio(missPositions.map((position) => inputs[position]!)),
+            runInCostTask(transcriptionTask, () =>
+              transcribeAudio(missedInputs),
+            ),
           );
           if (cost.sttSeconds > 0) {
             console.log(
@@ -315,6 +337,10 @@ export function startDloIntakeJob(client: SupabaseClient, id: string): void {
                 `~$${totalCostUsd(cost).toFixed(4)}.`,
             );
           }
+          // Attributed to लेख / बातमी, not to ध्वनिलेखन: this recording was transcribed on
+          // the way to an article, and /transcribe is the standalone product. Same split
+          // the analytics page draws everywhere else.
+          recordTasksFromCost(client, 'article', cost);
           await Promise.all(
             results.map(async (result, resultIndex) => {
               const position = missPositions[resultIndex]!;

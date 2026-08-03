@@ -18,6 +18,7 @@
 // "0 / 2,000" on an optional field reads as a form to fill in rather than an offer.
 
 import { useId } from 'react';
+import { Sparkles } from 'lucide-react';
 import { ARTICLE_INSTRUCTIONS_MAX_CHARS } from '@dgipr/schemas';
 import { STR } from '../lib/strings';
 
@@ -36,6 +37,7 @@ export function AiInstructionsField({
   return (
     <section className="card">
       <label className="field-label" htmlFor={id}>
+        <Sparkles size={18} className="label-icon" aria-hidden="true" />
         {STR.aiInstructionsLabel}
       </label>
       <p className="hint">{STR.aiInstructionsHint}</p>

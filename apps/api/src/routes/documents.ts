@@ -10,7 +10,9 @@
 
 import type { FastifyInstance } from 'fastify';
 import { documentKindOf } from '@dgipr/content-engine';
+import type { SupabaseClient, UsageFeature } from '@dgipr/database';
 import {
+  AnalyticsFeatureKeySchema,
   DOCUMENT_MAX_BYTES,
   ExtractDocumentRequestSchema,
   ReextractDocumentRequestSchema,
@@ -24,9 +26,17 @@ import {
   type DocumentIntakeJob,
 } from '../jobs/document-intake.js';
 
-export function registerDocumentRoutes(app: FastifyInstance): void {
+export function registerDocumentRoutes(
+  app: FastifyInstance,
+  client: SupabaseClient,
+): void {
   app.post('/documents', async (request, reply) => {
     let upload: { name: string; data: Buffer } | null = null;
+    // Which sidebar feature is uploading, for /analytics attribution only. This service is
+    // shared by four surfaces, so without it a paid OCR read is countable in the bill and
+    // attributable to nobody. Optional: an older web build sends none and the read is
+    // simply not attributed, which is better than guessing a card to put it on.
+    let feature: UsageFeature | null = null;
     try {
       // Per-request limits: the global multipart config is sized for small reference
       // images. DOCUMENT_MAX_BYTES is unlimited, so this override exists to LIFT that
@@ -36,7 +46,15 @@ export function registerDocumentRoutes(app: FastifyInstance): void {
         limits: { fileSize: DOCUMENT_MAX_BYTES, files: 1 },
       });
       for await (const part of parts) {
-        if (part.type !== 'file') continue;
+        if (part.type !== 'file') {
+          // Validated against the enum rather than trusted: `feature` reaches a jsonb
+          // column, and an unrecognised value would create a card nobody can read.
+          if (part.fieldname === 'feature') {
+            const parsed = AnalyticsFeatureKeySchema.safeParse(part.value);
+            if (parsed.success) feature = parsed.data;
+          }
+          continue;
+        }
         const name = part.filename ?? 'document';
         if (!documentKindOf(name)) {
           return reply.code(400).send({
@@ -68,7 +86,7 @@ export function registerDocumentRoutes(app: FastifyInstance): void {
       // Probes only. Nothing reaches Sarvam until the user has picked pages at /extract.
       return reply
         .code(202)
-        .send(await startDocumentIntake(upload.name, upload.data));
+        .send(await startDocumentIntake(upload.name, upload.data, feature));
     } catch (error) {
       request.log.error(error, 'document probe failed');
       return reply.code(400).send({
@@ -102,7 +120,7 @@ export function registerDocumentRoutes(app: FastifyInstance): void {
       const invalid = guardPageSelection(job, body.pages);
       if (invalid) return reply.code(400).send(invalid);
 
-      startDocumentIntakeExtraction(job, body.pages);
+      startDocumentIntakeExtraction(job, body.pages, client);
       return reply.code(202).send({ id: job.id });
     },
   );
@@ -127,7 +145,7 @@ export function registerDocumentRoutes(app: FastifyInstance): void {
       const invalid = guardPageSelection(job, body.pages);
       if (invalid) return reply.code(400).send(invalid);
 
-      startDocumentIntakeReextraction(job, body.pages);
+      startDocumentIntakeReextraction(job, body.pages, client);
       return reply.code(202).send({ id: job.id });
     },
   );

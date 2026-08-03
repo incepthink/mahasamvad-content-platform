@@ -10,9 +10,13 @@
 // TWO modes, set by the caller's toolbar:
 //   'mark'  — RED numbered boxes. A pointing gesture at the element to change
 //             (the element at/around it), never a hard mask boundary.
-//   'clear' — BLUE lettered boxes with a translucent fill. "Free this space":
-//             what is inside gets relocated by the image model and the rectangle
-//             is left as plain background, for a logo or photo added by hand.
+//   'clear' — BLUE lettered boxes with a translucent fill. "Free this space": the
+//             rectangle is left as plain background for a logo or photo added by
+//             hand, and each box's own `action` says what happens to the content
+//             inside — moved elsewhere on the poster, or deleted. Both actions
+//             look the same here on purpose: the prompt names each box by its
+//             letter, so no third colour is needed and the drawn language stays
+//             the two the officer already knows (red = change, blue = free).
 // Both sets are always drawn; only the active mode captures new input.
 
 import { useRef, useState } from 'react';
@@ -20,6 +24,7 @@ import {
   POSTER_FEEDBACK_MAX_CLEAR_REGIONS,
   POSTER_FEEDBACK_MAX_MARKERS,
   type FeedbackRegion,
+  type PosterClearAction,
 } from '@dgipr/schemas';
 import { STR } from '../lib/strings';
 
@@ -29,9 +34,16 @@ export type PosterMarkerDraft = {
   note: string;
 };
 
-// Same shape as a marker, but `note` is optional in meaning: an empty one means
-// "you decide where this content goes", which is the common case.
-export type PosterClearDraft = PosterMarkerDraft;
+// A marker's shape plus the ACTION, and two differences in meaning: `note` is
+// optional (an empty one means "you decide where this content goes", the common
+// case), and `action` says what happens to whatever is inside —
+//   'displace' — it stays on the poster; the layout is re-laid-out to fit it
+//                elsewhere. The default, and what this gesture always meant.
+//   'remove'   — it is deleted and nothing else on the poster moves.
+// Per box, not per round, so one round can free one area each way.
+export type PosterClearDraft = PosterMarkerDraft & {
+  action: PosterClearAction;
+};
 
 export type AnnotatorMode = 'mark' | 'clear';
 

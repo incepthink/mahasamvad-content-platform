@@ -44,6 +44,17 @@ export {
   CLEAR_REGION_LETTERS,
 } from './feedback-marker.js';
 export type { NormalizedRegion } from './feedback-marker.js';
+// Did a "free this space" edit actually free the space? READ-ONLY — it measures the
+// returned poster and reports, and never writes a pixel (see clear-region-check.ts for
+// why a code-composited fill was rejected). Log-only at the call site for now.
+export {
+  measureClearedRegions,
+  formatClearRegionReport,
+} from './clear-region-check.js';
+export type {
+  ClearRegionMeasurement,
+  ClearRegionRect,
+} from './clear-region-check.js';
 // Measures what colours a rendered poster actually uses, so the palette rotation can spread away
 // from what SHIPPED rather than from what was merely assigned (see poster-colours.ts).
 export { measurePosterColours, hueBucketOf } from './poster-colours.js';

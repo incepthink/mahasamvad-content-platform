@@ -25,7 +25,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { FileText, Music } from 'lucide-react';
+import {
+  FileCheck2,
+  FileText,
+  Heading1,
+  MessageSquareText,
+  Music,
+  PenLine,
+  SquarePen,
+  TriangleAlert,
+} from 'lucide-react';
 import type {
   DloCategory,
   DloIntakeDetail,
@@ -58,6 +67,7 @@ import { useDloReviewAutosave } from '../lib/useDloReviewAutosave';
 import { useGeneration } from '../lib/useGeneration';
 import { useTasks } from '../lib/TasksProvider';
 import { AiInstructionsField } from './AiInstructionsField';
+import { CardTitle } from './CardTitle';
 import { DloCategoryPicker } from './DloCategoryPicker';
 import { DloSourceReview } from './DloSourceReview';
 import {
@@ -142,7 +152,7 @@ function GenerationPhase({
   if (detail?.status === 'failed') {
     return (
       <section className="card">
-        <h2>{STR.failedTitle}</h2>
+        <CardTitle icon={TriangleAlert}>{STR.failedTitle}</CardTitle>
         <p className="hint">{STR.failedHint}</p>
         {detail.error ? <p className="form-error">{detail.error}</p> : null}
         <div className="btn-row" style={{ marginTop: 14 }}>
@@ -159,7 +169,7 @@ function GenerationPhase({
   const draft = streamed ? (
     <section className="card">
       <div className="article-head">
-        <h2>{STR.articleStreamingTitle}</h2>
+        <CardTitle icon={PenLine}>{STR.articleStreamingTitle}</CardTitle>
         <span className="translating-note" aria-live="off">
           <span className="spinner" aria-hidden="true" />
           {STR.articleStreamingBadge}
@@ -269,7 +279,7 @@ function DloArticleOutput({
     <>
       <section className="card">
         <div className="article-head">
-          <h2>{STR.dloOutputTitle}</h2>
+          <CardTitle icon={FileCheck2}>{STR.dloOutputTitle}</CardTitle>
         </div>
         {/* Same as the detail page: rendered for reading, copied/downloaded raw. */}
         <MarkdownText text={article} className="article-body" />
@@ -299,6 +309,11 @@ function DloArticleOutput({
 
         <div style={{ marginTop: 22 }}>
           <label className="field-label" htmlFor="dlo-article-feedback">
+            <MessageSquareText
+              size={18}
+              className="label-icon"
+              aria-hidden="true"
+            />
             {STR.articleFeedbackTitle}
           </label>
           <p className="hint">{STR.articleFeedbackHint}</p>
@@ -860,7 +875,7 @@ export default function DloWorkspace({ intakeId }: { intakeId: string }) {
         <section className="card">
           {intake?.status === 'failed' ? (
             <>
-              <h2>{STR.failedTitle}</h2>
+              <CardTitle icon={TriangleAlert}>{STR.failedTitle}</CardTitle>
               <p className="hint">{STR.failedHint}</p>
               {intake.error ? (
                 <p className="form-error">{intake.error}</p>
@@ -972,7 +987,7 @@ export default function DloWorkspace({ intakeId }: { intakeId: string }) {
           />
 
           <section className="card">
-            <h2>{STR.dloReviewTitle}</h2>
+            <CardTitle icon={SquarePen}>{STR.dloReviewTitle}</CardTitle>
             <p className="hint">{STR.dloReviewHint}</p>
             {failedFiles.length > 0 ? (
               <div className="info-callout" style={{ marginTop: 12 }}>
@@ -1081,6 +1096,7 @@ export default function DloWorkspace({ intakeId }: { intakeId: string }) {
 
           <section className="card">
             <label className="field-label" htmlFor="dlo-review-heading">
+              <Heading1 size={18} className="label-icon" aria-hidden="true" />
               {STR.headingLabel}
             </label>
             <p className="hint">{STR.headingHint}</p>

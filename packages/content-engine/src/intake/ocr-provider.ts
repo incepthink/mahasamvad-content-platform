@@ -24,6 +24,7 @@
 // at all. A document that used to read "free" in the cost breakdown now shows up in it.
 
 import { pathToFileURL } from 'node:url';
+import { recordOcrCost } from '../cost/cost-meter.js';
 import { extractPdfPagesViaOcr } from './sarvam-doc.js';
 import { extractPdfPagesViaOpenAI } from './openai-doc.js';
 import { type ExtractPdfOptions, type PdfPage } from './pdf-shared.js';
@@ -60,11 +61,19 @@ export async function extractPdfPagesViaProvider(
   options?: ExtractPdfOptions,
 ): Promise<PdfPage[]> {
   const provider = ocrProviderName();
+  // Metered HERE rather than inside either client, so a third provider is counted the day it
+  // is added. The pages that come back are the pages that were actually read — an options
+  // selection can be trimmed by the client, and the analytics card must report what was
+  // bought, not what was asked for.
+  const meter = (pages: PdfPage[]): PdfPage[] => {
+    recordOcrCost(provider, pages.length);
+    return pages;
+  };
   switch (provider) {
     case 'sarvam':
-      return extractPdfPagesViaOcr(name, data, options);
+      return extractPdfPagesViaOcr(name, data, options).then(meter);
     case 'openai':
-      return extractPdfPagesViaOpenAI(name, data, options);
+      return extractPdfPagesViaOpenAI(name, data, options).then(meter);
     default:
       throw new Error(
         `Unknown OCR_PROVIDER "${provider}". ` +

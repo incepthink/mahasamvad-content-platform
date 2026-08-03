@@ -22,7 +22,9 @@
 // Controlled by the parent so /dlo and the media room can hold the state
 // in whatever shape their own flow needs.
 
+import { UserCog } from 'lucide-react';
 import type { KnownDesignation, PreparedName } from '@dgipr/schemas';
+import { CardTitle } from './CardTitle';
 import { STR } from '../lib/strings';
 
 // One editable row's current state, keyed by the person's Marathi name.
@@ -113,7 +115,9 @@ export function DesignationReview({
 
   return (
     <section className="card names-review">
-      <h3 className="names-review-title">{STR.designationsTitle}</h3>
+      <CardTitle icon={UserCog} level={3} className="names-review-title">
+        {STR.designationsTitle}
+      </CardTitle>
       <p className="hint">{STR.designationsHint}</p>
 
       {/* The lookup is a paid call over the whole reviewed note and can take a few seconds,

@@ -14,7 +14,11 @@
 // Client state only: lost on reload (regions are never persisted server-side).
 
 import { useEffect, useRef, useState } from 'react';
-import type { FeedbackRegion, GenerationDetail } from '@dgipr/schemas';
+import type {
+  FeedbackRegion,
+  GenerationDetail,
+  PosterClearAction,
+} from '@dgipr/schemas';
 import type {
   PosterClearDraft,
   PosterMarkerDraft,
@@ -81,17 +85,22 @@ export function usePosterMarkers(
   const setNote = (id: number, note: string) =>
     setMarkers((ms) => ms.map((m) => (m.id === id ? { ...m, note } : m)));
 
+  // 'displace' by default — what this gesture has always meant, and the safer
+  // default of the two: it cannot lose information if the officer never looks at
+  // the toggle. 'remove' deletes, so it must be chosen deliberately.
   const addClearRegion = (region: FeedbackRegion) => {
     startRound();
     setClearRegions((cs) => [
       ...cs,
-      { id: nextClearId.current++, region, note: '' },
+      { id: nextClearId.current++, region, note: '', action: 'displace' },
     ]);
   };
   const removeClearRegion = (id: number) =>
     setClearRegions((cs) => cs.filter((c) => c.id !== id));
   const setClearNote = (id: number, note: string) =>
     setClearRegions((cs) => cs.map((c) => (c.id === id ? { ...c, note } : c)));
+  const setClearAction = (id: number, action: PosterClearAction) =>
+    setClearRegions((cs) => cs.map((c) => (c.id === id ? { ...c, action } : c)));
 
   // Call after a successful send. Reads both sets from the render the submit
   // started in — safe because the note inputs and annotator are disabled while
@@ -118,6 +127,7 @@ export function usePosterMarkers(
     addClearRegion,
     removeClearRegion,
     setClearNote,
+    setClearAction,
     markSubmitted,
     dismissSubmitted,
   };

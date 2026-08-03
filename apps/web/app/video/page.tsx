@@ -211,12 +211,16 @@ export default function VideoPage() {
 
   return (
     <main className="page">
-      <h1 className="page-title">{STR.videoTitle}</h1>
+      <header className="page-head">
+        <div className="page-head-text">
+          <h1 className="page-title">{STR.videoTitle}</h1>
+          <p className="page-sub">{STR.videoIntro}</p>
+        </div>
+      </header>
 
       <section className="card">
-        <p className="hint">{STR.videoIntro}</p>
         {activeProject ? (
-          <div className="info-callout" style={{ marginTop: 12 }}>
+          <div className="info-callout" style={{ marginBottom: 20 }}>
             <p>
               {STR.videoActiveBlocked}{' '}
               <Link href={`/video/${activeProject.id}`}>
@@ -227,9 +231,7 @@ export default function VideoPage() {
             </p>
           </div>
         ) : null}
-        <p className="field-label" style={{ marginTop: 16 }}>
-          {STR.videoInputModeLabel}
-        </p>
+        <p className="field-label">{STR.videoInputModeLabel}</p>
         <div className="segmented" style={{ marginTop: 10 }}>
           <button
             type="button"
@@ -381,7 +383,7 @@ export default function VideoPage() {
         </div>
       </section>
 
-      <section className="card">
+      <section className="card card-action">
         <div className="btn-row">
           <button
             type="button"

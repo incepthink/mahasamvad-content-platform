@@ -36,6 +36,8 @@ export const STR = {
   // Media-room home page: paste a FINISHED article, then make a poster / social post
   // from it (no article is written here — the pasted text is used as-is).
   mediaRoomTitle: 'पोस्टर व सोशल पोस्ट तयार करा',
+  mediaRoomIntro:
+    'तयार झालेला लेख चिकटवा किंवा फाईलमधून घ्या — त्यावरून पोस्टर, ट्विटर व फेसबुक पोस्ट किंवा फक्त कॅप्शन तयार होईल.',
   articlePasteLabel: 'पूर्ण लेख येथे चिकटवा',
   articlePasteHint:
     'तयार झालेला लेख येथे चिकटवा किंवा खालून फाईलमधून घ्या — दोन्ही एकत्रही करता येईल. त्यावरून पोस्टर व सोशल पोस्ट तयार होईल.',
@@ -47,10 +49,11 @@ export const STR = {
   mediaOutputLabel: 'काय तयार करायचे?',
   mediaFormatYoutube: 'यूट्यूब थंबनेल',
   mediaFormatYoutubeDesc: 'यूट्यूब व्हिडिओसाठी मराठी थंबनेल',
-  mediaFormatTwitter: 'ट्विटर पोस्ट',
-  mediaFormatTwitterDesc: 'X (ट्विटर) साठी मराठी पोस्टर',
-  mediaFormatFacebook: 'फेसबुक पोस्ट',
-  mediaFormatFacebookDesc: 'फेसबुकसाठी मराठी पोस्टर',
+  // One card for both social platforms: X and फेसबुक run the identical poster flow
+  // (same ठरलेले टेम्पलेट path, same master library), so asking which one was a question
+  // with no consequence at this step.
+  mediaFormatCreative: 'क्रिएटिव्ह',
+  mediaFormatCreativeDesc: 'सोशल मीडियासाठी मराठी पोस्टर',
   mediaFormatArticlePoster: 'लेख पोस्टर',
   mediaFormatArticlePosterDesc: 'लेखासोबत प्रसिद्ध करण्यासाठीचे पोस्टर',
   mediaOutputVideo: 'व्हिडिओ',
@@ -130,6 +133,13 @@ export const STR = {
   // DLO (Digital Liaison Officer) interface — meeting notes + recordings +
   // documents → transcription/extraction → editable review → article.
   dloTitle: 'DLO — बैठकीतून लेख',
+  /* The page header's one-liner, and now /dlo's ONLY blurb: the notes card used
+     to repeat the same sentence under a "नवीन काम" title of its own, which put
+     three lines of prose between the officer and the first box they type in. */
+  dloPageIntro:
+    'बैठकीचे ध्वनिमुद्रण, कागदपत्रे आणि टिपणी एकत्र करून त्यांतून प्रसिद्धीयोग्य मराठी लेख तयार करा.',
+  /* UNUSED — was the notes card's hint before the line above absorbed it. Kept
+     like dloNewWork/dloNewWorkTitle below, so restoring that card is one edit. */
   dloIntro:
     'बैठकीतील टिपणी, ध्वनिमुद्रण (MP3, WAV, M4A आदी) आणि कागदपत्रे (PDF/DOCX/TXT) येथे द्या — या सर्व माहितीतून लेख तयार होईल.',
   dloStepInput: 'माहिती द्या',
@@ -305,6 +315,7 @@ export const STR = {
   // Several officers work at once, so /dlo is a list of work and each intake lives at its
   // own address. 'काम' throughout rather than the more technical 'सत्र', matching dloStartOver.
   dloNewWork: '+ नवीन काम सुरू करा',
+  // UNUSED, like dloIntro above — the notes card no longer titles itself.
   dloNewWorkTitle: 'नवीन काम',
   dloResumeTitle: 'सुरू असलेले काम',
   dloResumeAction: 'पुढे चला →',
@@ -339,6 +350,8 @@ export const STR = {
 
   // Standalone Marathi-to-English/Hindi translation
   translatePageTitle: 'भाषांतर (Translation)',
+  translatePageIntro:
+    'मराठी मजकुराचे इंग्रजी किंवा हिंदी भाषांतर. भाषांतरापूर्वी नावे व पदनाम तपासली जातात, म्हणजे ती जशीच्या तशी राहतात.',
   translateInputLabel: 'मराठी मजकूर येथे लिहा किंवा चिकटवा',
   translateInputHint:
     'या मजकुराचे थेट भाषांतर केले जाईल. हा मजकूर जतन केला जाणार नाही.',
@@ -486,6 +499,8 @@ export const STR = {
 
   // Proof read (ad-hoc grammar/name/style check of pasted text; nothing stored)
   proofreadPageTitle: 'मुद्रितशोधन (Proof Read)',
+  proofreadPageIntro:
+    'मजकुरातील व्याकरण, शुद्धलेखन, विरामचिन्हे, नावे आणि महासंवाद-शैली तपासा. फक्त खात्रीशीर चुका दाखवल्या जातात.',
   proofreadInputLabel: 'मराठी किंवा इंग्रजी मजकूर येथे चिकटवा',
   proofreadInputHint:
     'व्याकरण, शुद्धलेखन, विरामचिन्हे, नावांची पडताळणी आणि महासंवाद-शैली तपासली जाईल. फक्त खात्रीशीर चुका दाखवल्या जातात. हा मजकूर जतन केला जाणार नाही.',
@@ -535,6 +550,18 @@ export const STR = {
   failedTitle: 'काम अपूर्ण राहिले',
   failedHint: 'क्षमस्व, काहीतरी चुकले. पुन्हा प्रयत्न करून पहा.',
   retry: 'पुन्हा प्रयत्न करा',
+  // Shown when an EDIT failed but everything produced earlier is still here — a different
+  // situation from a run that produced nothing, and it must not read like one.
+  editFailedTitle: 'शेवटची सुधारणा अयशस्वी झाली',
+  editFailedHint:
+    'आधीचे पोस्टर आणि त्याच्या सर्व आवृत्त्या जशाच्या तशा आहेत — फक्त ही एक सुधारणा लागू झाली नाही.',
+  editRetry: 'तीच सुधारणा पुन्हा करा',
+  editRecover: 'काम पुन्हा वापरात आणा',
+  dismiss: 'बंद करा',
+  // On a run that produced nothing there is nothing to recover, so the way forward is a
+  // fresh run — which is the पुढील पाऊल fold right below this card.
+  editFailedNewRunHint:
+    'या कामातून काहीच तयार झाले नाही. खाली “पुढील पाऊल” मध्ये याच टिपणीवरून नवीन काम सुरू करा.',
 
   // Results
   articleTitle: 'तयार झालेला लेख',
@@ -610,10 +637,15 @@ export const STR = {
   // that spot by hand afterwards, so the design there is moved elsewhere and the
   // rectangle is left as plain background.
   clearRegionHint:
-    'पोस्टरवर जी जागा मोकळी हवी आहे तिथे ओढून निळी चौकट काढा (जास्तीत जास्त २). त्या भागातील मजकूर व चित्रे रचनेनुसार दुसरीकडे हलवली जातील आणि ती जागा पार्श्वभूमीसारखीच मोकळी राहील — तिथे तुम्ही स्वतःचा लोगो किंवा फोटो नंतर लावू शकता.',
+    'पोस्टरवर जी जागा मोकळी हवी आहे तिथे ओढून निळी चौकट काढा (जास्तीत जास्त २). प्रत्येक चौकटीसाठी काय करायचे ते निवडा — “दुसरीकडे हलवा” म्हणजे त्या भागातील मजकूर व चित्रे पोस्टरवरच दुसरीकडे नेली जातील (त्यासाठी पोस्टरची संपूर्ण रचना बदलू शकते), तर “काढून टाका” म्हणजे तो मजकूर पूर्णपणे काढून टाकला जाईल आणि बाकी काहीही हलणार नाही. दोन्हींत ती जागा पार्श्वभूमीसारखीच मोकळी राहील — तिथे तुम्ही स्वतःचा लोगो किंवा फोटो नंतर लावू शकता.',
   clearRegionLabel: 'मोकळी जागा',
   clearRegionNotePlaceholder: 'तो भाग कुठे हलवायचा? (ऐच्छिक)…',
   clearRegionRemove: 'मोकळी जागा काढा',
+  // Per-box action toggle. 'displace' is the default; 'remove' deletes, so it is
+  // never the pre-selected option.
+  clearActionDisplace: 'दुसरीकडे हलवा',
+  clearActionRemove: 'काढून टाका',
+  clearActionLabel: 'या जागेतील मजकुराचे काय करायचे?',
   clearRegionSubmittedHint:
     'पाठवलेल्या मोकळ्या जागा पोस्टरवर दाखवल्या आहेत — नवीन चौकट काढल्यास त्या हटतील.',
   clearRegionReservedZoneWarning:
@@ -859,6 +891,8 @@ export const STR = {
 
   // History
   historyTitle: 'मागील काम',
+  historyIntro:
+    'या मंचावर तयार झालेले सर्व लेख, पोस्टर आणि सोशल पोस्ट येथे मिळतील.',
   historyEmpty: 'अजून काहीही तयार केलेले नाही.',
   historyNew: '+ नवीन तयार करा',
   historySearchPlaceholder: 'मागील काम शोधा…',
@@ -875,7 +909,7 @@ export const STR = {
   // type may be in use at once; one is picked at random per poster).
   refTitle: 'पोस्टर मास्टर टेम्पलेट',
   refIntro:
-    'पोस्टरसाठी वापरली जाणारी मूळ (मास्टर) टेम्पलेट चित्रे येथे व्यवस्थापित करा. एका प्रकारात एकाच वेळी अनेक चित्रे "वापरात" ठेवता येतात — प्रत्येक पोस्टरसाठी त्यांतील एक आपोआप निवडले जाते. नवीन प्रकारही तयार करता येतात.',
+    'पोस्टरसाठी वापरली जाणारी मूळ (मास्टर) टेम्पलेट चित्रे येथे व्यवस्थापित करा. "वापरात" असलेल्या चित्रांतून प्रत्येक पोस्टरसाठी एक आपोआप निवडले जाते — ज्या टेम्पलेटमध्ये तुमचे सर्व मुद्दे मावतात ते.',
   refUpload: 'नवीन चित्र अपलोड करा',
   refUploading: 'अपलोड होत आहे…',
   refEnabled: 'वापरात',
@@ -894,6 +928,47 @@ export const STR = {
   refShowMore: 'आणखी दाखवा',
   refShowLess: 'कमी दाखवा',
   refHiddenCount: (n: number) => `आणखी ${n} चित्रे`,
+
+  // Shape bands — how the library is presented. These name what the picker actually
+  // reasons over (how many points a master can hold), not what its placeholder art is
+  // about, so an operator can answer "which one is this?" by looking at the picture.
+  // See lib/referenceGroups.ts for why the old per-type sections were replaced.
+  refBandUnanalyzed: 'अजून तपासलेली नाहीत',
+  refBandUnanalyzedHint:
+    'ही चित्रे तपासेपर्यंत पोस्टरसाठी निवडली जाणार नाहीत. प्रत्येकावर "पुन्हा तपासा" दाबा.',
+  refBandSingle: 'एकच संदेश',
+  refBandSingleHint: 'मुद्द्यांची यादी नाही — एक घोषणा, एक वाक्य किंवा अवतरण.',
+  refBandFew: 'थोडे मुद्दे',
+  refBandFewHint: '१ ते ३ मुद्दे मावतात.',
+  refBandMedium: 'मध्यम यादी',
+  refBandMediumHint: '४ ते ६ मुद्दे मावतात.',
+  refBandMany: 'मोठी यादी',
+  refBandManyHint: '७ किंवा अधिक मुद्दे मावतात.',
+  refBandCount: (n: number) => `${n} टेम्पलेट`,
+  refBandEmpty: 'या मापाचे एकही टेम्पलेट नाही.',
+
+  // Which library. Three separate libraries serve three separate features, so this is a
+  // real division — unlike the topic groups it replaces at the top of the page.
+  refTabTwitter: 'ट्विटर / फेसबुक',
+  refTabArticle: 'लेख पोस्टर',
+  refTabYoutube: 'यूट्यूब थंबनेल',
+
+  // Upload. One button for the whole page: the group is a field on the form rather than
+  // a card you have to find first.
+  refAddOpen: 'नवीन टेम्पलेट जोडा',
+  refAddTitle: 'नवीन टेम्पलेट',
+  refAddCancel: 'रद्द करा',
+  refAddGroupLabel: 'गट',
+  refAddGroupHint:
+    'नोंदीसाठीचा गट. पोस्टर तयार करताना संपूर्ण लायब्ररीतून सर्वात योग्य टेम्पलेट निवडले जाते — गट त्यावर मर्यादा घालत नाही.',
+  refAddPick: 'चित्र निवडा',
+  refAddHint: 'PNG, JPEG किंवा WebP चित्र निवडल्यावर ते लगेच जोडले जाईल.',
+  refGroupLine: 'गट',
+
+  // Heading over the flat, relevance-ordered list a search produces. Bands are dropped
+  // there on purpose: a search has its own order, and re-bucketing it would bury the
+  // best hit under a size heading.
+  refSearchResultsTitle: 'शोध निकाल',
   // Template brand family. A type tagged CMO renders the मंत्रिमंडळ निर्णय lockup
   // (code-stamped leader header + DGIPR footer) and is kept out of the DGIPR
   // classifier pool — it appears only when a run picks विभाग = CMO.
@@ -1014,7 +1089,8 @@ export const STR = {
   transcribeHint:
     'एकावेळी अनेक फाईल जोडता येतील (कमाल १० फाईल्स, प्रत्येकी ५० MB). फक्त MP3, AAC व M4A चालतात.',
   transcribeFilesTitle: 'जोडलेली ध्वनिमुद्रणे',
-  transcribeNeedFile: 'कृपया किमान एक ध्वनिमुद्रण जोडा किंवा यूट्युब लिंक द्या.',
+  transcribeNeedFile:
+    'कृपया किमान एक ध्वनिमुद्रण जोडा किंवा यूट्युब लिंक द्या.',
   transcribeSubmit: 'मजकूर तयार करा',
   transcribeRunning:
     'मजकूर तयार होत आहे… मोठ्या ध्वनिमुद्रणाला काही मिनिटे लागू शकतात.',
@@ -1233,7 +1309,209 @@ export const STR = {
     'दृश्यांची चित्रे व हालचालीची सूचना पुन्हा तपासून बदलता येईल. आधी तयार झालेल्या क्लिप्स जतन राहतात — पुन्हा ॲनिमेशन केल्यास फक्त उरलेली दृश्ये तयार होतील.',
   videoStillPending: 'चित्र अजून काढलेले नाही',
   videoSceneFailed: 'हे दृश्य अयशस्वी झाले',
+
+  // ---------- वापर विश्लेषण (/analytics) ----------
+  navAnalytics: 'वापर विश्लेषण',
+  analyticsTitle: 'वापर विश्लेषण',
+  analyticsIntro:
+    'विभागाने या मंचावर किती काम केले याचा एकत्रित आढावा. सर्व आकडे संपूर्ण विभागाचे आहेत.',
+  analyticsRangeLabel: 'कालावधी',
+  analyticsRange7d: '७ दिवस',
+  analyticsRange30d: '३० दिवस',
+  analyticsRange90d: '९० दिवस',
+  analyticsRangeAll: 'सुरुवातीपासून',
+  analyticsLoading: 'आकडेवारी गोळा करत आहोत…',
+  analyticsRetry: 'पुन्हा प्रयत्न करा',
+  analyticsEmpty: 'या कालावधीत कोणतीही नोंद नाही.',
+  analyticsTrendTitle: 'दैनंदिन वापर',
+  analyticsTrendHint:
+    'प्रत्येक स्तंभ म्हणजे त्या दिवशी पूर्ण झालेली कामे. रिकामे दिवसही दाखवले आहेत.',
+  analyticsTrendAllHint: 'शेवटच्या ९० दिवसांचा आलेख.',
+  analyticsTrendTable: 'दिवसनिहाय आकडे पाहा',
+  analyticsTableDay: 'दिवस',
+  analyticsTableWork: 'कामे',
+  analyticsShareTitle: 'सुविधानिहाय वापर',
+  analyticsShareHint: 'या कालावधीत प्रत्येक सुविधेने तयार केलेले साहित्य.',
+  analyticsFeaturesTitle: 'सुविधानिहाय तपशील',
+  analyticsOpenFeature: 'तपशील पाहा',
+  analyticsBack: 'विश्लेषणाकडे परत',
+  analyticsOpenTool: 'ही सुविधा उघडा',
+  analyticsDetailsTitle: 'तपशील',
+  analyticsBreakdownTitle: 'विभागणी',
+  analyticsCostTitle: 'खर्च',
+  analyticsCostPerOutput: 'सरासरी खर्च प्रति साहित्य',
+  analyticsCostTotal: 'या कालावधीतील एकूण खर्च',
+  analyticsCostNone: 'या सुविधेचा खर्च स्वतंत्रपणे मोजला जात नाही.',
+  analyticsNotTracked: 'नोंद उपलब्ध नाही',
+  analyticsEventNotice:
+    'या सुविधेची नोंद ठेवायला अलीकडेच सुरुवात झाली आहे, त्यामुळे त्याआधीचा वापर यात दिसणार नाही.',
+  analyticsEventsUnavailable:
+    'वापराच्या नोंदी वाचता आल्या नाहीत. भाषांतर व मुद्रितशोधनाचे आकडे अपूर्ण असू शकतात.',
+  analyticsEstimateNote: 'हा अंदाजे आकडा आहे.',
+  analyticsDeltaNew: 'नवीन',
+  analyticsDeltaFlat: 'बदल नाही',
+
+  // Services — which paid outside service each feature actually ran on. Named by
+  // CAPABILITY, never by provider: "ध्वनिलेखन" stays ध्वनिलेखन whether ElevenLabs or
+  // Sarvam served it, and the provider is a smaller line underneath.
+  analyticsServicesTitle: 'वापरलेल्या सेवा',
+  analyticsServicesHint:
+    'या सुविधेतील प्रत्येक कामासाठी वापरलेली सेवा, मॉडेल, कॉल, प्रक्रिया आणि खर्च.',
+  analyticsServicesNone: 'या कालावधीत या कार्यप्रवाहातील कोणतीही सेवा वापरली गेली नाही.',
+  analyticsServiceTableTask: 'काम आणि सेवा',
+  analyticsServiceTableUsage: 'वापर',
+  analyticsServiceTableCost: 'खर्च',
+  analyticsServiceText: 'मजकूर निर्मिती (AI)',
+  analyticsServiceEmbedding: 'अर्थाधारित संदर्भ शोध',
+  analyticsServiceImage: 'प्रतिमा निर्मिती',
+  analyticsServiceOcr: 'स्कॅन केलेली पृष्ठे वाचणे (OCR)',
+  analyticsServiceStt: 'ध्वनिलेखन (आवाजाचे मजकुरात रूपांतर)',
+  analyticsServiceTts: 'निवेदनाचा आवाज (TTS)',
+  analyticsServiceClip: 'व्हिडिओ क्लिप निर्मिती',
+  analyticsServiceTranslate: 'भाषांतर सेवा',
+  analyticsTaskAudioTranscription: 'ध्वनिमुद्रणाचे ध्वनिलेखन',
+  analyticsTaskYoutubeTranscription: 'YouTube व्हिडिओचे ध्वनिलेखन',
+  analyticsTaskAudioYoutubeTranscription:
+    'ध्वनिमुद्रण व YouTube व्हिडिओचे ध्वनिलेखन',
+  analyticsTaskDocumentOcr: 'स्कॅन केलेल्या पृष्ठांचे OCR वाचन',
+  analyticsTaskDesignationExtraction: 'व्यक्ती व पदनाम शोध',
+  analyticsTaskArticleGeneration: 'लेखाचा मसुदा व पडताळणी',
+  analyticsTaskArticleRevision: 'अभिप्रायानुसार लेख सुधारणा',
+  analyticsTaskTranslationNames: 'भाषांतरापूर्वी नावांचा शोध',
+  analyticsTaskEnglishTranslation: 'इंग्रजी भाषांतर',
+  analyticsTaskHindiTranslation: 'हिंदी भाषांतर',
+  analyticsTaskProofreading: 'मुद्रितशोधन व भाषा तपासणी',
+  analyticsTaskSocialPost: 'सोशल मीडिया पोस्टर तयार करणे',
+  analyticsTaskSocialCaption: 'सोशल मीडिया कॅप्शन लिहिणे',
+  analyticsTaskSocialCaptionRevision: 'कॅप्शनमध्ये सुधारणा',
+  analyticsTaskYoutubeThumbnail: 'YouTube थंबनेल तयार करणे',
+  analyticsTaskPosterRegeneration: 'पोस्टर पुन्हा तयार करणे',
+  analyticsTaskPosterContentRevision: 'पोस्टर मजकूर किंवा दृश्य सुधारणा',
+  analyticsTaskPosterImageRevision: 'निशाणीवरून पोस्टर प्रतिमा सुधारणा',
+  analyticsTaskArticlePoster: 'लेखासाठी पोस्टर तयार करणे',
+  analyticsTaskVideoScript: 'व्हिडिओ पटकथा व दृश्य नियोजन',
+  analyticsTaskVideoStoryboard: 'निवेदन व स्टोरीबोर्ड तयार करणे',
+  analyticsTaskVideoStoryboardRevision: 'स्टोरीबोर्ड दृश्य पुन्हा तयार करणे',
+  analyticsTaskVideoClips: 'व्हिडिओ क्लिप तयार करणे',
+  analyticsTaskVideoSceneRevision: 'व्हिडिओ दृश्य पुन्हा ॲनिमेट करणे',
+  analyticsTaskVideoNarration: 'व्हिडिओ निवेदन तयार करणे',
+  analyticsTaskLegacyCombined: 'पूर्वीची एकत्रित AI नोंद',
+  analyticsUnitCalls: 'कॉल',
+  analyticsUnitImages: 'प्रतिमा',
+  analyticsUnitPages: 'पृष्ठे',
+  analyticsUnitMinutes: 'मिनिटे',
+  analyticsUnitChars: 'अक्षरे',
+  analyticsUnitClips: 'क्लिप',
+  // Marked per row rather than explained once at the bottom: a reader who has already
+  // taken the number as measured will not go back and re-read it.
+  analyticsServiceEstimated: 'अंदाजित',
+  analyticsServiceEstimatedTitle:
+    'हा खर्च ठरवलेल्या दराने काढला आहे, प्रत्यक्ष बिलावरून नाही.',
+  analyticsServiceRecent: 'अलीकडून नोंद',
+  analyticsServiceRecentTitle:
+    'या सेवेची नोंद ठेवायला अलीकडेच सुरुवात झाली, त्यामुळे त्याआधीचा वापर यात नाही.',
+  analyticsRatesTitle: 'अंदाजासाठी वापरलेले दर',
+  analyticsRatesHint:
+    'हे दर आमच्याकडे नोंदवलेले आहेत; सेवेच्या किमती बदलल्यास ते बदलावे लागतात.',
+
+  // Metric keys → labels. One flat map, shared by the KPI tiles, the feature
+  // cards and the drill-downs, so the same number is never named two ways.
+  analyticsMetricTotalOutputs: 'एकूण तयार झालेले साहित्य',
+  analyticsMetricArticles: 'लेख',
+  analyticsMetricPosters: 'पोस्टर',
+  analyticsMetricCaptions: 'कॅप्शन',
+  analyticsMetricTranscripts: 'ध्वनिलेखने',
+  analyticsMetricVideos: 'व्हिडिओ',
+  analyticsMetricTranslations: 'भाषांतरे',
+  analyticsMetricChecks: 'तपासण्या',
+  analyticsMetricActiveDays: 'वापर झालेले दिवस',
+  analyticsMetricCostPerOutput: 'सरासरी खर्च प्रति साहित्य',
+  analyticsMetricPublished: 'प्रकाशित पोस्ट',
+  analyticsMetricFeedbackRounds: 'सुधारणा फेऱ्या',
+  analyticsMetricFailed: 'अयशस्वी',
+  analyticsMetricSuccessRate: 'यशस्वी होण्याचे प्रमाण',
+  analyticsMetricIntakesStarted: 'सुरू केलेली कामे',
+  analyticsMetricIntakesReady: 'तपासणीसाठी तयार',
+  analyticsMetricPdfExports: 'PDF डाउनलोड',
+  analyticsMetricRecordings: 'ध्वनिमुद्रणे व लिंक',
+  analyticsMetricCharacters: 'अक्षरे',
+  analyticsMetricEstimatedMinutes: 'अंदाजे कालावधी',
+  analyticsMetricFailedFiles: 'अयशस्वी फाईल्स',
+  analyticsMetricAdHoc: 'सुटे भाषांतर',
+  analyticsMetricFromGenerations: 'लेखांची भाषांतरे',
+  analyticsMetricIssuesFound: 'आढळलेल्या त्रुटी',
+  analyticsMetricProjectsStarted: 'सुरू केलेले प्रकल्प',
+
+  // Breakdown slice keys → labels.
+  analyticsSliceTwitter: 'ट्विटर',
+  analyticsSliceFacebook: 'फेसबुक',
+  analyticsSliceArticlePoster: 'लेख पोस्टर',
+  analyticsSliceYoutubeThumb: 'यूट्युब थंबनेल',
+  analyticsSliceNews: 'बातमी',
+  analyticsSliceScheme: 'योजना-लेख',
+  analyticsSliceEnglish: 'इंग्रजी',
+  analyticsSliceHindi: 'हिंदी',
+  analyticsSliceMarathi: 'मराठी',
+  analyticsSliceShort: '३० सेकंदांचे',
+  analyticsSliceLong: '१ मिनिटाचे',
 } as const;
+
+// The window the page is reporting on, spelled out. Shown under the title because
+// "गेल्या ३० दिवसांत" alone leaves the reader guessing which 30 days — and in a
+// meeting the exact dates are the first thing that gets asked.
+export function analyticsWindowLine(window: string): string {
+  return `${window} या कालावधीतील आकडेवारी`;
+}
+
+// Growth against the previous period of the same length. Stated in full rather
+// than as a bare arrow: this line is often read aloud.
+export function analyticsDeltaLine(
+  percent: number,
+  direction: 'up' | 'down',
+): string {
+  const change = percent.toLocaleString('mr-IN');
+  return direction === 'up'
+    ? `मागील कालावधीपेक्षा ${change}% जास्त`
+    : `मागील कालावधीपेक्षा ${change}% कमी`;
+}
+
+// Used instead of a percentage when the base was so small that the percentage would be
+// absurd — the first busy month against a nearly empty one.
+export function analyticsDeltaCount(
+  count: number,
+  direction: 'up' | 'down',
+): string {
+  const change = count.toLocaleString('mr-IN');
+  return direction === 'up'
+    ? `मागील कालावधीपेक्षा ${change} ने जास्त`
+    : `मागील कालावधीपेक्षा ${change} ने कमी`;
+}
+
+// "$1" is deliberately spelled out rather than written as a symbol: `$१` mixes a Latin sign
+// with a Devanagari numeral and reads as neither.
+export function analyticsCostRateNote(rate: number): string {
+  return `खर्च १ अमेरिकी डॉलर = ₹${rate.toLocaleString('mr-IN')} या दराने रुपयांत दाखवला आहे.`;
+}
+
+// One rate line, e.g. "ध्वनिलेखन (ElevenLabs): ₹३५ प्रति ६० मिनिटे". `per` is spelled out
+// rather than reduced to a per-unit figure, because the published rate really is quoted per
+// hour or per 1,000 characters and a reader reconciling it against an invoice needs the
+// same shape.
+export function analyticsRateLine(
+  service: string,
+  provider: string,
+  inr: number,
+  per: number,
+  unit: string,
+): string {
+  const amount = inr.toLocaleString('mr-IN', { maximumFractionDigits: 2 });
+  const quantity = per.toLocaleString('mr-IN');
+  return `${service} (${provider}): ₹${amount} प्रति ${quantity} ${unit}`;
+}
+
+export function analyticsDayWork(day: string, count: number): string {
+  return `${day}: ${count.toLocaleString('mr-IN')} कामे`;
+}
 
 // Marathi labels + chip colors for a video project's statuses. The two gates
 // are the USER's turn (not the server's), so they get the queued color, not

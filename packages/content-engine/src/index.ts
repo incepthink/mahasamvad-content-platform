@@ -73,10 +73,16 @@ export { reviseCopy } from './generation/revise-copy.js';
 export { reviseSceneBrief } from './generation/revise-scene.js';
 export {
   interpretImageFeedback,
+  type ClearRegionInput,
   type FeedbackAnnotationInput,
   type InterpretImageFeedbackInput,
   type InterpretedImageFeedback,
 } from './generation/interpret-image-feedback.js';
+// What a BLUE "free this space" rectangle does to the content inside it. Mirrors
+// PosterClearAction in @dgipr/schemas; the two prompt lanes and the vision pass all
+// take it, and the rule text that enforces it is code-appended in clear-space-rule.ts
+// where a model cannot paraphrase it away.
+export type { ClearAction } from './generation/clear-space-rule.js';
 export {
   translateArticle,
   type GlossaryEntry,
@@ -241,6 +247,7 @@ export {
 export {
   renderFrame,
   frameProviderApiKeyEnv,
+  frameProviderName,
   type FrameRenderInput,
   type FrameAspect,
 } from './video/frame-provider.js';
@@ -275,11 +282,16 @@ export {
 export {
   createCostAccumulator,
   runInCostScope,
+  runInCostTask,
   recordImageCost,
   recordGeminiImageCost,
   recordVideoCost,
   recordTtsCost,
   recordSttCost,
+  recordOcrCost,
+  type CostTaskService,
+  type CostTaskUsage,
+  recordTranslateCost,
   totalCostUsd,
   type CostAccumulator,
 } from './cost/cost-meter.js';
@@ -290,6 +302,14 @@ export {
   estimateVideoCostUsd,
   estimateTtsCostUsd,
   estimateSttCostUsd,
+  estimateOcrCostUsd,
+  estimateTranslateCostUsd,
+  // The configured per-unit rates behind every estimated figure on /analytics. Exported so
+  // the API can print them on the page rather than asking the reader to trust them.
+  ELEVENLABS_STT_PRICE_PER_HOUR_USD,
+  TTS_PRICE_PER_1K_CHARS_USD,
+  SARVAM_TRANSLATE_PRICE_PER_1K_CHARS_USD,
+  SARVAM_OCR_PRICE_PER_PAGE_USD,
   type ImageKind,
   type ImageQuality,
 } from './cost/pricing.js';

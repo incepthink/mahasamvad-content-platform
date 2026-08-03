@@ -5,12 +5,17 @@
 
 import type { FastifyInstance } from 'fastify';
 import {
+  createCostAccumulator,
   proofreadText,
+  runInCostScope,
+  runInCostTask,
   type ProofreadGlossaryTerm,
 } from '@dgipr/content-engine';
+import { recordTasksFromCost } from '../jobs/service-usage.js';
 import {
   findGlossaryTermsInText,
   listGlossaryTerms,
+  recordUsageEvent,
   type SupabaseClient,
 } from '@dgipr/database';
 import { ProofreadRequestSchema } from '@dgipr/schemas';
@@ -48,6 +53,28 @@ export function registerProofreadRoutes(
       }
     }
 
-    return proofreadText(body.text, [...byMarathi.values()]);
+    // A cost scope so /analytics can report what मुद्रितशोधन spends. The route persists
+    // nothing, so this is the only place those one-to-two chat calls can be attributed —
+    // and it is why the feature's cost stops reading "not measured".
+    const cost = createCostAccumulator();
+    const result = await runInCostScope(cost, () =>
+      runInCostTask('proofreading', () =>
+        proofreadText(body.text, [...byMarathi.values()]),
+      ),
+    );
+    recordTasksFromCost(client, 'proofread', cost);
+
+    // This route stores nothing by design, so without an event the analytics page could only
+    // report मुद्रितशोधन as "never used". Counts and a language code only — the text checked
+    // is never recorded (0043). Fire-and-forget: it cannot fail the check.
+    recordUsageEvent(client, {
+      feature: 'proofread',
+      action: 'check',
+      charCount: body.text.length,
+      count: result.issues.length,
+      detail: { language: result.language },
+    });
+
+    return result;
   });
 }

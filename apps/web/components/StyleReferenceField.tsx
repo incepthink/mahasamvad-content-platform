@@ -14,6 +14,7 @@
 // them, so the misunderstanding has to be prevented here rather than explained afterwards.
 
 import { useId } from 'react';
+import { BookOpen } from 'lucide-react';
 import { STR } from '../lib/strings';
 
 export function StyleReferenceField({
@@ -30,6 +31,7 @@ export function StyleReferenceField({
   return (
     <section className="card">
       <label className="field-label" htmlFor={id}>
+        <BookOpen size={18} className="label-icon" aria-hidden="true" />
         {STR.styleRefLabel}
       </label>
       <p className="hint">{STR.styleRefHint}</p>

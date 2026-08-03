@@ -56,8 +56,12 @@ export default function TranscribePage() {
 
   return (
     <main className="page">
-      <h1 className="page-title">{STR.transcribeTitle}</h1>
-      <p className="page-intro">{STR.transcribeIntro}</p>
+      <header className="page-head">
+        <div className="page-head-text">
+          <h1 className="page-title">{STR.transcribeTitle}</h1>
+          <p className="page-sub">{STR.transcribeIntro}</p>
+        </div>
+      </header>
 
       <TranscriptionForm onStarted={start} busy={busy} />
 

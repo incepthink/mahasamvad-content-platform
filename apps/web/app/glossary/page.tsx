@@ -723,8 +723,12 @@ export default function GlossaryPage() {
 
   return (
     <main className="page">
-      <h1 className="page-title">{STR.glossaryTitle}</h1>
-      <p className="hint gl-intro">{STR.glossaryIntro}</p>
+      <header className="page-head">
+        <div className="page-head-text">
+          <h1 className="page-title">{STR.glossaryTitle}</h1>
+          <p className="page-sub">{STR.glossaryIntro}</p>
+        </div>
+      </header>
 
       <AddTermFold onAdded={afterMutation} />
 

@@ -4,22 +4,64 @@
 
 :root {
   color-scheme: light;
-  --bg: #e9dcc9;
-  --bg-accent: #d8c3a8;
-  --text: #201910;
-  --muted: #5e5247;
+  /* Surfaces. The canvas is a calm warm sand so white cards read as raised;
+     the old #e9dcc9 -> #d8c3a8 gradient was dark enough to muddy them. */
+  --bg: #f4eee5;
+  --bg-accent: #ebe1d3;
+  --text: #1c1611;
+  --muted: #6b6057;
   --card: #ffffff;
-  --border: rgba(77, 58, 41, 0.16);
-  --shadow: 0 10px 40px rgba(61, 42, 26, 0.1);
+  /* A second, tinted surface for rows/wells nested inside a white card —
+     use this instead of reaching for --bg, which is the page canvas. */
+  --surface: #faf7f2;
+  --border: rgba(63, 45, 30, 0.13);
+  --border-strong: rgba(63, 45, 30, 0.24);
+
+  /* Elevation is layered (a tight contact shadow + a wide ambient one) rather
+     than one large blur — that is what stops cards looking like they float. */
+  --shadow-sm: 0 1px 2px rgba(61, 42, 26, 0.06);
+  --shadow-md:
+    0 1px 2px rgba(61, 42, 26, 0.05), 0 4px 14px rgba(61, 42, 26, 0.07);
+  --shadow-lg:
+    0 2px 4px rgba(61, 42, 26, 0.05), 0 12px 32px rgba(61, 42, 26, 0.09);
+  --shadow: var(--shadow-md);
+
+  /* One radius scale. Everything rounded picks a rung; nothing invents a value. */
+  --r-sm: 10px;
+  --r-md: 14px;
+  --r-lg: 18px;
+  --r-xl: 24px;
+
   --accent: #8c3f20;
   --accent-dark: #6f3016;
-  --accent-soft: #f6e6dd;
+  --accent-soft: #f7eae3;
+  --accent-tint: #fdf7f4;
+  --ring: rgba(140, 63, 32, 0.28);
+
   --ok: #1f6f43;
-  --ok-soft: #e2f2e8;
+  --ok-soft: #e4f3ea;
   --warn: #8a6d1a;
-  --warn-soft: #f7efd7;
+  --warn-soft: #f8f0d9;
   --err: #a03123;
-  --err-soft: #fae4e1;
+  --err-soft: #fbe6e3;
+}
+
+/* One focus treatment for the whole product. Keyboard users get a thick accent
+   ring; mouse users never see it (:focus-visible, not :focus). */
+:where(a, button, input, textarea, select, [tabindex]):focus-visible {
+  outline: 3px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+}
+
+::placeholder {
+  color: var(--muted);
+  opacity: 0.72;
 }
 
 * {
@@ -30,10 +72,29 @@ html,
 body {
   margin: 0;
   min-height: 100vh;
-  background: linear-gradient(180deg, var(--bg), var(--bg-accent));
+  /* Fixed attachment so the canvas does not re-gradient as a long page scrolls —
+     on /glossary and /references that shift was visible. */
+  background: var(--bg);
+  background-image: linear-gradient(
+    180deg,
+    var(--bg) 0%,
+    var(--bg-accent) 100%
+  );
+  background-attachment: fixed;
   color: var(--text);
   font-size: 18px;
   line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Marathi headings set tighter than the 1.65 body leading, which is set for
+   running Devanagari and is far too loose for a two-word title. */
+h1,
+h2,
+h3 {
+  line-height: 1.3;
+  letter-spacing: -0.005em;
 }
 
 /* Desktop shell: body is a row of [sidebar | .app-main]. .app-main is itself a
@@ -85,7 +146,10 @@ a {
   gap: 18px;
   padding: 16px 14px 20px;
   background: var(--card);
-  border-right: 3px solid var(--accent);
+  /* A hairline + shadow instead of the old 3px maroon slab: the accent now
+     appears where it means something (the active row), not as a wall. */
+  border-right: 1px solid var(--border);
+  box-shadow: 1px 0 0 rgba(63, 45, 30, 0.04);
   transition: width 0.2s ease;
 }
 
@@ -95,6 +159,8 @@ a {
   justify-content: space-between;
   gap: 8px;
   min-height: 48px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
 }
 
 .sidebar-logo {
@@ -138,23 +204,34 @@ a {
   border: none;
   border-radius: 12px;
   background: transparent;
-  color: inherit;
+  color: var(--muted);
   font: inherit;
+  font-size: 0.95rem;
   font-weight: 600;
   text-decoration: none;
   text-align: start;
   cursor: pointer;
+  transition:
+    background 0.14s ease,
+    color 0.14s ease;
 }
 
 .sidebar-link svg,
 .sidebar .tasks-button svg {
   flex-shrink: 0;
-  color: var(--accent);
+  color: var(--muted);
+  transition: color 0.14s ease;
 }
 
 .sidebar-link:hover,
 .sidebar .tasks-button:hover {
-  background: var(--accent-soft);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.sidebar-link:hover svg,
+.sidebar .tasks-button:hover svg {
+  color: var(--accent);
 }
 
 /* Active page: accent fill + inset bar, so it never reads by color alone. */
@@ -163,6 +240,19 @@ a {
   color: var(--accent-dark);
   font-weight: 700;
   box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.sidebar-link.active svg {
+  color: var(--accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-link,
+  .sidebar-link svg,
+  .sidebar .tasks-button,
+  .sidebar .tasks-button svg {
+    transition: none;
+  }
 }
 
 .sidebar-label {
@@ -215,7 +305,8 @@ a {
   gap: 12px;
   padding: 10px 16px;
   background: var(--card);
-  border-bottom: 3px solid var(--accent);
+  border-bottom: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
 }
 
 .nav-toggle {
@@ -318,20 +409,27 @@ a {
 
 .site-footer {
   margin-top: 48px;
-  background: #8c3f20;
+  background: var(--accent-dark);
   border-top: 1px solid var(--border);
-  padding: 20px 24px;
+  padding: 22px 24px;
   display: flex;
   justify-content: center;
 }
 
+/* White on maroon. The colour lives here and not on an inline style, which is
+   what the markup used to work around --muted being unreadable on this band. */
 .powered-by {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   text-decoration: none;
-  color: var(--muted);
+  color: rgba(255, 255, 255, 0.82);
   font-size: 0.85rem;
+  transition: color 0.15s ease;
+}
+
+.powered-by:hover {
+  color: #fff;
 }
 
 /* .powered-logo {
@@ -345,20 +443,69 @@ a {
   width: 100%;
   max-width: 1080px;
   margin: 0 auto;
-  padding: 32px 24px 80px;
+  padding: 36px 24px 96px;
   flex: 1 0 auto;
 }
 
+/* ---------- page header ----------
+   Every index route opens with this block: an accent rule, the Marathi title,
+   an optional one-line subtitle, and optional right-aligned actions. It is the
+   only thing that makes ten separately-built pages read as one product, so a
+   new page must use it rather than a bare <h1>. */
+
+.page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px 24px;
+  flex-wrap: wrap;
+  margin: 0 0 28px;
+  padding: 0 0 20px 18px;
+  position: relative;
+  border-bottom: 1px solid var(--border);
+}
+
+/* The rule is a pseudo-element rather than a border-left so it hugs the text
+   block only and does not run down past the bottom border. */
+.page-head::before {
+  content: '';
+  position: absolute;
+  inset: 4px auto 24px 0;
+  width: 5px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, var(--accent), var(--accent-dark));
+}
+
+.page-head-text {
+  min-width: 0;
+}
+
 .page-title {
-  font-size: 1.7rem;
-  margin: 0 0 20px;
+  font-size: 1.75rem;
+  font-weight: 700;
+  margin: 0;
+}
+
+.page-sub {
+  color: var(--muted);
+  font-size: 0.95rem;
+  line-height: 1.5;
+  margin: 8px 0 0;
+  max-width: 68ch;
+}
+
+.page-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .card {
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 20px;
-  box-shadow: var(--shadow);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-md);
   padding: 28px;
 }
 
@@ -369,12 +516,163 @@ a {
 .card h2 {
   margin: 0 0 12px;
   font-size: 1.25rem;
+  font-weight: 700;
+}
+
+/* Card header: title left, actions right, with the description tucked under
+   the title. Optional — a card with one label + field does not need it. */
+.card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 0 0 18px;
+}
+
+.card-head h2 {
+  margin: 0;
+}
+
+.card-head .hint {
+  margin-top: 6px;
+}
+
+.card-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* ---------- titles with a leading icon ----------
+   A card heading that carries a small pictogram in front of its text. /dlo is a
+   dozen stacked white cards, and an officer looking for "the recordings one"
+   should find it without reading four Marathi sentences.
+   The icon is an ACCELERATOR, never the meaning: every one of these titles still
+   says the same thing in words beside it, so the rule at the top of this file —
+   status as text + colour, never colour (or here, a glyph) alone — is intact.
+   Rendered through <CardTitle>, so the size and spacing cannot drift per page. */
+.card-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.card-title-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r-md);
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+}
+
+/* The same idea one rung down, for a card whose title is the <label> of its one
+   field. No tinted tile there — a 36px chip beside a form label outweighs it. */
+.label-icon {
+  color: var(--accent);
+  vertical-align: -3px;
+  margin-inline-end: 8px;
+}
+
+/* Several cards name a LIST rather than a field, and write that name as a <p>.
+   label.field-label above is scoped to <label>, so those got no weight at all
+   and read as body text beside the rows they were labelling. */
+p.field-label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+/* ---------- action bar ----------
+   Several forms deliberately put the primary action in its own block ABOVE the
+   optional material below it (see the comment in DloIntakeForm) — that ordering
+   is a product decision and is kept. But rendered as a plain .card it is a
+   full-width sheet of white holding one button, which reads as a broken card.
+   .card-action keeps the block and states what it is: a tinted, compact bar. */
+.card.card-action {
+  padding: 18px 24px;
+  background: var(--accent-tint);
+  border-color: rgba(140, 63, 32, 0.2);
+  box-shadow: var(--shadow-sm);
+}
+
+/* A card whose whole content is one secondary control ("+ add another file"). */
+.card.card-compact {
+  padding: 16px 24px;
+  background: var(--surface);
+  box-shadow: none;
+}
+
+/* A live character count under a textarea. Right-aligned and labelled — an
+   unlabelled numeral sitting alone under a field reads as a stray glyph. */
+.char-count {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A small uppercase-ish label above a card title, for grouping sections. */
+.card-eyebrow {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--accent-dark);
+  margin: 0 0 6px;
 }
 
 .hint {
   color: var(--muted);
   font-size: 0.85rem;
   margin: 4px 0 0;
+}
+
+/* ---------- empty state ----------
+   Used where a list has nothing in it yet. An empty <div> reads as a broken
+   page; this reads as "nothing here yet, do this". */
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 10px;
+  padding: 48px 24px;
+  background: var(--card);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-xl);
+}
+
+.empty-state-icon {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  margin-bottom: 4px;
+}
+
+.empty-state h3 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.empty-state p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  max-width: 46ch;
+}
+
+/* ---------- section divider between stacked blocks on one page ---------- */
+.page-section + .page-section {
+  margin-top: 32px;
 }
 
 /* ---------- 5W1H at-a-glance card ---------- */
@@ -435,15 +733,29 @@ input[type='url'] {
   color: inherit;
   padding: 14px 16px;
   border: 1.5px solid var(--border);
-  border-radius: 14px;
-  background: #fffdfa;
+  border-radius: var(--r-md);
+  background: var(--surface);
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
+textarea:hover:not(:disabled),
+input[type='text']:hover:not(:disabled),
+input[type='url']:hover:not(:disabled) {
+  border-color: var(--border-strong);
+}
+
+/* Focus is a ring + a white field, so the active input is unmistakable on a
+   long form. outline-offset 0 keeps the ring flush with the rounded corner. */
 textarea:focus,
 input[type='text']:focus,
 input[type='url']:focus {
-  outline: 3px solid var(--accent-soft);
+  outline: 3px solid var(--ring);
+  outline-offset: 0;
   border-color: var(--accent);
+  background: var(--card);
 }
 
 textarea:disabled,
@@ -459,24 +771,43 @@ textarea.note-input {
 }
 
 .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   font: inherit;
   font-weight: 700;
-  border-radius: 14px;
-  border: 1.5px solid var(--border);
+  border-radius: var(--r-md);
+  border: 1.5px solid var(--border-strong);
   background: var(--card);
   color: var(--text);
   padding: 12px 22px;
   cursor: pointer;
   min-height: 48px;
+  box-shadow: var(--shadow-sm);
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.08s ease;
 }
 
-.btn:hover {
-  background: var(--bg);
+.btn:hover:not(:disabled) {
+  background: var(--accent-tint);
+  border-color: var(--accent);
+  color: var(--accent-dark);
+}
+
+/* A 1px press keeps the control feeling physical without moving layout. */
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: none;
 }
 
 .btn:disabled {
-  opacity: 0.55;
+  opacity: 0.5;
   cursor: not-allowed;
+  box-shadow: none;
 }
 
 .btn-primary {
@@ -486,10 +817,35 @@ textarea.note-input {
   min-height: 56px;
   padding: 14px 34px;
   font-size: 1.1rem;
+  box-shadow: var(--shadow-md);
 }
 
-.btn-primary:hover {
+.btn-primary:hover:not(:disabled) {
   background: var(--accent-dark);
+  border-color: var(--accent-dark);
+  color: #fff;
+  box-shadow: var(--shadow-lg);
+}
+
+/* A quiet tertiary action (cancel, back) — no border, no fill until hovered. */
+.btn-ghost {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted);
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--accent-dark);
+}
+
+/* A destructive action states itself in text and colour, never colour alone. */
+.btn-danger:hover:not(:disabled) {
+  background: var(--err-soft);
+  border-color: var(--err);
+  color: var(--err);
 }
 
 .btn-small {
@@ -497,6 +853,17 @@ textarea.note-input {
   padding: 8px 16px;
   font-size: 0.9rem;
   font-weight: 600;
+  border-radius: var(--r-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn {
+    transition: none;
+  }
+
+  .btn:active:not(:disabled) {
+    transform: none;
+  }
 }
 
 .btn-row {
@@ -506,20 +873,28 @@ textarea.note-input {
   align-items: center;
 }
 
+/* Status messages carry a left bar as well as a tint, so they never rely on
+   colour alone (globals.css line 1) and stay legible at a glance. */
 .form-error {
   color: var(--err);
   background: var(--err-soft);
-  border-radius: 12px;
+  border: 1px solid rgba(160, 49, 35, 0.22);
+  border-inline-start: 4px solid var(--err);
+  border-radius: var(--r-sm);
   padding: 12px 16px;
   margin: 16px 0 0;
+  font-size: 0.95rem;
 }
 
 .form-success {
   color: var(--ok);
   background: var(--ok-soft);
-  border-radius: 12px;
+  border: 1px solid rgba(31, 111, 67, 0.22);
+  border-inline-start: 4px solid var(--ok);
+  border-radius: var(--r-sm);
   padding: 12px 16px;
   margin: 16px 0 0;
+  font-size: 0.95rem;
 }
 
 /* ---------- output type picker ---------- */
@@ -1718,6 +2093,62 @@ details.fold[aria-disabled='true'] summary {
   color: #b05a00;
 }
 
+/* Per-box action toggle on a blue "free this space" row: move the content elsewhere,
+   or delete it. Two genuinely different edits, so the choice is explicit rather than
+   inferred from the note. Borrows .segmented's denser padding and sits on its own line
+   under the note input, because at ~2 Marathi words per option the pair does not fit
+   beside a text field on a phone. Selection is carried by weight + fill, not colour
+   alone (globals.css line 1). */
+.clear-action-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 6px 0 0 32px;
+}
+
+.clear-action-row .clear-action-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.clear-action-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.clear-action-toggle button {
+  padding: 4px 12px;
+  font-size: 13px;
+  background: transparent;
+  border: none;
+  color: var(--fg);
+  cursor: pointer;
+  line-height: 1.6;
+}
+
+.clear-action-toggle button + button {
+  border-left: 1px solid var(--border);
+}
+
+.clear-action-toggle button[aria-pressed='true'] {
+  background: #1a56db;
+  color: #fff;
+  font-weight: 600;
+}
+
+.clear-action-toggle button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.marker-note-submitted .clear-action-note {
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .poster-feedback {
   margin-top: 18px;
 }
@@ -1782,6 +2213,27 @@ details.fold[aria-disabled='true'] summary {
 .icon-btn[aria-pressed='true'] {
   background: var(--accent);
   border-color: var(--accent);
+  color: #fff;
+}
+
+/* The blue "free this space" gesture. Armed, it must read as the colour of the boxes
+   it draws (#1a56db, the same value .clear-badge and .clear-ghost use) — the class was
+   on both buttons but had no rule, so an armed clear button was maroon and looked
+   identical to the armed pencil beside it. */
+.icon-btn-clear[aria-pressed='true'] {
+  background: #1a56db;
+  border-color: #1a56db;
+  color: #fff;
+}
+
+.icon-btn-clear:hover:not(:disabled) {
+  border-color: #1a56db;
+  color: #1a56db;
+  background: rgba(26, 86, 219, 0.1);
+}
+
+.icon-btn-clear[aria-pressed='true']:hover:not(:disabled) {
+  background: #1a56db;
   color: #fff;
 }
 
@@ -1999,8 +2451,18 @@ fieldset.copy-group legend {
 
 .history-card:hover {
   border-color: var(--accent);
-  transform: translateY(-2px);
-  box-shadow: 0 14px 46px rgba(61, 42, 26, 0.16);
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-lg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .history-card {
+    transition: none;
+  }
+
+  .history-card:hover {
+    transform: none;
+  }
 }
 
 /* Full-width media block on top of every card (poster image or gradient banner). */
@@ -2012,25 +2474,32 @@ fieldset.copy-group legend {
   border-bottom: 1px solid var(--border);
 }
 
+/* A run with no poster (article-only, caption-only). This is a PLACEHOLDER, not
+   content, so it is a quiet tinted panel — a full-bleed saturated maroon block
+   pulled more attention on the history grid than the real posters beside it. */
 .history-banner {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(
-    135deg,
-    var(--accent) 0%,
-    var(--accent-dark) 100%
+  background: var(--accent-soft);
+  background-image: radial-gradient(
+    circle at 1px 1px,
+    rgba(140, 63, 32, 0.16) 1px,
+    transparent 0
   );
+  background-size: 14px 14px;
 }
 
 .history-banner-label {
-  padding: 6px 16px;
+  padding: 8px 18px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.18);
-  color: #fff;
+  background: var(--card);
+  border: 1px solid rgba(140, 63, 32, 0.22);
+  color: var(--accent-dark);
   font-weight: 700;
-  font-size: 1.1rem;
+  font-size: 1rem;
   letter-spacing: 0.02em;
+  box-shadow: var(--shadow-sm);
 }
 
 .history-info {
@@ -2189,11 +2658,6 @@ select.glossary-select:focus {
   border-color: var(--accent);
 }
 
-.gl-intro {
-  max-width: 760px;
-  margin-bottom: 20px;
-}
-
 .gl-add-fold {
   margin-top: 0;
 }
@@ -2307,8 +2771,8 @@ details.fold .fold-body.gl-add-body {
   gap: 10px;
   padding: 14px 16px;
   border: 1px solid var(--border);
-  border-radius: 14px;
-  background: #fffdfa;
+  border-radius: var(--r-md);
+  background: var(--surface);
 }
 
 .gl-row.is-review {
@@ -2320,8 +2784,14 @@ details.fold .fold-body.gl-add-body {
   background: var(--card);
 }
 
+/* The open row is marked by a tint + a left bar, NOT by an accent ring on all
+   four sides: an unverified list is 200+ rows and every one of them is open, so
+   a full accent border turned the page into a wall of maroon boxes. */
 .gl-row.is-open {
-  border-color: var(--accent);
+  border-color: var(--border-strong);
+  border-left: 4px solid var(--accent);
+  background: var(--card);
+  box-shadow: var(--shadow-sm);
 }
 
 .gl-row-head {
@@ -2587,104 +3057,160 @@ details.fold .fold-body.gl-add-body {
 
 /* ---------- poster master references ---------- */
 
-.ref-intro {
-  max-width: 800px;
-  margin-bottom: 24px;
-  font-size: 0.95rem;
-}
-
 .ref-loading {
   display: flex;
   justify-content: center;
   padding: 48px 0;
 }
 
-.ref-category + .ref-category {
-  margin-top: 40px;
+/* Which library — three separate libraries serving three separate features. A tinted
+   track (the .analytics-ranges idiom) rather than three loose buttons, so it reads as one
+   choice with one answer. */
+.ref-tabs {
+  display: inline-flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  padding: 4px;
+  margin-bottom: 16px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
 }
 
-.ref-category-title {
-  margin: 0 0 16px;
-  font-size: 1.35rem;
+.ref-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.9rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  padding: 6px 16px;
+  min-height: 40px;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.ref-tab:hover:not([aria-pressed='true']) {
+  background: var(--card);
+  color: var(--text);
+}
+
+.ref-tab[aria-pressed='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  box-shadow: var(--shadow-sm);
+}
+
+.ref-tab-count {
+  font-size: 0.8rem;
+  font-weight: 700;
+  opacity: 0.72;
+}
+
+/* A shape band: how many points its masters can hold. This is the page's structure, and
+   it is DERIVED from layoutSpec — see lib/referenceGroups.ts. */
+.ref-band + .ref-band {
+  margin-top: 36px;
+}
+
+.ref-band-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0 0 14px;
   padding-bottom: 8px;
   border-bottom: 2px solid var(--border);
 }
 
-.ref-type-list {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
+.ref-band-title {
+  margin: 0;
+  font-size: 1.25rem;
 }
 
-.ref-type-card {
-  padding: 22px 24px;
+.ref-band-count {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
 }
 
-.ref-type-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
+/* Pushed to its own line on a narrow viewport by the flex wrap above, which is why it
+   claims the full width rather than sitting on a fixed basis. */
+.ref-band-hint {
+  flex: 1 1 100%;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.5;
 }
 
-.ref-type-title-row {
+/* The un-analysed band is a queue, not a size: these masters are invisible to both search
+   and selection until the vision pass runs, so the heading carries a warning accent. */
+.ref-band-unanalyzed .ref-band-head {
+  border-bottom-color: var(--warn);
+}
+
+/* ---------- add a template ---------- */
+
+.ref-add {
+  margin-bottom: 16px;
+}
+
+.ref-add-head {
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ref-add-head .card-eyebrow {
+  margin: 0;
+}
+
+.ref-add-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 4px 8px;
+}
+
+.ref-add-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
   flex-wrap: wrap;
+  margin: 12px 0 10px;
+}
+
+.ref-add-group {
+  flex: 1 1 260px;
   min-width: 0;
 }
 
-.ref-type-title-row h3 {
-  margin: 0;
-  font-size: 1.15rem;
+.ref-add-group select {
+  width: 100%;
 }
 
-.ref-type-head-actions .btn,
-.ref-type-footer .btn,
-.ref-edit-btn {
+.ref-add-pick {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-}
-
-/* Description row: what the auto-classifier matches against. */
-.ref-type-desc-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  margin: 6px 0 16px;
-}
-
-.ref-type-desc {
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.88rem;
-  line-height: 1.55;
-}
-
-.ref-type-desc.is-empty {
-  opacity: 0.6;
-}
-
-.ref-edit-btn {
+  gap: 8px;
   flex-shrink: 0;
-  min-height: 34px;
-  padding: 5px 12px;
-  font-size: 0.82rem;
 }
 
-.ref-edit-form {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  margin: 10px 0 18px;
-  padding: 16px;
-  border: 1.5px dashed var(--border);
-  border-radius: 14px;
-  background: #fffdfa;
+@media (prefers-reduced-motion: reduce) {
+  .ref-tab {
+    transition: none;
+  }
 }
 
 textarea.ref-desc-input {
@@ -2771,10 +3297,26 @@ textarea.ref-desc-input {
 }
 
 .ref-thumb-date {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
   color: var(--muted);
   font-size: 0.75rem;
   margin-bottom: 8px;
+}
+
+/* Which group this master was filed under. RECORDED, not organising — the page is
+   structured by shape, and this line exists only so an operator can confirm where an
+   upload landed. Hence the last position and the smallest type on the tile. */
+.ref-thumb-group {
+  display: block;
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px dashed var(--border);
+  color: var(--muted);
+  font-size: 0.72rem;
+  overflow-wrap: anywhere;
 }
 
 /* The master's layout as read off its pixels. hasPhotoZone decides whether the
@@ -2854,11 +3396,15 @@ textarea.ref-desc-input {
 }
 
 /* Escape hatch for a wrong vision reading — quiet, but always reachable. */
+/* Each correction gets its own line. As inline buttons the two of them ran together into
+   an unreadable `विषय बदला"फक्त मजकूर" म्हणून नोंदवा`, with no space between the labels. */
 .ref-layout-flip {
+  display: block;
   background: none;
   border: 0;
   padding: 0;
   margin-top: 6px;
+  text-align: start;
   color: var(--muted);
   font: inherit;
   font-size: 0.75rem;
@@ -2900,63 +3446,6 @@ textarea.ref-desc-input {
 .btn-danger-ghost:hover {
   background: var(--err-soft);
   border-color: var(--err);
-}
-
-.ref-type-footer {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 16px;
-  padding-top: 14px;
-  border-top: 1px solid var(--border);
-}
-
-/* "+ नवीन प्रकार तयार करा" affordance card. */
-.ref-new-type-toggle {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  padding: 26px 24px;
-  border: 2px dashed var(--border);
-  border-radius: 20px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-  text-align: center;
-  transition:
-    border-color 0.15s ease,
-    background 0.15s ease;
-}
-
-.ref-new-type-toggle:hover {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-}
-
-.ref-new-type-icon {
-  display: grid;
-  place-items: center;
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-
-.ref-new-type-title {
-  font-weight: 700;
-  font-size: 1.05rem;
-}
-
-.ref-new-type-hint {
-  color: var(--muted);
-  font-size: 0.85rem;
-  max-width: 480px;
-}
-
-.ref-new-type-form h3 {
-  margin: 0 0 4px;
 }
 
 /* ---------- home-page reference picker ---------- */
@@ -4025,7 +4514,8 @@ a.thread-node:hover {
   gap: 10px;
   flex-wrap: wrap;
   padding: 10px 0;
-  border-bottom: 1px solid var(--line);
+  /* Was var(--line), which is defined nowhere — the divider never rendered. */
+  border-bottom: 1px solid var(--border);
 }
 
 .dlo-work-row:last-child {
@@ -4038,6 +4528,11 @@ a.thread-node:hover {
   font-weight: 600;
   color: inherit;
   text-decoration: none;
+  /* An intake is often titled with an uploaded filename
+     (0-CM_Review_Meeting_PMAY_U__2.0…), which offers no break opportunity —
+     min-width: 0 lets the FLEX ITEM shrink but cannot break the word, so the
+     row scrolled the whole page sideways on a phone. */
+  overflow-wrap: anywhere;
 }
 
 .dlo-work-title:hover,
@@ -4339,6 +4834,29 @@ a.thread-node:hover {
 /* ---------- responsive ---------- */
 
 @media (max-width: 860px) {
+  /* The header stacks: on a phone a right-aligned action row beside a wrapping
+     Marathi title leaves the title one word wide. */
+  .page-head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 16px;
+    margin-bottom: 22px;
+    padding-bottom: 16px;
+  }
+
+  .page-head::before {
+    bottom: 20px;
+  }
+
+  .page-title {
+    font-size: 1.45rem;
+  }
+
+  .card {
+    padding: 20px;
+    border-radius: var(--r-lg);
+  }
+
   .gl-row-form,
   .gl-form-grid {
     grid-template-columns: 1fr;
@@ -4406,5 +4924,723 @@ a.thread-node:hover {
   .dlo-steps {
     flex-direction: column;
     gap: 6px;
+  }
+}
+
+/* A notice card for something that did not land while the work itself is fine — an edit
+   that failed over an intact poster. It borrows the .gl-row.is-review idiom (left rule +
+   warn tint) rather than the red .form-error look: the run below it is usable, and
+   dressing it as a failure is exactly what made a recoverable run read as a lost one. */
+.warn-card {
+  border-left: 4px solid var(--warn);
+  background: var(--warn-soft);
+}
+
+/* ---------- वापर विश्लेषण (/analytics) ----------
+
+   ONE data colour throughout: --accent. There is deliberately no categorical palette on
+   this page, because no chart here encodes identity by colour — the daily chart is a
+   single series, and every bar in a ranked list carries its own name and value as text
+   beside it. That was a decision, not an omission: two tints of the brand maroon were
+   measured and cannot be told apart as categories (normal-vision ΔE 12.2, below the 15
+   floor), so a colour-coded variant would have failed full-colour readers as well as
+   colour-blind ones. Grid lines and axes stay recessive; the bars are the data. */
+
+/* A segmented control on a tinted track rather than four loose pills — it now
+   sits in .page-head-actions, where separate buttons read as four commands. */
+.analytics-ranges {
+  display: inline-flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  padding: 4px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.analytics-range {
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.9rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  padding: 6px 16px;
+  min-height: 40px;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.analytics-range:hover:not(:disabled):not(.active) {
+  background: var(--card);
+  color: var(--text);
+}
+
+.analytics-range.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  box-shadow: var(--shadow-sm);
+}
+
+.analytics-range:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .analytics-range {
+    transition: none;
+  }
+}
+
+.analytics-window {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin: 0 0 24px;
+}
+
+/* A centred spinner while the first response is in flight. A line of text at the top of an
+   otherwise empty page reads as the page having finished and being empty; a spinner in the
+   middle of the space the content will occupy reads as work in progress. The label is on the
+   wrapper for screen readers, so nothing is lost by dropping the visible sentence. */
+.page-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 240px;
+}
+
+/* Same left-rule + tint idiom as .warn-card: something worth reading before the numbers,
+   not a failure. */
+.analytics-notice {
+  border-left: 4px solid var(--warn);
+  background: var(--warn-soft);
+  border-radius: 12px;
+  padding: 12px 16px;
+  margin: 0 0 24px;
+  font-size: 0.9rem;
+}
+
+.analytics-section-title {
+  font-size: 1.25rem;
+  margin: 32px 0 16px;
+}
+
+/* `.card + .card` gives the stacked cards their 24px, but this section is not a `.card`,
+   so the chart card that follows it inherited nothing and sat hard against the last row of
+   feature cards. Stated here rather than as a margin-top on the chart, so the spacing
+   belongs to the block that ends. */
+.analytics-features {
+  margin-bottom: 24px;
+}
+
+.analytics-footnote {
+  margin-top: 24px;
+}
+
+/* ---------- stat tiles ---------- */
+
+/* Three columns, matching .feature-grid below, so the KPI strip and the feature cards read as
+   one page rather than two layouts. The tile count on every grid here is even (6 KPIs, 6
+   cards, 6 article stats), so 3 + 3 lands square; the alternatives measured at this width
+   broke 4 + 2 or 5 + 1, which reads as a layout accident on the first thing anyone looks at.
+   Wide tiles also let a long label like एकूण तयार झालेले साहित्य stay on one line. */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.stat-tile {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: var(--shadow);
+}
+
+/* The one number a drill-down exists to report, given the whole first row to itself. */
+.stat-tile--large {
+  grid-column: 1 / -1;
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.stat-tile-label {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+
+.stat-tile-value {
+  margin: 0;
+  font-size: 2rem;
+  font-weight: 800;
+  line-height: 1.15;
+  /* Devanagari numerals vary in width; tabular figures keep a row of tiles aligned. */
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-tile--large .stat-tile-value {
+  font-size: 2.75rem;
+  color: var(--accent-dark);
+}
+
+/* Direction is carried by the arrow AND the wording; colour only reinforces it. */
+.stat-delta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 8px 0 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.stat-delta--up {
+  color: var(--ok);
+}
+
+.stat-delta--down {
+  color: var(--err);
+}
+
+.stat-delta--new {
+  color: var(--accent-dark);
+}
+
+/* ---------- daily bar chart ---------- */
+
+.chart {
+  margin: 0;
+}
+
+.chart-plot {
+  position: relative;
+  height: 200px;
+  margin: 8px 0 0 44px;
+}
+
+.chart-grid {
+  position: absolute;
+  inset: 0;
+}
+
+.chart-grid-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px dashed var(--border);
+}
+
+.chart-grid-label {
+  position: absolute;
+  right: calc(100% + 8px);
+  transform: translateY(-50%);
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-bars {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  /* The 2px surface gap between adjacent fills. */
+  gap: 2px;
+}
+
+.chart-bar-slot {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+}
+
+/* Rounded data-end anchored to the baseline: the top is rounded, the foot is square. */
+.chart-bar {
+  width: 100%;
+  background: var(--accent);
+  border-radius: 4px 4px 0 0;
+  transition: height 160ms ease-out;
+}
+
+/* A hit target covering the full column height, so a one-unit day is as easy to hover as
+   a busy one — the mark is small, the target must not be. */
+.chart-hit {
+  position: absolute;
+  inset: 0;
+  cursor: default;
+}
+
+.chart-tip {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translate(-50%, -6px);
+  background: var(--text);
+  color: var(--bg);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease-out;
+  z-index: 2;
+}
+
+/* A centred tooltip on the first or last bar hangs past the plot. It is position:absolute and
+   therefore contributes to scrollWidth even at opacity 0, so on a phone the whole page gained
+   a horizontal scrollbar from a tip nobody had hovered (measured: body 403px in a 390px
+   viewport). Anchoring the edge columns' tips inward fixes the overflow without clipping the
+   tip itself, which an `overflow: hidden` on the plot would have done. */
+.chart-bar-slot:nth-child(-n + 3) .chart-tip {
+  left: 0;
+  transform: translate(0, -6px);
+}
+
+.chart-bar-slot:nth-last-child(-n + 3) .chart-tip {
+  left: auto;
+  right: 0;
+  transform: translate(0, -6px);
+}
+
+.chart-hit:hover .chart-tip,
+.chart-hit:focus-visible .chart-tip {
+  opacity: 1;
+}
+
+.chart-hit:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.chart-bar-slot:has(.chart-hit:hover) .chart-bar,
+.chart-bar-slot:has(.chart-hit:focus-visible) .chart-bar {
+  background: var(--accent-dark);
+}
+
+.chart-axis {
+  display: flex;
+  gap: 2px;
+  margin: 8px 0 0 44px;
+}
+
+.chart-axis-label {
+  flex: 1 1 0;
+  min-width: 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+  text-align: center;
+  white-space: nowrap;
+}
+
+/* The table view. Every chart needs one — it is how the numbers are read by a screen
+   reader and how they get copied into a report. */
+.chart-table {
+  margin-top: 16px;
+  font-size: 0.9rem;
+}
+
+.chart-table summary {
+  cursor: pointer;
+  color: var(--accent-dark);
+  font-weight: 600;
+}
+
+.chart-table table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 12px;
+  max-width: 420px;
+}
+
+.chart-table th,
+.chart-table td {
+  text-align: left;
+  padding: 6px 12px 6px 0;
+  border-bottom: 1px solid var(--border);
+  font-weight: 400;
+}
+
+.chart-table thead th {
+  font-weight: 700;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.chart-table td {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- ranked bar list ---------- */
+
+.bar-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.bar-list-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 190px) 1fr auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.bar-list-label {
+  font-size: 0.95rem;
+}
+
+.bar-list-track {
+  height: 12px;
+  background: var(--bg);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.bar-list-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width 200ms ease-out;
+}
+
+.bar-list-value {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  min-width: 3ch;
+  text-align: right;
+}
+
+/* ---------- वापरलेल्या सेवा (the service table) ---------- */
+
+/* A table rather than bars, because the rows are measured in incomparable units (calls,
+   images, pages, minutes, characters) and there is no honest shared scale to draw. It scrolls
+   inside its own box so the page body never scrolls sideways on a phone — the rule the
+   trend chart's tooltips already had to learn. */
+.service-table-wrap {
+  margin-top: 12px;
+  overflow-x: auto;
+}
+
+.service-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.service-table th,
+.service-table td {
+  padding: 10px 0;
+  vertical-align: baseline;
+  text-align: left;
+}
+
+.service-table th {
+  font-weight: 600;
+  padding-right: 16px;
+}
+
+.service-table thead th {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+}
+
+/* One tbody per task. The rule sits BETWEEN groups rather than under every row: with the
+   task named once, the group — not the row — is the unit a reader scans, and a line under
+   each service would cut a task's own detail into unrelated-looking pieces. */
+.service-table tbody + tbody > tr:first-child > th,
+.service-table tbody + tbody > tr:first-child > td {
+  border-top: 1px solid var(--border);
+}
+
+.service-name {
+  display: block;
+  font-size: 0.95rem;
+}
+
+/* The task line of a multi-service group: named once, carrying the combined figures. It is
+   deliberately the heaviest thing in the table — it answers "what did this piece of work
+   cost", which is the question the card exists for. */
+.service-group-head > th {
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.service-group-head > .service-units {
+  font-weight: 600;
+}
+
+.service-group-head > th,
+.service-group-head > td {
+  padding-bottom: 4px;
+}
+
+/* The services a task ran, as attribution under it. Indented, lighter and tighter, so the
+   group reads as one block instead of as three competing rows. */
+.service-detail > th,
+.service-detail > td {
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+/* The group's last service closes it, so the gap before the next task's rule matches the
+   padding a single-service row already has. */
+.service-table tbody > tr.service-detail:last-child > th,
+.service-table tbody > tr.service-detail:last-child > td {
+  padding-bottom: 10px;
+}
+
+.service-detail > th {
+  padding-left: 18px;
+}
+
+.service-detail-name {
+  display: block;
+  font-size: 0.88rem;
+  font-weight: 500;
+}
+
+.service-detail > .service-units,
+.service-detail > .service-cost {
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+/* The provider is a proper noun in Latin script beside Devanagari, so it is stepped down in
+   size and weight — it identifies the vendor on the invoice, it is not what the row is. */
+.service-provider {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.78rem;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+/* Scoped through .service-table on purpose: `.service-table td` above is a class-plus-type
+   selector and outranks a bare `.service-cost`, so the gap between the two numeric columns
+   silently never applied. It only showed once a row was wide enough for the figures to
+   touch — on a phone, "१,५६२ कॉल" ran straight into "₹२,७६४". */
+.service-table .service-units,
+.service-table .service-cost {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-align: right;
+  padding-left: 16px;
+}
+
+.service-cost {
+  font-weight: 700;
+}
+
+.service-cost-none {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+/* Marked on the row, not in a footnote: a caveat that arrives after the number has been
+   read is a caveat nobody applies. Same tint the rest of the page uses for "take care". */
+.service-flag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--warn-soft);
+  color: var(--text);
+  font-size: 0.72rem;
+  font-weight: 500;
+  font-variant-numeric: normal;
+  vertical-align: middle;
+  cursor: help;
+}
+
+.service-rates {
+  margin-top: 14px;
+}
+
+.service-rates > summary {
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.service-rate-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.9rem;
+}
+
+@media (max-width: 520px) {
+  /* Two numeric columns and a two-line label do not fit a phone; the units drop under the
+     name rather than the table scrolling for every reader. */
+  .service-table .service-units {
+    padding-left: 8px;
+  }
+
+  .service-detail > th {
+    padding-left: 12px;
+  }
+
+  /* The caveat chip beside a four-digit total is what pushes a phone row past the width it
+     has. It drops under the figure rather than making the whole table scroll sideways to
+     reach a number that was already on screen. */
+  .service-flag {
+    display: block;
+    width: fit-content;
+    margin: 4px 0 0 auto;
+  }
+}
+
+/* ---------- feature cards ---------- */
+
+/* Six cards as 3 + 3, for the same reason: 240px gave 4 + 2. */
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px;
+}
+
+.feature-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: var(--shadow);
+  text-decoration: none;
+  color: inherit;
+  transition:
+    transform 120ms ease-out,
+    border-color 120ms ease-out;
+}
+
+.feature-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+}
+
+.feature-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.feature-card-name {
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+.feature-card-value {
+  font-size: 2rem;
+  font-weight: 800;
+  line-height: 1.2;
+  color: var(--accent-dark);
+  font-variant-numeric: tabular-nums;
+}
+
+/* `margin-top: auto` pins this to the bottom of every card, not `margin-top: 12px`: only
+   some cards carry a delta line, so without it the link sits at a different height in each
+   one and the row reads as misaligned. The padding is what keeps the 12px in the tallest
+   card, where `auto` has no free space left to resolve to. */
+.feature-card-go {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: auto;
+  padding-top: 12px;
+  color: var(--accent-dark);
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+/* ---------- cost + back link ---------- */
+
+.cost-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  margin: 12px 0 16px;
+}
+
+.cost-list dt {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin-bottom: 4px;
+}
+
+.cost-list dd {
+  margin: 0;
+  font-size: 1.75rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.analytics-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+  margin-top: 24px;
+}
+
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent-dark);
+  font-weight: 600;
+  text-decoration: none;
+  margin-bottom: 16px;
+}
+
+.back-link:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 520px) {
+  .chart-plot,
+  .chart-axis {
+    margin-left: 36px;
+  }
+
+  .bar-list-row {
+    grid-template-columns: minmax(90px, 130px) 1fr auto;
+    gap: 8px;
+  }
+
+  .stat-tile-value {
+    font-size: 1.6rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chart-bar,
+  .bar-list-fill,
+  .feature-card,
+  .chart-tip {
+    transition: none;
   }
 }

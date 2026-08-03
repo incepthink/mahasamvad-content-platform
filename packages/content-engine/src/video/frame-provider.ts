@@ -54,6 +54,14 @@ function providerName(): string {
   return raw && raw.trim() !== '' ? raw.trim().toLowerCase() : 'gemini';
 }
 
+// Public name of the configured frame provider, for callers that need to REPORT which
+// backend a deployment is on rather than dispatch to it (the /analytics service card names
+// the live provider beside each capability). Its four siblings — sttProviderName,
+// ocrProviderName, narrationProviderName, clipProviderName — already export theirs.
+export function frameProviderName(): string {
+  return providerName();
+}
+
 // Which env var the STORYBOARD gate must find for the configured frame
 // provider. Keep this beside providerName() so the API route cannot drift from
 // the provider default when deployments switch between Gemini and OpenAI.

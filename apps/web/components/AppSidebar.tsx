@@ -13,6 +13,7 @@ import { usePathname } from 'next/navigation';
 import {
   AudioLines,
   BookOpen,
+  ChartColumn,
   Clapperboard,
   History,
   ImagePlus,
@@ -40,6 +41,7 @@ const NAV_LINKS = [
   { href: '/references', label: STR.navReferences, Icon: LayoutTemplate },
   { href: '/video', label: STR.navVideo, Icon: Clapperboard },
   { href: '/generations', label: STR.navHistory, Icon: History },
+  { href: '/analytics', label: STR.navAnalytics, Icon: ChartColumn },
 ] as const;
 
 export function AppSidebar() {

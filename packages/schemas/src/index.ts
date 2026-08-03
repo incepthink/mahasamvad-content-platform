@@ -56,3 +56,8 @@ export * from './tweet.js';
 
 // AI explainer-video API schemas + shared tier pricing / SRT builder.
 export * from './video.js';
+
+// Department usage analytics (/analytics): the response shape, the reporting timezone and
+// the single USD→INR presentation rate. Carries machine keys only — every Marathi label on
+// that page lives in apps/web/lib/strings.ts.
+export * from './analytics.js';

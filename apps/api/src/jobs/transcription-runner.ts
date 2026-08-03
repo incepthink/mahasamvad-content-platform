@@ -19,6 +19,7 @@ import {
   createCostAccumulator,
   isAudioUrlInput,
   runInCostScope,
+  runInCostTask,
   sttProviderName,
   totalCostUsd,
   transcribeAudio,
@@ -37,6 +38,7 @@ import {
 } from '@dgipr/database';
 import { combineTranscripts } from '@dgipr/schemas';
 
+import { recordTasksFromCost } from './service-usage.js';
 import { transcriptCacheMode } from './transcript-cache-mode.js';
 
 const running = new Set<string>();
@@ -161,7 +163,9 @@ export function startTranscriptionJob(
         // (it returns word timestamps to measure); a Sarvam run logs nothing.
         const cost = createCostAccumulator();
         const results = await runInCostScope(cost, () =>
-          transcribeAudio(missPositions.map((index) => inputs[index]!)),
+          runInCostTask('audio_transcription', () =>
+            transcribeAudio(missPositions.map((index) => inputs[index]!)),
+          ),
         );
         if (cost.sttSeconds > 0) {
           console.log(
@@ -170,6 +174,10 @@ export function startTranscriptionJob(
               `~$${totalCostUsd(cost).toFixed(4)}.`,
           );
         }
+        // `transcriptions` has no cost column, so this row is the ONLY record of what the
+        // page's STT actually cost — hence an event rather than a column read. Fire-and-
+        // forget: an analytics write must never fail a transcript that already landed.
+        recordTasksFromCost(client, 'transcribe', cost);
         await Promise.all(
           results.map(async (result, resultIndex) => {
             const index = missPositions[resultIndex]!;

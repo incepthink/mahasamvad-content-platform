@@ -21,7 +21,12 @@ export default function DloPage() {
 
   return (
     <main className="page">
-      <h1 className="page-title">{STR.dloTitle}</h1>
+      <header className="page-head">
+        <div className="page-head-text">
+          <h1 className="page-title">{STR.dloTitle}</h1>
+          <p className="page-sub">{STR.dloPageIntro}</p>
+        </div>
+      </header>
 
       {active ? <DloResumeCard intake={active} /> : null}
 

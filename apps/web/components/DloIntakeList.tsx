@@ -8,8 +8,10 @@
 // another machine appears under "इतर कामे" and works exactly the same.
 
 import Link from 'next/link';
+import { History } from 'lucide-react';
 import type { DloIntakeSummary } from '@dgipr/schemas';
 import { formatDate, STR } from '../lib/strings';
+import { CardTitle } from './CardTitle';
 import { DloStatusChip } from './DloStatusChip';
 
 function IntakeRow({ intake }: { intake: DloIntakeSummary }) {
@@ -52,7 +54,7 @@ export function DloIntakeList({
 }) {
   return (
     <section className="card">
-      <h2>{STR.dloRecent}</h2>
+      <CardTitle icon={History}>{STR.dloRecent}</CardTitle>
       {error ? <p className="form-error">{STR.dloListLoadError}</p> : null}
       {loading ? <p className="hint">{STR.dloListLoading}</p> : null}
       {!loading && !error && mine.length === 0 && others.length === 0 ? (

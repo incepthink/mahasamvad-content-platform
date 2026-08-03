@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import type { GenerationSummary } from '@dgipr/schemas';
 import { listGenerations } from '../../lib/api';
 import { STR } from '../../lib/strings';
@@ -61,7 +62,17 @@ export default function HistoryPage() {
 
   return (
     <main className="page">
-      <h1 className="page-title">{STR.historyTitle}</h1>
+      <header className="page-head">
+        <div className="page-head-text">
+          <h1 className="page-title">{STR.historyTitle}</h1>
+          <p className="page-sub">{STR.historyIntro}</p>
+        </div>
+        <div className="page-head-actions">
+          <Link href="/" className="btn btn-small">
+            {STR.historyNew}
+          </Link>
+        </div>
+      </header>
 
       {error ? <p className="form-error">{error}</p> : null}
 

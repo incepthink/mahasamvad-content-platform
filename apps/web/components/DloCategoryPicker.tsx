@@ -4,8 +4,10 @@
 // step — the officer can change their mind after reading what the sources actually say.
 // Same option cards as the home form.
 
+import { Newspaper } from 'lucide-react';
 import type { DloCategory } from '@dgipr/schemas';
 import { ARTICLE_CATEGORY_OPTIONS } from '../lib/generationOptions';
+import { CardTitle } from './CardTitle';
 import { STR } from '../lib/strings';
 
 export function DloCategoryPicker({
@@ -17,7 +19,7 @@ export function DloCategoryPicker({
 }) {
   return (
     <>
-      <h2>{STR.categoryLabel}</h2>
+      <CardTitle icon={Newspaper}>{STR.categoryLabel}</CardTitle>
       <div className="output-picker">
         {ARTICLE_CATEGORY_OPTIONS.map((option) => (
           <button

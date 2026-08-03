@@ -385,19 +385,33 @@ export type RegeneratePosterRequest = z.infer<
 
 export const POSTER_FEEDBACK_MAX_MARKERS = 3;
 
-// A rectangle the officer wants FREED, not edited: whatever design elements sit
-// inside it are relocated elsewhere in the composition and the rectangle is left
-// as plain background, so the officer can drop their own logo or photograph
-// there afterwards. The opposite gesture to a marker — a marker says "change the
-// thing here", this says "move the thing here somewhere else".
+// A rectangle the officer wants FREED, not edited: the rectangle ends up as plain
+// continuing background so they can drop their own logo or photograph there by
+// hand. The opposite gesture to a marker — a marker says "change the thing here",
+// this says "get the thing here out of the way".
+//
+// `action` says what happens to whatever sits inside, and the two need OPPOSITE
+// permissions in the edit prompt, which is why they are one field rather than two
+// gestures:
+//   'displace' — the content stays on the poster and the layout is re-laid-out to
+//                fit it elsewhere. Requires permission to redesign the
+//                arrangement, so the prompt's "keep the exact layout" rule is
+//                DROPPED for that round (hedging it is what made this a no-op).
+//   'remove'   — the content is deleted and nothing else moves at all. There the
+//                keep-everything-else rule is correct and stays.
+// Defaults to 'displace', which is what a client predating this field meant.
 //
 // The note is OPTIONAL and is a steer, not an instruction: with none, the image
-// model chooses where the displaced content belongs.
+// model chooses where displaced content belongs.
 export const POSTER_FEEDBACK_MAX_CLEAR_REGIONS = 2;
+
+export const PosterClearActionSchema = z.enum(['displace', 'remove']);
+export type PosterClearAction = z.infer<typeof PosterClearActionSchema>;
 
 export const PosterClearRegionSchema = z.object({
   region: FeedbackRegionSchema,
   note: z.string().trim().min(1).max(500).optional(),
+  action: PosterClearActionSchema.default('displace'),
 });
 export type PosterClearRegion = z.infer<typeof PosterClearRegionSchema>;
 
@@ -625,6 +639,14 @@ export const GenerationDetailSchema = z.object({
   // API's in-process registry, so both reset on restart.
   captionRevising: z.boolean(),
   captionReviseError: z.string().nullable(),
+  // An edit of this run — a poster re-render, a marker round, a redesign, an article
+  // revision — that failed while everything it had already produced stayed intact. The row
+  // stays `completed` in that case, precisely so the poster and its versions are not hidden
+  // by one bad edit; this is how the officer is told the edit did not land. Also from the
+  // in-process registry, so it resets on restart (the recovery itself does not — it is a
+  // row write). `editRetryable` says whether the API can re-run that exact step.
+  editFailure: z.string().nullable(),
+  editRetryable: z.boolean(),
   // Total USD the run has cost so far (null for pre-feature rows). `costBreakdown` carries
   // the audit detail (token counts + text-vs-image split); shape is intentionally loose.
   costUsd: z.number().nullable(),

@@ -30,7 +30,12 @@
 // matras become a real problem the fix is the Chromium path, not a stronger sentence.
 
 import { pathToFileURL } from 'node:url';
-import { clearSpaceRuleLines } from './clear-space-rule.js';
+import {
+  clearSpaceRule,
+  contentInventoryLines,
+  DISPLACE_PRESERVE_RULE,
+  type ClearAction,
+} from './clear-space-rule.js';
 
 /** The canvas every thumbnail prompt, render and chrome overlay on this lane assumes. */
 export const YOUTUBE_THUMBNAIL_DIMENSIONS = {
@@ -154,14 +159,18 @@ export function buildYoutubeThumbnailPrompt(
 export type BuildYoutubeFeedbackPromptInput = Readonly<{
   imageFeedback: string;
   markerCount?: number | undefined;
-  clearCount?: number | undefined;
+  // The lettered BLUE rectangles in draw order, each saying what happens to the
+  // content inside ('remove' deletes it, 'displace' keeps it and licenses a
+  // re-layout). Empty/absent = the pre-feature prompt, byte-for-byte.
+  clearActions?: readonly ClearAction[] | undefined;
+  // The checklist a displace re-layout must not lose, read off the current thumbnail.
+  contentInventory?: readonly string[] | undefined;
 }>;
 
 /**
  * Pixel/marker feedback on an existing thumbnail. The twin of buildFeedbackPrompt, with
  * the youtube canvas and reserved zones; the marker and clear-space semantics are shared
- * (clearSpaceRuleLines) so the two lanes cannot drift apart on the gesture the officer
- * drew.
+ * (clearSpaceRule) so the lanes cannot drift apart on the gesture the officer drew.
  */
 export function buildYoutubeFeedbackPrompt(
   input: BuildYoutubeFeedbackPromptInput,
@@ -171,22 +180,30 @@ export function buildYoutubeFeedbackPrompt(
     0,
     Math.min(3, Math.trunc(Number(input.markerCount) || 0)),
   );
-  const clearCount = Math.max(
-    0,
-    Math.min(2, Math.trunc(Number(input.clearCount) || 0)),
-  );
+  const clear = clearSpaceRule(input.clearActions ?? []);
   // A clear-space round is a complete request on its own — the blue rectangles say what to
   // do and the note is optional — so text is required only without them.
-  if (imageFeedback.length === 0 && clearCount === 0)
+  if (imageFeedback.length === 0 && clear.count === 0)
     throw new Error('No image feedback provided.');
-  const clearRule = clearSpaceRuleLines(clearCount);
+  const inventory = clear.hasDisplace
+    ? contentInventoryLines(input.contentInventory)
+    : [];
 
   const reservedZones = `RESERVED ZONES: the महाराष्ट्र शासन emblem-and-wordmark badge in the top-right (approx ${RESERVED_LOCKUP_WIDTH} x ${RESERVED_LOCKUP_HEIGHT} px) and the department strip along the bottom (full width, approx ${RESERVED_FOOTER_HEIGHT} px tall) are official branding stamped onto the thumbnail by software — do NOT alter, move, redraw or remove them, and do NOT move any text or important content into those areas.`;
 
-  // With clear rectangles present, "keep the exact layout unchanged" would contradict the
-  // relocation the officer asked for — a contradictory pair degrades compliance with both.
+  // A DISPLACE round cannot keep the exact layout — that is the point of it — so the
+  // keep-layout rule is REPLACED rather than hedged. DELETE-only keeps it, with the
+  // exception clause, since the delete itself changes the thumbnail.
   const exceptClause =
-    clearCount > 0 ? ' or the SPACE TO FREE block below' : '';
+    clear.count > 0 ? ' or the SPACE TO FREE block below' : '';
+  const keepRule = clear.hasDisplace
+    ? DISPLACE_PRESERVE_RULE
+    : `Keep the exact layout, existing Marathi text and figures, colours, typography, and imagery unchanged except where the requested change${exceptClause} explicitly requires it.`;
+  const keepRuleMarker = clear.hasDisplace
+    ? DISPLACE_PRESERVE_RULE
+    : `Keep the exact layout, existing Marathi text and figures, colours, typography, and imagery unchanged except where a requested change${exceptClause} explicitly requires it.`;
+  const textException =
+    clear.count > 0 ? ', except as the SPACE TO FREE block requires' : '';
   const opening = `You are editing an existing finished DGIPR Maharashtra government YouTube thumbnail provided as the input image: a single ${YOUTUBE_THUMBNAIL_DIMENSIONS.width} x ${YOUTUBE_THUMBNAIL_DIMENSIONS.height} landscape 16:9 frame.`;
   const closing = `Output ONE complete ${YOUTUBE_THUMBNAIL_DIMENSIONS.width} x ${YOUTUBE_THUMBNAIL_DIMENSIONS.height} landscape 16:9 thumbnail filling the canvas.`;
 
@@ -196,11 +213,12 @@ export function buildYoutubeFeedbackPrompt(
       `The input image carries ${markerCount} numbered red annotation marker(s): thin red outline rectangles, each with a small red circular badge showing its number. They were drawn onto the thumbnail by editing software and are NOT part of the design.`,
       'Each marker is a pointing gesture showing where one requested change applies — not a hard boundary. For each marker, identify the design element at or around that spot and apply the correspondingly numbered change from the request below to that WHOLE element, even where the element extends beyond the rectangle.',
       `REQUESTED CHANGES: «${imageFeedback}».`,
-      `Make ONLY these changes. Keep the exact layout, existing Marathi text and figures, colours, typography, and imagery unchanged except where a requested change${exceptClause} explicitly requires it.`,
+      `Make ONLY these changes. ${keepRuleMarker}`,
       reservedZones,
-      ...clearRule,
       'ERASE every red marker rectangle and numbered badge completely from the output, restoring whatever they overlapped — no red outlines, red circles, or annotation numbers may remain anywhere on the thumbnail.',
-      `Add no new text, letters, numbers, captions, logos, borders, or decorative elements beyond the requested changes. Preserve all other existing Devanagari text exactly. ${closing}`,
+      `Add no new text, letters, numbers, captions, logos, borders, or decorative elements beyond the requested changes. Preserve all other existing Devanagari text exactly${textException}. ${closing}`,
+      ...inventory,
+      ...clear.lines,
     ].join('\n');
   }
 
@@ -209,10 +227,11 @@ export function buildYoutubeFeedbackPrompt(
     ...(imageFeedback.length > 0
       ? [`Apply ONLY this requested change: «${imageFeedback}».`]
       : []),
-    `Keep the exact layout, existing Marathi text and figures, colours, typography, and imagery unchanged except where the requested change${exceptClause} explicitly requires it.`,
+    keepRule,
     reservedZones,
-    ...clearRule,
-    `Add no new text, letters, numbers, captions, logos, borders, or decorative elements. Preserve all existing Devanagari text exactly. ${closing}`,
+    `Add no new text, letters, numbers, captions, logos, borders, or decorative elements. Preserve all existing Devanagari text exactly${textException}. ${closing}`,
+    ...inventory,
+    ...clear.lines,
   ].join('\n');
 }
 
@@ -317,21 +336,44 @@ if (
     failures.push('plain feedback prompt mentions blue clear boxes');
   need(plain, 'RESERVED ZONES', 'feedback prompt lost the reserved zones');
   need(plain, '16:9', 'feedback prompt lost the aspect');
+  need(plain, 'Keep the exact layout', 'feedback prompt lost keep-layout');
 
   const marked = buildYoutubeFeedbackPrompt({
     imageFeedback: 'तारीख बदला',
     markerCount: 2,
-    clearCount: 1,
+    clearActions: ['displace'],
+    contentInventory: ['दि. २१ मे २०२६'],
   });
   need(marked, '2 numbered red annotation marker', 'lost the marker count');
   need(marked, '1 translucent BLUE rectangle', 'lost the clear count');
-  need(
-    marked,
-    'SPACE TO FREE block below',
-    'kept the contradictory keep-layout rule',
-  );
+  need(marked, 'MOVE — blue box A', 'lost the displace block');
+  need(marked, 'INFORMATION THAT MUST SURVIVE — 1 item(s)', 'lost the inventory');
+  need(marked, 'दि. २१ मे २०२६', 'inventory item did not reach the prompt');
+  // THE regression this change exists to prevent.
+  if (marked.includes('Keep the exact layout'))
+    failures.push('displace round kept the contradictory keep-layout rule');
   if (marked.indexOf('SPACE TO FREE:') < marked.indexOf('RESERVED ZONES'))
     failures.push('clear rule precedes the reserved zones it refers to');
+  if (!marked.trimEnd().endsWith('may remain anywhere on the poster.'))
+    failures.push('clear rule is not the last block of the prompt');
+
+  // DELETE-only keeps the frozen-layout rule and buys no inventory.
+  const removeOnly = buildYoutubeFeedbackPrompt({
+    imageFeedback: '',
+    clearActions: ['remove'],
+    contentInventory: ['दि. २१ मे २०२६'],
+  });
+  need(removeOnly, 'DELETE — blue box A', 'lost the remove block');
+  need(removeOnly, 'Keep the exact layout', 'remove-only dropped keep-layout');
+  need(
+    removeOnly,
+    'or the SPACE TO FREE block below',
+    'remove-only lost the keep-layout exception',
+  );
+  if (removeOnly.includes('MOVE — blue box'))
+    failures.push('remove-only round leaked the displace block');
+  if (removeOnly.includes('INFORMATION THAT MUST SURVIVE'))
+    failures.push('remove-only round emitted an inventory');
 
   let feedbackThrew = false;
   try {

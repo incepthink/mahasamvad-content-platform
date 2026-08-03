@@ -116,7 +116,12 @@ export default function TranslatePage() {
 
   return (
     <main className="page">
-      <h1 className="page-title">{STR.translatePageTitle}</h1>
+      <header className="page-head">
+        <div className="page-head-text">
+          <h1 className="page-title">{STR.translatePageTitle}</h1>
+          <p className="page-sub">{STR.translatePageIntro}</p>
+        </div>
+      </header>
 
       <section className="card">
         <label className="field-label" htmlFor="translate-text">
@@ -134,7 +139,9 @@ export default function TranslatePage() {
           }}
           style={{ marginTop: 10 }}
         />
-        <p className="hint">{text.length.toLocaleString('en-IN')}</p>
+        <p className="hint char-count">
+          {text.length.toLocaleString('en-IN')} {STR.docChars}
+        </p>
       </section>
 
       {/* The document to translate usually arrives as a file, not in the clipboard.
@@ -145,6 +152,7 @@ export default function TranslatePage() {
               selection is about OCR spend, not about trimming to fit. */}
       <DocumentIntake
         storageKey="dgipr.translate.document"
+        feature="translate"
         accept={['pdf', 'docx', 'txt']}
         onText={(value) => {
           setText(value);

@@ -59,15 +59,7 @@ export default function RootLayout({
                 rel="noopener noreferrer"
                 className="powered-by"
               >
-                <span
-                  style={{
-                    color: '#fff',
-                    paddingRight: '4px',
-                    marginTop: '2px',
-                  }}
-                >
-                  {STR.poweredBy}
-                </span>
+                <span>{STR.poweredBy}</span>
                 <HashcaseLogo className="powered-logo" />
               </a>
             </footer>

@@ -18,7 +18,8 @@ import type {
 import {
   Copy,
   Download,
-  Palette,
+  // Palette — the "वेगळ्या रंगात तयार करा" recolour redo, hidden from the UI (see the
+  // commented button below). Restore this import with it.
   RotateCw,
   Share2,
   SquareDashed,
@@ -35,6 +36,7 @@ import {
 } from '../lib/api';
 import { STR } from '../lib/strings';
 import { usePosterMarkers } from '../lib/usePosterMarkers';
+import { ClearActionToggle, clearActionLabel } from './ClearActionToggle';
 import { CrossFormatLinks } from './CrossFormatLinks';
 import {
   CLEAR_LETTERS,
@@ -78,6 +80,7 @@ export function SocialPostView({
     addClearRegion,
     removeClearRegion,
     setClearNote,
+    setClearAction,
     markSubmitted,
     dismissSubmitted,
   } = usePosterMarkers(detail);
@@ -126,6 +129,14 @@ export function SocialPostView({
     captionMissing && (startingCaption || captionRevising);
   const showSpinner = busy || pending;
   const settled = detail.status === 'completed' && !showSpinner;
+  // Poster edits do NOT need a completed row — every poster route (image-feedback,
+  // regenerate, restore) asks only for a poster and no running job. Gating them on
+  // 'completed' is what left a run whose last edit failed with a visible poster and no way
+  // to touch it; a run recovered from such a failure must be able to carry straight on.
+  const posterEditable =
+    detail.posterUrl !== null &&
+    (detail.status === 'completed' || detail.status === 'failed') &&
+    !showSpinner;
 
   // Copies what is on screen, so an unsaved hand edit copies as the user sees it.
   const copyCaption = async () => {
@@ -262,6 +273,7 @@ export function SocialPostView({
         ? {
             clearRegions: clearRegions.map((c) => ({
               region: c.region,
+              action: c.action,
               ...(c.note.trim().length > 0 ? { note: c.note.trim() } : {}),
             })),
           }
@@ -369,21 +381,27 @@ export function SocialPostView({
                 className="icon-btn"
                 title={STR.iconRedesignPoster}
                 aria-label={STR.iconRedesignPoster}
-                disabled={!settled}
+                disabled={!posterEditable}
                 onClick={() => void redoPoster(false)}
               >
                 <RotateCw size={18} strokeWidth={1.9} aria-hidden="true" />
               </button>
+              {/* HIDDEN FROM THE UI, deliberately kept: the recolour redo
+                  ("वेगळ्या रंगात तयार करा"), which re-renders the poster with the current
+                  colour family barred. The API still supports it — regeneratePoster takes
+                  `recolour`, and redoPoster(true) below is still the way in — so restoring
+                  this is uncommenting the block plus the `Palette` import above.
               <button
                 type="button"
                 className="icon-btn"
                 title={STR.iconRecolourPoster}
                 aria-label={STR.iconRecolourPoster}
-                disabled={!settled}
+                disabled={!posterEditable}
                 onClick={() => void redoPoster(true)}
               >
                 <Palette size={18} strokeWidth={1.9} aria-hidden="true" />
               </button>
+              */}
               <button
                 type="button"
                 className="icon-btn"
@@ -686,36 +704,45 @@ export function SocialPostView({
                         {CLEAR_LETTERS[i] ?? i + 1}
                       </span>
                       <span className="marker-note-text">
-                        {c.note || STR.clearRegionLabel}
+                        {clearActionLabel(c.action)}
+                        {c.note ? ` — ${c.note}` : ''}
                       </span>
                     </div>
                   ))
                 : clearRegions.map((c, i) => (
-                    <div className="marker-note-row" key={c.id}>
-                      <span
-                        className="marker-note-badge clear-badge"
-                        aria-hidden="true"
-                      >
-                        {CLEAR_LETTERS[i] ?? i + 1}
-                      </span>
-                      <input
-                        type="text"
-                        value={c.note}
-                        placeholder={STR.clearRegionNotePlaceholder}
-                        aria-label={`${STR.clearRegionLabel} ${CLEAR_LETTERS[i] ?? i + 1}`}
-                        maxLength={500}
+                    <div key={c.id}>
+                      <div className="marker-note-row">
+                        <span
+                          className="marker-note-badge clear-badge"
+                          aria-hidden="true"
+                        >
+                          {CLEAR_LETTERS[i] ?? i + 1}
+                        </span>
+                        <input
+                          type="text"
+                          value={c.note}
+                          placeholder={STR.clearRegionNotePlaceholder}
+                          aria-label={`${STR.clearRegionLabel} ${CLEAR_LETTERS[i] ?? i + 1}`}
+                          maxLength={500}
+                          disabled={showSpinner || sendingChange}
+                          onChange={(e) => setClearNote(c.id, e.target.value)}
+                        />
+                        <button
+                          type="button"
+                          className="marker-note-remove"
+                          aria-label={STR.clearRegionRemove}
+                          disabled={showSpinner || sendingChange}
+                          onClick={() => removeClearRegion(c.id)}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                      <ClearActionToggle
+                        value={c.action}
+                        letter={String(CLEAR_LETTERS[i] ?? i + 1)}
                         disabled={showSpinner || sendingChange}
-                        onChange={(e) => setClearNote(c.id, e.target.value)}
+                        onChange={(action) => setClearAction(c.id, action)}
                       />
-                      <button
-                        type="button"
-                        className="marker-note-remove"
-                        aria-label={STR.clearRegionRemove}
-                        disabled={showSpinner || sendingChange}
-                        onClick={() => removeClearRegion(c.id)}
-                      >
-                        ✕
-                      </button>
                     </div>
                   ))}
             </div>

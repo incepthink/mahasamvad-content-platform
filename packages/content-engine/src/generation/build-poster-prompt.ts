@@ -11,7 +11,12 @@ import type { ArtDirection } from './art-direction.js';
 import type { PosterPalette } from './poster-palettes.js';
 import type { PosterLayout } from './poster-layouts.js';
 import { stripColourMentions } from './strip-colour-words.js';
-import { clearSpaceRuleLines } from './clear-space-rule.js';
+import {
+  clearSpaceRule,
+  contentInventoryLines,
+  DISPLACE_PRESERVE_RULE,
+  type ClearAction,
+} from './clear-space-rule.js';
 
 export type DesignMode = 'fresh' | 'adaptive' | 'onbrand';
 
@@ -407,9 +412,15 @@ export type BuildFeedbackPromptInput = Readonly<{
   brand: TemplateBrand;
   // 0-3 numbered red markers drawn on the current poster (annotated pixel feedback).
   markerCount?: number | undefined;
-  // 0-2 lettered BLUE rectangles: space to be freed for the officer's own logo or
-  // photograph. Independent of markerCount — one round may carry both.
-  clearCount?: number | undefined;
+  // The lettered BLUE rectangles, in the order they were drawn (which is the order
+  // their A/B badges were painted on the poster), each saying what happens to the
+  // content inside: 'remove' deletes it and moves nothing else, 'displace' keeps it
+  // on the poster and licenses a re-layout. Independent of markerCount — one round
+  // may carry both gestures. Empty/absent = the pre-feature prompt, byte-for-byte.
+  clearActions?: readonly ClearAction[] | undefined;
+  // What the vision pass read off the CURRENT poster: the checklist a displace
+  // re-layout must not lose. Only emitted when a displace box is present.
+  contentInventory?: readonly string[] | undefined;
 }>;
 
 // The prompt that edits an EXISTING poster to apply a requested visual change. Mirrors the
@@ -421,25 +432,38 @@ export function buildFeedbackPrompt(input: BuildFeedbackPromptInput): string {
     0,
     Math.min(3, Math.trunc(Number(input.markerCount) || 0)),
   );
-  const clearCount = Math.max(
-    0,
-    Math.min(2, Math.trunc(Number(input.clearCount) || 0)),
-  );
+  const clear = clearSpaceRule(input.clearActions ?? []);
   // A clear-space round is a complete request on its own — the blue rectangles say
   // what to do and the note is optional — so text is required only without them.
-  if (imageFeedback.length === 0 && clearCount === 0)
+  if (imageFeedback.length === 0 && clear.count === 0)
     throw new Error('No image feedback provided.');
-  const clearRule = clearSpaceRuleLines(clearCount);
+  // The inventory anchors a re-layout; a delete-only round needs no such licence,
+  // so it is not paid for in prompt length there.
+  const inventory = clear.hasDisplace
+    ? contentInventoryLines(input.contentInventory)
+    : [];
 
   const reservedZones =
     input.brand === 'cmo'
       ? 'RESERVED ZONES: the TOP HEADER BAND (the full-width blue leader lockup and the महाराष्ट्र शासन emblem) occupies the top ~19% of the poster, the full-width BOTTOM ~8% footer strip, and the UPPER-RIGHT PHOTO CIRCLE — all three are stamped onto the poster by software (the circle holds a photograph placed by software). Do NOT alter, move, redraw or remove them; keep the upper-right circle a quiet plain background with no text, subject, ring or outline; and do NOT move any text or important content into those areas.'
       : 'RESERVED ZONES: the white rounded-square महाराष्ट्र शासन emblem-and-wordmark badge in the top-right (approx 280x270 px) and the footer strip along the bottom (full width, approx 130 px tall) are official branding stamped onto the poster by software — do NOT alter, move, redraw or remove them, and do NOT move any text or important content into those areas.';
 
-  // With clear rectangles present, "keep the exact layout unchanged" would contradict the
-  // relocation the officer asked for — a contradictory pair degrades compliance with both.
+  // A DISPLACE round cannot keep the exact layout — that is the point of it — so the
+  // keep-layout rule is REPLACED rather than hedged. Hedging it with a subordinate
+  // "except…" clause is what made the gesture a no-op: the absolute-sounding half won.
+  // With only DELETE boxes the rule is correct as it stands and only needs the except.
   const exceptClause =
-    clearCount > 0 ? ' or the SPACE TO FREE block below' : '';
+    clear.count > 0 ? ' or the SPACE TO FREE block below' : '';
+  const keepRule = clear.hasDisplace
+    ? DISPLACE_PRESERVE_RULE
+    : `Keep the exact layout, existing Marathi text and figures, colours, typography, and imagery unchanged except where the requested change${exceptClause} explicitly requires it.`;
+  const keepRuleMarker = clear.hasDisplace
+    ? DISPLACE_PRESERVE_RULE
+    : `Keep the exact layout, existing Marathi text and figures, colours, typography, and imagery unchanged except where a requested change${exceptClause} explicitly requires it.`;
+  // "Preserve all existing Devanagari text exactly" is true of a displace (the words
+  // survive, their positions change) but flatly contradicts a delete, so it gains the
+  // exception whenever any blue box is present.
+  const textException = clear.count > 0 ? ', except as the SPACE TO FREE block requires' : '';
 
   if (markerCount > 0) {
     return [
@@ -447,11 +471,12 @@ export function buildFeedbackPrompt(input: BuildFeedbackPromptInput): string {
       `The input image carries ${markerCount} numbered red annotation marker(s): thin red outline rectangles, each with a small red circular badge showing its number. They were drawn onto the poster by editing software and are NOT part of the poster design.`,
       'Each marker is a pointing gesture showing where one requested change applies — not a hard boundary. For each marker, identify the design element at or around that spot and apply the correspondingly numbered change from the request below to that WHOLE element, even where the element extends beyond the rectangle.',
       `REQUESTED CHANGES: «${imageFeedback}».`,
-      `Make ONLY these changes. Keep the exact layout, existing Marathi text and figures, colours, typography, and imagery unchanged except where a requested change${exceptClause} explicitly requires it.`,
+      `Make ONLY these changes. ${keepRuleMarker}`,
       reservedZones,
-      ...clearRule,
       'ERASE every red marker rectangle and numbered badge completely from the output, restoring whatever they overlapped — no red outlines, red circles, or annotation numbers may remain anywhere on the poster.',
-      'Add no new text, letters, numbers, captions, logos, borders, or decorative elements beyond the requested changes. Preserve all other existing Devanagari text exactly. Output ONE complete 4:5 portrait poster filling the canvas.',
+      `Add no new text, letters, numbers, captions, logos, borders, or decorative elements beyond the requested changes. Preserve all other existing Devanagari text exactly${textException}. Output ONE complete 4:5 portrait poster filling the canvas.`,
+      ...inventory,
+      ...clear.lines,
     ].join('\n');
   }
 
@@ -460,10 +485,11 @@ export function buildFeedbackPrompt(input: BuildFeedbackPromptInput): string {
     ...(imageFeedback.length > 0
       ? [`Apply ONLY this requested change: «${imageFeedback}».`]
       : []),
-    `Keep the exact layout, existing Marathi text and figures, colours, typography, and imagery unchanged except where the requested change${exceptClause} explicitly requires it.`,
+    keepRule,
     reservedZones,
-    ...clearRule,
-    'Add no new text, letters, numbers, captions, logos, borders, or decorative elements. Preserve all existing Devanagari text exactly. Output ONE complete 4:5 portrait poster filling the canvas.',
+    `Add no new text, letters, numbers, captions, logos, borders, or decorative elements. Preserve all existing Devanagari text exactly${textException}. Output ONE complete 4:5 portrait poster filling the canvas.`,
+    ...inventory,
+    ...clear.lines,
   ].join('\n');
 }
 
@@ -566,26 +592,33 @@ if (
 
     // 5. The clear-space (blue box) feedback path. The properties that matter are that the
     //    block only appears when asked for, that it survives beside red markers, that it can
-    //    stand alone with no typed text at all, and that it never proposes emptying the area
-    //    into a panel or a different colour — the failure mode this feature exists to avoid.
+    //    stand alone with no typed text at all, that it never proposes emptying the area
+    //    into a panel or a different colour — and, above all, that a DISPLACE round does not
+    //    also carry "keep the exact layout unchanged". That contradiction is what made the
+    //    gesture a no-op on a full poster, so it is asserted in both branches.
     const plainFeedback = buildFeedbackPrompt({
       imageFeedback: 'शीर्षक मोठे करा',
       brand: 'dgipr',
     });
     if (/blue/i.test(plainFeedback))
       failures.push('plain feedback prompt mentions blue clear boxes');
+    if (!plainFeedback.includes('Keep the exact layout'))
+      failures.push('plain feedback prompt lost its keep-layout rule');
+    if (plainFeedback.includes('SPACE TO FREE block'))
+      failures.push('plain feedback prompt gained a clear-space exception');
 
     const cleared = buildFeedbackPrompt({
       imageFeedback: '',
       brand: 'dgipr',
-      clearCount: 2,
+      clearActions: ['displace', 'remove'],
     });
     for (const needle of [
       'SPACE TO FREE',
       '2 translucent BLUE rectangle',
       '(A, B)',
-      'RELOCATE',
-      'PLAIN BACKGROUND',
+      'MOVE — blue box A',
+      'DELETE — blue box B',
+      'PLAIN EMPTY BACKGROUND',
       'ERASE the blue rectangles',
       'RESERVED ZONES',
     ]) {
@@ -594,22 +627,70 @@ if (
     }
     if (cleared.includes('Apply ONLY this requested change'))
       failures.push('clear-space-only prompt invented a requested change');
+    // THE regression this whole change exists to prevent.
+    if (cleared.includes('Keep the exact layout'))
+      failures.push('displace round kept the contradictory keep-layout rule');
+    if (!cleared.includes("INFORMATION is fixed but its ARRANGEMENT is not"))
+      failures.push('displace round lost the preserve-information replacement');
+
+    // A DELETE-only round is the opposite case: keeping the layout frozen is correct
+    // there, so the rule must survive — with the exception clause, since the delete
+    // itself changes the poster.
+    const removeOnly = buildFeedbackPrompt({
+      imageFeedback: '',
+      brand: 'dgipr',
+      clearActions: ['remove'],
+    });
+    if (!removeOnly.includes('Keep the exact layout'))
+      failures.push('remove-only round dropped the keep-layout rule');
+    if (!removeOnly.includes('or the SPACE TO FREE block below'))
+      failures.push('remove-only round lost the keep-layout exception');
+    if (removeOnly.includes('MOVE — blue box'))
+      failures.push('remove-only round leaked the displace block');
+    if (removeOnly.includes('INFORMATION THAT MUST SURVIVE'))
+      failures.push('remove-only round paid for a displace inventory');
+
+    // The survival inventory only rides a displace, and reaches the prompt verbatim.
+    const withInventory = buildFeedbackPrompt({
+      imageFeedback: '',
+      brand: 'dgipr',
+      clearActions: ['displace'],
+      contentInventory: ['पिण्याचे पाणी १५ मिनिटे उकळून घ्या', 'शिळे अन्न टाळा'],
+    });
+    if (!withInventory.includes('INFORMATION THAT MUST SURVIVE — 2 item(s)'))
+      failures.push('displace round lost its survival inventory');
+    if (!withInventory.includes('1. पिण्याचे पाणी १५ मिनिटे उकळून घ्या'))
+      failures.push('inventory item did not reach the prompt verbatim');
+    if (
+      buildFeedbackPrompt({
+        imageFeedback: '',
+        brand: 'dgipr',
+        clearActions: ['remove'],
+        contentInventory: ['शिळे अन्न टाळा'],
+      }).includes('INFORMATION THAT MUST SURVIVE')
+    )
+      failures.push('remove-only round emitted an inventory');
 
     const both = buildFeedbackPrompt({
       imageFeedback: 'शीर्षक मोठे करा',
       brand: 'dgipr',
       markerCount: 2,
-      clearCount: 1,
+      clearActions: ['displace'],
     });
     if (!both.includes('2 numbered red annotation marker'))
       failures.push('combined prompt lost the marker count');
     if (!both.includes('1 translucent BLUE rectangle'))
       failures.push('combined prompt lost the clear count');
-    if (!both.includes('SPACE TO FREE block below'))
-      failures.push('combined prompt kept the contradictory keep-layout rule');
-    // The clear rule must come AFTER the reserved zones it refers to.
+    if (both.includes('Keep the exact layout'))
+      failures.push('combined displace prompt kept the keep-layout rule');
+    // The clear rule must come AFTER the reserved zones it refers to, and LAST of all —
+    // last position is what these models weight most, and it is the officer's real ask.
     if (both.indexOf('SPACE TO FREE:') < both.indexOf('RESERVED ZONES'))
       failures.push('clear rule precedes the reserved zones it refers to');
+    if (!both.trimEnd().endsWith('may remain anywhere on the poster.'))
+      failures.push('clear rule is not the last block of the prompt');
+    if (both.indexOf('SPACE TO FREE:') < both.indexOf('Output ONE complete'))
+      failures.push('clear rule precedes the canvas/closing line');
 
     let threw = false;
     try {

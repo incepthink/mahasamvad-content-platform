@@ -102,14 +102,25 @@ export function estimateVideoCostUsd(tier: VideoTier, seconds: number): number {
   return VIDEO_TIER_PRICE_PER_SECOND_USD[tier] * Math.max(seconds, 0);
 }
 
-// Sarvam TTS (bulbul) is billed per character of input text. Approximate public
-// price captured 2026-07-22; an estimate like the image tiers, edit if Sarvam
-// changes pricing. Narration is short (a few hundred chars/scene), so this is a
-// small line beside the Veo spend.
-export const SARVAM_TTS_PRICE_PER_1K_CHARS_USD = 0.05;
+// Narration TTS, billed per character of input text. Approximate public price for Sarvam
+// bulbul captured 2026-07-22; an estimate like the image tiers, edit if pricing changes.
+// Narration is short (a few hundred chars/scene), so this is a small line beside the clip
+// spend.
+//
+// DELIBERATELY PROVIDER-AGNOSTIC, and the name says so: `recordTtsCost` applies it whatever
+// NARRATION_TTS_PROVIDER is set to, and the deployed provider is ElevenLabs, whose credit
+// pricing has never been reconciled against this figure. Naming it after Sarvam made
+// /analytics print "ElevenLabs: ₹4.4 per 1,000 characters" — a Sarvam-derived number under
+// another vendor's name, which is worse than an openly configured one. Reconcile it against
+// the real invoice and edit here; if the two providers ever diverge enough to matter, split
+// it per provider the way estimateOcrCostUsd already is.
+export const TTS_PRICE_PER_1K_CHARS_USD = 0.05;
+
+/** @deprecated Use TTS_PRICE_PER_1K_CHARS_USD — the rate is not Sarvam-specific. */
+export const SARVAM_TTS_PRICE_PER_1K_CHARS_USD = TTS_PRICE_PER_1K_CHARS_USD;
 
 export function estimateTtsCostUsd(characters: number): number {
-  return (Math.max(characters, 0) / 1000) * SARVAM_TTS_PRICE_PER_1K_CHARS_USD;
+  return (Math.max(characters, 0) / 1000) * TTS_PRICE_PER_1K_CHARS_USD;
 }
 
 // Speech-to-text is billed per HOUR of audio, not per character or token — the
@@ -124,4 +135,35 @@ export const ELEVENLABS_STT_PRICE_PER_HOUR_USD = 0.4;
 
 export function estimateSttCostUsd(seconds: number): number {
   return (Math.max(seconds, 0) / 3600) * ELEVENLABS_STT_PRICE_PER_HOUR_USD;
+}
+
+// Sarvam's translation endpoints (sarvam-chat for English, sarvam-translate:v1 for Hindi),
+// billed per character of SOURCE text. `translate-article.ts` has no provider seam — both
+// targets are Sarvam — so this is the rate behind every भाषांतर figure on the analytics
+// page, and it is CONFIGURED, not discovered: Sarvam returns no usage object, so nothing in
+// the product can reconcile it. Read it off the invoice once and edit here.
+export const SARVAM_TRANSLATE_PRICE_PER_1K_CHARS_USD = 0.05;
+
+export function estimateTranslateCostUsd(characters: number): number {
+  return (
+    (Math.max(characters, 0) / 1000) * SARVAM_TRANSLATE_PRICE_PER_1K_CHARS_USD
+  );
+}
+
+// Reading a scanned PDF's PIXELS, per page. Two providers, two billing shapes, which is why
+// this is a per-provider function rather than one constant:
+//
+//   openai (the default — see ocr-provider.ts) bills TOKENS against OPENAI_API_KEY, and
+//     openai-doc.ts already runs through chatComplete, so its cost is ALREADY in the text
+//     line. Returning 0 here is correct and not a gap: charging the page rate too would
+//     double-count it. The page count is still recorded, because "how many pages did the
+//     department have read" is the question the analytics card is asking.
+//
+//   sarvam bills per page against its own credits and has never appeared in any cost scope,
+//     so this rate is the only figure available for it.
+export const SARVAM_OCR_PRICE_PER_PAGE_USD = 0.008;
+
+export function estimateOcrCostUsd(provider: string, pages: number): number {
+  if (provider !== 'sarvam') return 0;
+  return Math.max(pages, 0) * SARVAM_OCR_PRICE_PER_PAGE_USD;
 }

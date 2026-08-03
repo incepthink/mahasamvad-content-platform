@@ -11,13 +11,18 @@
 
 import type { FastifyInstance } from 'fastify';
 import {
+  createCostAccumulator,
   extractGlossaryCandidates,
   interpretDocumentInstruction,
+  runInCostScope,
+  runInCostTask,
   translateArticle,
 } from '@dgipr/content-engine';
+import { recordTasksFromCost } from '../jobs/service-usage.js';
 import {
   findGlossaryTermsInText,
   insertGlossaryCandidates,
+  recordUsageEvent,
   upsertGlossaryTerm,
   type SupabaseClient,
 } from '@dgipr/database';
@@ -50,7 +55,14 @@ export function registerTranslateRoutes(
 ): void {
   app.post('/translate/prepare', async (request) => {
     const body = PrepareTranslateTextRequestSchema.parse(request.body);
-    return prepareTranslationTerms(client, body.text);
+    const cost = createCostAccumulator();
+    const result = await runInCostScope(cost, () =>
+      runInCostTask('translation_name_extraction', () =>
+        prepareTranslationTerms(client, body.text),
+      ),
+    );
+    recordTasksFromCost(client, 'translate', cost);
+    return result;
   });
 
   app.post('/translate', async (request) => {
@@ -83,11 +95,20 @@ export function registerTranslateRoutes(
       termType: term.termType,
     }));
 
-    const { text: translated, unpreservedNames } = await translateArticle(
-      body.text,
-      glossary,
-      body.language,
+    // A cost scope purely so the Sarvam and OpenAI work inside translateArticle can be
+    // attributed on /analytics: this route stores nothing, so without it the department's
+    // busiest translation surface reports no service usage at all. The scope wraps only the
+    // translation — the glossary mining below is a different feature's spend.
+    const cost = createCostAccumulator();
+    const { text: translated, unpreservedNames } = await runInCostScope(
+      cost,
+      () =>
+        runInCostTask(
+          body.language === 'hi' ? 'hindi_translation' : 'english_translation',
+          () => translateArticle(body.text, glossary, body.language),
+        ),
     );
+    recordTasksFromCost(client, 'translate', cost);
 
     // Legacy path only: with no confirmed set, mine unverified candidates into the
     // review queue (best-effort). The prepare flow already extracted these, so
@@ -109,6 +130,15 @@ export function registerTranslateRoutes(
         request.log.error(error, 'glossary candidate mining failed');
       }
     }
+
+    // Ad-hoc translation leaves no row (this route stores nothing), so the analytics page
+    // learns about it only here. Length and target language only — never the text (0043).
+    recordUsageEvent(client, {
+      feature: 'translate',
+      action: 'translate_text',
+      charCount: body.text.length,
+      detail: { language: body.language },
+    });
 
     return {
       translated,

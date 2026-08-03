@@ -29,8 +29,12 @@
 //     button or OCR wait here.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FileText } from 'lucide-react';
-import type { DocumentKind, PdfTextSourceValue } from '@dgipr/schemas';
+import { FileText, ListChecks } from 'lucide-react';
+import type {
+  AnalyticsFeatureKey,
+  DocumentKind,
+  PdfTextSourceValue,
+} from '@dgipr/schemas';
 import {
   createDocumentIntake,
   extractDocumentIntakePages,
@@ -45,6 +49,7 @@ import {
 } from '../lib/documentSelection';
 import { useDocumentIntake } from '../lib/useDocumentIntake';
 import { STR } from '../lib/strings';
+import { CardTitle } from './CardTitle';
 import { DocumentPages } from './DocumentPages';
 
 const EXTENSIONS: Record<DocumentKind, string> = {
@@ -86,6 +91,7 @@ export function DocumentIntake({
   title,
   hint,
   allowDeferredRead = false,
+  feature,
   onText,
   onTextChange,
   onStatusChange,
@@ -119,6 +125,12 @@ export function DocumentIntake({
   // LIVE mode only, in practice: a deferred document has no text, so there is nothing for the
   // handoff button to hand over.
   allowDeferredRead?: boolean | undefined;
+  // Which sidebar feature this upload belongs to, for /analytics attribution only. The
+  // document service is shared by four surfaces and knows nothing else about its caller, so
+  // without it a PAID OCR read is countable in the bill and attributable to nobody. Optional
+  // and never guessed server-side: an omitted value records no service row, which is honest,
+  // where a default would put one surface's spend on another's card.
+  feature?: AnalyticsFeatureKey | undefined;
   // HANDOFF mode: the text reaches the caller only when the button is pressed. Right for a
   // surface whose single text box the file REPLACES (/translate, /proofread) — the click is
   // what authorises overwriting whatever is in it.
@@ -329,6 +341,7 @@ export function DocumentIntake({
     try {
       const form = new FormData();
       form.append('file', file, file.name);
+      if (feature) form.append('feature', feature);
       const created = await createDocumentIntake(form);
       resetSelection();
       setJobId(created.id);
@@ -457,7 +470,7 @@ export function DocumentIntake({
         {/* An <h2>, like every other card heading on the surfaces this appears on:
             .field-label is scoped to <label> in globals.css, so a <p> carrying it rendered
             unweighted. The two later states below use the same element for the same reason. */}
-        <h2>{title ?? STR.docUploadTitle}</h2>
+        <CardTitle icon={FileText}>{title ?? STR.docUploadTitle}</CardTitle>
         <p className="hint">{hint ?? STR.docUploadHint}</p>
         <div className="btn-row" style={{ marginTop: 12 }}>
           {fileButton}
@@ -507,7 +520,7 @@ export function DocumentIntake({
   if (isSelecting) {
     return (
       <section className="card">
-        <h2>{STR.docSelectTitle}</h2>
+        <CardTitle icon={ListChecks}>{STR.docSelectTitle}</CardTitle>
         <p className="hint">
           {reselecting ? STR.docChangeSelectionHint : STR.docSelectHint}
         </p>
@@ -567,7 +580,7 @@ export function DocumentIntake({
 
   return (
     <section className="card">
-      <h2>{STR.docReviewTitle}</h2>
+      <CardTitle icon={FileText}>{STR.docReviewTitle}</CardTitle>
       <p className="hint">{STR.docReviewHint}</p>
       <p className="hint" style={{ marginTop: 8 }}>
         <FileText size={16} aria-hidden="true" /> {detail.fileName}

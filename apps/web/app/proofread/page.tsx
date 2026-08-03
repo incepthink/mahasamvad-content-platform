@@ -282,7 +282,12 @@ export default function ProofreadPage() {
 
   return (
     <main className="page">
-      <h1 className="page-title">{STR.proofreadPageTitle}</h1>
+      <header className="page-head">
+        <div className="page-head-text">
+          <h1 className="page-title">{STR.proofreadPageTitle}</h1>
+          <p className="page-sub">{STR.proofreadPageIntro}</p>
+        </div>
+      </header>
 
       <section className="card">
         <label className="field-label" htmlFor="proofread-text">
@@ -301,13 +306,16 @@ export default function ProofreadPage() {
           }}
           style={{ marginTop: 10 }}
         />
-        <p className="hint">{text.length.toLocaleString('en-IN')}</p>
+        <p className="hint char-count">
+          {text.length.toLocaleString('en-IN')} {STR.docChars}
+        </p>
       </section>
 
       {/* The text to check usually exists as a file — a draft press note, a scanned GR.
           Keep the upload inline, like every other document surface in the product. */}
       <DocumentIntake
         storageKey="dgipr.proofread.document"
+        feature="proofread"
         maxBytes={UPLOAD_FILE_MAX_BYTES}
         onText={(value) => {
           setText(value);
@@ -316,7 +324,7 @@ export default function ProofreadPage() {
         }}
       />
 
-      <section className="card">
+      <section className="card card-action">
         <div className="btn-row">
           <button
             type="button"

@@ -42,6 +42,7 @@ import {
   type YouTubeVideo,
 } from '@dgipr/schemas';
 import { probeYouTubeVideo } from '../lib/api';
+import { CardTitle } from './CardTitle';
 import { STR } from '../lib/strings';
 
 export function YouTubeLinkInput({
@@ -135,7 +136,7 @@ export function YouTubeLinkInput({
     <section className="card">
       {/* An <h2>, matching the recording picker above it and every other card heading — see
           AudioFilePicker for why .field-label on a <p> rendered unweighted. */}
-      <h2>{STR.ytTitle}</h2>
+      <CardTitle icon={CirclePlay}>{STR.ytTitle}</CardTitle>
       <p className="hint">{STR.ytHint}</p>
 
       <div className="yt-add" style={{ marginTop: 12 }}>

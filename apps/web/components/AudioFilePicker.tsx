@@ -13,12 +13,13 @@
 // only one.
 
 import { useRef, type ReactNode } from 'react';
-import { Music, X } from 'lucide-react';
+import { Mic, Music, X } from 'lucide-react';
 import {
   AUDIO_FILE_ACCEPT,
   isAudioFileName,
   UPLOAD_FILE_MAX_BYTES,
 } from '@dgipr/schemas';
+import { CardTitle } from './CardTitle';
 import { STR } from '../lib/strings';
 
 export function formatFileSize(bytes: number): string {
@@ -89,8 +90,10 @@ export function AudioFilePicker({
     <section className="card">
       {/* An <h2>, like every other card heading on both surfaces this picker appears on.
           .field-label is scoped to <label> in globals.css, so a <p> carrying it got no
-          weight at all and this card's title read as body text beside its neighbours. */}
-      <h2>{title}</h2>
+          weight at all and this card's title read as body text beside its neighbours.
+          The microphone is fixed here rather than passed in: this component only ever
+          takes recordings, so a caller choosing the icon could only get it wrong. */}
+      <CardTitle icon={Mic}>{title}</CardTitle>
       <p className="hint">{hint}</p>
 
       <div className="btn-row" style={{ marginTop: 12 }}>

@@ -4,6 +4,13 @@
 // ("मजकूर सुधारा" cheap re-render vs "चित्र बदला" new background image).
 
 import { useState } from 'react';
+import {
+  Download,
+  // Palette — the recolour redo, hidden from the UI (see the commented button below).
+  RotateCw,
+  SquareDashed,
+  SquarePen,
+} from 'lucide-react';
 import { POSTER_HEADING_MAX_CHARS, isYoutubeCategory } from '@dgipr/schemas';
 import type { GenerationDetail } from '@dgipr/schemas';
 import {
@@ -57,13 +64,17 @@ export function PosterPanel({
     addClearRegion,
     removeClearRegion,
     setClearNote,
+    setClearAction,
     markSubmitted,
     dismissSubmitted,
   } = usePosterMarkers(detail);
-  const [annotOpen, setAnnotOpen] = useState(false);
-  // Which gesture the overlay captures while the fold is open: red "change this"
-  // markers or blue "free this space" rectangles. Both sets travel in one round.
-  const [annotMode, setAnnotMode] = useState<AnnotatorMode>('mark');
+  // Which gesture the overlay captures: red "change this" markers or blue "free this
+  // space" rectangles. Both sets travel in one round. NULL means the poster is not armed
+  // at all — which is what makes this one piece of state serve both the two icon buttons
+  // (SocialPostView's shape) and the feedback fold, instead of a separate `annotOpen`
+  // flag that could disagree with it.
+  const [annotMode, setAnnotMode] = useState<AnnotatorMode | null>(null);
+  const annotOpen = annotMode !== null;
 
   if (!detail.posterUrl) return null;
 
@@ -86,6 +97,15 @@ export function PosterPanel({
   const reservedZones = isThumbnail
     ? YOUTUBE_RESERVED_ZONES
     : ARTICLE_RESERVED_ZONES;
+  // Same test SocialPostView makes: the poster routes want a poster and an idle row, NOT
+  // a completed status — a run whose last edit failed still has both and must be able to
+  // carry on. `failed` therefore counts here too.
+  const posterEditable =
+    (detail.status === 'completed' || detail.status === 'failed') &&
+    !showSpinner;
+  const downloadLabel = isThumbnail
+    ? STR.downloadThumbnail
+    : STR.downloadPoster;
 
   return (
     <section className="card">
@@ -107,7 +127,7 @@ export function PosterPanel({
               disabled={showSpinner}
               submittedMarkers={submittedMarkers}
               onDismissSubmitted={dismissSubmitted}
-              mode={annotMode}
+              mode={annotMode ?? 'mark'}
               clearRegions={clearRegions}
               onAddClear={addClearRegion}
               onRemoveClear={removeClearRegion}
@@ -121,26 +141,148 @@ export function PosterPanel({
           ) : null}
         </div>
         <div>
-          <div className="btn-row">
-            <a className="btn btn-primary" href={posterDownloadUrl(detail.id)}>
-              {isThumbnail ? STR.downloadThumbnail : STR.downloadPoster}
+          {/* Icon-only actions on the poster itself — the same row SocialPostView puts
+              under a social poster, so the two lanes read as one product. Every button
+              carries its Marathi label as title + aria-label, since nothing here is
+              spelled out on screen. The यूट्यूब थंबनेल lane shares the row unchanged; what
+              does not apply to it (the heading lock) is hidden further down, not here. */}
+          <div className="poster-icon-actions">
+            <a
+              className="icon-btn"
+              href={posterDownloadUrl(detail.id)}
+              title={downloadLabel}
+              aria-label={downloadLabel}
+            >
+              <Download size={18} strokeWidth={1.9} aria-hidden="true" />
             </a>
-            {canRevise ? (
+            {/* A fresh redesign of this same run. Only offered on the pixel-feedback
+                lane: in `html` mode the poster is typeset from a cached scene and the
+                two folds below are the way it changes. */}
+            {!canRevise ? (
               <button
                 type="button"
-                className="btn"
-                onClick={() => setEditing((v) => !v)}
+                className="icon-btn"
+                title={STR.posterRedesign}
+                aria-label={STR.posterRedesign}
+                disabled={!posterEditable}
+                onClick={async () => {
+                  setPending(true);
+                  try {
+                    await regeneratePoster(detail.id);
+                    await onChanged();
+                  } finally {
+                    setPending(false);
+                  }
+                }}
               >
-                {editing ? STR.closeEditCopy : STR.editCopy}
+                <RotateCw size={18} strokeWidth={1.9} aria-hidden="true" />
               </button>
             ) : null}
-            {/* The only entry here that navigates rather than acting on this run —
-                the trailing arrow is what says so. */}
+            {/* HIDDEN FROM THE UI, deliberately kept: the recolour redo
+                ("वेगळ्या रंगात तयार करा"), which re-renders with the current colour family
+                barred. The API still supports it — regeneratePoster takes `recolour` — so
+                restoring it is uncommenting this block plus the `Palette` import above.
+                A thumbnail never had it: its palette comes from the reference and the
+                message, so a "different colours" redo is indistinguishable from the plain
+                one, which is why the guard below stays if this ever comes back.
+            {!canRevise && !isThumbnail ? (
+              <button
+                type="button"
+                className="icon-btn"
+                title={STR.posterRecolour}
+                aria-label={STR.posterRecolour}
+                disabled={!posterEditable}
+                onClick={async () => {
+                  setPending(true);
+                  try {
+                    await regeneratePoster(detail.id, { recolour: true });
+                    await onChanged();
+                  } finally {
+                    setPending(false);
+                  }
+                }}
+              >
+                <Palette size={18} strokeWidth={1.9} aria-hidden="true" />
+              </button>
+            ) : null}
+            */}
+            {/* The two annotator gestures. They only ARM the poster — the notes are
+                typed in the fold below, exactly as on a social run. */}
+            {!canRevise ? (
+              <>
+                <button
+                  type="button"
+                  className="icon-btn"
+                  aria-pressed={annotMode === 'mark'}
+                  title={
+                    annotMode === 'mark'
+                      ? STR.iconEditPosterOn
+                      : STR.iconEditPoster
+                  }
+                  aria-label={
+                    annotMode === 'mark'
+                      ? STR.iconEditPosterOn
+                      : STR.iconEditPoster
+                  }
+                  disabled={showSpinner}
+                  onClick={() =>
+                    setAnnotMode(annotMode === 'mark' ? null : 'mark')
+                  }
+                >
+                  <SquarePen size={18} strokeWidth={1.9} aria-hidden="true" />
+                </button>
+                {/* The blue gesture: free a rectangle so the officer can place their own
+                    logo or photograph there by hand. Its own button rather than a mode
+                    inside the pencil, because it is a different request — nothing is
+                    being edited, space is being made. */}
+                <button
+                  type="button"
+                  className="icon-btn icon-btn-clear"
+                  aria-pressed={annotMode === 'clear'}
+                  title={
+                    annotMode === 'clear'
+                      ? STR.iconClearSpaceOn
+                      : STR.iconClearSpace
+                  }
+                  aria-label={
+                    annotMode === 'clear'
+                      ? STR.iconClearSpaceOn
+                      : STR.iconClearSpace
+                  }
+                  disabled={showSpinner}
+                  onClick={() =>
+                    setAnnotMode(annotMode === 'clear' ? null : 'clear')
+                  }
+                >
+                  <SquareDashed
+                    size={18}
+                    strokeWidth={1.9}
+                    aria-hidden="true"
+                  />
+                </button>
+              </>
+            ) : null}
+            {/* Last in the row, and the only entry that navigates rather than acting on
+                this run — the trailing arrow is what says so. */}
             <CrossFormatLinks
               generationId={detail.id}
               category={detail.category}
             />
           </div>
+
+          {/* Stays a text button: it opens a multi-field editor, not a single action, so
+              it does not belong in a row of one-tap icons. `html` mode only. */}
+          {canRevise ? (
+            <div className="btn-row" style={{ marginTop: 12 }}>
+              <button
+                type="button"
+                className="btn btn-small"
+                onClick={() => setEditing((v) => !v)}
+              >
+                {editing ? STR.closeEditCopy : STR.editCopy}
+              </button>
+            </div>
+          ) : null}
 
           {/* `canRevise` already requires detail.copy; the explicit test is what narrows
               it for the compiler now that a copy-less lane (the thumbnail) reaches here. */}
@@ -207,60 +349,21 @@ export function PosterPanel({
             </div>
           ) : (
             <div className="poster-feedback">
-              {detail.status === 'completed' ? (
+              {/* `failed` counts here too: the poster routes need a poster and an idle row,
+                  not a completed status, and a run whose last edit failed still has both.
+                  Hiding these was what left such a run with nothing to act on. */}
+              {detail.status === 'completed' || detail.status === 'failed' ? (
                 <div className="poster-feedback">
                   {detail.posterStyleLabel ? (
                     <p className="hint poster-style-label">
                       {STR.posterStyleLabelPrefix} {detail.posterStyleLabel}
                     </p>
                   ) : null}
-                  <p className="hint">{STR.posterRedesignHint}</p>
-                  <div className="poster-redesign-actions">
-                    {/* Both buttons re-render the poster as a new version; the row flips to
-                        running server-side, so refresh to resume polling. `recolour`
-                        additionally bars the family shown above, for when only the colours
-                        are wrong. Same pair as SocialPostView. */}
-                    <button
-                      type="button"
-                      className="btn btn-small"
-                      disabled={showSpinner}
-                      onClick={async () => {
-                        setPending(true);
-                        try {
-                          await regeneratePoster(detail.id);
-                          await onChanged();
-                        } finally {
-                          setPending(false);
-                        }
-                      }}
-                    >
-                      {STR.posterRedesign}
-                    </button>
-                    {/* A thumbnail has no assigned colour family to bar — the reference
-                        and the message decide its palette — so a "different colours" redo
-                        would be indistinguishable from the plain one. */}
-                    {isThumbnail ? null : (
-                      <button
-                        type="button"
-                        className="btn btn-small"
-                        disabled={showSpinner}
-                        onClick={async () => {
-                          setPending(true);
-                          try {
-                            await regeneratePoster(detail.id, {
-                              recolour: true,
-                            });
-                            await onChanged();
-                          } finally {
-                            setPending(false);
-                          }
-                        }}
-                      >
-                        {STR.posterRecolour}
-                      </button>
-                    )}
-                  </div>
-                  {/* The third redo, and the one that fixes a wrong heading: print exactly
+                  {/* The redesign redo moved into the icon row under the poster (the ↻
+                      button), so its explanatory hint went with it — the button carries
+                      its Marathi label as title + aria-label there, the SocialPostView
+                      shape. What stays here is the material that is not a one-tap action. */}
+                  {/* The heading redo, and the one that fixes a wrong heading: print exactly
                       this text. It lives here rather than on the create form alone because
                       the officer only discovers the automatic text is wrong once the poster
                       exists. */}
@@ -289,16 +392,22 @@ export function PosterPanel({
                 markers={markers}
                 onNoteChange={setNote}
                 onRemoveMarker={removeMarker}
-                onOpenChange={setAnnotOpen}
+                // Opening the fold arms the poster if an icon has not already done so;
+                // closing it disarms. So the fold and the two icons are two ways into
+                // one state rather than two states that can disagree.
+                onOpenChange={(open) =>
+                  setAnnotMode((current) => (open ? (current ?? 'mark') : null))
+                }
                 disabled={showSpinner}
                 showReservedWarning={markers.some((m) =>
                   markerInZones(m.region, reservedZones),
                 )}
                 submittedMarkers={submittedMarkers}
-                mode={annotMode}
+                mode={annotMode ?? 'mark'}
                 onModeChange={setAnnotMode}
                 clearRegions={clearRegions}
                 onClearNoteChange={setClearNote}
+                onClearActionChange={setClearAction}
                 onRemoveClearRegion={removeClearRegion}
                 submittedClearRegions={submittedClearRegions}
                 showClearReservedWarning={clearRegions.some((c) =>

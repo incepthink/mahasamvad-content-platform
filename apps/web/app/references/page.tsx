@@ -1,19 +1,34 @@
 'use client';
 
-// Master-template library. Each poster type (builtin or custom) holds a rotation
-// of images: every image marked "वापरात" (enabled) can be picked at random for a
-// generation, so several may be enabled at once. Custom twitter types carry their
-// own name + classifier description and can be created/deleted here.
+// Master-template library. Every image marked "वापरात" (enabled) can be picked for a
+// generation, so several may be enabled at once.
+//
+// THE PAGE IS ORGANISED BY SHAPE, NOT BY TOPIC. It used to render one card per
+// `reference_type` — 15 groups for 84 twitter masters, labelled by what their placeholder
+// art is ABOUT ("Information about insects, reptiles, animals, etc"), with one builtin
+// renamed प्रायोगिक holding 17 images whose slot counts run 0 to 10. That taxonomy described
+// nothing an operator could see in the picture, and it had stopped steering anything:
+// capacity-first selection ranks the WHOLE library and gates on `bulletSlots`, so the group
+// an image sits in has not decided a poster since 2026-07-31.
+//
+// Sections now come from `layoutSpec` (see lib/referenceGroups.ts) — the same axis the picker
+// reasons over — with छायाचित्र/मजकूर as a filter rather than a second level of nesting.
+// NOTHING IS STORED: `reference_types`, `subtype`, `copy_style` and every storage path are
+// untouched, so this is a presentation change with no effect on any render. The types survive
+// as the upload destination (the dropdown on the add form) and as the create-form pin target.
+//
+// Creating, renaming and deleting a type therefore has no home on this page any more. The
+// API routes still exist; put the control back here if that need returns.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ImageIcon,
-  Pencil,
   Plus,
   RefreshCw,
   Trash2,
   Type,
   Upload,
+  X,
 } from 'lucide-react';
 import type {
   ReferenceCategory,
@@ -22,15 +37,12 @@ import type {
 } from '@dgipr/schemas';
 import {
   analyzeReferenceImage,
-  createReferenceType,
   deleteReferenceImage,
-  deleteReferenceType,
   listReferenceImages,
   listReferenceTypes,
   setReferenceImageEnabled,
   setReferenceImagePhotoZone,
   updateReferenceImageLayoutSpec,
-  updateReferenceType,
   uploadReferenceImage,
 } from '../../lib/api';
 import {
@@ -45,16 +57,71 @@ import {
   type ReferenceFilters,
   type SearchableReference,
 } from '../../lib/referenceSearch';
-import { REF_CATEGORY_LABELS, STR } from '../../lib/strings';
+import {
+  SHAPE_BANDS,
+  groupByBand,
+  type ShapeBandId,
+} from '../../lib/referenceGroups';
+import { STR } from '../../lib/strings';
 
 const ACCEPTED_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
-// A card opens on one row and grows by this many rows per press.
+// A band opens on one row and grows by this many rows per press.
 const ROWS_PER_STEP = 2;
 const DATE_FORMAT = new Intl.DateTimeFormat('mr-IN', {
   day: 'numeric',
   month: 'long',
   year: 'numeric',
 });
+
+// Section order on the page; each is its own library serving its own feature.
+const CATEGORIES: readonly ReferenceCategory[] = [
+  'twitter',
+  'article',
+  'youtube',
+];
+
+const CATEGORY_TABS: Record<ReferenceCategory, string> = {
+  twitter: STR.refTabTwitter,
+  article: STR.refTabArticle,
+  youtube: STR.refTabYoutube,
+};
+
+const BAND_LABELS: Record<ShapeBandId, string> = {
+  unanalyzed: STR.refBandUnanalyzed,
+  single: STR.refBandSingle,
+  few: STR.refBandFew,
+  medium: STR.refBandMedium,
+  many: STR.refBandMany,
+};
+
+const BAND_HINTS: Record<ShapeBandId, string> = {
+  unanalyzed: STR.refBandUnanalyzedHint,
+  single: STR.refBandSingleHint,
+  few: STR.refBandFewHint,
+  medium: STR.refBandMediumHint,
+  many: STR.refBandManyHint,
+};
+
+// Remembering the last group per category is what makes the dropdown a formality rather
+// than a decision — an operator uploading ten masters answers it once. Ordering only; the
+// API is never told about it.
+const LAST_GROUP_KEY = 'dgipr.references.lastGroup';
+
+function readLastGroup(category: ReferenceCategory): string | null {
+  try {
+    return window.localStorage.getItem(`${LAST_GROUP_KEY}.${category}`);
+  } catch {
+    return null;
+  }
+}
+
+function writeLastGroup(category: ReferenceCategory, slug: string): void {
+  try {
+    window.localStorage.setItem(`${LAST_GROUP_KEY}.${category}`, slug);
+  } catch {
+    // A blocked localStorage costs the default, never the upload.
+  }
+}
 
 function errText(error: unknown): string {
   return error instanceof Error ? error.message : STR.genericError;
@@ -63,9 +130,7 @@ function errText(error: unknown): string {
 // What the vision pass read off this master. Two fields here are consequential and
 // therefore surfaced (not buried) and correctable by hand: hasPhotoZone, which stops
 // the image model painting a hero photograph onto a text-only template; and the
-// subject line, which the reference ranker matches a note against — a vague read
-// there quietly picks the wrong template on every future run, and re-rolling the
-// vision pass is not a reliable fix for a vague answer.
+// subject line, which is searchable — a vague read there makes the master hard to find.
 function LayoutBadge({
   image,
   disabled,
@@ -233,7 +298,7 @@ function LayoutBadge({
 // is read off the RESOLVED track list rather than computed from the card's width, which
 // would mean writing the gap and the minimum down a second time. `auto-fill` (unlike
 // `auto-fit`) keeps its empty tracks, so this reports the true column count even while
-// the card is showing a single tile — which is what lets one row stay one row.
+// the band is showing a single tile — which is what lets one row stay one row.
 function useGridColumns(ref: React.RefObject<HTMLDivElement | null>): number {
   // Assumed until measured; the correction lands in the effect below on first paint.
   const [columns, setColumns] = useState(4);
@@ -262,7 +327,8 @@ function useGridColumns(ref: React.RefObject<HTMLDivElement | null>): number {
 // One image tile: preview + date + layout reading + enable/disable/delete actions.
 function ImageTile({
   image,
-  typeLabel,
+  groupLabel,
+  isCmo,
   disabled,
   query,
   dimmed = false,
@@ -273,7 +339,8 @@ function ImageTile({
   onSaveAbout,
 }: {
   image: ReferenceImage;
-  typeLabel: string;
+  groupLabel: string;
+  isCmo: boolean;
   disabled: boolean;
   query: string;
   // An un-analyzed master shown during a search: it is here because it CANNOT be
@@ -292,7 +359,7 @@ function ImageTile({
     >
       <div className={`ref-thumb-frame ref-thumb-frame-${image.category}`}>
         {/* Immutable library URLs are safe to render directly. */}
-        <img src={image.url} alt={typeLabel} loading="lazy" />
+        <img src={image.url} alt={groupLabel} loading="lazy" />
         {image.isActive ? (
           <span className="ref-thumb-badge">{STR.refEnabled}</span>
         ) : null}
@@ -300,6 +367,11 @@ function ImageTile({
       <div className="ref-thumb-meta">
         <span className="ref-thumb-date">
           {STR.refUploadedOn}: {DATE_FORMAT.format(new Date(image.createdAt))}
+          {/* The CMO brand is NOT taxonomy noise — it renders a different lockup and is
+              filtered on at selection time, so it stays visible on the tile. */}
+          {isCmo ? (
+            <span className="chip chip-completed">{STR.refBrandChip}</span>
+          ) : null}
         </span>
         <LayoutBadge
           image={image}
@@ -329,277 +401,46 @@ function ImageTile({
             {STR.refDelete}
           </button>
         </div>
+        {/* Which group this master was filed under. Recorded, not organising — it is the
+            last line of the tile for exactly that reason. */}
+        <span className="ref-thumb-group">
+          {STR.refGroupLine}: {groupLabel}
+        </span>
       </div>
     </div>
   );
 }
 
-// One poster type: label + description (inline-editable), its image rotation,
-// upload, and — for custom types — deletion of the whole type.
-function TypeCard({
-  type,
+// A grid of tiles that opens on one row and grows two rows at a time, so a band holding
+// thirty masters does not push everything below it off the page.
+function ImageGrid({
   images,
-  unsearchable = [],
-  query,
-  searching = false,
-  onChanged,
+  resetKey,
+  render,
 }: {
-  type: ReferenceType;
-  // Already filtered and ordered by the page. While searching this is the type's matches
-  // in rank order; otherwise it is its whole rotation.
-  images: ReferenceImage[];
-  // This type's un-analyzed masters, shown only while searching — see UnanalyzedNote.
-  unsearchable?: ReferenceImage[];
-  query: string;
-  searching?: boolean;
-  onChanged: () => Promise<void>;
+  images: readonly ReferenceImage[];
+  // A new result set folds back to one row — otherwise a band left expanded on a previous
+  // query keeps showing rows nobody asked to see. Deliberately NOT the image count: an
+  // upload or a toggle must not collapse the rows the operator is working in.
+  resetKey: string;
+  render: (image: ReferenceImage) => React.ReactNode;
 }) {
-  const inputRef = useRef<HTMLInputElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   const columns = useGridColumns(gridRef);
   const [rows, setRows] = useState(1);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [editing, setEditing] = useState(false);
-  const [labelDraft, setLabelDraft] = useState(type.labelMr);
-  const [descDraft, setDescDraft] = useState(type.description);
-  const [brandDraft, setBrandDraft] = useState(type.brand);
 
-  // A new result set is a new list, so it opens folded again — otherwise a card left
-  // expanded on a previous query keeps showing rows the officer did not ask to see.
-  // Deliberately NOT keyed on the image count: an upload or a toggle must not collapse
-  // the rows the operator is working in.
   useEffect(() => {
     setRows(1);
-  }, [query, searching]);
+  }, [resetKey]);
 
-  // Reports whether the action succeeded, so a caller holding an open editor
-  // (the subject-line one) keeps the operator's draft on screen after a failure
-  // instead of closing over it.
-  const run = async (fn: () => Promise<unknown>): Promise<boolean> => {
-    setBusy(true);
-    setError(null);
-    try {
-      await fn();
-      await onChanged();
-      return true;
-    } catch (caught) {
-      setError(errText(caught));
-      return false;
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const upload = (file: File | undefined) => {
-    if (!file) return;
-    if (!ACCEPTED_TYPES.has(file.type)) {
-      setError(STR.refFileTypeError);
-      return;
-    }
-    void run(() => uploadReferenceImage(type.category, type.slug, file));
-  };
-
-  const saveType = () => {
-    void run(async () => {
-      await updateReferenceType(type.id, {
-        labelMr: labelDraft.trim(),
-        description: descDraft.trim(),
-        brand: brandDraft,
-      });
-      setEditing(false);
-    });
-  };
-
-  const removeType = () => {
-    if (!window.confirm(STR.refTypeDeleteConfirm)) return;
-    void run(() => deleteReferenceType(type.id));
-  };
-
-  // While searching, the page has already ranked these by relevance — re-sorting here
-  // would throw that away and put an exact subject-line hit below an enabled near-miss.
-  const sorted = searching
-    ? images
-    : [...images].sort(
-        (a, b) =>
-          Number(b.isActive) - Number(a.isActive) ||
-          b.createdAt.localeCompare(a.createdAt),
-      );
-  const shown = [...sorted, ...unsearchable];
-  const enabledCount = images.filter((image) => image.isActive).length;
-  const visible = shown.slice(0, columns * rows);
-  const hidden = shown.length - visible.length;
+  const visible = images.slice(0, columns * rows);
+  const hidden = images.length - visible.length;
 
   return (
-    <div className="card ref-type-card">
-      <div className="ref-type-head">
-        <div className="ref-type-title-row">
-          <h3>{type.labelMr}</h3>
-          {!type.isBuiltin ? (
-            <span className="chip chip-running">{STR.refCustomChip}</span>
-          ) : null}
-          {type.brand === 'cmo' ? (
-            <span className="chip chip-completed">{STR.refBrandChip}</span>
-          ) : null}
-          {enabledCount > 0 ? (
-            <span className="chip chip-completed">
-              {enabledCount} {STR.refEnabled}
-            </span>
-          ) : (
-            <span className="chip chip-queued">{STR.refNoneEnabled}</span>
-          )}
-        </div>
-        <div className="ref-type-head-actions">
-          <button
-            type="button"
-            className="btn btn-small"
-            disabled={busy}
-            onClick={() => inputRef.current?.click()}
-          >
-            <Upload size={16} strokeWidth={2} aria-hidden="true" />
-            {busy ? STR.refUploading : STR.refUpload}
-          </button>
-          <input
-            ref={inputRef}
-            type="file"
-            accept="image/png,image/jpeg,image/webp"
-            hidden
-            onChange={(event) => {
-              upload(event.target.files?.[0]);
-              event.target.value = '';
-            }}
-          />
-        </div>
+    <>
+      <div className="ref-thumb-grid" ref={gridRef}>
+        {visible.map((image) => render(image))}
       </div>
-
-      {editing ? (
-        <div className="ref-edit-form">
-          <div>
-            <label className="field-label" htmlFor={`label-${type.id}`}>
-              {STR.refTypeName}
-            </label>
-            <input
-              id={`label-${type.id}`}
-              type="text"
-              value={labelDraft}
-              maxLength={60}
-              onChange={(event) => setLabelDraft(event.target.value)}
-            />
-          </div>
-          <div>
-            <label className="field-label" htmlFor={`desc-${type.id}`}>
-              {STR.refTypeDesc}
-            </label>
-            <p className="hint">{STR.refTypeDescHint}</p>
-            <textarea
-              id={`desc-${type.id}`}
-              className="ref-desc-input"
-              value={descDraft}
-              maxLength={300}
-              onChange={(event) => setDescDraft(event.target.value)}
-            />
-          </div>
-          <div>
-            <label className="field-label" htmlFor={`brand-${type.id}`}>
-              {STR.refBrandLabel}
-            </label>
-            <select
-              id={`brand-${type.id}`}
-              value={brandDraft}
-              onChange={(event) =>
-                setBrandDraft(event.target.value as ReferenceType['brand'])
-              }
-            >
-              <option value="dgipr">{STR.refBrandDgipr}</option>
-              <option value="cmo">{STR.refBrandCmo}</option>
-            </select>
-          </div>
-          <div className="btn-row">
-            <button
-              type="button"
-              className="btn btn-small btn-primary"
-              disabled={
-                busy ||
-                labelDraft.trim().length === 0 ||
-                descDraft.trim().length < 3
-              }
-              onClick={saveType}
-            >
-              {busy ? STR.refTypeSaving : STR.refTypeSave}
-            </button>
-            <button
-              type="button"
-              className="btn btn-small"
-              disabled={busy}
-              onClick={() => {
-                setEditing(false);
-                setLabelDraft(type.labelMr);
-                setDescDraft(type.description);
-                setBrandDraft(type.brand);
-              }}
-            >
-              {STR.refTypeCancel}
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="ref-type-desc-row">
-          {type.description ? (
-            <p className="ref-type-desc">{type.description}</p>
-          ) : (
-            <p className="ref-type-desc is-empty">—</p>
-          )}
-          <button
-            type="button"
-            className="btn btn-small ref-edit-btn"
-            disabled={busy}
-            onClick={() => setEditing(true)}
-          >
-            <Pencil size={15} strokeWidth={2} aria-hidden="true" />
-            {STR.refTypeEdit}
-          </button>
-        </div>
-      )}
-
-      {shown.length === 0 ? <p className="hint">{STR.refEmpty}</p> : null}
-      {shown.length > 0 ? (
-        <div className="ref-thumb-grid" ref={gridRef}>
-          {visible.map((image) => (
-            <ImageTile
-              key={image.id}
-              image={image}
-              typeLabel={type.labelMr}
-              disabled={busy}
-              query={query}
-              dimmed={searching && image.layoutSpec === null}
-              onToggle={() =>
-                void run(() =>
-                  setReferenceImageEnabled(image.id, !image.isActive),
-                )
-              }
-              onDelete={() => {
-                if (!window.confirm(STR.refDeleteConfirm)) return;
-                void run(() => deleteReferenceImage(image.id));
-              }}
-              onRecheck={() => void run(() => analyzeReferenceImage(image.id))}
-              onFlip={() =>
-                void run(() =>
-                  setReferenceImagePhotoZone(
-                    image.id,
-                    !image.layoutSpec?.hasPhotoZone,
-                  ),
-                )
-              }
-              onSaveAbout={(contentSummary) =>
-                run(() =>
-                  updateReferenceImageLayoutSpec(image.id, { contentSummary }),
-                )
-              }
-            />
-          ))}
-        </div>
-      ) : null}
-
       {hidden > 0 || rows > 1 ? (
         <div className="ref-thumb-more">
           {hidden > 0 ? (
@@ -625,123 +466,98 @@ function TypeCard({
           ) : null}
         </div>
       ) : null}
-
-      {!type.isBuiltin ? (
-        <div className="ref-type-footer">
-          <button
-            type="button"
-            className="btn btn-small btn-danger-ghost"
-            disabled={busy}
-            onClick={removeType}
-          >
-            <Trash2 size={16} strokeWidth={2} aria-hidden="true" />
-            {STR.refTypeDelete}
-          </button>
-        </div>
-      ) : null}
-
-      {error ? <p className="form-error">{error}</p> : null}
-    </div>
+    </>
   );
 }
 
-// Footer card of the twitter section: create a custom type (name + classifier
-// description; images are uploaded on the card that appears after creation).
-function NewTypeCard({ onCreated }: { onCreated: () => Promise<void> }) {
-  const [open, setOpen] = useState(false);
-  const [label, setLabel] = useState('');
-  const [desc, setDesc] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+// The page's one upload control. The group is a field here rather than a card you must
+// find first, which is the whole point of the change — and it defaults to the last one
+// used, so a run of uploads answers it once.
+function UploadPanel({
+  category,
+  types,
+  busy,
+  onClose,
+  onUpload,
+}: {
+  category: ReferenceCategory;
+  types: readonly ReferenceType[];
+  busy: boolean;
+  onClose: () => void;
+  onUpload: (slug: string, file: File) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [slug, setSlug] = useState('');
 
-  const create = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await createReferenceType({
-        labelMr: label.trim(),
-        description: desc.trim(),
-      });
-      await onCreated();
-      setLabel('');
-      setDesc('');
-      setOpen(false);
-    } catch (caught) {
-      setError(errText(caught));
-    } finally {
-      setBusy(false);
-    }
-  };
+  // Re-seeded per category, since each library has its own groups and its own last choice.
+  useEffect(() => {
+    const remembered = readLastGroup(category);
+    const known = types.some((type) => type.slug === remembered);
+    setSlug(known && remembered ? remembered : (types[0]?.slug ?? ''));
+  }, [category, types]);
 
-  if (!open) {
-    return (
-      <button
-        type="button"
-        className="ref-new-type-toggle"
-        onClick={() => setOpen(true)}
-      >
-        <span className="ref-new-type-icon" aria-hidden="true">
-          <Plus size={26} strokeWidth={2} />
-        </span>
-        <span className="ref-new-type-title">{STR.refTypeNew}</span>
-        <span className="ref-new-type-hint">{STR.refTypeNewHint}</span>
-      </button>
-    );
-  }
+  if (types.length === 0) return null;
 
   return (
-    <div className="card ref-type-card ref-new-type-form">
-      <h3>{STR.refTypeNew}</h3>
-      <div className="ref-edit-form">
-        <div>
-          <label className="field-label" htmlFor="new-type-label">
-            {STR.refTypeName}
-          </label>
-          <input
-            id="new-type-label"
-            type="text"
-            placeholder={STR.refTypeNamePlaceholder}
-            value={label}
-            maxLength={60}
-            onChange={(event) => setLabel(event.target.value)}
-          />
-        </div>
-        <div>
-          <label className="field-label" htmlFor="new-type-desc">
-            {STR.refTypeDesc}
-          </label>
-          <p className="hint">{STR.refTypeDescHint}</p>
-          <textarea
-            id="new-type-desc"
-            className="ref-desc-input"
-            placeholder={STR.refTypeDescPlaceholder}
-            value={desc}
-            maxLength={300}
-            onChange={(event) => setDesc(event.target.value)}
-          />
-        </div>
-        <div className="btn-row">
-          <button
-            type="button"
-            className="btn btn-small btn-primary"
-            disabled={
-              busy || label.trim().length === 0 || desc.trim().length < 3
-            }
-            onClick={() => void create()}
-          >
-            {busy ? STR.refTypeCreating : STR.refTypeCreate}
-          </button>
-          <button
-            type="button"
-            className="btn btn-small"
-            disabled={busy}
-            onClick={() => setOpen(false)}
-          >
-            {STR.refTypeCancel}
-          </button>
-        </div>
+    <div className="card card-compact ref-add">
+      <div className="ref-add-head">
+        <h2 className="card-eyebrow">{STR.refAddTitle}</h2>
+        <button
+          type="button"
+          className="btn-ghost ref-add-close"
+          onClick={onClose}
+          aria-label={STR.refAddCancel}
+        >
+          <X size={18} strokeWidth={2.25} aria-hidden="true" />
+        </button>
       </div>
-      {error ? <p className="form-error">{error}</p> : null}
+      <div className="ref-add-row">
+        {/* A single-type library (लेख, यूट्यूब) has nothing to ask, so it asks nothing. */}
+        {types.length > 1 ? (
+          <div className="ref-add-group">
+            <label className="field-label" htmlFor="ref-add-group">
+              {STR.refAddGroupLabel}
+            </label>
+            <select
+              id="ref-add-group"
+              value={slug}
+              disabled={busy}
+              onChange={(event) => setSlug(event.target.value)}
+            >
+              {types.map((type) => (
+                <option key={type.id} value={type.slug}>
+                  {type.labelMr}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
+        <button
+          type="button"
+          className="btn btn-primary ref-add-pick"
+          disabled={busy || slug === ''}
+          onClick={() => inputRef.current?.click()}
+        >
+          <Upload size={18} strokeWidth={2} aria-hidden="true" />
+          {busy ? STR.refUploading : STR.refAddPick}
+        </button>
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          hidden
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = '';
+            if (file && slug) {
+              writeLastGroup(category, slug);
+              onUpload(slug, file);
+            }
+          }}
+        />
+      </div>
+      <p className="hint">{STR.refAddHint}</p>
+      {types.length > 1 ? <p className="hint">{STR.refAddGroupHint}</p> : null}
     </div>
   );
 }
@@ -750,6 +566,9 @@ export default function ReferencesPage() {
   const [types, setTypes] = useState<ReferenceType[] | null>(null);
   const [images, setImages] = useState<ReferenceImage[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [category, setCategory] = useState<ReferenceCategory>('twitter');
   const [query, setQuery] = useState('');
   const [filters, setFilters] = useState<ReferenceFilters>(NO_FILTERS);
 
@@ -771,25 +590,62 @@ export default function ReferencesPage() {
     void refresh();
   }, [refresh]);
 
-  const byCategory = useMemo(() => {
-    const map = new Map<ReferenceCategory, ReferenceType[]>();
-    for (const type of types ?? []) {
-      const list = map.get(type.category) ?? [];
-      list.push(type);
-      map.set(type.category, list);
-    }
+  // Reports whether the action succeeded, so a caller holding an open editor (the
+  // subject-line one) keeps the operator's draft on screen after a failure instead of
+  // closing over it.
+  const run = useCallback(
+    async (fn: () => Promise<unknown>): Promise<boolean> => {
+      setBusy(true);
+      setError(null);
+      try {
+        await fn();
+        await refresh();
+        return true;
+      } catch (caught) {
+        setError(errText(caught));
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [refresh],
+  );
+
+  const typeByKey = useMemo(() => {
+    const map = new Map<string, ReferenceType>();
+    for (const type of types ?? [])
+      map.set(`${type.category}:${type.slug}`, type);
     return map;
   }, [types]);
 
+  const typeOf = useCallback(
+    (image: ReferenceImage) =>
+      typeByKey.get(`${image.category}:${image.subtype}`),
+    [typeByKey],
+  );
+
+  const categoryTypes = useMemo(
+    () => (types ?? []).filter((type) => type.category === category),
+    [types, category],
+  );
+
+  const categoryCounts = useMemo(() => {
+    const counts = new Map<ReferenceCategory, number>(
+      CATEGORIES.map((key) => [key, 0]),
+    );
+    for (const image of images ?? []) {
+      counts.set(image.category, (counts.get(image.category) ?? 0) + 1);
+    }
+    return counts;
+  }, [images]);
+
   // Unlike the picker, this page searches DISABLED masters too: it is where a template is
   // brought back into rotation, so hiding the ones that are out of it would hide exactly
-  // the ones being looked for.
+  // the ones being looked for. Scoped to the open library, because that is what is on screen.
   const searchable = useMemo<SearchableReference[]>(() => {
-    const typeBySlug = new Map(
-      (types ?? []).map((type) => [`${type.category}:${type.slug}`, type]),
-    );
     return (images ?? []).flatMap((image) => {
-      const type = typeBySlug.get(`${image.category}:${image.subtype}`);
+      if (image.category !== category) return [];
+      const type = typeOf(image);
       if (!type) return [];
       return [
         {
@@ -800,7 +656,7 @@ export default function ReferencesPage() {
         },
       ];
     });
-  }, [types, images]);
+  }, [images, category, typeOf]);
 
   const search = useMemo(
     () => searchReferences(searchable, query, filters),
@@ -808,32 +664,107 @@ export default function ReferencesPage() {
   );
   const searching = search.queryActive || search.filtersActive;
 
-  // Rank position per image, so each type card can show its own matches in the page's
-  // global relevance order rather than re-deriving one.
-  const matchOrder = useMemo(() => {
-    const order = new Map<string, number>();
-    search.matches.forEach((match, index) =>
-      order.set(match.entry.image.id, index),
-    );
-    return order;
-  }, [search]);
-
-  const unsearchableIds = useMemo(
-    () => new Set(search.unanalyzed.map((entry) => entry.image.id)),
-    [search],
+  // Bands are for browsing; a search has its own relevance order and re-bucketing it would
+  // bury the best hit under a size heading. So a search renders one flat ranked list.
+  const bands = useMemo(
+    () => groupByBand(searchable.map((entry) => entry.image)),
+    [searchable],
   );
 
   const loaded = types !== null && images !== null;
-  // Section order on the page. 'youtube' (migration 0042) holds ONE builtin type, so it
-  // gets no "new type" card — the rotation is the images inside it, chosen by matching the
-  // officer's information against each one.
-  const categories: ReferenceCategory[] = ['twitter', 'article', 'youtube'];
+  const resetKey = `${category}|${query}|${filters.photo}|${filters.minSlots}`;
+
+  const tileFor = (image: ReferenceImage, dimmed = false) => {
+    const type = typeOf(image);
+    return (
+      <ImageTile
+        key={image.id}
+        image={image}
+        groupLabel={type?.labelMr ?? image.subtype}
+        isCmo={type?.brand === 'cmo'}
+        disabled={busy}
+        query={query}
+        dimmed={dimmed}
+        onToggle={() =>
+          void run(() => setReferenceImageEnabled(image.id, !image.isActive))
+        }
+        onDelete={() => {
+          if (!window.confirm(STR.refDeleteConfirm)) return;
+          void run(() => deleteReferenceImage(image.id));
+        }}
+        onRecheck={() => void run(() => analyzeReferenceImage(image.id))}
+        onFlip={() =>
+          void run(() =>
+            setReferenceImagePhotoZone(
+              image.id,
+              !image.layoutSpec?.hasPhotoZone,
+            ),
+          )
+        }
+        onSaveAbout={(contentSummary) =>
+          run(() =>
+            updateReferenceImageLayoutSpec(image.id, { contentSummary }),
+          )
+        }
+      />
+    );
+  };
 
   return (
     <main className="page">
-      <h1 className="page-title">{STR.refTitle}</h1>
-      <p className="hint ref-intro">{STR.refIntro}</p>
+      <header className="page-head">
+        <div className="page-head-text">
+          <h1 className="page-title">{STR.refTitle}</h1>
+          <p className="page-sub">{STR.refIntro}</p>
+        </div>
+        <div className="page-head-actions">
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => setAdding((open) => !open)}
+          >
+            <Plus size={18} strokeWidth={2.25} aria-hidden="true" />
+            {STR.refAddOpen}
+          </button>
+        </div>
+      </header>
+
       {error ? <p className="form-error">{error}</p> : null}
+
+      {loaded && adding ? (
+        <UploadPanel
+          category={category}
+          types={categoryTypes}
+          busy={busy}
+          onClose={() => setAdding(false)}
+          onUpload={(slug, file) => {
+            if (!ACCEPTED_TYPES.has(file.type)) {
+              setError(STR.refFileTypeError);
+              return;
+            }
+            void run(() => uploadReferenceImage(category, slug, file));
+          }}
+        />
+      ) : null}
+
+      {loaded ? (
+        <div className="ref-tabs" role="group" aria-label={STR.refTitle}>
+          {CATEGORIES.map((key) => (
+            <button
+              key={key}
+              type="button"
+              className="ref-tab"
+              aria-pressed={category === key}
+              onClick={() => setCategory(key)}
+            >
+              {CATEGORY_TABS[key]}
+              <span className="ref-tab-count">
+                {categoryCounts.get(key) ?? 0}
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       {loaded ? (
         <div className="ref-search-sticky">
@@ -865,68 +796,58 @@ export default function ReferencesPage() {
         <UnanalyzedNote count={search.unanalyzed.length} />
       ) : null}
 
-      {loaded
-        ? categories.map((category) => {
-            const cards = (byCategory.get(category) ?? []).map((type) => {
-              const own = (images ?? []).filter(
-                (image) =>
-                  image.category === category && image.subtype === type.slug,
-              );
-              const matched = searching
-                ? own
-                    .filter((image) => matchOrder.has(image.id))
-                    .sort(
-                      (a, b) =>
-                        (matchOrder.get(a.id) ?? 0) -
-                        (matchOrder.get(b.id) ?? 0),
-                    )
-                : own;
-              // Un-analyzed masters are appended (dimmed) rather than filtered out, so a
-              // search never makes a template unreachable — this card is the only place
-              // its "पुन्हा तपासा" button lives.
-              const unsearchable = searching
-                ? own.filter((image) => unsearchableIds.has(image.id))
-                : [];
-              return { type, matched, unsearchable };
-            });
-            // A type with nothing to show disappears while searching; with no query the
-            // page keeps every type, including empty ones, because uploading into an
-            // empty type is what its card is for.
-            const visible = searching
-              ? cards.filter(
-                  (card) =>
-                    card.matched.length > 0 || card.unsearchable.length > 0,
-                )
-              : cards;
-            if (searching && visible.length === 0) return null;
+      {loaded && searching && search.matches.length > 0 ? (
+        <section className="ref-band">
+          <div className="ref-band-head">
+            <h2 className="ref-band-title">{STR.refSearchResultsTitle}</h2>
+            <span className="ref-band-count">
+              {STR.refBandCount(search.matches.length)}
+            </span>
+          </div>
+          <ImageGrid
+            images={search.matches.map((match) => match.entry.image)}
+            resetKey={resetKey}
+            render={(image) => tileFor(image)}
+          />
+        </section>
+      ) : null}
 
+      {loaded && !searching
+        ? SHAPE_BANDS.map((band) => {
+            const own = bands.get(band.id) ?? [];
+            // An empty band is not rendered: five headings over four populated grids is
+            // the clutter this page is escaping, and "no templates of this size" is
+            // information nobody needs while browsing.
+            if (own.length === 0) return null;
+            const sorted = [...own].sort(
+              (a, b) =>
+                Number(b.isActive) - Number(a.isActive) ||
+                b.createdAt.localeCompare(a.createdAt),
+            );
             return (
-              <section className="ref-category" key={category}>
-                <h2 className="ref-category-title">
-                  {REF_CATEGORY_LABELS[category]}
-                </h2>
-                <div className="ref-type-list">
-                  {visible.map(({ type, matched, unsearchable }) => (
-                    <TypeCard
-                      key={type.id}
-                      type={type}
-                      images={matched}
-                      unsearchable={unsearchable}
-                      query={query}
-                      searching={searching}
-                      onChanged={refresh}
-                    />
-                  ))}
-                  {/* Creating a type is an admin action, not a search result — it stays
-                      out of the filtered view rather than looking like a match. */}
-                  {category === 'twitter' && !searching ? (
-                    <NewTypeCard onCreated={refresh} />
-                  ) : null}
+              <section className={`ref-band ref-band-${band.id}`} key={band.id}>
+                <div className="ref-band-head">
+                  <h2 className="ref-band-title">{BAND_LABELS[band.id]}</h2>
+                  <span className="ref-band-count">
+                    {STR.refBandCount(sorted.length)}
+                  </span>
+                  <p className="ref-band-hint">{BAND_HINTS[band.id]}</p>
                 </div>
+                <ImageGrid
+                  images={sorted}
+                  resetKey={resetKey}
+                  render={(image) => tileFor(image, band.id === 'unanalyzed')}
+                />
               </section>
             );
           })
         : null}
+
+      {loaded && !searching && searchable.length === 0 ? (
+        <div className="empty-state">
+          <p>{STR.refEmpty}</p>
+        </div>
+      ) : null}
     </main>
   );
 }

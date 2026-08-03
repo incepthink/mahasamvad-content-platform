@@ -1,11 +1,10 @@
 'use client';
 
-import { use } from 'react';
-import { useRouter } from 'next/navigation';
+import { use, useState } from 'react';
 import { isArticleCategory, isSocialCategory } from '@dgipr/schemas';
 import { useGeneration } from '../../../lib/useGeneration';
 import { useGenerationThread } from '../../../lib/useGenerationThread';
-import { createGeneration } from '../../../lib/api';
+import { retryGeneration } from '../../../lib/api';
 import { useTasks } from '../../../lib/TasksProvider';
 import { STR } from '../../../lib/strings';
 import { GenerationThread } from '../../../components/GenerationThread';
@@ -25,35 +24,42 @@ export default function GenerationDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
-  const router = useRouter();
   const { addTask, openPanel } = useTasks();
+  const [retrying, setRetrying] = useState(false);
+  const [retryError, setRetryError] = useState<string | null>(null);
+  // The edit failure is dismissible: it is a notice about one attempt, not a state of the
+  // run, and the run underneath it is fully usable while it is on screen.
+  const [failureDismissed, setFailureDismissed] = useState(false);
   const { detail, error, refresh } = useGeneration(id);
   const { thread, refresh: refreshThread } = useGenerationThread(
     id,
     detail?.status ?? null,
   );
 
+  // Retry on THIS run: re-run the step that failed, or — when its inputs are no longer
+  // held (an API restart, or a row failed by an older build) — put the run back in working
+  // order so its poster, versions and edit controls are usable again. It deliberately does
+  // NOT start a new generation: that used to be this button's only behaviour, and it left
+  // every earlier revision of the failed run stranded behind a page that showed nothing.
+  // Starting afresh from the same note lives in पुढील पाऊल below, where it always has.
   const retry = async () => {
-    if (!detail) return;
-    const newId = await createGeneration({
-      note: detail.note,
-      heading: detail.heading ?? undefined,
-      category: detail.category,
-      outputType: detail.outputType,
-      designMode: detail.designMode ?? undefined,
-      sourceGenerationId: detail.id,
-      // Captions are opt-in per run and not stored as a flag, so infer the intent from
-      // the run being re-made: one that ended up with a caption gets one again.
-      ...(isSocialCategory(detail.category)
-        ? { generateCaption: detail.article !== null }
-        : {}),
-    });
-    // Social reruns are background tasks: track + surface them in the panel.
-    if (isSocialCategory(detail.category)) {
-      addTask(newId);
-      openPanel();
+    if (!detail || retrying) return;
+    setRetrying(true);
+    setRetryError(null);
+    try {
+      const restarted = await retryGeneration(detail.id);
+      // A restarted edit is a background render like any other, so it belongs in the tasks
+      // panel; a plain recovery has nothing to watch.
+      if (restarted && isSocialCategory(detail.category)) {
+        addTask(detail.id);
+        openPanel();
+      }
+      await refresh();
+    } catch (e) {
+      setRetryError(e instanceof Error ? e.message : STR.genericError);
+    } finally {
+      setRetrying(false);
     }
-    router.push(`/generations/${newId}`);
   };
 
   if (error && !detail) {
@@ -114,6 +120,16 @@ export default function GenerationDetailPage({
   const posterFocused =
     isArticleCategory(detail.category) && detail.outputType === 'poster';
 
+  // Whether this run produced anything that outlives a failed edit. A social poster run
+  // created WITHOUT a caption has `article === null`, which is exactly the run that used to
+  // vanish: the result view was gated on the article alone, so one failed marker round hid
+  // the poster and every version behind it.
+  const hasOutput = !!detail.posterUrl || !!detail.article;
+  // An edit that did not land, over output that did. Either the API said so (`editFailure`,
+  // the row already back to `completed`), or the row is `failed` from before that existed.
+  const editFailed =
+    !!detail.editFailure || (detail.status === 'failed' && hasOutput);
+
   return (
     <main className="page">
       <div
@@ -145,24 +161,61 @@ export default function GenerationDetailPage({
           <ProgressSteps detail={detail} />
         ))}
 
-      {detail.status === 'failed' && (
+      {/* Two different situations, deliberately worded differently. A run that produced
+          NOTHING is a failure and reads as one. A run whose earlier output survived — its
+          poster, every immutable version, its article — had one EDIT fail, and saying "काम
+          अपूर्ण राहिले" over a perfectly good poster is what made a run look lost. Newer
+          rows never reach the second case as `failed` at all (the API recovers them and
+          reports `editFailure`); rows failed by an older build land here and recover on the
+          same button. */}
+      {detail.status === 'failed' && !hasOutput && (
         <section className="card">
           <h2>{STR.failedTitle}</h2>
           <p className="hint">{detail.error ?? STR.failedHint}</p>
-          <div className="btn-row" style={{ marginTop: 16 }}>
-            <button type="button" className="btn btn-primary" onClick={retry}>
-              {STR.retry}
+          <p className="hint">{STR.editFailedNewRunHint}</p>
+        </section>
+      )}
+
+      {editFailed && !failureDismissed && (
+        <section className="card warn-card" aria-live="polite">
+          <h2>{STR.editFailedTitle}</h2>
+          <p className="hint">{STR.editFailedHint}</p>
+          {(detail.editFailure ?? detail.error) ? (
+            <p className="form-error">{detail.editFailure ?? detail.error}</p>
+          ) : null}
+          <div className="btn-row" style={{ marginTop: 16, gap: 10 }}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={retry}
+              disabled={retrying}
+            >
+              {retrying
+                ? STR.submitting
+                : detail.editRetryable
+                  ? STR.editRetry
+                  : STR.editRecover}
+            </button>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => setFailureDismissed(true)}
+              disabled={retrying}
+            >
+              {STR.dismiss}
             </button>
           </div>
+          {retryError ? <p className="form-error">{retryError}</p> : null}
         </section>
       )}
 
       {(detail.status === 'completed' ||
         posterBusy ||
         posterPending ||
-        // A poster-phase failure must not hide an already-good article: keep
-        // the failed card above and the article content below it.
-        (detail.status === 'failed' && !!detail.article)) &&
+        // A failure must not hide what the run already produced — the article, the poster,
+        // or the poster's whole version history. The notice stays above; the result renders
+        // below it and stays fully editable, which is what makes the run recoverable at all.
+        (detail.status === 'failed' && hasOutput)) &&
         (isSocialCategory(detail.category) ? (
           <SocialPostView
             detail={detail}

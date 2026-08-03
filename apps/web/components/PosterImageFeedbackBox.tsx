@@ -13,8 +13,12 @@
 // switching pills never discards anything.
 
 import { useState } from 'react';
-import type { PosterImageFeedbackRequest } from '@dgipr/schemas';
+import type {
+  PosterClearAction,
+  PosterImageFeedbackRequest,
+} from '@dgipr/schemas';
 import { STR } from '../lib/strings';
+import { ClearActionToggle, clearActionLabel } from './ClearActionToggle';
 import {
   CLEAR_LETTERS,
   type AnnotatorMode,
@@ -35,6 +39,7 @@ export function PosterImageFeedbackBox({
   onModeChange,
   clearRegions = [],
   onClearNoteChange,
+  onClearActionChange,
   onRemoveClearRegion,
   submittedClearRegions = [],
   showClearReservedWarning = false,
@@ -55,6 +60,7 @@ export function PosterImageFeedbackBox({
   onModeChange?: (mode: AnnotatorMode) => void;
   clearRegions?: readonly PosterClearDraft[];
   onClearNoteChange?: (id: number, note: string) => void;
+  onClearActionChange?: (id: number, action: PosterClearAction) => void;
   onRemoveClearRegion?: (id: number) => void;
   submittedClearRegions?: readonly PosterClearDraft[];
   // Unlike the marker warning this one is a real limitation, not a hint: the
@@ -93,6 +99,7 @@ export function PosterImageFeedbackBox({
         ? {
             clearRegions: clearRegions.map((c) => ({
               region: c.region,
+              action: c.action,
               ...(c.note.trim().length > 0 ? { note: c.note.trim() } : {}),
             })),
           }
@@ -208,35 +215,44 @@ export function PosterImageFeedbackBox({
                   {CLEAR_LETTERS[i] ?? i + 1}
                 </span>
                 <span className="marker-note-text">
-                  {c.note || STR.clearRegionLabel}
+                  {clearActionLabel(c.action)}
+                  {c.note ? ` — ${c.note}` : ''}
                 </span>
               </div>
             ))}
           </>
         ) : null}
         {clearRegions.map((c, i) => (
-          <div className="marker-note-row" key={`c-${c.id}`}>
-            <span className="marker-note-badge clear-badge" aria-hidden="true">
-              {CLEAR_LETTERS[i] ?? i + 1}
-            </span>
-            <input
-              type="text"
-              value={c.note}
-              placeholder={STR.clearRegionNotePlaceholder}
-              aria-label={`${STR.clearRegionLabel} ${CLEAR_LETTERS[i] ?? i + 1}`}
-              maxLength={500}
+          <div key={`c-${c.id}`}>
+            <div className="marker-note-row">
+              <span className="marker-note-badge clear-badge" aria-hidden="true">
+                {CLEAR_LETTERS[i] ?? i + 1}
+              </span>
+              <input
+                type="text"
+                value={c.note}
+                placeholder={STR.clearRegionNotePlaceholder}
+                aria-label={`${STR.clearRegionLabel} ${CLEAR_LETTERS[i] ?? i + 1}`}
+                maxLength={500}
+                disabled={disabled || sending}
+                onChange={(e) => onClearNoteChange?.(c.id, e.target.value)}
+              />
+              <button
+                type="button"
+                className="marker-note-remove"
+                aria-label={STR.clearRegionRemove}
+                disabled={disabled || sending}
+                onClick={() => onRemoveClearRegion?.(c.id)}
+              >
+                ✕
+              </button>
+            </div>
+            <ClearActionToggle
+              value={c.action}
+              letter={String(CLEAR_LETTERS[i] ?? i + 1)}
               disabled={disabled || sending}
-              onChange={(e) => onClearNoteChange?.(c.id, e.target.value)}
+              onChange={(action) => onClearActionChange?.(c.id, action)}
             />
-            <button
-              type="button"
-              className="marker-note-remove"
-              aria-label={STR.clearRegionRemove}
-              disabled={disabled || sending}
-              onClick={() => onRemoveClearRegion?.(c.id)}
-            >
-              ✕
-            </button>
           </div>
         ))}
         {STR.chipsPosterImage.length > 0 ? (

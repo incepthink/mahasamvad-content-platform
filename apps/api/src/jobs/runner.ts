@@ -51,6 +51,7 @@ import {
   reviseCopy,
   reviseSceneBrief,
   runInCostScope,
+  runInCostTask,
   translateArticle,
   type ArticleDesignMode,
   type ImageQuality,
@@ -64,6 +65,8 @@ import {
 import {
   annotateFeedbackRegions,
   CLEAR_REGION_LETTERS,
+  formatClearRegionReport,
+  measureClearedRegions,
   buildArticleScenePrompt,
   buildCmoCirclePhotoPrompt,
   editImage,
@@ -107,10 +110,12 @@ import {
   type DesignationWarning,
   type NameDesignation,
   type SelectedFact,
+  type PosterClearAction,
   type PosterImageFeedbackRequest,
   type TranslationLanguage,
   type TranslationTermInput,
 } from '@dgipr/schemas';
+import { recordTasksFromCost } from './service-usage.js';
 import { listKnownDesignations } from './translation-terms.js';
 
 const running = new Set<string>();
@@ -166,6 +171,32 @@ const reviseArticleErrors = new Map<string, string>();
 // disjoint columns (article vs posterPath). One caption job at a time per row, either kind.
 const revisingCaption = new Set<string>();
 const captionReviseErrors = new Map<string, string>();
+
+// An EDIT of an already-produced run that failed — a poster re-render, a marker round, a
+// redesign, an article revision. Such a failure must NOT mark the row `failed`: the previous
+// poster, every immutable poster version and the article are all still on the row, and a
+// `failed` row hides the whole result view, which is how one bad edit used to swallow a run's
+// entire history. So `runJob` restores the row to `completed` and reports the failure here
+// instead — the stance translateWarnings/captionReviseErrors already take, for the same reason:
+// the work is on the row, this is a "that one edit did not land" prompt for whoever is looking
+// at it now.
+//
+// `retry` is the failed job re-armed with its own arguments, so the officer's button re-runs
+// the exact step that failed rather than starting a new run. It is in-process and therefore
+// lost on restart — the recovery itself is not (the row is `completed` again), so a restart
+// costs the one-click retry, never the run. A row that failed BEFORE producing anything is
+// untouched by all of this and still reports `failed`: there is nothing to go back to.
+type EditFailure = { message: string; retry: (() => void) | null };
+const editFailures = new Map<string, EditFailure>();
+
+// How an edit job declares itself one: it arms its own re-run immediately before calling
+// runJob, which picks the thunk up on the way in. A job with nothing armed is an ordinary
+// run and still fails the row.
+const pendingEditRetries = new Map<string, () => void>();
+
+function armEditRetry(id: string, retry: () => void): void {
+  pendingEditRetries.set(id, retry);
+}
 
 // The article as it is being written, so the officer reads it appearing rather than watching
 // a spinner for minutes. In-process and transient for the same reason translateWarnings is:
@@ -325,6 +356,33 @@ export function getCaptionReviseError(id: string): string | null {
   return captionReviseErrors.get(id) ?? null;
 }
 
+// The last edit of this run that failed while its earlier output stayed intact (null when the
+// run is clean, or when the failure predates this process). The row itself reads `completed`.
+export function getEditFailure(id: string): string | null {
+  return editFailures.get(id)?.message ?? null;
+}
+
+// Whether that failed edit can be re-run by this process (false once a restart has dropped the
+// armed thunk — the run is still usable, it just cannot be retried in one click).
+export function isEditRetryable(id: string): boolean {
+  return editFailures.get(id)?.retry != null;
+}
+
+// Re-run the failed edit with the arguments it was given. Returns false when there is nothing
+// armed — a different process ran it, or the run was already recovered — and the caller then
+// simply clears the failure, which is all a legacy `failed` row needs to become usable again.
+export function retryFailedEdit(id: string): boolean {
+  const failure = editFailures.get(id);
+  if (!failure?.retry) return false;
+  editFailures.delete(id);
+  failure.retry();
+  return true;
+}
+
+export function clearEditFailure(id: string): void {
+  editFailures.delete(id);
+}
+
 function requireEnv(name: string): string {
   const value = process.env[name];
   if (!value) {
@@ -405,20 +463,60 @@ async function persistCost(
   }
 }
 
+// An edit job's failure is survivable when the run still carries what it produced before the
+// edit: the poster (with every immutable version behind it) or the article. Put the row back to
+// `completed` and report the failure through the transient registry instead, so a poster that
+// exists is never hidden by an edit that did not land. Returns false when there is nothing to
+// go back to — that failure is real and belongs on the row.
+async function recoverEditFailure(
+  client: SupabaseClient,
+  id: string,
+  error: unknown,
+  retry: () => void,
+): Promise<boolean> {
+  try {
+    const row = await getGeneration(client, id);
+    if (!row || (!row.posterPath && !row.article)) return false;
+    await updateGeneration(client, id, {
+      status: 'completed',
+      step: 'done',
+      error: null,
+    });
+    editFailures.set(id, { message: errorMessage(error), retry });
+    return true;
+  } catch (recoverError) {
+    // Falling through to the normal failed write is the safe outcome: the officer sees a
+    // failure either way, and the row is never left claiming to be running.
+    console.error(`[job ${id}] could not recover edit failure:`, recoverError);
+    return false;
+  }
+}
+
 // Wrap a job body with the shared bookkeeping: claim the id, flip the row to
 // running, persist completed/failed, always release the id.
+//
+// A retry armed by `armEditRetry` marks the body as an EDIT of an already-produced run (see
+// `editFailures`): its failure restores the row instead of failing it, and the thunk re-arms
+// this same job with the same arguments for the officer's retry button.
 function runJob(
   client: SupabaseClient,
   id: string,
+  task: string,
   job: () => Promise<void>,
 ): void {
+  // Claimed synchronously, so it belongs to THIS attempt and cannot be inherited by the next
+  // job to run on the row.
+  const retry = pendingEditRetries.get(id) ?? null;
+  pendingEditRetries.delete(id);
   running.add(id);
+  // A new attempt supersedes whatever the last one reported.
+  editFailures.delete(id);
   void (async () => {
     // Meter every OpenAI text call this job makes (chatComplete records into the ambient
     // accumulator) plus the fixed image-render cost the job records explicitly.
     const cost = createCostAccumulator();
     try {
-      await runInCostScope(cost, job);
+      await runInCostScope(cost, () => runInCostTask(task, job));
       await updateGeneration(client, id, {
         status: 'completed',
         step: 'done',
@@ -426,13 +524,18 @@ function runJob(
       });
     } catch (error) {
       console.error(`[job ${id}] failed:`, error);
-      try {
-        await updateGeneration(client, id, {
-          status: 'failed',
-          error: errorMessage(error),
-        });
-      } catch (updateError) {
-        console.error(`[job ${id}] could not persist failure:`, updateError);
+      const recovered = retry
+        ? await recoverEditFailure(client, id, error, retry)
+        : false;
+      if (!recovered) {
+        try {
+          await updateGeneration(client, id, {
+            status: 'failed',
+            error: errorMessage(error),
+          });
+        } catch (updateError) {
+          console.error(`[job ${id}] could not persist failure:`, updateError);
+        }
       }
     } finally {
       // Persist the cost this job accrued, additively (initial run + every feedback job),
@@ -442,6 +545,25 @@ function runJob(
         await persistCost(client, id, cost);
       } catch (costError) {
         console.error(`[job ${id}] could not persist cost:`, costError);
+      }
+      try {
+        const row = await getGeneration(client, id);
+        if (row) {
+          const creativeTask =
+            task === 'article_poster_creation' ||
+            task === 'social_post_creation' ||
+            task === 'youtube_thumbnail_creation' ||
+            task === 'poster_regeneration' ||
+            task === 'poster_content_revision' ||
+            task === 'poster_image_revision';
+          recordTasksFromCost(
+            client,
+            creativeTask ? 'social' : row.dloIntakeId ? 'article' : 'social',
+            cost,
+          );
+        }
+      } catch (usageError) {
+        console.error(`[job ${id}] could not record task usage:`, usageError);
       }
       running.delete(id);
     }
@@ -759,7 +881,7 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
     );
   };
 
-  runJob(client, id, async () => {
+  runJob(client, id, 'article_generation', async () => {
     try {
       await job();
     } finally {
@@ -1112,7 +1234,7 @@ export function startArticlePosterJob(
   id: string,
   referenceImageId?: string,
 ): void {
-  runJob(client, id, async () => {
+  runJob(client, id, 'article_poster_creation', async () => {
     const row = await getGeneration(client, id);
     if (!row) throw new Error(`Generation ${id} not found.`);
     if (!row.article) throw new Error(`Generation ${id} has no article yet.`);
@@ -1275,14 +1397,20 @@ async function renderSocialPosterFeedbackViaN8n(
   // CMO only: the cached circle photograph (cmoPhotoPath), re-composited so a text/layout
   // feedback edit never changes the photo. Required when brand === 'cmo'.
   cmoPhoto?: Buffer,
-  // > 0 when currentPosterUrl also carries blue clear-space rectangles.
-  clearCount = 0,
+  // The blue clear-space rectangles carried on currentPosterUrl, in draw order, and
+  // — for a displace, which re-lays the poster out — the checklist of what must
+  // survive it. One object rather than two more positionals.
+  clear: {
+    actions?: readonly PosterClearAction[];
+    inventory?: readonly string[];
+  } = {},
 ): Promise<Buffer> {
   const prompt = buildFeedbackPrompt({
     imageFeedback: feedback,
     brand,
     markerCount,
-    clearCount,
+    clearActions: clear.actions ?? [],
+    contentInventory: clear.inventory ?? [],
   });
   const rawPoster = await renderSocialPosterViaN8n(
     id,
@@ -1543,7 +1671,9 @@ async function renderAndStoreSocialPoster(
   // for exactly this class of bug; the two lanes are meant to be indistinguishable here, and
   // merging the two UI options later is now purely a web change.
   const isSimpleTemplateEdit =
-    isSocialCategory(row.category) && brand === 'dgipr' && designMode === 'onbrand';
+    isSocialCategory(row.category) &&
+    brand === 'dgipr' &&
+    designMode === 'onbrand';
   let copyResult: Awaited<ReturnType<typeof generatePosterCopy>> | null = null;
   if (!isSimpleTemplateEdit) {
     // 2. Scheme-name lock source: verified glossary scheme/org names present in the note.
@@ -1744,7 +1874,7 @@ export function startSocialPostJob(
   id: string,
   options: Readonly<{ generateCaption?: boolean }> = {},
 ): void {
-  runJob(client, id, async () => {
+  runJob(client, id, 'social_post_creation', async () => {
     const row = await getGeneration(client, id);
     if (!row) throw new Error(`Generation ${id} not found.`);
 
@@ -1784,10 +1914,12 @@ export function startSocialPostJob(
     // Caption → article column (the social lane's convention). The supplied note is sent
     // directly to the deliberately simple caption prompt; poster copy is not included.
     await updateGeneration(client, id, { step: 'caption' });
-    const caption = await generateSocialCaption({
-      note: row.note,
-      platform: socialPlatformOf(row.category),
-    });
+    const caption = await runInCostTask('social_caption_creation', () =>
+      generateSocialCaption({
+        note: row.note,
+        platform: socialPlatformOf(row.category),
+      }),
+    );
     await updateGeneration(client, id, { article: caption });
   });
 }
@@ -1908,7 +2040,7 @@ export function startYoutubeThumbnailJob(
   client: SupabaseClient,
   id: string,
 ): void {
-  runJob(client, id, async () => {
+  runJob(client, id, 'youtube_thumbnail_creation', async () => {
     const row = await getGeneration(client, id);
     if (!row) throw new Error(`Generation ${id} not found.`);
 
@@ -1944,7 +2076,10 @@ export function startPosterRegenerateJob(
   id: string,
   options: Readonly<{ recolour?: boolean; posterHeading?: string }> = {},
 ): void {
-  runJob(client, id, async () => {
+  // A redesign that fails leaves the previous poster and every earlier version in place, so
+  // it is recovered rather than failed — and re-arming it needs only these options.
+  armEditRetry(id, () => startPosterRegenerateJob(client, id, options));
+  runJob(client, id, 'poster_regeneration', async () => {
     const row = await getGeneration(client, id);
     if (!row) throw new Error(`Generation ${id} not found.`);
     if (!row.posterPath) throw new Error(`Generation ${id} has no poster yet.`);
@@ -2080,16 +2215,18 @@ export function startGenerateCaptionJob(
   void (async () => {
     const cost = createCostAccumulator();
     try {
-      await runInCostScope(cost, async () => {
-        const row = await getGeneration(client, id);
-        if (!row) throw new Error(`Generation ${id} not found.`);
+      await runInCostScope(cost, () =>
+        runInCostTask('social_caption_creation', async () => {
+          const row = await getGeneration(client, id);
+          if (!row) throw new Error(`Generation ${id} not found.`);
 
-        const caption = await generateSocialCaption({
-          note: row.note,
-          platform: socialPlatformOf(row.category),
-        });
-        await updateGeneration(client, id, { article: caption });
-      });
+          const caption = await generateSocialCaption({
+            note: row.note,
+            platform: socialPlatformOf(row.category),
+          });
+          await updateGeneration(client, id, { article: caption });
+        }),
+      );
     } catch (error) {
       console.error(`[generate-caption ${id}] failed:`, error);
       captionReviseErrors.set(id, errorMessage(error));
@@ -2102,6 +2239,7 @@ export function startGenerateCaptionJob(
           costError,
         );
       }
+      recordTasksFromCost(client, 'social', cost);
       revisingCaption.delete(id);
     }
   })();
@@ -2116,7 +2254,10 @@ export function startArticleFeedbackJob(
   id: string,
   feedback: string,
 ): void {
-  runJob(client, id, async () => {
+  // The article being revised is still on the row, so a failed revision is recovered with
+  // the same feedback re-armed.
+  armEditRetry(id, () => startArticleFeedbackJob(client, id, feedback));
+  runJob(client, id, 'article_revision', async () => {
     const row = await getGeneration(client, id);
     if (!row) throw new Error(`Generation ${id} not found.`);
     if (!row.article) throw new Error(`Generation ${id} has no article yet.`);
@@ -2188,49 +2329,51 @@ export function startConcurrentArticleFeedbackJob(
   void (async () => {
     const cost = createCostAccumulator();
     try {
-      await runInCostScope(cost, async () => {
-        const row = await getGeneration(client, id);
-        if (!row) throw new Error(`Generation ${id} not found.`);
-        if (!row.article)
-          throw new Error(`Generation ${id} has no article yet.`);
+      await runInCostScope(cost, () =>
+        runInCostTask('article_revision', async () => {
+          const row = await getGeneration(client, id);
+          if (!row) throw new Error(`Generation ${id} not found.`);
+          if (!row.article)
+            throw new Error(`Generation ${id} has no article yet.`);
 
-        const currentContent = row.factCheck
-          ? `${row.article}\n\n${FACT_CHECK_DELIMITER}\n${row.factCheck}`
-          : row.article;
-        // Same reasoning as the status-owning path above: the designations must survive a
-        // revision, so they steer it and are re-applied at the end.
-        const revisionDesignations = await designationContext(client, row);
-        const revised = await reviseArticle(
-          row.note,
-          currentContent,
-          feedback,
-          articleCategoryOf(row.category),
-          row.heading ?? undefined,
-          revisionDesignations.designations,
-          revisionDesignations.knownDesignations,
-          selectedFactsOf(row),
-          statementsOf(row),
-          row.excludedFacts ?? [],
-          rowHasFactCheck(row),
-        );
-        designationWarnings.set(id, [...revised.designationIssues]);
-        const revisedArticle = ensureArticleDateline(
-          revised.article,
-          articleCategoryOf(row.category),
-        );
+          const currentContent = row.factCheck
+            ? `${row.article}\n\n${FACT_CHECK_DELIMITER}\n${row.factCheck}`
+            : row.article;
+          // Same reasoning as the status-owning path above: the designations must survive a
+          // revision, so they steer it and are re-applied at the end.
+          const revisionDesignations = await designationContext(client, row);
+          const revised = await reviseArticle(
+            row.note,
+            currentContent,
+            feedback,
+            articleCategoryOf(row.category),
+            row.heading ?? undefined,
+            revisionDesignations.designations,
+            revisionDesignations.knownDesignations,
+            selectedFactsOf(row),
+            statementsOf(row),
+            row.excludedFacts ?? [],
+            rowHasFactCheck(row),
+          );
+          designationWarnings.set(id, [...revised.designationIssues]);
+          const revisedArticle = ensureArticleDateline(
+            revised.article,
+            articleCategoryOf(row.category),
+          );
 
-        await updateGeneration(client, id, {
-          article: revisedArticle,
-          factCheck: revised.factCheck,
-        });
-        await insertRevision(client, {
-          generationId: id,
-          target: 'article',
-          feedback,
-          article: revisedArticle,
-          factCheck: revised.factCheck,
-        });
-      });
+          await updateGeneration(client, id, {
+            article: revisedArticle,
+            factCheck: revised.factCheck,
+          });
+          await insertRevision(client, {
+            generationId: id,
+            target: 'article',
+            feedback,
+            article: revisedArticle,
+            factCheck: revised.factCheck,
+          });
+        }),
+      );
     } catch (error) {
       console.error(`[revise-article ${id}] failed:`, error);
       reviseArticleErrors.set(id, errorMessage(error));
@@ -2241,6 +2384,14 @@ export function startConcurrentArticleFeedbackJob(
         console.error(
           `[revise-article ${id}] could not persist cost:`,
           costError,
+        );
+      }
+      const usageRow = await getGeneration(client, id).catch(() => null);
+      if (usageRow) {
+        recordTasksFromCost(
+          client,
+          usageRow.dloIntakeId ? 'article' : 'social',
+          cost,
         );
       }
       revisingArticle.delete(id);
@@ -2268,25 +2419,27 @@ export function startCaptionFeedbackJob(
   void (async () => {
     const cost = createCostAccumulator();
     try {
-      await runInCostScope(cost, async () => {
-        const row = await getGeneration(client, id);
-        if (!row) throw new Error(`Generation ${id} not found.`);
-        if (!row.article)
-          throw new Error(`Generation ${id} has no caption yet.`);
+      await runInCostScope(cost, () =>
+        runInCostTask('social_caption_revision', async () => {
+          const row = await getGeneration(client, id);
+          if (!row) throw new Error(`Generation ${id} not found.`);
+          if (!row.article)
+            throw new Error(`Generation ${id} has no caption yet.`);
 
-        const revised = await reviseCaption({
-          caption: row.article,
-          feedback,
-        });
+          const revised = await reviseCaption({
+            caption: row.article,
+            feedback,
+          });
 
-        await updateGeneration(client, id, { article: revised });
-        await insertRevision(client, {
-          generationId: id,
-          target: 'caption',
-          feedback,
-          article: revised,
-        });
-      });
+          await updateGeneration(client, id, { article: revised });
+          await insertRevision(client, {
+            generationId: id,
+            target: 'caption',
+            feedback,
+            article: revised,
+          });
+        }),
+      );
     } catch (error) {
       console.error(`[revise-caption ${id}] failed:`, error);
       captionReviseErrors.set(id, errorMessage(error));
@@ -2299,6 +2452,7 @@ export function startCaptionFeedbackJob(
           costError,
         );
       }
+      recordTasksFromCost(client, 'social', cost);
       revisingCaption.delete(id);
     }
   })();
@@ -2337,82 +2491,87 @@ export function startTranslateJob(
   void (async () => {
     const cost = createCostAccumulator();
     try {
-      await runInCostScope(cost, async () => {
-        const row = await getGeneration(client, id);
-        if (!row) throw new Error(`Generation ${id} not found.`);
-        if (!row.article)
-          throw new Error(`Generation ${id} has no article yet.`);
+      await runInCostScope(cost, () =>
+        runInCostTask(
+          language === 'hi' ? 'hindi_translation' : 'english_translation',
+          async () => {
+            const row = await getGeneration(client, id);
+            if (!row) throw new Error(`Generation ${id} not found.`);
+            if (!row.article)
+              throw new Error(`Generation ${id} has no article yet.`);
 
-        // Persist the user-confirmed names first: a human just asserted these exact
-        // spellings, so they overwrite any existing row (upsert by Marathi key) and
-        // are verified — findGlossaryTermsInText below then picks them up. Saved
-        // before translating so a translation failure never loses the review work.
-        if (confirmedTerms) {
-          for (const term of confirmedTerms) {
-            await upsertGlossaryTerm(client, {
-              marathi: term.marathi,
-              // english is NOT NULL; a Hindi-only extra carries no English, so fall
-              // back to the Marathi form rather than reject the row.
-              english: term.english?.trim() || term.marathi,
-              hindi: term.hindi?.trim() || term.marathi,
-              termType: term.termType ?? 'other',
-              verified: true,
-              source: 'manual',
-            });
-          }
-        }
+            // Persist the user-confirmed names first: a human just asserted these exact
+            // spellings, so they overwrite any existing row (upsert by Marathi key) and
+            // are verified — findGlossaryTermsInText below then picks them up. Saved
+            // before translating so a translation failure never loses the review work.
+            if (confirmedTerms) {
+              for (const term of confirmedTerms) {
+                await upsertGlossaryTerm(client, {
+                  marathi: term.marathi,
+                  // english is NOT NULL; a Hindi-only extra carries no English, so fall
+                  // back to the Marathi form rather than reject the row.
+                  english: term.english?.trim() || term.marathi,
+                  hindi: term.hindi?.trim() || term.marathi,
+                  termType: term.termType ?? 'other',
+                  verified: true,
+                  source: 'manual',
+                });
+              }
+            }
 
-        // Verified glossary terms whose Marathi form appears in this article become
-        // the locked-name table the translator must reuse verbatim (as English
-        // spellings for 'en', as frozen Devanagari forms for 'hi' — the stored Hindi
-        // spelling, defaulting to the Marathi form).
-        const terms = await findGlossaryTermsInText(client, row.article);
-        const glossary = terms.map((t) => ({
-          marathi: t.marathi,
-          english: t.english,
-          hindi: t.hindi ?? undefined,
-          // Hindi freezes only true proper nouns; the type is what tells them apart.
-          termType: t.termType,
-        }));
+            // Verified glossary terms whose Marathi form appears in this article become
+            // the locked-name table the translator must reuse verbatim (as English
+            // spellings for 'en', as frozen Devanagari forms for 'hi' — the stored Hindi
+            // spelling, defaulting to the Marathi form).
+            const terms = await findGlossaryTermsInText(client, row.article);
+            const glossary = terms.map((t) => ({
+              marathi: t.marathi,
+              english: t.english,
+              hindi: t.hindi ?? undefined,
+              // Hindi freezes only true proper nouns; the type is what tells them apart.
+              termType: t.termType,
+            }));
 
-        const { text: translated, unpreservedNames } = await translateArticle(
-          row.article,
-          glossary,
-          language,
-        );
-        await updateGeneration(
-          client,
-          id,
-          language === 'hi'
-            ? { articleHindi: translated }
-            : { articleEnglish: translated },
-        );
-        // Record which locked names (if any) the Hindi output could not carry, so the
-        // detail page can flag them beside the fresh translation. Set even when empty:
-        // an empty array is the honest "translated, nothing to flag" signal, distinct
-        // from "no translation ran this session".
-        translateWarnings.set(id, [...unpreservedNames]);
-
-        // Legacy path only: grow the review queue by mining proper nouns →
-        // unverified candidates. The upsert ignores duplicates, so verified/
-        // human-edited rows are never clobbered. Best-effort — a mining failure
-        // must not fail an already-persisted translation.
-        if (!confirmedTerms) {
-          try {
-            const candidates = await extractGlossaryCandidates(row.article);
-            await insertGlossaryCandidates(
+            const { text: translated, unpreservedNames } =
+              await translateArticle(row.article, glossary, language);
+            await updateGeneration(
               client,
-              candidates.map((c) => ({
-                ...c,
-                source: 'auto' as const,
-                verified: false,
-              })),
+              id,
+              language === 'hi'
+                ? { articleHindi: translated }
+                : { articleEnglish: translated },
             );
-          } catch (error) {
-            console.error(`[translate ${id}] candidate mining failed:`, error);
-          }
-        }
-      });
+            // Record which locked names (if any) the Hindi output could not carry, so the
+            // detail page can flag them beside the fresh translation. Set even when empty:
+            // an empty array is the honest "translated, nothing to flag" signal, distinct
+            // from "no translation ran this session".
+            translateWarnings.set(id, [...unpreservedNames]);
+
+            // Legacy path only: grow the review queue by mining proper nouns →
+            // unverified candidates. The upsert ignores duplicates, so verified/
+            // human-edited rows are never clobbered. Best-effort — a mining failure
+            // must not fail an already-persisted translation.
+            if (!confirmedTerms) {
+              try {
+                const candidates = await extractGlossaryCandidates(row.article);
+                await insertGlossaryCandidates(
+                  client,
+                  candidates.map((c) => ({
+                    ...c,
+                    source: 'auto' as const,
+                    verified: false,
+                  })),
+                );
+              } catch (error) {
+                console.error(
+                  `[translate ${id}] candidate mining failed:`,
+                  error,
+                );
+              }
+            }
+          },
+        ),
+      );
     } catch (error) {
       console.error(`[translate ${id}] failed:`, error);
       translateErrors.set(id, errorMessage(error));
@@ -2422,6 +2581,12 @@ export function startTranslateJob(
       } catch (costError) {
         console.error(`[translate ${id}] could not persist cost:`, costError);
       }
+      // Sarvam's translation spend is the one thing persistCost cannot carry:
+      // GenerationCostBreakdown holds chat+image only, and Sarvam is neither. Attributed
+      // to भाषांतर rather than to the run's own lane, because that is the feature the
+      // officer used — the same reason ad-hoc /translate work is counted there.
+      // Best-effort and outside the try above: the translation is already saved.
+      recordTasksFromCost(client, 'translate', cost);
       translating.delete(id);
     }
   })();
@@ -2436,7 +2601,8 @@ export function startPosterFeedbackJob(
   target: 'copy' | 'scene',
   feedback: string,
 ): void {
-  runJob(client, id, async () => {
+  armEditRetry(id, () => startPosterFeedbackJob(client, id, target, feedback));
+  runJob(client, id, 'poster_content_revision', async () => {
     const row = await getGeneration(client, id);
     if (!row) throw new Error(`Generation ${id} not found.`);
     const copy = requireCopy(row);
@@ -2526,23 +2692,35 @@ export function startPosterFeedbackJob(
 // annotations every value below equals the old behaviour byte-for-byte.
 //
 // `clearRegions` are the second gesture: BLUE lettered rectangles saying "free
-// this space" — the content inside is relocated elsewhere in the design and the
-// rectangle is left as plain continuing background, so the officer can place
-// their own logo or photograph there afterwards. They ride the SAME round as the
-// red markers (one paid render carries both) and take the same route: drawn on
-// the poster, named by the vision pass, and governed by a fixed rule appended in
-// the prompt builders, where a model cannot paraphrase it away.
+// this space", so the officer can place their own logo or photograph there
+// afterwards. Each carries an `action`, and the two are genuinely different edits:
+// 'remove' DELETES what is inside and moves nothing else, 'displace' keeps that
+// content on the poster and licenses a re-layout to fit it elsewhere. They ride the
+// SAME round as the red markers (one paid render carries both) and take the same
+// route: drawn on the poster, named by the vision pass, and governed by a fixed rule
+// appended in the prompt builders, where a model cannot paraphrase it away.
+//
+// A displace additionally asks the vision pass for the poster's content inventory —
+// the checklist a re-layout must not lose. Without it a model told to rearrange a
+// dense poster silently drops rows.
 // What a clear-space gesture reads as in the revision history. The note beside a
-// blue box is optional, so without this such a round would be logged blank —
-// and the history is the officer's record of what they asked for.
-const STR_CLEAR_SPACE_HISTORY = 'ही जागा मोकळी करा';
+// blue box is optional, so without this such a round would be logged blank — and
+// the history is the officer's record of what they asked for, including WHICH of
+// the two gestures they used.
+const STR_CLEAR_SPACE_HISTORY: Record<PosterClearAction, string> = {
+  displace: 'ही जागा मोकळी करा — आतील मजकूर दुसरीकडे हलवा',
+  remove: 'ही जागा मोकळी करा — आतील मजकूर काढून टाका',
+};
 
 export function startPosterImageFeedbackJob(
   client: SupabaseClient,
   id: string,
   input: PosterImageFeedbackRequest,
 ): void {
-  runJob(client, id, async () => {
+  // The round the officer drew is re-armed exactly as sent — markers, clear-space boxes and
+  // notes alike — so a failed edit costs a click, not the whole marking pass.
+  armEditRetry(id, () => startPosterImageFeedbackJob(client, id, input));
+  runJob(client, id, 'poster_image_revision', async () => {
     const row = await getGeneration(client, id);
     if (!row) throw new Error(`Generation ${id} not found.`);
     if (!row.posterPath) {
@@ -2557,11 +2735,18 @@ export function startPosterImageFeedbackJob(
 
     const annotations = input.annotations ?? [];
     const clearRegions = input.clearRegions ?? [];
+    // Draw order, which is the order annotateFeedbackRegions paints the A/B badges,
+    // so the letters in the prompt and the letters in the image always agree.
+    const clearActions: readonly PosterClearAction[] = clearRegions.map(
+      (c) => c.action,
+    );
     const version = await nextVersion(client, id);
     let inputUrl = publicUrl(client, row.posterPath);
     let feedbackText = input.feedback ?? '';
     // Revision history keeps the user's own words, never the machine text.
     let historyFeedback = feedbackText;
+    // Only a displace produces one (see interpretImageFeedback); best-effort either way.
+    let contentInventory: readonly string[] = [];
 
     if (annotations.length > 0 || clearRegions.length > 0) {
       const cleanPoster = await downloadPng(client, row.posterPath);
@@ -2591,6 +2776,7 @@ export function startPosterImageFeedbackJob(
         clearRegions: clearRegions.map((c, i) => ({
           letter: CLEAR_REGION_LETTERS[i] ?? String(i + 1),
           note: c.note,
+          action: c.action,
           region: c.region,
         })),
         overallNote: input.feedback,
@@ -2598,8 +2784,11 @@ export function startPosterImageFeedbackJob(
         // landscape like the article poster, so it reads that way.
         posterKind: isSocialCategory(row.category) ? 'twitter' : 'article',
       });
+      contentInventory = interpreted.contentInventory;
       console.log(
-        `[job ${id}] marker feedback (${interpreted.source}): ${interpreted.instruction}`,
+        `[job ${id}] marker feedback (${interpreted.source}; clear=${
+          clearActions.join('+') || 'none'
+        }; inventory=${contentInventory.length}): ${interpreted.instruction}`,
       );
       feedbackText = interpreted.instruction;
       historyFeedback = [
@@ -2608,7 +2797,7 @@ export function startPosterImageFeedbackJob(
         // recorded — otherwise the history row for such a round would be empty.
         ...clearRegions.map(
           (c, i) =>
-            `[${CLEAR_REGION_LETTERS[i] ?? i + 1}] ${STR_CLEAR_SPACE_HISTORY}` +
+            `[${CLEAR_REGION_LETTERS[i] ?? i + 1}] ${STR_CLEAR_SPACE_HISTORY[c.action]}` +
             (c.note ? ` — ${c.note}` : ''),
         ),
         ...(input.feedback ? [input.feedback] : []),
@@ -2618,12 +2807,13 @@ export function startPosterImageFeedbackJob(
     let posterPng: Buffer;
     if (isYoutubeCategory(row.category)) {
       // Thumbnail lane: edit the CURRENT thumbnail directly (no n8n). The marker and
-      // clear-space semantics are the shared ones — clearSpaceRuleLines is the same block
-      // both poster lanes get — so a gesture the officer drew means the same thing here.
+      // clear-space semantics are the shared ones — clearSpaceRule is the same block
+      // all three lanes get — so a gesture the officer drew means the same thing here.
       const prompt = buildYoutubeFeedbackPrompt({
         imageFeedback: feedbackText,
         markerCount: annotations.length,
-        clearCount: clearRegions.length,
+        clearActions,
+        contentInventory,
       });
       // The input is the poster ALREADY carrying the chrome (or the marked-up copy of it),
       // and the chrome is re-stamped after the edit — which is what keeps it crisp through
@@ -2648,7 +2838,7 @@ export function startPosterImageFeedbackJob(
         annotations.length,
         row.templateBrand,
         cmoPhoto,
-        clearRegions.length,
+        { actions: clearActions, inventory: contentInventory },
       );
       recordImageCost('twitter', imageQuality());
     } else {
@@ -2659,13 +2849,36 @@ export function startPosterImageFeedbackJob(
       const prompt = buildArticleFeedbackPrompt({
         imageFeedback: feedbackText,
         markerCount: annotations.length,
-        clearCount: clearRegions.length,
+        clearActions,
+        contentInventory,
       });
       posterPng = await renderArticlePosterEditViaN8n(id, inputUrl, prompt, {
         imageFeedback: feedbackText,
         markerCount: annotations.length,
       });
       recordImageCost('article', imageQuality());
+    }
+
+    // Did the edit actually free the space? READ-ONLY and log-only: it measures the
+    // returned poster and prints, and never alters it. A code-composited fill was
+    // rejected — the background behind a freed area is often photographic, so a
+    // sampled patch shows a seam on exactly the posters that need it most. Wrapped
+    // because a diagnostic must never be able to fail an already-paid render; the
+    // numbers here are what a future officer-facing warning would be calibrated on.
+    if (clearRegions.length > 0) {
+      try {
+        const measured = await measureClearedRegions(
+          posterPng,
+          clearRegions.map((c) => c.region),
+        );
+        console.log(
+          `[job ${id}] clear-space check: ${formatClearRegionReport(measured)}`,
+        );
+      } catch (error) {
+        console.warn(
+          `[job ${id}] clear-space check failed: ${(error as Error).message}`,
+        );
+      }
     }
 
     const posterObjectPath = posterPath(id, version);

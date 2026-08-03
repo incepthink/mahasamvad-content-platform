@@ -1,7 +1,7 @@
 'use client';
 
 // Creative and Social page: paste a FINISHED article, then turn it into a poster
-// (for the article itself, for X, or for Facebook) or into a caption alone. No
+// (for the article itself, or one social poster for X/Facebook) or into a caption alone. No
 // article is written here — the pasted text is the sole source and is used as-is
 // (providedArticle) for the poster path.
 
@@ -10,9 +10,11 @@ import type { ComponentType } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Clapperboard,
+  ClipboardPaste,
   Image as ImageIcon,
   MonitorPlay,
-  ThumbsUp,
+  Sparkles,
+  Type,
 } from 'lucide-react';
 import {
   POSTER_HEADING_MAX_CHARS,
@@ -33,6 +35,7 @@ import ReferencePicker, {
   type ReferenceSelection,
 } from '../components/ReferencePicker';
 import { XLogo } from '../components/XLogo';
+import { CardTitle } from '../components/CardTitle';
 
 // ONE flat row of formats. The two-level पोस्टर/कॅप्शन picker it replaces asked a question
 // officers were not making a decision about — a caption is an ADD-ON to a social post, so
@@ -57,17 +60,18 @@ const FORMATS = [
     name: STR.mediaFormatYoutube,
     desc: STR.mediaFormatYoutubeDesc,
   },
+  // ONE social card. ट्विटर पोस्ट and फेसबुक पोस्ट were two cards producing the identical
+  // poster: both are social categories, so both take the ठरलेले टेम्पलेट path
+  // (isSimpleTemplateEdit in the runner keys off isSocialCategory), the same twitter master
+  // library (referenceCategoryOf), the same chrome and the same image tier. It submits
+  // 'twitter' — the X on-brand lane — which is also what makes the published post go to X.
+  // Facebook remains a real category everywhere else (history, the detail page's
+  // cross-format fold, /dlo); it is only this picker that stops asking.
   {
     value: 'twitter',
     icon: XLogo,
-    name: STR.mediaFormatTwitter,
-    desc: STR.mediaFormatTwitterDesc,
-  },
-  {
-    value: 'facebook',
-    icon: ThumbsUp,
-    name: STR.mediaFormatFacebook,
-    desc: STR.mediaFormatFacebookDesc,
+    name: STR.mediaFormatCreative,
+    desc: STR.mediaFormatCreativeDesc,
   },
   {
     value: 'scheme',
@@ -90,10 +94,7 @@ const FORMATS = [
 
 // What the picker can actually leave selected. 'video' navigates away on click, so it is
 // never held in state.
-type SelectableFormat = Extract<
-  Format,
-  'twitter' | 'facebook' | 'scheme' | 'youtube'
->;
+type SelectableFormat = Extract<Format, 'twitter' | 'scheme' | 'youtube'>;
 
 // Where the upload card remembers its in-flight job across a refresh. The page also clears
 // it by hand after a submit (see clearDocument), so it is named once.
@@ -103,10 +104,11 @@ const DOC_STORAGE_KEY = 'dgipr.mediaRoom.document';
 // target, so a stale or hand-typed link can never put the form into a state the picker
 // cannot show.
 function selectableFormatOf(value: string | null): SelectableFormat | null {
-  return value === 'twitter' ||
-    value === 'facebook' ||
-    value === 'scheme' ||
-    value === 'youtube'
+  // ?format=facebook still arrives from a finished Facebook run's cross-format link, and
+  // the picker no longer has a card for it — it folds into the one क्रिएटिव्ह card, which
+  // renders the same poster.
+  if (value === 'facebook') return 'twitter';
+  return value === 'twitter' || value === 'scheme' || value === 'youtube'
     ? value
     : null;
 }
@@ -183,8 +185,8 @@ export default function NewGenerationPage() {
     })();
   }, []);
 
-  // ट्विटर and फेसबुक are one lane: same n8n workflow, same master library — only the
-  // recorded category differs.
+  // The क्रिएटिव्ह lane (submitted as 'twitter'). Still asked through isSocialCategory so a
+  // ?format=facebook handoff, and any future second social card, behave identically.
   const isSocial = isSocialCategory(category);
   // The लेख पोस्टर lane. Asked positively rather than as !isSocial, which silently swept
   // यूट्यूब थंबनेल in with it — a thumbnail writes no article and locks no poster heading.
@@ -313,10 +315,16 @@ export default function NewGenerationPage() {
 
   return (
     <main className="page">
-      <h1 className="page-title">{STR.mediaRoomTitle}</h1>
+      <header className="page-head">
+        <div className="page-head-text">
+          <h1 className="page-title">{STR.mediaRoomTitle}</h1>
+          <p className="page-sub">{STR.mediaRoomIntro}</p>
+        </div>
+      </header>
 
       <section className="card">
         <label className="field-label" htmlFor="note">
+          <ClipboardPaste size={18} className="label-icon" aria-hidden="true" />
           {STR.articlePasteLabel}
         </label>
         <p className="hint">{STR.articlePasteHint}</p>
@@ -355,6 +363,9 @@ export default function NewGenerationPage() {
       <DocumentIntake
         key={docKey}
         storageKey={DOC_STORAGE_KEY}
+        // Names this surface so a paid OCR read lands on this feature's service card
+        // rather than being counted in the bill and attributed to nobody.
+        feature="social"
         maxBytes={UPLOAD_FILE_MAX_BYTES}
         onTextChange={(text) => {
           setDocText(text);
@@ -365,14 +376,14 @@ export default function NewGenerationPage() {
       />
 
       <section className="card">
-        <h2>{STR.mediaOutputLabel}</h2>
+        <CardTitle icon={Sparkles}>{STR.mediaOutputLabel}</CardTitle>
         <div className="output-picker output-picker-flow">
           {FORMATS.map((option) => {
             // व्हिडिओ is a shortcut, not a format this form can submit — /video runs its
             // own two-gate flow.
             const isLink = option.value === 'video';
-            // One active task per lane: the two social cards are gated by an in-flight
-            // social run (they share one n8n workflow), लेख पोस्टर and यूट्यूब थंबनेल by an
+            // One active task per lane: the क्रिएटिव्ह card is gated by an in-flight
+            // social run (one n8n workflow, serial renders), लेख पोस्टर and यूट्यूब थंबनेल by an
             // in-flight article-lane run. A selected card that becomes disabled is left
             // selected — submit() re-checks both flags, and moving the choice under the
             // cursor would be worse.
@@ -430,6 +441,7 @@ export default function NewGenerationPage() {
         {isArticle ? (
           <div className="option-field">
             <label className="field-label" htmlFor="poster-heading">
+              <Type size={18} className="label-icon" aria-hidden="true" />
               {STR.posterHeadingLabel}
             </label>
             <p className="hint">{STR.posterHeadingHint}</p>
@@ -465,7 +477,7 @@ export default function NewGenerationPage() {
         ) : null}
       </section>
 
-      <section className="card">
+      <section className="card card-action">
         <div className="btn-row">
           <button
             type="button"

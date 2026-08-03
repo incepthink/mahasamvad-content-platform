@@ -15,6 +15,7 @@ import {
   listThreadGenerations,
   publicUrl,
   downloadPng,
+  recordUsageEvent,
   uploadPng,
   updateGeneration,
   type GenerationRow,
@@ -25,7 +26,12 @@ import {
   generateArticlePdf,
   generateArticlePoster,
 } from '@dgipr/poster-renderer';
-import { posterStyleLabel } from '@dgipr/content-engine';
+import {
+  createCostAccumulator,
+  posterStyleLabel,
+  runInCostScope,
+  runInCostTask,
+} from '@dgipr/content-engine';
 import {
   SocialPublishError,
   publishFacebookPhotoPost,
@@ -60,6 +66,10 @@ import {
 } from '@dgipr/schemas';
 import {
   getCaptionReviseError,
+  getEditFailure,
+  isEditRetryable,
+  retryFailedEdit,
+  clearEditFailure,
   getReviseArticleError,
   getTranslateError,
   getTranslateWarnings,
@@ -87,6 +97,7 @@ import {
 } from '../jobs/runner.js';
 import { rememberDesignations } from '../jobs/designation-writeback.js';
 import { prepareTranslationTerms } from '../jobs/translation-terms.js';
+import { recordTasksFromCost } from '../jobs/service-usage.js';
 
 // Stage ping n8n POSTs to /generations/:id/progress after each social-post stage.
 const ProgressPingSchema = z.object({ step: GenerationStepSchema });
@@ -238,6 +249,10 @@ async function toDetail(
     // run and may overlap a poster re-render), so it reports from the same registry.
     captionRevising: isRevisingCaption(row.id),
     captionReviseError: getCaptionReviseError(row.id),
+    // An edit that failed over intact earlier output. The row was put back to `completed`
+    // rather than marked failed, so this is the only thing that says the edit did not land.
+    editFailure: getEditFailure(row.id),
+    editRetryable: isEditRetryable(row.id),
     costUsd: row.costUsd,
     costBreakdown: row.costBreakdown ?? null,
     createdAt: row.createdAt,
@@ -782,7 +797,14 @@ export function registerGenerationRoutes(
           .code(409)
           .send({ error: { message: 'No article to translate yet.' } });
       }
-      return prepareTranslationTerms(client, row.article);
+      const cost = createCostAccumulator();
+      const result = await runInCostScope(cost, () =>
+        runInCostTask('translation_name_extraction', () =>
+          prepareTranslationTerms(client, row.article!),
+        ),
+      );
+      recordTasksFromCost(client, 'translate', cost);
+      return result;
     },
   );
 
@@ -979,7 +1001,10 @@ export function registerGenerationRoutes(
           .code(404)
           .send({ error: { message: 'Generation not found.' } });
       }
-      if (body.posterHeading !== undefined && !isArticleCategory(row.category)) {
+      if (
+        body.posterHeading !== undefined &&
+        !isArticleCategory(row.category)
+      ) {
         return reply.code(400).send({
           error: {
             message:
@@ -992,7 +1017,9 @@ export function registerGenerationRoutes(
       if (isArticleCategory(row.category) && !row.article) {
         return reply
           .code(409)
-          .send({ error: { message: 'No article to regenerate the poster from.' } });
+          .send({
+            error: { message: 'No article to regenerate the poster from.' },
+          });
       }
       if (isJobRunning(row.id)) {
         return reply
@@ -1082,6 +1109,61 @@ export function registerGenerationRoutes(
     },
   );
 
+  // Retry the edit that failed, on THIS row — never as a new generation. Two shapes, and the
+  // caller does not have to know which applies:
+  //
+  //   - This process still holds the failed job's arguments (the normal case): re-run that
+  //     exact step. 202, and the row goes back to running.
+  //   - It does not — the API restarted, or the row was marked `failed` by an older build that
+  //     had no recovery (which is how a run could lose its whole result view to one bad edit).
+  //     Then clear the failure and put the row back to `completed`, which is all such a row
+  //     needs: its poster, every immutable version and its article were never touched. 200,
+  //     and the officer re-sends whatever they wanted from the poster card.
+  //
+  // The spend gate is the point of the split: recovery is a column write and costs nothing,
+  // and a re-run only happens where the failed step's own inputs are still known — this route
+  // never re-derives an edit, and never renders one nobody asked for.
+  app.post<{ Params: { id: string } }>(
+    '/generations/:id/retry',
+    async (request, reply) => {
+      const row = await getGeneration(client, request.params.id);
+      if (!row) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'Generation not found.' } });
+      }
+      if (isJobRunning(row.id)) {
+        return reply
+          .code(409)
+          .send({ error: { message: 'A job is already running.' } });
+      }
+      // A run that never produced anything has nothing to go back to: retrying it means
+      // running it again from the note, which is a fresh generation, not this route.
+      if (!row.posterPath && !row.article) {
+        return reply.code(409).send({
+          error: {
+            message:
+              'या कामातून अद्याप काहीच तयार झालेले नाही; त्याच टिपणीवरून नवीन काम सुरू करा.',
+          },
+        });
+      }
+
+      if (retryFailedEdit(row.id)) {
+        return reply.code(202).send({ retried: true });
+      }
+
+      clearEditFailure(row.id);
+      if (row.status !== 'completed') {
+        await updateGeneration(client, row.id, {
+          status: 'completed',
+          step: 'done',
+          error: null,
+        });
+      }
+      return reply.send({ retried: false });
+    },
+  );
+
   // Manual poster text edit: re-typeset with the CACHED scene image and return the
   // new poster URL synchronously (~seconds; no image-generation call).
   app.put<{ Params: { id: string } }>(
@@ -1143,6 +1225,14 @@ export function registerGenerationRoutes(
           .send({ error: { message: 'Poster not found.' } });
       }
       const png = await downloadPng(client, row.posterPath);
+      // A download is the moment a poster actually leaves the platform, and it leaves no
+      // trace on the row. Counted per category so the analytics page can say which lane the
+      // department is really shipping (0043).
+      recordUsageEvent(client, {
+        feature: isSocialCategory(row.category) ? 'social' : 'article',
+        action: 'poster_download',
+        detail: { category: row.category },
+      });
       return reply
         .header('content-type', 'image/png')
         .header(
@@ -1176,7 +1266,9 @@ export function registerGenerationRoutes(
 
       const row = await getGeneration(client, request.params.id);
       if (!row) {
-        return reply.code(404).send({ error: { message: 'हे काम सापडले नाही.' } });
+        return reply
+          .code(404)
+          .send({ error: { message: 'हे काम सापडले नाही.' } });
       }
       // A social run's `article` column holds the CAPTION, not an article — a letterhead PDF
       // of a tweet is wrong — and a youtube run has no text at all. Asked positively, so a
@@ -1219,20 +1311,33 @@ export function registerGenerationRoutes(
           createdAt: row.createdAt,
           language: lang,
         });
-        return reply
-          .header('content-type', 'application/pdf')
-          .header(
-            'content-disposition',
-            `attachment; filename="dgipr-lekh-${row.id}-${lang}.pdf"`,
-          )
-          // The article is revisable, so a cached PDF would go stale behind a re-render.
-          .header('cache-control', 'no-store')
-          .send(pdf);
+        // Recorded only once the PDF actually rendered — a Chromium failure below must not
+        // count as an export. Language only; the article itself is never recorded (0043).
+        recordUsageEvent(client, {
+          feature: 'article',
+          action: 'article_pdf',
+          charCount: text.length,
+          detail: { language: lang },
+        });
+        return (
+          reply
+            .header('content-type', 'application/pdf')
+            .header(
+              'content-disposition',
+              `attachment; filename="dgipr-lekh-${row.id}-${lang}.pdf"`,
+            )
+            // The article is revisable, so a cached PDF would go stale behind a re-render.
+            .header('cache-control', 'no-store')
+            .send(pdf)
+        );
       } catch (error) {
         // deploy/api.Dockerfile installs Chromium for this route; if that layer is ever
         // missing, this must read as a setup problem, not a 500 in a blank tab.
         if (error instanceof ChromiumUnavailableError) {
-          request.log.error({ err: error }, 'article pdf: chromium unavailable');
+          request.log.error(
+            { err: error },
+            'article pdf: chromium unavailable',
+          );
           return reply.code(503).send({
             error: {
               message:

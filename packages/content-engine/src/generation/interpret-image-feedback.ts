@@ -14,6 +14,7 @@
 // correspondingly numbered change" wording keeps working either way.
 
 import { chatCompleteVision, VISION_MODEL } from './openai-chat.js';
+import type { ClearAction } from './clear-space-rule.js';
 
 export type FeedbackAnnotationInput = Readonly<{
   // 1-based, matching the badge drawn on the poster.
@@ -25,14 +26,19 @@ export type FeedbackAnnotationInput = Readonly<{
 }>;
 
 // One BLUE lettered rectangle: space the officer wants freed for their own logo
-// or photograph. This pass only has to NAME what sits inside it (and where that
-// content could sensibly go) — the rule about how to free it is hard-appended in
-// the prompt builders, where a model cannot paraphrase it away.
+// or photograph. This pass only has to NAME what sits inside it (and, for a
+// displace, where that content could sensibly go) — the rule about how to free it
+// is hard-appended in the prompt builders, where a model cannot paraphrase it
+// away.
 export type ClearRegionInput = Readonly<{
   // 'A', 'B' — matching the badge drawn on the poster.
   letter: string;
   // The officer's optional steer. Absent = the model chooses the destination.
   note?: string | undefined;
+  // 'displace' keeps the content on the poster (a re-layout); 'remove' deletes it.
+  // The two need different sentences from this pass: one proposes a destination,
+  // the other must NOT.
+  action: ClearAction;
   region: Readonly<{ x: number; y: number; width: number; height: number }>;
 }>;
 
@@ -48,6 +54,12 @@ export type InterpretImageFeedbackInput = Readonly<{
 
 export type InterpretedImageFeedback = Readonly<{
   instruction: string;
+  // Every distinct piece of information currently on the poster, read off the
+  // pixels. Requested ONLY when a 'displace' box is present, because that is the
+  // one round that re-lays the poster out and therefore needs a checklist of what
+  // must survive it — see contentInventoryLines. Empty on the fallback path and
+  // whenever no displace was asked for.
+  contentInventory: readonly string[];
   // 'fallback' = the vision call failed and the raw notes were used instead.
   source: 'vision' | 'fallback';
 }>;
@@ -57,6 +69,14 @@ export type InterpretedImageFeedback = Readonly<{
 // pins its own id.
 const INTERPRETER_MODEL = VISION_MODEL;
 const MAX_INSTRUCTION_CHARS = 1_500;
+// The instruction alone fits in 500; a Marathi inventory of a dense list poster does
+// not (~1 token per 1.2-1.8 chars), and an exhausted budget returns EMPTY content
+// rather than a short answer. Raised only for the round that asks for one, so a plain
+// marker round bills exactly as before. maxTokens is answer room — chatComplete adds
+// the reasoning headroom on top.
+const MAX_TOKENS_PLAIN = 500;
+const MAX_TOKENS_WITH_INVENTORY = 2_000;
+const MAX_INVENTORY_ITEMS = 40;
 
 // Coarse position words from a 3x3 grid over the region's center — used both in
 // the vision prompt (to anchor each marker) and in the fallback instruction.
@@ -86,7 +106,11 @@ function clearLines(clearRegions: readonly ClearRegionInput[]): string[] {
     const w = Math.round(c.region.width * 100);
     const h = Math.round(c.region.height * 100);
     const note = c.note ? ` — the editor's steer: «${c.note}»` : '';
-    return `Blue box ${c.letter} — centred at ~${cx}% from left, ~${cy}% from top (${gridPosition(c.region)} area), about ${w}% wide and ${h}% tall${note}.`;
+    const action =
+      c.action === 'remove'
+        ? 'DELETE what is inside (it is not wanted on the poster at all)'
+        : 'MOVE what is inside somewhere else on the poster (it must stay on the poster)';
+    return `Blue box ${c.letter} [${action}] — centred at ~${cx}% from left, ~${cy}% from top (${gridPosition(c.region)} area), about ${w}% wide and ${h}% tall${note}.`;
   });
 }
 
@@ -115,7 +139,7 @@ function buildPrompt(input: InterpretImageFeedbackInput): string {
   if (clearRegions.length > 0) {
     lines.push(
       '',
-      'The BLUE boxes mark space the editor wants FREED so they can place their own logo or photograph there afterwards. Whatever design content sits inside a blue box must be moved elsewhere in the layout — never deleted, never shrunk away.',
+      'The BLUE boxes mark space the editor wants FREED so they can place their own logo or photograph there afterwards. Each one says what happens to the content currently inside it — DELETE (it goes away entirely) or MOVE (it stays on the poster but elsewhere). Read each box\'s own instruction below; do not assume they are the same.',
       ...clearLines(clearRegions),
     );
   }
@@ -133,8 +157,16 @@ function buildPrompt(input: InterpretImageFeedbackInput): string {
   );
   if (clearRegions.length > 0) {
     lines.push(
-      '- For EACH blue box, add one sentence to the instruction that (a) names it by its letter, (b) names concretely what currently occupies that area — quoting any Devanagari verbatim — and (c) proposes a specific place in the layout that content should move to, chosen so the poster stays balanced and reads in a sensible order. Honour the editor\'s steer where one is given. If a blue box covers only plain background, say that it is already empty and only needs the blue rectangle removed.',
-      '- Never propose deleting, cropping or shrinking blue-box content away, and never propose moving anything into the software-stamped branding zones described below.',
+      '- For EACH blue box, add one sentence to the instruction that (a) names it by its letter and (b) names concretely what currently occupies that area — quoting any Devanagari verbatim. If a blue box covers only plain background, say that it is already empty and only needs the blue rectangle removed.',
+      '- For a MOVE box, that sentence must also propose a specific place in the layout the content should go, and say plainly if fitting it there means re-laying-out the poster (compressing a list, re-columning, restacking, resizing rows). A re-layout is allowed and expected. Honour the editor\'s steer where one is given. Never propose deleting, cropping, shrinking away or summarising MOVE content.',
+      '- For a DELETE box, say only that the content goes away and that nothing else on the poster moves. Never propose a destination for it, and never propose closing up the gap.',
+      '- Never propose moving anything into the software-stamped branding zones described below.',
+    );
+  }
+  if (clearRegions.some((c) => c.action === 'displace')) {
+    lines.push(
+      '',
+      `INVENTORY: because a MOVE re-lays the poster out, also return "items" — every distinct piece of information visible on this poster right now, read off the image in reading order, each as ONE short Marathi string copied VERBATIM from the poster (headline, kicker, each numbered/bulleted line, each stat, each caption; Devanagari and numerals exactly as printed). This is the checklist the editing model is held to, so it must be complete and it must not include anything that is not actually on the poster. Ignore the red and blue annotation boxes themselves, and ignore the software-stamped branding (emblem, footer strip, social handles). At most ${MAX_INVENTORY_ITEMS} items.`,
     );
   }
   if (input.posterKind === 'article') {
@@ -146,12 +178,23 @@ function buildPrompt(input: InterpretImageFeedbackInput): string {
       '- The top-right white rounded-square महाराष्ट्र शासन emblem-and-wordmark badge and the full-width bottom footer strip are branding stamped by software AFTER editing and cannot be changed by the edit. If a marker points at one of them, say so briefly and interpret the nearest plausible editable intent instead.',
     );
   }
-  lines.push('', 'Respond with STRICT JSON only: {"instruction": "..."}');
+  lines.push(
+    '',
+    wantsInventory(input)
+      ? 'Respond with STRICT JSON only: {"instruction": "...", "items": ["...", "..."]}'
+      : 'Respond with STRICT JSON only: {"instruction": "..."}',
+  );
   return lines.join('\n');
+}
+
+function wantsInventory(input: InterpretImageFeedbackInput): boolean {
+  return (input.clearRegions ?? []).some((c) => c.action === 'displace');
 }
 
 // The degradation path: numbered raw notes with grid positions. Deliberately
 // mechanical — no model involved — so an OpenAI outage never blocks feedback.
+// There is no inventory here: it can only be read off the pixels, and the
+// displace rule in the prompt builders stands on its own without one.
 function buildFallbackInstruction(input: InterpretImageFeedbackInput): string {
   const parts = input.annotations.map(
     (a) =>
@@ -159,9 +202,13 @@ function buildFallbackInstruction(input: InterpretImageFeedbackInput): string {
   );
   for (const c of input.clearRegions ?? []) {
     parts.push(
-      `Blue box ${c.letter} (in the ${gridPosition(c.region)} area): move whatever design content lies inside it to a suitable free place elsewhere in the layout` +
-        (c.note ? ` — «${c.note}»` : '') +
-        '.',
+      c.action === 'remove'
+        ? `Blue box ${c.letter} (in the ${gridPosition(c.region)} area): delete whatever design content lies inside it and move nothing else` +
+            (c.note ? ` — «${c.note}»` : '') +
+            '.'
+        : `Blue box ${c.letter} (in the ${gridPosition(c.region)} area): move whatever design content lies inside it elsewhere on the poster, re-laying the layout out as needed` +
+            (c.note ? ` — «${c.note}»` : '') +
+            '.',
     );
   }
   if (input.overallNote) parts.push(`Overall: «${input.overallNote}».`);
@@ -173,18 +220,32 @@ function buildFallbackInstruction(input: InterpretImageFeedbackInput): string {
   return parts.join(' ');
 }
 
+// Best-effort: a malformed or absent "items" costs the checklist, never the round.
+function parseInventory(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0)
+    .slice(0, MAX_INVENTORY_ITEMS);
+}
+
 export async function interpretImageFeedback(
   input: InterpretImageFeedbackInput,
 ): Promise<InterpretedImageFeedback> {
+  const withInventory = wantsInventory(input);
   try {
     const dataUrl = `data:image/png;base64,${input.markedPosterPng.toString('base64')}`;
     const raw = await chatCompleteVision(buildPrompt(input), dataUrl, {
       model: INTERPRETER_MODEL,
       responseFormat: 'json_object',
       temperature: 0.2,
-      maxTokens: 500,
+      maxTokens: withInventory ? MAX_TOKENS_WITH_INVENTORY : MAX_TOKENS_PLAIN,
     });
-    const parsed = JSON.parse(raw) as { instruction?: unknown };
+    const parsed = JSON.parse(raw) as {
+      instruction?: unknown;
+      items?: unknown;
+    };
     const instruction =
       typeof parsed.instruction === 'string' ? parsed.instruction.trim() : '';
     if (!instruction) {
@@ -192,12 +253,17 @@ export async function interpretImageFeedback(
     }
     return {
       instruction: instruction.slice(0, MAX_INSTRUCTION_CHARS),
+      contentInventory: withInventory ? parseInventory(parsed.items) : [],
       source: 'vision',
     };
   } catch (error) {
     console.warn(
       `[interpret-image-feedback] vision pass failed, using raw notes: ${(error as Error).message}`,
     );
-    return { instruction: buildFallbackInstruction(input), source: 'fallback' };
+    return {
+      instruction: buildFallbackInstruction(input),
+      contentInventory: [],
+      source: 'fallback',
+    };
   }
 }

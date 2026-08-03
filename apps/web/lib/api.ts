@@ -2,6 +2,9 @@
 // shared Zod schemas so the UI never renders shapes the API didn't promise.
 
 import {
+  AnalyticsResponseSchema,
+  type AnalyticsRange,
+  type AnalyticsResponse,
   DloIntakeDetailSchema,
   DloIntakeListResponseSchema,
   DloReviewPatchResponseSchema,
@@ -205,6 +208,15 @@ export async function getTranscription(
 export async function listTranscriptions(): Promise<TranscriptionSummary[]> {
   const body = await requestJson('/api/transcriptions');
   return TranscriptionListResponseSchema.parse(body);
+}
+
+// Department usage analytics. ONE request serves the landing page and every feature
+// drill-down, so the totals on one screen can never disagree with the detail on another.
+export async function getAnalytics(
+  range: AnalyticsRange,
+): Promise<AnalyticsResponse> {
+  const body = await requestJson(`/api/analytics?range=${range}`);
+  return AnalyticsResponseSchema.parse(body);
 }
 
 // Persist the review step's state so a reload — or a colleague opening the same intake —
@@ -447,6 +459,17 @@ export async function regeneratePoster(
 // detail.posterVersions, oldest→newest), so the next feedback/redesign/publish acts on it.
 // Synchronous and near-instant — it repoints the row at an existing immutable object, so
 // there is no copy, no new version, and switching back is the same move again.
+// Retry the edit that failed, on the same run. `retried` distinguishes the two outcomes:
+// true = that exact step is running again (poll for it), false = there was nothing to re-run
+// and the run was simply put back in working order (its poster and versions are untouched
+// either way). Neither shape starts a new generation.
+export async function retryGeneration(id: string): Promise<boolean> {
+  const body = await requestJson(`/api/generations/${id}/retry`, {
+    method: 'POST',
+  });
+  return z.object({ retried: z.boolean() }).parse(body).retried;
+}
+
 export async function restorePosterVersion(
   id: string,
   version: number,

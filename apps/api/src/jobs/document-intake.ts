@@ -19,13 +19,18 @@
 
 import { randomUUID } from 'node:crypto';
 import {
+  createCostAccumulator,
   detectPageLanguage,
   extractDocument,
   probeDocument,
+  runInCostScope,
+  runInCostTask,
   type DocumentKind,
   type DocumentPage as EnginePage,
   type DocumentTextSource,
 } from '@dgipr/content-engine';
+import type { SupabaseClient, UsageFeature } from '@dgipr/database';
+import { recordTasksFromCost } from './service-usage.js';
 import type {
   DocumentDetail,
   DocumentExtractProgress,
@@ -52,6 +57,12 @@ export type DocumentIntakeJob = {
   source: DocumentTextSource | null;
   extractProgress: DocumentExtractProgress | null;
   error: string | null;
+  // Which sidebar feature the upload came from, for /analytics attribution only. This
+  // service is shared by four surfaces and knows nothing else about its caller, so a paid
+  // OCR read would otherwise be orphaned — countable in the bill, attributable to nobody.
+  // Optional and NEVER inferred: an absent value records no service row, which is honest,
+  // where guessing a feature would put one surface's spend on another's card.
+  feature: UsageFeature | null;
   createdAt: string;
   touchedAt: number;
 };
@@ -154,6 +165,7 @@ export function toDocumentIntakeDetail(
 export async function startDocumentIntake(
   fileName: string,
   data: Buffer,
+  feature: UsageFeature | null = null,
 ): Promise<{
   id: string;
   kind: DocumentKind;
@@ -176,6 +188,7 @@ export async function startDocumentIntake(
     source: probe.pages ? 'text-layer' : null,
     extractProgress: null,
     error: null,
+    feature,
     createdAt: new Date().toISOString(),
     touchedAt: Date.now(),
   };
@@ -193,8 +206,9 @@ export async function startDocumentIntake(
 export function startDocumentIntakeExtraction(
   job: DocumentIntakeJob,
   pages: readonly number[],
+  client?: SupabaseClient,
 ): void {
-  runExtraction(job, 'auto', pages);
+  runExtraction(job, 'auto', pages, client);
 }
 
 // "The text looks wrong — read it with OCR instead." Re-runs extraction on the retained
@@ -204,15 +218,17 @@ export function startDocumentIntakeExtraction(
 export function startDocumentIntakeReextraction(
   job: DocumentIntakeJob,
   pages: readonly number[],
+  client?: SupabaseClient,
 ): void {
   job.pages = [];
-  runExtraction(job, 'ocr', pages);
+  runExtraction(job, 'ocr', pages, client);
 }
 
 function runExtraction(
   job: DocumentIntakeJob,
   source: 'auto' | 'ocr',
   pages: readonly number[],
+  client?: SupabaseClient,
 ): void {
   job.status = 'extracting';
   job.error = null;
@@ -221,17 +237,30 @@ function runExtraction(
 
   void (async () => {
     try {
-      const extracted = await extractDocument(job.fileName, job.data, {
-        source,
-        pages,
-        timeoutMs: OCR_TIMEOUT_MS,
-        // OCR runs one ≤10-page Sarvam job at a time, so a long scan is minutes of
-        // spinner without this.
-        onProgress: (pagesDone, pageCount) => {
-          job.extractProgress = { pagesDone, pageCount };
-          job.touchedAt = Date.now();
-        },
-      });
+      // Metered so a paid read from /translate, /proofread or the media room reaches that
+      // feature's service card. A born-digital PDF read from its text layer spends nothing
+      // and records nothing — recordOcrCost only fires on the pixel path.
+      const cost = createCostAccumulator();
+      const extracted = await runInCostScope(cost, () =>
+        runInCostTask('document_ocr', () =>
+          extractDocument(job.fileName, job.data, {
+            source,
+            pages,
+            timeoutMs: OCR_TIMEOUT_MS,
+            // OCR runs one ≤10-page Sarvam job at a time, so a long scan is minutes of
+            // spinner without this.
+            onProgress: (pagesDone, pageCount) => {
+              job.extractProgress = { pagesDone, pageCount };
+              job.touchedAt = Date.now();
+            },
+          }),
+        ),
+      );
+      // Both halves must be present: an upload that declared no feature, or a caller with
+      // no client, records nothing rather than landing on an arbitrary card.
+      if (client && job.feature) {
+        recordTasksFromCost(client, job.feature, cost);
+      }
       job.source = extracted.source;
       job.pages = extracted.pages.map(toPage);
       job.status = 'ready';

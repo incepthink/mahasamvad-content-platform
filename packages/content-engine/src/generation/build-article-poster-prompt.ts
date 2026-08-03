@@ -24,7 +24,12 @@ import type { PosterPalette } from './poster-palettes.js';
 import type { ArticlePosterLayout } from './article-poster-layouts.js';
 import type { ArtDirection } from './art-direction.js';
 import { stripColourMentions } from './strip-colour-words.js';
-import { clearSpaceRuleLines } from './clear-space-rule.js';
+import {
+  clearSpaceRule,
+  contentInventoryLines,
+  DISPLACE_PRESERVE_RULE,
+  type ClearAction,
+} from './clear-space-rule.js';
 
 // 'fresh' generates the poster from scratch (no n8n); 'onbrand' edits the picked master.
 export type ArticleDesignMode = 'fresh' | 'onbrand';
@@ -283,9 +288,14 @@ export type BuildArticleFeedbackPromptInput = Readonly<{
   imageFeedback: string;
   // 0-3 numbered red markers drawn on the current poster (annotated pixel feedback).
   markerCount?: number | undefined;
-  // 0-2 lettered BLUE rectangles: space to be freed for the officer's own logo or
-  // photograph. Independent of markerCount — one round may carry both.
-  clearCount?: number | undefined;
+  // The lettered BLUE rectangles, in draw order (matching their A/B badges), each
+  // saying what happens to the content inside: 'remove' deletes it and moves nothing
+  // else, 'displace' keeps it on the poster and licenses a re-layout. Independent of
+  // markerCount. Empty/absent = the pre-feature prompt, byte-for-byte.
+  clearActions?: readonly ClearAction[] | undefined;
+  // What the vision pass read off the CURRENT poster: the checklist a displace
+  // re-layout must not lose. Only emitted when a displace box is present.
+  contentInventory?: readonly string[] | undefined;
 }>;
 
 // The prompt that edits an EXISTING article poster to apply a requested visual change. Ported
@@ -299,23 +309,31 @@ export function buildArticleFeedbackPrompt(
     0,
     Math.min(3, Math.trunc(Number(input.markerCount) || 0)),
   );
-  const clearCount = Math.max(
-    0,
-    Math.min(2, Math.trunc(Number(input.clearCount) || 0)),
-  );
+  const clear = clearSpaceRule(input.clearActions ?? []);
   // A clear-space round is a complete request on its own — the blue rectangles say
   // what to do and the note is optional — so text is required only without them.
-  if (imageFeedback.length === 0 && clearCount === 0)
+  if (imageFeedback.length === 0 && clear.count === 0)
     throw new Error('No image feedback provided.');
-  const clearRule = clearSpaceRuleLines(clearCount);
+  const inventory = clear.hasDisplace
+    ? contentInventoryLines(input.contentInventory)
+    : [];
 
   const reservedZones =
     'RESERVED ZONES: the महासंवाद logo in the top-left (approx 420x180 px) and the footer strip along the bottom (full width, approx 150 px tall) are official branding stamped onto the poster by software — do NOT alter, move, redraw or remove them, and do NOT move any text or important content into those areas.';
 
-  // With clear rectangles present, "keep the exact layout unchanged" would contradict the
-  // relocation the officer asked for — a contradictory pair degrades compliance with both.
+  // A DISPLACE round cannot keep the exact layout — that is the point of it — so the
+  // keep-layout rule is REPLACED rather than hedged with an "except…" clause the
+  // absolute-sounding half of the sentence would win against. DELETE-only keeps it.
   const exceptClause =
-    clearCount > 0 ? ' or the SPACE TO FREE block below' : '';
+    clear.count > 0 ? ' or the SPACE TO FREE block below' : '';
+  const keepRule = clear.hasDisplace
+    ? DISPLACE_PRESERVE_RULE
+    : `Keep the exact layout, the poster's existing panels and accent shapes, existing Marathi headline text, colours, typography, and any photograph unchanged except where the requested change${exceptClause} explicitly requires it.`;
+  const keepRuleMarker = clear.hasDisplace
+    ? DISPLACE_PRESERVE_RULE
+    : `Keep the exact layout, the poster's existing panels and accent shapes, existing Marathi headline text, colours, typography, and any photograph unchanged except where a requested change${exceptClause} explicitly requires it.`;
+  const textException =
+    clear.count > 0 ? ', except as the SPACE TO FREE block requires' : '';
 
   if (markerCount > 0) {
     return [
@@ -323,11 +341,12 @@ export function buildArticleFeedbackPrompt(
       `The input image carries ${markerCount} numbered red annotation marker(s): thin red outline rectangles, each with a small red circular badge showing its number. They were drawn onto the poster by editing software and are NOT part of the poster design.`,
       'Each marker is a pointing gesture showing where one requested change applies — not a hard boundary. For each marker, identify the design element at or around that spot and apply the correspondingly numbered change from the request below to that WHOLE element, even where the element extends beyond the rectangle.',
       `REQUESTED CHANGES: «${imageFeedback}».`,
-      `Make ONLY these changes. Keep the exact layout, the poster's existing panels and accent shapes, existing Marathi headline text, colours, typography, and any photograph unchanged except where a requested change${exceptClause} explicitly requires it.`,
+      `Make ONLY these changes. ${keepRuleMarker}`,
       'ERASE every red marker rectangle and numbered badge completely from the output, restoring whatever they overlapped — no red outlines, red circles, or annotation numbers may remain anywhere on the poster.',
       reservedZones,
-      ...clearRule,
-      'Add no new text, letters, numbers, captions, logos, borders, or decorative elements beyond the requested changes. Preserve all other existing Devanagari text exactly. Output ONE complete landscape poster filling the canvas.',
+      `Add no new text, letters, numbers, captions, logos, borders, or decorative elements beyond the requested changes. Preserve all other existing Devanagari text exactly${textException}. Output ONE complete landscape poster filling the canvas.`,
+      ...inventory,
+      ...clear.lines,
     ].join('\n');
   }
 
@@ -336,10 +355,11 @@ export function buildArticleFeedbackPrompt(
     ...(imageFeedback.length > 0
       ? [`Apply ONLY this requested change: «${imageFeedback}».`]
       : []),
-    `Keep the exact layout, the poster's existing panels and accent shapes, existing Marathi headline text, colours, typography, and any photograph unchanged except where the requested change${exceptClause} explicitly requires it.`,
+    keepRule,
     reservedZones,
-    ...clearRule,
-    'Add no new text, letters, numbers, captions, logos, borders, or decorative elements. Preserve all existing Devanagari text exactly. Output ONE complete landscape poster filling the canvas.',
+    `Add no new text, letters, numbers, captions, logos, borders, or decorative elements. Preserve all existing Devanagari text exactly${textException}. Output ONE complete landscape poster filling the canvas.`,
+    ...inventory,
+    ...clear.lines,
   ].join('\n');
 }
 
@@ -558,18 +578,24 @@ if (
       failures.push('plain feedback prompt mentions blue clear boxes');
 
     // The clear-space (blue box) path — the article twin of the social assertions.
+    if (!plain.includes('Keep the exact layout'))
+      failures.push('plain feedback prompt lost its keep-layout rule');
+
     const cleared = buildArticleFeedbackPrompt({
       imageFeedback: '',
-      clearCount: 1,
+      clearActions: ['displace'],
+      contentInventory: ['मुख्यमंत्री देवेंद्र फडणवीस'],
     });
     for (const needle of [
       'SPACE TO FREE',
       '1 translucent BLUE rectangle',
       '(A)',
-      'RELOCATE',
-      'PLAIN BACKGROUND',
+      'MOVE — blue box A',
+      'PLAIN EMPTY BACKGROUND',
       'ERASE the blue rectangles',
       'RESERVED ZONES',
+      'INFORMATION THAT MUST SURVIVE — 1 item(s)',
+      'मुख्यमंत्री देवेंद्र फडणवीस',
     ]) {
       if (!cleared.includes(needle))
         failures.push(`clear-space prompt lost "${needle}"`);
@@ -578,18 +604,42 @@ if (
       failures.push('clear-space-only prompt invented a requested change');
     if (cleared.indexOf('SPACE TO FREE:') < cleared.indexOf('RESERVED ZONES'))
       failures.push('clear rule precedes the reserved zones it refers to');
+    // THE regression this change exists to prevent: a displace must not also be told
+    // to keep the exact layout.
+    if (cleared.includes('Keep the exact layout'))
+      failures.push('displace round kept the contradictory keep-layout rule');
+    if (!cleared.trimEnd().endsWith('may remain anywhere on the poster.'))
+      failures.push('clear rule is not the last block of the prompt');
+
+    // DELETE-only: the frozen-layout rule is correct there and must survive, and no
+    // displace wording or inventory may leak in.
+    const removeOnly = buildArticleFeedbackPrompt({
+      imageFeedback: '',
+      clearActions: ['remove'],
+      contentInventory: ['मुख्यमंत्री देवेंद्र फडणवीस'],
+    });
+    if (!removeOnly.includes('Keep the exact layout'))
+      failures.push('remove-only round dropped the keep-layout rule');
+    if (!removeOnly.includes('or the SPACE TO FREE block below'))
+      failures.push('remove-only round lost the keep-layout exception');
+    if (removeOnly.includes('MOVE — blue box'))
+      failures.push('remove-only round leaked the displace block');
+    if (removeOnly.includes('INFORMATION THAT MUST SURVIVE'))
+      failures.push('remove-only round emitted an inventory');
 
     const both = buildArticleFeedbackPrompt({
       imageFeedback: 'शीर्षक मोठे करा',
       markerCount: 2,
-      clearCount: 2,
+      clearActions: ['displace', 'remove'],
     });
     if (!both.includes('2 numbered red annotation marker'))
       failures.push('combined prompt lost the marker count');
     if (!both.includes('2 translucent BLUE rectangle'))
       failures.push('combined prompt lost the clear count');
-    if (!both.includes('SPACE TO FREE block below'))
-      failures.push('combined prompt kept the contradictory keep-layout rule');
+    if (!both.includes('MOVE — blue box A') || !both.includes('DELETE — blue box B'))
+      failures.push('combined prompt lost a per-letter action block');
+    if (both.includes('Keep the exact layout'))
+      failures.push('combined displace prompt kept the keep-layout rule');
 
     let threw = false;
     try {

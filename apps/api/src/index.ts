@@ -4,6 +4,7 @@ import multipart from '@fastify/multipart';
 import { fileURLToPath } from 'node:url';
 import { ZodError } from 'zod';
 import { createServiceRoleClient } from '@dgipr/database';
+import { registerAnalyticsRoutes } from './routes/analytics.js';
 import { registerDloRoutes } from './routes/dlo.js';
 import { registerDocumentRoutes } from './routes/documents.js';
 import { registerGenerationRoutes } from './routes/generations.js';
@@ -74,8 +75,9 @@ export async function createServer() {
       registerGenerationRoutes(instance, client);
       registerGlossaryRoutes(instance, client);
       registerTranslateRoutes(instance, client);
-      // Generic file upload → pages of text. No Supabase client: it persists nothing.
-      registerDocumentRoutes(instance);
+      // Generic file upload → pages of text. It still persists no document and no text;
+      // the client is here only so a PAID OCR read can be attributed on /analytics.
+      registerDocumentRoutes(instance, client);
       // "What is this YouTube link?" for the intake cards. Persists nothing either.
       registerYouTubeRoutes(instance);
       registerProofreadRoutes(instance, client);
@@ -85,6 +87,8 @@ export async function createServer() {
       registerDloRoutes(instance, client);
       registerTranscriptionRoutes(instance, client);
       registerVideoRoutes(instance, client);
+      // Department usage analytics. Read-only and derived — writes nothing.
+      registerAnalyticsRoutes(instance, client);
     },
     { prefix: '/api' },
   );

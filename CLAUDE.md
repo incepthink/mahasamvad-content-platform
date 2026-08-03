@@ -474,6 +474,26 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   `tsx --env-file=../../.env src/video/veo-client.ts <start.png> [end.png]` (two
   PNGs force the 8s interpolation window, ~$1.20 fast — the veo-path equivalent,
   proving the lastFrame shape). No n8n anywhere on this path.
+- **Department usage analytics (`/analytics`) — how much the department uses the platform.**
+  One read-only endpoint serves the landing page AND all six drill-downs, which is what makes a
+  card's number and its feature page's number impossible to disagree: route →
+  `apps/api/src/routes/analytics.ts` (`GET /api/analytics?range=7d|30d|90d|all`); aggregation →
+  `apps/api/src/jobs/analytics.ts`; lean windowed reads → `packages/database/src/analytics.ts`;
+  events → `packages/database/src/usage-events.ts` (migration 0043); shapes + the INR rate + the
+  reporting timezone → `packages/schemas/src/analytics.ts`; web → `apps/web/app/analytics/page.tsx`
+  + `analytics/[feature]/page.tsx` + `Analytics*` components + `lib/analytics.ts`/`useAnalytics.ts`.
+  Six things worth knowing before changing it. **There is no auth**, so every figure is
+  DEPARTMENT-WIDE per feature and nothing counts individuals — `dgipr.dlo.mine` is ordering, never
+  identity. The क्रिएटिव्ह आणि सोशल / लेख-बातमी split is `dlo_intake_id`, not category, so
+  `news`/`scheme` appear under both by design. **No query may select a text column** (`note`,
+  `article`, `combined_text`, `files`, `scenes`); the four metrics that need a text column to be
+  non-null use a head-only COUNT, and every list PAGES because PostgREST silently caps at 1000
+  rows. All day boundaries are `Asia/Kolkata` and windows are half-open with `to` = start of
+  tomorrow. A feature whose spend is not metered to a row reports `costInr: null`, never ₹0.
+  And **`usage_events` writes are fire-and-forget** — a logging failure must never fail an
+  officer's run (verified live against a database without 0043), which is also why an un-applied
+  0043 costs only the three event-backed cards. The payload carries machine keys only; every
+  Marathi label is in `apps/web/lib/strings.ts`.
 - Direct social publishing (post a completed twitter/facebook run's poster +
   caption to the OFFICIAL accounts): synchronous `POST /api/generations/:id/publish`
   in `apps/api/src/routes/generations.ts` (platform = the row's category; guards:
@@ -871,6 +891,8 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   `apps/web/app/generations/page.tsx`
 - Data layer → `apps/web/lib/api.ts`, `apps/web/lib/useGeneration.ts` (polling hook),
   `apps/web/lib/useGenerationThread.ts` (lineage rail; 5s poll only while a member runs)
+- Usage analytics → `apps/web/app/analytics/page.tsx` + `analytics/[feature]/page.tsx` (see the
+  analytics bullet above); sidebar entry `वापर विश्लेषण`, last in `NAV_LINKS`
 - Marathi UI strings → `apps/web/lib/strings.ts`
 - UI components → `apps/web/components/*` (`ArticleView`, `PosterPanel`,
   `ProgressSteps`, `FeedbackBox`, `CopyEditForm`, `HistoryCard`, `StatusChip`,
@@ -973,6 +995,13 @@ article. Additive + nullable, and `insertGeneration` omits the column unless som
 other create working. Typed on `/dlo`'s intake form (`AiInstructionsField`) and again at the
 review step; the form's copy reaches the review step through the intake's `review_state` (0036)
 blob, which the create route seeds as a separate best-effort update. Apply before the API deploy.
+`0043` — `usage_events` (new table: which feature was used, what was done, when, plus size/count
+integers — **never content**; there is no free-text column at all). It exists because /proofread,
+ad-hoc /translate and export/download actions deliberately persist nothing, so without it three of
+the analytics page's six cards would read as never used. Self-contained and additive; writes are
+fire-and-forget and the aggregator treats a read failure as "not tracked", so an un-applied 0043
+disables three cards rather than any feature — verified live, a poster download still returned 200
+with the table absent. Apply before the API deploy anyway.
 `0037` — `transcriptions` (new table: standalone recording → Marathi text runs behind
 `/transcribe`). Self-contained and additive — nothing else reads it, and it provisions no
 bucket (the recordings go into 0018's private `dlo-uploads` under a `transcriptions/` prefix),

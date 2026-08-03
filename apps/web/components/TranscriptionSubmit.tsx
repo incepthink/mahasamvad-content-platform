@@ -24,7 +24,7 @@ export function TranscriptionSubmit({
   error: string | null;
 }) {
   return (
-    <section className="card">
+    <section className="card card-action">
       <div className="btn-row">
         <button
           type="button"

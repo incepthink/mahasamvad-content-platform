@@ -42,7 +42,8 @@
 import { pathToFileURL } from 'node:url';
 import type { TranslationLanguage } from '@dgipr/schemas';
 import type { TermType } from '@dgipr/database';
-import { sarvamChatComplete } from './sarvam-chat.js';
+import { recordTranslateCost } from '../cost/cost-meter.js';
+import { SARVAM_MODEL, sarvamChatComplete } from './sarvam-chat.js';
 import {
   sarvamTranslate,
   SARVAM_TRANSLATE_MAX_INPUT_CHARS,
@@ -450,11 +451,15 @@ async function translateBlockToHindi(
   const label = `block ${index + 1}/${blockCount}`;
   const lockedNames = lockedNamesFor(block, glossary);
 
-  const attempt = async (): Promise<string> =>
-    sarvamTranslate(block, {
+  // Metered per ATTEMPT, not per block: a retry is a second charge, and an analytics page
+  // that reported one would understate what a difficult document actually cost.
+  const attempt = async (): Promise<string> => {
+    recordTranslateCost(block.length);
+    return sarvamTranslate(block, {
       sourceLanguageCode: sourceLanguage === 'en' ? 'en-IN' : 'mr-IN',
       targetLanguageCode: 'hi-IN',
     });
+  };
 
   // Belt and braces: the chat model's copy-back failure should be impossible here, but it
   // is invisible to the eye in Devanagari, so it stays checked.
@@ -496,6 +501,7 @@ async function translateBlockToEnglish(
 ): Promise<string> {
   const label = `block ${index + 1}/${blockCount}`;
   const messages = buildMessages(block, glossary);
+  recordTranslateCost(block.length, SARVAM_MODEL);
   const first = await sarvamChatComplete(messages, {
     ...TRANSLATE_SAMPLING,
     reasoningEffort: null,
@@ -506,6 +512,7 @@ async function translateBlockToEnglish(
     console.warn(
       `[translate] ${label} degenerated into a repetition loop; retrying with stronger anti-repetition settings.`,
     );
+    recordTranslateCost(block.length, SARVAM_MODEL);
     const retry = await sarvamChatComplete(messages, {
       ...TRANSLATE_SAMPLING_RETRY,
       reasoningEffort: null,

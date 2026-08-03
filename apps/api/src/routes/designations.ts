@@ -7,12 +7,18 @@
 // jobs/translation-terms.ts, shared with the pre-translation name check.
 
 import type { FastifyInstance } from 'fastify';
+import {
+  createCostAccumulator,
+  runInCostScope,
+  runInCostTask,
+} from '@dgipr/content-engine';
 import { markPersonVerified, type SupabaseClient } from '@dgipr/database';
 import {
   PrepareDesignationsRequestSchema,
   VerifyNameRequestSchema,
 } from '@dgipr/schemas';
 import { prepareDesignations } from '../jobs/translation-terms.js';
+import { recordTasksFromCost } from '../jobs/service-usage.js';
 
 export function registerDesignationRoutes(
   app: FastifyInstance,
@@ -22,7 +28,14 @@ export function registerDesignationRoutes(
     const body = PrepareDesignationsRequestSchema.parse(request.body);
     // A note naming nobody returns { names: [] }, and the web submits straight through —
     // the check is invisible when there is nothing to check.
-    return prepareDesignations(client, body.text);
+    const cost = createCostAccumulator();
+    const result = await runInCostScope(cost, () =>
+      runInCostTask('designation_extraction', () =>
+        prepareDesignations(client, body.text),
+      ),
+    );
+    recordTasksFromCost(client, 'article', cost);
+    return result;
   });
 
   // "तपासले म्हणून खूण करा" — confirm a name's नाव-शब्दकोश row from the review card, instead of

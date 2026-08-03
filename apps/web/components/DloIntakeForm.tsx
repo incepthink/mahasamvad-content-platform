@@ -18,6 +18,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Heading1, NotebookPen } from 'lucide-react';
 import type {
   DloCategory,
   DloPreReadDocument,
@@ -289,7 +290,7 @@ export function DloIntakeForm() {
           is optional material, so an officer who has only pasted notes can start the run
           without scrolling past every card they did not fill in. Any complaint (nothing
           supplied, instructions too long) is rendered here, where the button is. */}
-      <section className="card">
+      <section className="card card-action">
         <div className="btn-row">
           <button
             type="button"
@@ -303,14 +304,12 @@ export function DloIntakeForm() {
         {error ? <p className="form-error">{error}</p> : null}
       </section>
 
+      {/* The card's own title and blurb are deliberately absent: the page header above already
+          says what /dlo is for, and the notes label below says what this box takes. Repeating
+          either put three sentences between the officer and the first thing they type. */}
       <section className="card">
-        <h2>{STR.dloNewWorkTitle}</h2>
-        <p className="hint">{STR.dloIntro}</p>
-        <label
-          className="field-label"
-          htmlFor="dlo-notes"
-          style={{ marginTop: 16 }}
-        >
+        <label className="field-label" htmlFor="dlo-notes">
+          <NotebookPen size={18} className="label-icon" aria-hidden="true" />
           {STR.dloNotesLabel}
         </label>
         <p className="hint">{STR.dloNotesHint}</p>
@@ -371,6 +370,7 @@ export function DloIntakeForm() {
         <DocumentIntake
           key={slot.id}
           storageKey={documentStorageKey(slot.id)}
+          feature="article"
           accept={['pdf', 'docx', 'txt']}
           title={STR.dloDocsCardTitle}
           hint={STR.dloDocsIntakeHint}
@@ -402,7 +402,7 @@ export function DloIntakeForm() {
         />
       ))}
 
-      <section className="card">
+      <section className="card card-compact">
         <div className="btn-row">
           <button
             type="button"
@@ -417,6 +417,7 @@ export function DloIntakeForm() {
 
       <section className="card">
         <label className="field-label" htmlFor="dlo-heading">
+          <Heading1 size={18} className="label-icon" aria-hidden="true" />
           {STR.headingLabel}
         </label>
         <p className="hint">{STR.headingHint}</p>

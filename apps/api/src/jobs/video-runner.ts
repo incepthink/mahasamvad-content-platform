@@ -35,6 +35,7 @@ import {
   renderClip,
   renderFrame,
   runInCostScope,
+  runInCostTask,
   shortenContinuousNarration,
   narrationKeyPresent,
   narrationVoice,
@@ -74,6 +75,7 @@ import {
   estimateNarrationSeconds,
   sceneTimings,
 } from '@dgipr/schemas';
+import { recordTasksFromCost } from './service-usage.js';
 
 const running = new Set<string>();
 
@@ -172,6 +174,7 @@ async function uploadVersioned(
 function runVideoJob(
   client: SupabaseClient,
   id: string,
+  task: string,
   job: () => Promise<void>,
   options: Readonly<{ failureStatus?: 'failed' | 'completed' }> = {},
 ): void {
@@ -179,7 +182,7 @@ function runVideoJob(
   void (async () => {
     const cost = createCostAccumulator();
     try {
-      await runInCostScope(cost, job);
+      await runInCostScope(cost, () => runInCostTask(task, job));
     } catch (error) {
       console.error(`[video ${id}] failed:`, error);
       try {
@@ -212,6 +215,7 @@ function runVideoJob(
       } catch (costError) {
         console.error(`[video ${id}] could not persist cost:`, costError);
       }
+      recordTasksFromCost(client, 'video', cost);
       running.delete(id);
     }
   })();
@@ -300,7 +304,7 @@ export function startVideoScriptJob(
   // VOICE), which is what every later phase and every restart reads.
   uploaded?: UploadedNarration | undefined,
 ): void {
-  runVideoJob(client, id, async () => {
+  runVideoJob(client, id, 'video_script_creation', async () => {
     const row = await requireProject(client, id);
     await updateVideoProject(client, id, { step: 'script', error: null });
 
@@ -975,7 +979,7 @@ function withoutError(scene: VideoSceneEntry): VideoSceneEntry {
 // the project still reaches storyboard_ready and the card offers a per-scene
 // retry — because one flaky image render must not sink the other seven.
 export function startStoryboardJob(client: SupabaseClient, id: string): void {
-  runVideoJob(client, id, async () => {
+  runVideoJob(client, id, 'video_storyboard_creation', async () => {
     const row = await requireProject(client, id);
     await updateVideoProject(client, id, { step: 'narrate', error: null });
 
@@ -1079,7 +1083,7 @@ export function startSceneStillJob(
   returnTo: 'storyboard_ready' | 'completed',
   frame: 'start' | 'end' = 'start',
 ): void {
-  runVideoJob(client, id, async () => {
+  runVideoJob(client, id, 'video_storyboard_revision', async () => {
     const row = await requireProject(client, id);
     const scene = row.scenes[index];
     if (!scene) throw new Error(`Video project ${id} has no scene ${index}.`);
@@ -1402,7 +1406,7 @@ async function stitchAndPersist(
 // spend real money while the video already cannot stitch — but every clip that
 // finished before it is persisted, so the retry re-renders only what's missing.
 export function startVideoAnimateJob(client: SupabaseClient, id: string): void {
-  runVideoJob(client, id, async () => {
+  runVideoJob(client, id, 'video_clip_creation', async () => {
     const row = await requireProject(client, id);
     await updateVideoProject(client, id, { step: 'animate', error: null });
 
@@ -1451,6 +1455,7 @@ export function startVideoStitchJob(
   runVideoJob(
     client,
     id,
+    'video_assembly',
     async () => {
       const row = await requireProject(client, id);
       await stitchAndPersist(client, id, row.scenes);
@@ -1467,7 +1472,7 @@ export function startSceneReanimateJob(
   id: string,
   index: number,
 ): void {
-  runVideoJob(client, id, async () => {
+  runVideoJob(client, id, 'video_scene_reanimation', async () => {
     const row = await requireProject(client, id);
     if (!row.scenes[index]) {
       throw new Error(`Video project ${id} has no scene ${index}.`);
@@ -1510,7 +1515,7 @@ export function startSceneReanimateJob(
 // narrated video-v{n+1}. Reuses the `animating` status (the route flips it) so no
 // migration is needed for a new status value.
 export function startNarrationJob(client: SupabaseClient, id: string): void {
-  runVideoJob(client, id, async () => {
+  runVideoJob(client, id, 'video_narration', async () => {
     const row = await requireProject(client, id);
     await updateVideoProject(client, id, { step: 'narrate', error: null });
 
