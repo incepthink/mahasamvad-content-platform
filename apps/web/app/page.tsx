@@ -76,7 +76,7 @@ const FORMATS = [
   {
     value: 'scheme',
     icon: ImageIcon,
-    name: STR.mediaFormatArticlePoster,
+    name: 'बॅनर',
     desc: STR.mediaFormatArticlePosterDesc,
   },
   {
