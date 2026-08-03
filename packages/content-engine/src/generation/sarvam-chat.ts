@@ -1,7 +1,7 @@
-// Sarvam chat completions for the optional Marathi editor-polish step.
+// Sarvam chat completions for English translation and optional Marathi editor polish.
 //
-// Sarvam-30B is a strong Indic-language model tuned for Marathi and other Indian
-// languages, used here to polish the OpenAI draft's prose (flow / official tone) only.
+// Sarvam-105B is the current flagship Indic-language chat model, used here for English
+// translation and to polish the OpenAI draft's prose (flow / official tone) only.
 // Sarvam's Chat Completions API is OpenAI-compatible, so we call the REST endpoint
 // directly with fetch and reuse the ChatMessage type — same style as openai-chat.ts —
 // to avoid pulling in an SDK.
@@ -14,10 +14,10 @@ import type { ChatMessage } from './openai-chat.js';
 const SARVAM_URL =
   process.env.SARVAM_BASE_URL ?? 'https://api.sarvam.ai/v1/chat/completions';
 
-export const SARVAM_MODEL = process.env.SARVAM_MODEL ?? 'sarvam-30b';
+export const SARVAM_MODEL = process.env.SARVAM_MODEL ?? 'sarvam-105b';
 
 // Sarvam's token budget covers the model's reasoning_content AND the reply, and it
-// defaults to only 2048. On a hybrid-reasoning model (sarvam-30b/sarvam-m) with thinking
+// defaults to only 2048. On a hybrid-reasoning model such as sarvam-105b with thinking
 // ON, that default is entirely consumed by chain-of-thought → finish_reason=length and
 // empty content. So we send a generous max_tokens (env-overridable) by default.
 export const SARVAM_MAX_TOKENS = Number.parseInt(
