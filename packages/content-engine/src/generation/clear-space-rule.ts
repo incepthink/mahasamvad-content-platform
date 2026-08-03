@@ -4,9 +4,9 @@
 // They live in code, not in the interpreted user text, for the reason
 // SETTING_RULE and NO_TEXT_RULE already establish on the video path: a rule that
 // travels through a model can be paraphrased away, a code-appended one cannot.
-// The vision interpreter's job is only to NAME what occupies each blue box, say
-// where it could go, and list what must survive — how the space is freed is
-// fixed here.
+// The vision interpreter's job is only to NAME what occupies each blue box,
+// identify its complete parent group, propose the smallest sufficient group
+// movement, and list what must survive — how the space is freed is fixed here.
 //
 // TWO ACTIONS, and they are separate because they need OPPOSITE permissions:
 //
@@ -56,10 +56,12 @@ export type ClearSpaceRule = Readonly<{
 }>;
 
 // Replaces the builders' "Keep the exact layout … unchanged" sentence whenever a
-// DISPLACE box is present. The information is fixed; the arrangement is not.
-// One rule, no sub-clause hedge — the hedge is what lost last time.
+// DISPLACE box is present. The information is fixed; the arrangement may move,
+// but only by the minimum amount needed to clear the requested target. This is
+// deliberately parent-aware: translating a row or stack already moves every
+// child inside it, so the model must not also detach or clone one of those children.
 export const DISPLACE_PRESERVE_RULE =
-  "The poster's INFORMATION is fixed but its ARRANGEMENT is not. Every Marathi word, numeral, figure and photograph already on the poster must still appear afterwards, with its wording and its numbers unchanged, and the colour scheme, background artwork and typefaces stay as they are — but you MAY re-lay-out where those elements sit and how large they are, as far as the SPACE TO FREE block below requires. Change nothing that neither that block nor the requested change requires.";
+  "The poster's INFORMATION and ELEMENT COUNTS are fixed. Clear the requested target with the MINIMUM sufficient arrangement change: prefer translating or reflowing the least disruptive COMPLETE parent group (a whole row, card, list, stack, panel or column) while keeping every child icon, text block and image attached to that same parent. Every Marathi word, numeral, icon, figure, photograph, card and panel already on the poster must appear afterwards exactly as many times as it appeared before, with wording and numbers unchanged. Never clone, duplicate, echo, split or detach an element. If moving a parent group carries an element out of a blue rectangle, that element has already been moved and must NOT be placed again elsewhere. Keep the colour scheme, background artwork and typefaces unchanged, and change nothing that neither the SPACE TO FREE block nor the requested change requires.";
 
 function lettersFor(
   actions: readonly ClearAction[],
@@ -99,9 +101,9 @@ export function clearSpaceRule(
 
   if (displaceLetters.length > 0) {
     rule.push(
-      `MOVE — blue box ${displaceLetters.join(', ')}: the content inside must LEAVE that rectangle but must NOT leave the poster. Re-lay-out the poster so it fits somewhere else.`,
-      "You are explicitly permitted, and expected, to redesign the arrangement to make that possible: move, resize, restack, re-column and re-balance the poster's existing rows, panels, cards, icons, headline and body blocks as much as is needed to open up that space. A visibly rearranged poster is a CORRECT result here, not a mistake — returning the poster unchanged is a failure.",
-      'What you may NOT do is lose anything. Every heading, sentence, phrase, numeral, icon and photograph on the poster now must still be on the poster afterwards — the same words, the same numbers, fully legible at a readable size, not overlapping anything, in a sensible reading order. Never delete, crop, truncate, abbreviate, merge or summarise content to make it fit, and never invent new content.',
+      `MOVE — blue box ${displaceLetters.join(', ')}: each blue rectangle is a TARGET AREA that must become empty; it is NOT an object-selection mask and it does NOT require a separate copy or a separate destination for every element it overlaps. Keep the overlapped content on the poster exactly once.`,
+      "Use the least disruptive complete-group movement that clears the target. First try translating the existing containing row, card, list, stack, panel or column as one unit, preserving all icon-with-card, image-with-caption and text-with-panel relationships. When a box overlaps one member of a repeated list or stack, prefer moving or reflowing that complete list or stack together instead of extracting a child icon or text block. Resize, restack, re-column or re-balance only when a simpler group translation cannot produce a valid layout. The rectangle ending empty is required; changing more of the poster than that is a failure.",
+      'Do not perform the move twice. If a row, card, list or stack is shifted and the originally overlapped icon, text or image moves with it, that fully satisfies MOVE for that element: keep it only inside its original parent and do NOT add another copy anywhere else. Preserve the original number of copies of every element. Never delete, crop, truncate, abbreviate, merge, summarise, clone, duplicate, echo, split, detach or invent content to make it fit.',
     );
   }
 
@@ -178,7 +180,8 @@ if (
     'remove-only lost the preamble count',
   );
 
-  // 3. Displace only — the permission to redesign must be explicit, and the
+  // 3. Displace only — the permission to move must be explicit but bounded by
+  //    minimum-change, parent-preservation and exact-multiplicity rules. The
   //    remove wording must NOT appear (it would re-introduce the contradiction
   //    that made this gesture a no-op).
   const displaceOnly = clearSpaceRule(['displace']);
@@ -189,16 +192,29 @@ if (
   );
   check(displaceText.includes('MOVE — blue box A'), 'displace block missing');
   check(!displaceText.includes('DELETE — blue box'), 'displace leaked DELETE');
+  check(displaceText.includes('TARGET AREA'), 'displace lost target-area semantics');
   check(
-    displaceText.includes('explicitly permitted'),
-    'displace lost its permission to redesign',
+    displaceText.includes('least disruptive complete-group movement'),
+    'displace lost its minimum-change group rule',
+  );
+  check(
+    displaceText.includes('Do not perform the move twice'),
+    'displace lost its double-move guard',
+  );
+  check(
+    displaceText.includes('Preserve the original number of copies'),
+    'displace lost its exact-multiplicity guard',
+  );
+  check(
+    displaceText.includes('do NOT add another copy anywhere else'),
+    'displace lost its no-duplicate example',
   );
   check(
     !displaceText.includes('stays exactly as it is now'),
     'displace kept the contradictory keep-everything rule',
   );
   check(
-    displaceText.includes('returning the poster unchanged is a failure'),
+    displaceText.includes('rectangle ending empty is required'),
     'displace lost the no-op rejection',
   );
 

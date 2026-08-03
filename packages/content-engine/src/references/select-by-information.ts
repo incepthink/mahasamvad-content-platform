@@ -18,9 +18,13 @@
 // So the order is now:
 //
 //   STAGE 1 (capacity, a HARD GATE): a reference with fewer content slots than the information
-//     has items is EXCLUDED, not scored down. It was a scored preference before, and a scored
-//     preference is exactly how a four-slot template kept beating a seven-slot one.
-//   STAGE 2 (presentation): among what survives, which arrangement suits this shape of
+//     has items is EXCLUDED, not scored down. The TIGHTEST capacity that fits wins; an oversized
+//     two-section master is not harmless, because its unused text zones make the image model
+//     repeat the note or invent headings to fill them.
+//   STAGE 2 (text-role compatibility, another HARD GATE in strict-source social mode): within
+//     that capacity band, prefer the references that demand the fewest headline, subheadline,
+//     section-label, CTA and other auxiliary text slots not explicitly present in the note.
+//   STAGE 3 (presentation): among what survives, which arrangement suits this shape of
 //     information — a photograph zone or not, a quotation with a speaker, a date/venue, figures.
 //
 // SUBJECT IS NO LONGER A CRITERION AT ALL, and `contentSummary` is deliberately not shown to the
@@ -41,9 +45,10 @@
 // can split the note into two posters. Never a silent truncation, which is what this whole
 // change exists to end.
 //
-// The item COUNT comes from the same call that picks, deliberately: a separate counting call
-// would be a second charge, and the count and the pick could then disagree about the very thing
-// the gate is computed from.
+// In strict-source social mode the item COUNT is lexical and deterministic: one officer-written
+// bullet/numbered line or sentence is one display unit. The model still ranks presentation, but
+// cannot reinterpret seven source sentences as ten or twelve semantic facts. The legacy/shared
+// mode keeps its model count for backward compatibility.
 //
 // Colour is additionally stripped from the descriptions on a 'fresh' render, where the palette
 // is assigned separately and the master contributes structure only.
@@ -85,6 +90,21 @@ export type InformationCandidate = Readonly<{
   layoutSummary: string;
   hasPhotoZone: boolean;
   bulletSlots: number;
+  // Derived deterministically from the cached English layoutSummary. Existing reference rows
+  // therefore become strict-source compatible immediately; no migration or paid re-analysis is
+  // needed. A headline is tracked separately because an officer may explicitly provide one.
+  headlineSlots: number;
+  // Subheadlines, section labels, CTAs, contact/QR blocks, slogans and similar text roles which
+  // are NOT part of bulletSlots. These are the slots that caused the observed extra copy.
+  auxiliaryTextSlots: number;
+}>;
+
+export type InformationShape = Readonly<{
+  // Exact source units, never an LLM interpretation. A bullet/numbered line is one unit; prose
+  // is counted sentence-by-sentence, preserving the way an officer grouped facts in the input.
+  itemCount: number;
+  // True only for a short standalone first line that is visibly separated from the body.
+  hasExplicitHeadline: boolean;
 }>;
 
 export type InformationRanking = Readonly<{
@@ -114,7 +134,7 @@ export type SelectedByInformation = Readonly<{
   master: SelectedMaster;
   // Null when the pick fell back to the seeded hash (no ranking happened, so no title).
   title: string | null;
-  // Null when no ranking happened, so nothing counted the items.
+  // Strict-source mode computes this even if ranking fails; legacy mode leaves it null then.
   itemCount: number | null;
   // Null when the chosen reference can hold everything (the normal case).
   shortfall: SlotShortfall | null;
@@ -135,11 +155,116 @@ const MIN_GATED_ITEMS = 2;
 // exceeds 12 slots, so a count far above that is a bad read, not a big poster.
 const MAX_ITEM_COUNT = 24;
 
+const LIST_ITEM_PREFIX = /^\s*(?:[-*•▪◦–—]|\(?[0-9०-९]+[.)])\s+/u;
+const SENTENCE_UNIT = /[^.!?।]+(?:[.!?।]+|$)/gu;
+
+// The layout analyser deliberately writes summaries in a small, stable English vocabulary.
+// Reading those cached summaries here makes the fix work for every existing master immediately,
+// instead of adding jsonb fields which would remain absent until the whole library was re-read.
+const AUXILIARY_TEXT_ROLE = new RegExp(
+  [
+    'subheadline',
+    'subtitle',
+    'tagline',
+    'kicker',
+    'section(?:-tab)?(?:\\s+|-)(?:heading|header|label|title)',
+    'programme(?:-label|\\s+label)',
+    'scheme\\s+ribbon',
+    'call-to-action',
+    'contact(?:-information)?(?:\\s+block|\\s+line|\\s+callout)?',
+    'QR(?:-code)?',
+    'website',
+    'registration',
+    'attribution',
+    'quotation',
+    'slogan',
+    'introductory\\s+line',
+    'supporting\\s+(?:line|statement)',
+    'closing\\s+(?:line|invitation)',
+    'reminder\\s+callout',
+    'announcement\\s+(?:strip|banner|line)',
+    '(?:stat|statistic|figure)\\s+callout',
+    'date-style\\s+banner',
+    'availability\\s+callout',
+    'app-promotion',
+    '(?:location-)?caption\\s+line',
+    'helpline\\s+callout',
+  ].join('|'),
+  'giu',
+);
+
+function sentenceCount(text: string): number {
+  return (text.match(SENTENCE_UNIT) ?? []).filter(
+    (part) => part.trim().length > 0,
+  ).length;
+}
+
+// Describe only structure which the officer actually supplied. This is intentionally lexical,
+// not semantic: splitting one sentence into several inferred "facts" is exactly how the old
+// model count changed seven source sentences into a template needing extra copy.
+export function analyzeInformationShape(note: string): InformationShape {
+  const trimmed = note.trim();
+  if (!trimmed) return { itemCount: 0, hasExplicitHeadline: false };
+
+  const blocks = trimmed
+    .split(/\r?\n\s*\r?\n/u)
+    .map((block) => block.trim())
+    .filter(Boolean);
+  const lines = trimmed
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const firstBlock = blocks[0] ?? '';
+  const firstLine = lines[0] ?? '';
+  const laterLinesAreList = lines
+    .slice(1)
+    .some((line) => LIST_ITEM_PREFIX.test(line));
+  const shortStandaloneFirstBlock =
+    blocks.length > 1 &&
+    !firstBlock.includes('\n') &&
+    firstBlock.length <= 120 &&
+    !/[.!?।]$/u.test(firstBlock);
+  const listIntroduction =
+    lines.length > 1 &&
+    firstLine.length <= 160 &&
+    !LIST_ITEM_PREFIX.test(firstLine) &&
+    laterLinesAreList &&
+    /[:：]$/u.test(firstLine);
+  const hasExplicitHeadline = shortStandaloneFirstBlock || listIntroduction;
+
+  let skippedHeadline = false;
+  let itemCount = 0;
+  for (const line of lines) {
+    if (hasExplicitHeadline && !skippedHeadline && line === firstLine) {
+      skippedHeadline = true;
+      continue;
+    }
+    itemCount += LIST_ITEM_PREFIX.test(line) ? 1 : sentenceCount(line);
+  }
+
+  return {
+    itemCount: Math.min(MAX_ITEM_COUNT, Math.max(1, itemCount)),
+    hasExplicitHeadline,
+  };
+}
+
+export function referenceTextRoles(layoutSummary: string): Readonly<{
+  headlineSlots: number;
+  auxiliaryTextSlots: number;
+}> {
+  const headlineSlots = (layoutSummary.match(/\bheadline\b/giu) ?? []).length;
+  const auxiliaryTextSlots = (layoutSummary.match(AUXILIARY_TEXT_ROLE) ?? [])
+    .length;
+  return { headlineSlots, auxiliaryTextSlots };
+}
+
 function buildSystemPrompt(
   candidates: readonly InformationCandidate[],
   ignoreColour: boolean,
   // Indices of candidates the last few posts already used. Lowest-priority preference only.
   recentIndices: readonly number[],
+  strictSourceShape?: InformationShape | undefined,
 ): string {
   const lines = candidates.map((c, i) => {
     // CAPACITY LEADS THE LINE. It is the primary key of the decision, so it must not sit in a
@@ -155,10 +280,16 @@ function buildSystemPrompt(
     // assigned separately, and the DGIPR library is overwhelmingly saffron/maroon/cream, so a
     // colour-carrying description is a live channel for the house look to re-enter a poster
     // meant to be in a different family.
-    const layout = ignoreColour ? stripColourMentions(c.layoutSummary) : c.layoutSummary;
+    const layout = ignoreColour
+      ? stripColourMentions(c.layoutSummary)
+      : c.layoutSummary;
+    const textDemand =
+      `${c.headlineSlots} headline slot(s), ` +
+      `${c.auxiliaryTextSlots} other auxiliary text slot(s)`;
     return [
       `- index ${i} [group: ${c.typeLabel}]`,
       `  CAPACITY: ${slots}`,
+      `  TEXT DEMAND: ${textDemand}`,
       `  STRUCTURE: ${photo}. ${layout}`,
     ].join('\n');
   });
@@ -167,12 +298,25 @@ function buildSystemPrompt(
     recentIndices.length > 0
       ? [
           '',
-          'VARIETY (lowest priority, applies only after the two stages above):',
+          'VARIETY (lowest priority, applies only after the structural stages above):',
           `- Recent posts already used: ${recentIndices.map((i) => `index ${i}`).join(', ')}.`,
           '- Between references that hold the information EQUALLY well, prefer one that is not in that list.',
           '- NEVER reject a reference that fits the item count better in order to satisfy this.',
         ]
       : [];
+
+  const strictStructure = strictSourceShape
+    ? [
+        '',
+        'STRICT SOURCE-SHAPE RESULT (computed deterministically from the officer’s formatting; do not reinterpret it):',
+        `- The body contains exactly ${strictSourceShape.itemCount} display item(s). Report item_count as exactly ${strictSourceShape.itemCount}.`,
+        strictSourceShape.hasExplicitHeadline
+          ? '- The officer supplied one explicit standalone headline.'
+          : '- The officer supplied NO explicit standalone headline, kicker, section label, summary, CTA or other auxiliary poster copy.',
+        '- TEXT DEMAND is structural capacity the template expects beyond its repeating body items. Prefer the LOWEST unsupported text demand inside the tightest capacity band, or the image model will have to invent or duplicate text to fill the template.',
+        '- Never prefer an oversized or higher-text-demand reference merely because its composition is attractive.',
+      ]
+    : [];
 
   return [
     'You are a designer for DGIPR Maharashtra (Directorate General of Information & Public Relations).',
@@ -192,8 +336,9 @@ function buildSystemPrompt(
     '- Choose only from references whose capacity is item_count or more.',
     '- Prefer the SMALLEST capacity that still fits, so the poster is not mostly empty slots.',
     '- If item_count is 1 or 0, capacity does not apply — any reference may be chosen.',
+    ...strictStructure,
     '',
-    'STAGE 2 — PRESENTATION (chooses among the ones stage 1 allows).',
+    'STAGE 2 — PRESENTATION (chooses only among structurally compatible references).',
     '- Pick the arrangement that suits THIS SHAPE of information: whether it is a set of parallel points, a quotation with a named speaker, a sequence of dates, figures or amounts, an instruction list, or a single announcement.',
     '- A reference with a photograph area suits information about an event, place, people or a built thing; a text-only reference suits an advisory, a rule list or a plain statement. Judge this from the information, not as a rule.',
     '',
@@ -222,7 +367,9 @@ function parseJson(raw: string): Record<string, unknown> {
     if (start !== -1 && end > start) {
       return JSON.parse(raw.slice(start, end + 1)) as Record<string, unknown>;
     }
-    throw new Error(`Reference ranker did not return JSON: ${raw.slice(0, 400)}`);
+    throw new Error(
+      `Reference ranker did not return JSON: ${raw.slice(0, 400)}`,
+    );
   }
 }
 
@@ -241,6 +388,9 @@ export async function rankReferenceByInformation(
     // Master ids the last few runs used. A PREFERENCE handed to the model, never a filter —
     // see the recency note in the module header.
     recentIds?: readonly string[] | undefined;
+    // Social creative only: the deterministic source shape which the model may use but never
+    // override. The code applies the same rule after the response.
+    strictSourceShape?: InformationShape | undefined;
   }> = {},
 ): Promise<InformationRanking | null> {
   const trimmed = note.trim();
@@ -260,6 +410,7 @@ export async function rankReferenceByInformation(
             candidates,
             options.ignoreColour === true,
             recentIndices,
+            options.strictSourceShape,
           ),
         },
         {
@@ -361,6 +512,94 @@ export function enforceCapacity<T extends { id: string; bulletSlots: number }>(
   };
 }
 
+type StrictStructureCandidate = Readonly<{
+  id: string;
+  bulletSlots: number;
+  headlineSlots: number;
+  auxiliaryTextSlots: number;
+}>;
+
+function unsupportedTextDemand(
+  candidate: StrictStructureCandidate,
+  shape: InformationShape,
+): number {
+  const supportedHeadlines = shape.hasExplicitHeadline ? 1 : 0;
+  return (
+    Math.max(0, candidate.headlineSlots - supportedHeadlines) +
+    candidate.auxiliaryTextSlots
+  );
+}
+
+// Strict-source social selection. Unlike enforceCapacity, this does not merely reject a master
+// that is too small: it also rejects an unnecessarily LARGE master and one whose extra text
+// roles are unsupported. Both create empty semantic slots which the image model fills by
+// inventing a heading or repeating facts. The model's preference survives only inside the
+// deterministic best-fit band.
+export function enforceSourceStructure<T extends StrictStructureCandidate>(
+  candidates: readonly T[],
+  preferredId: string,
+  shape: InformationShape,
+  seed: string,
+): { id: string; shortfall: SlotShortfall | null; corrected: boolean } {
+  if (candidates.length === 0) {
+    return { id: preferredId, shortfall: null, corrected: false };
+  }
+  if (shape.itemCount <= 0) {
+    const preferred = candidates.find(
+      (candidate) => candidate.id === preferredId,
+    );
+    const chosen =
+      preferred ?? (candidates[hashString(seed) % candidates.length] as T);
+    return {
+      id: chosen.id,
+      shortfall: null,
+      corrected: chosen.id !== preferredId,
+    };
+  }
+
+  // bulletSlots=0 means a single-message/quotation layout, not zero usable content. It is a
+  // valid tight fit for one source unit, but never for a multi-item note.
+  const capacityOf = (candidate: T) => Math.max(1, candidate.bulletSlots);
+  const largeEnough = candidates.filter(
+    (candidate) => capacityOf(candidate) >= shape.itemCount,
+  );
+  const capacityBand =
+    largeEnough.length > 0
+      ? (() => {
+          const tightest = Math.min(...largeEnough.map(capacityOf));
+          return largeEnough.filter(
+            (candidate) => capacityOf(candidate) === tightest,
+          );
+        })()
+      : (() => {
+          const largest = Math.max(...candidates.map(capacityOf));
+          return candidates.filter(
+            (candidate) => capacityOf(candidate) === largest,
+          );
+        })();
+
+  const leastTextDemand = Math.min(
+    ...capacityBand.map((candidate) => unsupportedTextDemand(candidate, shape)),
+  );
+  const bestBand = capacityBand.filter(
+    (candidate) => unsupportedTextDemand(candidate, shape) === leastTextDemand,
+  );
+  const preferred = bestBand.find((candidate) => candidate.id === preferredId);
+  const chosen =
+    preferred ?? (bestBand[hashString(seed) % bestBand.length] as T);
+  const largestAvailable = Math.max(...candidates.map(capacityOf));
+  const shortfall =
+    largeEnough.length === 0
+      ? { needed: shape.itemCount, available: largestAvailable }
+      : null;
+
+  return {
+    id: chosen.id,
+    shortfall,
+    corrected: chosen.id !== preferredId,
+  };
+}
+
 // A candidate the ranker can reason over: it must already carry vision-derived summaries (a
 // null-spec master has nothing to match on, so it is invisible to selection — which is why one
 // un-analysed master is warmed per run below, filling the library over time).
@@ -371,12 +610,14 @@ function candidateFor(
   const spec = image.layoutSpec;
   if (!spec) return null;
   if (!spec.layoutSummary && !spec.contentSummary) return null;
+  const textRoles = referenceTextRoles(spec.layoutSummary);
   return {
     id: image.id,
     typeLabel: typeLabelFor(image),
     layoutSummary: spec.layoutSummary,
     hasPhotoZone: spec.hasPhotoZone,
     bulletSlots: spec.bulletSlots,
+    ...textRoles,
   };
 }
 
@@ -400,10 +641,17 @@ export async function selectReferenceByInformation(
   // lowest-priority tie-break between equally capable references, and only narrows the SEEDED
   // fallback pick. See the recency note in the module header for why.
   avoidIds?: readonly string[],
-  options: Readonly<{ ignoreColour?: boolean | undefined }> = {},
+  options: Readonly<{
+    ignoreColour?: boolean | undefined;
+    // Social creative's "the input IS the poster" contract. Kept opt-in because this selector is
+    // also reused by YouTube thumbnails, whose short marketing-message shape is different.
+    strictSourceText?: boolean | undefined;
+  }> = {},
 ): Promise<SelectedByInformation> {
   if (images.length === 0) {
-    throw new Error('selectReferenceByInformation called with no enabled images.');
+    throw new Error(
+      'selectReferenceByInformation called with no enabled images.',
+    );
   }
 
   // Deterministic ordering (newest first) so the seeded fallback and the candidate indices are
@@ -413,7 +661,7 @@ export async function selectReferenceByInformation(
   const pool = [...images].sort((a, b) =>
     a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0,
   );
-  const reasonPrefix = `capacity-first (pool=${pool.length})`;
+  const reasonPrefix = `${options.strictSourceText ? 'source-structure-first' : 'capacity-first'} (pool=${pool.length})`;
 
   // The seeded fallback keeps the old spread behaviour: no reasoning happens on that path, so
   // across-run variety is free there and costs nothing correct.
@@ -428,45 +676,84 @@ export async function selectReferenceByInformation(
     }
   }
 
-  let picked = fallbackPool[hashString(seed) % fallbackPool.length] as ReferenceImageRow;
+  let picked = fallbackPool[
+    hashString(seed) % fallbackPool.length
+  ] as ReferenceImageRow;
   let pickMethod = fallbackNote;
   let title: string | null = null;
   let itemCount: number | null = null;
   let shortfall: SlotShortfall | null = null;
+  let rankingApplied = false;
 
   const candidates = pool
     .map((image) => candidateFor(image, typeLabelFor))
     .filter((c): c is InformationCandidate => c !== null);
+  const strictShape = options.strictSourceText
+    ? analyzeInformationShape(note)
+    : null;
+
+  // Establish a structurally safe fallback BEFORE the model call. Ranking is best-effort, so a
+  // timeout or malformed answer must not restore the old random-template behaviour and make the
+  // exact same note depend on whether the model happened to answer.
+  if (strictShape && candidates.length > 0) {
+    const fallbackCandidate =
+      candidates.find((candidate) => candidate.id === picked.id) ??
+      (candidates[
+        hashString(seed) % candidates.length
+      ] as InformationCandidate);
+    const fallbackVerdict = enforceSourceStructure(
+      candidates,
+      fallbackCandidate.id,
+      strictShape,
+      seed,
+    );
+    const match = pool.find((image) => image.id === fallbackVerdict.id);
+    if (match) {
+      picked = match;
+      itemCount = strictShape.itemCount;
+      shortfall = fallbackVerdict.shortfall;
+      pickMethod = `${fallbackNote} + strict-source fallback (items=${strictShape.itemCount})`;
+    }
+  }
+
   // With fewer than two described references there is nothing to compare, so the model call
   // would only be a rubber stamp on a pool of one.
   if (candidates.length >= 2) {
     const ranked = await rankReferenceByInformation(note, candidates, {
       ignoreColour: options.ignoreColour,
       recentIds: avoidIds,
+      strictSourceShape: strictShape ?? undefined,
     });
     if (ranked) {
       // The model's answer is a preference; this is the rule.
-      const verdict = enforceCapacity(
-        candidates,
-        ranked.id,
-        ranked.itemCount,
-        seed,
-      );
+      const verdict = strictShape
+        ? enforceSourceStructure(candidates, ranked.id, strictShape, seed)
+        : enforceCapacity(candidates, ranked.id, ranked.itemCount, seed);
       const match = pool.find((img) => img.id === verdict.id);
       if (match) {
+        rankingApplied = true;
         picked = match;
-        itemCount = ranked.itemCount > 0 ? ranked.itemCount : null;
+        const effectiveItemCount = strictShape?.itemCount ?? ranked.itemCount;
+        itemCount = effectiveItemCount > 0 ? effectiveItemCount : null;
         shortfall = verdict.shortfall;
-        const fixed = verdict.corrected ? ' [capacity-corrected]' : '';
+        const fixed = verdict.corrected
+          ? strictShape
+            ? ' [source-structure-corrected]'
+            : ' [capacity-corrected]'
+          : '';
         const gap = shortfall
           ? ` [SHORTFALL — ${shortfall.needed} items, largest reference shows ${shortfall.available}]`
           : '';
-        pickMethod = `information-ranked${fixed}${gap} (items=${ranked.itemCount}; ${ranked.reason})`;
+        pickMethod = `information-ranked${fixed}${gap} (items=${effectiveItemCount}; ${ranked.reason})`;
         title = ranked.title.trim() === '' ? null : ranked.title.trim();
         if (verdict.corrected) {
           console.warn(
-            '[select-by-information] the ranked reference could not hold ' +
-              `${ranked.itemCount} item(s); corrected to ${picked.storagePath}.`,
+            strictShape
+              ? '[select-by-information] the ranked reference did not match the exact source ' +
+                  `structure (${strictShape.itemCount} item(s), headline=${strictShape.hasExplicitHeadline}); ` +
+                  `corrected to ${picked.storagePath}.`
+              : '[select-by-information] the ranked reference could not hold ' +
+                  `${ranked.itemCount} item(s); corrected to ${picked.storagePath}.`,
           );
         }
         if (shortfall) {
@@ -478,6 +765,16 @@ export async function selectReferenceByInformation(
         }
       }
     }
+  }
+
+  // A failed/skipped rank can still leave the deterministic fallback in a shortfall. Report it
+  // once here as well; the ranked branch reports the same condition above.
+  if (strictShape && shortfall && !rankingApplied) {
+    console.warn(
+      `[select-by-information] NO structurally described reference can show ${shortfall.needed} items ` +
+        `(largest shows ${shortfall.available}); rendering into ${picked.storagePath} ` +
+        'with an instruction to extend its item pattern. Consider adding a larger master.',
+    );
   }
 
   let layoutSpec = picked.layoutSpec;
@@ -512,33 +809,42 @@ export async function selectReferenceByInformation(
 // content: the model may prefer whatever it likes, but a reference that cannot show every item
 // must never survive. The LIVE half asserts the model's own behaviour on the case this rewrite
 // exists for — a mosquito note with seven points must NOT land on the three-slot dengue master.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
+  const makeCandidate = (
+    input: Omit<InformationCandidate, 'headlineSlots' | 'auxiliaryTextSlots'>,
+  ): InformationCandidate => ({
+    ...input,
+    ...referenceTextRoles(input.layoutSummary),
+  });
   const CANDIDATES: InformationCandidate[] = [
-    {
+    makeCandidate({
       id: 'alert-storm',
       typeLabel: 'सूचना / इशारा',
       hasPhotoZone: true,
       bulletSlots: 5,
       layoutSummary:
         'A large stacked headline over a full-bleed sky image, a warning strip, and five advisory cards below.',
-    },
-    {
+    }),
+    makeCandidate({
       id: 'quote-leader',
       typeLabel: 'वक्तव्य',
       hasPhotoZone: true,
       bulletSlots: 0,
       layoutSummary:
         'A single large quotation block with an attribution line and a portrait at the lower right; no repeating list.',
-    },
-    {
+    }),
+    makeCandidate({
       id: 'health-stats',
       typeLabel: 'माहिती',
       hasPhotoZone: true,
       bulletSlots: 4,
       layoutSummary:
         'A headline on a panel, four stat callouts with figures and short labels, a facility photo zone on the right, and a footer call-to-action.',
-    },
-    {
+    }),
+    makeCandidate({
       // The old design's winner: the mosquito note's TOPIC match, and far too small for it.
       id: 'dengue-mosquito',
       typeLabel: 'Information about insects, reptiles, animals, etc',
@@ -546,8 +852,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       bulletSlots: 3,
       layoutSummary:
         'A large stylised headline across the upper content area, a circular illustration of the insect, and three short explanatory callouts joined by arrows.',
-    },
-    {
+    }),
+    makeCandidate({
       // The correct winner for a seven-point note: big enough, and the tightest such fit.
       id: 'points-seven',
       typeLabel: 'माहिती',
@@ -555,20 +861,22 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       bulletSlots: 7,
       layoutSummary:
         'A headline band above seven numbered rows, each a short line of text with a small leading icon, over a plain ground.',
-    },
-    {
+    }),
+    makeCandidate({
       id: 'points-twelve',
       typeLabel: 'माहिती',
       hasPhotoZone: false,
       bulletSlots: 12,
       layoutSummary:
         'A dense two-column checklist of twelve compact rows under a narrow heading strip; text-only.',
-    },
+    }),
   ];
 
   const failures: string[] = [];
   const check = (ok: boolean, label: string, got: unknown) => {
-    console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}\n      ${JSON.stringify(got)}`);
+    console.log(
+      `${ok ? 'PASS' : 'FAIL'}  ${label}\n      ${JSON.stringify(got)}`,
+    );
     if (!ok) failures.push(label);
   };
 
@@ -620,7 +928,91 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const deterministic =
     enforceCapacity(CANDIDATES, 'dengue-mosquito', 7, 'seed-b').id ===
     enforceCapacity(CANDIDATES, 'dengue-mosquito', 7, 'seed-b').id;
-  check(deterministic, 'the correction is deterministic for one seed', deterministic);
+  check(
+    deterministic,
+    'the correction is deterministic for one seed',
+    deterministic,
+  );
+
+  // --- free: strict source-shape gate --------------------------------------
+  // The exact note from generations d547… and 3d068…. It has seven sentences and NO explicit
+  // headline. An LLM used to split those sentences into a variable number of semantic facts,
+  // which made the same note select materially different templates.
+  const DEVELOPMENT_NOTE = [
+    'स्थानिक स्वराज्य संस्थांमधील विकासकामांच्या दर्जावर, अचूकतेवर आणि वेळेत पूर्णत्वावर आता कृत्रिम बुद्धिमत्ता व जिओ-टॅगिंगच्या माध्यमातून प्रभावी नजर ठेवली जाणार आहे.',
+    'कृत्रिम बुद्धिमत्ता व जीआयएस मॅपिंगच्या सहाय्याने कामांची गुणवत्ता आणि अचूकता तपासून लेखापरीक्षण अधिक पारदर्शक केले जाईल. जिओ-टॅगिंगमुळे प्रत्यक्ष कामांच्या प्रगतीवर ऑनलाइन देखरेख शक्य होईल.',
+    'या प्रक्रियेत सरकारी अधिकारी, नागरिक, तांत्रिक तज्ज्ञ आणि लोकप्रतिनिधी यांचा सहभाग राहील. स्थापन समिती १ महिन्याच्या आत शासनाला अहवाल सादर करेल.',
+    'सामाजिक लेखापरीक्षणातून विकासकामांचा नागरिकांना होणारा प्रत्यक्ष लाभ व समाजावरील परिणाम अभ्यासला जाईल. सुरू असलेली आणि प्रस्तावित कामे गुणवत्तापूर्वक व मुदतीत पूर्ण व्हावीत, यासाठी ठोस उपाययोजना करण्यात येतील.',
+  ].join('\n\n');
+  const developmentShape = analyzeInformationShape(DEVELOPMENT_NOTE);
+  check(
+    developmentShape.itemCount === 7 && !developmentShape.hasExplicitHeadline,
+    'the observed prose input has one stable seven-item shape and no invented headline slot',
+    developmentShape,
+  );
+
+  const STRICT_CANDIDATES = [
+    makeCandidate({
+      id: 'source-seven',
+      typeLabel: 'माहिती',
+      hasPhotoZone: true,
+      bulletSlots: 7,
+      layoutSummary:
+        'A single headline sits above three advisory cards on the left and four quick-action rows along the bottom, with an illustration on the right.',
+    }),
+    makeCandidate({
+      id: 'labelled-seven',
+      typeLabel: 'माहिती',
+      hasPhotoZone: true,
+      bulletSlots: 7,
+      layoutSummary:
+        'A headline below a small label and explanatory subheadline, with three cards on the left and four rows on the right, followed by a QR-code registration call-to-action and contact line.',
+    }),
+    makeCandidate({
+      id: 'duplicate-twelve',
+      typeLabel: 'माहिती',
+      hasPhotoZone: true,
+      bulletSlots: 12,
+      layoutSummary:
+        'A headline above two titled section headings and two lists, followed by a summary call-to-action.',
+    }),
+  ];
+  const strictCorrection = enforceSourceStructure(
+    STRICT_CANDIDATES,
+    'duplicate-twelve',
+    developmentShape,
+    'development-note',
+  );
+  check(
+    strictCorrection.id === 'source-seven' && strictCorrection.corrected,
+    'an oversized two-section preference is corrected to the exact seven-slot low-text master',
+    strictCorrection,
+  );
+  const riskyExactCorrection = enforceSourceStructure(
+    STRICT_CANDIDATES,
+    'labelled-seven',
+    developmentShape,
+    'development-note',
+  );
+  check(
+    riskyExactCorrection.id === 'source-seven' &&
+      riskyExactCorrection.corrected,
+    'equal capacity cannot beat a template that needs less unsupported auxiliary text',
+    riskyExactCorrection,
+  );
+
+  const LIST_NOTE = [
+    'नागरिकांसाठी महत्त्वाच्या सूचना:',
+    '१. पहिली सूचना.',
+    '२. दुसरी सूचना.',
+    '३. तिसरी सूचना.',
+  ].join('\n');
+  const listShape = analyzeInformationShape(LIST_NOTE);
+  check(
+    listShape.itemCount === 3 && listShape.hasExplicitHeadline,
+    'an explicit list heading is recognised without being counted as a body item',
+    listShape,
+  );
 
   // --- live: the model's own counting + choosing ----------------------------
   const live = process.argv.includes('--live');
@@ -637,7 +1029,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 
   void (async () => {
     if (live) {
-      const ranked = await rankReferenceByInformation(MOSQUITO_NOTE, CANDIDATES);
+      const ranked = await rankReferenceByInformation(
+        MOSQUITO_NOTE,
+        CANDIDATES,
+      );
       check(
         ranked !== null && ranked.itemCount === 7,
         'the model counts the officer’s seven points',
@@ -655,7 +1050,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         ranked?.id,
       );
     } else {
-      console.log('\n(skipping live model checks — pass --live with --env-file to run them)');
+      console.log(
+        '\n(skipping live model checks — pass --live with --env-file to run them)',
+      );
     }
 
     if (failures.length > 0) {

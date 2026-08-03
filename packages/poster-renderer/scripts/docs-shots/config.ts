@@ -14,7 +14,16 @@ export const WEB_URL =
 export const API_URL =
   process.env.DOCS_SHOTS_API_URL ?? 'http://127.0.0.1:3001';
 
-export const OUT_DIR = path.join(REPO_ROOT, 'docs', 'user-guide', 'assets');
+// GitBook Git Sync stores page assets in this directory and every manual page
+// links here. The old sibling `assets/` is a pre-GitBook duplicate kept only for
+// historical commits; writing there did not update the published screenshots.
+export const OUT_DIR = path.join(
+  REPO_ROOT,
+  'docs',
+  'user-guide',
+  '.gitbook',
+  'assets',
+);
 // The real GR note used for every live run (per the docs plan) — never a made-up note.
 export const NOTE_FIXTURE_PATH = path.join(REPO_ROOT, 'trial-input.txt');
 // Generation ids captured by the live-run phases, so later phases can find them.

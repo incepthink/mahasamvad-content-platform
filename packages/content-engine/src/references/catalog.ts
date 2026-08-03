@@ -235,7 +235,10 @@ export async function resolveSocialReferenceByInformation(
       seed,
       note,
       avoidIds,
-      options,
+      // Social creative is a strict-source surface: the note itself is the complete poster
+      // copy. Make source shape (exact body-unit count + explicit headline presence) a hard
+      // template-compatibility rule. YouTube reuses the selector below without this option.
+      { ...options, strictSourceText: true },
     );
 
   const pickedImage = enabled.find((img) => img.id === master.id) as ReferenceImageRow;

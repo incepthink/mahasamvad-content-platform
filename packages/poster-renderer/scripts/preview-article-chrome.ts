@@ -1,5 +1,5 @@
-// Offline preview of the article-poster chrome overlay (article-logo.png top-left +
-// article-footer-new.png full-width bottom) WITHOUT any model call — for tuning the
+// Offline preview of the article-poster chrome overlay (code-rendered महासंवाद lockup
+// top-left + article-footer-new.png full-width bottom) WITHOUT any model call — for tuning the
 // scale/margin constants in src/article-chrome.ts for free.
 //
 //   pnpm --filter @dgipr/poster-renderer poster:preview:chrome [poster.png]

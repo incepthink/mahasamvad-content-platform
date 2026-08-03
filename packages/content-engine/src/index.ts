@@ -364,7 +364,11 @@ export {
 export {
   rankReferenceByInformation,
   selectReferenceByInformation,
+  analyzeInformationShape,
+  referenceTextRoles,
+  enforceSourceStructure,
   type InformationCandidate,
+  type InformationShape,
   type InformationRanking,
   type SelectedByInformation,
 } from './references/select-by-information.js';

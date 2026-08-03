@@ -13,6 +13,7 @@
 // with coarse grid positions — still numbered, so the n8n prompt's "apply the
 // correspondingly numbered change" wording keeps working either way.
 
+import { pathToFileURL } from 'node:url';
 import { chatCompleteVision, VISION_MODEL } from './openai-chat.js';
 import type { ClearAction } from './clear-space-rule.js';
 
@@ -27,17 +28,18 @@ export type FeedbackAnnotationInput = Readonly<{
 
 // One BLUE lettered rectangle: space the officer wants freed for their own logo
 // or photograph. This pass only has to NAME what sits inside it (and, for a
-// displace, where that content could sensibly go) — the rule about how to free it
-// is hard-appended in the prompt builders, where a model cannot paraphrase it
-// away.
+// displace, identify the smallest complete parent group whose movement clears the
+// target) — the rule about how to free it is hard-appended in the prompt builders,
+// where a model cannot paraphrase it away.
 export type ClearRegionInput = Readonly<{
   // 'A', 'B' — matching the badge drawn on the poster.
   letter: string;
-  // The officer's optional steer. Absent = the model chooses the destination.
+  // The officer's optional steer. Absent = choose the minimum-change group move;
+  // it does NOT mean every overlapped child needs its own destination.
   note?: string | undefined;
-  // 'displace' keeps the content on the poster (a re-layout); 'remove' deletes it.
-  // The two need different sentences from this pass: one proposes a destination,
-  // the other must NOT.
+  // 'displace' keeps the content on the poster (a minimal re-layout); 'remove'
+  // deletes it. The two need different sentences from this pass: one proposes a
+  // parent-preserving movement plan, the other must NOT propose any movement.
   action: ClearAction;
   region: Readonly<{ x: number; y: number; width: number; height: number }>;
 }>;
@@ -109,7 +111,7 @@ function clearLines(clearRegions: readonly ClearRegionInput[]): string[] {
     const action =
       c.action === 'remove'
         ? 'DELETE what is inside (it is not wanted on the poster at all)'
-        : 'MOVE what is inside somewhere else on the poster (it must stay on the poster)';
+        : 'CLEAR this target by moving the least disruptive complete parent group; keep each overlapped element exactly once and attached to its original parent';
     return `Blue box ${c.letter} [${action}] — centred at ~${cx}% from left, ~${cy}% from top (${gridPosition(c.region)} area), about ${w}% wide and ${h}% tall${note}.`;
   });
 }
@@ -139,7 +141,7 @@ function buildPrompt(input: InterpretImageFeedbackInput): string {
   if (clearRegions.length > 0) {
     lines.push(
       '',
-      'The BLUE boxes mark space the editor wants FREED so they can place their own logo or photograph there afterwards. Each one says what happens to the content currently inside it — DELETE (it goes away entirely) or MOVE (it stays on the poster but elsewhere). Read each box\'s own instruction below; do not assume they are the same.',
+      'The BLUE boxes mark TARGET SPACE the editor wants FREED so they can place their own logo or photograph there afterwards. A box is not an object-selection or extraction mask. Each one says what happens to the content currently overlapping it — DELETE (it goes away entirely) or MOVE (it stays exactly once, normally by moving its complete parent row/card/list/stack). Read each box\'s own instruction below; do not assume they are the same.',
       ...clearLines(clearRegions),
     );
   }
@@ -157,8 +159,9 @@ function buildPrompt(input: InterpretImageFeedbackInput): string {
   );
   if (clearRegions.length > 0) {
     lines.push(
-      '- For EACH blue box, add one sentence to the instruction that (a) names it by its letter and (b) names concretely what currently occupies that area — quoting any Devanagari verbatim. If a blue box covers only plain background, say that it is already empty and only needs the blue rectangle removed.',
-      '- For a MOVE box, that sentence must also propose a specific place in the layout the content should go, and say plainly if fitting it there means re-laying-out the poster (compressing a list, re-columning, restacking, resizing rows). A re-layout is allowed and expected. Honour the editor\'s steer where one is given. Never propose deleting, cropping, shrinking away or summarising MOVE content.',
+      '- For EACH blue box, add one sentence to the instruction that (a) names it by its letter, (b) names concretely what currently occupies that area — quoting any Devanagari verbatim — and (c) identifies the complete parent row, card, list, stack, panel or column that content belongs to. If a blue box covers only plain background, say that it is already empty and only needs the blue rectangle removed.',
+      '- For a MOVE box, propose ONE minimum-change, parent-preserving movement plan. First consider whether translating the complete containing group — especially an entire repeated row/card stack — clears the target while keeping each icon, image and text block attached to its original parent. If it does, that is the complete move: do not create a separate copy or destination for any child carried by that group. Only propose restacking, re-columning or resizing when a simple group translation cannot produce a valid layout. Honour the editor\'s steer where one is given. Never propose deleting, cropping, shrinking away, summarising, cloning, duplicating, echoing, splitting or detaching MOVE content.',
+      '- Preserve exact multiplicity in every MOVE plan: an element visible once before the edit must remain visible once afterwards. Moving its parent and separately placing the same element elsewhere is forbidden.',
       '- For a DELETE box, say only that the content goes away and that nothing else on the poster moves. Never propose a destination for it, and never propose closing up the gap.',
       '- Never propose moving anything into the software-stamped branding zones described below.',
     );
@@ -206,7 +209,7 @@ function buildFallbackInstruction(input: InterpretImageFeedbackInput): string {
         ? `Blue box ${c.letter} (in the ${gridPosition(c.region)} area): delete whatever design content lies inside it and move nothing else` +
             (c.note ? ` — «${c.note}»` : '') +
             '.'
-        : `Blue box ${c.letter} (in the ${gridPosition(c.region)} area): move whatever design content lies inside it elsewhere on the poster, re-laying the layout out as needed` +
+        : `Blue box ${c.letter} (in the ${gridPosition(c.region)} area): clear this target with the minimum sufficient complete-parent movement; keep each overlapped element exactly once, attached to its original row/card/list/stack, and do not create a separate copy or destination for a child already carried out by that group` +
             (c.note ? ` — «${c.note}»` : '') +
             '.',
     );
@@ -265,5 +268,85 @@ export async function interpretImageFeedback(
       contentInventory: [],
       source: 'fallback',
     };
+  }
+}
+
+// --- CLI harness -----------------------------------------------------------
+//   tsx src/generation/interpret-image-feedback.ts
+// Pure prompt/fallback assembly: no model call, no spend.
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
+  const failures: string[] = [];
+  const check = (ok: boolean, label: string) => {
+    if (!ok) failures.push(label);
+  };
+  const displaceInput: InterpretImageFeedbackInput = {
+    markedPosterPng: Buffer.alloc(0),
+    annotations: [],
+    clearRegions: [
+      {
+        letter: 'A',
+        action: 'displace',
+        region: { x: 0, y: 0, width: 0.2, height: 0.1 },
+      },
+    ],
+    posterKind: 'twitter',
+  };
+  const prompt = buildPrompt(displaceInput);
+  const fallback = buildFallbackInstruction(displaceInput);
+
+  for (const needle of [
+    'TARGET SPACE',
+    'not an object-selection or extraction mask',
+    'minimum-change, parent-preserving movement plan',
+    'complete containing group',
+    'do not create a separate copy or destination',
+    'Preserve exact multiplicity',
+  ]) {
+    check(prompt.includes(needle), `interpreter prompt lost "${needle}"`);
+  }
+  check(
+    !prompt.includes('must also propose a specific place'),
+    'interpreter still forces a separate destination',
+  );
+  check(
+    !prompt.includes('A re-layout is allowed and expected'),
+    'interpreter still expects a broad re-layout',
+  );
+  for (const needle of [
+    'minimum sufficient complete-parent movement',
+    'exactly once',
+    'do not create a separate copy or destination',
+  ]) {
+    check(fallback.includes(needle), `fallback lost "${needle}"`);
+  }
+
+  const removePrompt = buildPrompt({
+    ...displaceInput,
+    clearRegions: [
+      {
+        letter: 'A',
+        action: 'remove',
+        region: { x: 0, y: 0, width: 0.2, height: 0.1 },
+      },
+    ],
+  });
+  check(
+    removePrompt.includes('nothing else on the poster moves'),
+    'remove prompt lost its frozen-layout rule',
+  );
+  check(
+    !removePrompt.includes('also return "items"'),
+    'remove prompt incorrectly requested a displace inventory',
+  );
+
+  if (failures.length > 0) {
+    console.error(`\n${failures.length} FAILURE(S):`);
+    for (const failure of failures) console.error(`  - ${failure}`);
+    process.exitCode = 1;
+  } else {
+    console.log('All image-feedback interpreter prompt assertions passed.');
   }
 }

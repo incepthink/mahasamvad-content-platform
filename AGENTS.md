@@ -19,6 +19,21 @@ The long-term product will:
 Scaffolding is done. The core generation pipeline and a first web product on top of
 it are implemented and working end-to-end:
 
+- **Strict-source reference picking for क्रिएटिव्ह** (2026-08-03, no migration): ordinary
+  unpinned DGIPR social runs no longer let the ranking model reinterpret the same prose as a
+  different number of semantic facts on each run, or accept an oversized/multi-section master
+  merely because it has enough capacity. `select-by-information.ts` deterministically treats
+  each officer-written bullet/numbered line or prose sentence as one display unit, recognises
+  only a visibly separate first line as an explicit headline, then hard-gates the model's
+  preference to the tightest capacity band and the lowest unsupported text demand (headline,
+  subheadline, section-label, CTA/contact/QR, slogan and similar slots). Text demand is derived
+  from the existing cached `layoutSummary`, so the live library benefits immediately with no
+  jsonb change or paid re-analysis; the same hard gate establishes the fallback before ranking,
+  so a timeout cannot restore random template selection. The reproduced seven-sentence
+  development-work note selects the enabled seven-slot `2df40928…` low-text master instead of
+  the headline/benefits and duplicated two-section layouts seen in generations `d547…` and
+  `3d068…`. Pinned images/types, CMO, YouTube, image prompting and rendering are unchanged.
+  Deploy by rebuilding `@dgipr/content-engine` and the API; no n8n.
 - **Analytics reports the work the current UI actually performs** (2026-08-02,
   migration 0043 unchanged): the single `वापरलेल्या सेवा` table no longer collapses
   a workflow into vague `मजकूर निर्मिती` / `प्रतिमा निर्मिती` rows. Every paid call is

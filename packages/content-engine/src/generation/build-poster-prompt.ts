@@ -594,8 +594,9 @@ if (
     //    block only appears when asked for, that it survives beside red markers, that it can
     //    stand alone with no typed text at all, that it never proposes emptying the area
     //    into a panel or a different colour — and, above all, that a DISPLACE round does not
-    //    also carry "keep the exact layout unchanged". That contradiction is what made the
-    //    gesture a no-op on a full poster, so it is asserted in both branches.
+    //    also carry "keep the exact layout unchanged". It must instead require the minimum
+    //    complete-parent movement and exact element multiplicity: shifting a row stack already
+    //    moves its child icon, so painting that icon again elsewhere is a regression.
     const plainFeedback = buildFeedbackPrompt({
       imageFeedback: 'शीर्षक मोठे करा',
       brand: 'dgipr',
@@ -618,6 +619,11 @@ if (
       '(A, B)',
       'MOVE — blue box A',
       'DELETE — blue box B',
+      'TARGET AREA',
+      'least disruptive complete-group movement',
+      'Do not perform the move twice',
+      'Preserve the original number of copies',
+      'do NOT add another copy anywhere else',
       'PLAIN EMPTY BACKGROUND',
       'ERASE the blue rectangles',
       'RESERVED ZONES',
@@ -630,8 +636,12 @@ if (
     // THE regression this whole change exists to prevent.
     if (cleared.includes('Keep the exact layout'))
       failures.push('displace round kept the contradictory keep-layout rule');
-    if (!cleared.includes("INFORMATION is fixed but its ARRANGEMENT is not"))
-      failures.push('displace round lost the preserve-information replacement');
+    if (!cleared.includes("INFORMATION and ELEMENT COUNTS are fixed"))
+      failures.push('displace round lost the exact-multiplicity replacement');
+    if (!cleared.includes('keeping every child icon, text block and image attached'))
+      failures.push('displace round lost the parent-child preservation rule');
+    if (cleared.includes('visibly rearranged poster is a CORRECT result'))
+      failures.push('displace round kept the over-broad visible-redesign instruction');
 
     // A DELETE-only round is the opposite case: keeping the layout frozen is correct
     // there, so the rule must survive — with the exception clause, since the delete

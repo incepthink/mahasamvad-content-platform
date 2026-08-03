@@ -21,9 +21,18 @@ export type TrendPoint = Readonly<{ date: string; value: number }>;
 export function AnalyticsTrendChart({
   points,
   caption,
+  yLabel,
+  showTable = true,
 }: {
   points: readonly TrendPoint[];
   caption: string;
+  // What the bar heights count, printed above the plot and used as the value column's
+  // heading. Optional so a caller that has already said it in its own copy can omit it.
+  yLabel?: string;
+  // Whether the table is a visible "दिवसनिहाय आकडे पाहा" fold. When false the table is
+  // still rendered, only visually hidden — `.chart-bars` is role="img", so its children are
+  // not exposed to a screen reader and the table is the ONLY way those numbers are read.
+  showTable?: boolean;
 }) {
   const max = points.reduce((peak, point) => Math.max(peak, point.value), 0);
   const total = points.reduce((sum, point) => sum + point.value, 0);
@@ -43,8 +52,28 @@ export function AnalyticsTrendChart({
     points.length - 1,
   ]);
 
+  const table = (
+    <table>
+      <thead>
+        <tr>
+          <th scope="col">{STR.analyticsTableDay}</th>
+          <th scope="col">{yLabel ?? STR.analyticsTableWork}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {points.map((point) => (
+          <tr key={point.date}>
+            <th scope="row">{formatDay(point.date, true)}</th>
+            <td>{formatNumber(point.value)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+
   return (
     <figure className="chart">
+      {yLabel ? <p className="chart-y-label">{yLabel}</p> : null}
       <div className="chart-plot">
         <div className="chart-grid" aria-hidden="true">
           {gridValues.map((value, index) => (
@@ -60,7 +89,9 @@ export function AnalyticsTrendChart({
         <div
           className="chart-bars"
           role="img"
-          aria-label={`${caption}. ${STR.analyticsTrendTable}`}
+          aria-label={[caption, yLabel, STR.analyticsTrendTable]
+            .filter(Boolean)
+            .join('. ')}
         >
           {points.map((point) => (
             <div className="chart-bar-slot" key={point.date}>
@@ -93,26 +124,17 @@ export function AnalyticsTrendChart({
       <figcaption className="hint">{caption}</figcaption>
 
       {/* The table view. Every chart in this product needs one: it is how the numbers are
-          read by a screen reader, and how they are copied into a report. */}
-      <details className="chart-table">
-        <summary>{STR.analyticsTrendTable}</summary>
-        <table>
-          <thead>
-            <tr>
-              <th scope="col">{STR.analyticsTableDay}</th>
-              <th scope="col">{STR.analyticsTableWork}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {points.map((point) => (
-              <tr key={point.date}>
-                <th scope="row">{formatDay(point.date, true)}</th>
-                <td>{formatNumber(point.value)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </details>
+          read by a screen reader, and how they are copied into a report. `showTable: false`
+          drops the fold from the page but keeps the table itself — hiding it outright would
+          leave the chart with no accessible reading at all. */}
+      {showTable ? (
+        <details className="chart-table">
+          <summary>{STR.analyticsTrendTable}</summary>
+          {table}
+        </details>
+      ) : (
+        <div className="visually-hidden">{table}</div>
+      )}
     </figure>
   );
 }

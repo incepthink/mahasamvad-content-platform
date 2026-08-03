@@ -1,39 +1,41 @@
-# Glossary ("नाव-शब्दकोश")
+# Glossary
 
-The **"शब्दकोश"** page manages the **नाव-शब्दकोश (मराठी → इंग्रजी)** — the name dictionary that keeps English translations accurate. Whenever the platform translates (an article, or text on the [भाषांतर page](translation.md)), every **verified** entry here is used exactly as written — a person's name, a designation, a scheme name, a place — instead of being re-guessed each time.
+Use **"शब्दकोश"** to maintain the shared spellings used for translation, name checks, and article designations.
 
-New candidate names flow in automatically from translations (when term-mining is on); your team's job on this page is to **review, correct, and verify** them.
+![The current glossary](.gitbook/assets/10-glossary--overview.png)
 
-![The glossary page](.gitbook/assets/09-glossary--overview.png)
+## What a row contains
 
-## Adding a name yourself ("नवीन नाव जोडा")
+- **मराठी** source spelling;
+- **इंग्रजी** spelling;
+- **हिंदी** spelling;
+- type: person, place, organisation, scheme, designation, or other;
+- a designation when the row represents a person;
+- verification status.
 
-![The add-a-name form](.gitbook/assets/09-glossary--add-filled.png)
+Only a verified row is treated as an approved dictionary form. An unverified row is a candidate for officer review, not an authority.
 
-1. **"मराठी"** — the name as it appears in Marathi (e.g. जिल्हाधिकारी).
-2. **"इंग्रजी"** — the exact English rendering you want (e.g. District Collector).
-3. **"प्रकार"** (Type) — one of: **व्यक्ती** (person), **पदनाम** (designation), **योजना** (scheme), **ठिकाण** (place), **संस्था** (organisation), **इतर** (other).
-4. Click **"जोडा"** (Add). Names you add yourself are trusted immediately — they enter as **"तपासले"** (verified).
+## Find and review rows
 
-## Finding entries
+Use search, type, and status filters. The list is paginated. Select one or more unverified rows for bulk verification only after checking every spelling and type.
 
-The toolbar above the list:
+For a person, confirm that the designation belongs to that exact full name. A one-word surname must not be used to infer another person's portfolio.
 
-* **"नाव शोधा…"** (Search names) — filters as you type.
-* The type dropdown — show one type only, or **"सर्व प्रकार"** (all types).
-* **"फक्त तपासायची"** (Only those to review) — show only unverified entries. This is the daily review view.
-* **"एकूण नावे: N"** — the current count.
+## Add a row
 
-## Reviewing a row
+Open **"+ नवीन नाव जोडा"**, enter the spellings and type, then select **"जोडा"**.
 
-![Verified and unverified rows](.gitbook/assets/09-glossary--row-states.png)
+![Add a Marathi, English, and Hindi spelling](.gitbook/assets/10-glossary--add.png)
 
-Each row shows the Marathi name (fixed), an **editable** English field, and the type. Rows are tagged either **"तपासले"** (Verified — used in translations) or **"तपासायचे आहे"** (To be reviewed).
+For Hindi, enter the correct Hindi orthography even when it differs from Marathi—for example, a final vowel may legitimately change. Leaving the Hindi form empty falls back to the Marathi form where supported.
 
-* Corrected the English or the type? A **"जतन करा"** (Save) button appears — click it to store the change.
-* **"तपासले म्हणून खूण करा"** (Mark as verified) — approves the entry; from now on every translation uses it verbatim. **"खूण काढा"** (Remove the mark) un-verifies it again.
-* **"काढा"** (Delete) — removes the entry after the confirmation **"हे नाव कायमचे काढायचे?"** (Permanently remove this name?).
+## Edit, verify, or delete
 
-{% hint style="info" %}
-Only **verified** entries lock into translations. An unverified candidate does no harm — but it also doesn't help until someone reviews it. A few minutes of review after big translations steadily improves every future translation.
+- **"बदला"** edits a row; choose **"जतन करा"** when finished.
+- **"तपासले म्हणून खूण करा"** verifies an approved row.
+- **"खूण काढा"** returns it to review status.
+- **"काढा"** permanently deletes it after confirmation.
+
+{% hint style="warning" %}
+Glossary changes affect future work across the department. Never verify a guessed spelling or designation. Deleting a row is permanent and should be limited to duplicates or clearly incorrect records.
 {% endhint %}

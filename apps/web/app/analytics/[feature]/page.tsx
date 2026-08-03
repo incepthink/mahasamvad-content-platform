@@ -182,6 +182,11 @@ function FeaturePageBody() {
                   ? STR.analyticsTrendAllHint
                   : STR.analyticsTrendHint
               }
+              yLabel={STR.analyticsTrendYAxis}
+              // The day-by-day fold is dropped here: this page is already one feature's
+              // detail, and the numbers behind the bars are what the tiles above state.
+              // The table stays in the DOM for screen readers (see the component).
+              showTable={false}
             />
           </section>
 

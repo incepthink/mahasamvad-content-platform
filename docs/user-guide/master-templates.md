@@ -1,55 +1,38 @@
-# Master Templates ("मास्टर टेम्पलेट") — Admin
+# Master Templates — Admin
 
-The **"मास्टर टेम्पलेट"** page manages the poster template library — the master images every poster is painted on. It is meant for the team members who own the visual brand; everyday users normally never need it.
+**"मास्टर टेम्पलेट"** is the visual reference library used by creative, article-poster, and YouTube-thumbnail generation. It is an administrative workspace.
 
-![The template library](.gitbook/assets/10-refs--overview.png)
+![The current template library](.gitbook/assets/11-templates--overview.png)
 
-The page has two sections:
+## Browse the library
 
-* **"ट्विटर पोस्टर टेम्पलेट"** — templates for Twitter posts, organised into poster **types** (advisory, scheme info, quote…). The type is what the platform's automatic classifier picks between.
-* **"लेख पोस्टर टेम्पलेट"** — the landscape masters used for article posters.
+Use the tabs for **"ट्विटर / फेसबुक"**, **"लेख पोस्टर"**, and **"यूट्यूब थंबनेल"**. Search by subject, scheme, or template type. Filter templates by photo use, text-only layout, and content capacity.
 
-## How rotation works
+Templates are grouped by how much information their analysed structure can hold: a single message, a few points, medium content, many points, or not yet analysed. The create form uses this capacity to avoid placing dense source material into a small layout.
 
-Within a type, any number of images can be **in use** at once. Every image marked **"वापरात"** (In use) participates; each new poster picks **one of them at random**, so repeated posters of the same type don't all look identical.
+## Add a template
 
-On each image tile:
+1. Select **"नवीन टेम्पलेट जोडा"**.
+2. Upload a PNG, JPEG, or WebP image.
+3. Choose the intended channel and add a short content description.
+4. Save the row and run layout analysis.
 
-* **"वापरा"** (Use) / **"थांबवा"** (Stop) — add the image to, or remove it from, the rotation. Disabling never deletes anything.
-* **"काढा"** (Delete) — permanently removes the image, after the confirmation **"हे चित्र कायमचे काढायचे?"** (Permanently remove this picture?).
-* If nothing in a type is enabled, the type card warns **"या प्रकारातील एकही चित्र सध्या वापरात नाही."** — a generation that needs this type will then fail, so keep at least one image enabled per type you use.
+Analysis records structure such as photo zones, text regions, and the approximate number of bullet slots. It does not turn words or facts visible in the master into approved source content.
 
-## Uploading a new master
+## Review a template tile
 
-Click **"नवीन चित्र अपलोड करा"** (Upload a new picture) on the type it belongs to. PNG, JPEG and WebP are accepted; anything else shows **"कृपया PNG, JPEG किंवा WebP चित्र निवडा."** New uploads start **disabled** — enable them with **"वापरा"** when ready.
+![One analysed template tile](.gitbook/assets/11-templates--tile.png)
 
-## The layout reading — why it matters
+An administrator can:
 
-When a master is uploaded, the platform **reads its layout from the pixels** and shows the verdict on the tile:
+- enable or disable the template for automatic selection;
+- rerun layout analysis;
+- correct whether the layout is photo-led or text-only;
+- edit the content summary;
+- delete a wrong or duplicate template.
 
-![A tile with its layout badge and actions](.gitbook/assets/10-refs--tile-badges.png)
+Disabling is safer than deletion when a template may be needed for audit or later reuse. Deletion is permanent.
 
-* **"छायाचित्रासह"** (With photograph) — the template has a photo zone; posters made from it may contain a scene photo.
-* **"फक्त मजकूर"** (Text only) — the template is purely typographic; the platform will **never paint a photo** onto posters made from it.
-* **"तपासलेले नाही"** (Not checked) — not analysed yet; click **"पुन्हा तपासा"**.
-
-This one reading decides whether a generated poster may carry photography at all — a wrong reading quietly produces wrong posters (e.g. an invented photo on a text-only advisory). That's why it's visible on every tile, with two correction tools:
-
-* **"पुन्हा तपासा"** (Re-check) — runs the analysis again (shows **"तपासत आहे…"** while working).
-* The flip link — **"“फक्त मजकूर” म्हणून नोंदवा"** (Record as text-only) or **"“छायाचित्रासह” म्हणून नोंदवा"** (Record as with-photograph) — your manual override when the automatic reading is wrong. Your word is final.
-
-## Type name & description ("संपादन")
-
-Each type card shows its description, editable via **"संपादन"** (Edit) → **"जतन करा"** (Save). The description matters: **the automatic classifier reads it** to decide which type suits a note (as the form says: _"या वर्णनावरूनच टिपणीसाठी योग्य प्रकार आपोआप निवडला जातो"_). Describe **when** the poster should be used — it steers type choice and copy tone, not the layout (layout comes from the pixels, above).
-
-## Custom Twitter types ("+ नवीन प्रकार तयार करा")
-
-Your team can add its own poster types to the Twitter section:
-
-![The new-type form](.gitbook/assets/10-refs--newtype-form.png)
-
-1. Click **"+ नवीन प्रकार तयार करा"** (Create a new type).
-2. Give it a **"प्रकाराचे नाव"** (Type name — e.g. शेतकरी योजना) and a **"वर्णन"** (Description — when should this poster be used?).
-3. Click **"प्रकार तयार करा"** (Create the type), then upload at least one master image to the new card and enable it.
-
-Custom types are tagged **"नवीन प्रकार"** and can be removed with **"प्रकार काढा"** (Delete type) — the confirmation warns that **all of the type's template images are removed with it**: **"हा प्रकार कायमचा काढायचा? यातील सर्व टेम्पलेट चित्रेही काढली जातील."**
+{% hint style="warning" %}
+Do not upload a template unless the department has the right to reuse its visual structure. Reference logos, text, dates, URLs, QR codes, and factual claims are placeholders and must never be copied into a new poster.
+{% endhint %}

@@ -1327,6 +1327,9 @@ export const STR = {
   analyticsTrendHint:
     'प्रत्येक स्तंभ म्हणजे त्या दिवशी पूर्ण झालेली कामे. रिकामे दिवसही दाखवले आहेत.',
   analyticsTrendAllHint: 'शेवटच्या ९० दिवसांचा आलेख.',
+  // What the vertical axis counts. Stated on the chart itself, not only in the caption: a
+  // reader looking at the bar heights should not have to find a footnote to know the unit.
+  analyticsTrendYAxis: 'उभा अक्ष: त्या दिवशी पूर्ण झालेली कामे (संख्या)',
   analyticsTrendTable: 'दिवसनिहाय आकडे पाहा',
   analyticsTableDay: 'दिवस',
   analyticsTableWork: 'कामे',

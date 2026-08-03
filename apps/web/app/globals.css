@@ -5121,6 +5121,16 @@ a.thread-node:hover {
   margin: 0;
 }
 
+/* The y-axis title, stated horizontally above the plot rather than rotated up its side.
+   Sideways Devanagari is legible but reads as decoration, and this audience should not have
+   to tilt their head to learn what the bar heights count. Indented to the grid labels' gutter
+   so it sits over the axis it describes. */
+.chart-y-label {
+  margin: 0 0 4px 44px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
 .chart-plot {
   position: relative;
   height: 200px;
@@ -5244,6 +5254,21 @@ a.thread-node:hover {
   color: var(--muted);
   text-align: center;
   white-space: nowrap;
+}
+
+/* Off-screen but still in the accessibility tree. Used where a chart's table view is not
+   wanted on the page: `.chart-bars` is role="img", so its bars are not readable, and the
+   table is the only way those numbers reach a screen reader. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* The table view. Every chart needs one — it is how the numbers are read by a screen

@@ -591,6 +591,11 @@ if (
       '1 translucent BLUE rectangle',
       '(A)',
       'MOVE — blue box A',
+      'TARGET AREA',
+      'least disruptive complete-group movement',
+      'Do not perform the move twice',
+      'Preserve the original number of copies',
+      'do NOT add another copy anywhere else',
       'PLAIN EMPTY BACKGROUND',
       'ERASE the blue rectangles',
       'RESERVED ZONES',
@@ -608,6 +613,12 @@ if (
     // to keep the exact layout.
     if (cleared.includes('Keep the exact layout'))
       failures.push('displace round kept the contradictory keep-layout rule');
+    if (!cleared.includes('INFORMATION and ELEMENT COUNTS are fixed'))
+      failures.push('displace round lost the exact-multiplicity replacement');
+    if (!cleared.includes('keeping every child icon, text block and image attached'))
+      failures.push('displace round lost the parent-child preservation rule');
+    if (cleared.includes('visibly rearranged poster is a CORRECT result'))
+      failures.push('displace round kept the over-broad visible-redesign instruction');
     if (!cleared.trimEnd().endsWith('may remain anywhere on the poster.'))
       failures.push('clear rule is not the last block of the prompt');
 

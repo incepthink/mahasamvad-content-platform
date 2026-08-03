@@ -1,54 +1,52 @@
-# Journey 3: Improve Results with Feedback
+# Improve Results with Feedback
 
-Nothing the platform produces is final — the article and the poster each have their own feedback loop, right on the work's page. Feedback is written in plain Marathi, in your own words.
+Use feedback when the facts are correct but wording, composition, imagery, or emphasis needs improvement. Correct the source and regenerate when the underlying facts are wrong.
 
-## Improving the article ("लेखात बदल हवा आहे?")
+## Change an article
 
-Below the article, open the fold **"लेखात बदल हवा आहे?"** (Want a change in the article?).
+Open **"लेखात बदल हवा आहे?"**. Choose a quick suggestion or write one clear instruction, then select **"बदल करा"**.
 
-![The article feedback box with one-tap suggestions](.gitbook/assets/05-feedback--article-chips.png)
+Good instructions identify the outcome without introducing a new fact, for example:
 
-1.  Either click a one-tap suggestion under **"झटपट सूचना:"** (Quick suggestions) —
+- “सुरुवात आणखी थोडक्यात करा.”
+- “नागरिकांनी काय करावे हे स्वतंत्र परिच्छेदात मांडा.”
+- “भाषा आणखी सोपी करा; नावे आणि आकडे बदलू नका.”
 
-    * **"आणखी थोडक्यात लिहा"** (Write more briefly)
-    * **"आणखी सविस्तर लिहा"** (Write in more detail)
-    * **"भाषा आणखी सोपी करा"** (Make the language simpler)
-    * **"सुरुवात आणखी आकर्षक करा"** (Make the opening more engaging)
+The revised article again receives the required news dateline when applicable.
 
-    …or write your own instruction in the box (**"येथे आपला अभिप्राय लिहा…"**). A suggestion only pre-fills the box — you can still edit it before sending.
-2. Click **"बदल करा"** (Make the change).
+## Point to a poster element
 
-The article is revised **against your original note** — facts stay guarded by the same verification steps as the first draft. While the revision runs you'll see **"अभिप्रायानुसार लेख सुधारत आहोत…"** (Improving the article per your feedback…), and the new version replaces the old one when done.
+Select the edit icon labelled **"चित्रात बदल करा (पोस्टरवर खूण करा)"**.
 
-## Improving the poster ("चित्रात बदल हवा आहे?")
+1. Click a point, or drag a small red box, over the element to change.
+2. Write a separate instruction for that numbered mark.
+3. Add up to three marks.
+4. Optionally add one instruction for the whole poster.
+5. Select **"बदल करा"**.
 
-Below the poster, open **"चित्रात बदल हवा आहे?"** (Want a change in the picture?). The same one-tap pattern applies:
+![Red change markers and a blue free-space box](.gitbook/assets/06-social--markers.png)
 
-* **"रंग अधिक उठावदार करा"** (Make the colours more vivid)
-* **"मजकूर आणखी मोठा व वाचनीय करा"** (Make the text bigger and more readable)
-* **"मांडणी अधिक नीटनेटकी करा"** (Make the layout tidier)
+The red mark is a pointing gesture, not a crop or mask. The instruction applies to the whole nearby element. Do not mark the software-added official logo or footer; edits in those reserved areas will not be visible.
 
-![Poster feedback with a suggestion filled in](.gitbook/assets/05-feedback--poster-box.png)
+## Leave space for your own logo or photograph
 
-As the hint on screen says: describe the **visual** change you want, clearly. Each new instruction is applied to the **current** poster — so you can refine step by step ("make the headline bigger", then "warmer colours…"). If you want everything else untouched, say so in the instruction.
+Select **"जागा मोकळी करा (स्वतःच्या लोगोसाठी)"**, then drag a blue rectangle over the area. You can add up to two rectangles.
 
-Click **"बदल करा"** (Make the change). The poster stays on screen with a spinner over it while the new version is painted — this takes a minute or two.
+For each box choose:
 
-![The poster re-rendering after feedback](.gitbook/assets/05-feedback--poster-busy.png)
+- **"दुसरीकडे हलवा"** — move the existing content elsewhere; the overall composition may change.
+- **"काढून टाका"** — delete that content without moving other elements.
 
-## Every version is kept ("आधीच्या आवृत्त्या")
+The selected area is left as natural background so you can add your own item later. This tool does not upload or place that item for you.
 
-Each render is saved permanently. As soon as a second version exists, a thumbnail strip appears under the poster:
+## Request a different visual
 
-![The poster version strip](.gitbook/assets/05-feedback--versions.png)
+The result actions can create a different layout or colour treatment. Use this when the entire direction is unsuitable; use red markers for a local correction. A new visual render can incur image-generation cost.
 
-* **"मूळ"** (Original) — the first render.
-* **"आवृत्ती 2"**, **"आवृत्ती 3"**… (Version 2, 3…) — each later render.
-* **"सद्य"** (Current) — the version now shown and downloaded.
+## Versions
 
-Click any thumbnail to open that version full-size in a new tab — older versions remain downloadable forever, so trying feedback is risk-free.
+Every successful poster render is kept as an immutable version. Use the version strip to compare, download, or restore an earlier version. Restoring changes which version is current; it does not delete the newer files.
 
-| Message                             | Meaning                            | What to do                         |
-| ----------------------------------- | ---------------------------------- | ---------------------------------- |
-| **"कृपया थोडक्यात अभिप्राय लिहा."** | The feedback box is (almost) empty | Write at least a short instruction |
-| **"पाठवत आहोत…"** on the button     | Your feedback is being sent        | Just wait a moment                 |
+{% hint style="info" %}
+Submitted marker coordinates are not a permanent annotation history. Keep the written instruction specific enough to understand later from the revision record.
+{% endhint %}

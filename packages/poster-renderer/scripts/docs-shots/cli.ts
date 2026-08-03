@@ -4,6 +4,7 @@
 //
 // Phases, in capture order:
 //   preflight     readiness checklist (no secrets printed; nothing captured)
+//   current       current GitBook pass (saved runs + local response fixtures; no paid calls)
 //   static        every state capturable without a generation (+1 translate call)
 //   run-article   LIVE: scheme article+poster from trial-input.txt (+ English toggle)
 //   run-feedback  LIVE: one poster image-feedback round on that run
@@ -25,6 +26,7 @@ import { shootRunTwitter } from './shoot-run-twitter.js';
 import { shootRunRerun } from './shoot-run-rerun.js';
 import { optimize } from './optimize.js';
 import { verifyDocs } from './verify-docs.js';
+import { shootCurrentGuide } from './shoot-current-guide.js';
 
 // pnpm may forward a literal "--"; the phase is the first real (non-flag) arg.
 const phase = process.argv
@@ -34,6 +36,7 @@ const phase = process.argv
 const phases: Record<string, () => Promise<void> | void> = {
   preflight,
   static: shootStatic,
+  current: shootCurrentGuide,
   'run-article': shootRunArticle,
   'run-feedback': shootRunFeedback,
   'run-twitter': shootRunTwitter,

@@ -347,11 +347,36 @@ if (
   need(marked, '2 numbered red annotation marker', 'lost the marker count');
   need(marked, '1 translucent BLUE rectangle', 'lost the clear count');
   need(marked, 'MOVE — blue box A', 'lost the displace block');
+  need(marked, 'TARGET AREA', 'lost target-area semantics');
+  need(
+    marked,
+    'least disruptive complete-group movement',
+    'lost the minimum-change group rule',
+  );
+  need(marked, 'Do not perform the move twice', 'lost the double-move guard');
+  need(
+    marked,
+    'Preserve the original number of copies',
+    'lost the exact-multiplicity guard',
+  );
+  need(marked, 'do NOT add another copy anywhere else', 'lost the no-duplicate example');
   need(marked, 'INFORMATION THAT MUST SURVIVE — 1 item(s)', 'lost the inventory');
   need(marked, 'दि. २१ मे २०२६', 'inventory item did not reach the prompt');
   // THE regression this change exists to prevent.
   if (marked.includes('Keep the exact layout'))
     failures.push('displace round kept the contradictory keep-layout rule');
+  need(
+    marked,
+    'INFORMATION and ELEMENT COUNTS are fixed',
+    'lost the exact-multiplicity replacement',
+  );
+  need(
+    marked,
+    'keeping every child icon, text block and image attached',
+    'lost the parent-child preservation rule',
+  );
+  if (marked.includes('visibly rearranged poster is a CORRECT result'))
+    failures.push('displace round kept the over-broad visible-redesign instruction');
   if (marked.indexOf('SPACE TO FREE:') < marked.indexOf('RESERVED ZONES'))
     failures.push('clear rule precedes the reserved zones it refers to');
   if (!marked.trimEnd().endsWith('may remain anywhere on the poster.'))
