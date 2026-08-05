@@ -4,6 +4,12 @@
 // (for the article itself, or one social poster for X/Facebook) or into a caption alone. No
 // article is written here — the pasted text is the sole source and is used as-is
 // (providedArticle) for the poster path.
+//
+// The क्रिएटिव्ह lane asks ONE more question, as tabs above the text box: is the pasted text
+// the poster's own words, or an article to draw them out of? That is `designMode` —
+// 'onbrand' sends the note verbatim to the image-edit model (isSimpleTemplateEdit in the
+// runner), 'adaptive' runs generatePosterCopy first. बॅनर and यूट्यूब ignore designMode, so
+// the tabs are shown for the social lane only.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ComponentType } from 'react';
@@ -24,7 +30,7 @@ import {
   isSocialCategory,
   referenceCategoryOf,
 } from '@dgipr/schemas';
-import type { Category } from '@dgipr/schemas';
+import type { Category, DesignMode } from '@dgipr/schemas';
 import { createGeneration, getGeneration } from '../lib/api';
 import { useTasks } from '../lib/TasksProvider';
 import { STR } from '../lib/strings';
@@ -136,6 +142,12 @@ export default function NewGenerationPage() {
   // The chosen format IS the category — one flat picker, no derivation. ट्विटर पोस्ट is the
   // default because it is by far the most-used format on this page.
   const [category, setCategory] = useState<SelectableFormat>('twitter');
+  // क्रिएटिव्ह only: what the pasted text IS. 'onbrand' (the default, and what this form used
+  // to hardcode) prints it verbatim; 'adaptive' treats it as an article and has
+  // generatePosterCopy write the poster's headline + points out of it. Held across a format
+  // switch on purpose — it is a preference about this officer's own material, and the value
+  // is simply not sent on a lane that ignores it.
+  const [designMode, setDesignMode] = useState<DesignMode>('onbrand');
   // A social post is poster-only unless asked otherwise: the caption is a separate
   // paid model call, and plenty of posts are published as an image. It can also be added
   // afterwards from the detail page, so off is a cheap default rather than a lossy one.
@@ -196,6 +208,10 @@ export default function NewGenerationPage() {
   // The लेख पोस्टर lane. Asked positively rather than as !isSocial, which silently swept
   // यूट्यूब थंबनेल in with it — a thumbnail writes no article and locks no poster heading.
   const isArticle = isArticleCategory(category);
+  // The क्रिएटिव्ह tab that changes what the text box holds: a finished article the poster's
+  // copy is written OUT of, rather than the poster's own words. Only ever true on the social
+  // lane, which is the only one whose runner branch reads designMode.
+  const fromArticle = isSocial && designMode === 'adaptive';
 
   // Which library the template picker shows: twitter masters for the two social formats,
   // article masters for the लेख पोस्टर, youtube masters for the थंबनेल. Every format on this
@@ -278,9 +294,10 @@ export default function NewGenerationPage() {
         // meaningless "clear" on a run that has nothing to clear.
         posterHeading:
           isArticle && posterHeading.trim() ? posterHeading.trim() : undefined,
-        // Both template questions are now fixed rather than asked: a social poster from
-        // this form always follows the chosen DGIPR template (ठरलेले टेम्पलेट).
-        designMode: isSocial ? 'onbrand' : undefined,
+        // The विभाग question stays fixed (always the DGIPR template family); the design
+        // mode is the tab above the text box — 'onbrand' prints the note verbatim,
+        // 'adaptive' writes the poster's copy out of it first.
+        designMode: isSocial ? designMode : undefined,
         templateBrand: isSocial ? 'dgipr' : undefined,
         referenceImageId:
           reference?.kind === 'image' ? reference.id : undefined,
@@ -355,11 +372,43 @@ export default function NewGenerationPage() {
       </section>
 
       <section className="card">
+        {/* क्रिएटिव्ह only — it is the one lane where both paths exist. बॅनर keeps the pasted
+            text as the article and picks the heading out of it; यूट्यूब थंबनेल prints it. Both
+            ignore designMode, so offering the tabs there would be an inert control. */}
+        {isSocial ? (
+          <>
+            <p className="field-label">{STR.posterSourceLabel}</p>
+            <div className="segmented" style={{ marginTop: 10 }}>
+              <button
+                type="button"
+                className="output-option"
+                aria-pressed={designMode === 'onbrand'}
+                disabled={submitting}
+                onClick={() => setDesignMode('onbrand')}
+              >
+                <span className="name">{STR.posterSourceVerbatim}</span>
+                <span className="desc">{STR.posterSourceVerbatimDesc}</span>
+              </button>
+              <button
+                type="button"
+                className="output-option"
+                aria-pressed={designMode === 'adaptive'}
+                disabled={submitting}
+                onClick={() => setDesignMode('adaptive')}
+              >
+                <span className="name">{STR.posterSourceArticle}</span>
+                <span className="desc">{STR.posterSourceArticleDesc}</span>
+              </button>
+            </div>
+          </>
+        ) : null}
         <label className="field-label" htmlFor="note">
           <ClipboardPaste size={18} className="label-icon" aria-hidden="true" />
-          {STR.articlePasteLabel}
+          {fromArticle ? STR.articleSourceLabel : STR.articlePasteLabel}
         </label>
-        <p className="hint">{STR.articlePasteHint}</p>
+        <p className="hint">
+          {fromArticle ? STR.articleSourceHint : STR.articlePasteHint}
+        </p>
         {/* Handoff from a finished run's cross-format link. The failure is stated rather
             than silent — an empty box with no explanation reads as the link not working. */}
         {prefill === 'loading' ? (
@@ -374,7 +423,11 @@ export default function NewGenerationPage() {
         <textarea
           id="note"
           className="note-input"
-          placeholder={STR.articlePastePlaceholder}
+          placeholder={
+            fromArticle
+              ? STR.articleSourcePlaceholder
+              : STR.articlePastePlaceholder
+          }
           value={note}
           onChange={(e) => setNote(e.target.value)}
           style={{ marginTop: 10 }}
