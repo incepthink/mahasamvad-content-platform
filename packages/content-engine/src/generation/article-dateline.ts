@@ -22,6 +22,14 @@ const DEVANAGARI_DIGITS = [
 const EXISTING_DATELINE =
   /^.{1,80}?,\s*दि\.?\s*[०-९0-9]{1,2}(?:\s+[\p{L}\p{M}]+\s+[०-९0-9]{4})?\s*:\s*/u;
 
+const MARKDOWN_HEADING = /^#{1,6}\s+/u;
+// A Marathi news headline is a fragment: it carries no closing full stop, danda, question or
+// exclamation mark. A body paragraph always closes one. That is the discriminator used below,
+// and it is the only reliable one — length is not (a real DGIPR headline runs past 110
+// characters) and the Markdown marker is not (three of the four prompt variants ask for the
+// headline as a plain first line, so `#` is present only sometimes).
+const SENTENCE_END = /[.।?!]["'’”)\]]*$/u;
+
 function toDevanagariDigits(value: string): string {
   return value.replace(
     /\d/g,
@@ -71,18 +79,53 @@ export function ensureArticleDateline(
   if (!dateline || !trimmed) return trimmed;
 
   const lines = trimmed.split(/\r?\n/);
-  const bodyLine = lines.findIndex((line) => {
-    const value = line.trim();
-    return value.length > 0 && !/^#{1,6}\s+/u.test(value);
-  });
-  if (bodyLine < 0) return `${trimmed}\n\n${dateline.text}`;
+  const filled = lines
+    .map((line, index) => ({ index, value: line.trim() }))
+    .filter((line) => line.value.length > 0);
+  if (filled.length === 0) return `${trimmed}\n\n${dateline.text}`;
 
-  const body = lines[bodyLine]?.trim() ?? '';
-  const withoutOldDateline = body.replace(EXISTING_DATELINE, '').trimStart();
-  lines[bodyLine] = withoutOldDateline
+  const headline = headlineIndex(filled);
+  const body = filled.find((line) => line.index > (headline ?? -1));
+  if (!body) return `${trimmed}\n\n${dateline.text}`;
+
+  // Self-healing: a run that put the dateline on the headline (see headlineIndex) has it
+  // removed from there. Without this, re-running the pass over such an article would only add
+  // a second dateline to the body and leave the broken headline standing.
+  if (headline !== null) {
+    const stripped =
+      lines[headline]?.trim().replace(EXISTING_DATELINE, '') ?? '';
+    if (stripped) lines[headline] = stripped;
+  }
+
+  const withoutOldDateline = body.value
+    .replace(EXISTING_DATELINE, '')
+    .trimStart();
+  lines[body.index] = withoutOldDateline
     ? `${dateline.text} ${withoutOldDateline}`
     : dateline.text;
   return lines.join('\n');
+}
+
+// Which line — if any — is the article's headline rather than its first body paragraph.
+//
+// This used to be "the first line that is not a Markdown heading", which was correct only while
+// every prompt variant happened to emit `# शीर्षक`. The no-reference specification asks for the
+// headline as a PLAIN first line, so that test made the headline itself look like the body and
+// the dateline was prefixed to it — the exact defect this function now prevents.
+function headlineIndex(
+  filled: readonly Readonly<{ index: number; value: string }>[],
+): number | null {
+  const first = filled[0];
+  if (!first) return null;
+  if (MARKDOWN_HEADING.test(first.value)) return first.index;
+
+  // A plain headline is only recognisable in contrast: it must be a standalone opening line
+  // with an article underneath it, and it must not close a sentence. A one-paragraph article
+  // therefore has no headline, and a first paragraph is never mistaken for one.
+  if (filled.length < 2) return null;
+  const withoutDateline = first.value.replace(EXISTING_DATELINE, '').trim();
+  if (!withoutDateline || SENTENCE_END.test(withoutDateline)) return null;
+  return first.index;
 }
 
 // Free deterministic harness:
@@ -132,5 +175,67 @@ if (process.argv[1]?.endsWith('article-dateline.ts')) {
     '# शीर्षक\n\nपहिला परिच्छेद.',
   );
 
+  // The production defect (generation 0266d4eb): the no-reference specification asks for the
+  // headline as a PLAIN first line, so the old "first line without a #" test aimed the dateline
+  // straight at the headline.
+  check(
+    'a PLAIN headline is recognised and left alone',
+    ensureArticleDateline(
+      'एसटीचा निम्मा ताफा इलेक्ट्रिक करण्याचे उद्दिष्ट; मुख्यमंत्र्यांनी घेतला आढावा\n\nपहिला परिच्छेद.',
+      'news',
+      { now },
+    ),
+    'एसटीचा निम्मा ताफा इलेक्ट्रिक करण्याचे उद्दिष्ट; मुख्यमंत्र्यांनी घेतला आढावा\n\nमुंबई, दि. २९ : पहिला परिच्छेद.',
+  );
+  check(
+    'a dateline that landed on a plain headline is moved off it, not duplicated',
+    ensureArticleDateline(
+      'मुंबई, दि. ५ : एसटीचा निम्मा ताफा इलेक्ट्रिक करण्याचे उद्दिष्ट\n\nपुणे, दि. ५ : पहिला परिच्छेद.',
+      'news',
+      { now },
+    ),
+    'एसटीचा निम्मा ताफा इलेक्ट्रिक करण्याचे उद्दिष्ट\n\nमुंबई, दि. २९ : पहिला परिच्छेद.',
+  );
+  check(
+    'a headline-less article still gets its first paragraph datelined',
+    ensureArticleDateline('पहिला परिच्छेद.\n\nदुसरा परिच्छेद.', 'news', {
+      now,
+    }),
+    'मुंबई, दि. २९ : पहिला परिच्छेद.\n\nदुसरा परिच्छेद.',
+  );
+  check(
+    'a first PARAGRAPH is never mistaken for a headline (it closes its sentence)',
+    ensureArticleDateline(
+      'राज्यात नवीन एमआरआय केंद्रे सुरू होणार आहेत.\n\nदुसरा परिच्छेद.',
+      'news',
+      { now },
+    ),
+    'मुंबई, दि. २९ : राज्यात नवीन एमआरआय केंद्रे सुरू होणार आहेत.\n\nदुसरा परिच्छेद.',
+  );
+  check(
+    'a one-paragraph article has no headline to protect',
+    ensureArticleDateline('एकमेव ओळ', 'news', { now }),
+    'मुंबई, दि. २९ : एकमेव ओळ',
+  );
+  check(
+    'a Markdown headline with no body still appends the dateline',
+    ensureArticleDateline('# फक्त शीर्षक', 'news', { now }),
+    '# फक्त शीर्षक\n\nमुंबई, दि. २९ :',
+  );
+  check(
+    'running the pass twice is a no-op',
+    ensureArticleDateline(
+      ensureArticleDateline(
+        'एसटीचा ताफा इलेक्ट्रिक करण्याचे उद्दिष्ट\n\nपहिला परिच्छेद.',
+        'news',
+        { now },
+      ),
+      'news',
+      { now },
+    ),
+    'एसटीचा ताफा इलेक्ट्रिक करण्याचे उद्दिष्ट\n\nमुंबई, दि. २९ : पहिला परिच्छेद.',
+  );
+
   if (failures > 0) process.exitCode = 1;
+  else console.log('\nAll dateline checks passed.');
 }

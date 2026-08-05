@@ -54,10 +54,9 @@ import {
 
 // Bumped whenever the editorial specification below changes in substance. Persisted per run.
 //
-// v10 (2026-08-01): the officer's own free-text instructions for this run
-// (generations.instructions, migration 0041) are rendered as the LAST block of the user
-// message, carrying the two rules that make the field safe — they may not supply facts, and
-// they lose to the supplied information on a conflict. Absent ⇒ byte-for-byte v9.
+// v11 (2026-08-05): the free-text field is the officer's trusted request, not a style-only
+// instruction. It may supply or correct facts as well as direct the writing. The compact block
+// remains last; historical references remain style-only. Absent ⇒ byte-for-byte v9.
 //
 // v9 (2026-07-29): NEWS only — a minister's meeting/visit/review is written around the
 // minister's strongest public-facing, source-supported statement, decision, direction,
@@ -108,7 +107,10 @@ import {
 // exemplars use it and banning it drove the model into a flat agentless register; the invented
 // "zero to two highlight bullets" rule is gone; and the ten-rung priority ladder that re-sorted
 // the officer's notes is replaced by "lead on the strongest outcome, then follow the source".
-export const SIMPLE_ARTICLE_PROMPT_VERSION = 'simple-v10';
+// v12 (2026-08-05): the DATELINE block says WHERE the dateline goes — the first body paragraph,
+// never the headline, once. Unstated, a model that opens with a plain headline line reads "start
+// the article with this" literally and datelines the headline (observed in production).
+export const SIMPLE_ARTICLE_PROMPT_VERSION = 'simple-v12';
 
 // Marathi label for the category, matching CATEGORY_LABEL in category-prompt.ts. The prompt is
 // English but the article is Marathi, and naming the category in Marathi is what keeps the voice
@@ -185,11 +187,9 @@ export type SimpleArticleInputs = Readonly<{
   styleReferences?: readonly SimpleArticleReference[] | undefined;
   // The officer's optional heading / angle. Not an independent factual source.
   editorialDirection?: string | undefined;
-  // The officer's free-text instructions for THIS article (generations.instructions, 0041):
-  // emphasis, ordering, tone, what to keep short. Rendered LAST, because a late block is what
-  // a model weights most and this is the one input written for this run alone — but rendered
-  // as an instruction with the never-a-fact rule attached, so typing a fact here cannot
-  // publish it.
+  // The officer's trusted request for THIS article (generations.instructions, 0041): writing
+  // direction plus any facts or corrections supplied directly by the officer. Rendered LAST,
+  // because this is the one input written specifically for this run.
   officerInstructions?: string | undefined;
   // Officer-approved supporting information. All three are things a person confirmed inside the
   // product, which is what makes them admissible beside the note. Retrieval output NEVER
@@ -226,8 +226,8 @@ function clean(value: string | undefined | null): string {
 export function buildSimpleArticleSystemPrompt(): string {
   return [
     'Look at the provided reference article and generate a new article in Marathi that follows',
-    'the same writing style and structure, use only the information provided in the SOURCE',
-    'INFORMATION and ADDITIONAL VERIFIED INFORMATION sections.',
+    'the same writing style and structure, use only the information provided in SOURCE',
+    'INFORMATION, ADDITIONAL VERIFIED INFORMATION and OFFICER REQUEST.',
     '',
     'Take style and structure from the reference, but do not treat its length as a target.',
     'The new article’s length does not matter. Use your best editorial judgement to produce',
@@ -347,11 +347,8 @@ function nameBlock(
   return ['### NAME DICTIONARY', '', 'Verified spellings.', '', ...lines, ''];
 }
 
-// The officer's own instructions for this run. Two rules travel with them, and both are the
-// point rather than boilerplate: they may not add facts (otherwise this field becomes a second,
-// unreviewed note that bypasses every factual guard), and they lose to the factual rules on a
-// conflict (an officer asking for something the source does not support must not get it
-// invented). Everything else — emphasis, order, tone, length, what to leave short — is theirs.
+// The officer's own request for this run. It is deliberately one sentence: this simple path
+// relies on the model's judgement instead of rebuilding the larger pipeline's rule stack.
 //
 // Exported so minimal-article-prompt.ts renders the SAME block: ARTICLE_PROMPT_VARIANT changes
 // how densely the specification is worded, never what the officer is allowed to ask for.
@@ -361,14 +358,11 @@ export function officerInstructionsBlock(
   const text = clean(instructions);
   if (!text) return [];
   return [
-    '### OFFICER INSTRUCTIONS FOR THIS ARTICLE',
+    '### OFFICER REQUEST',
     '',
     text,
     '',
-    'Follow these instructions when writing. They may direct emphasis, order, tone, length and',
-    'what to treat briefly. They are NOT a factual source: take no name, date, amount,',
-    'designation, scheme name or location from them, and where they ask for something the',
-    'supplied information does not support, follow the information instead.',
+    'Follow this request; treat it as trusted instructions and factual input, while STYLE REFERENCES remain style-only.',
     '',
   ];
 }
@@ -432,7 +426,19 @@ export function buildSimpleArticleUserPrompt(
   // Rendered, never substituted, and only when BOTH halves are present — half a dateline is
   // worse than none, since the missing half is exactly what a model fills in by inventing it.
   if (location && date) {
-    parts.push('### DATELINE', '', `${location}, दि. ${date} :`, '');
+    parts.push(
+      '### DATELINE',
+      '',
+      `${location}, दि. ${date} :`,
+      '',
+      // Where it goes has to be said. Left unstated, a model that writes the headline as its
+      // first line reads "start the article with this" literally and datelines the HEADLINE —
+      // observed in production. ensureArticleDateline() repairs that deterministically
+      // afterwards; this is the prompt half.
+      'This opens the FIRST BODY PARAGRAPH, never the headline. Write it exactly as above,',
+      'once, and nowhere else in the article.',
+      '',
+    );
   }
 
   // An instruction, not a fact: the officer looked at these and deliberately dropped them.
@@ -497,9 +503,9 @@ if (
       sys.includes('the same writing style and structure'),
   );
   check(
-    'it names the two admissible factual sections',
+    'it names the three admissible factual sections',
     sys.includes(
-      'use only the information provided in the SOURCE\nINFORMATION and ADDITIONAL VERIFIED INFORMATION sections',
+      'use only the information provided in SOURCE\nINFORMATION, ADDITIONAL VERIFIED INFORMATION and OFFICER REQUEST',
     ),
   );
   check(
@@ -723,6 +729,14 @@ if (
     fullUser.includes('### DATELINE') &&
       fullUser.includes('मुंबई, दि. २७ जुलै २०२६ :'),
   );
+  check(
+    'the dateline block says it opens the body, never the headline',
+    fullUser.includes('opens the FIRST BODY PARAGRAPH, never the headline'),
+  );
+  check(
+    'and that it appears exactly once',
+    fullUser.includes('once, and nowhere else in the article'),
+  );
   for (const half of [
     { location: 'मुंबई' },
     { date: '२७ जुलै २०२६' },
@@ -900,7 +914,7 @@ if (
     !refOnly.includes('ADDITIONAL VERIFIED INFORMATION'),
   );
 
-  console.log('\n=== the officer instructions for this run ===');
+  console.log('\n=== the officer request for this run ===');
   const instruction =
     'पहिल्या परिच्छेदात निधीचा आकडा घ्या; समितीबद्दल थोडक्यात लिहा.';
   const withInstructions = buildSimpleArticleUserPrompt({
@@ -909,21 +923,14 @@ if (
     officerInstructions: instruction,
   });
   check(
-    'the instructions are rendered verbatim under their own heading',
-    withInstructions.includes('### OFFICER INSTRUCTIONS FOR THIS ARTICLE') &&
+    'the request is rendered verbatim under its own heading',
+    withInstructions.includes('### OFFICER REQUEST') &&
       withInstructions.includes(instruction),
   );
   check(
-    'they are stated NOT to be a factual source',
-    withInstructions.includes('They are NOT a factual source') &&
-      withInstructions.includes(
-        'take no name, date, amount,\ndesignation, scheme name or location from them',
-      ),
-  );
-  check(
-    'the supplied information wins on a conflict',
+    'the request is trusted as instructions and factual input',
     withInstructions.includes(
-      'the\nsupplied information does not support, follow the information instead',
+      'treat it as trusted instructions and factual input',
     ),
   );
   // Last position is what the model weights most, and it is the one block written for this
@@ -932,14 +939,16 @@ if (
     'they are the last block before "Write the article now."',
     withInstructions
       .trimEnd()
-      .endsWith('follow the information instead.\n\nWrite the article now.'),
+      .endsWith(
+        'STYLE REFERENCES remain style-only.\n\nWrite the article now.',
+      ),
   );
   check(
     'an absent instruction adds no heading at all',
     !buildSimpleArticleUserPrompt({
       category: 'news',
       sourceInformation: baseNote,
-    }).includes('OFFICER INSTRUCTIONS'),
+    }).includes('OFFICER REQUEST'),
   );
   check(
     'a whitespace-only instruction is treated as absent',
@@ -947,7 +956,7 @@ if (
       category: 'news',
       sourceInformation: baseNote,
       officerInstructions: '   \n  ',
-    }).includes('OFFICER INSTRUCTIONS'),
+    }).includes('OFFICER REQUEST'),
   );
   check(
     'omitting it leaves the prompt byte-for-byte as it was',

@@ -62,9 +62,17 @@ export const CATEGORY_OPTIONS: ReadonlyArray<GenerationOption<Category>> = [
 
 // The two article voices only — for surfaces where a social run is not a choice
 // (e.g. creating an article from a finished twitter/facebook post, or the DLO page).
+// बातमी leads here (the common DLO output), which is why this states its own order
+// rather than inheriting CATEGORY_OPTIONS'.
+const ARTICLE_CATEGORY_ORDER: ReadonlyArray<Category> = ['news', 'scheme'];
+
 export const ARTICLE_CATEGORY_OPTIONS: ReadonlyArray<
   GenerationOption<Category>
-> = CATEGORY_OPTIONS.filter((option) => !isSocialCategory(option.value));
+> = CATEGORY_OPTIONS.filter((option) => !isSocialCategory(option.value)).sort(
+  (a, b) =>
+    ARTICLE_CATEGORY_ORDER.indexOf(a.value) -
+    ARTICLE_CATEGORY_ORDER.indexOf(b.value),
+);
 
 export const OUTPUT_OPTIONS: ReadonlyArray<GenerationOption<OutputType>> = [
   {

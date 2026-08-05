@@ -1,14 +1,11 @@
 'use client';
 
-// "AI साठी सूचना" — the officer's free-text direction for ONE article run
-// (generations.instructions, migration 0041). Emphasis, ordering, tone, what to keep short.
+// The officer's trusted free-text request for ONE article run (generations.instructions,
+// migration 0041): writing direction plus facts or corrections supplied directly here.
 //
 // It sits beside StyleReferenceField and is deliberately its sibling in shape, because the two
 // answer neighbouring questions: that field says "write it like THIS article", this one says
-// "write it like THIS". Both are style-side inputs, and neither is ever a factual source — the
-// prompt block that renders this text carries that rule explicitly, so an officer who types a
-// figure here does not get it published. The hint says so in plain Marathi rather than letting
-// them discover it from a missing number in the output.
+// "write it like THIS". The reference remains style-only; this request is trusted officer input.
 //
 // Rendered on /dlo only, for the same reason StyleReferenceField is: the media room always
 // submits `providedArticle: true`, so no prose is generated there and the field would be dead

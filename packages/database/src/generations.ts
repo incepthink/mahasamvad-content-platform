@@ -83,10 +83,9 @@ export type GenerationRow = Readonly<{
   // structure only; never a factual source. Insert-only, because a retry re-reads the row and
   // must reproduce the same reference. Null when the officer pasted nothing and on pre-0035 rows.
   styleReference: string | null;
-  // The officer's free-text direction for this article (migration 0041): emphasis, ordering,
-  // tone, what to keep short. An instruction, never a factual source — the prompt says so, so
-  // a fact typed there is not published. Insert-only for the same reason as styleReference: a
-  // retry re-reads the row and must write the same article, not a differently-directed one.
+  // The officer's trusted request for this article (migration 0041): writing direction plus
+  // facts or corrections supplied directly here. Insert-only for the same reason as
+  // styleReference: a retry re-reads the row and must write the same article.
   // Null when nothing was typed and on pre-0041 rows.
   instructions: string | null;
   // Which style reference the run ACTUALLY used (migration 0035): the officer's paste, a
@@ -388,7 +387,7 @@ export async function insertGeneration(
     // Read again on every retry, which is why it lives on the row rather than in the create
     // request alone.
     styleReference?: string | undefined;
-    // Insert-only (migration 0041): the officer's free-text direction for this article.
+    // Insert-only (migration 0041): the officer's trusted request for this article.
     instructions?: string | undefined;
     // Insert-only: the note is a finished article; the runner skips generation.
     articleProvided?: boolean | undefined;

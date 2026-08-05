@@ -12,8 +12,7 @@
 //     src/scripts/motionize-poster-demo.ts "C:\path\to\poster.png" --execute
 
 import { execFile } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { resolveFfmpeg } from '@dgipr/poster-renderer';
@@ -28,27 +27,27 @@ import {
 
 const execFileAsync = promisify(execFile);
 
+// Kept under Kling's 2500-char RECOMMENDED budget on purpose: fitClipPrompt
+// returns a prompt of that length untouched, whereas an over-cap prompt with
+// none of the /video pipeline's field prefixes gets trimmed by shedding whole
+// lines FROM THE END — which would silently delete the card and camera blocks.
 export const POSTER_MOTION_PROMPT = [
-  'Create a clearly animated 5-second image-to-video shot from this Marathi voter-information poster. Use one locked camera shot. Motion must begin within the first second and be plainly visible; do not return a static or almost-static image.',
+  'Animate this government tiger-conservation poster into a clearly moving 5-second image-to-video shot. Motion must start within the first half second and stay visible throughout; never return a static image.',
   '',
-  'LOCK ALL OFFICIAL GRAPHICS:',
-  'Keep the crop, headline panel, all Marathi text and numerals, dates, information cards, icons, government emblem, QR code, footer, background, lines, and decorations fixed at exact source coordinates.',
-  'Every glyph, logo, icon, QR module, colour, edge, and spacing remains identical and sharp. Treat all graphics as one still overlay: never redraw, translate, morph, blur, crop, flicker, or animate them. Keep the QR code scannable. Add no text, logo, watermark, person, animal, or object.',
+  'TEXT LOCK — outranks every motion instruction below. Treat all typography, panels and branding as one frozen overlay pinned at exact source pixels: the "GOVERNMENT\'S NEW / INITIATIVE FOR / TIGER CONSERVATION" headline, the gold "11 MoUs SIGNED" banner, the "TIGER POPULATION" card with 2014 / 190 / NOW / 444 / NEXT ESTIMATE / 600+, every bullet line, and the whole footer band. Every letter, numeral, glyph, colour and edge stays identical and sharp: never redraw, retype, reflow, warp, blur, crop, flicker or move them. Add no new text, number, logo, watermark, person or object.',
   '',
-  'ANIMATE ONLY THE EXISTING FOUR PEOPLE:',
-  'The only people are inside the upper-right photographic region, approximately x=52%-99% and y=10%-52% of the full canvas. Confine human motion to that box. Preserve each identity, face, skin tone, hair, clothing, anatomy, and hands. Never add, remove, duplicate, swap, or deform anyone.',
-  'Show one clear, warm shared reaction to the tablet. The older man and woman visibly lean a little closer. The standing young man leans forward and his grin broadens. The seated man tilts the tablet slightly toward them and smiles more. Their heads and shoulders move naturally by a small but unmistakable amount, as if sharing a quiet laugh.',
-  'Keep all eyes on the tablet. Allow natural cheek, eye, and clothing movement, but no speech, exaggerated open mouths, changed teeth, waving, or large gestures. Hands retain correct anatomy and contact with the tablet or table. The tablet may tilt slightly but its screen gains no new content. Keep the clipboard, papers, pen, table, and chairs still.',
+  'ICON LOCK — equally absolute. Every icon is flat vector artwork and is FROZEN: the four dark circular icons down the left (globe, house-and-tree, AI chip, hand-and-plant), the gold paw prints, the gold arrow between 190 and 444, the top-right Government of Maharashtra emblem card, and every social icon in the footer. Never animate, rotate, pulse, glow, shimmer, recolour, redraw, restyle or make any of them photographic or three-dimensional. They keep their exact shape, weight, colour and position for the whole clip.',
   '',
-  'MOTION PERFORMANCE:',
-  'Start from the exact supplied pose, then move continuously toward the closer, happier group reaction. Prioritize visible human motion over complete stillness. Make it friendly, restrained, realistic, synchronized, and suitable for an official Instagram post.',
+  'TIGER — ONE SLOW STEP FORWARD (main motion). The tiger stands at x=72%-100%, y=30%-96%. It takes a single unhurried stride toward the camera: the front paws lift and plant, the shoulders roll, the tail sways, the ears flick and the fur stirs. Keep it in its own right-hand column — it must not drift left past x=70%, must not grow more than a few percent larger, must never overlap any card, bullet line, icon or the footer, and must not walk out of frame. Its stripes, face markings and proportions stay exactly as drawn.',
   '',
-  'CAMERA AND IMAGE LOCK:',
-  'No pan, zoom, shake, crop change, parallax, focus pull, background motion, warping, lighting change, colour shift, glow, or new shadows. Preserve the clean public-information-poster look.',
+  'FOREST ON THE RIGHT (x=48%-100%, y=0%-95%): bring the woodland behind the tiger alive. The hanging leaves at the top right flutter in a light breeze, the canopy sways slowly, sunlight dapples through the trees and faint haze drifts upward. The drawn bird silhouettes glide slowly along the treeline. Keep this greenery pale and firmly in the background — it may never darken, spread left, or reduce the contrast of any text or icon.',
+  '',
+  'CAMERA LOCK: no pan, zoom, shake, rotation, crop change, warping or colour shift. The cream background, gold banner, white cards, the pale trees behind the left-hand text and the footer band all stay completely still.',
 ].join('\n');
 
 type Options = {
   imagePath: string;
+  promptPath?: string;
   execute: boolean;
   durationSeconds: number;
   resolution: KlingResolution;
@@ -80,7 +79,8 @@ function parseOptions(args: string[]): Options {
       [
         'Usage:',
         '  tsx src/scripts/motionize-poster-demo.ts <poster.png> [--execute]',
-        '      [--duration=5] [--resolution=720p|1080p]',
+        '      [--prompt-file=brief.txt] [--duration=5]',
+        '      [--resolution=720p|1080p]',
         '      [--model=kling-3.0] [--gif-width=720] [--gif-fps=12]',
         '      [--mp4=output.mp4] [--gif=output.gif]',
       ].join('\n'),
@@ -89,6 +89,7 @@ function parseOptions(args: string[]): Options {
 
   const knownFlags = new Set([
     '--execute',
+    '--prompt-file',
     '--duration',
     '--resolution',
     '--model',
@@ -125,9 +126,11 @@ function parseOptions(args: string[]): Options {
     );
   }
   const model = optionValue(args, '--model');
+  const promptFile = optionValue(args, '--prompt-file');
 
   return {
     imagePath,
+    ...(promptFile ? { promptPath: resolve(promptFile) } : {}),
     execute: args.includes('--execute'),
     durationSeconds,
     resolution: resolutionRaw,
@@ -188,17 +191,17 @@ function printReview(
         willCallApi: options.execute,
         endpoint: `${baseUrl}/image-to-video/${klingModel()}`,
         input: options.imagePath,
+        promptSource: options.promptPath ?? 'built-in POSTER_MOTION_PROMPT',
+        promptChars: prompt.length,
         inputDimensions: `${dimensions.width}x${dimensions.height}`,
         firstFrame: 'the supplied poster',
         lastFrame: 'not supplied, so Kling has room to create visible motion',
         settings: {
-          klingSourceDuration: options.durationSeconds,
-          finalBoomerangDuration: options.durationSeconds,
+          durationSeconds: options.durationSeconds,
           resolution: klingResolution('fast'),
           audio: 'off',
           multi_shot: false,
-          localLoop:
-            'first half of the Kling clip followed by its FFmpeg reversal',
+          playback: 'forward once — no reversal, no boomerang, no loop pass',
         },
         outputs: {
           mp4: options.mp4Path,
@@ -211,42 +214,6 @@ function printReview(
       2,
     ),
   );
-}
-
-async function convertMp4ToBoomerang(
-  sourcePath: string,
-  outputPath: string,
-  durationSeconds: number,
-): Promise<void> {
-  const forwardSeconds = durationSeconds / 2;
-  const filter = [
-    `[0:v]trim=start=0:duration=${forwardSeconds},setpts=PTS-STARTPTS,split[forward][reverse_source]`,
-    '[reverse_source]reverse,setpts=PTS-STARTPTS[backward]',
-    '[forward][backward]concat=n=2:v=1:a=0,format=yuv420p[video]',
-  ].join(';');
-
-  await execFileAsync(resolveFfmpeg(), [
-    '-hide_banner',
-    '-loglevel',
-    'error',
-    '-y',
-    '-i',
-    sourcePath,
-    '-filter_complex',
-    filter,
-    '-map',
-    '[video]',
-    '-an',
-    '-c:v',
-    'libx264',
-    '-crf',
-    '18',
-    '-preset',
-    'medium',
-    '-movflags',
-    '+faststart',
-    outputPath,
-  ]);
 }
 
 async function convertMp4ToGif(
@@ -283,13 +250,19 @@ async function main(): Promise<void> {
 
   const image = await readFile(options.imagePath);
   const info = await posterInfo(image);
+  // A custom brief is per-poster: the built-in prompt names the regions of one
+  // specific poster (the TIGER CONSERVATION artwork), so any other artwork
+  // needs its own --prompt-file.
+  const basePrompt = options.promptPath
+    ? (await readFile(options.promptPath, 'utf8')).trim()
+    : POSTER_MOTION_PROMPT;
+  if (basePrompt.length === 0) {
+    throw new Error(`The prompt file ${options.promptPath} is empty.`);
+  }
   const prompt =
     options.durationSeconds === 5
-      ? POSTER_MOTION_PROMPT
-      : POSTER_MOTION_PROMPT.replace(
-          '5-second',
-          `${options.durationSeconds}-second`,
-        );
+      ? basePrompt
+      : basePrompt.replace('5-second', `${options.durationSeconds}-second`);
   printReview(options, info, prompt);
 
   if (!options.execute) {
@@ -313,20 +286,9 @@ async function main(): Promise<void> {
     },
   });
 
-  const temporaryDirectory = await mkdtemp(
-    join(tmpdir(), 'dgipr-poster-motion-'),
-  );
-  try {
-    const sourcePath = join(temporaryDirectory, 'kling-source.mp4');
-    await writeFile(sourcePath, clip);
-    await convertMp4ToBoomerang(
-      sourcePath,
-      options.mp4Path,
-      options.durationSeconds,
-    );
-  } finally {
-    await rm(temporaryDirectory, { recursive: true, force: true });
-  }
+  // Kling's clip is written through unchanged: it plays forward once, start to
+  // finish. Do not reintroduce a reverse/boomerang pass here.
+  await writeFile(options.mp4Path, clip);
   console.log(`Wrote ${options.mp4Path}`);
   await convertMp4ToGif(
     options.mp4Path,

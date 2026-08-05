@@ -33,6 +33,7 @@ import {
 import type {
   ReferenceCategory,
   ReferenceImage,
+  ReferenceShapeBand,
   ReferenceType,
 } from '@dgipr/schemas';
 import {
@@ -58,9 +59,11 @@ import {
   type SearchableReference,
 } from '../../lib/referenceSearch';
 import {
+  BAND_HINTS,
+  BAND_LABELS,
   SHAPE_BANDS,
+  UPLOAD_BANDS,
   groupByBand,
-  type ShapeBandId,
 } from '../../lib/referenceGroups';
 import { STR } from '../../lib/strings';
 
@@ -84,22 +87,6 @@ const CATEGORY_TABS: Record<ReferenceCategory, string> = {
   twitter: STR.refTabTwitter,
   article: STR.refTabArticle,
   youtube: STR.refTabYoutube,
-};
-
-const BAND_LABELS: Record<ShapeBandId, string> = {
-  unanalyzed: STR.refBandUnanalyzed,
-  single: STR.refBandSingle,
-  few: STR.refBandFew,
-  medium: STR.refBandMedium,
-  many: STR.refBandMany,
-};
-
-const BAND_HINTS: Record<ShapeBandId, string> = {
-  unanalyzed: STR.refBandUnanalyzedHint,
-  single: STR.refBandSingleHint,
-  few: STR.refBandFewHint,
-  medium: STR.refBandMediumHint,
-  many: STR.refBandManyHint,
 };
 
 // Remembering the last group per category is what makes the dropdown a formality rather
@@ -470,9 +457,18 @@ function ImageGrid({
   );
 }
 
-// The page's one upload control. The group is a field here rather than a card you must
-// find first, which is the whole point of the change — and it defaults to the last one
-// used, so a run of uploads answers it once.
+// The page's one upload control.
+//
+// It asks for a SIZE BAND — the same four sections the page below is browsed by — and
+// not for a `reference_type`. The dropdown it replaces asked which topic group to file
+// under, which is a judgement about the placeholder artwork that predicts nothing about
+// the image and has not steered a render since capacity-first selection landed. The
+// band, by contrast, is the number that decides whether a note with N points may use
+// this master at all, and it is visible in the picture: you count the slots.
+//
+// The type is still stored (the column is NOT NULL and the types survive as pin
+// targets), it is simply no longer asked about — it comes from the last one used in
+// this library, or the first.
 function UploadPanel({
   category,
   types,
@@ -484,12 +480,15 @@ function UploadPanel({
   types: readonly ReferenceType[];
   busy: boolean;
   onClose: () => void;
-  onUpload: (slug: string, file: File) => void;
+  onUpload: (slug: string, band: ReferenceShapeBand, file: File) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [slug, setSlug] = useState('');
+  // No default: the band is the master's real capacity and a pre-selected guess would be
+  // accepted silently on most uploads. The file button stays disabled until it is answered.
+  const [band, setBand] = useState<ReferenceShapeBand | null>(null);
 
-  // Re-seeded per category, since each library has its own groups and its own last choice.
+  // Re-seeded per category, since each library has its own types and its own last choice.
   useEffect(() => {
     const remembered = readLastGroup(category);
     const known = types.some((type) => type.slug === remembered);
@@ -511,31 +510,31 @@ function UploadPanel({
           <X size={18} strokeWidth={2.25} aria-hidden="true" />
         </button>
       </div>
-      <div className="ref-add-row">
-        {/* A single-type library (लेख, यूट्यूब) has nothing to ask, so it asks nothing. */}
-        {types.length > 1 ? (
-          <div className="ref-add-group">
-            <label className="field-label" htmlFor="ref-add-group">
-              {STR.refAddGroupLabel}
-            </label>
-            <select
-              id="ref-add-group"
-              value={slug}
+
+      <fieldset className="ref-add-bands">
+        <legend className="field-label">{STR.refAddBandLabel}</legend>
+        <div className="ref-add-band-row">
+          {UPLOAD_BANDS.map((id) => (
+            <button
+              key={id}
+              type="button"
+              className="ref-add-band"
+              aria-pressed={band === id}
               disabled={busy}
-              onChange={(event) => setSlug(event.target.value)}
+              onClick={() => setBand(id)}
             >
-              {types.map((type) => (
-                <option key={type.id} value={type.slug}>
-                  {type.labelMr}
-                </option>
-              ))}
-            </select>
-          </div>
-        ) : null}
+              <span className="ref-add-band-name">{BAND_LABELS[id]}</span>
+              <span className="ref-add-band-hint">{BAND_HINTS[id]}</span>
+            </button>
+          ))}
+        </div>
+      </fieldset>
+
+      <div className="ref-add-row">
         <button
           type="button"
           className="btn btn-primary ref-add-pick"
-          disabled={busy || slug === ''}
+          disabled={busy || slug === '' || band === null}
           onClick={() => inputRef.current?.click()}
         >
           <Upload size={18} strokeWidth={2} aria-hidden="true" />
@@ -549,15 +548,15 @@ function UploadPanel({
           onChange={(event) => {
             const file = event.target.files?.[0];
             event.target.value = '';
-            if (file && slug) {
+            if (file && slug && band) {
               writeLastGroup(category, slug);
-              onUpload(slug, file);
+              onUpload(slug, band, file);
             }
           }}
         />
       </div>
       <p className="hint">{STR.refAddHint}</p>
-      {types.length > 1 ? <p className="hint">{STR.refAddGroupHint}</p> : null}
+      <p className="hint">{STR.refAddBandHint}</p>
     </div>
   );
 }
@@ -737,12 +736,12 @@ export default function ReferencesPage() {
           types={categoryTypes}
           busy={busy}
           onClose={() => setAdding(false)}
-          onUpload={(slug, file) => {
+          onUpload={(slug, band, file) => {
             if (!ACCEPTED_TYPES.has(file.type)) {
               setError(STR.refFileTypeError);
               return;
             }
-            void run(() => uploadReferenceImage(category, slug, file));
+            void run(() => uploadReferenceImage(category, slug, file, band));
           }}
         />
       ) : null}

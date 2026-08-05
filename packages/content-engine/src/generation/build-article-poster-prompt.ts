@@ -30,6 +30,15 @@ import {
   DISPLACE_PRESERVE_RULE,
   type ClearAction,
 } from './clear-space-rule.js';
+import { stampedChromeRule, type StampedChrome } from './reserved-zone-rule.js';
+
+// What overlayArticleChrome stamps, described as the model sees it on the poster it is editing.
+// Keep the wording in sync with poster-renderer/src/article-chrome.ts.
+const ARTICLE_CHROME: StampedChrome = {
+  surface: 'poster',
+  lockup: 'महासंवाद logo card in the top-left corner',
+  footer: 'full-width department footer strip along the bottom',
+};
 
 // 'fresh' generates the poster from scratch (no n8n); 'onbrand' edits the picked master.
 export type ArticleDesignMode = 'fresh' | 'onbrand';
@@ -318,8 +327,13 @@ export function buildArticleFeedbackPrompt(
     ? contentInventoryLines(input.contentInventory)
     : [];
 
+  // Geometry, then the branding itself. The old single sentence ended "do NOT alter, move,
+  // redraw or remove them", which an image-edit model repainting the whole canvas reads as
+  // "reproduce them" — and a freehand reproduction does not coincide with what
+  // overlayArticleChrome stamps afterwards, so both stay visible. See reserved-zone-rule.ts.
   const reservedZones =
-    'RESERVED ZONES: the महासंवाद logo in the top-left (approx 420x180 px) and the footer strip along the bottom (full width, approx 150 px tall) are official branding stamped onto the poster by software — do NOT alter, move, redraw or remove them, and do NOT move any text or important content into those areas.';
+    'RESERVED ZONES: the top-left corner (approx 420x180 px) and the full-width bottom strip (approx 150 px tall) are reserved for official branding that software places onto the finished poster. Keep both clear, and do NOT move any text or important content into those areas.';
+  const chromeRule = stampedChromeRule(ARTICLE_CHROME);
 
   // A DISPLACE round cannot keep the exact layout — that is the point of it — so the
   // keep-layout rule is REPLACED rather than hedged with an "except…" clause the
@@ -344,6 +358,7 @@ export function buildArticleFeedbackPrompt(
       `Make ONLY these changes. ${keepRuleMarker}`,
       'ERASE every red marker rectangle and numbered badge completely from the output, restoring whatever they overlapped — no red outlines, red circles, or annotation numbers may remain anywhere on the poster.',
       reservedZones,
+      chromeRule,
       `Add no new text, letters, numbers, captions, logos, borders, or decorative elements beyond the requested changes. Preserve all other existing Devanagari text exactly${textException}. Output ONE complete landscape poster filling the canvas.`,
       ...inventory,
       ...clear.lines,
@@ -357,6 +372,7 @@ export function buildArticleFeedbackPrompt(
       : []),
     keepRule,
     reservedZones,
+    chromeRule,
     `Add no new text, letters, numbers, captions, logos, borders, or decorative elements. Preserve all existing Devanagari text exactly${textException}. Output ONE complete landscape poster filling the canvas.`,
     ...inventory,
     ...clear.lines,
@@ -573,6 +589,46 @@ if (
       failures.push('plain feedback prompt mentions markers');
     if (!plain.includes('RESERVED ZONES')) {
       failures.push('plain feedback prompt lost the reserved zones');
+    }
+    // The article twin of the social duplicated-badge fix (generation cc283a63). The old
+    // "do NOT alter, move, redraw or remove them" reads to a model repainting the whole
+    // canvas as "reproduce the logo freehand", and overlayArticleChrome then stamps the real
+    // one beside it.
+    for (const [label, prompt] of [
+      ['plain', plain],
+      ['marker', marked],
+      [
+        'clear-space',
+        buildArticleFeedbackPrompt({
+          imageFeedback: '',
+          clearActions: ['displace'],
+        }),
+      ],
+    ] as const) {
+      if (!prompt.includes('DO NOT REPRODUCE IT'))
+        failures.push(
+          `${label} feedback prompt does not forbid redrawing the chrome`,
+        );
+      if (!prompt.includes('ERASE both of them'))
+        failures.push(
+          `${label} feedback prompt does not ask for the chrome to be erased`,
+        );
+      if (!prompt.includes('survives BESIDE the real branding'))
+        failures.push(
+          `${label} feedback prompt does not state the duplicate consequence`,
+        );
+      if (!prompt.includes('OVERRIDES any instruction above'))
+        failures.push(
+          `${label} feedback prompt lets keep-unchanged beat the chrome rule`,
+        );
+      if (/do NOT alter, move, redraw or remove them/.test(prompt))
+        failures.push(
+          `${label} feedback prompt restored the "do not redraw" wording`,
+        );
+      // The failure this whole file was already carrying a rule against: erasing the logo
+      // must not read as freeing the corner for the headline.
+      if (!prompt.includes('does NOT free up usable space'))
+        failures.push(`${label} feedback prompt lost the reflow guard`);
     }
     if (/blue/i.test(plain))
       failures.push('plain feedback prompt mentions blue clear boxes');

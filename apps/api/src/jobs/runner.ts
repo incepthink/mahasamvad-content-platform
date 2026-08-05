@@ -595,7 +595,10 @@ function articleCategoryOf(
 //
 // Read here rather than inside the engine, beside the ARTICLE_POSTER_MODE precedent: apps/api
 // sequences and chooses, the engine computes.
-function articleGenerationMode(): 'simple' | 'full' {
+// Exported so the detail payload can tell the web WHICH phases a run walks. Without it the
+// progress list can only guess, and it guessed the full pipeline: a simple-mode run showed six
+// steps of which one ever became active, so a multi-minute single call read as frozen.
+export function articleGenerationMode(): 'simple' | 'full' {
   return process.env.ARTICLE_GENERATION_MODE === 'full' ? 'full' : 'simple';
 }
 
@@ -1751,9 +1754,12 @@ async function renderAndStoreSocialPoster(
   const prompt = buildPosterPrompt({
     copy: copyResult?.copy ?? {},
     information: isSimpleTemplateEdit ? row.note : undefined,
-    // Both only reach the fixed-template branch, which is the one that must show every item.
+    // Only reaches the fixed-template branch, which is the one that must show every item —
+    // each of them exactly once. The shortfall is deliberately NOT passed any more: it used to
+    // tell the image model to repeat the reference's rows, and "repeat" is the wrong word to
+    // put anywhere near a prompt that must reproduce the officer's text unchanged. It still
+    // warns the officer through posterCapacityWarnings above.
     itemCount: isSimpleTemplateEdit ? resolved.itemCount : undefined,
-    slotShortfall: isSimpleTemplateEdit ? resolved.shortfall : undefined,
     copyStyle: copyResult?.copyStyle ?? resolved.type.copyStyle,
     designMode,
     brand,
@@ -2287,6 +2293,7 @@ export function startArticleFeedbackJob(
       statementsOf(row),
       row.excludedFacts ?? [],
       rowHasFactCheck(row),
+      row.instructions ?? undefined,
     );
     designationWarnings.set(id, [...revised.designationIssues]);
     const revisedArticle = ensureArticleDateline(
@@ -2354,6 +2361,7 @@ export function startConcurrentArticleFeedbackJob(
             statementsOf(row),
             row.excludedFacts ?? [],
             rowHasFactCheck(row),
+            row.instructions ?? undefined,
           );
           designationWarnings.set(id, [...revised.designationIssues]);
           const revisedArticle = ensureArticleDateline(

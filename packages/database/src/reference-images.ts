@@ -20,6 +20,11 @@ export type ReferenceLayoutSpec = Readonly<{
   // What this master is about (subject/scheme). Display-only; absent on rows
   // analysed before this field existed.
   contentSummary?: string | undefined;
+  // `bulletSlots` above is the operator's declared band from upload time, not the
+  // vision pass's count — so a re-check must carry it through rather than overwrite
+  // it. Absent on every row analysed before this field existed, which reads correctly
+  // as "vision-derived".
+  slotsLockedByOperator?: boolean | undefined;
 }>;
 
 export type ReferenceImageRow = Readonly<{

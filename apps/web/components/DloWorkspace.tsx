@@ -371,7 +371,7 @@ export default function DloWorkspace({ intakeId }: { intakeId: string }) {
   // Tier 1 of the article's style-reference hierarchy: a published article the officer wants
   // this one shaped like. Style only — never a factual source (see StyleReferenceField).
   const [styleReference, setStyleReference] = useState('');
-  // The officer's free-text direction for this article (generations.instructions, 0041).
+  // The officer's trusted request for this article (generations.instructions, 0041).
   // Seeded from the saved review state, which is also how anything typed on the intake FORM
   // reaches this step — the create route writes it there.
   const [instructions, setInstructions] = useState('');

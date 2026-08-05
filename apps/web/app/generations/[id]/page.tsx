@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useState } from 'react';
+import { use, useCallback, useState } from 'react';
 import { isArticleCategory, isSocialCategory } from '@dgipr/schemas';
 import { useGeneration } from '../../../lib/useGeneration';
 import { useGenerationThread } from '../../../lib/useGenerationThread';
@@ -36,6 +36,21 @@ export default function GenerationDetailPage({
     detail?.status ?? null,
   );
 
+  // Every image-producing edit started on THIS page (a poster redesign, a heading redo, a
+  // copy/scene re-render, a marker round, attaching a poster to an article run) registers
+  // the run in the navbar's सुरू असलेली कामे panel, so the officer can navigate away and
+  // still see it finish — until now only a brand-new run appeared there and an edit was
+  // only visible on this page.
+  //
+  // Called AFTER the request resolves, never before: all of these routes flip the row to
+  // `running` before their 202, and addTask fetches the detail immediately — handed a row
+  // still reading `completed`, the provider would file it as terminal and never poll it.
+  // Deliberately no openPanel(): the officer is already watching the poster, so the panel's
+  // count is the notification and taking over the screen would not be.
+  const trackImageWork = useCallback(() => {
+    addTask(id);
+  }, [addTask, id]);
+
   // Retry on THIS run: re-run the step that failed, or — when its inputs are no longer
   // held (an API restart, or a row failed by an older build) — put the run back in working
   // order so its poster, versions and edit controls are usable again. It deliberately does
@@ -49,10 +64,12 @@ export default function GenerationDetailPage({
     try {
       const restarted = await retryGeneration(detail.id);
       // A restarted edit is a background render like any other, so it belongs in the tasks
-      // panel; a plain recovery has nothing to watch.
-      if (restarted && isSocialCategory(detail.category)) {
+      // panel; a plain recovery has nothing to watch. Tracked on BOTH lanes — a failed
+      // article-poster edit is as much a render to follow as a social one — while opening
+      // the panel outright stays social-only, where the panel is that lane's own surface.
+      if (restarted) {
         addTask(detail.id);
-        openPanel();
+        if (isSocialCategory(detail.category)) openPanel();
       }
       await refresh();
     } catch (e) {
@@ -221,6 +238,7 @@ export default function GenerationDetailPage({
             detail={detail}
             onChanged={refresh}
             busy={posterBusy}
+            onImageWorkStarted={trackImageWork}
           />
         ) : (
           <>
@@ -231,6 +249,7 @@ export default function GenerationDetailPage({
                 detail={detail}
                 onChanged={refresh}
                 busy={posterBusy}
+                onImageWorkStarted={trackImageWork}
               />
             ) : posterPending ? (
               <PosterSkeleton detail={detail} />
@@ -265,6 +284,7 @@ export default function GenerationDetailPage({
         detail={detail}
         onSpawned={() => void refreshThread()}
         onPosterStarted={() => void refresh()}
+        onImageWorkStarted={trackImageWork}
       />
     </main>
   );
