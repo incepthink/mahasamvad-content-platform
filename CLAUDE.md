@@ -1212,6 +1212,20 @@ Chromium): `pnpm --filter @dgipr/poster-renderer exec playwright install chromiu
   only steers the classifier + copy tone — never structure. Vision can misread, so
   `/references` shows the verdict per image with a re-check and a manual flip
   (`POST/PATCH /api/references/:id/analyze|layout-spec`).
+  - **`bulletSlots` has TWO possible authors, and `slotsLockedByOperator` says which.**
+    The upload form asks for a SIZE BAND (`ReferenceShapeBand` +
+    `REFERENCE_BAND_SLOTS` in `@dgipr/schemas`, the one place the boundaries live —
+    `apps/web/lib/referenceGroups.ts` reads the same numbers back out), and that answer
+    is written as the master's slot count with the flag set. `reanalyzeReferenceImage`
+    then carries the count through untouched while refreshing the summaries and the
+    photo-zone call, so a re-check never re-files a master out of the band the operator
+    put it in. No migration — `layout_spec` is jsonb and the flag is optional, so every
+    pre-existing spec reads correctly as vision-derived. **This number gates selection**
+    (`enforceCapacity` excludes a master with fewer slots than the note has items), so
+    the band map takes each band's ceiling and the open top band its floor —
+    understating passes a master over, overstating drops the officer's content. A failed
+    vision pass stores null even when a band was given, rather than fabricating a
+    `hasPhotoZone` nobody declared.
 - **Reference templates are a data-driven catalog, not a fixed list.** `reference_types`
   (migration 0013) holds the six builtins plus user-created custom twitter types; each
   type has a rotation of immutable library images (`reference_images`, many may be

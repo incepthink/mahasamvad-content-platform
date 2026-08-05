@@ -36,6 +36,14 @@ import {
   DISPLACE_PRESERVE_RULE,
   type ClearAction,
 } from './clear-space-rule.js';
+import {
+  fitToReserveRule,
+  referenceChromeRule,
+  reservedZoneBlock,
+  stampedChromeRule,
+  type ReservedZoneGeometry,
+  type StampedChrome,
+} from './reserved-zone-rule.js';
 
 /** The canvas every thumbnail prompt, render and chrome overlay on this lane assumes. */
 export const YOUTUBE_THUMBNAIL_DIMENSIONS = {
@@ -49,8 +57,16 @@ export const YOUTUBE_THUMBNAIL_DIMENSIONS = {
 const RESERVED_LOCKUP_WIDTH = 130;
 const RESERVED_LOCKUP_HEIGHT = 130;
 const RESERVED_FOOTER_HEIGHT = 70;
-const CONTENT_BOTTOM_Y =
-  YOUTUBE_THUMBNAIL_DIMENSIONS.height - RESERVED_FOOTER_HEIGHT;
+
+// The same shape the poster lane uses, so the two cannot drift apart on a rule that was
+// already copied verbatim between them once. See reserved-zone-rule.ts.
+const THUMBNAIL_ZONES: ReservedZoneGeometry = {
+  width: YOUTUBE_THUMBNAIL_DIMENSIONS.width,
+  height: YOUTUBE_THUMBNAIL_DIMENSIONS.height,
+  lockupWidth: RESERVED_LOCKUP_WIDTH,
+  lockupHeight: RESERVED_LOCKUP_HEIGHT,
+  footerHeight: RESERVED_FOOTER_HEIGHT,
+};
 
 export type BuildYoutubeThumbnailPromptInput = Readonly<{
   // The officer's information, VERBATIM. Not a "note about" the thumbnail — it IS the
@@ -72,7 +88,7 @@ const TEXT_FIDELITY =
   'REPRODUCE THE MARATHI TEXT EXACTLY. Copy every word character for character from the supplied information: every Devanagari letter, every matra and vowel sign, every conjunct (जोडाक्षर), every anusvara and every numeral, exactly as written and in the same order. Do not re-spell, re-word, translate, transliterate, correct, abbreviate, or "improve" any word. Do not drop or reposition a matra. Do not break a conjunct into separate letters. Marathi words rendered with a misplaced or missing matra are wrong even if they look plausible — re-read each word against the supplied text before finishing.';
 
 const STRUCTURE_ONLY =
-  'Use the provided reference image as the AUTHORITATIVE VISUAL STRUCTURE for the thumbnail. Preserve its overall composition, section placement, proportions, content distribution, imagery zones, visual balance, and density while replacing its information. STRUCTURE means only geometry and visual hierarchy—not the meaning, factual content, or element type of any reference slot. Do not redesign the structure, compress everything onto one side, or leave large blank or unused areas. Fill the usable canvas as efficiently as the reference image does.';
+  'Use the provided reference image as the AUTHORITATIVE VISUAL STRUCTURE for the thumbnail. Preserve its overall composition, section placement, proportions, content distribution, imagery zones, visual balance, and density while replacing its information. STRUCTURE means only geometry and visual hierarchy—not the meaning, factual content, or element type of any reference slot. Do not redesign the structure, compress everything onto one side, or leave large blank or unused areas. Fill the usable canvas as efficiently as the reference image does — the USABLE CANVAS is the area above the reserved bottom strip and outside the reserved top-right corner, never the full height of the frame.';
 
 const COLOUR_FREE =
   "The reference image controls STRUCTURE ONLY, not colour. Choose the thumbnail's colour palette freely and creatively; ensure strong contrast and easy readability for every Marathi word and Devanagari numeral, including when the frame is viewed small.";
@@ -103,7 +119,20 @@ const DESIGN_SUITS_MESSAGE =
 const PEOPLE_RULE =
   'PEOPLE: if the reference image places a cut-out portrait of a person, keep that arrangement — same side, same scale, same cut-out treatment against the background — and depict the person the supplied information names, dressed and presented as a senior Maharashtra government figure would be. Introduce a person ONLY where the supplied information names one; where it names nobody, use that area for the thumbnail’s own design treatment or supported imagery instead of inventing an official. Never place a face, a person or a portrait inside the reserved zones below.';
 
-const RESERVED_ZONES = `MANDATORY EMPTY COVER ZONES: only the top-right ${RESERVED_LOCKUP_WIDTH} x ${RESERVED_LOCKUP_HEIGHT} pixels and the full-width bottom ${RESERVED_FOOTER_HEIGHT} pixels of the ${YOUTUBE_THUMBNAIL_DIMENSIONS.width} x ${YOUTUBE_THUMBNAIL_DIMENSIONS.height} output are reserved for official branding added later by software (a government emblem badge top-right, and a full-width department strip along the bottom). All text, cards, panels, icons, photographs, faces, subjects and other meaningful content must end above y=${CONTENT_BOTTOM_Y} and must not sit behind the bottom strip. These are the ONLY areas that may be intentionally empty: use all remaining space right up to their boundaries, following the reference structure. Leave both zones COMPLETELY EMPTY of content and continue the thumbnail’s immediately surrounding background through them seamlessly, with the same colour and visual treatment as the adjacent background. Do NOT create a separate colour, white space, patch, box, panel, band, reserved-space marker, or visible boundary in either zone. ABSOLUTELY NO text, numbers, logos, footer, photographs, faces, people, objects, icons, borders, shapes, or decoration may enter, sit behind, or cross either zone.`;
+// What youtube-chrome.ts stamps, described as the model sees it — on the reference template it
+// is editing (initial) and on the finished thumbnail it is editing (feedback). The sixth block
+// carried over from the poster lane, and for the same reason as the other five: it fixes an
+// observed failure there (a duplicated महाराष्ट्र शासन badge, generation cc283a63).
+const THUMBNAIL_CHROME: StampedChrome = {
+  surface: 'thumbnail',
+  lockup: 'महाराष्ट्र शासन emblem-and-wordmark badge in the top-right corner',
+  footer: 'full-width department strip along the bottom',
+};
+
+const RESERVED_ZONES = reservedZoneBlock(
+  THUMBNAIL_ZONES,
+  'That branding is a government emblem badge in the top-right corner and a full-width department strip along the bottom.',
+);
 
 /**
  * The initial thumbnail prompt: edit the chosen reference template into a finished
@@ -121,7 +150,10 @@ export function buildYoutubeThumbnailPrompt(
   // four-item poster, and the two clauses that caused it ("never paste the entire input",
   // "select only the most important information") are deliberately absent here too.
   const completeness = [
-    'SHOW ALL OF THE INFORMATION. Every distinct point, name, designation, date, time, venue, figure and fact in the supplied information must appear on the thumbnail. Do not omit any of it, do not summarise it, and do not merge two points into one because the layout feels tight. If space is short, reduce type size within the legibility rule above, tighten spacing, or use more of the canvas — never drop content.',
+    // "or use more of the canvas" is deliberately GONE — the only space left over on this
+    // frame is the reserved footer strip, so that clause invited content under branding that
+    // is stamped on afterwards. See reserved-zone-rule.ts.
+    'SHOW ALL OF THE INFORMATION. Every distinct point, name, designation, date, time, venue, figure and fact in the supplied information must appear on the thumbnail. Do not omit any of it, do not summarise it, and do not merge two points into one because the layout feels tight. If space is short, reduce the type size within the legibility rule above and tighten the spacing until it fits — never drop content, and never run content into the reserved zones described at the end of these instructions.',
   ];
   const itemCount = input.itemCount;
   if (typeof itemCount === 'number' && itemCount > 0) {
@@ -150,9 +182,15 @@ export function buildYoutubeThumbnailPrompt(
     PEOPLE_RULE,
     CONTENT_FIREWALL,
     ARTEFACT_FILTER,
-    'Do not add a logo. Do not add a footer. Do not add any social-media handles, website addresses, channel names or QR codes.',
-    RESERVED_ZONES,
+    // "Do not add a logo. Do not add a footer." was the whole of this rule and did not hold on
+    // the poster lane: the reference is a finished frame carrying its own chrome, STRUCTURE ONLY
+    // above has just called it authoritative, and the model copied the badge it could see.
+    `${referenceChromeRule(THUMBNAIL_CHROME)} Do not add a channel name either.`,
     'Use only Marathi text and Devanagari numerals in the output. Use Nirmala UI for all text.',
+    // Geometry, then the rule that makes it outrank the completeness clauses above — LAST,
+    // which is the position these models weight most.
+    RESERVED_ZONES,
+    fitToReserveRule(THUMBNAIL_ZONES),
   ].join('\n');
 }
 
@@ -189,7 +227,12 @@ export function buildYoutubeFeedbackPrompt(
     ? contentInventoryLines(input.contentInventory)
     : [];
 
-  const reservedZones = `RESERVED ZONES: the महाराष्ट्र शासन emblem-and-wordmark badge in the top-right (approx ${RESERVED_LOCKUP_WIDTH} x ${RESERVED_LOCKUP_HEIGHT} px) and the department strip along the bottom (full width, approx ${RESERVED_FOOTER_HEIGHT} px tall) are official branding stamped onto the thumbnail by software — do NOT alter, move, redraw or remove them, and do NOT move any text or important content into those areas.`;
+  // Geometry, then the branding itself. The old single sentence ended "do NOT alter, move,
+  // redraw or remove them", which an image-edit model repainting the whole frame reads as
+  // "reproduce them" — and a freehand copy does not coincide with what the chrome overlay
+  // stamps afterwards, so both stay visible. See reserved-zone-rule.ts.
+  const reservedZones = `RESERVED ZONES: the top-right ${RESERVED_LOCKUP_WIDTH} x ${RESERVED_LOCKUP_HEIGHT} px corner and the full-width bottom ${RESERVED_FOOTER_HEIGHT} px strip are reserved for official branding that software places onto the finished thumbnail. Keep both clear, and do NOT move any text or important content into those areas.`;
+  const chromeRule = stampedChromeRule(THUMBNAIL_CHROME);
 
   // A DISPLACE round cannot keep the exact layout — that is the point of it — so the
   // keep-layout rule is REPLACED rather than hedged. DELETE-only keeps it, with the
@@ -215,6 +258,7 @@ export function buildYoutubeFeedbackPrompt(
       `REQUESTED CHANGES: «${imageFeedback}».`,
       `Make ONLY these changes. ${keepRuleMarker}`,
       reservedZones,
+      chromeRule,
       'ERASE every red marker rectangle and numbered badge completely from the output, restoring whatever they overlapped — no red outlines, red circles, or annotation numbers may remain anywhere on the thumbnail.',
       `Add no new text, letters, numbers, captions, logos, borders, or decorative elements beyond the requested changes. Preserve all other existing Devanagari text exactly${textException}. ${closing}`,
       ...inventory,
@@ -229,6 +273,7 @@ export function buildYoutubeFeedbackPrompt(
       : []),
     keepRule,
     reservedZones,
+    chromeRule,
     `Add no new text, letters, numbers, captions, logos, borders, or decorative elements. Preserve all existing Devanagari text exactly${textException}. ${closing}`,
     ...inventory,
     ...clear.lines,
@@ -284,8 +329,26 @@ if (
     'lost the form rule',
   );
   need(prompt, '320 pixels wide', 'lost the small-tile legibility test');
-  need(prompt, 'Do not add a logo.', 'lost the no-logo rule');
-  need(prompt, 'Do not add a footer.', 'lost the no-footer rule');
+  // The chrome rule that replaced the bare "Do not add a logo. Do not add a footer." pair —
+  // too weak on the poster lane against a reference the prompt calls authoritative, which is
+  // how a duplicated महाराष्ट्र शासन badge shipped (generation cc283a63).
+  need(
+    prompt,
+    'PLACEHOLDER CHROME — COPY NONE OF IT',
+    "does not mark the reference's branding as placeholder",
+  );
+  need(
+    prompt,
+    'survives BESIDE the real branding',
+    'does not say a painted logo becomes a duplicate',
+  );
+  need(
+    prompt,
+    'does NOT free up usable space',
+    'lost the guard against reflowing into the freed zone',
+  );
+  need(prompt, 'Do not add a channel name', 'lost the channel-name rule');
+  need(prompt, 'QR code', 'lost the QR-code rule');
   need(prompt, 'Devanagari numerals', 'lost the Marathi-only rule');
 
   // The reserved-zone numbers are the contract with youtube-chrome.ts. Assert the literal
@@ -337,6 +400,50 @@ if (
   need(plain, 'RESERVED ZONES', 'feedback prompt lost the reserved zones');
   need(plain, '16:9', 'feedback prompt lost the aspect');
   need(plain, 'Keep the exact layout', 'feedback prompt lost keep-layout');
+
+  // The thumbnail twin of the social duplicated-badge fix. The old reserved-zone sentence
+  // ended "do NOT alter, move, redraw or remove them", which a model repainting the whole
+  // frame reads as "redraw the badge freehand"; the chrome overlay then stamps the real one
+  // beside it. Asserted on every feedback shape.
+  for (const [label, p] of [
+    ['plain', plain],
+    [
+      'marker+clear',
+      buildYoutubeFeedbackPrompt({
+        imageFeedback: 'तारीख बदला',
+        markerCount: 1,
+        clearActions: ['displace'],
+      }),
+    ],
+  ] as const) {
+    need(
+      p,
+      'DO NOT REPRODUCE IT',
+      `${label} feedback allows redrawing the chrome`,
+    );
+    need(
+      p,
+      'ERASE both of them',
+      `${label} feedback does not erase the chrome`,
+    );
+    need(
+      p,
+      'survives BESIDE the real branding',
+      `${label} feedback lost the duplicate consequence`,
+    );
+    need(
+      p,
+      'OVERRIDES any instruction above',
+      `${label} feedback lets keep-unchanged beat the chrome rule`,
+    );
+    need(
+      p,
+      'does NOT free up usable space',
+      `${label} feedback lost the reflow guard`,
+    );
+    if (/do NOT alter, move, redraw or remove them/.test(p))
+      failures.push(`${label} feedback restored the "do not redraw" wording`);
+  }
 
   const marked = buildYoutubeFeedbackPrompt({
     imageFeedback: 'तारीख बदला',

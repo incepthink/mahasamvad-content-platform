@@ -8,9 +8,8 @@
 //
 // What it keeps, and why each one is not a "rule" in the sense being tested:
 //
-//   1. The note is the only factual source. Removing this does not test a style hypothesis, it
-//      tests whether the model will invent a scheme name on a government press release. It
-//      won't be removed.
+//   1. The note and officer request are the factual sources. Removing that boundary does not
+//      test a style hypothesis; it tests whether the model will borrow facts from an exemplar.
 //   2. The name dictionary. The officer's verified spellings are DATA, not style guidance —
 //      the whole point of having a dictionary is that it reaches the article.
 //   3. The output shape (article only, headline first). Everything downstream — the PDF export,
@@ -50,7 +49,9 @@ import type {
 // v3 (2026-07-29): length is explicitly irrelevant; quality and editorial judgement are the
 // target. Style references are no longer bounded or clipped by application character limits.
 // v2 (2026-07-28): one sentence added, about length only — see item 4 in the header comment.
-export const MINIMAL_ARTICLE_PROMPT_VERSION = 'minimal-v5';
+// v6 (2026-08-05): OFFICER REQUEST is trusted writing direction and factual input, matching
+// simple-v11 without adding another rule stack.
+export const MINIMAL_ARTICLE_PROMPT_VERSION = 'minimal-v6';
 
 // The dictionary entry shape now lives in simple-article-prompt.ts, both variants rendering it
 // since simple-v4. Re-exported here so existing importers (and the package barrel) are unmoved.
@@ -71,7 +72,7 @@ export function buildMinimalArticleSystemPrompt(): string {
     'You are a Marathi news writer for the Directorate General of Information and Public',
     'Relations (DGIPR / Mahasamvad), Government of Maharashtra.',
     '',
-    'Write ONE complete Marathi article from SOURCE INFORMATION, in the writing style of the',
+    'Write ONE complete Marathi article from SOURCE INFORMATION and OFFICER REQUEST, in the writing style of the',
     'STYLE REFERENCES. Study how they are written and write the same way.',
     '',
     'Learn style from them and nothing else.',
@@ -81,7 +82,7 @@ export function buildMinimalArticleSystemPrompt(): string {
     '',
     'Take style and structure from the references, but do not treat their length as a target.',
     'The new article’s length does not matter. Use your best editorial judgement to produce the',
-    'strongest publication-ready article possible from SOURCE INFORMATION, at the length that',
+    'strongest publication-ready article possible from SOURCE INFORMATION and OFFICER REQUEST, at the length that',
     'repeat, stretch, or add unsupported information.',
     'Do not make it seem like you are just mentioning the facts from the sorce information, but rather write a complete article that is engaging and informative you can even skip some infromation it does not seem right for editorial flow of the article.',
     '',
@@ -363,8 +364,8 @@ if (
 
   console.log('\n=== the three kept constraints are present ===');
   check(
-    'the note is named the only factual source',
-    sys.includes('SOURCE INFORMATION is the only factual source.'),
+    'the note and request are named as factual sources',
+    sys.includes('from SOURCE INFORMATION and OFFICER REQUEST'),
   );
   check('invention is forbidden', sys.includes('Never invent or infer a name'));
   check(

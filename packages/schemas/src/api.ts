@@ -45,9 +45,7 @@ export function isSocialCategory(
 // idea. It is its own predicate for the same reason isSocialCategory exists: every
 // lane branch in apps/api and apps/web must ask a named question, never
 // `category === 'youtube'`, so adding a second thumbnail format later is one edit here.
-export function isYoutubeCategory(
-  category: Category,
-): category is 'youtube' {
+export function isYoutubeCategory(category: Category): category is 'youtube' {
   return category === 'youtube';
 }
 
@@ -168,16 +166,25 @@ export const ARTICLE_WORD_TARGETS: Readonly<
   scheme: { target: 600, min: 450, max: 750 },
 };
 
-// How much free-text instruction an officer may attach to one article run. Generous enough
-// for a paragraph of real direction and small enough that it cannot become a second note —
-// this text steers the writing, it is never a factual source. Shared so the API's 400 and the
-// form's own counter enforce the same number.
+// How much free-text request an officer may attach to one article run. Generous enough
+// for a paragraph of real direction and factual corrections, while keeping one request bounded.
+// Shared so the API's 400 and the form's own counter enforce the same number.
 export const ARTICLE_INSTRUCTIONS_MAX_CHARS = 2000;
+
+// The floor on `note`. It was 20 — an ARTICLE minimum, from when every run on this route
+// was written from a टिपणी. The Creative and Social form now sends the POSTER'S OWN TEXT in
+// this field, and a poster line is legitimately short ('भारत टॅक्सी' is 11 characters), so a
+// 20-character floor rejected valid work. Lowered rather than removed: a one- or two-letter
+// note is a mis-submit on every lane, and this is the only thing standing between an empty
+// box and a paid render. Surfaces that genuinely need more (the detail page's edit-note
+// rerun, /dlo's combinedText, /video) keep their own higher minimums.
+export const POSTER_TEXT_MIN_CHARS = 5;
 
 export const CreateGenerationRequestSchema = z
   .object({
-    // The Marathi note (टिपणी) — sole factual source for everything generated.
-    note: z.string().trim().min(20),
+    // The Marathi note (टिपणी) — a factual source for everything generated. On the
+    // poster-first lanes it is also the text printed on the poster.
+    note: z.string().trim().min(POSTER_TEXT_MIN_CHARS),
     // What the run produces. 'article' means NO POSTER on BOTH lanes: on news/scheme the
     // poster phase is skipped, and on twitter/facebook it is the caption-only run (the
     // caption lives in the `article` column, the social lane's convention). 'poster' and
@@ -236,10 +243,9 @@ export const CreateGenerationRequestSchema = z
     // from the requested style category. Inert for social runs and for a pasted finished
     // article (providedArticle), neither of which generates prose.
     styleReference: z.string().trim().optional(),
-    // Article runs only (news/scheme): free-text instructions the officer wants the model to
-    // follow for THIS article — emphasis, ordering, tone, what to keep short. It is an
-    // INSTRUCTION, never a factual source: the prompt says so, so an officer who types a fact
-    // here does not get it published. Absent/empty ⇒ the article the pipeline writes today.
+    // Article runs only (news/scheme): the officer's trusted request for this article — writing
+    // direction plus facts or corrections supplied directly here. Absent/empty ⇒ the article
+    // the pipeline writes today.
     instructions: z
       .string()
       .trim()
@@ -554,6 +560,12 @@ export const GenerationDetailSchema = z.object({
   step: GenerationStepSchema.nullable(),
   outputType: OutputTypeSchema,
   category: CategorySchema,
+  // Which article pipeline this deployment runs (ARTICLE_GENERATION_MODE). The two walk
+  // DIFFERENT phases — 'simple' is retrieve → draft → done, 'full' is the six-stage editorial
+  // pipeline — so the progress list has to know which one to promise, or a simple run shows
+  // five phases that never happen and looks stuck on the one that does. Defaulted to the API's
+  // own default so an older payload still parses.
+  articlePipeline: z.enum(['simple', 'full']).default('simple'),
   // Poster design mode the run was created with (null for non-twitter rows).
   designMode: DesignModeSchema.nullable(),
   // Template brand the run was created with. Defaulted so a pre-0024 row (no column)
@@ -918,8 +930,42 @@ export const ReferenceLayoutSpecSchema = z.object({
   // description ranker that picks the best-fit master within a band (rank-master.ts).
   // Optional so specs analysed before this field existed still parse.
   contentSummary: z.string().optional(),
+  // The operator declared this master's size band at upload time, so `bulletSlots`
+  // above is THEIR number, not the vision pass's. A re-check therefore refreshes the
+  // summaries and the photo-zone call but leaves the count alone — the band an image
+  // is filed under is the operator's answer to the one question the upload form asks,
+  // and a later vision roll silently re-filing it would make that answer meaningless.
+  // Optional so every spec analysed before this existed keeps parsing as vision-derived.
+  slotsLockedByOperator: z.boolean().optional(),
 });
 export type ReferenceLayoutSpec = z.infer<typeof ReferenceLayoutSpecSchema>;
+
+// The size bands the master library is browsed and uploaded by. Derived from
+// `bulletSlots` for an ordinary vision-analysed master (see the web's referenceGroups.ts,
+// which adds an 'unanalyzed' band that only the library page can have) and DECLARED by
+// the operator on upload, which is why the mapping below has to live here rather than in
+// apps/web: the API writes the number, the web draws the chips, and the two would drift.
+export const ReferenceShapeBandSchema = z.enum([
+  'single',
+  'few',
+  'medium',
+  'many',
+]);
+export type ReferenceShapeBand = z.infer<typeof ReferenceShapeBandSchema>;
+
+// What an operator's band pick means as a slot COUNT. Each value is the band's own
+// ceiling ("१ ते ३ मुद्दे मावतात" = it holds three), except the open top band, which
+// takes its floor — there is no ceiling to state, and `enforceCapacity` excludes a
+// master with fewer slots than the note has items, so understating is the safe error
+// (the master is passed over) where overstating drops the officer's content.
+export const REFERENCE_BAND_SLOTS: Readonly<
+  Record<ReferenceShapeBand, number>
+> = {
+  single: 0,
+  few: 3,
+  medium: 6,
+  many: 7,
+};
 
 // Manual override for a bad vision read: patches the cached jsonb in place.
 // Both fields are optional and applied independently — the vision pass gets the

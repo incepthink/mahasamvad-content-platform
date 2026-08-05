@@ -41,7 +41,7 @@ export type DloDraft = Readonly<{
   category: DloCategory;
   heading: string;
   styleReference: string;
-  // The officer's free-text direction for the article (generations.instructions, 0041).
+  // The officer's trusted request for the article (generations.instructions, 0041).
   instructions: string;
   documentSlotIds: readonly number[];
   nextSlotId: number;

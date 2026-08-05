@@ -17,9 +17,15 @@
 // destination and the pin target. This module is pure and derived, so it cannot drift from the
 // data and cannot affect a render.
 
-import type { ReferenceImage } from '@dgipr/schemas';
+import type { ReferenceImage, ReferenceShapeBand } from '@dgipr/schemas';
+import { STR } from './strings';
 
-export type ShapeBandId = 'unanalyzed' | 'single' | 'few' | 'medium' | 'many';
+// The four real bands come from @dgipr/schemas, because the API writes an operator's
+// band pick as a slot count at upload time and this module reads that same number back
+// out — two copies of the boundaries would drift. 'unanalyzed' is added here and only
+// here: it is the absence of a spec, which is a state of the LIBRARY PAGE (an action
+// queue), never something an operator can file a master under.
+export type ShapeBandId = ReferenceShapeBand | 'unanalyzed';
 
 export type ShapeBand = Readonly<{
   id: ShapeBandId;
@@ -39,6 +45,35 @@ export const SHAPE_BANDS: readonly ShapeBand[] = [
   { id: 'few', min: 1, max: 3 },
   { id: 'medium', min: 4, max: 6 },
   { id: 'many', min: 7, max: Number.POSITIVE_INFINITY },
+];
+
+// The band headings, kept here rather than in each component: the library page, the
+// upload chips and the create-form picker are three surfaces naming the same four
+// sections, and three copies would drift the moment one label is reworded.
+export const BAND_LABELS: Record<ShapeBandId, string> = {
+  unanalyzed: STR.refBandUnanalyzed,
+  single: STR.refBandSingle,
+  few: STR.refBandFew,
+  medium: STR.refBandMedium,
+  many: STR.refBandMany,
+};
+
+export const BAND_HINTS: Record<ShapeBandId, string> = {
+  unanalyzed: STR.refBandUnanalyzedHint,
+  single: STR.refBandSingleHint,
+  few: STR.refBandFewHint,
+  medium: STR.refBandMediumHint,
+  many: STR.refBandManyHint,
+};
+
+// The bands an operator may actually file a master under — SHAPE_BANDS minus the
+// 'unanalyzed' action queue, which nothing can be uploaded into. Used by the upload
+// chips on /references and by the picker's section order, so those two agree.
+export const UPLOAD_BANDS: readonly ReferenceShapeBand[] = [
+  'single',
+  'few',
+  'medium',
+  'many',
 ];
 
 /**

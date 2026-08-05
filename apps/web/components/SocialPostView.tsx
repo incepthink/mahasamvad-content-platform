@@ -4,7 +4,8 @@
 // link-out target; the navbar tasks panel is the primary surface).
 //
 // Layout, top to bottom: the poster with an icon-button row under it (download /
-// redesign / recolour / publish / mark-for-image-edit), the caption as an ALWAYS-EDITABLE
+// redesign / recolour / mark-for-image-edit / free-this-space, then one brand-mark
+// publish button per platform — फेसबुक live, X disabled), the caption as an ALWAYS-EDITABLE
 // textarea with copy (and, on a run that has none, generate) icons in its bottom-right
 // corner, the marker notes for whatever the user has marked on the poster, and one
 // "बदल हवा आहे?" fold whose two pills switch between the caption and the poster change
@@ -21,7 +22,6 @@ import {
   // Palette — the "वेगळ्या रंगात तयार करा" recolour redo, hidden from the UI (see the
   // commented button below). Restore this import with it.
   RotateCw,
-  Share2,
   SquareDashed,
   SquarePen,
 } from 'lucide-react';
@@ -38,6 +38,8 @@ import { STR } from '../lib/strings';
 import { usePosterMarkers } from '../lib/usePosterMarkers';
 import { ClearActionToggle, clearActionLabel } from './ClearActionToggle';
 import { CrossFormatLinks } from './CrossFormatLinks';
+import { FacebookLogo } from './FacebookLogo';
+import { XLogo } from './XLogo';
 import {
   CLEAR_LETTERS,
   PosterAnnotator,
@@ -51,10 +53,17 @@ export function SocialPostView({
   detail,
   onChanged,
   busy = false,
+  onImageWorkStarted,
 }: {
   detail: GenerationDetail;
   onChanged: () => Promise<void>;
   busy?: boolean;
+  // Fired once a POSTER edit has been accepted by the API, handing the run to the navbar's
+  // सुरू असलेली कामे panel so it can be followed after leaving this page. Poster work only:
+  // a caption edit or revision touches no image, and this run's caption is already on screen
+  // here with its own inline indicator. Called after the await — these routes flip the row to
+  // running before their 202, and the panel files a still-`completed` row as terminal.
+  onImageWorkStarted?: (() => void) | undefined;
 }) {
   const [copied, setCopied] = useState(false);
   const [pending, setPending] = useState(false);
@@ -199,7 +208,7 @@ export function SocialPostView({
     setPublishingPost(true);
     setPublishError(null);
     try {
-      const postUrl = await publishGeneration(detail.id);
+      const postUrl = await publishGeneration(detail.id, 'facebook');
       setJustPublishedUrl(postUrl);
       setConfirmingPublish(false);
       // Pull the refreshed detail so the persisted publishedUrl arrives (the
@@ -220,6 +229,7 @@ export function SocialPostView({
     setPending(true);
     try {
       await regeneratePoster(detail.id, recolour ? { recolour: true } : {});
+      onImageWorkStarted?.();
       await onChanged();
     } finally {
       setPending(false);
@@ -286,6 +296,7 @@ export function SocialPostView({
       markSubmitted();
       setPosterChange('');
       setAnnotMode(null);
+      onImageWorkStarted?.();
       await onChanged();
     } catch (e) {
       setChangeError(e instanceof Error ? e.message : STR.genericError);
@@ -295,16 +306,16 @@ export function SocialPostView({
     }
   };
 
-  const publishLabel =
-    detail.category === 'facebook' ? STR.publishToFacebook : STR.publishToX;
   const liveUrl = justPublishedUrl ?? detail.publishedUrl;
-  const canPublish =
-    detail.status === 'completed' &&
-    detail.posterUrl !== null &&
-    detail.article !== null &&
-    !showSpinner &&
-    // X publishing is held back for now; Facebook is live.
-    detail.category !== 'twitter';
+  // The Facebook button is NOT gated on the row's category, a settled row or a finished
+  // caption. Not the category, because the create form's one क्रिएटिव्ह card submits
+  // 'twitter' for every social poster — that poster goes on the Page too, which is why the
+  // publish call names its target platform instead of letting the route infer one. Not the
+  // rest, because the officer decides when a post is ready and the route's own guards
+  // answer in Marathi if it is not (the reply lands in publishError under the poster).
+  // What is left is the one press that could not recover: a publish already in flight —
+  // posting is irreversible, so a second click must never make a second live post.
+  const publishBlocked = publishingPost;
   const changeSuggestions =
     changeTab === 'caption' ? STR.chipsCaption : STR.chipsPosterImage;
   const changeDraft = changeTab === 'caption' ? captionChange : posterChange;
@@ -405,19 +416,6 @@ export function SocialPostView({
               <button
                 type="button"
                 className="icon-btn"
-                title={canPublish ? publishLabel : STR.iconPublishDisabled}
-                aria-label={canPublish ? publishLabel : STR.iconPublishDisabled}
-                disabled={!canPublish || publishingPost}
-                onClick={() => {
-                  setConfirmingPublish(true);
-                  setPublishError(null);
-                }}
-              >
-                <Share2 size={18} strokeWidth={1.9} aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                className="icon-btn"
                 // Pressed state = marking is armed, so the poster reads as editable.
                 aria-pressed={annotMode === 'mark'}
                 title={
@@ -467,12 +465,35 @@ export function SocialPostView({
               >
                 <SquareDashed size={18} strokeWidth={1.9} aria-hidden="true" />
               </button>
-              {/* Last in the row, and the only entry that navigates rather than acting
-                  on this run — the trailing arrow is what says so. */}
-              <CrossFormatLinks
-                generationId={detail.id}
-                category={detail.category}
-              />
+              {/* Publish to the official account, one button per platform, brand mark
+                  only — where the poster goes is the whole message, so a Marathi label
+                  beside it would say the same thing twice. The label still travels as
+                  title + aria-label, since nothing here is spelled out on screen.
+                  The फेसबुक one stays pressable on a फेसबुक run — see publishBlocked. */}
+              <button
+                type="button"
+                className="icon-btn"
+                title={STR.publishToFacebook}
+                aria-label={STR.publishToFacebook}
+                disabled={publishBlocked}
+                onClick={() => {
+                  setConfirmingPublish(true);
+                  setPublishError(null);
+                }}
+              >
+                <FacebookLogo size={18} />
+              </button>
+              {/* Always disabled: X publishing is held back. Shown rather than hidden so
+                  the officer can see the platform exists and is simply not open yet. */}
+              <button
+                type="button"
+                className="icon-btn"
+                title={STR.iconPublishDisabled}
+                aria-label={STR.iconPublishDisabled}
+                disabled
+              >
+                <XLogo size={17} />
+              </button>
             </div>
             {markers.length > 0 || clearRegions.length > 0 ? (
               <div className="btn-row marker-submit-action">

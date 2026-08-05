@@ -2947,6 +2947,222 @@ Not implemented yet: Canva integration, authentication.
 
 ## Latest Implementation Milestone
 
+- **The dateline belongs to the BODY, and the progress list stopped promising phases that
+  never run** (2026-08-05, no migration): after `ARTICLE_STYLE_REFERENCES_ENABLED` made the
+  no-reference specification the default, a real news run (generation `0266d4eb`) published
+  its HEADLINE as `मुंबई, दि. ५ : एसटीचा निम्मा ताफा … आढावा` with the same dateline correctly
+  opening the body underneath it. Two causes, one in each half of the "instruct + guarantee"
+  pair the repo always builds in.
+  - **The guarantee had a `#`-shaped assumption.** `ensureArticleDateline` found the body as
+    "the first non-empty line that is not a Markdown heading". That is only correct while the
+    model emits `# शीर्षक` — and `no-reference-v1` asked for "the headline on the first line"
+    with no marker at all (so does `minimal-v6`), so the headline itself matched the body test
+    and got the dateline prefixed. It now detects the headline **without depending on the
+    marker**: a `#` heading, or a standalone opening line that has an article under it and does
+    **not close a sentence**. That last test is the discriminator and the only reliable one —
+    a Marathi headline is a fragment, a body paragraph always closes with `.`/`।`; length is
+    not usable (a real DGIPR headline runs past 110 characters). It also **strips a dateline
+    that landed on the headline**, so an already-broken row heals on its next feedback round
+    rather than growing a second dateline. Free harness (7 new cases, incl. the exact
+    production string and a two-pass no-op): `tsx src/generation/article-dateline.ts`.
+  - **No prompt had ever said where the dateline goes.** The shared `### DATELINE` block
+    rendered the value and nothing else, so "start the article with this" is read literally by
+    a model whose article starts with a headline. It now says it opens the FIRST BODY
+    PARAGRAPH, never the headline, once (`simple-v12`, reaching every variant through the
+    shared user message). `no-reference-v2`'s system message additionally states the OUTPUT
+    SHAPE — `# शीर्षक`, blank line, body — which fixes a second silent defect that shipped
+    with v1: a plain first line is not a heading to `MarkdownText` or to
+    `article-pdf-template.ts`, so the headline was rendering as body text on screen and in
+    every exported PDF.
+  - **The progress list was describing the wrong pipeline.** `ProgressSteps` hardcoded the
+    six-stage `full` list, so a `simple` run showed five phases that never happen — and,
+    worse, the row's `retrieve` is not in that list at all, so `indexOf` returned -1 and the
+    component fell back to marking step 1 active: a spinner on a phase that was not running,
+    under a label that did not describe it, for the whole setup window. `GenerationDetail`
+    gained `articlePipeline` (`'simple' | 'full'`, defaulted so an older payload parses),
+    reported from `articleGenerationMode()` — deployment-wide, read fresh, since the flag is
+    re-read at every job start — and the list is now `retrieve → draft` for simple and the
+    six stages for full. `STEP_LABELS.retrieve` went from "संदर्भ लेख शोधत आहोत…" to
+    "लेखाची तयारी करत आहोत…", which is true whether that window is fetching a style reference,
+    the name dictionary or the officer's designations.
+    Verified 2026-08-05, all free: workspace typecheck **7/7 green**, lint clean on all eight
+    touched files, and three harnesses green (`article-dateline` 11 cases,
+    `no-reference-article-prompt` +4, `simple-article-prompt` +2). **Left for a real run**: one
+    /dlo news article confirming the headline is a `#` line carrying no dateline and the body's
+    first paragraph carries exactly one. No migration, no n8n; deploy is `@dgipr/schemas` →
+    `@dgipr/content-engine` dists → API + web (ship together — `articlePipeline` is a shared
+    contract, though its schema default keeps a half-deploy from breaking).
+
+- **No image model ever paints the branding again — the chrome is CODE's, on every lane**
+  (2026-08-04, no migration, API only): an officer drew a blue clear-space box on generation
+  cc283a63 to move text out from under the logo, and got a SECOND महाराष्ट्र शासन badge —
+  the crisp stamped one plus a larger painted copy behind and below it. The zone rules were
+  not what failed. Two prompts positively invited the branding, and the fix is one shared
+  rule (`generation/reserved-zone-rule.ts`, joining `fitToReserveRule` there) wired into all
+  four lanes.
+  - **The FEEDBACK prompts asked for it, in as many words.** Every one of them said the badge
+    and footer "are official branding stamped onto the poster by software — do NOT alter,
+    move, redraw or **remove** them". An image-edit model repaints the whole canvas, so "do
+    not remove it" is read as "reproduce it", and its reproduction is freehand: it lands at a
+    different size and offset from the 160x154 badge `overlayTwitterChrome` stamps at a 6px
+    margin, so the two do not coincide and BOTH survive. The prompt also described that badge
+    as "approx 280x270 px" — a figure licensing a badge half as wide again as the real one,
+    which is exactly the shape of the overhang in the render. It now quotes `SOCIAL_ZONES`
+    (180x170 / 120px), the same reserve the initial fixed-template prompt uses.
+  - **The fixed-template (ठरलेले टेम्पलेट) prompt said only "Do not add a logo. Do not add a
+    footer."** while calling the reference the AUTHORITATIVE VISUAL STRUCTURE — and the
+    reference is a finished poster carrying real chrome, with nothing marking it placeholder.
+    Every other DGIPR path says ERASE the master's chrome (`PLACEHOLDER_WITH_PHOTO`); this
+    branch never did. This is the problem the 2026-08-04 reserved-zone milestone below named
+    as separate and deferred.
+  - **The fact that makes both fixable is the one that makes erasure safe**: the chrome is
+    composited in CODE after EVERY render, initial and feedback alike (`overlayTwitterChrome`
+    / `overlayArticleChrome` / `overlayCmoChrome` / the youtube overlay — runner.ts:1432 and
+    :1824 for the social lane). A painted badge is never needed, never used, and can only
+    ever be a duplicate. So `stampedChromeRule` (feedback: it is not yours, ERASE it, leave
+    plain continuing background) and `referenceChromeRule` (initial: the reference's chrome
+    is placeholder, copy NONE of it) say the same three things — it is not yours, remove it,
+    and here is the consequence.
+  - **The consequence is the half that was never stated**, and it is what makes the rule win:
+    a painted copy is NOT overwritten by the stamp, it survives BESIDE it. Without that, the
+    model has no reason to prefer erasing over faithfully reproducing what it can see.
+  - **The erase rule must explicitly OUTRANK "keep the input unchanged"**, because it
+    contradicts two rules already in every feedback prompt — the keep-layout rule and
+    "preserve all existing Devanagari text exactly" (the footer band carries text). Left
+    unranked, the absolute-sounding half wins; that is the same trap `DISPLACE_PRESERVE_RULE`
+    was written to escape. Harness-asserted on every feedback shape.
+  - **`CHROME_FREES_NO_SPACE` travels INSIDE the rule**, not beside it. Telling a model to
+    erase the logo is the known way to cause the article path's older bug — freed corner read
+    as usable space, headline floated up into it, stamped logo clipped it — so the guard
+    cannot be something a caller might forget to add.
+  - CMO is included: its chrome is a full-width leader header rather than a corner badge, but
+    `overlayCmoChrome` re-stamps it on exactly the same schedule. Its header redraw is fully
+    covered and so was invisible; its FOOTER is the same DGIPR strip and had the same overhang.
+    The article `fresh` and legacy paths already said "do not paint any logos … stamped on
+    afterwards by software" and are deliberately untouched.
+    Verified 2026-08-04, all free: workspace typecheck **7/7 green**, lint clean on all four
+    touched files, and five harnesses green — `reserved-zone-rule` (both new rules, including
+    that the reference rule does NOT tell the model to erase branding off an image it is not
+    editing), plus **new per-lane assertions on every feedback shape** (plain / marker /
+    clear-space / cmo on the social lane, three on the article lane, two on the thumbnail
+    lane) checking the erase instruction, the duplicate consequence, the override, the reflow
+    guard, and — the regression test that matters — that the literal string
+    `do NOT alter, move, redraw or remove them` has not come back. If a painted badge or
+    footer ever reappears, check those first. **Left for a real run** (one image charge):
+    re-running the cc283a63 clear-space round and confirming one badge and one footer.
+    No migration, no n8n, no web change; deploy is `@dgipr/content-engine` dist → API.
+
+- **The reserved zones now OUTRANK completeness, and the prompt says what to do when the
+  content will not fit** (2026-08-04, no migration, API only): real renders were shipping
+  their closing paragraph under the stamped footer, cut mid-word — generation `cc283a63`
+  lost three of the four columns of its आवाहन block. **The reserve was not wrong and the
+  numbers were not wrong**: the fixed-template prompt asks for 120px on a 1600px canvas
+  where `overlayTwitterChrome` actually covers 91px (`239/3376 × 1280`, measured), i.e. 29px
+  of slack, and the top-right badge is 160x154 at a 6px margin against a 180x170 reserve.
+  What was wrong is that the prompt gave the model no way to WIN that constraint and three
+  louder reasons to lose it: the completeness rule offered *"or use more of the canvas"*
+  when space is short — on this canvas the only space left over IS the footer strip, so
+  that clause was a licence to put the officer's last paragraph where an opaque band was
+  about to land; the structure rule demands the "usable canvas" be filled as densely as the
+  reference, with "usable" left undefined and therefore read as the full height; and the
+  item count is stated as a number to check the output against. Completeness was stated
+  three times, the reserve once, in **second-to-last** position — so on a long note the
+  model resolved the conflict against the reserve, by about one line.
+  The fix is `generation/reserved-zone-rule.ts`, shared by the poster and YouTube-thumbnail
+  lanes (the `clear-space-rule.ts` shape, and shared because these blocks had already been
+  "carried over verbatim" between the two once — a verbatim copy is a copy that drifts).
+  It supplies the three things the failing prompt never said. **Priority**: the fit rule
+  opens by declaring it OUTRANKS every completeness, density and canvas-filling instruction
+  above it. **Consequence**: the band is OPAQUE and is not moved to suit the layout, so
+  anything under it is *covered and lost* — the sentence ends mid-word and the image is
+  thrown away; "reserved for branding added later" never said that, and the fixed-template
+  block did not even carry the `fresh` path's "will cover them" clause. **Action**: lay it
+  out, then CHECK THE BOTTOM, and if the last line does not clear the band, shrink the type
+  — **headline first**, no minimum size — and lay it out again; this is the officer's own
+  diagnosis, and the sentence already existed in the CMO branch of the same file and had
+  never been ported. Plus two supporting changes: `y=1480` is restated as a proportion the
+  model can actually SEE (a strip about one thirteenth of the height) because an image model
+  has no ruler and a bare coordinate is close to inert; and "usable canvas" is now defined
+  in place as the area above the band and outside the corner. `fitToReserveRule` is emitted
+  **LAST** on every path — fixed-template, `fresh`, the legacy edit modes and the thumbnail —
+  the position these models weight most and the position `clear-space-rule` is already
+  harness-asserted to hold. The `fresh`/legacy paths quote their own (more generous) 280x270
+  / 130px figures through `CHROME_ZONE_GEOMETRY`, because two different footer heights inside
+  one prompt would be worse than either number alone.
+  Deliberately NOT done, and worth knowing before anyone builds it: a post-render detector
+  that measures ink in the reserved strip. The prompt *correctly* asks for background,
+  gradients and photography to continue through those zones, so on a poster with a
+  photographic bleed a cheap edge/ink statistic cannot separate the failure from the required
+  behaviour — it would warn on posters that are fine. A reliable check needs the OCR/text
+  discrimination that is not in the repo, and a warning that cries wolf is worse than none.
+  The duplicated महाराष्ट्र शासन badge seen on some fixed-template renders is a SEPARATE
+  problem (that branch says "Do not add a logo" where every other DGIPR path says ERASE the
+  master's own chrome) and is deliberately untouched here. **Fixed on 2026-08-04 — see the
+  milestone above it.**
+  Verified 2026-08-04, all free: workspace typecheck **7/7 green**, lint clean on all three
+  touched files, and three harnesses — the new `tsx src/generation/reserved-zone-rule.ts`
+  (geometry, both content floors, the proportion wording, the optional footer note), plus
+  **new assertions on the fixed-template branch, which had none at all**: the priority, the
+  consequence, the shrink action, that `use more of the canvas` is gone, that "usable canvas"
+  is defined, that the fit rule is the LAST block, that the zones no longer precede the
+  completeness rule they must outrank, and that the geometry still matches `twitter-chrome.ts`.
+  If the overlap ever returns, check those first. **Left for a real run** (one image charge):
+  the same long weather-alert note re-rendered on ठरलेले टेम्पलेट, confirming the आवाहन block
+  clears the band. No migration, no n8n, no web change; deploy is `@dgipr/content-engine`
+  dist → API.
+
+- **Templates are uploaded and pinned by SIZE, not by topic** (2026-08-04, no migration,
+  web + API): `/references` had been reorganised into four size bands (एकच संदेश / थोडे
+  मुद्दे / मध्यम यादी / मोठी यादी) months ago, but the two places an operator actually
+  ANSWERS a question still asked the retired one. The upload form asked for a
+  `reference_type` in a dropdown — a judgement about what the placeholder artwork is about,
+  which predicts nothing and has not steered a render since capacity-first selection landed
+  — and the create-form picker still grouped Twitter under those same type headings. Both
+  now use the bands, so the library is uploaded into, browsed and pinned through one axis.
+  - **The band pick is authoritative, not decorative.** It is written as the master's
+    `bulletSlots` and marked `slotsLockedByOperator`, and `reanalyzeReferenceImage`
+    carries that count through while still refreshing the summaries and the photo-zone
+    call — otherwise a re-check aimed at fixing a vague subject line would silently move
+    the master to a different section of the library. Optional flag on a jsonb column, so
+    no migration and every existing spec still reads as vision-derived.
+  - **The band boundaries moved to `@dgipr/schemas`** (`ReferenceShapeBand`,
+    `REFERENCE_BAND_SLOTS`): the API now writes the number the web draws chips from, and
+    two copies would drift. `apps/web/lib/referenceGroups.ts` keeps `bandOf` and adds
+    'unanalyzed', which is the absence of a spec — a state of the library page, never
+    something an operator can file into. The band labels/hints moved there too, being
+    named by three surfaces now.
+  - **The number gates selection**, so the mapping errs deliberately: each band's ceiling
+    ("१ ते ३ मुद्दे मावतात" = 3), and the open top band its floor. `enforceCapacity`
+    excludes a master with fewer slots than the note has items, so understating passes a
+    master over while overstating drops the officer's content. Nothing is preselected on
+    the form and the file button stays disabled until the band is answered — a defaulted
+    guess would be accepted silently on most uploads. A failed vision pass stores null even
+    when a band was given rather than fabricating a `hasPhotoZone` nobody declared.
+  - **The whole-TYPE pin is gone from the picker**: a band is not a type, so there is no
+    `reference_type_id` to send, and pinning is now always one exact image. A restored
+    `{ kind: 'type' }` value still RENDERS (an older link, a re-run) — nothing on the form
+    can create one. The route, the column and `pickType`'s server half are untouched.
+  - The type is still stored (NOT NULL, and types remain pin targets); it is simply no
+    longer asked about, coming from the last one used in that library.
+  - Also: **तयार करा moved above the note box** on क्रिएटिव्ह आणि सोशल. The form is a long
+    textarea, an upload card and the format cards, so a button under all of it is
+    off-screen for most of the time spent on the page; this form is filled in one pass and
+    submitted, not reviewed downward. The error line moved with it, so a refusal is
+    reported where the action was taken.
+    Verified 2026-08-04, all free: workspace typecheck **7/7 green**, lint clean on all ten
+    touched files (the two prettier complaints are whole-file CRLF confirmed already failing
+    at HEAD — do NOT `--write` them); **38 browser assertions at 1360 and 390** against the
+    live library (the picker's four bands with real counts 22/19/27/14, आणखी दाखवा revealing
+    8 → 16, no type checkbox, the four upload chips with their capacity hints, no dropdown,
+    nothing preselected, the file button disabled until answered, तयार करा above the note at
+    both widths, no overflow, no page errors), plus the बॅनर and यूट्यूब lanes — which used
+    to render as one flat grid — now sectioning correctly; and the API rejecting an unknown
+    band **before** any upload while the band-less legacy call still parses. **Left for a
+    real run** (one vision call, writes a row to the live library): an actual upload
+    confirming the stored `bulletSlots` is the operator's number and survives a re-check.
+    No migration, no n8n; deploy is `@dgipr/schemas` → `@dgipr/database` →
+    `@dgipr/content-engine` dists → API → web.
+
 - **One design system across all ten index routes** (2026-08-03, no migration, web only): the
   UI was deliberately plain for non-technical staff, and had drifted into looking unfinished
   rather than simple. **No UI library was added** — Tailwind/shadcn over a hand-written

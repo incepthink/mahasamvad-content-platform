@@ -258,7 +258,7 @@ export const DloReviewStateSchema = z.object({
   excluded: z.array(z.string()).default([]),
   // Pasted style reference. Unlike category/heading this has no column of its own.
   styleReference: z.string().optional(),
-  // Free-text instructions for the article model (see ARTICLE_INSTRUCTIONS_MAX_CHARS). Stored
+  // Trusted request for the article model (see ARTICLE_INSTRUCTIONS_MAX_CHARS). Stored
   // here rather than in a column for the same reason as the style reference — and this is also
   // how something typed on the intake FORM reaches the review step: the create route seeds an
   // initial blob with it.
@@ -457,8 +457,8 @@ export const DloGenerateRequestSchema = z.object({
   // and structure only; never a factual source. Absent/empty ⇒ semantic retrieval, then any
   // available article from the requested news/scheme style category.
   styleReference: z.string().trim().optional(),
-  // Free-text instructions for the article model — emphasis, ordering, tone, what to keep
-  // short. An instruction, never a fact (see CreateGenerationRequestSchema.instructions).
+  // The officer's trusted request for the article model — writing direction plus any facts or
+  // corrections supplied directly here (see CreateGenerationRequestSchema.instructions).
   // Absent/empty ⇒ the article this intake would have produced before this field existed.
   instructions: z
     .string()

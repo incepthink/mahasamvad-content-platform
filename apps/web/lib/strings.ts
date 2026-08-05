@@ -38,11 +38,16 @@ export const STR = {
   mediaRoomTitle: 'पोस्टर व सोशल पोस्ट तयार करा',
   mediaRoomIntro:
     'तयार झालेला लेख चिकटवा किंवा फाईलमधून घ्या — त्यावरून पोस्टर, ट्विटर व फेसबुक पोस्ट किंवा फक्त कॅप्शन तयार होईल.',
-  articlePasteLabel: 'पूर्ण लेख येथे चिकटवा',
+  // The one text box on this page is now the POSTER'S OWN TEXT, not a finished article:
+  // क्रिएटिव्ह and यूट्यूब थंबनेल print everything typed here. बॅनर is the one exception —
+  // there the text is kept as the article and only the main name / heading is picked out of
+  // it — so the label stays single and the HINT carries that difference, rather than a
+  // label that changes below the fold (the format cards sit under this card, not above it).
+  articlePasteLabel: 'पोस्टरवर जो मजकूर हवा आहे तो येथे लिहा',
   articlePasteHint:
-    'तयार झालेला लेख येथे चिकटवा किंवा खालून फाईलमधून घ्या — दोन्ही एकत्रही करता येईल. त्यावरून पोस्टर व सोशल पोस्ट तयार होईल.',
+    'क्रिएटिव्ह व यूट्यूब थंबनेलसाठी येथे लिहिलेला सर्व मजकूर पोस्टरवर छापला जातो — म्हणून फक्त जेवढे पोस्टरवर हवे तेवढेच लिहा. बॅनरसाठी मात्र या मजकुरातील मुख्य नाव / शीर्षक शोधून तेच बॅनरवर येते. खालून फाईलमधूनही मजकूर घेता येईल — दोन्ही एकत्रही करता येईल.',
   articlePastePlaceholder:
-    'उदा. पूर्ण तयार झालेला मराठी लेख येथे चिकटवा… हाच लेख पोस्टर व सोशल पोस्टचा आधार असेल.',
+    'उदा. पोस्टरवर हवे असलेले मुद्दे, नावे, तारखा व आकडे येथे लिहा…',
   // ONE flat row of formats — यूट्यूब थंबनेल / ट्विटर / फेसबुक / लेख पोस्टर / व्हिडिओ.
   // Deliberately NOT the categoryTwitter/categoryFacebook pair, whose descriptions promise
   // "पोस्टर + कॅप्शन": the caption is now an opt-in checkbox under those two cards.
@@ -72,14 +77,12 @@ export const STR = {
     'आधी प्रसिद्ध झालेला एखादा लेख इथे चिकटवा; त्याची मांडणी, शीर्षक-रचना व भाषाशैली नमुना म्हणून वापरली जाईल. यातील कोणतीही माहिती, नावे किंवा आकडे नव्या लेखात घेतले जाणार नाहीत — त्यासाठी टिपणीच एकमेव आधार आहे. रिकामे ठेवल्यास मंच जुळणारा महासंवाद लेख स्वतः निवडेल.',
   styleRefPlaceholder:
     'उदा. महासंवादवर आधी प्रसिद्ध झालेल्या लेखाचा संपूर्ण मजकूर…',
-  // The officer's own instructions to the model for ONE article. The hint has the same job as
-  // the style reference's: make it unmistakable that this steers the WRITING and is never a
-  // source of facts, so nobody types a name or a figure here expecting it to be published.
-  aiInstructionsLabel: 'AI साठी सूचना (ऐच्छिक)',
+  // The officer's trusted request for ONE article: both writing direction and factual input.
+  aiInstructionsLabel: 'तुमची विनंती (ऐच्छिक)',
   aiInstructionsHint:
-    'लेख कसा लिहावा याविषयी सूचना द्या — कशावर भर द्यायचा, कोणता मुद्दा आधी घ्यायचा, भाषा कशी असावी, काय थोडक्यात लिहायचे. या सूचना फक्त लेखनशैलीसाठी वापरल्या जातात; येथे लिहिलेली नावे, आकडे किंवा तारखा लेखात घेतल्या जाणार नाहीत — त्यासाठी टिपणी व कागदपत्रेच एकमेव आधार आहेत.',
+    'लेख कसा हवा, कशावर भर द्यायचा, काय वगळायचे किंवा कोणती माहिती दुरुस्त करायची ते लिहा. येथे दिलेली माहिती अधिकृत मानली जाईल.',
   aiInstructionsPlaceholder:
-    'उदा. पहिल्या परिच्छेदात निधीचा आकडा घ्या; समितीच्या रचनेबद्दल थोडक्यात लिहा; भाषा सोपी ठेवा.',
+    'उदा. ५० कोटींच्या निधीवर भर द्या; समिती सदस्यांची यादी टाळा; भाषा सोपी ठेवा.',
   aiInstructionsTooLong: 'सूचना खूप मोठ्या आहेत — कृपया थोडक्यात लिहा.',
 
   categoryLabel: 'लेखाचा प्रकार?',
@@ -129,6 +132,11 @@ export const STR = {
   submitting: 'पाठवत आहोत…',
   docReadingForSubmit: 'फाईल वाचत आहे…',
   noteTooShort: 'कृपया किमान २० अक्षरांची टिपणी लिहा.',
+  // The media room's own version. It is a SEPARATE string rather than a reworded
+  // noteTooShort because that one is still shown by the detail page's edit-note rerun,
+  // which keeps the 20-character article minimum — poster text can legitimately be a
+  // handful of characters ('भारत टॅक्सी' is 11).
+  posterTextTooShort: 'कृपया पोस्टरवर छापायचा मजकूर लिहा.',
 
   // DLO (Digital Liaison Officer) interface — meeting notes + recordings +
   // documents → transcription/extraction → editable review → article.
@@ -823,6 +831,12 @@ export const STR = {
   posterHeadingPlaceholder: 'उदा. भारत टॅक्सी',
   posterHeadingHint:
     'पोस्टरवर नेमका हाच मजकूर छापला जाईल. रिकामे ठेवल्यास टिपणीतील योजना / पुरस्कार / उपक्रमाचे नाव आपोआप शोधून वापरले जाईल.',
+  // The create form's own wording. The shared hint above is written for the detail page,
+  // where the poster already exists and this is how a wrong line is corrected; here the box
+  // at the top of the page is ALSO called "पोस्टरवरील मजकूर", so this one's job is to say
+  // which of the two decides — otherwise the officer sees two fields making one promise.
+  posterHeadingCreateHint:
+    'बॅनरवर वरील मजकुरातील मुख्य नाव आपोआप शोधून छापले जाते. ते नाव स्वतः ठरवायचे असल्यास येथे लिहा — मग नेमका हाच मजकूर बॅनरवर येईल.',
   posterHeadingTooLong: 'पोस्टरवरील मजकूर १२० अक्षरांपेक्षा कमी ठेवा.',
   // Detail page: the edit fold under the poster.
   posterHeadingEdit: 'पोस्टरवरील मजकूर बदला',
@@ -958,9 +972,13 @@ export const STR = {
   refAddOpen: 'नवीन टेम्पलेट जोडा',
   refAddTitle: 'नवीन टेम्पलेट',
   refAddCancel: 'रद्द करा',
-  refAddGroupLabel: 'गट',
-  refAddGroupHint:
-    'नोंदीसाठीचा गट. पोस्टर तयार करताना संपूर्ण लायब्ररीतून सर्वात योग्य टेम्पलेट निवडले जाते — गट त्यावर मर्यादा घालत नाही.',
+  // The upload form's ONE question, asked with the same four sections the page is
+  // browsed by. It is a real answer, not a filing convenience: the chosen band becomes
+  // the master's slot count, which is what decides whether a note with N points may use
+  // it at all — hence "किती मुद्दे मावतात", never "कोणता विषय".
+  refAddBandLabel: 'या टेम्पलेटमध्ये किती मुद्दे मावतात?',
+  refAddBandHint:
+    'चित्रातील मुद्द्यांच्या जागा मोजून गट निवडा. तुम्ही निवडलेला गटच कायम राहील — तपासणीनंतरही तो बदलणार नाही.',
   refAddPick: 'चित्र निवडा',
   refAddHint: 'PNG, JPEG किंवा WebP चित्र निवडल्यावर ते लगेच जोडले जाईल.',
   refGroupLine: 'गट',
@@ -1053,14 +1071,16 @@ export const STR = {
   // Home-page reference picker (pin a specific master template for this run)
   refPickerTitle: 'पोस्टर टेम्पलेट',
   refPickerHint:
-    'आपोआप निवड वापरा, संपूर्ण प्रकार निवडा किंवा गॅलरीतून एक ठरावीक टेम्पलेट निवडा.',
+    'आपोआप निवड वापरा किंवा गॅलरीतून एक ठरावीक टेम्पलेट निवडा. टेम्पलेटमध्ये किती मुद्दे मावतात त्यानुसार गट केले आहेत.',
   refPickerAuto: 'आपोआप निवड (शिफारस)',
   refPickerAutoDesc: 'विषयानुसार योग्य प्रकार व चित्र मंच स्वतः निवडेल',
   refPickerManual: 'स्वतः निवडा',
   refPickerManualDesc: 'गॅलरीतून ठरावीक टेम्पलेट निवडा',
   refPickerBadge: 'निवडले',
   refPickerSelected: 'निवडलेले टेम्पलेट',
-  refPickerTypeSelect: 'संपूर्ण प्रकार वापरा (यादृच्छिक चित्र)',
+  // The three below no longer describe anything this form can CREATE — the whole-type
+  // pin went with the type headings. They stay because a restored pin (an older link, a
+  // re-run of an earlier generation) still has to be readable rather than blank.
   refPickerTypeBadge: 'संपूर्ण प्रकार',
   refPickerTypeSelected: 'निवडलेला प्रकार',
   refPickerTypeHint:
@@ -1360,7 +1380,8 @@ export const STR = {
   analyticsServicesTitle: 'वापरलेल्या सेवा',
   analyticsServicesHint:
     'या सुविधेतील प्रत्येक कामासाठी वापरलेली सेवा, मॉडेल, कॉल, प्रक्रिया आणि खर्च.',
-  analyticsServicesNone: 'या कालावधीत या कार्यप्रवाहातील कोणतीही सेवा वापरली गेली नाही.',
+  analyticsServicesNone:
+    'या कालावधीत या कार्यप्रवाहातील कोणतीही सेवा वापरली गेली नाही.',
   analyticsServiceTableTask: 'काम आणि सेवा',
   analyticsServiceTableUsage: 'वापर',
   analyticsServiceTableCost: 'खर्च',
@@ -1582,7 +1603,10 @@ export const DLO_INTAKE_STEP_LABELS: Record<DloIntakeStep, string> = {
 
 // Marathi labels for the machine step keys the API writes.
 export const STEP_LABELS: Record<GenerationStep, string> = {
-  retrieve: 'संदर्भ लेख शोधत आहोत…',
+  // Covers the whole setup window before drafting: the name dictionary, the officer's
+  // designations and — when ARTICLE_STYLE_REFERENCES_ENABLED is on — the style reference.
+  // Deliberately not "संदर्भ लेख शोधत आहोत", which is false whenever references are bypassed.
+  retrieve: 'लेखाची तयारी करत आहोत…',
   extract_5w1h: 'माहितीचे विश्लेषण करत आहोत…',
   editorial_brief: 'संपादकीय आराखडा तयार करत आहोत…',
   draft: 'लेख लिहित आहोत…',

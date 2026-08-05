@@ -1,8 +1,18 @@
 'use client';
 
-// Optional template pin on the create form. Automatic mode lets the classifier
-// choose; manual mode can pin either a whole Twitter type (with a fresh image
-// roll per run) or one exact enabled library image.
+// Optional template pin on the create form. Automatic mode lets the platform choose;
+// manual mode pins one exact enabled library image.
+//
+// THE GALLERY IS ORGANISED BY SIZE BAND, exactly as /references is — एकच संदेश / थोडे
+// मुद्दे / मध्यम यादी / मोठी यादी, each opening on two rows with an आणखी दाखवा control.
+// It used to group Twitter by `reference_type`, whose labels describe what the
+// placeholder artwork is ABOUT rather than what the template can hold; a run's real
+// question is "does my note fit this", which is what the bands answer.
+//
+// The whole-TYPE pin went with those headings: a band is not a type, so there is no
+// reference_type_id to send, and pinning is now always one exact image. A restored
+// `{ kind: 'type' }` value (an older link, a re-run of an earlier generation) still
+// RENDERS correctly — nothing on this form can create one any more.
 //
 // Types + images are fetched lazily the first time manual mode is chosen;
 // enabled images only.
@@ -28,7 +38,19 @@ import {
   ReferenceSearchBar,
   UnanalyzedNote,
 } from './ReferenceSearchBar';
+import {
+  BAND_HINTS,
+  BAND_LABELS,
+  SHAPE_BANDS,
+  groupByBand,
+} from '../lib/referenceGroups';
 import { STR } from '../lib/strings';
+
+// A band opens on two rows' worth of thumbnails and grows by the same each press. Count-
+// based rather than measured (the library page measures its resolved grid tracks): this
+// gallery sits inside a fold on a form, where "about two rows" is close enough and a
+// ResizeObserver per band is not worth what it buys.
+const BAND_PAGE = 8;
 
 // The three master libraries. 'twitter' is the only one with several types, so it is also
 // the only one that offers a whole-TYPE pin (the API rejects a type pin on any other lane);
@@ -137,6 +159,63 @@ function ResultTile({
           </span>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+// One size section of the gallery: heading, count, and a grid that reveals itself two
+// rows at a time so a band holding thirty masters does not push the next heading off the
+// fold. The reveal is local state, so opening one band leaves the others as they were.
+function BandSection({
+  label,
+  hint,
+  images,
+  children,
+}: {
+  label: string;
+  hint: string;
+  images: readonly ReferenceImage[];
+  children: (image: ReferenceImage) => React.ReactNode;
+}) {
+  const [shown, setShown] = useState(BAND_PAGE);
+  const visible = images.slice(0, shown);
+  const hidden = images.length - visible.length;
+
+  return (
+    <div className="ref-picker-group">
+      <div className="ref-picker-group-header">
+        <h3 className="ref-picker-group-title">{label}</h3>
+        <span className="ref-picker-group-count">
+          {STR.refBandCount(images.length)}
+        </span>
+      </div>
+      <p className="hint ref-picker-group-hint">{hint}</p>
+      <div className="ref-picker-grid">{visible.map(children)}</div>
+      {hidden > 0 || shown > BAND_PAGE ? (
+        <div className="ref-thumb-more">
+          {hidden > 0 ? (
+            <button
+              type="button"
+              className="btn btn-small"
+              onClick={() => setShown((current) => current + BAND_PAGE)}
+            >
+              {STR.refShowMore}
+              <span className="ref-thumb-more-count">
+                {STR.refHiddenCount(hidden)}
+              </span>
+            </button>
+          ) : null}
+          {shown > BAND_PAGE ? (
+            <button
+              type="button"
+              className="btn btn-small"
+              onClick={() => setShown(BAND_PAGE)}
+            >
+              {STR.refShowLess}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -255,6 +334,24 @@ export default function ReferencePicker({
   );
   const searching = search.queryActive || search.filtersActive;
 
+  // The browse view: the same enabled-only pool, re-bucketed by what each master can
+  // hold. Built off `groups` rather than `library.images` so the brand and category
+  // filters above still decide the pool — a CMO master must not appear in a DGIPR run.
+  const bands = useMemo(
+    () => groupByBand(groups.flatMap((group) => group.images)),
+    [groups],
+  );
+
+  // A thumbnail still needs its type's name for its tooltip/alt text, which is the one
+  // thing the type is still good for here.
+  const typeLabelOf = useMemo(() => {
+    const labels = new Map<string, string>();
+    for (const { type, images } of groups) {
+      for (const image of images) labels.set(image.id, type.labelMr);
+    }
+    return labels;
+  }, [groups]);
+
   const selectedImage =
     value?.kind === 'image' && library
       ? (library.images.find((image) => image.id === value.id) ?? null)
@@ -276,10 +373,6 @@ export default function ReferencePicker({
   const pick = (id: string) =>
     onChange(
       value?.kind === 'image' && value.id === id ? null : { kind: 'image', id },
-    );
-  const pickType = (id: string) =>
-    onChange(
-      value?.kind === 'type' && value.id === id ? null : { kind: 'type', id },
     );
 
   // The gallery itself is variant-independent — the three variants differ only in what
@@ -373,52 +466,34 @@ export default function ReferencePicker({
           )}
           <UnanalyzedNote count={search.unanalyzed.length} />
         </>
-      ) : category === 'twitter' ? (
-        groups.map(({ type, images }) => (
-          <div key={type.id} className="ref-picker-group">
-            <div className="ref-picker-group-header">
-              <h3 className="ref-picker-group-title">{type.labelMr}</h3>
-              {/* Checked = pin the whole type; the job then rolls one of its
-                  enabled images at random. Picking a thumbnail below swaps the
-                  type pin for an image pin, so this unchecks itself. */}
-              <label className="ref-picker-check">
-                <input
-                  type="checkbox"
-                  checked={value?.kind === 'type' && value.id === type.id}
-                  onChange={() => pickType(type.id)}
-                />
-                <span>{STR.refPickerTypeSelect}</span>
-              </label>
-            </div>
-            <div className="ref-picker-grid">
-              {images.map((image) => (
+      ) : (
+        // Browsing, by what each template HOLDS. Every library gets the same sections —
+        // the shape question is the same one whether the output is a social poster, a
+        // लेख banner or a thumbnail. An empty band renders nothing: "no templates of this
+        // size" is not information anyone needs while choosing one.
+        SHAPE_BANDS.map((band) => {
+          const own = bands.get(band.id) ?? [];
+          if (own.length === 0) return null;
+          return (
+            <BandSection
+              key={band.id}
+              label={BAND_LABELS[band.id]}
+              hint={BAND_HINTS[band.id]}
+              images={own}
+            >
+              {(image) => (
                 <Thumb
                   key={image.id}
                   image={image}
                   category={category}
-                  label={type.labelMr}
+                  label={typeLabelOf.get(image.id) ?? image.subtype}
                   selected={value?.kind === 'image' && value.id === image.id}
                   onClick={() => pick(image.id)}
                 />
-              ))}
-            </div>
-          </div>
-        ))
-      ) : (
-        <div className="ref-picker-grid ref-picker-grid-wide">
-          {groups.flatMap(({ type, images }) =>
-            images.map((image) => (
-              <Thumb
-                key={image.id}
-                image={image}
-                category={category}
-                label={type.labelMr}
-                selected={value?.kind === 'image' && value.id === image.id}
-                onClick={() => pick(image.id)}
-              />
-            )),
-          )}
-        </div>
+              )}
+            </BandSection>
+          );
+        })
       )}
     </div>
   );

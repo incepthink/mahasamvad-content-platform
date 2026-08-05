@@ -52,6 +52,7 @@ import {
   type ProofreadRequest,
   type ProofreadResponse,
   type ReferenceCategory,
+  type ReferenceShapeBand,
   type ReferenceImage,
   type ReferenceType,
   type TermType,
@@ -508,12 +509,19 @@ export function articlePdfDownloadUrl(
   return `${API_URL}/api/generations/${id}/article.pdf?lang=${language}`;
 }
 
-// Posts the poster + caption to the official account of the run's own platform
-// (twitter → X, facebook → the Facebook Page). Synchronous (~3-10s); returns the
-// live post's URL, which is also persisted on the row as `publishedUrl`.
-export async function publishGeneration(id: string): Promise<string> {
+// Posts the poster + caption to an official account — X or the Facebook Page. `platform`
+// is which one: the caller names it because one क्रिएटिव्ह poster is used on both, so the
+// run's category no longer says where it should go. Omitted, the API falls back to that
+// category. Synchronous (~3-10s); returns the live post's URL, which is also persisted on
+// the row as `publishedUrl`.
+export async function publishGeneration(
+  id: string,
+  platform?: 'twitter' | 'facebook',
+): Promise<string> {
   const body = await requestJson(`/api/generations/${id}/publish`, {
     method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(platform ? { platform } : {}),
   });
   return PublishGenerationResponseSchema.parse(body).postUrl;
 }
@@ -804,8 +812,13 @@ export async function uploadReferenceImage(
   category: ReferenceCategory,
   subtype: string,
   file: File,
+  // The size band the operator filed it under. It becomes the master's `bulletSlots`
+  // and is marked as theirs, so a later re-check refreshes the summaries without
+  // re-filing the image.
+  band?: ReferenceShapeBand,
 ): Promise<ReferenceImage> {
   const query = new URLSearchParams({ category, subtype });
+  if (band) query.set('band', band);
   const form = new FormData();
   form.set('file', file);
   const response = await fetch(`${API_URL}/api/references?${query}`, {

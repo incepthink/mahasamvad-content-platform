@@ -1,7 +1,7 @@
 // Revise a generated article according to free-text user feedback (the web UI's
-// feedback loop), under the SAME guardrails as generation: the original notes stay
-// the ONLY source of facts, so feedback can reshape tone/structure/emphasis but can
-// never smuggle in new names, dates, amounts or claims. Flow: revise → completeness
+// feedback loop), under the SAME guardrails as generation: the original notes and trusted
+// officer request remain factual sources, while feedback can reshape tone/structure/emphasis.
+// Flow: revise → completeness
 // guard (weave back citizen facts the revision dropped; when the feedback asks to
 // expand, also pull broader missing note info and let the article grow) → faithfulness
 // check + repair. The guard exists because the feedback path has no coverage loop of its
@@ -78,6 +78,7 @@ function buildRevisionMessages(
   includeFacts: readonly string[] = [],
   statements: readonly AttributedStatement[] = [],
   excludeFacts: readonly string[] = [],
+  officerRequest = '',
 ): ChatMessage[] {
   const { article: currentArticle, factCheck: currentFactCheck } =
     splitContent(currentContent);
@@ -90,6 +91,14 @@ function buildRevisionMessages(
     note.trim(),
     '</NOTES>',
     '',
+    ...(officerRequest.trim()
+      ? [
+          '<OFFICER_REQUEST purpose="authoritative_instructions_and_facts">',
+          officerRequest.trim(),
+          '</OFFICER_REQUEST>',
+          '',
+        ]
+      : []),
     '<CURRENT_ARTICLE purpose="draft_to_revise_not_fact_source">',
     currentArticle.trim(),
     '</CURRENT_ARTICLE>',
@@ -121,18 +130,22 @@ function buildRevisionMessages(
     '',
     '<TASK>',
     'वरील FEEDBACK नुसार लेख सुधारून संपूर्ण लेख पुन्हा लिहा.',
+    ...(officerRequest.trim()
+      ? ['FEEDBACK ने बदलले नसतील तर OFFICER_REQUEST मधील सूचना जपा.']
+      : []),
     // Rule 6 below forbids adding a पदनाम absent from NOTES; without this carve-out the
     // revision reads that as licence to strip the designations it was just handed.
     ...(designationBlock(designations).length > 0
       ? [DESIGNATION_ALLOWED_RULE]
       : []),
     ...(requiredRows.length > 0
-      ? [
-          'REQUIRED_FACTS मधील प्रत्येक निवडलेले तथ्य अंतिम लेखात अर्थासह जपा.',
-        ]
+      ? ['REQUIRED_FACTS मधील प्रत्येक निवडलेले तथ्य अंतिम लेखात अर्थासह जपा.']
       : []),
     ...(statementRows.length > 0
-      ? [STATEMENTS_ALLOWED_RULE, 'प्रत्येक ATTRIBUTED_STATEMENT योग्य वक्त्याशी जोडून जपा.']
+      ? [
+          STATEMENTS_ALLOWED_RULE,
+          'प्रत्येक ATTRIBUTED_STATEMENT योग्य वक्त्याशी जोडून जपा.',
+        ]
       : []),
     ...(excluded.length > 0
       ? [
@@ -150,12 +163,14 @@ function buildRevisionMessages(
       : []),
     '',
     'अत्यंत महत्त्वाचे नियम:',
-    '1. NOTES हाच माहितीचा एकमेव आणि अधिकृत स्रोत आहे.',
+    officerRequest.trim()
+      ? '1. NOTES आणि OFFICER_REQUEST हे माहितीचे अधिकृत स्रोत आहेत.'
+      : '1. NOTES हाच माहितीचा अधिकृत स्रोत आहे.',
     '2. CURRENT_ARTICLE हा फक्त आधीचा मसुदा आहे; तो स्वतंत्र तथ्य-स्रोत नाही.',
     '3. FEEDBACK हा फक्त शैली, रचना, लांबी, भर, सूर आणि मांडणी यांसाठी आहे; तो तथ्य-स्रोत नाही.',
-    '4. FEEDBACK मध्ये नवीन तथ्य, नाव, तारीख, रक्कम, पदनाम, ठिकाण, योजना, कायदा, दावा, quote किंवा byline सुचवले असल्यास ते फक्त NOTES मध्ये स्पष्ट आधार असल्यासच वापरा.',
+    `4. FEEDBACK मध्ये नवीन तथ्य, नाव, तारीख, रक्कम, पदनाम, ठिकाण, योजना, कायदा, दावा, quote किंवा byline सुचवले असल्यास ते फक्त NOTES${officerRequest.trim() ? ' किंवा OFFICER_REQUEST' : ''} मध्ये स्पष्ट आधार असल्यासच वापरा.`,
     '5. FEEDBACK आणि NOTES यांच्यात विरोध असेल तर NOTES ला प्राधान्य द्या आणि विरोधी feedback दुर्लक्ष करा.',
-    '6. NOTES मध्ये नसलेले कोणतेही नवीन तथ्य, नाव, तारीख, रक्कम, पदनाम, ठिकाण, योजना, कायदा, दावा, quote किंवा byline जोडू नका.',
+    `6. NOTES${officerRequest.trim() ? ' किंवा OFFICER_REQUEST' : ''} मध्ये नसलेले कोणतेही नवीन तथ्य, नाव, तारीख, रक्कम, पदनाम, ठिकाण, योजना, कायदा, दावा, quote किंवा byline जोडू नका.`,
     '7. NOTES मधील खरी आणि महत्त्वाची माहिती वगळू नका.',
     '8. अंतिम लेख category च्या मूळ शैलीतच ठेवा.',
     '9. फक्त सुधारित लेख द्या; तथ्य-तपासणी यादी किंवा विभाजक जोडू नका.',
@@ -318,13 +333,17 @@ export async function reviseArticle(
   // feedback round on such an article would silently grow a तथ्य-तपासणी fold that the run never
   // had, and buy an extra model pass to do it. Scheme-only either way; news never had one.
   withFactCheck = true,
+  // The trusted request used for the original draft. Kept last for call-site compatibility.
+  officerRequest?: string,
 ): Promise<RevisedArticle> {
   const expand = wantsExpansion(feedback);
+  const authoritativeSource = officerRequest?.trim()
+    ? `${note.trim()}\n\n=== OFFICER REQUEST ===\n${officerRequest.trim()}`
+    : note;
   const includeFacts = selectedFacts
     .map((fact) => fact.text.trim())
     .filter(Boolean);
-  const hasApprovedInventory =
-    includeFacts.length > 0 || statements.length > 0;
+  const hasApprovedInventory = includeFacts.length > 0 || statements.length > 0;
 
   let content = await chatComplete(
     buildRevisionMessages(
@@ -337,6 +356,7 @@ export async function reviseArticle(
       includeFacts,
       statements,
       excludeFacts,
+      officerRequest,
     ),
     { maxTokens: ARTICLE_BODY_MAX_TOKENS },
   );
@@ -347,20 +367,16 @@ export async function reviseArticle(
   // so any drift the inject pass introduces is still stripped downstream.
   const { article: revisedArticle } = splitContent(content);
   const approvedCoverage = hasApprovedInventory
-    ? await findMissingApprovedFacts(
-        revisedArticle,
-        includeFacts,
-        statements,
-      )
+    ? await findMissingApprovedFacts(revisedArticle, includeFacts, statements)
     : null;
   const [citizenMissing, broadMissing] = approvedCoverage
     ? [approvedCoverage.missing, [] as string[]]
     : await Promise.all([
-        findMissingNoteFacts(revisedArticle, note, excludeFacts),
+        findMissingNoteFacts(revisedArticle, authoritativeSource, excludeFacts),
         expand
           ? findMissingInformation(
               revisedArticle,
-              note,
+              authoritativeSource,
               heading,
               undefined,
               excludeFacts,
@@ -381,7 +397,7 @@ export async function reviseArticle(
     );
     content = await chatComplete(
       buildInjectMessages(
-        note,
+        authoritativeSource,
         content,
         missing,
         category,
@@ -398,7 +414,7 @@ export async function reviseArticle(
   // for the same reason — the article already carries them and they are not in the note.
   const unsupported = await findUnsupportedClaims(
     injectedArticle,
-    note,
+    authoritativeSource,
     heading,
     designations,
     statements,
@@ -407,7 +423,7 @@ export async function reviseArticle(
   if (unsupported.length > 0) {
     content = await chatComplete(
       buildRepairMessages(
-        note,
+        authoritativeSource,
         content,
         unsupported,
         category,
@@ -424,7 +440,7 @@ export async function reviseArticle(
   const { article: rawArticle } = splitContent(content);
   const factCheck =
     category === 'scheme' && withFactCheck
-      ? await generateFactCheck(rawArticle, note)
+      ? await generateFactCheck(rawArticle, authoritativeSource)
       : null;
 
   // Same placement as generateArticle: after the appendix, so it never reports the officer's

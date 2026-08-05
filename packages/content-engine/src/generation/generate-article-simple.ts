@@ -17,7 +17,7 @@
 //     guarantee, not an AI stage;
 //   - every officer-approved input (selected facts, attributed statements, excluded facts,
 //     approved designations), all of which reach the prompt;
-//   - the note as the sole factual authority, which the runtime specification states directly.
+//   - the note and the officer's request as the factual authorities; references remain style-only.
 //
 // The full pipeline is untouched and one env line away: ARTICLE_GENERATION_MODE=full.
 //
@@ -68,18 +68,20 @@ import {
   chatCompleteStream,
 } from './openai-chat.js';
 import {
+  NO_STYLE_REFERENCE,
   selectStyleReference,
   type StyleReference,
 } from './select-style-reference.js';
-import {
-  SIMPLE_ARTICLE_PROMPT_VERSION,
-  buildSimpleArticleMessages,
-} from './simple-article-prompt.js';
+import { SIMPLE_ARTICLE_PROMPT_VERSION } from './simple-article-prompt.js';
 import {
   MINIMAL_ARTICLE_PROMPT_VERSION,
-  buildMinimalArticleMessages,
   type ArticleNameEntry,
 } from './minimal-article-prompt.js';
+import {
+  NO_REFERENCE_ARTICLE_PROMPT_VERSION,
+  articleStyleReferencesEnabled,
+  buildArticleMessagesForReferenceMode,
+} from './no-reference-article-prompt.js';
 
 // Which editorial specification writes the article. 'standard' (the unset default) is the full
 // DGIPR specification in simple-article-prompt.ts. 'minimal' is the experiment: five sentences,
@@ -115,9 +117,8 @@ export type SimpleGenerateArticleOptions = Readonly<{
   heading?: string | undefined;
   // The officer's pasted style-reference article (generations.style_reference). Tier 1.
   styleReference?: string | null | undefined;
-  // The officer's free-text direction for this article (generations.instructions, 0041).
-  // Steers emphasis, order, tone and length; never a factual source — the prompt block carries
-  // that rule, so this is safe to pass through untouched.
+  // The officer's trusted request for this article (generations.instructions, 0041). It may
+  // direct the writing and supply or correct facts, so it is passed through untouched.
   instructions?: string | null | undefined;
   // Officer-approved inputs, all threaded into the one prompt.
   excludeFacts?: readonly string[] | undefined;
@@ -178,15 +179,20 @@ export async function generateArticleSimple(
   const statements = options?.statements ?? [];
   const designations = options?.designations ?? [];
 
-  // Tier 1 officer paste → tier 2 retrieval above the similarity floor → tier 3 none.
-  onProgress('retrieve');
-  const styleReference = await selectStyleReference({
-    note,
-    category,
-    officerReference: options?.styleReference,
-    heading: options?.heading,
-    preferAttribution: statements.length > 0,
-  });
+  // References are temporarily bypassed by default. The complete existing tier 1 → 2 → 3
+  // selector remains immediately available behind ARTICLE_STYLE_REFERENCES_ENABLED=true.
+  const referencesEnabled = articleStyleReferencesEnabled();
+  let styleReference = NO_STYLE_REFERENCE;
+  if (referencesEnabled) {
+    onProgress('retrieve');
+    styleReference = await selectStyleReference({
+      note,
+      category,
+      officerReference: options?.styleReference,
+      heading: options?.heading,
+      preferAttribution: statements.length > 0,
+    });
+  }
 
   onProgress('draft');
   const variant = articlePromptVariant();
@@ -210,10 +216,11 @@ export async function generateArticleSimple(
     date: options?.date,
   } as const;
 
-  const messages =
-    variant === 'minimal'
-      ? buildMinimalArticleMessages(promptInputs)
-      : buildSimpleArticleMessages(promptInputs);
+  const messages = buildArticleMessagesForReferenceMode(
+    promptInputs,
+    variant,
+    referencesEnabled,
+  );
   const callOptions = {
     model: ARTICLE_MODEL,
     maxTokens: ARTICLE_BODY_MAX_TOKENS,
@@ -256,10 +263,11 @@ export async function generateArticleSimple(
 
   // Which specification produced this article. Persisted below, so a good or bad output is
   // attributable to the prompt rather than to a memory of which env line was set that day.
-  const promptVersion =
-    variant === 'minimal'
+  const promptVersion = referencesEnabled
+    ? variant === 'minimal'
       ? MINIMAL_ARTICLE_PROMPT_VERSION
-      : SIMPLE_ARTICLE_PROMPT_VERSION;
+      : SIMPLE_ARTICLE_PROMPT_VERSION
+    : `${variant}-${NO_REFERENCE_ARTICLE_PROMPT_VERSION}`;
 
   console.log(
     `[simple-article] ${category} | model=${ARTICLE_MODEL} effort=${articleReasoningEffort()} | ` +

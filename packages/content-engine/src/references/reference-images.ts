@@ -13,7 +13,13 @@ import {
   type ReferenceImageRow,
   type SupabaseClient,
 } from '@dgipr/database';
-import type { ReferenceCategory, ReferenceImage } from '@dgipr/schemas';
+import {
+  REFERENCE_BAND_SLOTS,
+  type ReferenceCategory,
+  type ReferenceImage,
+  type ReferenceLayoutSpec,
+  type ReferenceShapeBand,
+} from '@dgipr/schemas';
 import sharp from 'sharp';
 import { analyzeReferenceTemplate } from './analyze-template.js';
 
@@ -68,11 +74,17 @@ export async function listReferenceLibrary(
 
 // The subtype must be an existing reference_types slug — the route validates it
 // against the catalog before calling this (the DB FK is the final guard).
+//
+// `band` is the operator's own answer to "how much does this template hold?", asked as
+// the upload form's one question. It OVERRIDES the vision pass's slot count and is
+// marked as theirs, so neither this upload nor any later re-check re-files the master
+// out of the band they filed it under.
 export async function uploadReferenceImage(
   client: SupabaseClient,
   category: ReferenceCategory,
   subtype: string,
   file: Buffer,
+  band?: ReferenceShapeBand,
 ): Promise<ReferenceImage> {
   const png = await normalizeReferenceImage(file, category);
   const storagePath = newLibraryPath(category, subtype);
@@ -88,9 +100,28 @@ export async function uploadReferenceImage(
     // The normalized buffer is already in hand, so the vision pass costs no
     // extra download. Best-effort: a null spec makes the workflow fall back to
     // its old behaviour, which is a worse poster — never a failed upload.
-    layoutSpec: await analyzeQuietly(png, storagePath),
+    //
+    // A failed analysis stays null even when a band was declared, rather than being
+    // fabricated around it: hasPhotoZone is the field that decides whether the image
+    // model may paint a photograph at all, and guessing `false` there is a claim about
+    // the master nobody made. The row lands in अजून तपासलेली नाहीत and one re-check
+    // fixes it — which is exactly what a null spec has always meant.
+    layoutSpec: withOperatorBand(await analyzeQuietly(png, storagePath), band),
   });
   return withUrl(client, row);
+}
+
+// Stamps the operator's declared band onto a vision-derived spec. Null in, null out.
+function withOperatorBand(
+  spec: ReferenceLayoutSpec | null,
+  band: ReferenceShapeBand | undefined,
+): ReferenceLayoutSpec | null {
+  if (!spec || !band) return spec;
+  return {
+    ...spec,
+    bulletSlots: REFERENCE_BAND_SLOTS[band],
+    slotsLockedByOperator: true,
+  };
 }
 
 async function analyzeQuietly(png: Buffer, label: string) {
@@ -118,7 +149,25 @@ export async function reanalyzeReferenceImage(
 
   const png = await downloadPng(client, row.storagePath);
   const spec = await analyzeReferenceTemplate(png);
-  return withUrl(client, await setReferenceImageLayoutSpec(client, id, spec));
+  // An operator-declared band survives the re-read. The re-check exists to correct a bad
+  // photo-zone call or a vague subject line; the slot count is not a reading of the
+  // pixels here but the answer given at upload, and silently overwriting it would move
+  // the master to another section of the library as a side effect of fixing its summary.
+  const locked = row.layoutSpec?.slotsLockedByOperator === true;
+  return withUrl(
+    client,
+    await setReferenceImageLayoutSpec(
+      client,
+      id,
+      locked
+        ? {
+            ...spec,
+            bulletSlots: row.layoutSpec!.bulletSlots,
+            slotsLockedByOperator: true,
+          }
+        : spec,
+    ),
+  );
 }
 
 // Manual correction of a bad vision read. Deliberately a PATCH of the cached spec,

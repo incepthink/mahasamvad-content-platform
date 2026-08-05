@@ -1025,6 +1025,9 @@ textarea.note-input {
   text-align: center;
   cursor: pointer;
   font: inherit;
+  /* What .logo-stack-item cuts its overlap with. Declared here rather than in the stack so
+     the ring always matches the card it sits on — including the selected state below. */
+  --chip-bg: #fffdfa;
 }
 
 .output-option .icon {
@@ -1055,6 +1058,37 @@ textarea.note-input {
 .output-option[aria-pressed='true'] {
   border-color: var(--accent);
   background: var(--accent-soft);
+  --chip-bg: var(--accent-soft);
+}
+
+/* Three overlapping brand marks as one card icon (क्रिएटिव्ह: X + Facebook + Instagram).
+   The separation between marks is a ring in the card's own background (--chip-bg), so the
+   overlap stays clean on both the plain and the selected card and no colour is hardcoded
+   here. Glyph size is passed in as --logo-glyph by SocialLogoStack. */
+.logo-stack {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.logo-stack-item {
+  position: relative;
+  display: grid;
+  place-items: center;
+  /* The chip is wider than the glyph on purpose — see SocialLogoStack. */
+  width: var(--logo-chip);
+  height: var(--logo-chip);
+  border-radius: 999px;
+  /* Fill AND ring, both in the card's colour: the fill is what hides the mark underneath
+     where they overlap, the ring is the visible gap between them. */
+  background: var(--chip-bg);
+  box-shadow: 0 0 0 2px var(--chip-bg);
+}
+
+/* Overlap by a quarter of a chip — enough to read as one set, little enough that every
+   mark stays recognisable. */
+.logo-stack-item + .logo-stack-item {
+  margin-left: calc(var(--logo-chip) * -0.25);
 }
 
 .output-option:disabled {
@@ -3191,13 +3225,73 @@ details.fold .fold-body.gl-add-body {
   margin: 12px 0 10px;
 }
 
-.ref-add-group {
-  flex: 1 1 260px;
-  min-width: 0;
+/* The upload form's one question, asked as the same four sections the page is browsed
+   by. Cards rather than a <select>: the operator is matching a picture against a
+   description ("१ ते ३ मुद्दे मावतात"), and a dropdown hides three of the four options
+   at the moment of comparison. Nothing is preselected, so the answer is always given. */
+.ref-add-bands {
+  margin: 14px 0 0;
+  padding: 0;
+  border: 0;
 }
 
-.ref-add-group select {
-  width: 100%;
+.ref-add-bands legend {
+  padding: 0;
+  margin-bottom: 4px;
+}
+
+.ref-add-band-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.ref-add-band {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 56px;
+  padding: 12px 14px;
+  text-align: left;
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+
+.ref-add-band:hover:not(:disabled) {
+  border-color: var(--border-strong);
+}
+
+.ref-add-band[aria-pressed='true'] {
+  background: var(--card);
+  border-color: var(--accent);
+  box-shadow: var(--shadow-sm);
+}
+
+.ref-add-band:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.ref-add-band-name {
+  font-weight: 700;
+}
+
+.ref-add-band-hint {
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ref-add-band {
+    transition: none;
+  }
 }
 
 .ref-add-pick {
@@ -3529,9 +3623,11 @@ textarea.ref-desc-input {
   margin: 0;
 }
 
-/* A plain heading row — the checkbox on the right is what selects the whole type. */
+/* A size-band heading and how many templates it holds. The count is on the heading row
+   rather than in the hint below because it is the number that decides whether the band
+   is worth opening. */
 .ref-picker-group-header {
-  margin: 0 0 10px;
+  margin: 0 0 4px;
   padding: 0 2px 8px;
   display: flex;
   align-items: center;
@@ -3546,22 +3642,18 @@ textarea.ref-desc-input {
   font-weight: 700;
 }
 
-.ref-picker-check {
+.ref-picker-group-count {
   flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  color: var(--accent-dark);
+  color: var(--muted);
   font-size: 0.8rem;
-  font-weight: 700;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
-.ref-picker-check input {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--accent);
-  cursor: pointer;
+.ref-picker-group-hint {
+  margin: 0 0 10px;
+  padding: 0 2px;
+  font-size: 0.82rem;
 }
 
 .ref-picker-grid {

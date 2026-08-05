@@ -65,6 +65,7 @@ import {
   type ThreadItem,
 } from '@dgipr/schemas';
 import {
+  articleGenerationMode,
   getCaptionReviseError,
   getEditFailure,
   isEditRetryable,
@@ -101,6 +102,18 @@ import { recordTasksFromCost } from '../jobs/service-usage.js';
 
 // Stage ping n8n POSTs to /generations/:id/progress after each social-post stage.
 const ProgressPingSchema = z.object({ step: GenerationStepSchema });
+
+// Which official account a publish targets. Optional, defaulting to the run's own
+// category — which is what every caller before this sent, so an old client keeps working.
+//
+// It exists because the create form now has ONE क्रिएटिव्ह card, and it submits 'twitter'
+// for every social poster (see FORMATS in apps/web/app/page.tsx). The poster it makes is
+// used on X AND on the Facebook Page, so the row's category no longer says where the
+// officer wants THIS post to go — the button they pressed does. Nothing else moves: the
+// category still decides the pipeline, the master library and the chrome.
+const PublishRequestSchema = z.object({
+  platform: z.enum(['twitter', 'facebook']).optional(),
+});
 
 // In-flight publish guard: posting to the official account is irreversible, so a
 // double click must never produce two live posts. In-process only (like the
@@ -203,6 +216,9 @@ async function toDetail(
     step: (row.step as GenerationStep | null) ?? null,
     outputType: row.outputType,
     category: row.category,
+    // Deployment-wide, not per row: the flag is read fresh on every job start, so reporting
+    // the CURRENT mode is what the progress list needs. A finished run's list is never shown.
+    articlePipeline: articleGenerationMode(),
     designMode: row.designMode,
     templateBrand: row.templateBrand,
     heading: row.heading,
@@ -1350,10 +1366,12 @@ export function registerGenerationRoutes(
     },
   );
 
-  // Post the poster + caption to the official account of the run's own platform
-  // (twitter → X, facebook → the Facebook Page). Synchronous — a publish is one
-  // media upload + one create (~3-10s). The latest live post URL is persisted on
-  // the row (migration 0021); re-publishing after a poster re-render overwrites it.
+  // Post the poster + caption to an official account — X or the Facebook Page, named by
+  // the request's `platform` and falling back to the run's own category. Synchronous — a
+  // publish is one media upload + one create (~3-10s). The latest live post URL is
+  // persisted on the row (migration 0021), so publishing the same poster to the second
+  // platform overwrites the first one's link; the posts themselves are both live, and one
+  // column cannot hold two. Re-publishing after a poster re-render overwrites it too.
   app.post<{ Params: { id: string } }>(
     '/generations/:id/publish',
     async (request, reply) => {
@@ -1368,20 +1386,30 @@ export function registerGenerationRoutes(
           error: { message: 'Only social-post runs can be published.' },
         });
       }
+      const parsedPublish = PublishRequestSchema.safeParse(request.body ?? {});
+      if (!parsedPublish.success) {
+        return reply.code(400).send({
+          error: { message: 'Unknown publish platform.' },
+        });
+      }
       if (publishing.has(row.id)) {
         return reply
           .code(409)
           .send({ error: { message: 'प्रकाशन आधीच सुरू आहे.' } });
       }
+      // These three used to be unreachable from the UI — the publish button was gated on a
+      // settled row with a caption. It is not any more (the officer decides when a post is
+      // ready), so these messages are now read by officers and are Marathi like the
+      // 409/503/422 guards below.
       if (isJobRunning(row.id)) {
-        return reply
-          .code(409)
-          .send({ error: { message: 'A job is already running.' } });
+        return reply.code(409).send({
+          error: { message: 'या पोस्टवर एक काम आधीच सुरू आहे.' },
+        });
       }
       if (row.status !== 'completed') {
-        return reply
-          .code(409)
-          .send({ error: { message: 'The run has not completed yet.' } });
+        return reply.code(409).send({
+          error: { message: 'काम अद्याप पूर्ण झालेले नाही.' },
+        });
       }
       // The कॅप्शन lane renders no poster, and both platforms need one (X uploads the
       // poster bytes as media, the Page endpoint is /photos) — so this is permanent, not
@@ -1397,13 +1425,18 @@ export function registerGenerationRoutes(
       }
       if (!row.posterPath || !row.article) {
         return reply.code(409).send({
-          error: { message: 'No poster and caption to publish yet.' },
+          error: {
+            message:
+              'पोस्टर आणि कॅप्शन दोन्ही तयार झाल्यावरच पोस्ट प्रकाशित करता येईल.',
+          },
         });
       }
       // Within-social platform branch — the legitimate divergence point the
       // isSocialCategory() rule funnels toward (it guards social-vs-article
       // routing; X and the Facebook Page genuinely need different APIs here).
-      const platform = row.category;
+      const platform: 'twitter' | 'facebook' =
+        parsedPublish.data.platform ??
+        (row.category === 'facebook' ? 'facebook' : 'twitter');
       const twitterCredentials =
         platform === 'twitter' ? twitterCredentialsFromEnv() : null;
       const facebookCredentials =

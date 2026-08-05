@@ -16,6 +16,7 @@ import {
 import {
   CreateReferenceTypeRequestSchema,
   ReferenceCategorySchema,
+  ReferenceShapeBandSchema,
   UpdateLayoutSpecRequestSchema,
   UpdateReferenceTypeRequestSchema,
 } from '@dgipr/schemas';
@@ -26,6 +27,10 @@ import { z } from 'zod';
 const UploadQuerySchema = z.object({
   category: ReferenceCategorySchema,
   subtype: z.string().regex(/^[a-z0-9_]+$/),
+  // The size band the operator filed this master under. Optional so the older
+  // two-parameter upload (and the seed script) still works and simply lets the
+  // vision pass decide, as it always did.
+  band: ReferenceShapeBandSchema.optional(),
 });
 
 export function registerReferenceRoutes(
@@ -79,7 +84,7 @@ export function registerReferenceRoutes(
   app.get('/references', async () => listReferenceLibrary(client));
 
   app.post('/references', async (request, reply) => {
-    const { category, subtype } = UploadQuerySchema.parse(request.query);
+    const { category, subtype, band } = UploadQuerySchema.parse(request.query);
     const type = await findReferenceTypeRow(client, category, subtype);
     if (!type) {
       return reply.code(400).send({
@@ -114,6 +119,7 @@ export function registerReferenceRoutes(
       category,
       subtype,
       await file.toBuffer(),
+      band,
     );
     return reply.code(201).send(image);
   });

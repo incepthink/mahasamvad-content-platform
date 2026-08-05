@@ -222,7 +222,7 @@ export function registerDloRoutes(
     let category = 'news';
     let heading = '';
     // Two fields the officer can fill in on the intake FORM even though they are only used at
-    // generate time: the free-text direction for the article and the pasted style model.
+    // generate time: the officer's trusted request and the pasted style model.
     // Neither has a column on dlo_intakes, so they are handed on through the review-state blob
     // (see the seed below) rather than being lost the moment the form is submitted.
     let instructions = '';
@@ -769,7 +769,7 @@ export function registerDloRoutes(
         // The article the officer pasted as the STYLE model (migration 0035) — tier 1 of the
         // simplified generator's reference hierarchy. Same omit-when-empty treatment again.
         styleReference: body.styleReference,
-        // The officer's free-text direction for this article (migration 0041). Same
+        // The officer's trusted request for this article (migration 0041). Same
         // omit-when-empty treatment again.
         instructions: body.instructions,
       });

@@ -50,13 +50,17 @@ function socialStartedOf(category: Category): string | null {
 // generation): article-only runs, DLO runs, and poster-phase-failure retries.
 // After the 202 the row is running again, so onPosterStarted must refresh the
 // detail poll; the whole NextActions panel then unmounts (non-terminal) and the
-// page shows the poster skeleton. No addTask/lane gating — nothing new to track.
+// page shows the poster skeleton. No lane gating — no new run is created — but
+// the render IS tracked (onImageWorkStarted): the panel follows rows, not runs,
+// so an edit of this row belongs there exactly like a poster redesign does.
 function CreatePosterBlock({
   detail,
   onPosterStarted,
+  onImageWorkStarted,
 }: {
   detail: GenerationDetail;
   onPosterStarted?: (() => void) | undefined;
+  onImageWorkStarted?: (() => void) | undefined;
 }) {
   const [reference, setReference] = useState<ReferenceSelection | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -70,6 +74,7 @@ function CreatePosterBlock({
         detail.id,
         reference?.kind === 'image' ? reference.id : undefined,
       );
+      onImageWorkStarted?.();
       onPosterStarted?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : STR.genericError);
@@ -208,7 +213,13 @@ export function NextActions({
   detail,
   onSpawned,
   onPosterStarted,
-}: BlockProps & { onPosterStarted?: (() => void) | undefined }) {
+  onImageWorkStarted,
+}: BlockProps & {
+  onPosterStarted?: (() => void) | undefined;
+  // Only CreatePosterBlock needs it: the edit-note block starts a NEW run and already
+  // registers that one itself.
+  onImageWorkStarted?: (() => void) | undefined;
+}) {
   const terminal = detail.status === 'completed' || detail.status === 'failed';
   if (!terminal) return null;
 
@@ -221,7 +232,11 @@ export function NextActions({
       {/* Outside the completed-only gate: on a failed row with an article the
           failure was the poster phase, so this doubles as the cheap retry. */}
       {!isSocial && detail.article && !detail.posterUrl ? (
-        <CreatePosterBlock detail={detail} onPosterStarted={onPosterStarted} />
+        <CreatePosterBlock
+          detail={detail}
+          onPosterStarted={onPosterStarted}
+          onImageWorkStarted={onImageWorkStarted}
+        />
       ) : null}
       <EditNoteBlock detail={detail} onSpawned={onSpawned} />
     </section>

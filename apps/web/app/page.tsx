@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import {
   POSTER_HEADING_MAX_CHARS,
+  POSTER_TEXT_MIN_CHARS,
   UPLOAD_FILE_MAX_BYTES,
   isArticleCategory,
   isSocialCategory,
@@ -34,7 +35,7 @@ import {
 import ReferencePicker, {
   type ReferenceSelection,
 } from '../components/ReferencePicker';
-import { XLogo } from '../components/XLogo';
+import { SocialLogoStack } from '../components/SocialLogoStack';
 import { CardTitle } from '../components/CardTitle';
 
 // ONE flat row of formats. The two-level पोस्टर/कॅप्शन picker it replaces asked a question
@@ -67,9 +68,13 @@ const FORMATS = [
   // 'twitter' — the X on-brand lane — which is also what makes the published post go to X.
   // Facebook remains a real category everywhere else (history, the detail page's
   // cross-format fold, /dlo); it is only this picker that stops asking.
+  //
+  // Its icon is the three-mark stack rather than X alone: one X read as "this makes a
+  // tweet", when the poster it produces is used on all three. Instagram is shown as a
+  // destination only — nothing publishes to it (see SocialLogoStack).
   {
     value: 'twitter',
-    icon: XLogo,
+    icon: SocialLogoStack,
     name: STR.mediaFormatCreative,
     desc: STR.mediaFormatCreativeDesc,
   },
@@ -234,8 +239,11 @@ export default function NewGenerationPage() {
   };
 
   const submit = async () => {
-    if (combinedNote.length < 20) {
-      setError(STR.noteTooShort);
+    // The box holds the poster's own text now, which can legitimately be a few characters
+    // ('भारत टॅक्सी' is 11) — the old 20-character article minimum would have refused it.
+    // POSTER_TEXT_MIN_CHARS is shared with the API's schema, so the two cannot drift.
+    if (combinedNote.length < POSTER_TEXT_MIN_CHARS) {
+      setError(STR.posterTextTooShort);
       return;
     }
     if (isArticle && posterHeading.trim().length > POSTER_HEADING_MAX_CHARS) {
@@ -321,6 +329,30 @@ export default function NewGenerationPage() {
           <p className="page-sub">{STR.mediaRoomIntro}</p>
         </div>
       </header>
+
+      {/* The submit sits ABOVE the form, not under it. The card below is a long
+          textarea followed by an upload card and the format cards, so a button at the
+          bottom is off-screen for most of the time anyone spends on this page — and this
+          form is filled in one pass, then submitted, rather than reviewed downward. The
+          error line stays with it so a refusal (too short, another run in flight) is
+          reported where the action was taken. */}
+      <section className="card card-action">
+        <div className="btn-row">
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => void startSubmit()}
+            disabled={submitting || awaitingRead}
+          >
+            {awaitingRead
+              ? STR.docReadingForSubmit
+              : submitting
+                ? STR.submitting
+                : STR.submit}
+          </button>
+        </div>
+        {error ? <p className="form-error">{error}</p> : null}
+      </section>
 
       <section className="card">
         <label className="field-label" htmlFor="note">
@@ -444,7 +476,7 @@ export default function NewGenerationPage() {
               <Type size={18} className="label-icon" aria-hidden="true" />
               {STR.posterHeadingLabel}
             </label>
-            <p className="hint">{STR.posterHeadingHint}</p>
+            <p className="hint">{STR.posterHeadingCreateHint}</p>
             <input
               id="poster-heading"
               type="text"
@@ -475,24 +507,6 @@ export default function NewGenerationPage() {
         {hasActiveArticleTask ? (
           <p className="info-callout">{STR.articleBusyInfo}</p>
         ) : null}
-      </section>
-
-      <section className="card card-action">
-        <div className="btn-row">
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={() => void startSubmit()}
-            disabled={submitting || awaitingRead}
-          >
-            {awaitingRead
-              ? STR.docReadingForSubmit
-              : submitting
-                ? STR.submitting
-                : STR.submit}
-          </button>
-        </div>
-        {error ? <p className="form-error">{error}</p> : null}
       </section>
     </main>
   );

@@ -39,11 +39,18 @@ export function PosterPanel({
   detail,
   onChanged,
   busy = false,
+  onImageWorkStarted,
 }: {
   detail: GenerationDetail;
   onChanged: () => Promise<void>;
   // True while the server is re-rendering the poster (driven by detail.step).
   busy?: boolean;
+  // Fired once every edit here that produces a new poster image has been ACCEPTED by the
+  // API — the detail page hands the run to the navbar's सुरू असलेली कामे panel so the
+  // officer can leave the page and still watch it finish. Called after the await, never
+  // before: these routes flip the row to running before their 202, and the panel files a
+  // still-`completed` row as terminal and stops polling it.
+  onImageWorkStarted?: (() => void) | undefined;
 }) {
   const [editing, setEditing] = useState(false);
   const [target, setTarget] = useState<'copy' | 'scene'>('copy');
@@ -169,6 +176,7 @@ export function PosterPanel({
                   setPending(true);
                   try {
                     await regeneratePoster(detail.id);
+                    onImageWorkStarted?.();
                     await onChanged();
                   } finally {
                     setPending(false);
@@ -196,6 +204,7 @@ export function PosterPanel({
                   setPending(true);
                   try {
                     await regeneratePoster(detail.id, { recolour: true });
+                    onImageWorkStarted?.();
                     await onChanged();
                   } finally {
                     setPending(false);
@@ -294,6 +303,12 @@ export function PosterPanel({
                   setPending(true);
                   try {
                     await updatePosterCopy(detail.id, copy);
+                    // Synchronous — the row never leaves `completed`, so this lands in the
+                    // panel as a finished row rather than one to follow. Tracked anyway:
+                    // it re-renders the poster, and "everything I started here is in the
+                    // list" is a simpler promise than a per-route judgement about which
+                    // renders were slow enough to count.
+                    onImageWorkStarted?.();
                     await onChanged();
                   } finally {
                     setPending(false);
@@ -311,6 +326,7 @@ export function PosterPanel({
                   setPending(true);
                   try {
                     await sendPosterFeedback(detail.id, { target, feedback });
+                    onImageWorkStarted?.();
                     await onChanged();
                   } finally {
                     // After onChanged the server reports `running`, so the `busy`
@@ -379,6 +395,7 @@ export function PosterPanel({
                           await regeneratePoster(detail.id, {
                             posterHeading: heading,
                           });
+                          onImageWorkStarted?.();
                           await onChanged();
                         } finally {
                           setPending(false);
@@ -418,6 +435,7 @@ export function PosterPanel({
                   try {
                     await sendPosterImageFeedback(detail.id, payload);
                     markSubmitted();
+                    onImageWorkStarted?.();
                     await onChanged();
                   } finally {
                     // The refreshed row now drives `busy` until the n8n edit
