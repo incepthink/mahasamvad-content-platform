@@ -78,6 +78,7 @@ export default function manifest(): ShareTargetManifest {
               '.aif',
               '.aiff',
               '.ogg',
+              '.oga',
               '.opus',
               '.wav',
               '.flac',

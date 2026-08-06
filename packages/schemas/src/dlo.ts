@@ -121,7 +121,14 @@ export const AUDIO_MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
   '.aif': 'audio/aiff',
   '.aiff': 'audio/aiff',
   '.ogg': 'audio/ogg',
-  '.opus': 'audio/opus',
+  '.oga': 'audio/ogg',
+  // Ogg, NOT 'audio/opus'. Every .opus file in the wild — a WhatsApp PTT note above all —
+  // is an Ogg-encapsulated Opus stream, which RFC 7845 registers as audio/ogg; 'audio/opus'
+  // is not a registered container type at all. It is what this map used to say, and
+  // ElevenLabs Scribe answered a real WhatsApp voice note with
+  // `invalid_audio: File is corrupted` because the declared type named no container it
+  // could parse (the bytes were fine). The narration list in video.ts has always said ogg.
+  '.opus': 'audio/ogg',
   '.wav': 'audio/wav',
   '.flac': 'audio/flac',
   '.webm': 'audio/webm',
@@ -131,12 +138,22 @@ export const AUDIO_FILE_EXTENSIONS: readonly string[] = Object.keys(
   AUDIO_MIME_BY_EXTENSION,
 );
 
+// Media types a picker should RECOGNISE but that nothing is ever stored or uploaded as.
+// `audio/opus` is the case that matters: it is what some Android share sheets and file
+// managers report for a voice note, so leaving it out would grey the file out — but it names
+// no container, which is exactly why the map above stores an Ogg Opus file as audio/ogg.
+// Offering it here and refusing to send it is the distinction the two constants draw.
+const AUDIO_ACCEPT_ALIASES: readonly string[] = ['audio/opus'];
+
 // The `accept` attribute for a recording picker. Extensions AND media types, because
 // browsers differ over which they honour, and offering both is what keeps the picker from
 // greying out a file the server would have accepted.
 export const AUDIO_FILE_ACCEPT: string = [
   ...AUDIO_FILE_EXTENSIONS,
-  ...new Set(Object.values(AUDIO_MIME_BY_EXTENSION)),
+  ...new Set([
+    ...Object.values(AUDIO_MIME_BY_EXTENSION),
+    ...AUDIO_ACCEPT_ALIASES,
+  ]),
 ].join(',');
 
 // The content type to store a recording under, or null when the name is not a recording.
