@@ -328,6 +328,13 @@ a {
   display: none;
 }
 
+/* Chrome only exposes its native install confirmation after a user gesture. This compact
+   one-tap card is therefore the entire Android setup UI; it appears only when the browser
+   says installation is available and disappears for the rest of the session if dismissed. */
+.install-app-prompt {
+  display: none;
+}
+
 @media (max-width: 860px) {
   body {
     flex-direction: column;
@@ -395,6 +402,65 @@ a {
     background: rgba(32, 25, 16, 0.42);
     backdrop-filter: blur(4px);
     -webkit-backdrop-filter: blur(4px);
+  }
+
+  .install-app-prompt {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 10px;
+    margin: 12px 14px 0;
+    padding: 12px;
+    border: 1px solid rgba(140, 63, 32, 0.22);
+    border-radius: var(--r-md);
+    background: var(--accent-tint);
+    box-shadow: var(--shadow-sm);
+    color: var(--accent-dark);
+  }
+
+  .install-app-copy {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    line-height: 1.35;
+  }
+
+  .install-app-copy span {
+    margin-top: 2px;
+    color: var(--muted);
+    font-size: 0.78rem;
+  }
+
+  .install-app-prompt .btn {
+    min-height: 42px;
+    white-space: nowrap;
+  }
+
+  .install-app-dismiss {
+    display: grid;
+    place-items: center;
+    padding: 7px;
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+  }
+}
+
+@media (max-width: 560px) {
+  .install-app-prompt {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .install-app-prompt > .btn {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    width: 100%;
+  }
+
+  .install-app-dismiss {
+    grid-column: 3;
+    grid-row: 1;
   }
 }
 

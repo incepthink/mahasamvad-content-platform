@@ -103,13 +103,13 @@ export type DloIntakeFile = z.infer<typeof DloIntakeFileSchema>;
 export const UPLOAD_FILE_MAX_MB = 50;
 export const UPLOAD_FILE_MAX_BYTES = UPLOAD_FILE_MAX_MB * 1024 * 1024;
 
-// ---------- meeting recordings: the audio containers Sarvam can transcribe ----------
+// ---------- meeting recordings: the audio containers the STT path can transcribe ----------
 //
-// Sarvam's STT auto-detects the codec for every container listed here, so a recording needs
-// no conversion before upload. The set is deliberately NARROW — MP3, AAC and M4A only.
-// Everything else a meeting recorder can emit (WAV, FLAC, OGG/OPUS, WEBM, AIFF, AMR, WMA,
-// and raw PCM, which Sarvam cannot auto-detect at all) is rejected here rather than at
-// transcription time, so the officer learns at the picker instead of after the upload.
+// The production STT provider (ElevenLabs Scribe) accepts every container listed here, so a
+// phone recording or WhatsApp OPUS note needs no conversion before upload. Keep the list to
+// the provider's documented AUDIO formats: video containers, AMR/WMA and raw PCM remain out.
+// That makes Android's broad `audio/*` share target useful without turning the normal picker
+// into "accept anything and fail after upload".
 //
 // Shared because the API validates an upload by its extension and stores the object under
 // the matching content type, while the web picker's `accept` must offer exactly the same
@@ -118,6 +118,13 @@ export const AUDIO_MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
   '.mp3': 'audio/mpeg',
   '.m4a': 'audio/mp4',
   '.aac': 'audio/aac',
+  '.aif': 'audio/aiff',
+  '.aiff': 'audio/aiff',
+  '.ogg': 'audio/ogg',
+  '.opus': 'audio/opus',
+  '.wav': 'audio/wav',
+  '.flac': 'audio/flac',
+  '.webm': 'audio/webm',
 };
 
 export const AUDIO_FILE_EXTENSIONS: readonly string[] = Object.keys(

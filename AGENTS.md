@@ -19,6 +19,24 @@ The long-term product will:
 Scaffolding is done. The core generation pipeline and a first web product on top of
 it are implemented and working end-to-end:
 
+- **Android Share → automatic ध्वनिलेखन** (2026-08-06, no migration): the web app is now an
+  installable PWA and registers `share_target` for audio, so an officer can choose Mahasamvad
+  directly from WhatsApp/Recorder's Android Share sheet instead of first saving the recording
+  into Files. `public/sw.js` intercepts the multipart navigation POST on the PHONE (never
+  routing a meeting-sized recording through Vercel), holds at most 10 × 50 MiB recordings in
+  Cache Storage, writes metadata last, and redirects to `/transcribe?share=<id>`. The
+  transcription form consumes and deletes that one-shot cache, validates it with the SAME
+  shared limits as a normal picker, and immediately creates the transcription — no second
+  upload/submit instruction. Failed API uploads keep the reconstructed `File`s in React state
+  for the ordinary retry button; abandoned cached shares expire after 24 hours. A compact
+  `beforeinstallprompt` card gives Android users the only unavoidable one-tap installation
+  gesture and disappears once installed or for the dismissed session. Required 192/512
+  maskable icons use the exact Maharashtra emblem asset, not an AI redraw. The accepted
+  recording set now matches ElevenLabs Scribe's documented audio inputs across `/transcribe`,
+  `/dlo`, the shared picker and API validation: MP3, M4A, AAC, AIFF, OGG, OPUS, WAV, FLAC and
+  WebM; this is what makes WhatsApp OPUS notes usable. iOS remains on its normal file-picker
+  path because Safari does not register Web Share Targets. Deploy by rebuilding
+  `@dgipr/schemas`, then API + web; HTTPS and one initial PWA install are required, no n8n.
 - **Strict-source reference picking for क्रिएटिव्ह** (2026-08-03, no migration): ordinary
   unpinned DGIPR social runs no longer let the ranking model reinterpret the same prose as a
   different number of semantic facts on each run, or accept an oversized/multi-section master

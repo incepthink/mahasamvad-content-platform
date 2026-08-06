@@ -27,6 +27,11 @@ export const STR = {
   navCollapse: 'मेनू लहान करा',
   navExpand: 'मेनू मोठा करा',
   poweredBy: 'Powered by',
+  installAppTitle: 'मोबाईलवर महासंवाद जोडा',
+  installAppHint:
+    'एकदा जोडल्यानंतर WhatsApp किंवा Recorder मधून ध्वनिफीत थेट येथे पाठवता येईल.',
+  installAppAction: 'मोबाईलवर जोडा',
+  installAppDismiss: 'आत्ता नको',
 
   // New-generation form
   newTitle: 'नवीन लेख / पोस्टर तयार करा',
@@ -165,10 +170,10 @@ export const STR = {
   // recording is transcribed whole and has nothing to choose, while a document is read here
   // and now — page by page, with the scanned ones stopping to ask which pages are worth
   // OCR'ing before a single credit is spent.
-  dloAudioTitle: 'ध्वनिमुद्रण (MP3, AAC, M4A)',
+  dloAudioTitle: 'ध्वनिमुद्रण',
   dloAudioUpload: 'ध्वनिफीत जोडा',
   dloAudioHint:
-    'बैठकीचे ध्वनिमुद्रण — एकावेळी अनेक फाईल जोडता येतील (प्रत्येकी कमाल ५० MB). फक्त MP3, AAC व M4A चालतात.',
+    'बैठकीचे ध्वनिमुद्रण — एकावेळी अनेक फाईल जोडता येतील (प्रत्येकी कमाल ५० MB). मोबाईलवरील नेहमीचे ध्वनिफीत प्रकार चालतात.',
   dloAudioFilesTitle: 'जोडलेली ध्वनिमुद्रणे',
   dloDocsTitle: 'कागदपत्रे (PDF / DOCX / TXT)',
   dloDocsHint:
@@ -201,7 +206,7 @@ export const STR = {
   ytSourceLabel: 'यूट्युब व्हिडिओ',
   ytOpen: 'यूट्युबवर पाहा',
   dloFileTypeError:
-    'कृपया ध्वनिमुद्रण फाईल निवडा (MP3, WAV, M4A, AAC, FLAC, OGG, OPUS, WEBM, AIFF, AMR, WMA).',
+    'कृपया ध्वनिमुद्रण फाईल निवडा (MP3, M4A, AAC, AIFF, OGG, OPUS, WAV, FLAC किंवा WEBM).',
   dloNeedInput: 'कृपया टिपणी लिहा, किमान एक फाईल जोडा किंवा यूट्युब लिंक द्या.',
   dloSubmit: 'पुढे जा →',
   dloProcessingTitle: 'माहितीवर प्रक्रिया सुरू आहे…',
@@ -1107,7 +1112,9 @@ export const STR = {
   transcribeNewTitle: 'नवीन ध्वनिलेखन',
   transcribeUpload: 'ध्वनिफीत जोडा',
   transcribeHint:
-    'एकावेळी अनेक फाईल जोडता येतील (कमाल १० फाईल्स, प्रत्येकी ५० MB). फक्त MP3, AAC व M4A चालतात.',
+    'एकावेळी अनेक फाईल जोडता येतील (कमाल १० फाईल्स, प्रत्येकी ५० MB). मोबाईलवरील नेहमीचे ध्वनिफीत प्रकार चालतात.',
+  transcribeSharedReadError:
+    'मोबाईलवरून पाठवलेली ध्वनिफीत उघडता आली नाही. कृपया पुन्हा Share करून महासंवाद निवडा.',
   transcribeFilesTitle: 'जोडलेली ध्वनिमुद्रणे',
   transcribeNeedFile:
     'कृपया किमान एक ध्वनिमुद्रण जोडा किंवा यूट्युब लिंक द्या.',

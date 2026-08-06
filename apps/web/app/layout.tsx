@@ -1,11 +1,13 @@
 import './globals.css';
 
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
 import { Mukta } from 'next/font/google';
 import { STR } from '../lib/strings';
 import { TasksProvider } from '../lib/TasksProvider';
 import { AppSidebar } from '../components/AppSidebar';
+import { InstallAppPrompt } from '../components/InstallAppPrompt';
+import { PwaRegistration } from '../components/PwaRegistration';
 import HashcaseLogo from '../public/hashcase-text.svg';
 
 // Same family the poster renderer typesets with, so the UI shapes Devanagari
@@ -33,6 +35,16 @@ export const metadata: Metadata = {
     icon: '/favicon.ico',
     shortcut: '/favicon.ico',
   },
+  manifest: '/manifest.webmanifest',
+  appleWebApp: {
+    capable: true,
+    title: 'महासंवाद',
+    statusBarStyle: 'default',
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: '#9f1d20',
 };
 
 export default function RootLayout({
@@ -43,9 +55,11 @@ export default function RootLayout({
   return (
     <html lang="mr">
       <body className={devanagari.className}>
+        <PwaRegistration />
         <TasksProvider>
           <AppSidebar />
           <div className="app-main">
+            <InstallAppPrompt />
             {/* /dlo used to be mounted here permanently and hidden with CSS, so that
                 navigating away did not destroy an in-flight intake. It no longer needs to be:
                 each intake now lives at /dlo/[id] with the row as its state of record, which

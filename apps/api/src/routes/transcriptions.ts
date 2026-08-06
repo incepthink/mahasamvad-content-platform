@@ -150,7 +150,7 @@ export function registerTranscriptionRoutes(
           return reply.code(400).send({
             error: {
               message:
-                'फक्त ध्वनिमुद्रण (MP3, AAC, M4A) फाईल्स स्वीकारल्या जातात.',
+                'फक्त समर्थित ध्वनिमुद्रण फाईल्स (MP3, M4A, AAC, AIFF, OGG, OPUS, WAV, FLAC, WEBM) स्वीकारल्या जातात.',
             },
           });
         }
@@ -176,7 +176,9 @@ export function registerTranscriptionRoutes(
 
     if (uploads.length === 0 && youtube.length === 0) {
       return reply.code(400).send({
-        error: { message: 'किमान एक ध्वनिमुद्रण जोडा किंवा यूट्युब लिंक द्या.' },
+        error: {
+          message: 'किमान एक ध्वनिमुद्रण जोडा किंवा यूट्युब लिंक द्या.',
+        },
       });
     }
 
