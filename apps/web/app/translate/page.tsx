@@ -161,8 +161,15 @@ export default function TranslatePage() {
       />
 
       <section className="card">
-        <span className="field-label">{STR.translateTargetLabel}</span>
-        <div className="lang-toggle" role="group" style={{ marginTop: 8 }}>
+        {/* A <p>, not a <span>: .field-label is scoped to <label> and <p>, so a span
+            got no weight and no block display and the question ran straight into the
+            first button ("…भाषांतर हवे?इंग्रजी"). */}
+        <p className="field-label">{STR.translateTargetLabel}</p>
+        <div
+          className="lang-toggle"
+          role="group"
+          aria-label={STR.translateTargetLabel}
+        >
           {(['en', 'hi'] as const).map((option) => (
             <button
               key={option}

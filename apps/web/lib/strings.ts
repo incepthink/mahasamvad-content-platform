@@ -53,6 +53,23 @@ export const STR = {
     'क्रिएटिव्ह व यूट्यूब थंबनेलसाठी येथे लिहिलेला सर्व मजकूर पोस्टरवर छापला जातो — म्हणून फक्त जेवढे पोस्टरवर हवे तेवढेच लिहा. बॅनरसाठी मात्र या मजकुरातील मुख्य नाव / शीर्षक शोधून तेच बॅनरवर येते. खालून फाईलमधूनही मजकूर घेता येईल — दोन्ही एकत्रही करता येईल.',
   articlePastePlaceholder:
     'उदा. पोस्टरवर हवे असलेले मुद्दे, नावे, तारखा व आकडे येथे लिहा…',
+  // Input-mode tabs above the text box, shown for the क्रिएटिव्ह (social) lane only — it is
+  // the one lane where the two paths exist. जसाच्या तसा = designMode 'onbrand' (the note is
+  // sent verbatim to the image-edit model); लेखावरून = designMode 'adaptive' (generatePosterCopy
+  // writes the poster's headline + points from the pasted article first). बॅनर and यूट्यूब
+  // ignore designMode, so the tabs are not shown there.
+  posterSourceLabel: 'दिलेला मजकूर कसा वापरायचा?',
+  posterSourceVerbatim: 'जसाच्या तसा मजकूर',
+  posterSourceVerbatimDesc: 'लिहिलेला मजकूर जसाच्या तसा पोस्टरवर छापला जातो',
+  posterSourceArticle: 'लेखावरून पोस्टर',
+  posterSourceArticleDesc: 'दिलेल्या लेखातून पोस्टरचा मजकूर AI तयार करते',
+  // The text box's own label/hint follow the tab above: in लेखावरून mode the box holds a
+  // finished article, not the poster's words, so promising "सर्व मजकूर पोस्टरवर छापला जातो"
+  // there would be false.
+  articleSourceLabel: 'तयार लेख येथे चिकटवा',
+  articleSourceHint:
+    'संपूर्ण लेख येथे चिकटवा — त्यातील मुख्य मुद्दे, नावे, तारखा व आकडे निवडून पोस्टरचा मजकूर तयार केला जातो. खालून फाईलमधूनही मजकूर घेता येईल — दोन्ही एकत्रही करता येईल.',
+  articleSourcePlaceholder: 'उदा. तयार झालेला मराठी लेख येथे चिकटवा…',
   // ONE flat row of formats — यूट्यूब थंबनेल / ट्विटर / फेसबुक / लेख पोस्टर / व्हिडिओ.
   // Deliberately NOT the categoryTwitter/categoryFacebook pair, whose descriptions promise
   // "पोस्टर + कॅप्शन": the caption is now an opt-in checkbox under those two cards.

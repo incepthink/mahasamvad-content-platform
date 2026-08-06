@@ -1803,15 +1803,39 @@ textarea.note-input {
   margin-bottom: 12px;
 }
 
+/* A segmented control on a tinted track, the .analytics-ranges idiom — two loose
+   outlined pills read as two separate commands rather than as one either/or choice,
+   and the unselected one looked as clickable-primary as the selected one. The track
+   carries the border; the buttons inside it drop their own chrome. */
 .lang-toggle {
   display: inline-flex;
-  gap: 6px;
+  gap: 4px;
+  flex-wrap: wrap;
+  padding: 4px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.lang-toggle .btn {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  border-radius: 999px;
+  color: var(--muted);
+  padding: 8px 18px;
+}
+
+.lang-toggle .btn:hover:not(:disabled):not([aria-pressed='true']) {
+  background: var(--card);
+  color: var(--text);
 }
 
 .lang-toggle .btn[aria-pressed='true'] {
-  background: var(--accent-soft);
+  background: var(--accent);
   border-color: var(--accent);
-  color: var(--accent-dark);
+  color: #fff;
+  box-shadow: var(--shadow-sm);
 }
 
 .translating-note {
