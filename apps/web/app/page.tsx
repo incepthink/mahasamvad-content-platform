@@ -5,11 +5,19 @@
 // article is written here — the pasted text is the sole source and is used as-is
 // (providedArticle) for the poster path.
 //
-// The क्रिएटिव्ह lane asks ONE more question, as tabs above the text box: is the pasted text
-// the poster's own words, or an article to draw them out of? That is `designMode` —
-// 'onbrand' sends the note verbatim to the image-edit model (isSimpleTemplateEdit in the
-// runner), 'adaptive' runs generatePosterCopy first. बॅनर and यूट्यूब ignore designMode, so
-// the tabs are shown for the social lane only.
+// On the क्रिएटिव्ह lane, THE TEMPLATE PICK IS THE DESIGN DECISION (2026-08-07). There is no
+// separate design-mode control: leave the template picker empty and the run is designMode
+// 'fresh' — the API resolves no reference at all and the image model designs the whole poster.
+// Pick a template and the poster follows it, and only THEN is a second question asked (as tabs
+// above the text box) about how to fill it: 'onbrand' prints the pasted text verbatim
+// (isSimpleTemplateEdit in the runner), 'adaptive' has generatePosterCopy write the headline +
+// points out of it first.
+//
+// `designMode` is therefore DERIVED from those two answers rather than stored, which is what
+// makes it impossible for the mode and the pin to disagree. The old default was 'onbrand' with an
+// auto-selected template, so every poster took the shape of whatever the library happened to
+// return — twelve cramped numbered rows out of a 5,600-character note (generation 63511b51).
+// बॅनर and यूट्यूब ignore designMode entirely.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ComponentType } from 'react';
@@ -142,12 +150,16 @@ export default function NewGenerationPage() {
   // The chosen format IS the category — one flat picker, no derivation. ट्विटर पोस्ट is the
   // default because it is by far the most-used format on this page.
   const [category, setCategory] = useState<SelectableFormat>('twitter');
-  // क्रिएटिव्ह only: what the pasted text IS. 'onbrand' (the default, and what this form used
-  // to hardcode) prints it verbatim; 'adaptive' treats it as an article and has
-  // generatePosterCopy write the poster's headline + points out of it. Held across a format
-  // switch on purpose — it is a preference about this officer's own material, and the value
-  // is simply not sent on a lane that ignores it.
-  const [designMode, setDesignMode] = useState<DesignMode>('onbrand');
+  // क्रिएटिव्ह only: how to FILL a chosen template. 'onbrand' prints the pasted text verbatim
+  // onto it; 'adaptive' treats that text as an article and has generatePosterCopy write the
+  // headline + points out of it first. It is NOT the whole design question — see designMode
+  // below — and it is only ever asked once a template exists to fill.
+  //
+  // Held across a format switch on purpose: it is a preference about this officer's own
+  // material, and the value is simply not sent on a lane that ignores it.
+  const [templateFill, setTemplateFill] = useState<'onbrand' | 'adaptive'>(
+    'onbrand',
+  );
   // A social post is poster-only unless asked otherwise: the caption is a separate
   // paid model call, and plenty of posts are published as an image. It can also be added
   // afterwards from the detail page, so off is a cheap default rather than a lossy one.
@@ -208,16 +220,34 @@ export default function NewGenerationPage() {
   // The लेख पोस्टर lane. Asked positively rather than as !isSocial, which silently swept
   // यूट्यूब थंबनेल in with it — a thumbnail writes no article and locks no poster heading.
   const isArticle = isArticleCategory(category);
+  // Has the officer explicitly chosen a template? This is the ONLY design question on the
+  // क्रिएटिव्ह lane (2026-08-07): no template means a fully-AI poster, a template means that
+  // template is followed. There is no separate "design mode" control any more.
+  const templatePicked = isSocial && reference !== null;
+
+  // What actually goes on the wire. DERIVED, never stored — the officer answers "which
+  // template?" and, if they picked one, "how should it be filled?", and those two answers
+  // determine the mode completely:
+  //
+  //   no template  -> 'fresh'    : the API resolves no reference at all and the image model
+  //                                designs the whole poster. THE DEFAULT, because the previous
+  //                                default ('onbrand') gave every poster the shape of whatever
+  //                                template was auto-selected — twelve cramped numbered rows out
+  //                                of a 5,600-character note (generation 63511b51).
+  //   template     -> templateFill ('onbrand' verbatim | 'adaptive' AI-written copy).
+  //
+  // Keeping it derived is what stops the two controls from ever disagreeing — there is no state
+  // that can say "fresh" while a template sits pinned beside it.
+  const designMode: DesignMode = templatePicked ? templateFill : 'fresh';
+
   // The क्रिएटिव्ह tab that changes what the text box holds: a finished article the poster's
-  // copy is written OUT of, rather than the poster's own words. Only ever true on the social
-  // lane, which is the only one whose runner branch reads designMode.
-  const fromArticle = isSocial && designMode === 'adaptive';
+  // copy is written OUT of, rather than the poster's own words. Only reachable with a template,
+  // since that tab is only asked once one is picked.
+  const fromArticle = designMode === 'adaptive';
 
   // Which library the template picker shows: twitter masters for the two social formats,
-  // article masters for the लेख पोस्टर, youtube masters for the थंबनेल. Every format on this
-  // page renders an image, so it is never hidden. रचना-शैली and विभाग are gone from this
-  // form — a social post here is always the DGIPR 'onbrand' template, which is what makes
-  // the pinned reference the only template question left to ask.
+  // article masters for the लेख पोस्टर, youtube masters for the थंबनेल. विभाग is gone from this
+  // form — a social post here is always the DGIPR brand.
   const pickerCategory = referenceCategoryOf(category);
 
   // A pin is only meaningful for the format it was chosen under.
@@ -294,9 +324,10 @@ export default function NewGenerationPage() {
         // meaningless "clear" on a run that has nothing to clear.
         posterHeading:
           isArticle && posterHeading.trim() ? posterHeading.trim() : undefined,
-        // The विभाग question stays fixed (always the DGIPR template family); the design
-        // mode is the tab above the text box — 'onbrand' prints the note verbatim,
-        // 'adaptive' writes the poster's copy out of it first.
+        // The विभाग question stays fixed (always the DGIPR template family); designMode is
+        // derived from the template pick above, so it is 'fresh' unless the officer chose a
+        // template. The reference ids below are null in that case by construction — designMode
+        // and the pin can never disagree, because one is computed from the other.
         designMode: isSocial ? designMode : undefined,
         templateBrand: isSocial ? 'dgipr' : undefined,
         referenceImageId:
@@ -372,19 +403,21 @@ export default function NewGenerationPage() {
       </section>
 
       <section className="card">
-        {/* क्रिएटिव्ह only — it is the one lane where both paths exist. बॅनर keeps the pasted
-            text as the article and picks the heading out of it; यूट्यूब थंबनेल prints it. Both
-            ignore designMode, so offering the tabs there would be an inert control. */}
-        {isSocial ? (
+        {/* क्रिएटिव्ह only, and only once a TEMPLATE has been picked. These tabs ask how to fill
+            that template, so with none picked there is nothing for them to decide — the run is
+            fully AI. Showing them there would be a control that changes nothing, and worse, the
+            जसाच्या तसा tab would promise verbatim text that a from-scratch render does not give.
+            बॅनर and यूट्यूब ignore designMode entirely. */}
+        {isSocial && templatePicked ? (
           <>
             <p className="field-label">{STR.posterSourceLabel}</p>
             <div className="segmented" style={{ marginTop: 10 }}>
               <button
                 type="button"
                 className="output-option"
-                aria-pressed={designMode === 'onbrand'}
+                aria-pressed={templateFill === 'onbrand'}
                 disabled={submitting}
-                onClick={() => setDesignMode('onbrand')}
+                onClick={() => setTemplateFill('onbrand')}
               >
                 <span className="name">{STR.posterSourceVerbatim}</span>
                 <span className="desc">{STR.posterSourceVerbatimDesc}</span>
@@ -392,9 +425,9 @@ export default function NewGenerationPage() {
               <button
                 type="button"
                 className="output-option"
-                aria-pressed={designMode === 'adaptive'}
+                aria-pressed={templateFill === 'adaptive'}
                 disabled={submitting}
-                onClick={() => setDesignMode('adaptive')}
+                onClick={() => setTemplateFill('adaptive')}
               >
                 <span className="name">{STR.posterSourceArticle}</span>
                 <span className="desc">{STR.posterSourceArticleDesc}</span>
@@ -552,6 +585,15 @@ export default function NewGenerationPage() {
             variant="disclosure"
             value={reference}
             onChange={setReference}
+            {...(isSocial
+              ? {
+                  // On this lane an empty selection means NO template is used and the poster is
+                  // designed from scratch — the opposite of the default wording, which promises
+                  // the platform will pick one. लेख and यूट्यूब still auto-select, so they keep it.
+                  noneLabel: STR.refPickerDisclosureNoneSocial,
+                  noneHint: STR.refPickerDisclosureHintSocial,
+                }
+              : {})}
           />
         </div>
         {hasActiveSocialTask ? (

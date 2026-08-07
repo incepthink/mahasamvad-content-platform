@@ -19,6 +19,7 @@ import {
 } from './clear-space-rule.js';
 import {
   fitToReserveRule,
+  paintNoChromeRule,
   referenceChromeRule,
   reservedZoneBlock,
   stampedChromeRule,
@@ -91,12 +92,15 @@ export type BuildPosterPromptInput = Readonly<{
   copyStyle: string;
   designMode: DesignMode;
   brand: TemplateBrand;
-  // The master to edit (the chosen library image's public URL). Empty is only valid for
-  // design_mode 'fresh', which paints from scratch.
-  masterUrl: string;
-  // The chosen master's vision-derived one-liner ('' = un-analysed → generic prompt). In
-  // 'fresh' mode this is loose STRUCTURE inspiration (which sections a poster like this has),
-  // never colours to copy — the art direction owns the palette.
+  // The master to edit (the chosen library image's public URL). Absent/empty is only valid for
+  // design_mode 'fresh', which paints from scratch and resolves no reference at all — the
+  // check below still throws for every mode that needs one. Optional because the runner has
+  // nothing to pass on a fresh run; the body already tolerated it, only the type did not.
+  masterUrl?: string | undefined;
+  // The chosen master's vision-derived one-liner ('' = un-analysed → generic prompt). Reaches
+  // the template-edit modes only: a 'fresh' run has no master, so the STRUCTURE INSPIRATION
+  // block it used to feed is simply not emitted and the assigned COMPOSITION archetype is the
+  // whole structural instruction — which it already outranked whenever both were present.
   layoutSummary?: string | undefined;
   hasPhoto: boolean;
   // The per-run AI-chosen visual treatment (art-direction.ts). Applied in 'fresh' mode so the
@@ -161,21 +165,27 @@ function fmtComposition(l: PosterLayout): string {
 const COLOUR_MANDATE =
   'MANDATORY: the colour specification above is required and must DOMINATE the poster, including the page background. Do NOT fall back to a saffron/orange + cream "government paper" look, and do NOT use a generic government navy-blue-and-white, unless the specification above explicitly calls for those colours.';
 
-// The zones as quoted to the copy-pipeline paths ('fresh' and the legacy edit modes), which
-// reserve a more generous corner than the fixed-template path does. Its own geometry constant
-// so the fit rule appended to those prompts quotes the SAME figures the block above them does —
-// two different footer heights inside one prompt is worse than either number alone.
-const CHROME_ZONE_GEOMETRY: ReservedZoneGeometry = {
-  width: 1280,
-  height: 1600,
-  lockupWidth: 280,
-  lockupHeight: 270,
-  footerHeight: 130,
-};
-
-// Keep the reserved-zone numbers in sync with packages/poster-renderer/src/twitter-chrome.ts.
-const CHROME_ZONES =
-  'RESERVED ZONES — the official branding is stamped onto the finished poster afterwards by software: the top-right corner (approx 280x270 px; a white rounded-square महाराष्ट्र शासन emblem-and-wordmark badge) and the full-width bottom strip (approx 130 px tall; the department footer band and social-handle strip). Place NO text, numbers, statistics, logos, emblems, faces, focal subjects or other important information inside these zones because the software-added branding will cover them. Ordinary background colour, gradients, textures, decorative shapes and non-informational background imagery SHOULD continue naturally through these zones; do not leave them plain or empty solely for the branding.';
+// RETIRED (2026-08-07): CHROME_ZONE_GEOMETRY (280x270 / 130px) and its prose twin
+// CHROME_ZONES. Both are gone and must not come back — SOCIAL_ZONES below is now the single
+// geometry every DGIPR social prompt quotes, initial and feedback alike.
+//
+// They were the cause of two reported defects on fully-AI ('fresh') posters:
+//
+//   - "the logo left too much space with a different background, like a box in the top right".
+//     280x270 is THREE TIMES the area of the 160x154 badge overlayTwitterChrome actually
+//     stamps, so a model obeying the reserve correctly still left an obviously oversized gap;
+//     and CHROME_ZONES described the badge it was reserving for ("a white rounded-square
+//     महाराष्ट्र शासन emblem-and-wordmark badge"), which is an invitation to paint a white
+//     rounded square there. Its only defence against that was a soft "do not leave them plain
+//     or empty solely for the branding" — where reservedZoneBlock names the failure outright
+//     ("Do NOT create a separate colour, white space, patch, box, panel, band, reserved-space
+//     marker, or visible boundary in either zone").
+//   - "the footer was hiding some text". CHROME_ZONES described the footer as one strip. The
+//     stamped footer is a navy title pill sitting ABOVE a white social strip, and a model told
+//     only "a footer strip" reads the white strip alone as the footer and tucks its last line
+//     under the pill — the exact loss SOCIAL_FOOTER_NOTE was written for, which the fresh path
+//     never received. CHROME_ZONES was also glued mid-prompt onto the "Compose it as a …
+//     poster." line rather than emitted as its own block near the end.
 
 const PLACEHOLDER_WITH_PHOTO =
   'The master template you are editing still carries PLACEHOLDER content from a previous poster: sample Marathi text in every text zone (headline, tag, bullets, figures, dates) and a sample photo/illustration in the image zone. NONE of that content relates to this poster. ERASE every piece of existing sample text and ERASE the existing photo/illustration completely before adding the new content — no word, number, person, or pictorial element from the placeholder may survive into the output. ALSO ERASE the branding chrome the master carries: the महाराष्ट्र शासन emblem-and-wordmark lockup in the top-right and the department footer band + social-handle strip along the bottom — fill those areas by continuing the surrounding colour band or background naturally, as if that branding was never there. Only the layout frame stays: colour bands and panel shapes.';
@@ -430,7 +440,7 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
     freshLines.push(
       '',
       'Government public-information aesthetic: bold, high-contrast, highly legible Devanagari (Marathi) typography; a clean, trustworthy, well-organised layout.',
-      `Compose it as a "${copyStyle}" poster. ${CHROME_ZONES}`,
+      `Compose it as a "${copyStyle}" poster.`,
     );
     // The master's own description is a SECONDARY hint here and its colour words are removed
     // outright rather than disclaimed: the previous "IGNORE any colours it mentions" sat next to
@@ -445,7 +455,7 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
     }
     freshLines.push(
       '',
-      'Render ALL Marathi text crisply and correctly in Devanagari, spelled EXACTLY as given. Do not add any English body text. Do not paint any logos, emblems, footer bands or social handles — the official branding is stamped on afterwards by software. One poster, no outer border.',
+      'Render ALL Marathi text crisply and correctly in Devanagari, spelled EXACTLY as given. Do not add any English body text. One poster, no outer border.',
       '',
       'CONTENT TO TYPESET:',
       change,
@@ -461,9 +471,30 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
         'This poster is TEXT-ONLY: build it from typography, colour blocks, cards and simple icons. Do NOT include any photograph, portrait or pictorial illustration.',
       );
     }
-    // Last, for the reason given in reserved-zone-rule.ts: CHROME_ZONES states WHERE the zones
-    // are, this states that they outrank the layout and what to do when the copy will not fit.
-    freshLines.push('', fitToReserveRule(CHROME_ZONE_GEOMETRY));
+    // The chrome blocks, LAST and in the fixed-template path's order — that path is the one
+    // whose posters come back with the branding sitting correctly, and these three blocks are
+    // the whole of the difference. Nothing about the STAMP differs between the two modes:
+    // both render through overlayTwitterChrome, so the badge and footer bytes are already
+    // identical. What differed was only what the prompt reserved for them.
+    //
+    //   1. paintNoChromeRule — do not invent a badge; a painted one survives BESIDE the real
+    //      one. Fresh had the prohibition without the consequence, and no word against the
+    //      placeholder BOX that was actually showing up in the corner.
+    //   2. reservedZoneBlock — the real 180x170 / 120px reserve, as a proportion the model can
+    //      see, with SOCIAL_FOOTER_NOTE naming the footer's navy pill so its last line does not
+    //      go under it, and the explicit ban on painting a patch/panel/boundary in either zone.
+    //   3. fitToReserveRule — the priority, the consequence and the shrink-headline-first
+    //      action. WITHOUT allowStructuralReflow, unlike the fixed-template path: that option
+    //      exists to licence departing from a reference's geometry, and a from-scratch render
+    //      has no reference geometry to depart from. Shrink-to-fit is the whole recovery here.
+    freshLines.push(
+      '',
+      paintNoChromeRule(SOCIAL_CHROME),
+      '',
+      reservedZoneBlock(SOCIAL_ZONES, SOCIAL_FOOTER_NOTE),
+      '',
+      fitToReserveRule(SOCIAL_ZONES),
+    );
     return freshLines.join('\n');
   }
 
@@ -474,8 +505,10 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
   const locked = [
     `You are editing a master template for an OFFICIAL DGIPR Maharashtra government poster (type: ${copyStyle}).`,
     layoutRule,
+    // Already tells the model to ERASE the master's own chrome, so this branch needs the zone
+    // geometry rather than a second erase rule.
     hasPhoto ? PLACEHOLDER_WITH_PHOTO : PLACEHOLDER_TEXT_ONLY,
-    CHROME_ZONES,
+    reservedZoneBlock(SOCIAL_ZONES, SOCIAL_FOOTER_NOTE),
   ];
   if (!hasPhoto) locked.push(TEXT_ONLY_LOCK);
   locked.push(
@@ -505,7 +538,7 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
     '',
     'Do not add any English text. Do not paint any logos, emblems, footer bands or social handles — the official branding is stamped on afterwards by software. Keep one single poster within the canvas, no outer borders.',
     '',
-    fitToReserveRule(CHROME_ZONE_GEOMETRY),
+    fitToReserveRule(SOCIAL_ZONES),
   );
   return lines.join('\n');
 }
@@ -851,8 +884,13 @@ if (
         "fixed-template prompt tells the model to repeat the reference's rows/cards again",
       );
 
-    // 4c. The copy-pipeline paths carry the same rule, quoting their OWN (more generous)
-    //     figures — two different footer heights inside one prompt would be worse than either.
+    // 4c. THE FULLY-AI ('fresh') BRANCH. Two reported defects on real posters — an oversized
+    //     white box in the top-right corner, and a footer covering the last line of text — and
+    //     both were the prompt, not the stamp: fresh and fixed-template render through the SAME
+    //     overlayTwitterChrome. Fresh quoted a retired 280x270 / 130px reserve (three times the
+    //     badge's real area), described the badge it was reserving for, called the two-part
+    //     footer one strip, and buried the whole thing mid-prompt. It now emits the same three
+    //     blocks as the fixed-template path. If either defect returns, check these FIRST.
     const freshPrompt = buildPosterPrompt({
       copy: COPY,
       copyStyle: 'info_bullets',
@@ -863,12 +901,69 @@ if (
     });
     if (!freshPrompt.trimEnd().endsWith('cross into either reserved zone.'))
       failures.push('the fresh prompt does not end on the fit rule');
-    if (!freshPrompt.includes('bottom 130 pixels'))
+    // (a) ONE geometry across the whole file, and it is the real one.
+    for (const needle of [
+      'top-right 180 x 170 pixels',
+      'bottom 120 pixels',
+      '1280 x 1600 output',
+      'y=1480',
+    ]) {
+      if (!freshPrompt.includes(needle))
+        failures.push(`the fresh prompt lost "${needle}"`);
+    }
+    for (const retired of ['280 x 270', 'bottom 130 pixels', '280x270']) {
+      if (freshPrompt.includes(retired))
+        failures.push(
+          `the fresh prompt still quotes the retired reserve "${retired}" — it is 3x the stamped badge and is what left a box in the corner`,
+        );
+    }
+    // (b) The footer's navy pill. Without it a model tucks its last line under the pill,
+    //     reading the white strip alone as the footer — the "footer hides text" report.
+    if (!freshPrompt.includes('navy-blue ministry title pill'))
       failures.push(
-        'the fresh fit rule quotes a footer height CHROME_ZONES does not',
+        'the fresh prompt does not describe the two-part footer, so text can sit under the title pill',
       );
-    if (freshPrompt.includes('bottom 120 pixels'))
-      failures.push('the fresh prompt quotes two different footer heights');
+    // (c) The corner BOX. The old wording described the badge being reserved for and only
+    //     softly discouraged leaving the zone plain; this names the artefact outright.
+    if (!freshPrompt.includes('patch, box, panel, band'))
+      failures.push(
+        'the fresh prompt does not forbid painting a box/panel in the reserved zones',
+      );
+    if (/white rounded-square[^.]*badge\) /.test(freshPrompt))
+      failures.push(
+        'the fresh prompt describes the badge inside its zone geometry, which invites painting one',
+      );
+    // (d) The duplicate consequence — the reason the model prefers an empty corner over a
+    //     plausible painted badge. Fresh had the prohibition without it.
+    if (!freshPrompt.includes('survives BESIDE the real branding'))
+      failures.push(
+        'the fresh prompt states the no-branding rule without its consequence',
+      );
+    // (e) Structural reflow is the fixed-template path's licence to depart from a REFERENCE's
+    //     geometry. A from-scratch render has none, so fresh takes the strict shrink-to-fit.
+    if (freshPrompt.includes('SMART REFLOW WHEN CONTENT DOES NOT FIT'))
+      failures.push(
+        'the fresh prompt carries the reference-geometry reflow licence, which it has no reference for',
+      );
+    if (!freshPrompt.includes('Shrink the HEADLINE first'))
+      failures.push('the fresh prompt lost the shrink-to-fit recovery action');
+    // (f) REFERENCE-FREE. As of 2026-08-07 the runner resolves no master for a fresh run, so
+    //     the prompt must stand up with no masterUrl and no layoutSummary and must borrow no
+    //     structure from anywhere: the assigned COMPOSITION is the whole structural
+    //     instruction. `freshPrompt` above is already built that way — this asserts it is a
+    //     supported shape rather than an accident, since the fixed-template branch still
+    //     throws without a master.
+    if (
+      !freshPrompt.includes('COMPOSITION —') &&
+      !freshPrompt.includes('FROM SCRATCH')
+    )
+      failures.push(
+        'the reference-free fresh prompt carries no structural instruction at all',
+      );
+    if (freshPrompt.includes('STRUCTURE INSPIRATION'))
+      failures.push(
+        'the fresh prompt emitted a STRUCTURE INSPIRATION block with no master to take one from',
+      );
 
     // 5. The clear-space (blue box) feedback path. The properties that matter are that the
     //    block only appears when asked for, that it survives beside red markers, that it can

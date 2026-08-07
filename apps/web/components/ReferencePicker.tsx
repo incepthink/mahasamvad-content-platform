@@ -1,7 +1,13 @@
 'use client';
 
-// Optional template pin on the create form. Automatic mode lets the platform choose;
-// manual mode pins one exact enabled library image.
+// Optional template pin on the create form. Manual mode pins one exact enabled library image.
+//
+// WHAT AN EMPTY SELECTION MEANS IS THE CALLER'S, NOT THIS COMPONENT'S — pass noneLabel/noneHint
+// to say so. On लेख and यूट्यूब it still means "the platform picks a template for you", which is
+// the default wording. On क्रिएटिव्ह (since 2026-08-07) it means NO template is used at all and
+// the poster is designed from scratch, so the default wording would state the opposite of what
+// happens. That is lane semantics, which is why it arrives as props rather than as a
+// `category === 'twitter'` branch in here.
 //
 // THE GALLERY IS ORGANISED BY SIZE BAND, exactly as /references is — एकच संदेश / थोडे
 // मुद्दे / मध्यम यादी / मोठी यादी, each opening on two rows with an आणखी दाखवा control.
@@ -58,8 +64,7 @@ const BAND_PAGE = 8;
 type PickerCategory = ReferenceCategory;
 
 export type ReferenceSelection =
-  | { kind: 'image'; id: string }
-  | { kind: 'type'; id: string };
+  { kind: 'image'; id: string } | { kind: 'type'; id: string };
 
 type Library = Readonly<{
   types: ReferenceType[];
@@ -226,6 +231,8 @@ export default function ReferencePicker({
   value,
   onChange,
   variant = 'card',
+  noneLabel,
+  noneHint,
 }: {
   category: PickerCategory;
   // Which template brand family to show. The DGIPR flow excludes CMO types and vice
@@ -233,6 +240,13 @@ export default function ReferencePicker({
   brand?: TemplateBrand;
   value: ReferenceSelection | null;
   onChange: (selection: ReferenceSelection | null) => void;
+  // What "nothing selected" MEANS on this surface, for the disclosure variant's collapsed
+  // summary and its open hint. Props rather than a `category === 'twitter'` branch, because
+  // the meaning is the caller's lane semantics, not this component's: on the क्रिएटिव्ह lane
+  // an empty selection means no template is used at all (a fully-AI render), while the लेख and
+  // यूट्यूब lanes still auto-select one. Defaults keep the auto-select wording.
+  noneLabel?: string;
+  noneHint?: string;
   // 'card' is the standalone section; 'inline' drops the card chrome so the picker can
   // sit inside another card (e.g. the detail page's next-step panel) without a
   // nested-card look; 'disclosure' is that same gallery folded shut behind ONE optional
@@ -508,7 +522,7 @@ export default function ReferencePicker({
         : selectedType.labelMr
       : value
         ? STR.refPickerSelected
-        : STR.refPickerDisclosureNone;
+        : (noneLabel ?? STR.refPickerDisclosureNone);
 
     return (
       <div className="ref-picker ref-picker-disclosure">
@@ -540,7 +554,7 @@ export default function ReferencePicker({
         </button>
         {open ? (
           <div className="ref-picker-disclosure-body">
-            <p className="hint">{STR.refPickerDisclosureHint}</p>
+            <p className="hint">{noneHint ?? STR.refPickerDisclosureHint}</p>
             {value ? (
               <div className="ref-picker-disclosure-actions">
                 <button

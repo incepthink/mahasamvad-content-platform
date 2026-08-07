@@ -27,14 +27,14 @@ export const STR = {
   navCollapse: 'मेनू लहान करा',
   navExpand: 'मेनू मोठा करा',
   poweredBy: 'Powered by',
-  installAppTitle: 'मोबाईलवर महासंवाद जोडा',
+  installAppTitle: 'मोबाईलवर Newsroom जोडा',
   installAppHint:
     'एकदा जोडल्यानंतर WhatsApp किंवा Recorder मधून ध्वनिफीत थेट येथे पाठवता येईल.',
   installAppAction: 'मोबाईलवर जोडा',
   installAppDismiss: 'आत्ता नको',
 
   // New-generation form
-  newTitle: 'नवीन लेख / पोस्टर तयार करा',
+  newTitle: 'नवीन बातमी / पोस्टर तयार करा',
   noteLabel: 'टिपणी येथे लिहा किंवा चिकटवा',
   noteHint: 'Paste your official note (टिपणी) here',
 
@@ -53,16 +53,19 @@ export const STR = {
     'क्रिएटिव्ह व यूट्यूब थंबनेलसाठी येथे लिहिलेला सर्व मजकूर पोस्टरवर छापला जातो — म्हणून फक्त जेवढे पोस्टरवर हवे तेवढेच लिहा. बॅनरसाठी मात्र या मजकुरातील मुख्य नाव / शीर्षक शोधून तेच बॅनरवर येते. खालून फाईलमधूनही मजकूर घेता येईल — दोन्ही एकत्रही करता येईल.',
   articlePastePlaceholder:
     'उदा. पोस्टरवर हवे असलेले मुद्दे, नावे, तारखा व आकडे येथे लिहा…',
-  // Input-mode tabs above the text box, shown for the क्रिएटिव्ह (social) lane only — it is
-  // the one lane where the two paths exist. जसाच्या तसा = designMode 'onbrand' (the note is
-  // sent verbatim to the image-edit model); लेखावरून = designMode 'adaptive' (generatePosterCopy
-  // writes the poster's headline + points from the pasted article first). बॅनर and यूट्यूब
-  // ignore designMode, so the tabs are not shown there.
-  posterSourceLabel: 'दिलेला मजकूर कसा वापरायचा?',
+  // Input-mode tabs above the text box, shown for the क्रिएटिव्ह (social) lane only AND only
+  // once a template has actually been picked. They are a question about how to FILL that
+  // template — जसाच्या तसा = designMode 'onbrand' (the note is sent verbatim to the image-edit
+  // model), लेखावरून = 'adaptive' (generatePosterCopy writes the headline + points from the
+  // pasted article first) — so with no template there is nothing for them to decide: that run
+  // is designMode 'fresh' and the image model designs the whole poster. बॅनर and यूट्यूब ignore
+  // designMode entirely, so the tabs never appear there.
+  posterSourceLabel: 'निवडलेले टेम्पलेट कसे भरायचे?',
   posterSourceVerbatim: 'जसाच्या तसा मजकूर',
-  posterSourceVerbatimDesc: 'लिहिलेला मजकूर जसाच्या तसा पोस्टरवर छापला जातो',
+  posterSourceVerbatimDesc:
+    'निवडलेल्या टेम्पलेटवर लिहिलेला मजकूर जसाच्या तसा छापला जातो',
   posterSourceArticle: 'लेखावरून पोस्टर',
-  posterSourceArticleDesc: 'दिलेल्या लेखातून पोस्टरचा मजकूर AI तयार करते',
+  posterSourceArticleDesc: 'दिलेल्या लेखातून टेम्पलेटसाठी मजकूर AI तयार करते',
   // The text box's own label/hint follow the tab above: in लेखावरून mode the box holds a
   // finished article, not the poster's words, so promising "सर्व मजकूर पोस्टरवर छापला जातो"
   // there would be false.
@@ -87,27 +90,29 @@ export const STR = {
   mediaOutputVideoDesc: 'टिपणीवरून मराठी व्हिडिओ',
   notePlaceholder:
     'उदा. शासन निर्णय, बैठकीची टिपणी, योजनेची माहिती… ही टिपणीच लेखाचा एकमेव आधार असेल.',
-  headingLabel: 'शीर्षक किंवा लेखाचा रोख (ऐच्छिक)',
+  headingLabel: 'शीर्षक किंवा बातमीचा रोख (ऐच्छिक)',
   headingHint:
-    'शीर्षक द्या, किंवा लेखाचा रोख थोडक्यात सांगा — रिकामे ठेवल्यास मंच स्वतः रोख ठरवेल.',
+    'शीर्षक द्या, किंवा बातमीचा रोख थोडक्यात सांगा — रिकामे ठेवल्यास मंच स्वतः रोख ठरवेल.',
   headingPlaceholder: 'उदा. कर्जमुक्तीमुळे ग्रामीण अर्थव्यवस्थेला नवी ऊर्जा',
   // The officer-supplied STYLE reference (tier 1). The hint has one job: make it unmistakable
-  // that this article is copied for its SHAPE and never for its facts — an officer who pastes
-  // a related article expecting its details to be reused would be misreading the field.
-  styleRefLabel: 'नमुना लेख — शैलीसाठी (ऐच्छिक)',
+  // that this sample is copied for its SHAPE and never for its facts — an officer who pastes
+  // a related news item expecting its details to be reused would be misreading the field.
+  styleRefLabel: 'नमुना बातमी — शैलीसाठी (ऐच्छिक)',
   styleRefHint:
-    'आधी प्रसिद्ध झालेला एखादा लेख इथे चिकटवा; त्याची मांडणी, शीर्षक-रचना व भाषाशैली नमुना म्हणून वापरली जाईल. यातील कोणतीही माहिती, नावे किंवा आकडे नव्या लेखात घेतले जाणार नाहीत — त्यासाठी टिपणीच एकमेव आधार आहे. रिकामे ठेवल्यास मंच जुळणारा महासंवाद लेख स्वतः निवडेल.',
+    'आधी प्रसिद्ध झालेली एखादी बातमी इथे चिकटवा; तिची मांडणी, शीर्षक-रचना व भाषाशैली नमुना म्हणून वापरली जाईल. यातील कोणतीही माहिती, नावे किंवा आकडे नव्या बातमीत घेतले जाणार नाहीत — त्यासाठी टिपणीच एकमेव आधार आहे. रिकामे ठेवल्यास मंच जुळणारी महासंवाद बातमी स्वतः निवडेल.',
   styleRefPlaceholder:
-    'उदा. महासंवादवर आधी प्रसिद्ध झालेल्या लेखाचा संपूर्ण मजकूर…',
-  // The officer's trusted request for ONE article: both writing direction and factual input.
+    'उदा. महासंवादवर आधी प्रसिद्ध झालेल्या बातमीचा संपूर्ण मजकूर…',
+  // The officer's trusted request for ONE news item: both writing direction and factual input.
   aiInstructionsLabel: 'तुमची विनंती (ऐच्छिक)',
   aiInstructionsHint:
-    'लेख कसा हवा, कशावर भर द्यायचा, काय वगळायचे किंवा कोणती माहिती दुरुस्त करायची ते लिहा. येथे दिलेली माहिती अधिकृत मानली जाईल.',
+    'बातमी कशी हवी, कशावर भर द्यायचा, काय वगळायचे किंवा कोणती माहिती दुरुस्त करायची ते लिहा. येथे दिलेली माहिती अधिकृत मानली जाईल.',
   aiInstructionsPlaceholder:
     'उदा. ५० कोटींच्या निधीवर भर द्या; समिती सदस्यांची यादी टाळा; भाषा सोपी ठेवा.',
   aiInstructionsTooLong: 'सूचना खूप मोठ्या आहेत — कृपया थोडक्यात लिहा.',
 
-  categoryLabel: 'लेखाचा प्रकार?',
+  // Deliberately neutral: the two options are बातमी and योजना-लेख, so naming either one
+  // in the question would misdescribe the other.
+  categoryLabel: 'कोणता प्रकार?',
   categoryScheme: 'योजना-लेख',
   categorySchemeDesc: 'सविस्तर, चिंतनशील महासंवाद फीचर-लेख',
   categoryNews: 'बातमी',
@@ -141,7 +146,7 @@ export const STR = {
 
   // Shown on the योजना/बातमी cards while a news/scheme run is already in flight
   articleBusyInfo:
-    'एक लेख सध्या तयार होत आहे. तो पूर्ण झाल्यावर नवीन सुरू करता येईल.',
+    'एक बातमी सध्या तयार होत आहे. ती पूर्ण झाल्यावर नवीन सुरू करता येईल.',
 
   outputTypeLabel: 'काय तयार करायचे?',
   outputArticle: 'लेख',
@@ -162,22 +167,26 @@ export const STR = {
 
   // DLO (Digital Liaison Officer) interface — meeting notes + recordings +
   // documents → transcription/extraction → editable review → article.
-  dloTitle: 'DLO — बैठकीतून लेख',
+  //
+  // The officer-facing word for the output is बातमी, not लेख, throughout this block and
+  // in ArticleView/STEP_LABELS below: ~95% of DLO runs are news. योजना-लेख survives as the
+  // name of the OTHER category card, which is the one place the distinction is the point.
+  dloTitle: 'DLO — बैठकीतून बातमी',
   /* The page header's one-liner, and now /dlo's ONLY blurb: the notes card used
      to repeat the same sentence under a "नवीन काम" title of its own, which put
      three lines of prose between the officer and the first box they type in. */
   dloPageIntro:
-    'बैठकीचे ध्वनिमुद्रण, कागदपत्रे आणि टिपणी एकत्र करून त्यांतून प्रसिद्धीयोग्य मराठी लेख तयार करा.',
+    'बैठकीचे ध्वनिमुद्रण, कागदपत्रे आणि टिपणी एकत्र करून त्यांतून प्रसिद्धीयोग्य मराठी बातमी तयार करा.',
   /* UNUSED — was the notes card's hint before the line above absorbed it. Kept
      like dloNewWork/dloNewWorkTitle below, so restoring that card is one edit. */
   dloIntro:
-    'बैठकीतील टिपणी, ध्वनिमुद्रण (MP3, WAV, M4A आदी) आणि कागदपत्रे (PDF/DOCX/TXT) येथे द्या — या सर्व माहितीतून लेख तयार होईल.',
+    'बैठकीतील टिपणी, ध्वनिमुद्रण (MP3, WAV, M4A आदी) आणि कागदपत्रे (PDF/DOCX/TXT) येथे द्या — या सर्व माहितीतून बातमी तयार होईल.',
   dloStepInput: 'माहिती द्या',
   dloStepProcessing: 'प्रक्रिया',
   // The middle rail step now covers processing + the Pointers selection + the source review,
   // so its label names the two things the officer does there.
   dloStepReview: 'मुद्दे व तपासणी',
-  dloStepOutput: 'तयार लेख',
+  dloStepOutput: 'तयार बातमी',
   dloNotesLabel: 'बैठकीतील टिपणी येथे लिहा',
   dloNotesHint:
     'बैठकीत जे ऐकले, ठरले किंवा आठवते ते सर्व येथे लिहा — मुद्दे, निर्णय, घोषणा, आकडेवारी.',
@@ -238,14 +247,14 @@ export const STR = {
   dloCharsSuffix: 'अक्षरे',
   dloReviewTitle: 'मजकूर तपासा व दुरुस्त करा',
   dloReviewHint:
-    'खालील मजकूर टिपणी, ध्वनिमुद्रण व कागदपत्रांतून तयार झाला आहे. नावे, आकडे, पदनामे व योजनांची नावे तपासून हवे ते बदल करा — हाच मजकूर लेखाचा एकमेव आधार असेल.',
+    'खालील मजकूर टिपणी, ध्वनिमुद्रण व कागदपत्रांतून तयार झाला आहे. नावे, आकडे, पदनामे व योजनांची नावे तपासून हवे ते बदल करा — हाच मजकूर बातमीचा एकमेव आधार असेल.',
   dloReviewFailedWarning:
     'काही फाईल्समधून मजकूर मिळाला नाही — त्यांशिवाय पुढे जाता येईल:',
   dloReviewTooShort: 'कृपया किमान २० अक्षरांचा मजकूर ठेवा.',
   // Review step: one card per source (notes / each recording / each document),
   // PDFs with page-wise selection.
   dloReviewNotesTitle: 'बैठकीतील टिपणी',
-  dloReviewInclude: 'लेखात समाविष्ट करा',
+  dloReviewInclude: 'बातमीत समाविष्ट करा',
   dloReviewExcluded: 'वगळले आहे',
   dloReviewKindAudio: 'ध्वनिमुद्रण',
   dloReviewKindPdf: 'PDF कागदपत्र',
@@ -265,9 +274,9 @@ export const STR = {
     'निवडलेली पृष्ठे OCR ने वाचली जातील. यास काही मिनिटे लागू शकतात.',
   dloReviewReading: 'निवडलेली पृष्ठे वाचत आहोत…',
   dloReviewSelectionPending:
-    'लेख तयार करण्यापूर्वी वरील स्कॅन केलेल्या PDF ची पृष्ठे वाचून घ्या.',
+    'बातमी तयार करण्यापूर्वी वरील स्कॅन केलेल्या PDF ची पृष्ठे वाचून घ्या.',
   dloReviewNoPagesPicked: 'किमान एक पृष्ठ निवडा.',
-  dloReviewTotal: 'लेखासाठी वापरला जाणारा मजकूर:',
+  dloReviewTotal: 'बातमीसाठी वापरला जाणारा मजकूर:',
   dloReviewPreviewShow: 'पूर्ण मजकूर पाहा',
   dloReviewPreviewHide: 'पूर्ण मजकूर लपवा',
   dloReviewEmpty: 'कोणताही मजकूर निवडलेला नाही — किमान एक स्रोत निवडा.',
@@ -276,7 +285,7 @@ export const STR = {
   // field means the name prints bare — a designation is never guessed from the note.
   designationsTitle: 'व्यक्ती व पदनाम तपासा',
   designationsHint:
-    'लेखात या व्यक्तींचा पहिला उल्लेख "पदनाम + नाव" असा होईल (उदा. मुख्यमंत्री देवेंद्र फडणवीस). पदनाम रिकामे ठेवल्यास फक्त नाव येईल. इंग्रजी व हिंदी भाषांतरातही हेच पदनाम वापरले जाईल.',
+    'बातमीत या व्यक्तींचा पहिला उल्लेख "पदनाम + नाव" असा होईल (उदा. मुख्यमंत्री देवेंद्र फडणवीस). पदनाम रिकामे ठेवल्यास फक्त नाव येईल. इंग्रजी व हिंदी भाषांतरातही हेच पदनाम वापरले जाईल.',
   designationsLoading: 'व्यक्तींची नावे तपासत आहोत…',
   designationsEmpty:
     'या मजकुरात कोणत्याही व्यक्तीचे नाव आढळले नाही. पुढे जा — पदनामाची गरज नाही.',
@@ -288,7 +297,7 @@ export const STR = {
   designationsPlaceholder: 'उदा. मुख्यमंत्री (ऐच्छिक)',
   designationsRemember: 'यापुढेही हेच वापरा',
   designationsRememberHint:
-    'खूण केल्यास हे पदनाम नाव-शब्दकोशात जतन होईल आणि पुढच्या लेखात आपोआप भरले जाईल.',
+    'खूण केल्यास हे पदनाम नाव-शब्दकोशात जतन होईल आणि पुढच्या बातमीत आपोआप भरले जाईल.',
   designationsAddName: '+ आणखी व्यक्ती जोडा',
   designationsNamePlaceholder: 'उदा. देवेंद्र फडणवीस',
   designationsKnown: 'शब्दकोशातील पदनाम',
@@ -299,7 +308,7 @@ export const STR = {
   // office-holder can change, and only the officer knows whose meeting this was.
   designationsSuggested: 'शब्दकोशातून सुचवलेले',
   designationsSuggestHint:
-    'टिपणीत पदनाम आहे पण नाव नाही. नाव-शब्दकोशानुसार हे पदनाम खालील व्यक्तीचे आहे आणि ते लेखात वापरले जाईल. चुकीचे असल्यास खूण काढून टाका.',
+    'टिपणीत पदनाम आहे पण नाव नाही. नाव-शब्दकोशानुसार हे पदनाम खालील व्यक्तीचे आहे आणि ते बातमीत वापरले जाईल. चुकीचे असल्यास खूण काढून टाका.',
   // The पदनाम was read off the officer's own note, where the title stands immediately before
   // the name ("उपमुख्यमंत्री एकनाथ शिंदे"). Labelled so it is clear this came from the text and
   // not from the शब्दकोश — the officer can clear it like any other.
@@ -327,20 +336,20 @@ export const STR = {
   // Shown on the finished article when an approved designation could not be applied.
   designationWarnTitle: 'पदनामाबाबत लक्ष द्या',
   designationWarnNotFound:
-    'यांचे पूर्ण नाव लेखात आढळले नाही, त्यामुळे पदनाम जोडता आले नाही:',
-  designationWarnCorrected: 'लेखातील चुकीचे पदनाम बदलले:',
+    'यांचे पूर्ण नाव बातमीत आढळले नाही, त्यामुळे पदनाम जोडता आले नाही:',
+  designationWarnCorrected: 'बातमीतील चुकीचे पदनाम बदलले:',
   // Shown on a social poster whose information held more items than any master template lays
   // out. The poster DOES carry every item — the design was stretched to fit — so this is a
   // "check it reads well, or split the note" prompt, not an error.
   posterCapacityWarnTitle: 'मुद्दे टेम्पलेटच्या क्षमतेपेक्षा जास्त आहेत',
   posterCapacityWarnBody: (needed: number, available: number) =>
     `तुम्ही दिलेल्या माहितीत ${needed} मुद्दे आहेत, पण उपलब्ध टेम्पलेटमध्ये साधारण ${available} मुद्दे मावतात. सर्व मुद्दे पोस्टरवर दाखवले आहेत, मात्र मजकूर दाटीवाटीने आला असू शकतो. पोस्टर तपासून पाहा — गरज वाटल्यास माहिती दोन पोस्टरमध्ये विभागून पुन्हा तयार करा.`,
-  dloGenerate: 'लेख तयार करा →',
-  dloOutputTitle: 'तयार झालेला लेख',
+  dloGenerate: 'बातमी तयार करा →',
+  dloOutputTitle: 'तयार झालेली बातमी',
   dloViewDetail: 'सविस्तर पाहा (अभिप्राय, भाषांतर, पोस्टर)',
   dloStartOver: 'पुन्हा सुरुवात करा',
-  dloNewArticle: 'नवीन DLO लेख तयार करा',
-  dloRegenerateArticle: 'याच स्रोतातून पुन्हा लेख तयार करा',
+  dloNewArticle: 'नवीन DLO बातमी तयार करा',
+  dloRegenerateArticle: 'याच स्रोतातून पुन्हा बातमी तयार करा',
 
   // Several officers work at once, so /dlo is a list of work and each intake lives at its
   // own address. 'काम' throughout rather than the more technical 'सत्र', matching dloStartOver.
@@ -356,8 +365,8 @@ export const STR = {
   dloListLoading: 'यादी लोड होत आहे…',
   dloListLoadError: 'मागील कामांची यादी मिळाली नाही.',
   dloSourceCountSuffix: 'स्रोत',
-  dloArticleReady: 'लेख तयार',
-  dloArticleCount: 'लेख',
+  dloArticleReady: 'बातमी तयार',
+  dloArticleCount: 'बातमी',
   dloOpenWork: 'उघडा',
   dloLoadingWork: 'काम उघडत आहे…',
   dloNotFound: 'हे काम सापडले नाही. ते हटवले गेले असावे.',
@@ -485,7 +494,7 @@ export const STR = {
   // Live mode (the media room): the file's text is already counted alongside the box above,
   // so there is no button to press and the card says as much.
   docAutoUsed:
-    'निवडलेल्या पृष्ठांचा हा मजकूर वरील लेखासोबत आपोआप वापरला जाईल — वेगळे बटण दाबण्याची गरज नाही.',
+    'निवडलेल्या पृष्ठांचा हा मजकूर वरील मजकुरासोबत आपोआप वापरला जाईल — वेगळे बटण दाबण्याची गरज नाही.',
   docEmptySelection: 'निवडलेल्या पृष्ठांमध्ये मजकूर नाही.',
   docNoPagesSelected: 'या फाईलमधून एकही पृष्ठ निवडलेले नाही.',
   // Which backend read the file. The text layer is exact; OCR guesses from pixels and can
@@ -567,9 +576,10 @@ export const STR = {
   proofreadHighlightOriginal: 'मूळ:',
   proofreadHighlightClose: 'बंद करा',
 
-  // The draft arriving live (useArticleStream). Deliberately not called "लेख" — it is not
-  // the finished article until the run completes, and the officer must not copy from it.
-  articleStreamingTitle: 'लेख लिहिला जात आहे',
+  // The draft arriving live (useArticleStream). Deliberately phrased as still in progress —
+  // it is not the finished बातमी until the run completes, and the officer must not copy
+  // from it. Compare articleTitle below, which names the finished thing.
+  articleStreamingTitle: 'बातमी लिहिली जात आहे',
   articleStreamingBadge: 'लिहीत आहे…',
 
   // Progress
@@ -594,8 +604,8 @@ export const STR = {
     'या कामातून काहीच तयार झाले नाही. खाली “पुढील पाऊल” मध्ये याच टिपणीवरून नवीन काम सुरू करा.',
 
   // Results
-  articleTitle: 'तयार झालेला लेख',
-  givenArticle: 'दिलेला लेख',
+  articleTitle: 'तयार झालेली बातमी',
+  givenArticle: 'दिलेली बातमी',
   factCheckTitle: 'तथ्य-तपासणी (माहिती कुठून आली?)',
   noteTitle: 'मूळ टिपणी',
 
@@ -621,7 +631,7 @@ export const STR = {
   translating: 'भाषांतर सुरू आहे…',
   translatingEnglish: 'इंग्रजी भाषांतर सुरू आहे…',
   translatingHindi: 'हिंदी भाषांतर सुरू आहे…',
-  revisingArticle: 'लेख सुधारला जात आहे…',
+  revisingArticle: 'बातमी सुधारली जात आहे…',
   posterTitle: 'तयार झालेले पोस्टर',
   // Same panel, यूट्यूब lane: calling a thumbnail a "पोस्टर" is simply wrong to the officer
   // who chose यूट्यूब थंबनेल on the form.
@@ -637,7 +647,7 @@ export const STR = {
   rerenderDone: 'पोस्टर तयार झाले ✓',
 
   // Feedback
-  articleFeedbackTitle: 'लेखात बदल हवा आहे?',
+  articleFeedbackTitle: 'बातमीत बदल हवा आहे?',
   articleFeedbackHint:
     'काय बदलायचे ते आपल्या शब्दांत लिहा — उदा. "सुरुवात आणखी आकर्षक करा", "मुद्दे थोडक्यात मांडा".',
   posterFeedbackTitle: 'पोस्टरमध्ये बदल हवा आहे?',
@@ -811,11 +821,11 @@ export const STR = {
   sourceNoteDesc: 'तुम्ही दिलेली मूळ टिपणी वापरली जाईल.',
   nextArticleTitle: 'याच टिपणीवरून लेख तयार करा',
   nextArticleHint:
-    'हीच टिपणी वापरून महासंवाद शैलीतील लेख (हवे असल्यास पोस्टरसह) तयार होईल.',
-  nextArticleCta: 'लेख तयार करा',
-  nextPosterTitle: 'या लेखासाठी पोस्टर तयार करा',
+    'हीच टिपणी वापरून महासंवाद शैलीतील बातमी (हवे असल्यास पोस्टरसह) तयार होईल.',
+  nextArticleCta: 'बातमी तयार करा',
+  nextPosterTitle: 'या बातमीसाठी पोस्टर तयार करा',
   nextPosterHint:
-    'तयार झालेल्या लेखावरून महासंवाद शैलीतील पोस्टर याच कामात तयार होईल — नवीन काम सुरू होणार नाही.',
+    'तयार झालेल्या बातमीवरून महासंवाद शैलीतील पोस्टर याच कामात तयार होईल — नवीन काम सुरू होणार नाही.',
   nextPosterRetryHint:
     'मागील वेळी पोस्टर तयार होऊ शकले नाही. खालील बटणावर क्लिक करून पुन्हा प्रयत्न करा.',
   nextPosterCta: 'पोस्टर तयार करा',
@@ -1120,6 +1130,13 @@ export const STR = {
     'रिकामे ठेवल्यास मंच विषयानुसार योग्य टेम्पलेट स्वतः निवडेल.',
   refPickerDisclosureNone: 'आपोआप निवड',
   refPickerDisclosureClear: 'निवड काढा',
+  // The क्रिएटिव्ह lane overrides the two above (noneLabel/noneHint on ReferencePicker).
+  // Leaving it empty there no longer means "the platform picks a template for you" — it means
+  // NO template is used at all and the poster is designed from scratch, which is the opposite
+  // claim. The लेख and यूट्यूब lanes still auto-select, so they keep the originals.
+  refPickerDisclosureNoneSocial: 'संपूर्ण AI रचना — टेम्पलेट नाही',
+  refPickerDisclosureHintSocial:
+    'रिकामे ठेवल्यास कोणतेही टेम्पलेट वापरले जाणार नाही — रंग, मांडणी व रचना AI स्वतः ठरवते. टेम्पलेट निवडल्यासच पोस्टर त्या टेम्पलेटनुसार तयार होते.',
 
   // Transcription (/transcribe). A recording in, Marathi text out — nothing is generated,
   // rewritten or summarised here, which the intro says plainly so nobody expects an article.
@@ -1131,7 +1148,7 @@ export const STR = {
   transcribeHint:
     'एकावेळी अनेक फाईल जोडता येतील (कमाल १० फाईल्स, प्रत्येकी ५० MB). मोबाईलवरील नेहमीचे ध्वनिफीत प्रकार चालतात.',
   transcribeSharedReadError:
-    'मोबाईलवरून पाठवलेली ध्वनिफीत उघडता आली नाही. कृपया पुन्हा Share करून महासंवाद निवडा.',
+    'मोबाईलवरून पाठवलेली ध्वनिफीत उघडता आली नाही. कृपया पुन्हा Share करून Newsroom निवडा.',
   transcribeFilesTitle: 'जोडलेली ध्वनिमुद्रणे',
   transcribeNeedFile:
     'कृपया किमान एक ध्वनिमुद्रण जोडा किंवा यूट्युब लिंक द्या.',
@@ -1629,12 +1646,12 @@ export const DLO_INTAKE_STEP_LABELS: Record<DloIntakeStep, string> = {
 export const STEP_LABELS: Record<GenerationStep, string> = {
   // Covers the whole setup window before drafting: the name dictionary, the officer's
   // designations and — when ARTICLE_STYLE_REFERENCES_ENABLED is on — the style reference.
-  // Deliberately not "संदर्भ लेख शोधत आहोत", which is false whenever references are bypassed.
-  retrieve: 'लेखाची तयारी करत आहोत…',
+  // Deliberately not "संदर्भ बातमी शोधत आहोत", which is false whenever references are bypassed.
+  retrieve: 'बातमीची तयारी करत आहोत…',
   extract_5w1h: 'माहितीचे विश्लेषण करत आहोत…',
   editorial_brief: 'संपादकीय आराखडा तयार करत आहोत…',
-  draft: 'लेख लिहित आहोत…',
-  coverage: 'लेखाची पूर्णता तपासत आहोत…',
+  draft: 'बातमी लिहित आहोत…',
+  coverage: 'बातमीची पूर्णता तपासत आहोत…',
   faithfulness: 'तथ्यांची पडताळणी करत आहोत…',
   fact_check: 'तथ्य-तपासणी यादी तयार करत आहोत…',
   // The step resolves which reference template the poster is built on. It no longer
@@ -1648,7 +1665,7 @@ export const STEP_LABELS: Record<GenerationStep, string> = {
   caption: 'कॅप्शन लिहित आहोत…',
   scene: 'पोस्टरचे चित्र तयार करत आहोत…',
   render: 'पोस्टर जुळवत आहोत…',
-  revise_article: 'अभिप्रायानुसार लेख सुधारत आहोत…',
+  revise_article: 'अभिप्रायानुसार बातमी सुधारत आहोत…',
   revise_copy: 'अभिप्रायानुसार मजकूर सुधारत आहोत…',
   revise_scene: 'नवीन चित्र तयार करत आहोत…',
   revise_image: 'चित्र पुन्हा तयार करत आहोत…',

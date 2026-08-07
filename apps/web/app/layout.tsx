@@ -38,7 +38,7 @@ export const metadata: Metadata = {
   manifest: '/manifest.webmanifest',
   appleWebApp: {
     capable: true,
-    title: 'महासंवाद',
+    title: 'Newsroom',
     statusBarStyle: 'default',
   },
 };

@@ -20,8 +20,8 @@ type ShareTargetManifest = MetadataRoute.Manifest & {
 export default function manifest(): ShareTargetManifest {
   return {
     id: '/',
-    name: 'महासंवाद सामग्री मंच',
-    short_name: 'महासंवाद',
+    name: 'Newsroom',
+    short_name: 'Newsroom',
     description: 'महाराष्ट्र शासनाच्या प्रसिद्धीसाठी मराठी सामग्री मंच',
     start_url: '/transcribe',
     scope: '/',
@@ -57,7 +57,7 @@ export default function manifest(): ShareTargetManifest {
       },
     ],
     prefer_related_applications: false,
-    // Once the PWA is installed, Android registers Mahasamvad in the system Share sheet.
+    // Once the PWA is installed, Android registers Newsroom in the system Share sheet.
     // The service worker intercepts this POST before the recording ever reaches Vercel.
     share_target: {
       action: '/share/audio',
@@ -67,7 +67,7 @@ export default function manifest(): ShareTargetManifest {
         files: [
           {
             name: 'recordings',
-            // `audio/*` is what lets recorder and messaging apps offer Mahasamvad even
+            // `audio/*` is what lets recorder and messaging apps offer Newsroom even
             // when their exact MIME spelling differs. The client and API still enforce
             // the narrower supported-container list before transcription.
             accept: [

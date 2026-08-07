@@ -1528,12 +1528,11 @@ async function resolveSocialReference(
   id: string,
   row: GenerationRow,
   brand: TemplateBrand,
-  // On a from-scratch render the master contributes STRUCTURE only and the palette is assigned
-  // separately, so colour must play no part in choosing it — the master library is
-  // overwhelmingly saffron/maroon/cream, and ranking on colour theme is one of the ways the
-  // house look kept re-entering a poster that was supposed to be in a different family.
-  ignoreColour = false,
 ): Promise<ResolvedReference> {
+  // NO per-design-mode options, and there is nothing left to add one for. This function is now
+  // only ever called for a mode that renders INTO the reference it returns, so every caller
+  // wants the same answer for the same note. The `ignoreColour` flag that used to arrive here
+  // existed for the fully-AI path, which no longer resolves a reference at all.
   if (row.referenceImageId) {
     const pinned = await resolvePinnedImage(client, row.referenceImageId, id);
     if (pinned) return pinned;
@@ -1557,13 +1556,15 @@ async function resolveSocialReference(
   // would no longer describe what the last few runs actually used.
   if (socialReferenceMode() === 'information') {
     const recencyKey = `${brand}:library`;
+    // No per-design-mode options: every ordinary DGIPR social run — fresh or template, pinned
+    // or not — reaches this call with identical arguments, so the reference is picked by one
+    // process for all of them.
     const resolved = await resolveSocialReferenceByInformation(
       client,
       brand,
       id,
       row.note,
       recentMasters(recencyKey),
-      { ignoreColour },
     );
     rememberMaster(recencyKey, resolved.master.id, resolved.poolSize ?? 1);
     return resolved;
@@ -1590,7 +1591,6 @@ async function resolveSocialReference(
     id,
     row.note,
     recentMasters(recencyKey),
-    { ignoreColour },
   );
   rememberMaster(recencyKey, master.id, type.images.length);
   return {
@@ -1605,6 +1605,25 @@ async function resolveSocialReference(
     forced: false,
     title: classification.title,
   };
+}
+
+// The copy registry a fully-AI run writes into. 'generic' is headline + subhead + 3-6 supporting
+// points — a shape the copy model bounds for itself, where every other registry exists to fill a
+// particular template's slots. It is also generate-poster-copy's own fallback for an unknown
+// copy_style, so this is not a new code path, just the one a reference-free run names explicitly.
+const FRESH_COPY_STYLE = 'generic';
+
+// A fresh run has no reference ranker, so nothing hands it the Marathi working title that
+// becomes generations.reference_title. The poster's own headline is the best available answer and
+// costs nothing — it is already written by the time this is needed. null only if the copy step
+// produced no headline at all, which is the same as the pre-existing "no title" case.
+function freshWorkingTitle(
+  copy: Record<string, unknown> | undefined,
+): string | null {
+  const headline = copy?.headline;
+  if (typeof headline !== 'string') return null;
+  const trimmed = headline.trim();
+  return trimmed === '' ? null : trimmed;
 }
 
 // Render ONE social poster and store it at posterPath(id, version), updating referenceTitle +
@@ -1630,32 +1649,56 @@ async function renderAndStoreSocialPoster(
   // "different colours" redo so the new version cannot land back in the family being rejected.
   avoidFamilies: readonly PaletteFamily[] = [],
 ): Promise<{ postType: string; title: string | null }> {
-  // 1. Resolve the poster type + the master. A pin (image or type) or the CMO brand forces the
-  //    type and skips classification; otherwise classify the note and pick the best-fit master
-  //    within the chosen type (content-aware, seeded, recency-spread across runs).
+  // A fully-AI poster: designed from scratch, with NO reference of any kind.
+  const isFresh = brand !== 'cmo' && designMode === 'fresh';
+
+  // 1. Resolve the poster type + the master — FOR THE TEMPLATE MODES ONLY.
+  //
+  //    A 'fresh' run now resolves NOTHING (2026-08-07). It used to resolve one anyway and use it
+  //    "headlessly": no pixels reached the image model, but the picked master still decided the
+  //    copy registry, pinned the body-point count to its slot count, decided photo-vs-text-only
+  //    and supplied a STRUCTURE INSPIRATION line. That is a template deciding the shape of a
+  //    poster the officer asked to be designed freely — and it is what produced the twelve
+  //    cramped numbered rows on generation 63511b51. The library is described by layout
+  //    structure, so selecting on it can only ever return a structure; asking for a poster with
+  //    no reference and then handing the copy model a reference's slot count is not that.
+  //
+  //    What replaces it, all of it already existing behaviour for an un-analysed master:
+  //      - copyStyle  -> 'generic', whose registry self-bounds to a sensible 3-6 points rather
+  //                      than filling a template's slots.
+  //      - layoutSpec -> null, so nothing pins the point count and hasPhoto defaults true.
+  //      - structure  -> the assigned COMPOSITION archetype alone (poster-layouts.ts), which
+  //                      already OUTRANKED the master's hint whenever both were present.
+  //    A fresh run therefore also has no capacity ceiling, so it can never report a shortfall:
+  //    there is no template to overflow.
+  //
+  //    For the template modes the precedence is unchanged — a pin (image or type) or the CMO
+  //    brand forces the type and skips selection; otherwise the note is compared against the
+  //    whole enabled library, capacity-first, by ONE process for every template mode.
   await updateGeneration(client, id, { step: 'classify' });
-  const resolved = await resolveSocialReference(
-    client,
-    id,
-    row,
-    brand,
-    brand !== 'cmo' && designMode === 'fresh',
-  );
+  const resolved = isFresh
+    ? null
+    : await resolveSocialReference(client, id, row, brand);
 
   console.log(
-    `[job ${id}] social poster reference: ${JSON.stringify({
-      id,
-      brand,
-      forced: resolved.forced,
-      type: resolved.type.slug,
-      analyzed: Boolean(resolved.master.layoutSpec),
-      pick: resolved.master.reason,
-    })}`,
+    `[job ${id}] social poster reference: ${JSON.stringify(
+      resolved
+        ? {
+            id,
+            brand,
+            forced: resolved.forced,
+            type: resolved.type.slug,
+            analyzed: Boolean(resolved.master.layoutSpec),
+            pick: resolved.master.reason,
+          }
+        : { id, brand, reference: 'none (fully-AI render)' },
+    )}`,
   );
 
   // Record the capacity shortfall (if any) so the detail payload can warn the officer that this
-  // poster is carrying more items than any template is built to lay out.
-  if (resolved.shortfall) {
+  // poster is carrying more items than any template is built to lay out. A fresh run has no
+  // template and therefore no ceiling, so it always clears the warning.
+  if (resolved?.shortfall) {
     posterCapacityWarnings.set(id, { ...resolved.shortfall });
   } else {
     posterCapacityWarnings.delete(id);
@@ -1674,6 +1717,7 @@ async function renderAndStoreSocialPoster(
   // for exactly this class of bug; the two lanes are meant to be indistinguishable here, and
   // merging the two UI options later is now purely a web change.
   const isSimpleTemplateEdit =
+    resolved !== null &&
     isSocialCategory(row.category) &&
     brand === 'dgipr' &&
     designMode === 'onbrand';
@@ -1688,14 +1732,17 @@ async function renderAndStoreSocialPoster(
       .map((t) => t.marathi);
 
     // 3. Copy (gpt-5.6-luna, metered inside this job's cost scope).
+    //    On a fresh run there is no resolved type, so the copy runs on the 'generic' registry
+    //    (headline + 3-6 supporting points) with a null layoutSpec — no slot pin, no operator
+    //    type description steering the tone toward a template's purpose.
     await updateGeneration(client, id, { step: 'copy' });
     copyResult = await generatePosterCopy({
       note: row.note,
-      postType: resolved.type.slug,
-      copyStyle: resolved.type.copyStyle,
-      description: resolved.type.description,
+      postType: resolved?.type.slug ?? FRESH_COPY_STYLE,
+      copyStyle: resolved?.type.copyStyle ?? FRESH_COPY_STYLE,
+      description: resolved?.type.description,
       brand,
-      layoutSpec: resolved.master.layoutSpec,
+      layoutSpec: resolved?.master.layoutSpec ?? null,
       lockedSchemeNames,
     });
   }
@@ -1705,8 +1752,10 @@ async function renderAndStoreSocialPoster(
   //     exact ids), so consecutive posters differ in hue AND in shape. The avoid set includes the
   //     hue families the last few renders were MEASURED to be, not only the ones they were
   //     assigned — if the image model ignores a spec, avoiding intentions would achieve nothing.
-  //     Seeded, so a retry reproduces the same assignment rather than redesigning.
-  const isFresh = brand !== 'cmo' && designMode === 'fresh';
+  //     Seeded, so a retry reproduces the same assignment rather than redesigning. With no
+  //     master to take a structure hint from, the assigned archetype is now the ONLY structural
+  //     instruction a fresh poster gets — which it effectively already was, since COMPOSITION
+  //     was documented to outrank the master's hint wherever the two disagreed.
   const history = isFresh
     ? await recentStyleHistory(client, SOCIAL_STYLE_CATEGORIES)
     : undefined;
@@ -1732,9 +1781,10 @@ async function renderAndStoreSocialPoster(
     ? await generateArtDirection({
         note: row.note,
         copyStyle: copyResult!.copyStyle,
-        // Colour words are stripped from this hint inside buildPosterPrompt; the art director
-        // gets the raw summary but is told the palette is not its call.
-        referenceHint: resolved.master.layoutSpec?.layoutSummary,
+        // Always undefined now that a fresh run resolves no master — kept because CMO and the
+        // template modes share this builder, and because the parameter is what the art director
+        // would use if a hint ever returns.
+        referenceHint: resolved?.master.layoutSpec?.layoutSummary,
         seed,
         assignedPalette,
         assignedLayout,
@@ -1760,24 +1810,27 @@ async function renderAndStoreSocialPoster(
     // put anywhere near a prompt that must reproduce the officer's text unchanged. It still
     // warns the officer through posterCapacityWarnings above.
     itemCount: isSimpleTemplateEdit ? resolved.itemCount : undefined,
-    copyStyle: copyResult?.copyStyle ?? resolved.type.copyStyle,
+    copyStyle:
+      copyResult?.copyStyle ?? resolved?.type.copyStyle ?? FRESH_COPY_STYLE,
     designMode,
     brand,
-    masterUrl: resolved.master.url,
-    layoutSummary: resolved.master.layoutSpec?.layoutSummary,
+    // Both empty on a fresh run. buildPosterPrompt only demands a master URL for the modes that
+    // EDIT one, and it omits the STRUCTURE INSPIRATION block entirely when there is no summary —
+    // so a fresh prompt now carries the assigned palette and composition and nothing borrowed.
+    masterUrl: resolved?.master.url,
+    layoutSummary: resolved?.master.layoutSpec?.layoutSummary,
     hasPhoto: copyResult?.hasPhoto ?? false,
     artDirection: artDirection ?? undefined,
     assignedPalette,
     assignedLayout,
   });
 
-  // 5. Render. 'fresh' generates from scratch (the master is only inspiration in the prompt)
-  //    via the direct image call; the edit modes edit the chosen master through n8n.
+  // 5. Render. 'fresh' paints from scratch via the direct image call — no master, and no n8n;
+  //    the template modes edit the chosen master through the thin workflow.
   await updateGeneration(client, id, { step: 'image' });
-  const rawPoster =
-    designMode === 'fresh' && brand !== 'cmo'
-      ? await generateImage(prompt, { size: '1280x1600' })
-      : await renderSocialPosterViaN8n(id, resolved.master.url, prompt);
+  const rawPoster = isFresh
+    ? await generateImage(prompt, { size: '1280x1600' })
+    : await renderSocialPosterViaN8n(id, resolved!.master.url, prompt);
   // gpt-image-2 @ 1280x1600 — attribute the fixed tier price (image usage isn't measurable
   // whether it ran in n8n or the direct call). The copy above is metered by chatComplete.
   recordImageCost('twitter', imageQuality());
@@ -1833,9 +1886,12 @@ async function renderAndStoreSocialPoster(
   await uploadPng(client, posterObjectPath, posterPng);
 
   // Working title → referenceTitle (surfaced in UI). Persisted with the poster so a later
-  // caption failure never loses the paid render.
+  // caption failure never loses the paid render. A fresh run has no reference ranker to name it,
+  // so the poster's own headline stands in — a run must not go into history untitled just
+  // because nothing was selected for it.
+  const workingTitle = resolved?.title ?? freshWorkingTitle(copyResult?.copy);
   await updateGeneration(client, id, {
-    referenceTitle: resolved.title ?? null,
+    referenceTitle: workingTitle,
     posterPath: posterObjectPath,
   });
 
@@ -1855,7 +1911,10 @@ async function renderAndStoreSocialPoster(
     }
   }
 
-  return { postType: resolved.type.slug, title: resolved.title ?? null };
+  return {
+    postType: resolved?.type.slug ?? FRESH_COPY_STYLE,
+    title: workingTitle,
+  };
 }
 
 // Social pipeline (twitter + facebook, identical today). The POSTER pipeline — classify →

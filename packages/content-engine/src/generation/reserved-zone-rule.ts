@@ -193,6 +193,27 @@ export function stampedChromeRule(c: StampedChrome): string {
 }
 
 /**
+ * For a prompt that PAINTS FROM SCRATCH with no input image at all (designMode 'fresh'):
+ * there is nothing to erase and no reference whose chrome could be called placeholder, so
+ * neither rule above is true of it — the only thing to say is "do not invent one, and here
+ * is what happens if you do".
+ *
+ * The fresh branch carried a one-line version of this ("Do not paint any logos, emblems,
+ * footer bands or social handles — the official branding is stamped on afterwards by
+ * software"), which states the prohibition but not the CONSEQUENCE. That omission is what
+ * the other two rules were rewritten to fix: a model has no reason to prefer leaving the
+ * corner alone over painting a plausible badge unless it is told the painted one is not
+ * replaced by the real one.
+ */
+export function paintNoChromeRule(c: StampedChrome): string {
+  return [
+    `PAINT NO BRANDING OF YOUR OWN. Official branding is composited onto this ${c.surface} by software after you finish: a ${c.lockup}, and a ${c.footer}.`,
+    `You are NOT designing those. Paint no emblem, government wordmark, department name, ministry title, logo, badge, footer band, social-handle strip, website address or QR code anywhere on the ${c.surface}, inside the reserved zones or outside them, and do not draw a frame, plate, card, outline or placeholder box where you expect them to land.`,
+    CHROME_DUPLICATE_CONSEQUENCE,
+  ].join(' ');
+}
+
+/**
  * For a prompt that EDITS A REFERENCE TEMPLATE into a new render (the fixed-template lanes):
  * the reference is a finished poster carrying branding of its own, and the prompt has just
  * told the model to treat that reference as authoritative. Its chrome is placeholder, exactly
@@ -406,6 +427,35 @@ if (
   // branding off something it is not editing, which is what makes the two rules distinct.
   if (reference.includes('ERASE both of them'))
     failures.push('reference rule copied the stamped rule’s erase wording');
+
+  // The from-scratch variant. It must NOT claim there is an input image or a reference to
+  // erase — that is what makes it a third rule rather than a reuse of either above — but it
+  // must still carry the duplicate consequence and forbid a placeholder box in the corner.
+  const paintNone = paintNoChromeRule(CHROME);
+  need(
+    paintNone,
+    'PAINT NO BRANDING OF YOUR OWN',
+    'paint-none rule lost its heading',
+  );
+  need(
+    paintNone,
+    'survives BESIDE the real branding',
+    'paint-none rule does not state the duplicate consequence',
+  );
+  need(
+    paintNone,
+    'placeholder box',
+    'paint-none rule does not forbid the placeholder box that appeared in the corner',
+  );
+  need(paintNone, CHROME.lockup, 'paint-none rule lost the lockup description');
+  need(paintNone, CHROME.footer, 'paint-none rule lost the footer description');
+  for (const wrong of ['ERASE both of them', 'REFERENCE IMAGE']) {
+    if (paintNone.includes(wrong)) {
+      failures.push(
+        `paint-none rule claims something a from-scratch render has no input for ("${wrong}")`,
+      );
+    }
+  }
 
   console.log(`${'='.repeat(78)}\nPOSTER\n${'='.repeat(78)}`);
   console.log(`${posterZones}\n\n${fitToReserveRule(POSTER)}`);

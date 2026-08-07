@@ -87,7 +87,21 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
     `selectMaster`'s `MasterNeed` scoring are kept alive for it. `step` is set
     directly at each stage (`classify`/`copy`/`image`) — the old n8n Ping nodes fired after the
     response and never reached the UI. `design_mode: 'fresh'` calls `generateImage` directly
-    (no master). The API stamps `poster-logo.png` (top-right) + `poster-footer.png` (bottom) in
+    — **no master IMAGE, but still a master ROW**, and the distinction has misled before (this
+    line used to read "no master"). `resolveSocialReference` runs UNCONDITIONALLY at the top of
+    `renderAndStoreSocialPoster`, before the mode branches, so a fresh run is a *headless* RAG:
+    no pixels reach the model, but the picked master supplies `type.copyStyle` (which copy
+    registry writes the text), `layoutSpec.bulletSlots` (how many body points the copy may
+    have), `layoutSpec.hasPhotoZone` (photo vs text-only, and `pickLayout`'s hard filter) and
+    `layoutSpec.layoutSummary` (the colour-stripped STRUCTURE INSPIRATION block). That is
+    deliberate — it shapes the copy shape and the composition — and **every mode now picks that
+    reference by ONE process** (2026-08-07): the design mode used to reach selection as an
+    `ignoreColour` flag, which made a fresh run rank against different candidate text than a
+    template run; the information-first path no longer takes it (colour is not one of its
+    criteria anyway, and `buildPosterPrompt` strips colour from the summary itself). The flag
+    survives for the `SOCIAL_REFERENCE_MODE=classify` rollback alone, where `rank-master.ts`
+    really does rank on colour theme.
+    The API stamps `poster-logo.png` (top-right) + `poster-footer.png` (bottom) in
     code (`overlayTwitterChrome`) on every returned PNG — initial and image-feedback alike.
     The **caption is written by the API** (`generateSocialCaption`), **opt-in** — a social run
     is poster-only unless `generateCaption` was set, produced AFTER the poster row-write so a
@@ -866,6 +880,18 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
 
 **Web flow (user journey starts here):**
 
+- **On the क्रिएटिव्ह lane the TEMPLATE PICK IS THE DESIGN DECISION** (2026-08-07,
+  `apps/web/app/page.tsx`). There is no design-mode control: an empty `ReferencePicker` means
+  `designMode: 'fresh'` — the API resolves no reference at all and the image model designs the
+  whole poster — and picking a template means the poster follows it. Only then is a second
+  question asked (the tabs above the text box) about how to FILL it: `onbrand` prints the pasted
+  text verbatim, `adaptive` has `generatePosterCopy` write the headline + points out of it. So
+  `designMode` is **derived, never stored in state**, which is what makes it impossible for the
+  mode and the pin to disagree. The old default was `onbrand` over an auto-selected master, so
+  every poster took the shape of whatever the library returned. `ReferencePicker` takes
+  `noneLabel`/`noneHint` because what an empty selection MEANS is the caller's lane semantics —
+  लेख and यूट्यूब still auto-select and keep the default wording; क्रिएटिव्ह must not say "the
+  platform will pick one for you" when it no longer does.
 - Entry / create a generation (**Creative and Social**, formerly the media room — the
   sidebar's one English label: paste a finished article, upload a file, or
   **both** — the upload runs `DocumentIntake` in **live** mode, so the file's text is a
@@ -1158,10 +1184,27 @@ Chromium): `pnpm --filter @dgipr/poster-renderer exec playwright install chromiu
   (`buildArticlePosterPrompt` mode `onbrand` → the 5-node workflow); neither n8n mode produces
   a scene image, so poster feedback + manual copy-edit (which need `scenePath`) stay
   `html`-only.
-- **Twitter posters get the same code-stamped chrome.** `social-post-v2-api`'s prompts
+- **Twitter posters get the same code-stamped chrome — and since 2026-08-07 there is exactly
+  ONE reserved geometry for the whole social lane.** `SOCIAL_ZONES` in
+  `build-poster-prompt.ts` (180x170 top-right, 120px bottom at 1280x1600) is quoted by the
+  fixed-template, `fresh`, legacy-edit and feedback prompts alike. **`CHROME_ZONE_GEOMETRY`
+  (280x270 / 130px) and its prose twin `CHROME_ZONES` are DELETED — do not reintroduce them.**
+  They were the cause of two reported defects on fully-AI posters: 280x270 is ~3x the area of
+  the 160x154 badge `overlayTwitterChrome` actually stamps, so an obedient render still left a
+  conspicuous empty box in the corner; and `CHROME_ZONES` described the badge it was reserving
+  for (an invitation to paint one) while calling the two-part footer a single strip, so the last
+  line of copy went under the navy title pill. The `fresh` branch now ends with the same three
+  blocks the fixed-template branch does — `paintNoChromeRule` → `reservedZoneBlock(SOCIAL_ZONES,
+  SOCIAL_FOOTER_NOTE)` → `fitToReserveRule(SOCIAL_ZONES)` — the last of these WITHOUT
+  `allowStructuralReflow` (that option licenses departing from a *reference's* geometry, and a
+  from-scratch render has none). `paintNoChromeRule` is a third variant beside
+  `stampedChromeRule` / `referenceChromeRule` because `fresh` has neither an input image to
+  erase nor a reference whose chrome is placeholder — both of those would state something false.
+  Harness-asserted in both files, including regression guards that fail if `280 x 270` or
+  `bottom 130 pixels` ever come back.
+  `social-post-v2-api`'s prompts
   erase the master's महाराष्ट्र शासन emblem (top-right) + footer band/social strip and
-  declare them reserved zones (top-right ~220x180, bottom ~130px at 1280x1600, quiet
-  background only); `overlayTwitterChrome`
+  declare them reserved zones; `overlayTwitterChrome`
   (`packages/poster-renderer/src/twitter-chrome.ts`) stamps `assets/poster-logo.png` +
   `assets/poster-footer.png` on every webhook return — `startSocialPostJob` and the
   twitter image-feedback path alike. Zone numbers in twitter-chrome.ts and the
