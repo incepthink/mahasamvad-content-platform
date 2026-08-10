@@ -1,7 +1,10 @@
 'use client';
 
-// The /dlo input step: free-text notes + MP3 recordings + documents + article type, submitted
-// as a new intake. On success it navigates to /dlo/[id], where the rest of the flow lives.
+// The /dlo input step: free-text notes + MP3 recordings + documents, submitted as a new
+// intake. On success it navigates to /dlo/[id], where the rest of the flow lives.
+//
+// There is no article-type question here: this lane produces बातमी only, so the category is
+// fixed (DLO_CATEGORY below) rather than asked for.
 //
 // Recordings and documents take DIFFERENT routes in, and the split is about what each costs to
 // read. A recording has to be transcribed by Sarvam, so it is uploaded with the intake and read
@@ -41,7 +44,6 @@ import {
 } from '../lib/dloDraft';
 import { AiInstructionsField } from './AiInstructionsField';
 import { AudioFilePicker } from './AudioFilePicker';
-import { DloCategoryPicker } from './DloCategoryPicker';
 import { DocumentIntake, type DocumentSnapshot } from './DocumentIntake';
 import { StyleReferenceField } from './StyleReferenceField';
 import { YouTubeLinkInput } from './YouTubeLinkInput';
@@ -57,6 +59,10 @@ type DocumentSlot = Readonly<{ id: number; snapshot: DocumentSnapshot | null }>;
 
 // Same ceiling the API puts on the documents array.
 const MAX_DOCUMENTS = 10;
+
+// The only article type this lane produces. The picker is gone from this form, so a draft
+// saved before that change (category: 'scheme') is simply not read back.
+const DLO_CATEGORY: DloCategory = 'news';
 
 // Where each slot's card remembers its in-flight job across a refresh — a long OCR must
 // survive one. Cleared by hand when a slot is dropped or the run is submitted, or the card
@@ -124,7 +130,6 @@ export function DloIntakeForm() {
   // string, so a reload loses nothing.
   const [youtube, setYoutube] = useState<readonly YouTubeVideo[]>(draft.youtube);
   const nextSlotId = useRef(draft.nextSlotId);
-  const [category, setCategory] = useState<DloCategory>(draft.category);
   const [heading, setHeading] = useState(draft.heading);
   // Tier 1 of the article's style-reference hierarchy: a published article the officer wants
   // this one shaped like. Style only — never a factual source (see StyleReferenceField).
@@ -141,7 +146,7 @@ export function DloIntakeForm() {
     const timer = setTimeout(() => {
       writeDraft({
         notes,
-        category,
+        category: DLO_CATEGORY,
         heading,
         styleReference,
         instructions,
@@ -154,7 +159,6 @@ export function DloIntakeForm() {
     return () => clearTimeout(timer);
   }, [
     notes,
-    category,
     heading,
     styleReference,
     instructions,
@@ -242,7 +246,7 @@ export function DloIntakeForm() {
     try {
       const form = new FormData();
       form.append('notes', notes);
-      form.append('category', category);
+      form.append('category', DLO_CATEGORY);
       form.append('heading', heading);
       // Neither is used until the article is generated, and neither has a column on
       // dlo_intakes — the create route seeds them into the intake's review state, which is
@@ -280,16 +284,10 @@ export function DloIntakeForm() {
 
   return (
     <>
-      {/* The article type comes first: it is the one decision that frames everything typed
-          below it, and it is a single click. */}
-      <section className="card">
-        <DloCategoryPicker value={category} onChange={setCategory} />
-      </section>
-
-      {/* The action sits directly under the type, at the top of the form: everything below it
-          is optional material, so an officer who has only pasted notes can start the run
-          without scrolling past every card they did not fill in. Any complaint (nothing
-          supplied, instructions too long) is rendered here, where the button is. */}
+      {/* The action leads the form: everything below it is optional material, so an officer
+          who has only pasted notes can start the run without scrolling past every card they
+          did not fill in. Any complaint (nothing supplied, instructions too long) is
+          rendered here, where the button is. */}
       <section className="card card-action">
         <div className="btn-row">
           <button

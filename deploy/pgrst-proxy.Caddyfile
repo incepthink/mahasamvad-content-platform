@@ -1,0 +1,35 @@
+# Internal path-strip proxy in front of PostgREST. NOT public — this listens on
+# the compose network only (no host port mapping, no route in the public
+# Caddyfile), and exists for exactly one reason:
+#
+#   @supabase/supabase-js builds every request as `${SUPABASE_URL}/rest/v1/...`
+#   and offers no way to change that prefix. PostgREST serves at the root. So
+#   something has to strip `/rest/v1`, and `handle_path` is Caddy's directive
+#   that strips the matched prefix before proxying.
+#
+#     /rest/v1/generations?id=eq.x   ->  /generations?id=eq.x
+#     /rest/v1/rpc/match_...         ->  /rpc/match_...
+#
+# The alternative was patching createServiceRoleClient() with a URL-rewriting
+# fetch, which would have put a workaround in application code for what is
+# purely a deployment concern.
+
+{
+	# No ACME here: this server is HTTP-only on a private network. Without this
+	# Caddy would try to provision certificates it can neither need nor obtain.
+	auto_https off
+	admin off
+}
+
+:8000 {
+	handle_path /rest/v1/* {
+		reverse_proxy postgrest:3000
+	}
+
+	# Anything else is a wiring mistake (wrong SUPABASE_URL, a stray probe).
+	# Say so explicitly rather than letting it fall through as a confusing 404
+	# that looks like PostgREST rejecting a table name.
+	handle {
+		respond "dgipr pgrst-proxy: expected /rest/v1/* — check SUPABASE_URL" 404
+	}
+}

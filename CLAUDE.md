@@ -24,7 +24,7 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
 | `apps/api`                  | `@dgipr/api`              | Fastify API — thin routes + job orchestration                                                                                                                                                                                  |
 | `packages/content-engine`   | `@dgipr/content-engine`   | Scraping, chunking, embeddings, RAG, article generation + revision                                                                                                                                                             |
 | `packages/poster-renderer`  | `@dgipr/poster-renderer`  | Poster: AI background photo + HTML/Chromium typesetting                                                                                                                                                                        |
-| `packages/database`         | `@dgipr/database`         | Supabase client, queries, storage helpers, row types                                                                                                                                                                           |
+| `packages/database`         | `@dgipr/database`         | DB client, queries, storage helpers, row types. Still `@supabase/supabase-js`, but it now talks to **our own PostgREST in front of RDS** (2026-08-09) — see `docs/database-on-aws.md`; S3 storage since 2026-08-09              |
 | `packages/social-publisher` | `@dgipr/social-publisher` | Direct posting to the official X account (`twitter-api-v2`, OAuth 1.0a) and Facebook Page (Graph API) — pure functions, no DB/LLM deps                                                                                         |
 | `packages/schemas`          | `@dgipr/schemas`          | Shared Zod schemas + types (poster `Copy`, generation API)                                                                                                                                                                     |
 | `supabase/migrations`       | —                         | SQL migrations (pgvector + generations)                                                                                                                                                                                        |
@@ -1184,6 +1184,34 @@ Chromium): `pnpm --filter @dgipr/poster-renderer exec playwright install chromiu
   (`buildArticlePosterPrompt` mode `onbrand` → the 5-node workflow); neither n8n mode produces
   a scene image, so poster feedback + manual copy-edit (which need `scenePath`) stay
   `html`-only.
+- **The social footer is APPENDED below the artwork (2026-08-10), so it can never cover text.**
+  `overlayTwitterChrome` no longer pastes the band over the render: `footer-extension.ts` adds a
+  strip below it and the band is stamped there, making a finished social poster **1280x1691**.
+  The badge is still a destructive overlay. Three things not to break. The added strip is filled
+  from the poster's own bottom edge (flat fill at the mean of the bottom 24 rows, or the last 6
+  rows stretched and softened when that edge is textured) — that is what makes the join
+  invisible, so do not replace it with a fixed colour. Idempotence across feedback rounds is
+  decided by **aspect** (4:5 = fresh artwork, extend; 4:5-plus-a-strip = already finished, stamp
+  in place), never by a flag or an absolute height. And the prompt side must stay in step:
+  `SOCIAL_ZONES.footerAppendedMargin` (**16px**) is what switches `reservedZoneBlock` /
+  `fitToReserveRule` from "reserved cover zone" to "this is a JOIN"; clearing it is the one-line
+  rollback to an overlaid footer, and leaving the old 120px reserve in place would letterbox
+  every poster above its own footer. **It is a TEXT cushion, not a background reserve** — the
+  design must run off the bottom edge in ANY colour, exactly as it must run into the badge
+  corner, and only words/numerals/icons stop 16px short. It was 48px and phrased as "keep the
+  last 48px calm, plain, even background": the model painted 82px of flat grey, the strip was
+  then filled from it, and generation 97b64542 shipped with 173 dead pixels above its own footer.
+  An image model overshoots a pixel figure, so both the number and the sentence had to change.
+  The FEEDBACK prompts are the exception — they edit a finished poster whose band is re-stamped
+  in place, so `footerHeight` (91, the band's real footprint) is a genuine reserve there.
+- **The fixed-template (`onbrand`) lane chooses its own colours, so it carries `BRIGHT_LOOK_RULE`
+  (`build-poster-prompt.ts`).** "Ensure strong contrast" was the only colour guidance there, and
+  white-on-black satisfies it perfectly — 97b64542 came back charcoal-and-near-black (mean
+  luminance 153/255, 37% of pixels below 80). The rule states which SIDE of the contrast the
+  large areas sit on: a light luminous ground over most of the poster, saturated colour for
+  panels and accents, dark tones as accents only. Deliberately **not** emitted on the `fresh`
+  lane, where `fmtColourSpec` assigns exact hexes (all 18 palettes are light-ground already) and
+  a second voice about brightness would licence departing from a non-negotiable specification.
 - **Twitter posters get the same code-stamped chrome — and since 2026-08-07 there is exactly
   ONE reserved geometry for the whole social lane.** `SOCIAL_ZONES` in
   `build-poster-prompt.ts` (180x170 top-right, 120px bottom at 1280x1600) is quoted by the
@@ -1202,6 +1230,14 @@ Chromium): `pnpm --filter @dgipr/poster-renderer exec playwright install chromiu
   erase nor a reference whose chrome is placeholder — both of those would state something false.
   Harness-asserted in both files, including regression guards that fail if `280 x 270` or
   `bottom 130 pixels` ever come back.
+  **A reserved zone is kept clear of CONTENT, never cut out of the ARTWORK** (2026-08-10): the
+  block used to forbid a `panel`/`band`/`shape` from "entering, sitting behind or CROSSING" the
+  corner, so a render stopped its header panel short of the badge and left a pale notch. All
+  three lanes now emit `continuityRules` — background layers (colour blocks, panels, gradients,
+  photographs) MUST run into the zone and continue through unbroken, since the branding is opaque
+  and lands on top; only meaning-bearing and focal content stays out. The headings dropped the
+  word EMPTY for the same reason. The five strings that caused it are `deny`-asserted in
+  `reserved-zone-rule.ts`'s harness — check those first if a notched corner returns.
   `social-post-v2-api`'s prompts
   erase the master's महाराष्ट्र शासन emblem (top-right) + footer band/social strip and
   declare them reserved zones; `overlayTwitterChrome`
@@ -1350,6 +1386,14 @@ Chromium): `pnpm --filter @dgipr/poster-renderer exec playwright install chromiu
   `halfvec(1024)`). Rollback is env-only: the pre-gpt-5 request body is preserved
   byte-for-byte, so `OPENAI_CHAT_MODEL=gpt-4o` restores the old behaviour exactly.
 - **Env & secrets:** config comes from the root `.env` (see `.env.example`:
-  Supabase + OpenAI, optional Sarvam). Never commit secrets.
+  database + OpenAI, optional Sarvam). Never commit secrets.
+- **The database is RDS Postgres behind our own PostgREST, not Supabase** (2026-08-09).
+  `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` keep their NAMES — the code is unchanged and
+  supabase-js still speaks PostgREST — but they now point at our instance and a JWT we sign.
+  Operational detail, the tunnel local scripts need, and the hardening checklist are in
+  `docs/database-on-aws.md`. Two things not to break: `service_role` must keep **BYPASSRLS**
+  (every table has RLS on with zero policies, so without it queries return zero rows and no
+  error), and the `/rest/v1` path-strip lives in the **separate** `pgrst-proxy` container —
+  never add it to the public `deploy/Caddyfile`, which terminates TLS for the site.
 - **Scraped output** under `packages/content-engine/data/` is gitignored — don't
   commit it or assume it's present.

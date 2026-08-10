@@ -27,22 +27,45 @@ import {
   type StampedChrome,
 } from './reserved-zone-rule.js';
 
-// The social canvas and the zones the API stamps branding into afterwards. The PIXEL figures
-// here are deliberately larger than what overlayTwitterChrome actually covers (a 160x154 badge
-// at a 6px margin, and a 91px footer at this width) — the slack is the margin of error the
-// image model gets. Keep in sync with packages/poster-renderer/src/twitter-chrome.ts.
+// The social canvas and the zones the API stamps branding into afterwards. Keep in sync with
+// packages/poster-renderer/src/twitter-chrome.ts.
+//
+// The BADGE is still a destructive overlay, and its 180x170 is deliberately larger than the
+// 160x154 the API actually stamps at a 6px margin — that slack is the model's margin of error.
+//
+// The FOOTER is not an overlay any more (2026-08-10). overlayTwitterChrome appends a strip
+// below the artwork and stamps the band there, so the model cannot bury a line under it however
+// it lays the poster out — the prompt had been strengthened once for exactly that failure and
+// lost anyway. `footerHeight` is therefore the band's REAL height (~91px at this width, so the
+// prose describing it is true) and `footerAppendedMargin` is a thin TEXT cushion, nothing more.
+//
+// IT WAS 48 AND THAT WAS STILL TOO MUCH (generation 97b64542, measured): asked for a 48px
+// "calm plain background" margin, the model left 82, and footer-extension.ts then filled its
+// 91px strip from that same flat grey — 173 dead pixels, a tenth of the poster, reading as a
+// letterboxed image with a bar stuck on the end. An image model has no ruler, so it overshoots
+// a pixel figure by whatever feels safe; the fix is therefore BOTH a smaller number and a rule
+// that no longer asks for a void at all. reservedZoneBlock now tells the design to run off the
+// bottom edge in any colour it likes, exactly as it must run into the badge corner, and 16px is
+// only the gap between the last LINE OF TEXT and the band.
 const SOCIAL_ZONES: ReservedZoneGeometry = {
   width: 1280,
   height: 1600,
   lockupWidth: 180,
   lockupHeight: 170,
-  footerHeight: 120,
+  footerHeight: 91,
+  footerAppendedMargin: 16,
 };
 
 // The stamped footer is a navy ministry title pill sitting ON TOP of a white social-handle
 // strip. A model told only "a footer strip" reads the white strip alone as the footer and
 // tucks its last line under the pill, which is where a real render lost three columns of its
 // closing paragraph.
+//
+// STILL PASSED, DELIBERATELY IGNORED. reservedZoneBlock drops it in appended mode — nothing
+// tucks under the pill any more, and on an initial render the pill is not even on the canvas
+// the model is painting. It is left at the call sites so that clearing footerAppendedMargin
+// (the one-line rollback to an overlaid footer) restores the old prompt intact, rather than
+// restoring it with this hard-won sentence missing.
 const SOCIAL_FOOTER_NOTE =
   'The software-added footer has TWO parts: a navy-blue ministry title pill that rises above a white social-media strip. Together they cover the full canvas width at the bottom; do NOT treat only the white strip as the footer.';
 
@@ -164,6 +187,24 @@ function fmtComposition(l: PosterLayout): string {
 // saffron/cream brand look (its one rotation slot in eighteen).
 const COLOUR_MANDATE =
   'MANDATORY: the colour specification above is required and must DOMINATE the poster, including the page background. Do NOT fall back to a saffron/orange + cream "government paper" look, and do NOT use a generic government navy-blue-and-white, unless the specification above explicitly calls for those colours.';
+
+// BRIGHTNESS. Only for the lane where the image model chooses the colours itself — the
+// fixed-template branch, which tells it the reference controls structure and not colour.
+//
+// "Ensure strong contrast and easy readability" was the whole of the guidance there, and
+// contrast is satisfied perfectly by white type on black: generation 97b64542 came back as a
+// charcoal-and-near-black poster (mean luminance 153/255, 37% of its pixels below 80) with a
+// full-height black column down one third of it. It is technically legible and it does not look
+// like anything DGIPR publishes. The rule that was missing is not about contrast at all — it is
+// about which SIDE of the contrast the large areas sit on, so this says the dominant ground is
+// light and dark is an accent, rather than repeating "high contrast" a third time.
+//
+// Deliberately NOT emitted on the 'fresh' lane: there the palette rotation assigns exact hexes
+// (every one of the 18 is a light ground already, by product decision), and a second voice
+// telling the model to brighten things would be licence to depart from a specification whose
+// whole point is that it is not negotiable.
+const BRIGHT_LOOK_RULE =
+  'MAKE IT BRIGHT, VIVID AND EYE-CATCHING. This poster is published on social media and read on a phone, so it must look light, fresh and inviting at a glance. Build it on a LIGHT, luminous ground — white, off-white, or a light clean tint of the chosen colour — covering most of the poster, and carry the design with clear, saturated, confident colour in the panels, bands, headings, figures, icons and accents. Dark tones are for small blocks, headings and accents only. Do NOT make the poster dark, black, charcoal, near-black, slate, night-mode, muted, dull, washed-out, greyscale, monochrome or moody, and do NOT let a black or very dark panel occupy a large part of the canvas or serve as the main background. Any photograph must be bright, colourful and naturally lit — never desaturated, greyscale, darkened or overlaid with a dark scrim. A dark, drab or low-energy poster is a failed poster even when every other rule is followed.';
 
 // RETIRED (2026-08-07): CHROME_ZONE_GEOMETRY (280x270 / 130px) and its prose twin
 // CHROME_ZONES. Both are gone and must not come back — SOCIAL_ZONES below is now the single
@@ -339,6 +380,14 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
     // answer — see reserved-zone-rule.ts.
     const completeness = [
       'SHOW ALL OF THE INFORMATION. Every distinct point, instruction, measure, figure and fact in the supplied information must appear on the poster. Do not omit any of it, do not summarise it, and do not merge two points into one because the layout feels tight. If space is short, reduce the type size and tighten the spacing until it fits — never drop content, and never run content into the reserved zones described at the end of these instructions.',
+      // THE HEADLINE IS WHERE THE ROOM COMES FROM, and this had to be said here rather than
+      // only in fitToReserveRule at the end. A real five-point poster came back with a
+      // three-line headline taking roughly a third of the canvas and its last bullet pushed off
+      // the bottom: the fit rule DOES say "shrink the headline first", but on this lane it is
+      // reached through allowStructuralReflow, which offers a paragraph of re-layout options
+      // ahead of it. Stating the proportion up here, beside the completeness pressure it has to
+      // answer, is what makes it act before the layout is committed rather than as a remedy.
+      'KEEP THE HEADLINE PROPORTIONATE TO THE REST. The headline is a title, not the poster: set it in at most two or three lines, and never let it and its eyebrow/subheadline together take more than about a quarter of the poster height. The longer the supplied information, the smaller the headline must be — reduce it BEFORE reducing anything else, because it is the largest block on the poster and the cheapest to shrink, and there is no minimum size it has to keep. Never enlarge a short headline to fill space that the body content needs.',
     ];
     if (typeof itemCount === 'number' && itemCount > 0) {
       completeness.push(
@@ -379,8 +428,10 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
       // none, so the model reused what it already had (generation 7c33fa93). Density is now
       // explicitly subordinate to the exactly-once rule; the canvas definition stays, because it
       // is what keeps "usable" from meaning the full 1600px height.
-      "Use the provided reference image as the PRIMARY STRUCTURAL GUIDE for the poster, not as a pixel-locked blueprint. Preserve its recognisable overall composition, visual hierarchy and design idea wherever they work for the supplied information. STRUCTURE means geometry and visual hierarchy—not the meaning, factual content, or element type of any reference slot. Content completeness, readability and reserved-zone safety OUTRANK the reference's exact widths, heights, proportions, section boundaries and imagery zones. You may intelligently resize, widen, move or extend components when the supplied information needs a different amount of space; do not redesign unnecessarily and do not compress everything onto one side. Distribute the supplied information across the usable canvas — the USABLE CANVAS is the area above the reserved bottom band and outside the reserved top-right corner, never the full height of the image. Match the reference's density ONLY as far as the supplied information reaches: where it runs out, stop. Never repeat or invent content to match the reference's fullness.",
+      "Use the provided reference image as the PRIMARY STRUCTURAL GUIDE for the poster, not as a pixel-locked blueprint. Preserve its recognisable overall composition, visual hierarchy and design idea wherever they work for the supplied information. STRUCTURE means geometry and visual hierarchy—not the meaning, factual content, or element type of any reference slot. Content completeness, readability and reserved-zone safety OUTRANK the reference's exact widths, heights, proportions, section boundaries and imagery zones. You may intelligently resize, widen, move or extend components when the supplied information needs a different amount of space; do not redesign unnecessarily and do not compress everything onto one side. Distribute the supplied information across the usable canvas — the USABLE CANVAS is the area above the bottom margin described at the end of these instructions and outside the reserved top-right corner. Match the reference's density ONLY as far as the supplied information reaches: where it runs out, stop. Never repeat or invent content to match the reference's fullness.",
       "The reference image controls STRUCTURE ONLY, not colour. Choose the poster's colour palette freely and creatively; ensure strong contrast and easy readability for every Marathi word and Devanagari numeral.",
+      // …and "strong contrast" alone is what let a real render come back charcoal-on-black.
+      BRIGHT_LOOK_RULE,
       // "...or fill it only with other source-supported poster content" was the third licence to
       // duplicate, and the most direct of the three: by the time a slot is unsupported, every
       // source-supported item is already on the poster, so "other source-supported content" can
@@ -587,6 +638,13 @@ export function buildFeedbackPrompt(input: BuildFeedbackPromptInput): string {
   // 280x270 for a badge that is really 160x154 at a 6px margin, which is a licence to paint one
   // half as wide again as the real thing; it now quotes the SOCIAL_ZONES reserve, the same
   // figures the initial fixed-template prompt uses.
+  //
+  // THE FOOTER IS A REAL RESERVE ON THIS LANE, unlike the initial prompts. Feedback edits a
+  // FINISHED poster, which already carries its appended strip, and overlayTwitterChrome
+  // re-stamps the band in place over the bottom of it rather than appending a second one — so
+  // content drawn there really is covered. SOCIAL_ZONES.footerHeight is the band's true
+  // footprint (~91px), which is what this lane needs; do not "restore" it to the old 120, which
+  // would push content up by 30px on every feedback round and drift the layout.
   const reservedZones =
     input.brand === 'cmo'
       ? 'RESERVED ZONES: the TOP HEADER BAND (the full-width blue leader lockup and the महाराष्ट्र शासन emblem) occupies the top ~19% of the poster, the full-width BOTTOM ~8% footer strip, and the UPPER-RIGHT PHOTO CIRCLE — all three are placed onto the poster by software (the circle holds a photograph placed by software). Keep all three clear: leave the upper-right circle a quiet plain background with no text, subject, ring or outline, and do NOT move any text or important content into those areas.'
@@ -615,7 +673,7 @@ export function buildFeedbackPrompt(input: BuildFeedbackPromptInput): string {
 
   if (markerCount > 0) {
     return [
-      'You are editing an existing finished DGIPR Maharashtra government social-media poster provided as the input image: a single 4:5 portrait poster.',
+      'You are editing an existing finished DGIPR Maharashtra government social-media poster provided as the input image: a single portrait poster.',
       `The input image carries ${markerCount} numbered red annotation marker(s): thin red outline rectangles, each with a small red circular badge showing its number. They were drawn onto the poster by editing software and are NOT part of the poster design.`,
       'Each marker is a pointing gesture showing where one requested change applies — not a hard boundary. For each marker, identify the design element at or around that spot and apply the correspondingly numbered change from the request below to that WHOLE element, even where the element extends beyond the rectangle.',
       `REQUESTED CHANGES: «${imageFeedback}».`,
@@ -623,21 +681,21 @@ export function buildFeedbackPrompt(input: BuildFeedbackPromptInput): string {
       reservedZones,
       chromeRule,
       'ERASE every red marker rectangle and numbered badge completely from the output, restoring whatever they overlapped — no red outlines, red circles, or annotation numbers may remain anywhere on the poster.',
-      `Add no new text, letters, numbers, captions, logos, borders, or decorative elements beyond the requested changes. Preserve all other existing Devanagari text exactly${textException}. Output ONE complete 4:5 portrait poster filling the canvas.`,
+      `Add no new text, letters, numbers, captions, logos, borders, or decorative elements beyond the requested changes. Preserve all other existing Devanagari text exactly${textException}. Output ONE complete portrait poster filling the canvas, at exactly the same width and height as the input image.`,
       ...inventory,
       ...clear.lines,
     ].join('\n');
   }
 
   return [
-    'You are editing an existing finished DGIPR Maharashtra government social-media poster provided as the input image: a single 4:5 portrait poster.',
+    'You are editing an existing finished DGIPR Maharashtra government social-media poster provided as the input image: a single portrait poster.',
     ...(imageFeedback.length > 0
       ? [`Apply ONLY this requested change: «${imageFeedback}».`]
       : []),
     keepRule,
     reservedZones,
     chromeRule,
-    `Add no new text, letters, numbers, captions, logos, borders, or decorative elements. Preserve all existing Devanagari text exactly${textException}. Output ONE complete 4:5 portrait poster filling the canvas.`,
+    `Add no new text, letters, numbers, captions, logos, borders, or decorative elements. Preserve all existing Devanagari text exactly${textException}. Output ONE complete portrait poster filling the canvas, at exactly the same width and height as the input image.`,
     ...inventory,
     ...clear.lines,
   ].join('\n');
@@ -798,9 +856,7 @@ if (
       );
     // (e) "Fill the usable canvas" must not read as the full 1600px height.
     if (
-      !onbrand.includes(
-        'the USABLE CANVAS is the area above the reserved bottom band',
-      )
+      !onbrand.includes('the USABLE CANVAS is the area above the bottom margin')
     )
       failures.push('fixed-template prompt leaves "usable canvas" undefined');
     // (f) Position. It sat second-to-last under three louder rules; last is what these
@@ -810,22 +866,80 @@ if (
         'the fit rule is not the last block of the fixed-template prompt',
       );
     if (
-      onbrand.indexOf('MANDATORY EMPTY COVER ZONES') <
+      onbrand.indexOf('RESERVED BADGE CORNER') <
       onbrand.indexOf('SHOW ALL OF THE')
     )
       failures.push(
         'reserved zones precede the completeness rule they must outrank',
       );
-    // (g) The geometry itself must survive, and must still match twitter-chrome.ts.
+    // (g) The geometry itself must survive, and must still match twitter-chrome.ts — plus the
+    //     rule that keeps the badge corner from being cut OUT of the artwork. This lane is
+    //     where that failed: a render stopped its navy header panel short of the corner and
+    //     left a pale notch around the stamped badge, because the block forbade a "panel" from
+    //     crossing the zone. See reserved-zone-rule.ts.
     for (const needle of [
       'top-right 180 x 170 pixels',
-      'bottom 120 pixels',
       '1280 x 1600 output',
-      'y=1480',
-      'navy-blue ministry title pill',
+      'y=1584',
+      'THE BOTTOM EDGE IS A JOIN, NOT A COVER ZONE',
+      'DO NOT CUT A HOLE IN IT',
+      'continue through unbroken',
+      'CLEAR OF CONTENT, NOT CLEAR OF DESIGN',
+      // THE 173-PIXEL DEAD BAND (generation 97b64542): 82px of flat grey the model left above
+      // the bottom edge, plus the 91px strip footer-extension.ts then filled from it. The
+      // bottom is an edge the design runs off, not a reserve — see reserved-zone-rule.ts.
+      'DESIGN ALL THE WAY DOWN TO THE VERY BOTTOM EDGE',
+      'THERE IS NO COLOUR RESTRICTION AT THE BOTTOM',
+      'the design itself must reach the bottom edge',
     ]) {
       if (!onbrand.includes(needle))
         failures.push(`fixed-template prompt lost "${needle}"`);
+    }
+    if (onbrand.includes('calm, plain, even background'))
+      failures.push(
+        'fixed-template prompt restored the plain-background bottom reserve that letterboxed the poster',
+      );
+    // THE DARK POSTER (same generation): mean luminance 153/255 with a black column over a third
+    // of the canvas. "Strong contrast" is satisfied by white-on-black, so the rule that was
+    // missing names which side of the contrast the large areas sit on.
+    if (!onbrand.includes('MAKE IT BRIGHT, VIVID AND EYE-CATCHING'))
+      failures.push(
+        'fixed-template prompt lost the brightness rule, so free colour choice can go dark again',
+      );
+    if (
+      onbrand.indexOf('MAKE IT BRIGHT') <
+      onbrand.indexOf('controls STRUCTURE ONLY, not colour')
+    )
+      failures.push(
+        'the brightness rule precedes the free-colour clause it has to qualify',
+      );
+    // (g2) THE OVERSIZED HEADLINE. The poster that prompted the appended footer carried a
+    //      three-line headline over roughly a third of the canvas with its last bullet pushed
+    //      off the bottom. fitToReserveRule does say "shrink the headline first", but on this
+    //      lane it is reached through allowStructuralReflow, which offers a paragraph of
+    //      re-layout options ahead of it — so the proportion is also stated up beside the
+    //      completeness pressure it has to answer, where it acts before the layout is committed.
+    if (!onbrand.includes('KEEP THE HEADLINE PROPORTIONATE TO THE REST'))
+      failures.push(
+        'fixed-template prompt lost the headline proportion cap, which is where the room comes from',
+      );
+    if (
+      onbrand.indexOf('KEEP THE HEADLINE PROPORTIONATE') >
+      onbrand.indexOf('REPRODUCE THE MARATHI TEXT EXACTLY')
+    )
+      failures.push(
+        'the headline cap sits below the layout rules it has to constrain',
+      );
+    // (g3) Same appended-footer honesty check as the fresh lane below.
+    for (const retired of [
+      'navy-blue ministry title pill',
+      'pastes an OPAQUE full-width band',
+      'bottom 120 pixels',
+    ]) {
+      if (onbrand.includes(retired))
+        failures.push(
+          `fixed-template prompt still treats the footer as an overlay ("${retired}") — it is appended below the artwork by overlayTwitterChrome`,
+        );
     }
     // (h) THE DUPLICATED BADGE (generation cc283a63). "Do not add a logo" was not enough
     //     against a reference the prompt calls authoritative and which carries real chrome:
@@ -904,31 +1018,68 @@ if (
     // (a) ONE geometry across the whole file, and it is the real one.
     for (const needle of [
       'top-right 180 x 170 pixels',
-      'bottom 120 pixels',
       '1280 x 1600 output',
-      'y=1480',
+      'y=1584',
+      'DESIGN ALL THE WAY DOWN TO THE VERY BOTTOM EDGE',
     ]) {
       if (!freshPrompt.includes(needle))
         failures.push(`the fresh prompt lost "${needle}"`);
     }
+    // The brightness rule is deliberately fixed-template ONLY: on this lane the palette rotation
+    // assigns exact hexes, and a second voice telling the model to brighten them would licence
+    // departing from a specification whose whole point is that it is not negotiable.
+    if (freshPrompt.includes('MAKE IT BRIGHT'))
+      failures.push(
+        'the fresh prompt carries the brightness rule, which competes with its assigned hex palette',
+      );
     for (const retired of ['280 x 270', 'bottom 130 pixels', '280x270']) {
       if (freshPrompt.includes(retired))
         failures.push(
           `the fresh prompt still quotes the retired reserve "${retired}" — it is 3x the stamped badge and is what left a box in the corner`,
         );
     }
-    // (b) The footer's navy pill. Without it a model tucks its last line under the pill,
-    //     reading the white strip alone as the footer — the "footer hides text" report.
-    if (!freshPrompt.includes('navy-blue ministry title pill'))
+    // (b) The footer is APPENDED on this lane, so the prompt must not present it as an
+    //     overlay. The navy-pill note and the "band pasted over the bottom" consequence were
+    //     both written for a footer that could bury a line; neither is true any more, and a
+    //     threat the model's own render disproves teaches it that this prompt's threats are
+    //     negotiable. It must also not ask for the ~120px void the band no longer occupies,
+    //     which would letterboard the poster above its own footer.
+    for (const retired of [
+      'navy-blue ministry title pill',
+      'pastes an OPAQUE full-width band',
+      'bottom 120 pixels',
+    ]) {
+      if (freshPrompt.includes(retired))
+        failures.push(
+          `the fresh prompt still treats the footer as an overlay ("${retired}") — it is appended below the artwork by overlayTwitterChrome`,
+        );
+    }
+    if (
+      !freshPrompt.includes(
+        'do not leave a large empty gap above the bottom edge',
+      )
+    )
       failures.push(
-        'the fresh prompt does not describe the two-part footer, so text can sit under the title pill',
+        'the fresh prompt does not ask for the full canvas height, so posters will letterbox above the appended footer',
       );
     // (c) The corner BOX. The old wording described the badge being reserved for and only
     //     softly discouraged leaving the zone plain; this names the artefact outright.
-    if (!freshPrompt.includes('patch, box, panel, band'))
+    if (!freshPrompt.includes('blank or differently-coloured rectangle, patch'))
       failures.push(
         'the fresh prompt does not forbid painting a box/panel in the reserved zones',
       );
+    // (c2) …and the other half of the same problem: the corner must not be cut OUT of the
+    //      artwork either. A real ठरलेले टेम्पलेट render stopped its header panel short of
+    //      the badge and left a pale notch — see reserved-zone-rule.ts.
+    for (const needle of [
+      'DO NOT CUT A HOLE IN IT',
+      'continue through unbroken',
+    ]) {
+      if (!freshPrompt.includes(needle))
+        failures.push(
+          `the fresh prompt does not require the background to continue under the badge ("${needle}")`,
+        );
+    }
     if (/white rounded-square[^.]*badge\) /.test(freshPrompt))
       failures.push(
         'the fresh prompt describes the badge inside its zone geometry, which invites painting one',

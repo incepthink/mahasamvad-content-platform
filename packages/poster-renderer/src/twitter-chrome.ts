@@ -7,17 +7,28 @@
 // returns. Applies to BOTH the initial render and pixel-feedback edits (feedback
 // re-edits a poster that already carries the chrome; re-stamping keeps it crisp).
 //
-// The reserved-zone numbers quoted to the image model live in the n8n workflow's
-// prompt builders (content-engine/build-poster-prompt.ts) and must stay in sync
-// with the constants below: at the 1280x1600 canvas the tightly-fitted white lockup badge is
-// 160x154 at a 6px margin from the top-right corner. The fixed-template prompt
-// reserves 180x170 there. The footer is full-width ~91px tall; fixed-template
-// mode reserves 120px at the bottom.
+// The reserved-zone numbers quoted to the image model live in the prompt builders
+// (content-engine/build-poster-prompt.ts) and must stay in sync with the constants below: at
+// the 1280x1600 canvas the tightly-fitted white lockup badge is 160x154 at a 6px margin from
+// the top-right corner, and the prompt reserves 180x170 there.
+//
+// THE FOOTER IS APPENDED, NOT PASTED OVER (2026-08-10). The badge is still a destructive
+// overlay — it sits in a corner that almost never holds the tail of a sentence — but the
+// full-width footer band is now stamped onto a strip ADDED BELOW the artwork
+// (footer-extension.ts), so a finished poster is 1280x1691 rather than 1280x1600. The band was
+// burying the last line of long posters, and the reserve protecting it could only ever be a
+// request: an image model has no ruler, and the same prompt tells it three times over to show
+// every point and match the reference's density. Appending makes the failure impossible
+// instead of unlikely. What the prompt asks for at the bottom is that the DESIGN run off the
+// edge in whatever colours it uses, with only a 16px cushion below the last line of text — see
+// footerAppendedMargin in build-poster-prompt.ts. It asked for a calm plain-background margin
+// first, and that produced a poster with 173 flat grey pixels above its own footer.
 
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import { loadScaled } from './article-chrome.js';
+import { extendCanvasForFooter } from './footer-extension.js';
 
 const ASSETS_DIR = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -42,6 +53,10 @@ const LABEL_COLOUR = '#17324d';
 // footer-new-poster.png was exported on a 3376x4219 transparent canvas; the
 // intended footer artwork occupies the bottom 239 pixels.
 const SOCIAL_FOOTER_SOURCE_HEIGHT = 239;
+
+// The ARTWORK the image model is asked for, as height/width. A finished poster is taller than
+// this, by the appended footer strip. Used only to tell the two apart — see overlayTwitterChrome.
+const DESIGN_ASPECT = 1600 / ASSET_BASE_WIDTH;
 
 export type GovernmentLockupRaster = Readonly<{
   data: Buffer;
@@ -153,9 +168,16 @@ async function loadSocialFooter(targetWidth: number): Promise<Raster> {
   return { data, width, height };
 }
 
-// Composite the white emblem + Marathi wordmark lockup (top-right) and
-// footer-new-poster.png (full-width, flush to the bottom edge) onto the poster PNG
-// and return the result as a new PNG buffer.
+// Composite the white emblem + Marathi wordmark lockup into the top-right corner, and
+// footer-new-poster.png onto a strip appended below the artwork, returning a new PNG.
+//
+// IDEMPOTENCE. This runs on initial renders AND on pixel-feedback re-renders, and a feedback
+// round edits the poster this function last produced — which already carries its appended
+// strip. Extending unconditionally would grow the poster by ~91px every round. So the two
+// cases are told apart by ASPECT rather than by a flag or a stored dimension: a fresh render
+// comes back at the artwork's 4:5, a finished poster at 4:5-plus-a-strip. Aspect rather than
+// absolute height because the model is not contractually bound to return 1280 wide, and
+// everything else in this file already scales off the width it actually got.
 export async function overlayTwitterChrome(poster: Buffer): Promise<Buffer> {
   const meta = await sharp(poster).metadata();
   if (!meta.width || !meta.height) {
@@ -168,15 +190,27 @@ export async function overlayTwitterChrome(poster: Buffer): Promise<Buffer> {
     loadSocialFooter(meta.width),
   ]);
 
+  const aspect = meta.height / meta.width;
+  const finishedAspect = DESIGN_ASPECT + footer.height / meta.width;
+  const alreadyExtended =
+    Math.abs(aspect - finishedAspect) < Math.abs(aspect - DESIGN_ASPECT);
+
+  const base = alreadyExtended
+    ? poster
+    : await extendCanvasForFooter(poster, footer.height);
+  const baseHeight = alreadyExtended
+    ? meta.height
+    : meta.height + footer.height;
+
   const margin = Math.round(LOCKUP_MARGIN * scale);
-  return sharp(poster)
+  return sharp(base)
     .composite([
       {
         input: lockup.data,
         left: meta.width - lockup.width - margin,
         top: margin,
       },
-      { input: footer.data, left: 0, top: meta.height - footer.height },
+      { input: footer.data, left: 0, top: baseHeight - footer.height },
     ])
     .png()
     .toBuffer();

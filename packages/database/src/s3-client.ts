@@ -27,6 +27,24 @@ function requireEnv(name: string): string {
 
 let cachedClient: S3Client | undefined;
 
+// S3 Transfer Acceleration: uploads enter AWS at the nearest CloudFront edge and
+// cross to the bucket's region over AWS's own backbone instead of the public
+// internet. OFF by default, because the API runs on EC2 in us-east-2 beside the
+// buckets, where it would buy nothing and cost $0.04/GB.
+//
+// Turn it on for a machine that is FAR from us-east-2 — i.e. local development
+// from India, where a single TCP connection to the bucket is loss-limited to
+// ~26 KiB/s. Measured 2026-08-10 on a 6.4 MB poster: 198 s and an intermittent
+// ECONNRESET without it, 2.3 s with. That reset is not cosmetic — it fails the
+// job AFTER gpt-image has been billed, throwing away a paid render.
+//
+// The buckets have Status=Enabled, which only ADDS the s3-accelerate endpoint;
+// the normal one is untouched, so production is unaffected either way and this
+// is a per-machine env choice rather than a deployment-wide one.
+function useAccelerate(): boolean {
+  return (process.env.S3_USE_ACCELERATE ?? '').trim().toLowerCase() === 'true';
+}
+
 // One client for the process. The SDK pools connections internally, and
 // rebuilding it per call would drop that pool on every poster upload.
 export function getS3Client(): S3Client {
@@ -36,6 +54,18 @@ export function getS3Client(): S3Client {
       credentials: {
         accessKeyId: requireEnv('AWS_ACCESS_KEY_ID'),
         secretAccessKey: requireEnv('AWS_SECRET_ACCESS_KEY'),
+      },
+      useAccelerateEndpoint: useAccelerate(),
+      // Both default to 0 = wait forever, which is how a stalled upload became a
+      // job that sat there for minutes before failing. These BOUND the hang; they
+      // do not slow a healthy upload down.
+      //
+      // requestTimeout is an IDLE timeout on the socket, not a total-duration cap
+      // (it maps to ClientRequest.setTimeout), so a large video that keeps making
+      // progress is never cut off — only a connection that has gone silent is.
+      requestHandler: {
+        connectionTimeout: 6_000,
+        requestTimeout: 60_000,
       },
     });
   }

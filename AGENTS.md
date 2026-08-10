@@ -2965,6 +2965,270 @@ Not implemented yet: Canva integration, authentication.
 
 ## Latest Implementation Milestone
 
+- **The bottom edge is an edge, not a reserve — and a free-colour poster must be BRIGHT**
+  (2026-08-10, no migration, no n8n, API only): generation 97b64542 came back with a tenth of
+  the poster given over to a dead grey band above its own footer, and the artwork itself almost
+  black. Measured on the real PNG before anything was changed: 1280x1691, content ending at
+  y=1518, a flat #EAEAEA band from 1518 to 1600 (**82px the model painted**) with the appended
+  91px strip filled from that same grey — **173 dead pixels** — and a mean luminance of 153/255
+  with 37% of pixels below 80. Two independent causes, both in the prompt.
+  - **The margin asked for a void.** The 2026-08-10 append milestone (below) correctly stopped
+    the band covering text, but the sentence it left behind still described the bottom as
+    something to keep clear: _"Keep only the last 48 pixels as calm, plain, even background in
+    the poster's own colours"_, with the content floor listing **panels and photographs** among
+    the things that must END above it. That is the same over-reach the badge corner had a few
+    hours earlier — a rule that forbids the BACKGROUND from reaching the zone — and it produced
+    the same artefact one edge over. It also asked for a pixel figure, which an image model has
+    no way to measure and therefore overshoots: 48 became 82 (1.7x).
+    So the bottom is now the badge corner's rule turned sideways. `reservedZoneBlock`'s appended
+    branch says **DESIGN ALL THE WAY DOWN TO THE VERY BOTTOM EDGE** (colour blocks, panels,
+    gradients, background and photographs reach the last row and run off it, exactly as at the
+    left and right edges), **THERE IS NO COLOUR RESTRICTION AT THE BOTTOM** (dark, saturated,
+    patterned or photographic; it need not be pale, white, neutral, plain or empty), and only
+    then a text rule — no words, numerals, captions or icons below the floor. The margin drops
+    **48 → 16px** and is documented as a typographic cushion so the last line is not jammed
+    against the band, not as a background reserve. `fitToReserveRule`'s appended consequence
+    follows, and drops _"a worse failure than any amount of empty space"_ — true on an overlay
+    lane where the alternative is a buried sentence, and now the opposite of what this lane wants.
+    The **16 is deliberately not 0**: nothing is lost at 0 (the band is appended), but a line
+    touching the band reads as broken, and 16px of cushion costs nothing next to the ~43px of
+    poster-coloured strip that already shows either side of the navy pill (the band's artwork is
+    only ~56% opaque across its top 43px — measured).
+    Downstream, `footer-extension.ts`'s **stretch-and-soften path is now the expected one** rather
+    than the exception, since a bottom edge split between a dark column and a photograph is
+    ordinary. No code change there — it already handled it — only the comment, which claimed the
+    prompt asks for a flat edge.
+  - **"Strong contrast" is satisfied by white-on-black.** The fixed-template lane tells the model
+    the reference controls structure and not colour, and its entire colour guidance was _"choose
+    freely and creatively; ensure strong contrast and easy readability"_. New `BRIGHT_LOOK_RULE`
+    names which SIDE of the contrast the large areas sit on: a light, luminous ground over most
+    of the poster, saturated confident colour in panels/headings/figures/icons, dark tones as
+    accents only, no black or near-black panel as the main surface, and photographs bright and
+    naturally lit rather than desaturated or scrimmed. Emitted immediately after the free-colour
+    clause it qualifies. **Deliberately NOT on the `fresh` lane** — there `fmtColourSpec` assigns
+    exact hexes (all 18 palettes are light-ground by product decision), and a second voice telling
+    the model to brighten them would licence departing from a specification whose whole point is
+    that it is not negotiable. Harness-asserted in both directions.
+  Verified 2026-08-10, all free: workspace typecheck **7/7 green**, lint and prettier clean on all
+  four touched files, four prompt harnesses green (`reserved-zone-rule`, `build-poster-prompt`,
+  `build-youtube-thumbnail-prompt`, `build-article-poster-prompt`, plus `clear-space-rule`) with
+  new assertions that **deny** the exact wording that caused the band (`calm, plain, even
+  background`, `end all text, cards, panels, icons, photographs`) — check those first if a flat
+  strip ever returns above the footer; and an offline render on a deliberately NON-flat bottom
+  edge (dark left column, warm block right) confirming 1280x1691 out, the strip continuing the
+  dark column's own colour rather than a grey fill, and **1280x1691 again on re-stamp** (the
+  feedback-round idempotence). **Left for a real run** (one image charge): a ठरलेले टेम्पलेट
+  poster on the same note, confirming the design reaches the bottom edge and the poster comes back
+  light-ground. Overlay lanes (article poster, YouTube thumbnail) are untouched — they leave
+  `footerAppendedMargin` unset and keep their wording byte-for-byte. Deploy is
+  `@dgipr/poster-renderer` → `@dgipr/content-engine` dists → API; no migration, no n8n, no web.
+
+- **The reserved corner is kept clear of CONTENT, not cut out of the ARTWORK** (2026-08-10, no
+  migration, no n8n, API only): a live ठरलेले टेम्पलेट poster came back with its navy header
+  panel STOPPING SHORT of the top-right badge, leaving a pale notch of page ground around the
+  stamped emblem — a visibly broken corner on an otherwise correct poster. The prompt asked for
+  it. `reservedZoneBlock` paired two sentences that contradict each other:
+
+  > "Leave that corner COMPLETELY EMPTY of content and continue the image's immediately
+  > surrounding background through it seamlessly…"
+  > "Do NOT create a separate colour, white space, patch, box, **panel**, **band**, reserved-space
+  > marker, or visible boundary there, and NO text, numbers, logos, photographs, faces, people,
+  > objects, icons, borders, **shapes**, or decoration may enter, sit behind, or **CROSS** it."
+
+  A header block IS a panel/band/shape, and to reach the right edge it must CROSS the corner — so
+  the second sentence forbids in as many words the thing the first one asks for. The list is
+  concrete and the word "background" is not (a model reads it as the page ground, not as whatever
+  layer occupies that edge), so the list won. Note this is not the 2026-08-04 reserved-zone work
+  regressing: that fixed content being BURIED and a second painted badge; this is the opposite
+  failure, the zone being honoured by cutting a hole.
+  The rule is now split along the axis that matters — **information vs ground** — in three shared
+  sentences (`continuityRules`, used by both lanes so the wording cannot drift): background layers
+  (colour blocks, panels, bands, gradients, photographs, textures) MUST run into the zone and
+  continue through unbroken, because the branding is opaque and lands ON TOP so there is nothing
+  to make room for; the failure is NAMED (`DO NOT CUT A HOLE IN IT`; never notch, inset, step,
+  clip or stop a panel short of it; never leave a paler/blank rectangle there), these prompts
+  responding far better to a described defect than to a prohibition; and only content that
+  carries meaning or draws the eye stays out. `panel`/`band`/`borders`/`shapes` survive only in
+  the "do not CREATE something new there" sense, which is a different sentence from "do not let
+  an existing element reach it". The headings lose the word EMPTY (`RESERVED BADGE CORNER` /
+  `RESERVED BRANDING ZONES`) — it is the word that makes a model blank the area.
+  Three consequences worth keeping. **All three lanes are fixed at once** (social, article-poster
+  overlay, YouTube thumbnail) because they share the function; the article `fresh` path already
+  had this right in its own `RESERVED_ZONES` string ("Ordinary background colour, gradients,
+  textures… SHOULD continue naturally through these zones; do not leave them plain, white, empty
+  or cut away solely for the branding") and is untouched — that string was the model for the
+  rewrite. `CHROME_FREES_NO_SPACE` carried the same over-reach in miniature ("…or any other
+  content into either reserved zone", which forbids the background too) and now names text and
+  focal content, with the continuation stated explicitly — so the FEEDBACK lanes, which reach it
+  through `stampedChromeRule`, cannot notch the corner on a re-render either. And the guarantee
+  is the harness: `reserved-zone-rule.ts` now asserts on all three geometries that the block
+  demands the background continue through, names the hole, and **denies** the five exact strings
+  that caused it (`COMPLETELY EMPTY`, `may enter, sit behind, or cross`, `shapes, or decoration`,
+  …), with the same needles asserted on the assembled onbrand, fresh and thumbnail prompts. If a
+  notched corner ever comes back, check those first.
+  Verified 2026-08-10, all free: workspace typecheck **7/7 green**, lint clean and prettier clean
+  on all three touched files (the residual complaint in `build-youtube-thumbnail-prompt.ts` is at
+  untouched pre-existing lines — do NOT `--write` it), and five harnesses green
+  (`reserved-zone-rule`, `build-poster-prompt`, `build-youtube-thumbnail-prompt`,
+  `build-article-poster-prompt`, `clear-space-rule`). **Left for a real run** (one image charge):
+  a ठरलेले टेम्पलेट poster on a note with a full-width coloured header, confirming the header runs
+  edge to edge behind the badge. Deploy is `@dgipr/content-engine` dist → API; no migration, no
+  n8n, no web change.
+
+- **The social footer is APPENDED below the artwork, not pasted over it** (2026-08-10, no
+  migration, no n8n): a live ठरलेले टेम्पलेट poster shipped with the fifth bullet of a
+  five-point note buried under the navy title pill — the sentence simply ends mid-word. The
+  geometry was not out of sync (the prompt reserved 120px where `overlayTwitterChrome` stamps
+  ~91px, i.e. 29px of slack); the model just laid content ~60px past the floor. **This had
+  already been fixed once at the prompt layer** (the 2026-08-04 reserved-zone milestone gave
+  `fitToReserveRule` its priority/consequence/action) and it happened again, which is the
+  finding: the reserve could only ever be a request. An image model has no ruler — `y=1480` is
+  close to inert — and the same prompt says three times over to show every point and match the
+  reference's density. There was, and deliberately still is, **no post-render check**: the
+  prompt correctly asks for background to continue through the zone, so a cheap ink metric
+  cannot separate the failure from the required behaviour.
+  So the band stops being an overlay. `packages/poster-renderer/src/footer-extension.ts` adds a
+  strip BELOW the artwork and `overlayTwitterChrome` stamps the band there, making a finished
+  social poster **1280x1691** instead of 1280x1600. Nothing the model paints can be covered,
+  however badly it ignores the reserve — the deterministic-guarantee-behind-an-instructed-rule
+  shape the repo already uses (Chromium typesets the Devanagari; `lock-scheme-names` repairs a
+  truncation the prompt merely asked for). The **badge is untouched** and is still a destructive
+  overlay: a corner almost never holds the tail of a sentence.
+  Six things worth knowing:
+  - **The join has to be invisible or this trades one ugly poster for another.** The band's
+    artwork is transparent around its navy pill, so the added strip shows either side of it.
+    `readBottomEdge` samples the bottom 24 rows: a near-uniform edge (the normal case, and what
+    the prompt still asks for) gets a flat fill at their MEAN — the mean rather than the last
+    row, because one row can carry a stray antialiased pixel and a hairline of the wrong colour
+    along the join is exactly the artefact being avoided; a textured edge gets the last 6 rows
+    stretched down and softened, which continues a gradient and gives a photograph a plausible
+    falloff. Measured on four synthetic bottom-edge shapes: seam Δ **0.0 / 0.0 / 1.0 / 2.5** out
+    of 255.
+  - **Idempotence is decided by ASPECT, not a flag or a stored dimension.** Feedback edits the
+    poster this function last produced, which already carries its strip; extending
+    unconditionally would grow the poster ~91px every round. A fresh render comes back at the
+    artwork's 4:5, a finished one at 4:5-plus-a-strip, and the nearer of the two wins — aspect
+    rather than absolute height because the model is not contractually bound to return 1280 wide
+    and everything else in that file already scales off the width it actually got.
+  - **The prompt had to stop asking for a void.** (**48px and the "calm and plain" wording are
+    SUPERSEDED — see the milestone above: it is 16px and a TEXT cushion, because this version
+    still asked for a plain background there and got 82px of flat grey.**) Left as-is, the model
+    would still clear ~120px
+    the band no longer occupies and the poster would come back letterboxed above its own footer.
+    `ReservedZoneGeometry.footerAppendedMargin` (48px) switches `reservedZoneBlock` and
+    `fitToReserveRule` into a mode where the bottom is a **JOIN, not a cover zone**: design down
+    to the edge, keep only the last 48px calm and plain so the seam does not show. 48 lands the
+    finished gap close to what the old reserve INTENDED (content to 1480, band from 1509 — 29px),
+    and overshooting it now costs breathing room instead of a sentence. Unset = overlay mode,
+    byte-for-byte unchanged, which is what the article-poster and YouTube-thumbnail lanes keep.
+  - **The prompt must also stop CLAIMING the band covers things.** A threat the model's own
+    render disproves teaches it that this prompt's threats are negotiable, so the appended
+    consequence says what is actually true (the band butts against whatever the last 48px
+    contain) and the badge keeps its `COVERED AND LOST`. Harness-asserted both ways.
+  - **The feedback lane is the exception and still reserves the band for real** — it edits a
+    finished poster and the band is re-stamped in place over the bottom of it. It now quotes
+    `SOCIAL_ZONES.footerHeight`, which was changed 120 → **91, the band's true footprint**; do
+    not "restore" it to 120, which would push content up 30px every round and drift the layout.
+    The feedback prompts also stopped saying "4:5 portrait poster" (their input is 0.757 now) and
+    ask for the input's exact width and height.
+  - **The C-tier cause is fixed too: the headline.** The failing poster's headline took roughly a
+    third of the canvas. `fitToReserveRule` does say "shrink the HEADLINE first", but on the
+    onbrand lane it is reached through `allowStructuralReflow`, which offers a paragraph of
+    re-layout options ahead of it. A `KEEP THE HEADLINE PROPORTIONATE TO THE REST` rule (≤2-3
+    lines, ≤~¼ of the height, reduce it before anything else) now sits **beside the completeness
+    pressure it has to answer**, so it acts before the layout is committed rather than as a remedy.
+  **CMO is deliberately untouched** (`overlayCmoChrome`, a different function and canvas), as are
+  the article-poster and YouTube-thumbnail lanes — same structure, far lower risk, and worth doing
+  separately. Verified 2026-08-10, all free: workspace typecheck **7/7 green**, lint + prettier
+  clean on all four touched files, both prompt harnesses green (with new assertions for the
+  appended lane, the letterbox guard, the no-bluff check and the headline cap), and an offline
+  render check on four bottom-edge shapes confirming 1280x1691 out, **1280x1691 again on
+  re-stamp**, both fill branches firing, and the reproduced failure case ("used to be buried")
+  fully visible above the band. **Left for a real run** (one image charge): a live ठरलेले
+  टेम्पलेट poster on the same long note, then one feedback round on it to confirm the poster does
+  not grow. Deploy is `@dgipr/poster-renderer` → `@dgipr/content-engine` dists → API; no
+  migration, no n8n, no web change (`.poster-frame` sets no aspect ratio, and the 4:5 rules in
+  globals.css are the reference-library thumbnails, whose masters are still 1280x1600).
+
+- **The database is our own Postgres on RDS, behind our own PostgREST** (2026-08-09, no
+  migration, no application code change): the Supabase free-tier project
+  (`scmwebkxoftkqdyujibw`) was over quota and due to be restricted the same day, so the
+  database followed the storage migration off Supabase. **Nothing in `packages/*` or
+  `apps/*` changed.** That was possible because of a property worth keeping: the entire
+  coupling is 56 single-table queries plus ONE RPC, all inside
+  [packages/database/src/](packages/database/src/) (the sole exception being
+  `what-changed/find-topic-articles.ts`), with **no joins, no `.auth`, no realtime, no
+  edge functions**, and every consumer importing `SupabaseClient` as a TYPE from
+  `@dgipr/database` rather than from `@supabase/supabase-js`.
+  So the move was chosen to preserve the WIRE PROTOCOL rather than rewrite the queries:
+  **PostgREST is the same software Supabase runs**, so pointing `SUPABASE_URL` at our own
+  instance keeps all 56 queries behaving byte-for-byte. The alternative — rewriting
+  `packages/database` onto the `pg` driver — remains the right end state and is now
+  strictly easier, because it can be done one file at a time and **diffed against a
+  working PostgREST**. It was deliberately NOT attempted on deadline day, with no test
+  suite, against the shapes this repo has repeatedly found to be silent breakers
+  (`maybeSingle` vs `single`, `head:true` counts, `ignoreDuplicates` upserts, jsonb
+  omit-unless-present, the 1000-row paging cap).
+  - **Target**: RDS PostgreSQL 17.10, `db.t4g.small`, 20 GB gp3, encrypted, 7-day backups,
+    single-AZ, **`PubliclyAccessible=false`** in the EC2's own VPC (`vpc-08bfbd30046bfebf9`,
+    us-east-2). The VPC has no private subnets — all three are public — so it is the
+    **publicly-accessible flag, not the subnet, that withholds the public IP**. The SG
+    (`sg-0bf2ce65bf33adb0a`) allows 5432 from the EC2's SG only.
+  - **pgvector was the one gating risk** and is cleared: RDS ships **0.8.2**, and 0019/0039
+    need ≥0.7 for `halfvec`, `subvector`, `l2_normalize` and `hnsw ... halfvec_cosine_ops`.
+    `describe-db-engine-versions` does **not** expose extension versions, so this cannot be
+    pre-checked from the CLI — provision, then `select ... from pg_available_extensions`.
+  - **Restore, not migration replay.** The plan had been to replay `0001…0043` because
+    AGENTS.md recorded migrations applied by hand and at least one (0041) as never applied.
+    The schema dump disproved that: **all 43 are applied**, including
+    `generations.instructions`. So the dump IS the current schema and restoring it
+    reproduces production exactly. The extension also turned out to live in **`public`**
+    (`public.halfvec`), not Supabase's `extensions` schema, so the dump needed no rewriting
+    — only `create extension vector` on the target first.
+  - **Getting the bytes out has two traps.** The direct endpoint
+    `db.<ref>.supabase.co` is **IPv6-only** (AAAA, no A record), unreachable from most
+    machines and from Docker; the session pooler (port **5432** — the 6543 transaction
+    pooler cannot serve `pg_dump`) is the usable path. And the pooler host is
+    region-specific: `aws-1-ap-northeast-1.pooler.supabase.com`, user
+    `postgres.<ref>`. The region is discoverable by matching the direct endpoint's IPv6
+    against AWS's published ranges. The pooler distinguishes the two failure modes
+    precisely — `(ENOTFOUND) tenant/user ... not found` means wrong cluster,
+    `password authentication failed` means right cluster — which is how the endpoint was
+    found.
+  - **RLS is the silent-failure risk, and is why `service_role` MUST keep `BYPASSRLS`.**
+    Every table has RLS enabled with **zero policies** (0002), so a `service_role` without
+    that attribute returns **zero rows with no error** on every query — the worst possible
+    failure shape. `postgrest-roles.sql` therefore sets it explicitly AND re-asserts it on
+    every run, and verification asserts real row COUNTS rather than HTTP 200s.
+  - **supabase-js hardcodes a `/rest/v1` prefix** and PostgREST serves at the root, so a
+    path-strip sits between them: `deploy/pgrst-proxy.Caddyfile` (`handle_path`) in a
+    **separate `pgrst-proxy` container**, deliberately NOT a route in the public
+    `deploy/Caddyfile` — that file terminates TLS for api/n8n and a syntax error in it would
+    take the site down. Neither PostgREST nor the proxy is published; `api` reaches them
+    over the compose network only.
+  - `SUPABASE_SERVICE_ROLE_KEY` is now a JWT we sign ourselves (`role: service_role`,
+    HS256, `PGRST_JWT_SECRET`) — a different token of the same KIND, which is the reason no
+    code changed. **Rotation = change `PGRST_JWT_SECRET` and re-mint.**
+  - **Verified**: row counts on all 11 tables match the pre-migration baseline exactly
+    (37,811 / 429 / 178 / 285 / 113 / 17 / 141 / 41 / 22 / 14 / 295); 7 FKs, 11 RLS tables,
+    27 indexes; the restore's **only** error was `schema "public" already exists`; the
+    vector RPC returns the **identical top-5 chunk ids at identical similarity** on both
+    databases; `service_role` has S/I/U/D on all 11 tables and EXECUTE on the RPC; PostgREST
+    returns matching counts through the proxy; and after cutover `/api/generations`,
+    `/api/generations/:id`, `/api/analytics`, `/api/glossary` (incl. the `ilike`+`or`
+    search), `/api/references`, `/api/reference-types`, `/api/dlo/intakes`,
+    `/api/transcriptions` and `/api/video/projects` all return 200 with **zero errors** in
+    the api and postgrest logs. **Not yet exercised live: a real generation** (the RAG
+    retrieval + write path end to end) — verified at SQL and permission level only, because
+    it costs model spend.
+  - **Rollback**: `deploy/.env.prod.bak-presupabase-migration` on the box holds the
+    pre-cutover values; restore `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` and
+    `docker compose up -d api`. Valid only while the Supabase project still exists.
+  - **Local dev / the ingestion scripts now need a tunnel** — RDS has no public IP and
+    PostgREST is internal-only. This is the one workflow that got harder; see
+    `docs/database-on-aws.md`.
+
+
 - **The dateline belongs to the BODY, and the progress list stopped promising phases that
   never run** (2026-08-05, no migration): after `ARTICLE_STYLE_REFERENCES_ENABLED` made the
   no-reference specification the default, a real news run (generation `0266d4eb`) published

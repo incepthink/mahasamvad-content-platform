@@ -366,8 +366,20 @@ if (
 
   // Order matters: the model weights late blocks most, so the reserved zones — the one rule
   // whose violation cannot be repaired afterwards — sit near the end.
-  if (prompt.indexOf('MANDATORY EMPTY COVER ZONES') < prompt.indexOf('PEOPLE:'))
+  if (prompt.indexOf('RESERVED BRANDING ZONES') < prompt.indexOf('PEOPLE:'))
     failures.push('reserved zones no longer follow the content rules');
+
+  // The zone must be kept clear of CONTENT, not cut out of the artwork — a social poster came
+  // back with its header panel stopped short of the badge corner (see reserved-zone-rule.ts).
+  for (const needle of [
+    'DO NOT CUT A HOLE IN IT',
+    'continue through unbroken',
+  ]) {
+    if (!prompt.includes(needle))
+      failures.push(
+        `the thumbnail prompt does not require the background to continue under the branding ("${needle}")`,
+      );
+  }
 
   let threw = false;
   try {
