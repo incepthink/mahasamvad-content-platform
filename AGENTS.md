@@ -2965,6 +2965,60 @@ Not implemented yet: Canva integration, authentication.
 
 ## Latest Implementation Milestone
 
+- **The video stitch stopped loading the whole video into RAM at once** (2026-08-10, no
+  migration, no n8n, API only): a production run died at the one step that spends nothing —
+  `Final video assembly failed validation after 2 attempts: Video stitch was stopped by
+SIGKILL: it was killed by the operating system, most likely out of memory.` Both attempts
+  were killed, which is the signature of a deterministic resource ceiling rather than a
+  flake. The cause is the shape of the ffmpeg command, and it had been latent since the
+  2026-07-29 assembly rework: `assembleSilentVideo` took EVERY clip as a simultaneous input
+  to one filter graph and joined them with the concat **filter**. The ffmpeg CLI reads
+  packets from whichever input has the earliest DTS, and every clip starts at 0, so it
+  decodes them all at once — while the concat filter consumes only the segment it is
+  currently on, leaving every LATER segment's frames sitting decoded in that input's queue.
+  Peak memory therefore grew with the length of the whole video, on a small instance shared
+  with n8n and Chromium. **Measured on the real command shape**, 8x15s at 720p with captions:
+  **6.53 GB peak RSS**. Nothing about it was a leak or a bad flag; the graph was simply
+  asking for the entire decoded timeline at once (~4 GB of raw frames at 720p, ~9 GB at
+  1080p), plus a full-frame RGBA still per looped caption PNG.
+  - **Each scene is now encoded on its own, and the normalized segments are joined by the
+    concat DEMUXER with `-c copy`.** That bounds the memory at ONE clip regardless of the
+    video's length — the demuxer opens the finished segments strictly in sequence. Same job,
+    same machine: **500 MB peak RSS (13x lower) and 19s instead of 60s**, the speedup being
+    the decoding that is no longer thrown away.
+  - **The demuxer is safe here only because of the pass above it**, which is the thing not to
+    undo: every segment is written by the same encoder at the same resolution, frame rate,
+    pixel format, SAR and profile (`SEGMENT_ENCODE_ARGS`, applied to the outro segment too),
+    so their stream parameters are identical by construction. x264 derives its level from
+    resolution + frame rate + DPB, never from content. Concatenating PROVIDER clips directly
+    — mixed 720p/1080p, provider timestamps — is the unsafe thing the 2026-07-29 milestone
+    correctly moved away from, and is not what this does. Source clips are still always
+    re-encoded; only the segments this function itself just wrote are copied.
+  - **Captions are clipped into their own segment's time base.** The windows arrive on the
+    final timeline (from `sceneTimings`, the same function the SRT is built from), so each is
+    intersected with its scene and shifted, `enable`'s `t` being segment-local after `setpts`.
+    A side benefit: caption drift can no longer accumulate across scenes, because each is
+    bound to its own segment rather than to a running total of declared durations.
+  - **A looped still is now finite (`-t`) and sized off the MEASURED clip length**, not the
+    declared one. Finite is what stops it being the endless input it was; measured is what
+    stops `shortest=1` silently trimming a clip that decoded longer than its billed window —
+    the duration gate only checks the minimum, so that trim would not have been caught.
+    `assertStreamDuration` already decoded each clip, so the real length was free.
+  - Every segment is duration-gated as it is written, so a defect names the scene it came
+    from instead of surfacing as a short total.
+    Verified 2026-08-10, all free: workspace typecheck **7/7 green**, lint + prettier clean;
+    all four harnesses green (`video:preview:captions` at 720p asserting the panel on-frame at
+    the documented 13.6%, `--vertical`, `video:preview:assemble` incl. its one-frame rejection,
+    and `video:preview:narrate` with unequal 5s+12s windows); and a measured 8x15s 720p job
+    where old and new outputs are **frame-for-frame identical in every stream parameter** —
+    3054 frames, 2:02.16, 1280x720, High/yuv420p, SAR 1:1, 25 fps, 12800 tbn — with sampled
+    frames confirming the caption panel on all eight scenes and none on the outro, the lockup
+    on the scenes and not on the outro, a half-scene caption window landing on exactly its own
+    half, and a deliberately under-declared 6s clip surviving at its full length. Deploy is
+    `@dgipr/poster-renderer` dist → API; no web change. Re-stitching an existing project needs
+    no re-render — the **क्लिप्स पुन्हा जोडून व्हिडिओ तयार करा** button on a completed project
+    reuses the stored clips and cached narration, so the failed run can be recovered for free.
+
 - **The bottom edge is an edge, not a reserve — and a free-colour poster must be BRIGHT**
   (2026-08-10, no migration, no n8n, API only): generation 97b64542 came back with a tenth of
   the poster given over to a dead grey band above its own footer, and the artwork itself almost

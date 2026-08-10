@@ -1773,24 +1773,13 @@ async function renderAndStoreSocialPoster(
       )
     : undefined;
 
-  // 3b. Art direction — only the fully-AI-generated DGIPR path consumes it; edit modes and CMO
-  //     ignore it, so don't spend the call there. It describes HOW the assigned colours and
-  //     composition are used and chooses neither. Best-effort: null → render from the assignment
-  //     alone, which carries the colours and the layout and is deliberately sufficient.
-  const artDirection = isFresh
-    ? await generateArtDirection({
-        note: row.note,
-        copyStyle: copyResult!.copyStyle,
-        // Always undefined now that a fresh run resolves no master — kept because CMO and the
-        // template modes share this builder, and because the parameter is what the art director
-        // would use if a hint ever returns.
-        referenceHint: resolved?.master.layoutSpec?.layoutSummary,
-        seed,
-        assignedPalette,
-        assignedLayout,
-        recentTreatments: history?.treatments,
-      })
-    : null;
+  // 3b. Art direction — RETIRED (2026-08-10). It designed a treatment WITHIN an assigned palette
+  //     and an assigned composition, and buildPosterPrompt no longer emits any of the three: the
+  //     fresh brief names the client and hands the whole design over to the image model. A paid
+  //     call whose output is dropped on the floor is worse than no call, so it is not made.
+  //     generateArtDirection itself is left in place — restoring the specification is re-adding
+  //     this block and the prompt's COLOUR SPECIFICATION / ART DIRECTION / COMPOSITION blocks.
+  const artDirection = null;
   if (assignedPalette && assignedLayout) {
     console.log(
       `[job ${id}] style: palette=${assignedPalette.id} (${assignedPalette.family}) layout=${assignedLayout.id} (${assignedLayout.coverage})` +

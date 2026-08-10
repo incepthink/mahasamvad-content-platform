@@ -10,7 +10,6 @@ import type { PosterCopy, TemplateBrand } from './generate-poster-copy.js';
 import type { ArtDirection } from './art-direction.js';
 import type { PosterPalette } from './poster-palettes.js';
 import type { PosterLayout } from './poster-layouts.js';
-import { stripColourMentions } from './strip-colour-words.js';
 import {
   clearSpaceRule,
   contentInventoryLines,
@@ -126,67 +125,19 @@ export type BuildPosterPromptInput = Readonly<{
   // whole structural instruction — which it already outranked whenever both were present.
   layoutSummary?: string | undefined;
   hasPhoto: boolean;
-  // The per-run AI-chosen visual treatment (art-direction.ts). Applied in 'fresh' mode so the
-  // fully-AI-generated poster looks different every render. Absent = render from the assignment
-  // alone, which is deliberately sufficient — see fmtColourSpec.
+  // RETIRED FROM THE PROMPT (2026-08-10) — all three were the fresh lane's design specification
+  // and none of them reaches the image model any more. The fresh brief now names the client and
+  // hands the design over; see the branch below for why.
+  //
+  // They are kept on the type, and the runner still ASSIGNS a palette and a layout, because
+  // `generations.poster_style` (migration 0028) persists them and the UI reads them back as the
+  // run's style label. Be honest about what that label now means: it records a rotation that no
+  // longer influences the render. `artDirection` is no longer requested at all — the runner
+  // skips that paid call rather than buying a treatment nothing consumes.
   artDirection?: ArtDirection | undefined;
-  // The colour family this run is anchored to (poster-palettes.ts, rotated per run). In 'fresh'
-  // mode this is the AUTHORITATIVE colour source and is always emitted when present — art
-  // direction describes how the colours are used, never which they are.
   assignedPalette?: PosterPalette | undefined;
-  // The composition archetype this run is anchored to (poster-layouts.ts, rotated per run).
-  // Emitted in 'fresh' mode above the master's structure hint, which it outranks.
   assignedLayout?: PosterLayout | undefined;
 }>;
-
-// The colour block. This is the load-bearing part of the whole diversity fix, so it goes FIRST in
-// the prompt and it speaks in hex.
-//
-// The bug this replaces: art direction was emitted INSTEAD of the assignment whenever it
-// succeeded (which is almost always), so the palette the rotation had carefully chosen reached
-// the image model only as an art director's paraphrase — and a paraphrase of "deep teal" is
-// something gpt-image-2 will happily brand-correct back to saffron. Exact hex values are not
-// negotiable in the same way; the model either matches #0E5C63 or it does not, which is also
-// what makes the rendered result measurable afterwards (poster-colours.ts).
-function fmtColourSpec(p: PosterPalette): string {
-  return [
-    'COLOUR SPECIFICATION — use these EXACT colours. This is a specification, not a suggestion:',
-    `- Page background (the whole canvas outside the colour block): ${p.hex.ground}`,
-    `- Dominant colour block / band / column: ${p.hex.panel}`,
-    `- Body text sitting on the page background: ${p.hex.ink}`,
-    `- Accent for figures, icons, dividers and emphasis: ${p.hex.accent}`,
-    `In words: ${p.palette}.`,
-    'Do not substitute these values, do not warm them up, and do not "brand-correct" them toward a house style.',
-  ].join('\n');
-}
-
-// The art director's treatment — HOW the assigned colours and composition are handled. Kept here
-// (rather than in art-direction.ts) so all image-prompt string assembly lives in one file. The
-// `palette` line only appears on the legacy un-assigned path, where colour really was its call.
-function fmtArtDirection(ad: ArtDirection): string {
-  const lines = ['ART DIRECTION — the intended treatment for this poster:'];
-  if (ad.palette) lines.push(`- Colour palette: ${ad.palette}`);
-  if (ad.background) lines.push(`- Background handling: ${ad.background}`);
-  if (ad.composition) lines.push(`- Composition detail: ${ad.composition}`);
-  if (ad.mood) lines.push(`- Mood: ${ad.mood}`);
-  if (ad.accents)
-    lines.push(`- Panels / cards / icons / accents: ${ad.accents}`);
-  return lines.join('\n');
-}
-
-// The assigned composition archetype. Emitted above the master's structure hint because it
-// OUTRANKS it: the master is topic-matched, so leaving it in charge of structure is what made
-// two differently-coloured posters still read as the same poster.
-function fmtComposition(l: PosterLayout): string {
-  return `COMPOSITION — build the poster to this arrangement: ${l.instruction}`;
-}
-
-// Reinforces the palette against gpt-image-2's strong "Indian government Marathi poster ->
-// saffron/cream" prior. Appended whenever a palette is present; the "unless the specification
-// above explicitly calls for" clause keeps it correct when the assigned family IS the
-// saffron/cream brand look (its one rotation slot in eighteen).
-const COLOUR_MANDATE =
-  'MANDATORY: the colour specification above is required and must DOMINATE the poster, including the page background. Do NOT fall back to a saffron/orange + cream "government paper" look, and do NOT use a generic government navy-blue-and-white, unless the specification above explicitly calls for those colours.';
 
 // BRIGHTNESS. Only for the lane where the image model chooses the colours itself — the
 // fixed-template branch, which tells it the reference controls structure and not colour.
@@ -457,69 +408,66 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
   }
 
   if (designMode === 'fresh') {
-    const freshLines = [
-      'Design a single, complete 4:5 portrait OFFICIAL DGIPR Maharashtra government poster FROM SCRATCH — an original composition, NOT a copy of any existing template.',
-    ];
-    // Colour LEADS, and it is the ASSIGNMENT that leads — not the art director's paraphrase of
-    // it. Both are emitted when both exist: the spec says which colours, the direction says how
-    // they are used. Only a run with no assignment at all falls back to free choice.
-    if (input.assignedPalette) {
-      freshLines.push(
-        '',
-        fmtColourSpec(input.assignedPalette),
-        '',
-        COLOUR_MANDATE,
-      );
-      if (input.artDirection)
-        freshLines.push('', fmtArtDirection(input.artDirection));
-    } else if (input.artDirection) {
-      freshLines.push(
-        '',
-        fmtArtDirection(input.artDirection),
-        '',
-        COLOUR_MANDATE,
-      );
-    } else {
-      freshLines.push(
-        '',
-        'Choose an original colour palette and layout suited to the topic and tone — vary it from the usual government navy-blue-and-white and from the saffron-orange + cream look; keep it dignified and legible.',
-      );
-    }
-    if (input.assignedLayout) {
-      freshLines.push('', fmtComposition(input.assignedLayout));
-    }
-    freshLines.push(
+    // NAME THE CLIENT, STATE WHAT CANNOT MOVE, THEN GET OUT OF THE WAY (2026-08-10).
+    //
+    // Everything that used to sit between those two things is gone: an assigned hex palette, a
+    // COLOUR MANDATE, an art director's treatment, an assigned composition archetype, the
+    // selected master's structure summary, a "clean, trustworthy, well-organised" house
+    // aesthetic, and a `copyStyle` label telling the model which of six shapes to build. It was
+    // a specification for a poster, not a brief for a designer, and the renders read exactly
+    // like that — correct, legible, and interchangeable. The two libraries feeding it were the
+    // giveaway: eleven composition archetypes that were ALL "a flat colour rectangle plus rows
+    // of text" (two of them literally "photograph down one side, text down the other"), and
+    // eighteen palettes that were all "light ground plus one colour block", because the ground
+    // was a product decision rather than a design choice. No amount of rotation between those
+    // makes an interesting poster; it only makes a differently-arranged boring one.
+    //
+    // WHAT STAYS IS THE SET OF THINGS THAT ARE NOT TASTE:
+    //   - the Marathi must come out character-exact (a displaced matra is a different word);
+    //   - the branding zones must survive, because the badge and footer are composited in code
+    //     afterwards and a poster that ignores them ships with its own text destroyed;
+    //   - the canvas is 4:5 and carries one poster.
+    // Every other decision — composition, colour, imagery, illustration, texture, type — is the
+    // model's, and the brief says so in as many words.
+    //
+    // ONE DELIBERATE EXCEPTION to "no colour guidance", and it is the opposite of a restriction.
+    // gpt-image has a very strong "Indian government Marathi poster -> saffron on cream" prior.
+    // Measured on eight consecutive live posters BEFORE the palette rotation existed: 5/8 warm
+    // cream grounds, 5/8 orange-or-red dominants. Silence does not read as freedom to a prior
+    // that strong — it reads as permission to default. So the brief names the two defaults and
+    // asks for something other than them, without saying what that something is.
+    const freshLines: string[] = [
+      "You are an award-winning poster designer working for DGIPR — the Directorate General of Information and Public Relations, Government of Maharashtra, India. This poster goes out on the department's official social media and will be read on a phone by ordinary Maharashtra citizens.",
       '',
-      'Government public-information aesthetic: bold, high-contrast, highly legible Devanagari (Marathi) typography; a clean, trustworthy, well-organised layout.',
-      `Compose it as a "${copyStyle}" poster.`,
-    );
-    // The master's own description is a SECONDARY hint here and its colour words are removed
-    // outright rather than disclaimed: the previous "IGNORE any colours it mentions" sat next to
-    // a sentence naming this library's saffron/maroon/cream house look, and telling a model to
-    // ignore words you have just given it is not a mechanism. See strip-colour-words.ts.
-    const structureHint = stripColourMentions(layoutSummary);
-    if (structureHint) {
-      freshLines.push(
-        '',
-        `STRUCTURE INSPIRATION — a reference poster that suits this kind of post is built like this. Treat it ONLY as a loose idea of which sections to include (headline, points, a photo area, etc.); where it conflicts with the COMPOSITION above, the COMPOSITION wins: ${structureHint}`,
-      );
-    }
-    freshLines.push(
+      'Design a single, complete 4:5 portrait poster for the Marathi content below. Design it from scratch, as an original piece of work.',
       '',
-      'Render ALL Marathi text crisply and correctly in Devanagari, spelled EXACTLY as given. Do not add any English body text. One poster, no outer border.',
+      'YOU HAVE FULL CREATIVE CONTROL, AND YOU SHOULD USE IT. The composition, the colour palette, the imagery, the illustration style, any photography, the texture and material, the typographic scale and hierarchy, the graphic devices — all of it is yours to decide, and you should decide it boldly. Build the poster around whatever serves THIS message: an illustration, a photograph, hand-drawn artwork, a symbolic graphic, a textured or patterned ground, a large colour field, a strong piece of typography. Give it one clear visual idea and a real focal point, with confident contrast between the largest element and the smallest. Craft, depth and personality are wanted here. Do NOT produce a safe, template-shaped layout of a coloured rectangle above a list of rows — that is the failure mode. A citizen scrolling past should stop because the poster is genuinely good to look at.',
       '',
-      'CONTENT TO TYPESET:',
+      'Choose the colours yourself, freely, from the meaning and the mood of the content. Do NOT default to the saffron-orange-and-cream "government paper" look, and do NOT default to a generic government navy-blue-and-white — those are the tired defaults and this poster should not look like either unless the content genuinely calls for it. Light or dark, deep or high-key, vivid or restrained, duotone, gradient or flat are all open to you. The only requirement is that every Marathi word stays effortlessly readable against whatever sits behind it.',
+      '',
+      'It is an official government communication, so it must be accurate and legible. It does not have to be plain.',
+      '',
+      // The slot labels in `change` name each piece of text's ROLE. Left unqualified beside a
+      // brief this open they read as a layout spec ("BULLET POINTS (in the body list zone)"),
+      // which is half of where the row-stack habit came from.
+      'CONTENT TO TYPESET — reproduce this Marathi text EXACTLY as written, character for character: every letter, every matra and vowel sign, every conjunct (जोडाक्षर), every anusvara, every Devanagari numeral. Do not re-spell, re-word, translate, transliterate, abbreviate, correct or add to it, and do not drop a line because the composition feels tight. Render it crisply. No English body text. The labels below name what each piece of text IS — they do not tell you where to put it, how large to set it, or what shape to give it; those are your decisions.',
+      '',
       change,
-    );
-    if (hasPhoto) {
+    ];
+    if (sceneBrief) {
       freshLines.push(
         '',
-        `BACKGROUND / HERO IMAGERY (must never cover the text): ${sceneBrief}`,
+        // Was "BACKGROUND / HERO IMAGERY", i.e. a photograph in a rectangle behind the type, and
+        // its else-branch banned illustration outright ("Do NOT include any photograph, portrait
+        // or pictorial illustration") — so imagery was a binary with no middle, and the middle is
+        // exactly where good public-information posters live.
+        `SUBJECT MATTER — what this poster is about, if you want imagery: ${sceneBrief}`,
+        'Treat that as subject, never as a specification. Render it as a photograph, an illustration, line art, a flat-vector scene, a symbolic graphic, a repeated motif, a textured ground — or leave it out entirely and carry the poster on typography and colour alone. Whichever you choose, imagery must never obscure, crowd or compete with the Marathi text.',
       );
     } else {
       freshLines.push(
         '',
-        'This poster is TEXT-ONLY: build it from typography, colour blocks, cards and simple icons. Do NOT include any photograph, portrait or pictorial illustration.',
+        'No specific subject imagery is supplied. Carry the poster however you judge best — typography and colour alone, an abstract or geometric treatment, a symbolic graphic, a motif, or original illustration suited to the message. Nothing here restricts you to text on a plain ground.',
       );
     }
     // The chrome blocks, LAST and in the fixed-template path's order — that path is the one
@@ -762,40 +710,98 @@ if (
         `\n${'='.repeat(78)}\nseed ${seed} · ${palette.id} (${palette.family}) · ${layout.id}\n${'='.repeat(78)}\n${prompt}`,
       );
 
-      // 1. The assigned hexes must be present — this is the bug that made the whole rotation inert.
+      // THE DESIGN SPECIFICATION MUST NOT REACH THE MODEL (2026-08-10). A palette, a layout, an
+      // art direction AND a master summary are all supplied above precisely so this asserts they
+      // are IGNORED — the fresh lane is a brief now, not a spec. If posters ever go back to
+      // reading as one template in rotating colours, check whether these blocks came back.
+      //
+      // 1. Not one assigned hex may appear. The rotation is still recorded for poster_style; it
+      //    just no longer decides what the poster looks like.
       for (const hex of [
         palette.hex.ground,
         palette.hex.panel,
         palette.hex.ink,
         palette.hex.accent,
       ]) {
-        if (!prompt.includes(hex))
-          failures.push(`${seed}: assigned hex ${hex} missing from the prompt`);
+        if (prompt.includes(hex))
+          failures.push(
+            `${seed}: assigned hex ${hex} is back in the prompt — the fresh lane chooses its own colours`,
+          );
       }
-      // 2. The colour spec must come BEFORE the art direction, so the spec is what leads.
-      const specAt = prompt.indexOf('COLOUR SPECIFICATION');
-      const adAt = prompt.indexOf('ART DIRECTION');
-      if (specAt === -1)
-        failures.push(`${seed}: no COLOUR SPECIFICATION block`);
-      if (adAt !== -1 && specAt > adAt)
-        failures.push(`${seed}: art direction precedes the colour spec`);
-      // 3. The assigned composition must be present and precede the master's structure hint.
-      const compAt = prompt.indexOf('COMPOSITION —');
-      const structAt = prompt.indexOf('STRUCTURE INSPIRATION');
-      if (compAt === -1) failures.push(`${seed}: no COMPOSITION block`);
-      if (structAt !== -1 && compAt > structAt)
-        failures.push(`${seed}: structure hint precedes the composition`);
-      // 4. NO colour word from the master's summary may survive into the structure hint.
-      if (structAt !== -1) {
-        const hint = prompt.slice(structAt);
-        for (const word of ['saffron', 'cream', 'maroon', 'orange']) {
-          if (new RegExp(`\b${word}\b`, 'i').test(hint)) {
-            failures.push(
-              `${seed}: master colour word "${word}" leaked into the structure hint`,
-            );
-          }
-        }
+      // 2. …nor any of the four blocks that carried the specification.
+      for (const retired of [
+        'COLOUR SPECIFICATION',
+        'ART DIRECTION',
+        'COMPOSITION —',
+        'STRUCTURE INSPIRATION',
+        // The art direction's own text, in case it is ever inlined without its heading.
+        'calm, clinical, reassuring',
+        // The assigned archetype's instruction, same reason.
+        layout.instruction.slice(0, 40),
+      ]) {
+        if (prompt.includes(retired))
+          failures.push(
+            `${seed}: the retired design specification is back in the fresh prompt ("${retired}")`,
+          );
       }
+      // 3. WHO IT IS FOR is the one thing the brief must say, since it is now carrying the whole
+      //    weight of "make it appropriate" that the specification used to carry.
+      for (const needle of [
+        'DGIPR',
+        'Government of Maharashtra',
+        'YOU HAVE FULL CREATIVE CONTROL',
+      ]) {
+        if (!prompt.includes(needle))
+          failures.push(`${seed}: the fresh brief lost "${needle}"`);
+      }
+      // 4. THE FAILURE MODE, NAMED. These prompts respond far better to a described defect than
+      //    to an abstraction — the same finding as reserved-zone-rule.ts's "DO NOT CUT A HOLE".
+      //    The defect here is the poster the eleven retired archetypes all produced.
+      if (!prompt.includes('coloured rectangle above a list of rows'))
+        failures.push(
+          `${seed}: the fresh brief does not name the template-shaped layout as the failure mode`,
+        );
+      // 5. THE ANTI-DEFAULT. Not a colour restriction — the opposite. gpt-image's "Indian
+      //    government Marathi poster -> saffron on cream" prior measured 5/8 warm cream grounds
+      //    across eight consecutive live posters before the rotation existed, and silence reads
+      //    to that prior as permission. Removing the spec WITHOUT this is how the lane regresses
+      //    to one colourway; it is the single most likely thing to be "cleaned up" by mistake.
+      for (const needle of [
+        'saffron-orange-and-cream',
+        'navy-blue-and-white',
+      ]) {
+        if (!prompt.includes(needle))
+          failures.push(
+            `${seed}: the fresh brief no longer names the "${needle}" default it has to push away from`,
+          );
+      }
+      // 6. TEXT FIDELITY IS NOT TASTE and survives the hand-over intact.
+      for (const needle of [
+        'reproduce this Marathi text EXACTLY',
+        'जोडाक्षर',
+        'No English body text',
+      ]) {
+        if (!prompt.includes(needle))
+          failures.push(
+            `${seed}: the fresh brief lost the text rule "${needle}"`,
+          );
+      }
+      // 7. IMAGERY IS NO LONGER A BINARY. It was: a photograph in a rectangle, or an outright
+      //    ban on "any photograph, portrait or pictorial illustration" — so the middle ground
+      //    that good public-information posters live in (line art, flat-vector scenes, motifs)
+      //    was unreachable by construction.
+      if (!prompt.includes('an illustration, line art'))
+        failures.push(
+          `${seed}: the fresh brief does not offer illustration as an option`,
+        );
+      if (
+        prompt.includes(
+          'Do NOT include any photograph, portrait or pictorial illustration',
+        )
+      )
+        failures.push(
+          `${seed}: the illustration ban is back — imagery is a binary again`,
+        );
     }
 
     // 4b. THE FIXED-TEMPLATE (ठरलेले टेम्पलेट) BRANCH — the one that renders the officer's
@@ -1104,16 +1110,37 @@ if (
     //     instruction. `freshPrompt` above is already built that way — this asserts it is a
     //     supported shape rather than an accident, since the fixed-template branch still
     //     throws without a master.
-    if (
-      !freshPrompt.includes('COMPOSITION —') &&
-      !freshPrompt.includes('FROM SCRATCH')
-    )
+    if (!freshPrompt.includes('Design it from scratch'))
       failures.push(
-        'the reference-free fresh prompt carries no structural instruction at all',
+        'the reference-free fresh prompt no longer says the poster is designed from scratch',
       );
     if (freshPrompt.includes('STRUCTURE INSPIRATION'))
       failures.push(
         'the fresh prompt emitted a STRUCTURE INSPIRATION block with no master to take one from',
+      );
+
+    // (g) A run whose copy carries NO scene_brief must still be told it may use imagery. This
+    //     was the else-branch that banned illustration outright, so a text-only note could only
+    //     ever come back as type on a flat ground — the other half of "they all look the same".
+    const freshNoSubject = buildPosterPrompt({
+      copy: { ...COPY, scene_brief: '' } as unknown as PosterCopy,
+      copyStyle: 'info_bullets',
+      designMode: 'fresh',
+      brand: 'dgipr',
+      masterUrl: '',
+      hasPhoto: false,
+    });
+    if (
+      !freshNoSubject.includes(
+        'Nothing here restricts you to text on a plain ground',
+      )
+    )
+      failures.push(
+        'a fresh run with no subject imagery is not told it may still use illustration or texture',
+      );
+    if (/TEXT-ONLY/.test(freshNoSubject))
+      failures.push(
+        'the fresh no-imagery branch restored the TEXT-ONLY lock, which banned illustration',
       );
 
     // 5. The clear-space (blue box) feedback path. The properties that matter are that the
