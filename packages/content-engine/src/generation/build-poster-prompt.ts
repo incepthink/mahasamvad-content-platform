@@ -443,7 +443,27 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
       '',
       'YOU HAVE FULL CREATIVE CONTROL, AND YOU SHOULD USE IT. The composition, the colour palette, the imagery, the illustration style, any photography, the texture and material, the typographic scale and hierarchy, the graphic devices — all of it is yours to decide, and you should decide it boldly. Build the poster around whatever serves THIS message: an illustration, a photograph, hand-drawn artwork, a symbolic graphic, a textured or patterned ground, a large colour field, a strong piece of typography. Give it one clear visual idea and a real focal point, with confident contrast between the largest element and the smallest. Craft, depth and personality are wanted here. Do NOT produce a safe, template-shaped layout of a coloured rectangle above a list of rows — that is the failure mode. A citizen scrolling past should stop because the poster is genuinely good to look at.',
       '',
-      'Choose the colours yourself, freely, from the meaning and the mood of the content. Do NOT default to the saffron-orange-and-cream "government paper" look, and do NOT default to a generic government navy-blue-and-white — those are the tired defaults and this poster should not look like either unless the content genuinely calls for it. Light or dark, deep or high-key, vivid or restrained, duotone, gradient or flat are all open to you. The only requirement is that every Marathi word stays effortlessly readable against whatever sits behind it.',
+      // READABILITY rides on the colour paragraph rather than becoming a rule of its own — it is
+      // a consideration, and a separate block would give it weight the officer did not ask for.
+      // The last sentence is load-bearing in the OTHER direction: BRIGHT_LOOK_RULE used to ban
+      // dark grounds outright on the fixed-template lane, and without saying so plainly this
+      // reads as the same ban rebuilt out of "contrast". Dark posters are allowed here.
+      'Choose the colours yourself, freely, from the meaning and the mood of the content. Do NOT default to the saffron-orange-and-cream "government paper" look, and do NOT default to a generic government navy-blue-and-white — those are the tired defaults and this poster should not look like either unless the content genuinely calls for it. Light or dark, deep or high-key, vivid or restrained, duotone, gradient or flat are all open to you. Just keep readability in mind: every Marathi word should stay easy to read against whatever sits immediately behind it, so where text falls on a photograph, a gradient or a busy pattern, give it a calmer area, a panel, or more weight. Dark, deep and saturated posters are entirely welcome — this is about the contrast between text and its own background, not about making the poster lighter.',
+      '',
+      // TYPOGRAPHY. The fresh lane said nothing about type at all, which is why every poster came
+      // back set in one face — 'Use Nirmala UI for all text' is the onbrand lane's rule, not this
+      // one. Kept to a single paragraph deliberately: this brief works by handing decisions over,
+      // and a page of typographic instruction would be the specification creeping back in.
+      //
+      // The named families are a CHARACTER hint and say so — gpt-image loads no font files, so a
+      // name steers letterform style or it does nothing. Mukta leads the list on evidence rather
+      // than taste: it is this repo's own MARATHI_FONT_FAMILY (poster-renderer/src/assets.ts),
+      // adopted 2026-07-28 after Noto Sans Devanagari was found to break the C+र conjunct.
+      //
+      // The last sentence is the escape hatch, the same shape as the photo rule's. This lane
+      // already accepts image-model Devanagari, so more typefaces means more chances at a
+      // detached matra; correctness has to outrank the style choice explicitly.
+      'TYPOGRAPHY IS PART OF THE DESIGN — do not set the whole poster in one font. Pair a Devanagari display face with real character for the headline against a cleaner, quieter Devanagari face for the body and points, and let weight, size and letterspacing do work too; two families, three at the most. Aim for the character of well-made Devanagari families such as Kamal, Mukta, Hind, Baloo 2, Tiro Devanagari Marathi, Rozha One, Khand, Teko, Martel or Yatra One — those name the letterforms to aim for, not files to load. Correctness outranks style: every conjunct (जोडाक्षर), matra and anusvara must stay correctly formed and attached to its consonant, so if a decorative face would break one, set that text in a cleaner face instead.',
       '',
       'It is an official government communication, so it must be accurate and legible. It does not have to be plain.',
       '',
@@ -833,6 +853,34 @@ if (
         if (!prompt.includes(needle))
           failures.push(`${seed}: the photo-realism rule lost "${needle}"`);
       }
+      // 9. TYPOGRAPHY. Only the three things that would actually regress: that more than one
+      //    face is asked for at all, that the named families survive as a character hint, and
+      //    that conjunct correctness still outranks the style choice on a lane where the image
+      //    model is the one rendering Devanagari.
+      for (const needle of [
+        'do not set the whole poster in one font',
+        'Kamal, Mukta, Hind',
+        'Correctness outranks style',
+      ]) {
+        if (!prompt.includes(needle))
+          failures.push(`${seed}: the typography rule lost "${needle}"`);
+      }
+      // 10. READABILITY must not become a brightness ban. BRIGHT_LOOK_RULE is the fixed-template
+      //     lane's, it bans dark grounds outright, and "keep it readable" is exactly the sentence
+      //     someone would later rebuild it from — which would re-close the palette this lane just
+      //     opened. Assert the permission, and deny the rule itself.
+      if (
+        !prompt.includes(
+          'Dark, deep and saturated posters are entirely welcome',
+        )
+      )
+        failures.push(
+          `${seed}: the readability clause no longer states that dark posters are allowed`,
+        );
+      if (prompt.includes('MAKE IT BRIGHT'))
+        failures.push(
+          `${seed}: the brightness ban is back on the fresh lane, which chooses its own colours`,
+        );
     }
 
     // 4b. THE FIXED-TEMPLATE (ठरलेले टेम्पलेट) BRANCH — the one that renders the officer's
