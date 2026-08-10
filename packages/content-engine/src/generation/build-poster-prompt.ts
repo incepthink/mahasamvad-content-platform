@@ -90,15 +90,25 @@ const CMO_CHROME: StampedChrome = {
     'full-width department footer band and social-handle strip along the bottom',
 };
 
-export type DesignMode = 'fresh' | 'adaptive' | 'onbrand';
+// Mirrors DesignModeSchema in @dgipr/schemas — a 2x2 of "who designs it" x "where the text comes
+// from". See that file for the table.
+export type DesignMode = 'fresh' | 'fresh_verbatim' | 'adaptive' | 'onbrand';
+
+// The two modes that resolve NO reference image and paint the poster from scratch. Everything
+// below that used to test `=== 'fresh'` tests this instead, or 'fresh_verbatim' would fall through
+// to the template branches and throw for want of a master URL.
+function isFreshDesign(mode: DesignMode): boolean {
+  return mode === 'fresh' || mode === 'fresh_verbatim';
+}
 
 export type BuildPosterPromptInput = Readonly<{
   copy: PosterCopy;
-  // The officer's information, VERBATIM. In social DGIPR 'onbrand' mode this is passed to the
-  // image model with the reference image; no generated poster-copy or design rules are added.
-  //
-  // On that path this string is not a "note about" the poster — it IS the poster's content, and
-  // every item of it must appear. See the onbrand branch below.
+  // The officer's information, VERBATIM — the poster's content, not a note ABOUT it. Every item of
+  // it must appear, exactly as written. Two modes carry it:
+  //   'onbrand'        — printed onto the chosen reference template (see the branch below);
+  //   'fresh_verbatim' — typeset onto a poster the model designs from scratch, no reference.
+  // Both skip generatePosterCopy entirely, which is what makes the text the officer's rather than
+  // a model's summary of it.
   information?: string | undefined;
   // How many distinct items `information` contains, counted by the reference selector
   // (select-by-information.ts). Stated to the image model so "show all of it" is a number it
@@ -281,12 +291,41 @@ const CMO_ZONES =
 
 // The prompt that edits the master into a finished poster. Throws if a non-fresh render has
 // no master URL (the workflow used to fail loudly on the same condition).
+// --- VERBATIM-CONTENT RULES ------------------------------------------------
+// Shared by the two modes that print the officer's own text ('onbrand' onto a template,
+// 'fresh_verbatim' onto a from-scratch design). They were written for the template lane and are
+// hoisted here rather than copied, because a copy drifts: each one is the fix for a specific
+// reported defect and the two lanes must not diverge on any of them.
+
+// Generation 63511b51 and its predecessors: a seven-point note coming back as a four-point poster.
+const SHOW_ALL_RULE =
+  'SHOW ALL OF THE INFORMATION. Every distinct point, instruction, measure, figure and fact in the supplied information must appear on the poster. Do not omit any of it, do not summarise it, and do not merge two points into one because the layout feels tight. If space is short, reduce the type size and tighten the spacing until it fits — never drop content, and never run content into the reserved zones described at the end of these instructions.';
+
+// The officer's requirement in one sentence: not one character or matra moved. Marathi is
+// unforgiving here — a displaced matra or a broken conjunct is a different word. Note this is an
+// INSTRUCTION, not a guarantee: both lanes have the image model painting the Devanagari, which is
+// the trade the repo's poster doctrine (typeset with Chromium) otherwise refuses.
+const REPRODUCE_EXACTLY_RULE =
+  'REPRODUCE THE MARATHI TEXT EXACTLY. Copy every word character for character from the supplied information: every Devanagari letter, every matra and vowel sign, every conjunct (जोडाक्षर), every anusvara and every numeral, exactly as written and in the same order. Do not re-spell, re-word, translate, transliterate, correct, abbreviate, or "improve" any word. Do not drop or reposition a matra. Do not break a conjunct into separate letters. Marathi words rendered with a misplaced or missing matra are wrong even if they look plausible — re-read each word against the supplied text before finishing.';
+
+// Generation 7c33fa93: the same five dated alerts rendered twice, once as a paragraph column and
+// again as dated cards, because every other pressure said "show everything, fill the space" and
+// nothing said each item appears once. Repeating the officer's words changes their text just as
+// much as rewording it does — and the trailing clause is what stops an invented tagline or recap.
+const USE_EACH_ITEM_ONCE_RULE =
+  'USE EACH ITEM EXACTLY ONCE. Every point, instruction, figure, date and fact from the supplied information appears in ONE place on the poster and nowhere else. Do not repeat an item in a second column, panel, card, sidebar, banner, caption or summary. Do not restate the same fact in a shortened, expanded or reordered form elsewhere on the poster. Do not write the same item once as a sentence and again as a list row, a dated card or a callout — that is the same item twice, not two items. Do not add a heading, label, caption, tagline, footnote, recap or any other wording that is not in the supplied information.';
+
+// Pasted text arrives with the source document's furniture attached — this keeps वृत्त. क्र. and
+// page numbers off an official poster even though they are, strictly, in the supplied text.
+const DOCUMENT_ARTIFACT_RULE =
+  'DOCUMENT-ARTIFACT FILTER: never put source-document production metadata on the poster—page numbers, वृत्त. क्र., issue/report/file/document numbers, running headers or footers, filenames, scan marks, OCR artifacts, or similar administrative labels are not poster information, even if they appear in the supplied text.';
+
 export function buildPosterPrompt(input: BuildPosterPromptInput): string {
   const { copy, copyStyle, brand, hasPhoto } = input;
   const designMode = input.designMode;
   const masterFile = (input.masterUrl ?? '').trim();
   const layoutSummary = (input.layoutSummary ?? '').trim();
-  if (designMode !== 'fresh' && brand !== 'cmo' && !masterFile) {
+  if (!isFreshDesign(designMode) && brand !== 'cmo' && !masterFile) {
     throw new Error(
       `No master URL for copy_style "${copyStyle}" — the enabled-image catalog is empty.`,
     );
@@ -330,7 +369,7 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
     // land. Smart reflow inside the usable canvas, followed by shrinking if still needed, is the
     // answer — see reserved-zone-rule.ts.
     const completeness = [
-      'SHOW ALL OF THE INFORMATION. Every distinct point, instruction, measure, figure and fact in the supplied information must appear on the poster. Do not omit any of it, do not summarise it, and do not merge two points into one because the layout feels tight. If space is short, reduce the type size and tighten the spacing until it fits — never drop content, and never run content into the reserved zones described at the end of these instructions.',
+      SHOW_ALL_RULE,
       // THE HEADLINE IS WHERE THE ROOM COMES FROM, and this had to be said here rather than
       // only in fitToReserveRule at the end. A real five-point poster came back with a
       // three-line headline taking roughly a third of the canvas and its last bullet pushed off
@@ -358,7 +397,7 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
       // note that it is an instruction, not a guarantee. The repo's poster doctrine (paint no
       // text; typeset Devanagari with Chromium) is what would make it a guarantee, and this
       // template-editing path deliberately trades that away for design fidelity.
-      'REPRODUCE THE MARATHI TEXT EXACTLY. Copy every word character for character from the supplied information: every Devanagari letter, every matra and vowel sign, every conjunct (जोडाक्षर), every anusvara and every numeral, exactly as written and in the same order. Do not re-spell, re-word, translate, transliterate, correct, abbreviate, or "improve" any word. Do not drop or reposition a matra. Do not break a conjunct into separate letters. Marathi words rendered with a misplaced or missing matra are wrong even if they look plausible — re-read each word against the supplied text before finishing.',
+      REPRODUCE_EXACTLY_RULE,
       // NO REPETITION. The other half of "use the officer's text as it is", and the one the
       // prompt was missing: generation 7c33fa93 came back with the same five dated alerts
       // written out twice — once as a left-hand paragraph column and again as right-hand dated
@@ -366,7 +405,7 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
       // the reference's density, do not leave slots empty) and NOTHING said each item appears
       // once. Repeating the officer's words is a change to their text just as much as
       // rewording it is.
-      'USE EACH ITEM EXACTLY ONCE. Every point, instruction, figure, date and fact from the supplied information appears in ONE place on the poster and nowhere else. Do not repeat an item in a second column, panel, card, sidebar, banner, caption or summary. Do not restate the same fact in a shortened, expanded or reordered form elsewhere on the poster. Do not write the same item once as a sentence and again as a list row, a dated card or a callout — that is the same item twice, not two items. Do not add a heading, label, caption, tagline, footnote, recap or any other wording that is not in the supplied information.',
+      USE_EACH_ITEM_ONCE_RULE,
       // EMPTY IS ALLOWED, and it has to be said explicitly, because it contradicts the density
       // rule two lines below. Given a reference with more slots than the officer has items, a
       // model told to match its density and never leave gaps will fill the surplus with the only
@@ -389,7 +428,7 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
       // only mean an item shown a second time. An unsupported slot is now left empty or given
       // non-informational imagery — never text.
       "REFERENCE-CONTENT FIREWALL: treat every word, numeral, date, year, URL, domain, app name, contact detail, identifier, logo, emblem, QR code, barcode, and factual claim visible in the reference image as unrelated placeholder content. Copy NONE of it. Every textual, numeric, coded, or factual element in the output must be directly supported by the supplied information. Never invent or infer a missing date, link, QR code, identifier, or fact merely to fill a reference slot. If the supplied information has no matching content for a reference element, KEEP the successful reference layout and its surrounding spacing, and leave that slot EMPTY — visually neutral in the poster's background/design treatment, or carrying relevant non-informational imagery only. Do not fill it by repeating information shown elsewhere on the poster. Do not reflow or redesign the overall composition just because a reference slot is unsupported.",
-      'DOCUMENT-ARTIFACT FILTER: never put source-document production metadata on the poster—page numbers, वृत्त. क्र., issue/report/file/document numbers, running headers or footers, filenames, scan marks, OCR artifacts, or similar administrative labels are not poster information, even if they appear in the supplied text.',
+      DOCUMENT_ARTIFACT_RULE,
       // "Do not add a logo. / Do not add a footer." used to be the whole of this rule, and it
       // was not enough: the reference is a FINISHED poster carrying its own chrome, and the
       // block above has just called it the AUTHORITATIVE VISUAL STRUCTURE, so the model copied
@@ -407,7 +446,13 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
     ].join('\n');
   }
 
-  if (designMode === 'fresh') {
+  if (isFreshDesign(designMode)) {
+    // Where the poster's words come from. 'fresh' typesets the copy generatePosterCopy wrote out
+    // of the note; 'fresh_verbatim' typesets the officer's own text and no copy call was made at
+    // all, so `copy` is empty and `change` would render a block of "HEADLINE: undefined" labels.
+    const verbatim = (input.information ?? '').trim();
+    const isVerbatim = designMode === 'fresh_verbatim' && verbatim.length > 0;
+
     // NAME THE CLIENT, STATE WHAT CANNOT MOVE, THEN GET OUT OF THE WAY (2026-08-10).
     //
     // Everything that used to sit between those two things is gone: an assigned hex palette, a
@@ -470,9 +515,34 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
       // The slot labels in `change` name each piece of text's ROLE. Left unqualified beside a
       // brief this open they read as a layout spec ("BULLET POINTS (in the body list zone)"),
       // which is half of where the row-stack habit came from.
-      'CONTENT TO TYPESET — reproduce this Marathi text EXACTLY as written, character for character: every letter, every matra and vowel sign, every conjunct (जोडाक्षर), every anusvara, every Devanagari numeral. Do not re-spell, re-word, translate, transliterate, abbreviate, correct or add to it, and do not drop a line because the composition feels tight. Render it crisply. No English body text. The labels below name what each piece of text IS — they do not tell you where to put it, how large to set it, or what shape to give it; those are your decisions.',
-      '',
-      change,
+      // TWO SHAPES OF CONTENT, ONE BRIEF. The design half above is identical either way — the
+      // officer chose "design it freely" separately from "use my words as they are", and the two
+      // questions are independent (see DesignModeSchema's table).
+      ...(isVerbatim
+        ? [
+            // No slot labels here, and that is the whole difference: there is no copy object, so
+            // nothing names a HEADLINE or a BULLET. The model reads the officer's text and decides
+            // for itself what is the headline, what is a list, what deserves emphasis — which is
+            // the freedom this lane exists for. What it may NOT do is change the words.
+            "CONTENT TO TYPESET — the officer's own Marathi text, below. This is not source material to summarise, shorten or rewrite: it IS the poster's content, word for word. Read it, decide yourself what is the headline, what belongs in a list, what deserves emphasis and what shape the whole thing takes — then set that text, unchanged. Render it crisply. No English body text.",
+            '',
+            verbatim,
+            '',
+            REPRODUCE_EXACTLY_RULE,
+            SHOW_ALL_RULE,
+            USE_EACH_ITEM_ONCE_RULE,
+            // The fresh counterpart of the fixed-template lane's empty-space rule. Same defect it
+            // guards against (surplus canvas filled by showing an item twice), different escape:
+            // with no reference density to match, a short note should simply become a more
+            // spacious poster.
+            'LEAVING SPACE EMPTY IS CORRECT. If the supplied text is short, design a genuinely spacious poster — larger type, more generous margins, a bigger focal image or graphic device. Never repeat an item, never invent extra wording, and never split one item into several to fill the canvas. Well-composed empty space is always better than a repeated or invented line.',
+            DOCUMENT_ARTIFACT_RULE,
+          ]
+        : [
+            'CONTENT TO TYPESET — reproduce this Marathi text EXACTLY as written, character for character: every letter, every matra and vowel sign, every conjunct (जोडाक्षर), every anusvara, every Devanagari numeral. Do not re-spell, re-word, translate, transliterate, abbreviate, correct or add to it, and do not drop a line because the composition feels tight. Render it crisply. No English body text. The labels below name what each piece of text IS — they do not tell you where to put it, how large to set it, or what shape to give it; those are your decisions.',
+            '',
+            change,
+          ]),
     ];
     if (sceneBrief) {
       freshLines.push(
@@ -1226,6 +1296,111 @@ if (
     if (!freshNoSubject.includes('PHOTOGRAPHS MUST LOOK LIKE REAL PHOTOGRAPHS'))
       failures.push(
         'a fresh run with no subject imagery does not carry the photo-realism rule',
+      );
+
+    // 4e. THE FULLY-AI VERBATIM ('fresh_verbatim') BRANCH — the officer's own words on a poster
+    //     the model designs from scratch. It is the fourth cell of the design x content grid and
+    //     the one that did not exist: 'verbatim' used to require a template, so on the default
+    //     no-template path the officer could not ask for their exact text at all.
+    const VERBATIM_NOTE = [
+      'मुंबई प्रादेशिक हवामान केंद्राने अंदाज जाहीर केला आहे.',
+      '१. १५ ऑगस्ट रोजी मुसळधार पावसाचा इशारा',
+      '२. नागरिकांनी सखल भागात जाणे टाळावे',
+    ].join('\n');
+    const freshVerbatim = buildPosterPrompt({
+      copy: {},
+      information: VERBATIM_NOTE,
+      copyStyle: 'info_bullets',
+      designMode: 'fresh_verbatim',
+      brand: 'dgipr',
+      masterUrl: '',
+      hasPhoto: false,
+    });
+    // (a) It must NOT throw for want of a master. The template branches do, and this mode reaches
+    //     the same guard — `isFreshDesign` is what excuses it. Building it above is that assertion.
+    //     What it must carry: the officer's text, verbatim, and the rules that keep it that way.
+    if (!freshVerbatim.includes(VERBATIM_NOTE))
+      failures.push(
+        "the fresh_verbatim prompt does not carry the officer's text verbatim",
+      );
+    for (const needle of [
+      'REPRODUCE THE MARATHI TEXT EXACTLY',
+      'SHOW ALL OF THE INFORMATION',
+      'USE EACH ITEM EXACTLY ONCE',
+      'LEAVING SPACE EMPTY IS CORRECT',
+      'DOCUMENT-ARTIFACT FILTER',
+    ]) {
+      if (!freshVerbatim.includes(needle))
+        failures.push(`the fresh_verbatim prompt lost "${needle}"`);
+    }
+    // (b) It is still the FRESH brief: the design half is identical to plain fresh, or this is
+    //     just the template lane without a template. If a poster on this mode ever comes back
+    //     looking like a coloured rectangle over rows of text, check these.
+    for (const needle of [
+      'YOU HAVE FULL CREATIVE CONTROL',
+      'Design it from scratch',
+      'coloured rectangle above a list of rows',
+      'saffron-orange-and-cream',
+      'do not set the whole poster in one font',
+      'PHOTOGRAPHS MUST LOOK LIKE REAL PHOTOGRAPHS',
+      'Nothing here restricts you to text on a plain ground',
+    ]) {
+      if (!freshVerbatim.includes(needle))
+        failures.push(
+          `the fresh_verbatim prompt is not the fresh brief any more — lost "${needle}"`,
+        );
+    }
+    // (c) NO REFERENCE ANYWHERE. This mode resolves no master (isFresh in the runner), so nothing
+    //     may talk about one — a reference clause with no reference attached is an instruction the
+    //     model can only satisfy by inventing something.
+    for (const retired of [
+      'reference image',
+      'PRIMARY STRUCTURAL GUIDE',
+      'REFERENCE-CONTENT FIREWALL',
+      'STRUCTURE INSPIRATION',
+    ]) {
+      if (freshVerbatim.includes(retired))
+        failures.push(
+          `the fresh_verbatim prompt talks about a reference it does not have ("${retired}")`,
+        );
+    }
+    // (d) NO SLOT LABELS. There was no copy call, so `copy` is empty and buildChange would render
+    //     "HEADLINE (largest text block): undefined". Shipping that would put the word undefined
+    //     in front of an image model.
+    if (freshVerbatim.includes('undefined'))
+      failures.push(
+        'the fresh_verbatim prompt rendered the empty copy object — buildChange leaked in',
+      );
+    if (freshVerbatim.includes('BULLET POINTS'))
+      failures.push(
+        'the fresh_verbatim prompt carries copy slot labels, which pre-decide the layout it hands over',
+      );
+    // (e) The chrome/zone blocks are the fresh lane's, unchanged, and still last.
+    if (!freshVerbatim.trimEnd().endsWith('cross into either reserved zone.'))
+      failures.push('the fresh_verbatim prompt does not end on the fit rule');
+    if (!freshVerbatim.includes('survives BESIDE the real branding'))
+      failures.push(
+        'the fresh_verbatim prompt lost the painted-badge consequence',
+      );
+    // (f) PLAIN FRESH MUST BE BYTE-FOR-BYTE UNCHANGED. The verbatim path is additive; if adding it
+    //     moved a single character of the existing brief, that is a regression on the default lane.
+    if (
+      freshPrompt !==
+      buildPosterPrompt({
+        copy: COPY,
+        // Supplied and must be IGNORED: 'fresh' takes its words from the copy object. Only
+        // 'fresh_verbatim' reads this field, and a mode that silently switched on the presence of
+        // an argument would be impossible to reason about from the runner.
+        information: VERBATIM_NOTE,
+        copyStyle: 'info_bullets',
+        designMode: 'fresh',
+        brand: 'dgipr',
+        masterUrl: '',
+        hasPhoto: true,
+      })
+    )
+      failures.push(
+        'a plain fresh prompt changed when `information` was supplied — the verbatim path is not additive',
       );
 
     // 5. The clear-space (blue box) feedback path. The properties that matter are that the

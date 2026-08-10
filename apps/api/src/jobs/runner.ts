@@ -1626,6 +1626,21 @@ function freshWorkingTitle(
   return trimmed === '' ? null : trimmed;
 }
 
+// The same job for a VERBATIM run, which has no copy object to take a headline from: the officer's
+// own opening line is the best answer available and costs nothing. Without this a fresh_verbatim
+// run would go into history untitled — the case freshWorkingTitle above exists to prevent.
+const VERBATIM_TITLE_MAX_CHARS = 120;
+function verbatimWorkingTitle(note: string): string | null {
+  const first = note
+    .split('\n')
+    .map((line) => line.trim())
+    .find((line) => line.length > 0);
+  if (!first) return null;
+  return first.length > VERBATIM_TITLE_MAX_CHARS
+    ? `${first.slice(0, VERBATIM_TITLE_MAX_CHARS).trimEnd()}…`
+    : first;
+}
+
 // Render ONE social poster and store it at posterPath(id, version), updating referenceTitle +
 // posterPath. Shared by the initial job (version 1) and the regenerate action (next version).
 //
@@ -1649,8 +1664,16 @@ async function renderAndStoreSocialPoster(
   // "different colours" redo so the new version cannot land back in the family being rejected.
   avoidFamilies: readonly PaletteFamily[] = [],
 ): Promise<{ postType: string; title: string | null }> {
-  // A fully-AI poster: designed from scratch, with NO reference of any kind.
-  const isFresh = brand !== 'cmo' && designMode === 'fresh';
+  // A fully-AI poster: designed from scratch, with NO reference of any kind. TWO modes land here,
+  // differing only in where the poster's words come from — 'fresh' has generatePosterCopy write
+  // them out of the note, 'fresh_verbatim' typesets the officer's own text unchanged. Design and
+  // content are independent questions on the create form and are independent here too.
+  const isFresh =
+    brand !== 'cmo' &&
+    (designMode === 'fresh' || designMode === 'fresh_verbatim');
+  // The officer's text IS the poster's content: no copy call, and the raw note goes to the image
+  // model. Same contract as the fixed-template lane below, minus the template.
+  const isFreshVerbatim = isFresh && designMode === 'fresh_verbatim';
 
   // 1. Resolve the poster type + the master — FOR THE TEMPLATE MODES ONLY.
   //
@@ -1721,8 +1744,13 @@ async function renderAndStoreSocialPoster(
     isSocialCategory(row.category) &&
     brand === 'dgipr' &&
     designMode === 'onbrand';
+  // 'fresh_verbatim' skips the copy call for the SAME reason, one lane over: generated structured
+  // copy would be hidden editorial work over text the officer wrote to be printed, and
+  // generatePosterCopy condenses to 3-6 points, which is exactly the content loss this mode exists
+  // to avoid. It also saves the call outright.
+  const usesVerbatimText = isSimpleTemplateEdit || isFreshVerbatim;
   let copyResult: Awaited<ReturnType<typeof generatePosterCopy>> | null = null;
-  if (!isSimpleTemplateEdit) {
+  if (!usesVerbatimText) {
     // 2. Scheme-name lock source: verified glossary scheme/org names present in the note.
     //    These must survive in the copy in full (lock-scheme-names). Free — a substring
     //    match over the small verified set, no model call.
@@ -1768,7 +1796,15 @@ async function renderAndStoreSocialPoster(
   const assignedLayout = isFresh
     ? pickLayout(
         seed,
-        { hasPhoto: copyResult!.hasPhoto, copyStyle: copyResult!.copyStyle },
+        // A verbatim run made no copy call, so there is nothing to read a shape off. The defaults
+        // are the un-analysed-master defaults used everywhere else in this file: photo allowed,
+        // generic registry. Neither reaches the image model any more (the assignment is recorded
+        // for poster_style and nothing else) — but pickLayout still has to be given an answer, and
+        // `copyResult!` here was a live null-dereference the moment a second copy-less mode existed.
+        {
+          hasPhoto: copyResult?.hasPhoto ?? true,
+          copyStyle: copyResult?.copyStyle ?? FRESH_COPY_STYLE,
+        },
         { ids: history?.layoutIds, coverages: history?.coverages },
       )
     : undefined;
@@ -1792,7 +1828,9 @@ async function renderAndStoreSocialPoster(
   // 4. Image prompt (pure string assembly, no model call).
   const prompt = buildPosterPrompt({
     copy: copyResult?.copy ?? {},
-    information: isSimpleTemplateEdit ? row.note : undefined,
+    // The officer's text, on both verbatim lanes — printed onto the chosen template
+    // (isSimpleTemplateEdit) or typeset onto a from-scratch design (isFreshVerbatim).
+    information: usesVerbatimText ? row.note : undefined,
     // Only reaches the fixed-template branch, which is the one that must show every item —
     // each of them exactly once. The shortfall is deliberately NOT passed any more: it used to
     // tell the image model to repeat the reference's rows, and "repeat" is the wrong word to
@@ -1878,7 +1916,11 @@ async function renderAndStoreSocialPoster(
   // caption failure never loses the paid render. A fresh run has no reference ranker to name it,
   // so the poster's own headline stands in — a run must not go into history untitled just
   // because nothing was selected for it.
-  const workingTitle = resolved?.title ?? freshWorkingTitle(copyResult?.copy);
+  const workingTitle =
+    resolved?.title ??
+    (isFreshVerbatim
+      ? verbatimWorkingTitle(row.note)
+      : freshWorkingTitle(copyResult?.copy));
   await updateGeneration(client, id, {
     referenceTitle: workingTitle,
     posterPath: posterObjectPath,
