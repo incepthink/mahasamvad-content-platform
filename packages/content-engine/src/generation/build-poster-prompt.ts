@@ -470,6 +470,24 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
         'No specific subject imagery is supplied. Carry the poster however you judge best — typography and colour alone, an abstract or geometric treatment, a symbolic graphic, a motif, or original illustration suited to the message. Nothing here restricts you to text on a plain ground.',
       );
     }
+    // PHOTOGRAPHS MUST BE PHOTOGRAPHS. Emitted unconditionally, because the choice of medium is
+    // the model's now and neither branch above knows which way it went.
+    //
+    // SCOPED TO PHOTOGRAPHY ON PURPOSE. A blanket "make it realistic" would cancel the
+    // illustration freedom the block above just opened — line art, flat-vector scenes and
+    // motifs are legitimate outcomes and several of the department's best posters are exactly
+    // that. This rule says only that if the model reaches for a PHOTOGRAPH, it must not deliver
+    // the 3D-render/CGI/AI-composite look that image models drift to when nothing forbids it:
+    // waxy skin, plastic surfaces, impossible lighting, invented faces with too-even features.
+    //
+    // The vocabulary is deliberately the house wording already used by
+    // poster-renderer/src/build-scene-prompt.ts ("real, natural daylight; authentic skin, fabric
+    // and material textures; realistic depth of field"), so a photograph reads the same whether
+    // it was painted into a fresh poster or generated separately as a scene.
+    freshLines.push(
+      '',
+      'PHOTOGRAPHS MUST LOOK LIKE REAL PHOTOGRAPHS. This rule applies only where you actually choose to use photography — illustration, line art, flat-vector artwork, symbolic graphics, motifs and texture are all still fully open to you, and this does not push you toward photography or away from those. But any photographic element on this poster must read as a genuine photograph taken with a camera: real people with natural faces, skin and expressions, authentic skin, hair, fabric and material textures, real natural or ambient light with believable shadows and reflections, realistic depth of field, and true-to-life colour. Do NOT produce a 3D render, CGI, a video-game or animated-film look, a plastic or waxy digital-human look, an airbrushed stock-photo composite, an obviously AI-generated face, or a photo-illustration hybrid that is half painting and half photograph. People, clothing, vehicles, buildings, streets and interiors must be recognisably Maharashtra, India. If a convincing photograph is not achievable for this subject, use illustration or a graphic treatment instead — a clearly stylised illustration is a good poster, but a photograph that looks fake is not.',
+    );
     // The chrome blocks, LAST and in the fixed-template path's order — that path is the one
     // whose posters come back with the branding sitting correctly, and these three blocks are
     // the whole of the difference. Nothing about the STAMP differs between the two modes:
@@ -802,6 +820,19 @@ if (
         failures.push(
           `${seed}: the illustration ban is back — imagery is a binary again`,
         );
+      // 8. PHOTOGRAPHS MUST BE PHOTOGRAPHS — and the rule must stay SCOPED. An unscoped
+      //    "make it realistic" would quietly undo assertion 7 above by ruling out the
+      //    illustration the brief has just offered, so the scoping clause is asserted too.
+      for (const needle of [
+        'PHOTOGRAPHS MUST LOOK LIKE REAL PHOTOGRAPHS',
+        'authentic skin, hair, fabric and material textures',
+        'realistic depth of field',
+        'This rule applies only where you actually choose to use photography',
+        'a clearly stylised illustration is a good poster',
+      ]) {
+        if (!prompt.includes(needle))
+          failures.push(`${seed}: the photo-realism rule lost "${needle}"`);
+      }
     }
 
     // 4b. THE FIXED-TEMPLATE (ठरलेले टेम्पलेट) BRANCH — the one that renders the officer's
@@ -1141,6 +1172,12 @@ if (
     if (/TEXT-ONLY/.test(freshNoSubject))
       failures.push(
         'the fresh no-imagery branch restored the TEXT-ONLY lock, which banned illustration',
+      );
+    // The photo-realism rule is emitted unconditionally: with no scene_brief the model may still
+    // reach for photography, and neither imagery branch knows which way it went.
+    if (!freshNoSubject.includes('PHOTOGRAPHS MUST LOOK LIKE REAL PHOTOGRAPHS'))
+      failures.push(
+        'a fresh run with no subject imagery does not carry the photo-realism rule',
       );
 
     // 5. The clear-space (blue box) feedback path. The properties that matter are that the
