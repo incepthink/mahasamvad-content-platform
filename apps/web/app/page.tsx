@@ -5,19 +5,28 @@
 // article is written here — the pasted text is the sole source and is used as-is
 // (providedArticle) for the poster path.
 //
-// On the क्रिएटिव्ह lane, THE TEMPLATE PICK IS THE DESIGN DECISION (2026-08-07). There is no
-// separate design-mode control: leave the template picker empty and the run is designMode
-// 'fresh' — the API resolves no reference at all and the image model designs the whole poster.
-// Pick a template and the poster follows it, and only THEN is a second question asked (as tabs
-// above the text box) about how to fill it: 'onbrand' prints the pasted text verbatim
-// (isSimpleTemplateEdit in the runner), 'adaptive' has generatePosterCopy write the headline +
-// points out of it first.
+// On the क्रिएटिव्ह lane the officer answers TWO INDEPENDENT questions, and `designMode` is
+// DERIVED from the pair rather than stored — which is what makes it impossible for the mode and
+// the pin to disagree:
 //
-// `designMode` is therefore DERIVED from those two answers rather than stored, which is what
-// makes it impossible for the mode and the pin to disagree. The old default was 'onbrand' with an
-// auto-selected template, so every poster took the shape of whatever the library happened to
-// return — twelve cramped numbered rows out of a 5,600-character note (generation 63511b51).
-// बॅनर and यूट्यूब ignore designMode entirely.
+//   DESIGN  — the template picker. Empty (the default) means the API resolves no reference at all
+//             and the image model designs the whole poster; pick one and the poster follows it.
+//   CONTENT — the tabs above the text box. 'ai' (the default) has generatePosterCopy read the box
+//             as source material and write the poster's words out of it; 'verbatim' prints exactly
+//             what is in the box, unchanged.
+//
+//                   | content 'ai' | content 'verbatim'
+//   ----------------+--------------+--------------------
+//   no template     | 'fresh'      | 'fresh_verbatim'
+//   a template      | 'adaptive'   | 'onbrand'
+//
+// The content tabs used to be shown only once a template was picked, because 'verbatim' had no
+// from-scratch counterpart — so on the default (no-template) path the officer could not ask for
+// their exact text at all. 'fresh_verbatim' is that counterpart.
+//
+// The old design default was 'onbrand' over an auto-selected template, so every poster took the
+// shape of whatever the library happened to return — twelve cramped numbered rows out of a
+// 5,600-character note (generation 63511b51). बॅनर and यूट्यूब ignore designMode entirely.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ComponentType } from 'react';
@@ -150,16 +159,17 @@ export default function NewGenerationPage() {
   // The chosen format IS the category — one flat picker, no derivation. ट्विटर पोस्ट is the
   // default because it is by far the most-used format on this page.
   const [category, setCategory] = useState<SelectableFormat>('twitter');
-  // क्रिएटिव्ह only: how to FILL a chosen template. 'onbrand' prints the pasted text verbatim
-  // onto it; 'adaptive' treats that text as an article and has generatePosterCopy write the
-  // headline + points out of it first. It is NOT the whole design question — see designMode
-  // below — and it is only ever asked once a template exists to fill.
+  // क्रिएटिव्ह only: WHERE THE POSTER'S WORDS COME FROM. Independent of the template question
+  // below — 'ai' has generatePosterCopy read the box as source material and write the poster's
+  // headline + points out of it; 'verbatim' prints exactly what is in the box, unchanged.
+  //
+  // 'ai' is the default: most officers paste an article or a set of notes and want a poster made
+  // out of it. 'verbatim' is for the case where the box already holds the finished poster text,
+  // word for word, and any rewrite would be a defect.
   //
   // Held across a format switch on purpose: it is a preference about this officer's own
   // material, and the value is simply not sent on a lane that ignores it.
-  const [templateFill, setTemplateFill] = useState<'onbrand' | 'adaptive'>(
-    'onbrand',
-  );
+  const [contentSource, setContentSource] = useState<'ai' | 'verbatim'>('ai');
   // A social post is poster-only unless asked otherwise: the caption is a separate
   // paid model call, and plenty of posts are published as an image. It can also be added
   // afterwards from the detail page, so off is a cheap default rather than a lossy one.
@@ -225,25 +235,39 @@ export default function NewGenerationPage() {
   // template is followed. There is no separate "design mode" control any more.
   const templatePicked = isSocial && reference !== null;
 
-  // What actually goes on the wire. DERIVED, never stored — the officer answers "which
-  // template?" and, if they picked one, "how should it be filled?", and those two answers
-  // determine the mode completely:
+  // What actually goes on the wire. DERIVED, never stored — the officer answers two INDEPENDENT
+  // questions and the mode is the cell they land on:
   //
-  //   no template  -> 'fresh'    : the API resolves no reference at all and the image model
-  //                                designs the whole poster. THE DEFAULT, because the previous
-  //                                default ('onbrand') gave every poster the shape of whatever
-  //                                template was auto-selected — twelve cramped numbered rows out
-  //                                of a 5,600-character note (generation 63511b51).
-  //   template     -> templateFill ('onbrand' verbatim | 'adaptive' AI-written copy).
+  //                   | contentSource 'ai'  | contentSource 'verbatim'
+  //   ----------------+---------------------+--------------------------
+  //   no template     | 'fresh'             | 'fresh_verbatim'
+  //   a template      | 'adaptive'          | 'onbrand'
   //
-  // Keeping it derived is what stops the two controls from ever disagreeing — there is no state
-  // that can say "fresh" while a template sits pinned beside it.
-  const designMode: DesignMode = templatePicked ? templateFill : 'fresh';
+  // No template is the DEFAULT design (the API resolves no reference at all and the image model
+  // designs the whole poster), because the previous default ('onbrand' over an auto-selected
+  // template) gave every poster the shape of whatever the library happened to return — twelve
+  // cramped numbered rows out of a 5,600-character note (generation 63511b51). 'ai' is the default
+  // content answer.
+  //
+  // Keeping it derived is what stops the controls from ever disagreeing — there is no state that
+  // can say "fresh" while a template sits pinned beside it.
+  const verbatimText = contentSource === 'verbatim';
+  const designMode: DesignMode = templatePicked
+    ? verbatimText
+      ? 'onbrand'
+      : 'adaptive'
+    : verbatimText
+      ? 'fresh_verbatim'
+      : 'fresh';
 
-  // The क्रिएटिव्ह tab that changes what the text box holds: a finished article the poster's
-  // copy is written OUT of, rather than the poster's own words. Only reachable with a template,
-  // since that tab is only asked once one is picked.
-  const fromArticle = designMode === 'adaptive';
+  // Does the box hold SOURCE MATERIAL the poster's copy is written out of, rather than the
+  // poster's own words? That is the 'ai' answer, on either design lane — and it changes what the
+  // box's label, hint and placeholder promise.
+  //
+  // SCOPED TO isSocial deliberately. contentSource is a क्रिएटिव्ह control and defaults to 'ai',
+  // so an unscoped test would silently re-label the लेख पोस्टर and यूट्यूब थंबनेल boxes, whose
+  // wording is not this tab's to change. Those two lanes never send a designMode at all.
+  const fromArticle = isSocial && !verbatimText;
 
   // Which library the template picker shows: twitter masters for the two social formats,
   // article masters for the लेख पोस्टर, youtube masters for the थंबनेल. विभाग is gone from this
@@ -403,34 +427,34 @@ export default function NewGenerationPage() {
       </section>
 
       <section className="card">
-        {/* क्रिएटिव्ह only, and only once a TEMPLATE has been picked. These tabs ask how to fill
-            that template, so with none picked there is nothing for them to decide — the run is
-            fully AI. Showing them there would be a control that changes nothing, and worse, the
-            जसाच्या तसा tab would promise verbatim text that a from-scratch render does not give.
-            बॅनर and यूट्यूब ignore designMode entirely. */}
-        {isSocial && templatePicked ? (
+        {/* क्रिएटिव्ह only, and now shown whether or not a template has been picked — this asks
+            where the poster's WORDS come from, which is a separate question from who designs it.
+            It used to be gated on a template because 'verbatim' had no from-scratch counterpart;
+            'fresh_verbatim' is that counterpart, so the officer can have their exact text on a
+            fully-AI poster. बॅनर and यूट्यूब ignore designMode entirely. */}
+        {isSocial ? (
           <>
             <p className="field-label">{STR.posterSourceLabel}</p>
             <div className="segmented" style={{ marginTop: 10 }}>
               <button
                 type="button"
                 className="output-option"
-                aria-pressed={templateFill === 'onbrand'}
+                aria-pressed={contentSource === 'ai'}
                 disabled={submitting}
-                onClick={() => setTemplateFill('onbrand')}
+                onClick={() => setContentSource('ai')}
               >
-                <span className="name">{STR.posterSourceVerbatim}</span>
-                <span className="desc">{STR.posterSourceVerbatimDesc}</span>
+                <span className="name">{STR.posterSourceArticle}</span>
+                <span className="desc">{STR.posterSourceArticleDesc}</span>
               </button>
               <button
                 type="button"
                 className="output-option"
-                aria-pressed={templateFill === 'adaptive'}
+                aria-pressed={contentSource === 'verbatim'}
                 disabled={submitting}
-                onClick={() => setTemplateFill('adaptive')}
+                onClick={() => setContentSource('verbatim')}
               >
-                <span className="name">{STR.posterSourceArticle}</span>
-                <span className="desc">{STR.posterSourceArticleDesc}</span>
+                <span className="name">{STR.posterSourceVerbatim}</span>
+                <span className="desc">{STR.posterSourceVerbatimDesc}</span>
               </button>
             </div>
           </>

@@ -15,7 +15,11 @@ export type Category =
   | 'twitter'
   | 'facebook'
   | 'youtube';
-export type DesignMode = 'onbrand' | 'adaptive' | 'fresh';
+// Mirrors DesignModeSchema in @dgipr/schemas — a 2x2 of who DESIGNS the poster (a template, or
+// the image model from scratch) x where its TEXT comes from (generatePosterCopy, or the officer's
+// note verbatim). 'fresh_verbatim' is the from-scratch/verbatim cell. generations.design_mode is
+// a plain text column with no CHECK constraint (0006_social_post.sql), so it needed no migration.
+export type DesignMode = 'onbrand' | 'adaptive' | 'fresh' | 'fresh_verbatim';
 // Template brand family (migration 0024); mirrors TemplateBrand in reference-types.ts.
 export type TemplateBrand = 'dgipr' | 'cmo';
 export type GenerationStatus = 'queued' | 'running' | 'completed' | 'failed';

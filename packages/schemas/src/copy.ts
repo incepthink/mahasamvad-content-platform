@@ -18,7 +18,26 @@ export const PostTypeSchema = z.enum([
 export type PostType = z.infer<typeof PostTypeSchema>;
 
 // How much freedom the image model gets vs. the master template. User-selected.
-export const DesignModeSchema = z.enum(['fresh', 'adaptive', 'onbrand']);
+//
+// The four values are a 2x2 of two INDEPENDENT questions — how the poster is DESIGNED, and where
+// its TEXT comes from — which is exactly how the create form asks them (a template picker, then a
+// content tab):
+//
+//                  | AI writes the content | the officer's text, verbatim
+//   ---------------+-----------------------+-----------------------------
+//   no template    | 'fresh'               | 'fresh_verbatim'
+//   a template     | 'adaptive'            | 'onbrand'
+//
+// 'fresh_verbatim' is the fully-AI design carrying the officer's own words untouched: no reference
+// image, no generatePosterCopy call, and the raw note typeset exactly as written. It stores fine on
+// an older database — generations.design_mode is a plain text column with no CHECK constraint
+// (0006_social_post.sql) — so this needed no migration.
+export const DesignModeSchema = z.enum([
+  'fresh',
+  'fresh_verbatim',
+  'adaptive',
+  'onbrand',
+]);
 export type DesignMode = z.infer<typeof DesignModeSchema>;
 
 const BulletSchema = z.object({

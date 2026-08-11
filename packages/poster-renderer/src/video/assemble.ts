@@ -3,11 +3,32 @@
 // per-scene Marathi key points, and stitch the clips into ONE browser-safe
 // silent MP4.
 //
-// Always re-encode, never `-c copy`: per-scene re-animation legitimately mixes
-// clips from different render runs (and potentially different tier models after
-// a retry), so stream-parameter equality can't be assumed. Re-encoding ≤60s of
-// 720p costs seconds of CPU and guarantees a uniform yuv420p + faststart MP4
-// that Safari and Chrome both play.
+// Always re-encode the source clips, never pass them through with `-c copy`:
+// per-scene re-animation legitimately mixes clips from different render runs
+// (and potentially different tier models after a retry), so stream-parameter
+// equality can't be assumed. Re-encoding ≤60s of 720p costs seconds of CPU and
+// guarantees a uniform yuv420p + faststart MP4 that Safari and Chrome both play.
+//
+// That re-encode happens ONE CLIP AT A TIME, and the normalized segments are
+// then joined by the concat DEMUXER with `-c copy`. It used to be a single
+// ffmpeg run whose filter graph took every clip as a simultaneous input and
+// joined them with the concat FILTER — which is what killed a real production
+// stitch with SIGKILL and no stderr. The ffmpeg CLI reads packets from whichever
+// input has the earliest DTS, and every clip starts at 0, so it decodes all of
+// them at once; the concat filter meanwhile consumes only the segment it is
+// currently on, and the frames of every LATER segment pile up decoded in the
+// filter's input queue. Eight 15s 720p clips is ~4 GB of yuv420p frames (~9 GB
+// at 1080p), plus a full-frame RGBA still per looped caption PNG. Peak memory
+// grew with the video's length, on a small instance shared with n8n and
+// Chromium.
+//
+// Per-segment encoding bounds that at one clip: ffmpeg holds a few frames of one
+// input, whatever its length, and the demuxer then opens the finished segments
+// strictly in sequence. The demuxer is only safe here BECAUSE of the pass above
+// it — every segment is written by the same encoder at the same resolution,
+// frame rate, pixel format, SAR and profile, so their stream parameters are
+// identical by construction. Concatenating provider clips directly (mixed sizes,
+// provider timestamps) is the thing that is not safe, and is not what this does.
 
 import { execFile } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -236,6 +257,136 @@ async function firstClipDimensions(
     : { width: 1280, height: 720 };
 }
 
+// Every segment is encoded with EXACTLY these settings, which is what makes the
+// concat demuxer's `-c copy` join safe: same encoder, preset, profile, pixel
+// format, frame rate and timescale, on top of the common canvas the filter
+// chain forces. x264 derives its level from resolution + frame rate + DPB
+// (never from content), so identical settings on an identical canvas produce
+// identical stream parameters. Changing anything here means changing it for the
+// outro segment too — they are joined without re-encoding.
+const SEGMENT_ENCODE_ARGS: readonly string[] = [
+  '-c:v',
+  'libx264',
+  '-preset',
+  'veryfast',
+  '-crf',
+  '20',
+  '-profile:v',
+  'high',
+  '-pix_fmt',
+  'yuv420p',
+  '-r',
+  '25',
+  '-video_track_timescale',
+  '12800',
+  '-an',
+];
+
+// The filter chain that puts any clip on the common canvas: fixed frame rate,
+// fitted and padded to the output size, square pixels, and timestamps rebuilt
+// from the frame number so provider timestamps cannot survive into the join.
+function normalizeChain(
+  input: number,
+  width: number,
+  height: number,
+  padColor: 'black' | 'white',
+  label: string,
+): string {
+  return (
+    `[${input}:v:0]fps=25,scale=${width}:${height}:` +
+    `force_original_aspect_ratio=decrease:force_divisible_by=2,` +
+    `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=${padColor},` +
+    `setsar=1,format=yuv420p,setpts=N/(25*TB)[${label}]`
+  );
+}
+
+// A still image laid over one segment, in that segment's OWN time base.
+type SegmentStill = Readonly<{
+  path: string;
+  // Omitted means "the whole segment" — the video logo, which has no window.
+  startSeconds?: number;
+  endSeconds?: number;
+  x: number;
+  y: number;
+}>;
+
+// Encode ONE segment of the final video: normalize it onto the common canvas
+// and burn in whatever stills belong to it. This is the memory boundary — a
+// single clip input plus a handful of finite still inputs, whatever the length
+// of the video as a whole.
+async function encodeSegment(
+  inputPath: string,
+  outPath: string,
+  width: number,
+  height: number,
+  padColor: 'black' | 'white',
+  stills: readonly SegmentStill[],
+  expectedSeconds: number,
+  measuredSeconds: number,
+  label: string,
+): Promise<void> {
+  const inputArgs: string[] = ['-i', inputPath];
+  const chains: string[] = [normalizeChain(0, width, height, padColor, 'base')];
+  let stage = 'base';
+
+  // Finite (`-t`), so a looped still can never become the endless input it was
+  // in the old single-pass graph — but always longer than the footage, so that
+  // `shortest=1` ends the segment on the FOOTAGE and never on a still. It is
+  // measured, not declared: a clip that decoded longer than its billed window
+  // must be cut by nothing here, and cutting it to the DECLARED length would do
+  // it silently, since the duration gate below only checks the minimum.
+  const stillSeconds = Math.max(expectedSeconds, measuredSeconds) + 2;
+
+  for (const [index, still] of stills.entries()) {
+    inputArgs.push(
+      '-framerate',
+      '25',
+      '-loop',
+      '1',
+      '-t',
+      stillSeconds.toFixed(3),
+      '-i',
+      still.path,
+    );
+    const input = index + 1;
+    const next = `s${index}`;
+    const window =
+      still.startSeconds === undefined || still.endSeconds === undefined
+        ? ''
+        : `:enable='between(t,${still.startSeconds.toFixed(3)},` +
+          `${still.endSeconds.toFixed(3)})'`;
+    chains.push(
+      `[${stage}][${input}:v]overlay=${still.x}:${still.y}:shortest=1` +
+        `${window}[${next}]`,
+    );
+    stage = next;
+  }
+
+  await runFfmpeg(
+    [
+      '-hide_banner',
+      '-loglevel',
+      'error',
+      ...inputArgs,
+      '-filter_complex',
+      chains.join(';'),
+      '-map',
+      `[${stage}]`,
+      ...SEGMENT_ENCODE_ARGS,
+      outPath,
+    ],
+    label,
+    // Generous: this runs on a small shared instance beside n8n and Chromium,
+    // and an over-eager timeout throws away nothing but this free local step
+    // while costing the officer a whole paid run's deliverable.
+    VIDEO_STITCH_TIMEOUT_MS,
+  );
+
+  // Per segment rather than only on the finished file, so a defect names the
+  // scene it came from instead of surfacing as a short total.
+  await assertStreamDuration(outPath, expectedSeconds, label, 'video');
+}
+
 // Validate an in-memory final MP4 before its versioned storage upload. Exported
 // because narration muxing happens after the silent assembly.
 export async function validateVideoOutput(
@@ -384,9 +535,6 @@ export async function assembleSilentVideo(
       clipPaths.push(clipPath);
     }
 
-    // Each clip is an independent input; caption PNGs follow them. Captions are
-    // rendered at a high-quality reference size and scaled once to the common
-    // output canvas before being enabled for their scene window.
     const expectedDurations =
       options.expectedClipDurations ??
       (await Promise.all(
@@ -395,13 +543,18 @@ export async function assembleSilentVideo(
           return result.durationSeconds;
         }),
       ));
+    // The gate every clip must pass, and — since it decodes the clip to report
+    // it — also where each clip's REAL length comes from, which is what the
+    // caption stills are sized against below.
+    const measuredDurations: number[] = [];
     for (const [index, path] of clipPaths.entries()) {
-      await assertStreamDuration(
+      const validation = await assertStreamDuration(
         path,
         expectedDurations[index]!,
         `Scene ${index + 1} clip`,
         'video',
       );
+      measuredDurations.push(validation.durationSeconds);
     }
 
     const { width, height } = await firstClipDimensions(
@@ -415,65 +568,13 @@ export async function assembleSilentVideo(
       'Video outro asset',
       'video',
     );
-    const videoInputPaths = [...clipPaths, VIDEO_OUTRO_PATH];
-    const inputArgs = videoInputPaths.flatMap((path) => ['-i', path]);
-    const chains: string[] = [];
-
-    // Normalize canvas, SAR, FPS, and timestamps before using the concat
-    // filter. Provider timestamps and mixed 720p/1080p retries therefore
-    // cannot collapse an otherwise successful encode to its first frame.
-    for (const index of clipPaths.keys()) {
-      chains.push(
-        `[${index}:v:0]fps=25,scale=${width}:${height}:` +
-          `force_original_aspect_ratio=decrease:force_divisible_by=2,` +
-          `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,` +
-          `setsar=1,format=yuv420p,setpts=N/(25*TB)[clip${index}]`,
-      );
-    }
-    const outroInput = clipPaths.length;
-    chains.push(
-      `[${outroInput}:v:0]fps=25,scale=${width}:${height}:` +
-        `force_original_aspect_ratio=decrease:force_divisible_by=2,` +
-        `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=white,` +
-        `setsar=1,format=yuv420p,setpts=N/(25*TB)[outro]`,
-    );
-    chains.push(
-      `${clipPaths.map((_, index) => `[clip${index}]`).join('')}[outro]` +
-        `concat=n=${videoInputPaths.length}:v=1:a=0[joined]`,
-    );
-
-    let stage = 'joined';
-    for (const [index, overlay] of overlays.entries()) {
-      const pngPath = join(dir, `overlay-${index}.png`);
-      // Resized ONCE here rather than by an ffmpeg `scale` filter, which would
-      // rescale the looped still on every frame of the whole video — and hold a
-      // full-size RGBA frame per overlay while doing it. Resizing must still
-      // happen: caption-overlay.ts typesets at a fixed 1080p reference, so on
-      // 720p footage an unscaled panel lands below the bottom edge and the key
-      // point vanishes with no ffmpeg error at all.
-      await writeFile(
-        pngPath,
-        await sharp(overlay.png)
-          .resize(width, height, { fit: 'fill' })
-          .png()
-          .toBuffer(),
-      );
-      inputArgs.push('-loop', '1', '-i', pngPath);
-      const input = videoInputPaths.length + index;
-      const next = `v${index}`;
-      chains.push(
-        `[${stage}][${input}:v]overlay=0:0:shortest=1:enable='between(t,` +
-          `${overlay.startSeconds.toFixed(3)},${overlay.endSeconds.toFixed(3)})'` +
-          `[${next}]`,
-      );
-      stage = next;
-    }
-
-    // Re-stamp the lockup on the final stitch as well. New clips already carry
-    // it for their individual review players; this makes the final logo crisp
-    // after concatenation and brands free restitches of older stored clips.
-    // It ends exactly where the generated scenes end because the supplied
-    // outro is already a full-frame DGIPR brand/contact slate.
+    // Re-stamp the lockup on every generated scene. New clips already carry it
+    // for their individual review players; this makes the final logo crisp
+    // after concatenation and brands free restitches of older stored clips. It
+    // ends exactly where the generated scenes end because the supplied outro is
+    // already a full-frame DGIPR brand/contact slate — which is now expressed by
+    // simply not stamping the outro segment, rather than by a time window over a
+    // joined timeline.
     const expectedSceneTotal = expectedDurations.reduce(
       (sum, seconds) => sum + seconds,
       0,
@@ -483,18 +584,97 @@ export async function assembleSilentVideo(
     );
     const logoPath = join(dir, 'video-logo.png');
     await writeFile(logoPath, lockup.data);
-    inputArgs.push('-loop', '1', '-i', logoPath);
-    const logoInput = videoInputPaths.length + overlays.length;
     const logoMargin = Math.max(
       4,
       Math.round(width * VIDEO_LOCKUP_MARGIN_RATIO),
     );
-    chains.push(
-      `[${stage}][${logoInput}:v:0]overlay=` +
-        `${width - lockup.width - logoMargin}:${logoMargin}:shortest=1:` +
-        `enable='between(t,0,${expectedSceneTotal.toFixed(3)})'[branded]`,
+    const logoStill: SegmentStill = {
+      path: logoPath,
+      x: width - lockup.width - logoMargin,
+      y: logoMargin,
+    };
+
+    // Resized ONCE here rather than by an ffmpeg `scale` filter, which would
+    // rescale the looped still on every frame it is laid over. Resizing must
+    // still happen: caption-overlay.ts typesets at a fixed 1080p reference, so
+    // on 720p footage an unscaled panel lands below the bottom edge and the key
+    // point vanishes with no ffmpeg error at all.
+    const overlayPaths: string[] = [];
+    for (const [index, overlay] of overlays.entries()) {
+      const pngPath = join(dir, `overlay-${index}.png`);
+      await writeFile(
+        pngPath,
+        await sharp(overlay.png)
+          .resize(width, height, { fit: 'fill' })
+          .png()
+          .toBuffer(),
+      );
+      overlayPaths.push(pngPath);
+    }
+
+    // Each scene becomes its own normalized, branded, captioned segment. The
+    // caption windows arrive on the FINAL timeline (they come from sceneTimings,
+    // the same function the SRT is built from), so they are clipped to the scene
+    // they fall in and shifted into that segment's own time base — where the
+    // `enable` expression's `t` is measured, setpts having reset it to zero.
+    const segmentPaths: string[] = [];
+    let sceneStart = 0;
+    for (const [index, clipPath] of clipPaths.entries()) {
+      const seconds = expectedDurations[index]!;
+      const sceneEnd = sceneStart + seconds;
+      const captions: SegmentStill[] = [];
+      for (const [overlayIndex, overlay] of overlays.entries()) {
+        const from = Math.max(overlay.startSeconds, sceneStart);
+        const to = Math.min(overlay.endSeconds, sceneEnd);
+        if (to <= from) continue;
+        captions.push({
+          path: overlayPaths[overlayIndex]!,
+          startSeconds: from - sceneStart,
+          endSeconds: to - sceneStart,
+          x: 0,
+          y: 0,
+        });
+      }
+      const segmentPath = join(dir, `segment-${index}.mp4`);
+      await encodeSegment(
+        clipPath,
+        segmentPath,
+        width,
+        height,
+        'black',
+        [...captions, logoStill],
+        seconds,
+        measuredDurations[index]!,
+        `Scene ${index + 1} segment`,
+      );
+      segmentPaths.push(segmentPath);
+      sceneStart = sceneEnd;
+    }
+
+    const outroSegmentPath = join(dir, 'segment-outro.mp4');
+    await encodeSegment(
+      VIDEO_OUTRO_PATH,
+      outroSegmentPath,
+      width,
+      height,
+      'white',
+      [],
+      outroValidation.durationSeconds,
+      outroValidation.durationSeconds,
+      'Outro segment',
     );
-    stage = 'branded';
+    segmentPaths.push(outroSegmentPath);
+
+    // Relative names, so the temp directory's own path never has to be escaped
+    // into the list file — the concat demuxer resolves them against the list's
+    // directory, which is that same directory.
+    const listPath = join(dir, 'segments.txt');
+    await writeFile(
+      listPath,
+      segmentPaths
+        .map((path) => `file '${path.slice(dir.length + 1)}'\n`)
+        .join(''),
+    );
 
     const outPath = join(dir, 'out.mp4');
     await runFfmpeg(
@@ -502,29 +682,19 @@ export async function assembleSilentVideo(
         '-hide_banner',
         '-loglevel',
         'error',
-        ...inputArgs,
-        '-filter_complex',
-        chains.join(';'),
-        '-map',
-        `[${stage}]`,
-        '-an',
-        '-c:v',
-        'libx264',
-        '-preset',
-        'veryfast',
-        '-crf',
-        '20',
-        '-pix_fmt',
-        'yuv420p',
+        '-f',
+        'concat',
+        '-safe',
+        '0',
+        '-i',
+        listPath,
+        '-c',
+        'copy',
         '-movflags',
         '+faststart',
         outPath,
       ],
       'Video stitch',
-      // A minute or two of 720p re-encode on a dev box, but this runs on a small
-      // shared instance beside n8n and Chromium, so the release valve is
-      // generous: an over-eager timeout throws away nothing but this free local
-      // step, yet costs the officer a whole paid run's deliverable.
       VIDEO_STITCH_TIMEOUT_MS,
     );
 

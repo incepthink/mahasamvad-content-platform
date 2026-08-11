@@ -53,19 +53,21 @@ export const STR = {
     'क्रिएटिव्ह व यूट्यूब थंबनेलसाठी येथे लिहिलेला सर्व मजकूर पोस्टरवर छापला जातो — म्हणून फक्त जेवढे पोस्टरवर हवे तेवढेच लिहा. बॅनरसाठी मात्र या मजकुरातील मुख्य नाव / शीर्षक शोधून तेच बॅनरवर येते. खालून फाईलमधूनही मजकूर घेता येईल — दोन्ही एकत्रही करता येईल.',
   articlePastePlaceholder:
     'उदा. पोस्टरवर हवे असलेले मुद्दे, नावे, तारखा व आकडे येथे लिहा…',
-  // Input-mode tabs above the text box, shown for the क्रिएटिव्ह (social) lane only AND only
-  // once a template has actually been picked. They are a question about how to FILL that
-  // template — जसाच्या तसा = designMode 'onbrand' (the note is sent verbatim to the image-edit
-  // model), लेखावरून = 'adaptive' (generatePosterCopy writes the headline + points from the
-  // pasted article first) — so with no template there is nothing for them to decide: that run
-  // is designMode 'fresh' and the image model designs the whole poster. बॅनर and यूट्यूब ignore
-  // designMode entirely, so the tabs never appear there.
-  posterSourceLabel: 'निवडलेले टेम्पलेट कसे भरायचे?',
+  // Content tabs above the text box, shown for the whole क्रिएटिव्ह (social) lane. They ask where
+  // the poster's WORDS come from, which is independent of who DESIGNS it (the template picker):
+  //   लेखातून मजकूर तयार करा  → generatePosterCopy writes the poster's words out of the box
+  //                              ('fresh' with no template, 'adaptive' with one);
+  //   जसाच्या तसा मजकूर        → the box is printed unchanged
+  //                              ('fresh_verbatim' with no template, 'onbrand' with one).
+  // Neither label may name the template any more: both answers are available with or without one.
+  // बॅनर and यूट्यूब ignore designMode entirely, so the tabs never appear there.
+  posterSourceLabel: 'पोस्टरवरील मजकूर कुठून घ्यायचा?',
   posterSourceVerbatim: 'जसाच्या तसा मजकूर',
   posterSourceVerbatimDesc:
-    'निवडलेल्या टेम्पलेटवर लिहिलेला मजकूर जसाच्या तसा छापला जातो',
-  posterSourceArticle: 'लेखावरून पोस्टर',
-  posterSourceArticleDesc: 'दिलेल्या लेखातून टेम्पलेटसाठी मजकूर AI तयार करते',
+    'खाली लिहिलेला मजकूर जसाच्या तसा पोस्टरवर छापला जातो — एकही शब्द बदलला जात नाही',
+  posterSourceArticle: 'लेखातून मजकूर तयार करा',
+  posterSourceArticleDesc:
+    'खाली दिलेल्या लेखातून मुख्य मुद्दे निवडून पोस्टरचा मजकूर AI तयार करते',
   // The text box's own label/hint follow the tab above: in लेखावरून mode the box holds a
   // finished article, not the poster's words, so promising "सर्व मजकूर पोस्टरवर छापला जातो"
   // there would be false.
