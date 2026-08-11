@@ -6,6 +6,11 @@
 // There is no article-type question here: this lane produces बातमी only, so the category is
 // fixed (DLO_CATEGORY below) rather than asked for.
 //
+// Every file source is ASKED FOR in one card (<DloSourcesCard>) — recordings, photographs and
+// documents share one row of buttons, because "what do you want to add?" is one question and
+// three cards asking it made the officer scroll past two they were not using. This component
+// still owns the lists themselves: it is what drafts and submits them.
+//
 // Recordings and documents take DIFFERENT routes in, and the split is about what each costs to
 // read. A recording has to be transcribed by Sarvam, so it is uploaded with the intake and read
 // by the job. A document is read RIGHT HERE by the shared ephemeral service (<DocumentIntake>),
@@ -46,9 +51,8 @@ import {
   writeDraft,
 } from '../lib/dloDraft';
 import { AiInstructionsField } from './AiInstructionsField';
-import { AudioFilePicker } from './AudioFilePicker';
+import { DloSourcesCard } from './DloSourcesCard';
 import { DocumentIntake, type DocumentSnapshot } from './DocumentIntake';
-import { ImageFilePicker } from './ImageFilePicker';
 import { StyleReferenceField } from './StyleReferenceField';
 import { YouTubeLinkInput } from './YouTubeLinkInput';
 import { STR } from '../lib/strings';
@@ -213,13 +217,18 @@ export function DloIntakeForm() {
       : [],
   );
 
+  // The one slot that was just asked for, so its card opens the file dialog on arrival and no
+  // other card ever does. A ref rather than state: it is read during the very render the
+  // setDocuments below schedules, and it must NOT be restored from the draft — a reload
+  // recreating slots is not the officer pressing "attach a document".
+  const autoOpenSlotId = useRef<number | null>(null);
+
   // No ceiling on the number of documents: a meeting can produce a dozen GRs, and the API
   // stopped capping the array for the same reason (DloCreateDocumentsSchema).
   const addDocumentSlot = () => {
-    setDocuments((prev) => [
-      ...prev,
-      { id: nextSlotId.current++, snapshot: null },
-    ]);
+    const id = nextSlotId.current++;
+    autoOpenSlotId.current = id;
+    setDocuments((prev) => [...prev, { id, snapshot: null }]);
     setError(null);
   };
 
@@ -354,19 +363,22 @@ export function DloIntakeForm() {
         ) : null}
       </section>
 
-      {/* Recordings and documents get a control each. A recording is transcribed whole and has
-          nothing to pick; a document is read page by page and, if it is a scan, its pages are
-          chosen before any OCR is paid for. Asking for them together made one picker stand for
-          two different jobs. */}
-      <AudioFilePicker
-        title={STR.dloAudioTitle}
-        hint={STR.dloAudioHint}
-        uploadLabel={STR.dloAudioUpload}
-        filesTitle={STR.dloAudioFilesTitle}
+      {/* Every file source in one card: recordings, photographs and documents share the
+          question "what do you want to add?", so they share a card and a row of buttons. How
+          each is READ still differs and the card says so — a recording is transcribed whole
+          during प्रक्रिया, a photograph is one page read in the same phase, and a document is
+          read here and now, page by page, with a scan stopping to ask which pages are worth
+          OCR'ing before a credit is spent. That last one is why documents keep a block of
+          their own inside the card. */}
+      <DloSourcesCard
         files={files}
-        onChange={changeFiles}
+        onFilesChange={changeFiles}
+        images={images}
+        onImagesChange={changeImages}
+        documentCount={documents.length}
+        onAddDocument={addDocumentSlot}
         onError={setError}
-        notice={
+        audioNotice={
           lostAudioNames.length > 0 ? (
             <div className="info-callout" style={{ marginTop: 12 }}>
               <p>{STR.dloDraftAudioLost}</p>
@@ -378,26 +390,7 @@ export function DloIntakeForm() {
             </div>
           ) : null
         }
-      />
-
-      {/* Directly under the recordings, because it is the same kind of source arriving a
-          different way: a pasted link is transcribed in the very same phase. Nothing is
-          downloaded here or by the job — the transcriber fetches the video itself. */}
-      <YouTubeLinkInput
-        videos={youtube}
-        onChange={setYoutube}
-        onError={setError}
-      />
-
-      {/* Photographs of documents: a GR, a notice or a table snapped with a phone. Placed
-          with the attach-and-go sources rather than with the documents below, because that
-          is what it behaves like — there are no pages to choose, so nothing is read here and
-          the text arrives at the review step just as a transcript does. */}
-      <ImageFilePicker
-        files={images}
-        onChange={changeImages}
-        onError={setError}
-        notice={
+        imageNotice={
           lostImageNames.length > 0 ? (
             <div className="info-callout" style={{ marginTop: 12 }}>
               <p>{STR.dloDraftImagesLost}</p>
@@ -409,58 +402,62 @@ export function DloIntakeForm() {
             </div>
           ) : null
         }
+      >
+        {documents.map((slot) => (
+          <DocumentIntake
+            key={slot.id}
+            storageKey={documentStorageKey(slot.id)}
+            feature="article"
+            accept={['pdf', 'docx', 'txt']}
+            title={STR.dloDocsCardTitle}
+            hint={STR.dloDocsIntakeHint}
+            // A block inside the sources card rather than a card of its own — a nested card
+            // reads as a separate form, and the heading drops to an <h3> in the same move.
+            embedded
+            // Same per-file ceiling as this form's recordings. Only /dlo passes it: the shared
+            // document service has no upload cap of its own, so this is a limit on what an
+            // INTAKE will carry, not a new rule for /translate or /proofread.
+            maxBytes={UPLOAD_FILE_MAX_BYTES}
+            // /dlo is the one surface that can read a scan later: its live initial selection is
+            // the handover, and the intake job reads exactly those pages from the archived
+            // original. Waiting for OCR in this card is optional, not the price of going on.
+            allowDeferredRead
+            // "कागदपत्र जोडा" already said what the officer wants; this block appearing with
+            // its own file button was a second identical press. Only the slot that press just
+            // created carries it, so restoring a draft never pops a dialog.
+            autoOpenPicker={slot.id === autoOpenSlotId.current}
+            onTextChange={(_text, snapshot) => {
+              setDocuments((prev) =>
+                // Every card reports once on mount with nothing loaded; rebuilding the list
+                // for that would re-render the whole step for no change.
+                prev.some(
+                  (entry) =>
+                    entry.id === slot.id && entry.snapshot !== snapshot,
+                )
+                  ? prev.map((entry) =>
+                      entry.id === slot.id ? { ...entry, snapshot } : entry,
+                    )
+                  : prev,
+              );
+              if (snapshot) setError(null);
+            }}
+            // Removable as soon as there are documents at all: the sources card's own button
+            // is what adds one, so a lone block is no longer the only way back to an empty
+            // state the way it was when the card WAS the control.
+            onRemove={() => removeDocumentSlot(slot.id)}
+          />
+        ))}
+      </DloSourcesCard>
+
+      {/* After the files, because it is the same kind of source arriving a different way: a
+          pasted link is transcribed in the very same phase. It stays its own card — it is a
+          field to type into, not a file to attach — and nothing is downloaded here or by the
+          job, the transcriber fetches the video itself. */}
+      <YouTubeLinkInput
+        videos={youtube}
+        onChange={setYoutube}
+        onError={setError}
       />
-
-      {/* One card per document, each probing its file HERE — so a scanned PDF asks which pages
-          are worth OCR'ing the moment it is attached. The selected pages are handed to the
-          intake job unread by default; reading them in this card remains optional. */}
-      {documents.map((slot) => (
-        <DocumentIntake
-          key={slot.id}
-          storageKey={documentStorageKey(slot.id)}
-          feature="article"
-          accept={['pdf', 'docx', 'txt']}
-          title={STR.dloDocsCardTitle}
-          hint={STR.dloDocsIntakeHint}
-          // Same per-file ceiling as this form's recordings. Only /dlo passes it: the shared
-          // document service has no upload cap of its own, so this is a limit on what an
-          // INTAKE will carry, not a new rule for /translate or /proofread.
-          maxBytes={UPLOAD_FILE_MAX_BYTES}
-          // /dlo is the one surface that can read a scan later: its live initial selection is
-          // the handover, and the intake job reads exactly those pages from the archived
-          // original. Waiting for OCR in this card is optional, not the price of going on.
-          allowDeferredRead
-          onTextChange={(_text, snapshot) => {
-            setDocuments((prev) =>
-              // Every card reports once on mount with nothing loaded; rebuilding the list for
-              // that would re-render the whole step for no change.
-              prev.some(
-                (entry) => entry.id === slot.id && entry.snapshot !== snapshot,
-              )
-                ? prev.map((entry) =>
-                    entry.id === slot.id ? { ...entry, snapshot } : entry,
-                  )
-                : prev,
-            );
-            if (snapshot) setError(null);
-          }}
-          {...(documents.length > 1
-            ? { onRemove: () => removeDocumentSlot(slot.id) }
-            : {})}
-        />
-      ))}
-
-      <section className="card card-compact">
-        <div className="btn-row">
-          <button
-            type="button"
-            className="btn btn-small"
-            onClick={addDocumentSlot}
-          >
-            {STR.dloDocsAdd}
-          </button>
-        </div>
-      </section>
 
       <section className="card">
         <label className="field-label" htmlFor="dlo-heading">

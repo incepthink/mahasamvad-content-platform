@@ -3,34 +3,43 @@
 // The composer's attachment tray: everything between picking a file and having something the
 // turn can carry.
 //
-// The rule this hook exists to enforce is ATTACH → PREPARE → SEND. An attachment is not ready
-// the moment it is picked: an image has to upload, a scanned PDF needs its pages chosen and
-// read, a recording and a YouTube link need transcribing (minutes). Send stays disabled until
-// every one of them is `ready`, so a turn is never sent half-prepared and the model never sees
-// a file that is still arriving.
+// The rule this hook exists to enforce is ATTACH → SEND → PREPARE. Picking a file costs
+// NOTHING: the File is held here and no upload, OCR or transcription happens until the officer
+// actually sends the message. That is deliberate — attaching a 40-page scan and then deleting
+// it, or opening the file picker to check a name, or abandoning the chat, used to buy an OCR
+// run and minutes of transcription for a question that was never asked. `prepare()` is the one
+// place that work happens, and it is called by the send path.
 //
 // Where the work happens is deliberately NOT here:
-//   - documents go through the shared ephemeral <DocumentIntake>, so /chat gets the same probe,
-//     the same page picker and the same "no page is OCR'd unless it was ticked" spend gate as
-//     every other upload surface;
+//   - documents go through the shared ephemeral document service (/api/documents), so /chat
+//     gets the same probe, the same text-layer-before-OCR policy and the same page identity
+//     as every other upload surface — but NOT its page picker (see readDocument below);
 //   - recordings and YouTube links go through the EXISTING /api/transcriptions job, which
 //     brings the 0031 content-addressed cache with it — a recording already transcribed on
 //     /transcribe comes back here instantly and free, and vice versa. The visible cost is that
 //     a chat recording also appears in /transcribe's history; the composer hint says so rather
 //     than letting it surprise someone.
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   CHAT_MAX_ATTACHMENTS,
   isImageFileName,
   type ChatAttachment,
   type YouTubeVideo,
 } from '@dgipr/schemas';
-import { createTranscription, getTranscription, uploadChatImage } from './api';
+import {
+  createDocumentIntake,
+  createTranscription,
+  extractDocumentIntakePages,
+  getDocumentIntake,
+  getTranscription,
+  uploadChatImage,
+} from './api';
+import { joinPageTexts, numberedPages } from './documentSelection';
 import { STR } from './strings';
 
 export type DraftAttachmentState =
-  'preparing' | 'transcribing' | 'ready' | 'failed';
+  'pending' | 'preparing' | 'transcribing' | 'ready' | 'failed';
 
 export type DraftAttachment = Readonly<{
   // Local only — the API never sees it.
@@ -39,17 +48,102 @@ export type DraftAttachment = Readonly<{
   name: string;
   state: DraftAttachmentState;
   error?: string;
+  // Held until the turn is sent, then consumed by prepare(). Never leaves the browser before
+  // that, which is the whole point of the deferral.
+  file?: File;
+  video?: YouTubeVideo;
   // Present once ready.
   imageUrl?: string;
   text?: string;
   sourceUrl?: string;
-  // A document slot's <DocumentIntake> storage key, so the card can be rendered and remounted.
-  documentSlot?: string;
-  // The transcription run backing a recording or link, polled until it lands.
+  // The transcription run backing a recording or link, once one has been started.
   transcriptionId?: string;
 }>;
 
-const POLL_INTERVAL_MS = 4000;
+const TRANSCRIPTION_POLL_INTERVAL_MS = 4000;
+// ~40 minutes at the interval above. A cap only so a run that never terminates fails its chip
+// instead of holding the turn open forever.
+const TRANSCRIPTION_POLL_MAX_TICKS = 600;
+
+// ---------- documents ----------
+
+const DOCUMENT_EXTENSIONS = ['.pdf', '.docx', '.txt'] as const;
+export const CHAT_DOCUMENT_ACCEPT: string = DOCUMENT_EXTENSIONS.join(',');
+
+function isDocumentFileName(fileName: string): boolean {
+  const lower = fileName.toLowerCase();
+  return DOCUMENT_EXTENSIONS.some((extension) => lower.endsWith(extension));
+}
+
+const DOCUMENT_POLL_INTERVAL_MS = 2500;
+// ~25 minutes at the interval above, past the longest realistic chunked OCR. A cap only so a
+// job that never leaves 'extracting' fails the chip instead of polling forever.
+const DOCUMENT_POLL_MAX_TICKS = 600;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Upload one document and return its text.
+//
+// **/chat reads the WHOLE document — there is no page picker here, and that is deliberate.**
+// Every other upload surface stops a scanned PDF at a page list, because OCR is billed per
+// page and the officer decides which pages are worth buying. A chat attachment is read once,
+// inside one turn, to answer one question: a spend-gate card in the composer was more
+// machinery than that question deserves, so the document button opens the file explorer
+// directly and the file becomes a chip beside the images and recordings. The spend is instead
+// gated by the SEND — nothing here runs until the officer has committed to asking. The
+// consequence to know: sending a message with a 40-page scan attached OCRs 40 pages. The
+// surfaces whose output gets published (/dlo, /translate, /proofread, the media room) keep the
+// picker and its gate untouched.
+async function readDocument(file: File): Promise<string> {
+  const form = new FormData();
+  form.append('file', file, file.name);
+  const created = await createDocumentIntake(form);
+  let extractRequested = false;
+
+  for (let tick = 0; tick < DOCUMENT_POLL_MAX_TICKS; tick += 1) {
+    // Lean poll — the page text is fetched once, at the end, when there is something to fetch.
+    const detail = await getDocumentIntake(created.id);
+
+    if (detail.status === 'selecting') {
+      // A scan waiting to be told which pages to read. All of them.
+      const pages = numberedPages(detail.pageCount ?? 0);
+      if (pages.length === 0) {
+        throw new Error(detail.error ?? STR.chatAttachFailed);
+      }
+      if (!extractRequested) {
+        extractRequested = true;
+        await extractDocumentIntakePages(created.id, pages);
+      }
+    } else if (detail.status !== 'extracting') {
+      // 'ready' or 'failed'. A failure that still produced pages is usable text plus a
+      // warning, so the page list decides, not the status.
+      if (detail.pages.length === 0) {
+        throw new Error(detail.error ?? STR.chatAttachFailed);
+      }
+      const withText = await getDocumentIntake(created.id, true);
+      return joinPageTexts(withText.pages);
+    }
+
+    await sleep(DOCUMENT_POLL_INTERVAL_MS);
+  }
+  throw new Error(STR.chatAttachFailed);
+}
+
+// Wait for a transcription run to land. Only ever called on a run this hook started.
+async function waitForTranscript(id: string): Promise<string> {
+  for (let tick = 0; tick < TRANSCRIPTION_POLL_MAX_TICKS; tick += 1) {
+    await sleep(TRANSCRIPTION_POLL_INTERVAL_MS);
+    // ?text=1: the transcript is the whole point here.
+    const detail = await getTranscription(id, true);
+    if (detail.status === 'ready') return detail.combinedText ?? '';
+    if (detail.status === 'failed') {
+      throw new Error(detail.error ?? STR.chatAttachFailed);
+    }
+  }
+  throw new Error(STR.chatAttachFailed);
+}
 
 let nextKey = 0;
 function makeKey(): string {
@@ -57,23 +151,41 @@ function makeKey(): string {
   return `att-${nextKey}-${Date.now().toString(36)}`;
 }
 
+// The wire shape of a draft that has been prepared. Local bookkeeping (the key, the File, the
+// transcription id) is stripped here and nowhere else.
+function payloadOf(draft: DraftAttachment): ChatAttachment {
+  return {
+    kind: draft.kind,
+    name: draft.name || STR.chatAttachedImage,
+    ...(draft.imageUrl !== undefined ? { imageUrl: draft.imageUrl } : {}),
+    ...(draft.text !== undefined ? { text: draft.text } : {}),
+    ...(draft.sourceUrl !== undefined ? { sourceUrl: draft.sourceUrl } : {}),
+  };
+}
+
 export function useChatAttachments(): {
   attachments: DraftAttachment[];
-  // True while anything is still being prepared — the send button's gate.
+  // True only while a turn's attachments are actually being prepared — i.e. between the send
+  // press and the message leaving. It is the send button's gate.
   preparing: boolean;
   full: boolean;
-  addImages: (files: readonly File[]) => Promise<void>;
-  addDocumentSlot: () => void;
-  // Live text from a document card, keyed by its slot. '' clears it back to not-ready.
-  setDocumentText: (slot: string, name: string, text: string) => void;
-  addAudio: (files: readonly File[]) => Promise<void>;
-  addYouTube: (video: YouTubeVideo) => Promise<void>;
+  addImages: (files: readonly File[]) => void;
+  addDocuments: (files: readonly File[]) => void;
+  addAudio: (files: readonly File[]) => void;
+  addYouTube: (video: YouTubeVideo) => void;
   remove: (key: string) => void;
   clear: () => void;
-  // What the turn carries. Only ready attachments, stripped of local bookkeeping.
-  toPayload: () => ChatAttachment[];
+  // Do the work — upload the images, read the documents, transcribe the recordings and links —
+  // and return what the turn should carry, in the order they were picked. A failed attachment
+  // is reported on its chip and simply not carried, so one bad file cannot trap a message.
+  prepare: () => Promise<ChatAttachment[]>;
 } {
   const [attachments, setAttachments] = useState<DraftAttachment[]>([]);
+  const [preparing, setPreparing] = useState(false);
+  // Guards against a second prepare starting before the first has released the button.
+  const preparingRef = useRef(false);
+  const attachmentsRef = useRef(attachments);
+  attachmentsRef.current = attachments;
 
   const patch = useCallback((key: string, next: Partial<DraftAttachment>) => {
     setAttachments((current) =>
@@ -83,208 +195,90 @@ export function useChatAttachments(): {
     );
   }, []);
 
-  // How many of `wanted` will fit. Picking several files at once is normal (a phone hands over
-  // five photographs), so the excess is silently dropped rather than the whole pick refused.
-  const room = useCallback(
-    (wanted: number): number =>
-      Math.min(wanted, Math.max(0, CHAT_MAX_ATTACHMENTS - attachments.length)),
-    [attachments.length],
-  );
-
-  const addImages = useCallback(
-    async (files: readonly File[]) => {
-      const accepted = files
-        .filter((file) => isImageFileName(file.name))
-        .slice(0, room(files.length));
-      const pending = accepted.map((file) => ({
-        key: makeKey(),
-        file,
-      }));
-      setAttachments((current) => [
-        ...current,
-        ...pending.map(({ key, file }): DraftAttachment => ({
-          key,
-          kind: 'image',
-          name: file.name,
-          state: 'preparing',
-        })),
-      ]);
-      // Uploaded one at a time rather than in parallel: several photographs from a phone are
-      // megabytes each, and a serial upload keeps the tray's progress honest.
-      for (const { key, file } of pending) {
-        try {
-          const uploaded = await uploadChatImage(file);
-          patch(key, { state: 'ready', imageUrl: uploaded.imageUrl });
-        } catch (e) {
-          patch(key, {
-            state: 'failed',
-            error: e instanceof Error ? e.message : STR.chatAttachFailed,
-          });
-        }
-      }
+  const fail = useCallback(
+    (key: string, e: unknown) => {
+      patch(key, {
+        state: 'failed',
+        error: e instanceof Error ? e.message : STR.chatAttachFailed,
+      });
     },
-    [patch, room],
+    [patch],
   );
 
-  // A document is a CARD, not a background task: <DocumentIntake> renders the probe, the page
-  // picker and the read, and reports its text back through setDocumentText. So the slot starts
-  // out not-ready and carries no name until the officer has actually picked a file.
-  const addDocumentSlot = useCallback(() => {
-    if (room(1) === 0) return;
-    const key = makeKey();
+  // How many more will fit. Picking several files at once is normal (a phone hands over five
+  // photographs), so the excess is silently dropped rather than the whole pick refused.
+  const add = useCallback((made: readonly DraftAttachment[]) => {
+    if (made.length === 0) return;
     setAttachments((current) => [
       ...current,
-      {
-        key,
-        kind: 'document',
-        name: '',
-        state: 'preparing',
-        documentSlot: `dgipr.chat.document.${key}`,
-      },
+      ...made.slice(0, Math.max(0, CHAT_MAX_ATTACHMENTS - current.length)),
     ]);
-  }, [room]);
+  }, []);
 
-  const setDocumentText = useCallback(
-    (slot: string, name: string, text: string) => {
-      setAttachments((current) =>
-        current.map((attachment) =>
-          attachment.documentSlot === slot
-            ? {
-                ...attachment,
-                name: name || attachment.name,
-                text,
-                // An empty read is not a failure — it is a document whose pages have not been
-                // chosen yet, which is exactly the state send must wait on.
-                state: text.trim() === '' ? 'preparing' : 'ready',
-              }
-            : attachment,
-        ),
+  const addImages = useCallback(
+    (files: readonly File[]) => {
+      add(
+        files
+          .filter((file) => isImageFileName(file.name))
+          .map((file) => ({
+            key: makeKey(),
+            kind: 'image' as const,
+            name: file.name,
+            state: 'pending' as const,
+            file,
+          })),
       );
     },
-    [],
+    [add],
+  );
+
+  const addDocuments = useCallback(
+    (files: readonly File[]) => {
+      add(
+        files
+          .filter((file) => isDocumentFileName(file.name))
+          .map((file) => ({
+            key: makeKey(),
+            kind: 'document' as const,
+            name: file.name,
+            state: 'pending' as const,
+            file,
+          })),
+      );
+    },
+    [add],
   );
 
   const addAudio = useCallback(
-    async (files: readonly File[]) => {
-      const accepted = files.slice(0, room(files.length));
-      if (accepted.length === 0) return;
-      // One run per recording, so a failure is isolated to its own chip and the other files
-      // still deliver — the same stance the transcription job itself takes.
-      for (const file of accepted) {
-        const key = makeKey();
-        setAttachments((current) => [
-          ...current,
-          { key, kind: 'audio', name: file.name, state: 'transcribing' },
-        ]);
-        try {
-          const form = new FormData();
-          form.append('files', file);
-          const id = await createTranscription(form);
-          patch(key, { transcriptionId: id });
-        } catch (e) {
-          patch(key, {
-            state: 'failed',
-            error: e instanceof Error ? e.message : STR.chatAttachFailed,
-          });
-        }
-      }
+    (files: readonly File[]) => {
+      add(
+        files.map((file) => ({
+          key: makeKey(),
+          kind: 'audio' as const,
+          name: file.name,
+          state: 'pending' as const,
+          file,
+        })),
+      );
     },
-    [patch, room],
+    [add],
   );
 
   const addYouTube = useCallback(
-    async (video: YouTubeVideo) => {
-      if (room(1) === 0) return;
-      const key = makeKey();
-      setAttachments((current) => [
-        ...current,
+    (video: YouTubeVideo) => {
+      add([
         {
-          key,
+          key: makeKey(),
           kind: 'youtube',
           name: video.title ?? video.url,
-          state: 'transcribing',
+          state: 'pending',
           sourceUrl: video.url,
+          video,
         },
       ]);
-      try {
-        const form = new FormData();
-        form.append('youtube', JSON.stringify([video]));
-        const id = await createTranscription(form);
-        patch(key, { transcriptionId: id });
-      } catch (e) {
-        patch(key, {
-          state: 'failed',
-          error: e instanceof Error ? e.message : STR.chatAttachFailed,
-        });
-      }
     },
-    [patch, room],
+    [add],
   );
-
-  // Poll the transcription runs backing any recording or link still in flight. One timer for
-  // all of them, running ONLY while something is actually transcribing.
-  const waiting = attachments.filter(
-    (attachment) =>
-      attachment.state === 'transcribing' &&
-      attachment.transcriptionId !== undefined,
-  );
-  const waitingKey = waiting
-    .map((attachment) => `${attachment.key}:${attachment.transcriptionId}`)
-    .join(',');
-  const attachmentsRef = useRef(attachments);
-  attachmentsRef.current = attachments;
-
-  useEffect(() => {
-    if (waitingKey === '') return;
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-
-    const tick = async () => {
-      const pending = attachmentsRef.current.filter(
-        (attachment) =>
-          attachment.state === 'transcribing' &&
-          attachment.transcriptionId !== undefined,
-      );
-      for (const attachment of pending) {
-        try {
-          // ?text=1: the transcript is the whole point here, and this only runs once the run
-          // has something to hand over.
-          const detail = await getTranscription(
-            attachment.transcriptionId!,
-            true,
-          );
-          if (cancelled) return;
-          if (detail.status === 'ready') {
-            const text = detail.combinedText ?? '';
-            patch(attachment.key, {
-              state: text.trim() === '' ? 'failed' : 'ready',
-              text,
-              ...(text.trim() === '' ? { error: STR.chatAttachFailed } : {}),
-            });
-          } else if (detail.status === 'failed') {
-            patch(attachment.key, {
-              state: 'failed',
-              error: detail.error ?? STR.chatAttachFailed,
-            });
-          }
-        } catch (e) {
-          if (cancelled) return;
-          patch(attachment.key, {
-            state: 'failed',
-            error: e instanceof Error ? e.message : STR.chatAttachFailed,
-          });
-        }
-      }
-      if (cancelled) return;
-      timer = setTimeout(tick, POLL_INTERVAL_MS);
-    };
-    timer = setTimeout(tick, POLL_INTERVAL_MS);
-
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, [waitingKey, patch]);
 
   const remove = useCallback((key: string) => {
     setAttachments((current) =>
@@ -294,40 +288,126 @@ export function useChatAttachments(): {
 
   const clear = useCallback(() => setAttachments([]), []);
 
-  const toPayload = useCallback(
-    (): ChatAttachment[] =>
-      attachments
-        .filter((attachment) => attachment.state === 'ready')
-        .map((attachment) => ({
-          kind: attachment.kind,
-          name: attachment.name || STR.chatAttachedImage,
-          ...(attachment.imageUrl !== undefined
-            ? { imageUrl: attachment.imageUrl }
-            : {}),
-          ...(attachment.text !== undefined ? { text: attachment.text } : {}),
-          ...(attachment.sourceUrl !== undefined
-            ? { sourceUrl: attachment.sourceUrl }
-            : {}),
-        })),
-    [attachments],
-  );
+  const prepare = useCallback(async (): Promise<ChatAttachment[]> => {
+    if (preparingRef.current) return [];
+    const drafts = attachmentsRef.current;
+    if (drafts.length === 0) return [];
+
+    preparingRef.current = true;
+    setPreparing(true);
+    const done = new Map<string, ChatAttachment>();
+
+    try {
+      // A draft already carrying its result is one that survived an earlier prepare whose
+      // siblings failed. Re-reading it would be a second charge for the same bytes.
+      for (const draft of drafts) {
+        if (draft.state === 'ready') done.set(draft.key, payloadOf(draft));
+      }
+
+      // 1. The transcription runs are STARTED first and awaited last, so a recording is
+      //    already being transcribed by Sarvam while the documents are read here.
+      const waitingFor: { draft: DraftAttachment; id: string }[] = [];
+      for (const draft of drafts) {
+        if (draft.state !== 'pending') continue;
+        if (draft.kind !== 'audio' && draft.kind !== 'youtube') continue;
+        patch(draft.key, { state: 'transcribing' });
+        try {
+          const form = new FormData();
+          if (draft.kind === 'audio') {
+            if (!draft.file) throw new Error(STR.chatAttachFailed);
+            form.append('files', draft.file);
+          } else {
+            if (!draft.video) throw new Error(STR.chatAttachFailed);
+            form.append('youtube', JSON.stringify([draft.video]));
+          }
+          // One run per source, so a failure is isolated to its own chip and the other files
+          // still deliver — the same stance the transcription job itself takes.
+          const id = await createTranscription(form);
+          patch(draft.key, { transcriptionId: id });
+          waitingFor.push({ draft, id });
+        } catch (e) {
+          fail(draft.key, e);
+        }
+      }
+
+      // 2. Images and documents, serially: several photographs from a phone are megabytes
+      //    each and a scanned PDF's OCR runs on a lane the API already serializes, so firing
+      //    them all at once would only make the tray lie about which one is being read.
+      for (const draft of drafts) {
+        if (draft.state !== 'pending') continue;
+        if (draft.kind !== 'image' && draft.kind !== 'document') continue;
+        patch(draft.key, { state: 'preparing' });
+        try {
+          if (!draft.file) throw new Error(STR.chatAttachFailed);
+          if (draft.kind === 'image') {
+            const uploaded = await uploadChatImage(draft.file);
+            patch(draft.key, { state: 'ready', imageUrl: uploaded.imageUrl });
+            done.set(
+              draft.key,
+              payloadOf({ ...draft, imageUrl: uploaded.imageUrl }),
+            );
+          } else {
+            const text = await readDocument(draft.file);
+            if (text.trim() === '') {
+              // An empty read is a real answer ("this file contributed nothing"), but there
+              // is nothing to carry, so it must not count as ready.
+              patch(draft.key, { state: 'failed', error: STR.chatAttachEmpty });
+            } else {
+              patch(draft.key, { state: 'ready', text });
+              done.set(draft.key, payloadOf({ ...draft, text }));
+            }
+          }
+        } catch (e) {
+          fail(draft.key, e);
+        }
+      }
+
+      // 3. Collect the transcripts. In parallel — these are independent server-side runs, and
+      //    two recordings should not take twice as long as one.
+      await Promise.all(
+        waitingFor.map(async ({ draft, id }) => {
+          try {
+            const text = await waitForTranscript(id);
+            if (text.trim() === '') {
+              patch(draft.key, {
+                state: 'failed',
+                error: STR.chatAttachEmpty,
+              });
+              return;
+            }
+            patch(draft.key, { state: 'ready', text });
+            done.set(draft.key, payloadOf({ ...draft, text }));
+          } catch (e) {
+            fail(draft.key, e);
+          }
+        }),
+      );
+
+      // Pick order, and only what is still attached — an officer who removed a chip while it
+      // was being read must not find it on the message anyway.
+      const live = new Set(
+        attachmentsRef.current.map((attachment) => attachment.key),
+      );
+      return drafts
+        .filter((draft) => live.has(draft.key))
+        .map((draft) => done.get(draft.key))
+        .filter((entry): entry is ChatAttachment => entry !== undefined);
+    } finally {
+      preparingRef.current = false;
+      setPreparing(false);
+    }
+  }, [fail, patch]);
 
   return {
     attachments,
-    // A FAILED attachment does not block sending — it is reported and simply not carried, so
-    // one bad file cannot trap a message the officer has already written.
-    preparing: attachments.some(
-      (attachment) =>
-        attachment.state === 'preparing' || attachment.state === 'transcribing',
-    ),
+    preparing,
     full: attachments.length >= CHAT_MAX_ATTACHMENTS,
     addImages,
-    addDocumentSlot,
-    setDocumentText,
+    addDocuments,
     addAudio,
     addYouTube,
     remove,
     clear,
-    toPayload,
+    prepare,
   };
 }

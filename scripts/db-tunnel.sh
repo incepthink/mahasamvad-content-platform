@@ -52,19 +52,37 @@ push_key() {
     --ssh-public-key "$KEY_PUB_PARAM" >/dev/null
 }
 
-echo "Resolving $CONTAINER on the box..."
-push_key
-PROXY_IP=$(ssh -i "$KEY" -o StrictHostKeyChecking=no -o ConnectTimeout=15 "$USER@$HOST" \
-  "sudo docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $CONTAINER" \
-  | tr -d '\r')
+resolve_proxy_ip() {
+  push_key
+  ssh -i "$KEY" -o StrictHostKeyChecking=no -o ConnectTimeout=15 "$USER@$HOST" \
+    "sudo docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $CONTAINER" \
+    | tr -d '\r'
+}
 
-if [ -z "$PROXY_IP" ]; then
-  echo "Could not resolve $CONTAINER's IP — is the container running?" >&2
-  exit 1
-fi
+# The long haul to us-east-2 drops connections ("Connection reset by peer") often enough that a
+# one-shot tunnel is not good enough when the whole local app is behind it — a drop otherwise
+# surfaces much later as a bare `fetch failed` from some unrelated page. So: reconnect, and
+# re-resolve the IP each time, since a drop caused by the container being recreated also
+# changes it. Ctrl-C exits rather than reconnecting.
+trap 'echo; echo "Tunnel closed."; exit 0' INT TERM
 
-echo "Tunnelling localhost:$LOCAL_PORT -> $PROXY_IP:8000 (Ctrl-C to stop)"
-push_key
-exec ssh -i "$KEY" -o StrictHostKeyChecking=no -o ServerAliveInterval=30 \
-  -o ExitOnForwardFailure=yes -N \
-  -L "$LOCAL_PORT:$PROXY_IP:8000" "$USER@$HOST"
+while true; do
+  echo "Resolving $CONTAINER on the box..."
+  PROXY_IP=$(resolve_proxy_ip)
+
+  if [ -z "$PROXY_IP" ]; then
+    echo "Could not resolve $CONTAINER's IP — is the container running? Retrying in 10s." >&2
+    sleep 10
+    continue
+  fi
+
+  echo "Tunnelling localhost:$LOCAL_PORT -> $PROXY_IP:8000 (Ctrl-C to stop)"
+  push_key
+  ssh -i "$KEY" -o StrictHostKeyChecking=no \
+    -o ServerAliveInterval=20 -o ServerAliveCountMax=3 -o TCPKeepAlive=yes \
+    -o ExitOnForwardFailure=yes -N \
+    -L "$LOCAL_PORT:$PROXY_IP:8000" "$USER@$HOST" || true
+
+  echo "Tunnel dropped — reconnecting in 3s..." >&2
+  sleep 3
+done

@@ -11,18 +11,19 @@
 //
 //   DESIGN  — the template picker. Empty (the default) means the API resolves no reference at all
 //             and the image model designs the whole poster; pick one and the poster follows it.
-//   CONTENT — the tabs above the text box. 'ai' (the default) has generatePosterCopy read the box
-//             as source material and write the poster's words out of it; 'verbatim' prints exactly
-//             what is in the box, unchanged.
+//   CONTENT — the "जसाच्या तसा मजकूर" checkbox under the text box. Unticked (the default) has
+//             generatePosterCopy read the box as source material and write the poster's words out
+//             of it; ticked prints exactly what is in the box, unchanged.
 //
 //                   | content 'ai' | content 'verbatim'
 //   ----------------+--------------+--------------------
 //   no template     | 'fresh'      | 'fresh_verbatim'
 //   a template      | 'adaptive'   | 'onbrand'
 //
-// The content tabs used to be shown only once a template was picked, because 'verbatim' had no
-// from-scratch counterpart — so on the default (no-template) path the officer could not ask for
-// their exact text at all. 'fresh_verbatim' is that counterpart.
+// The content question used to be a pair of tabs ABOVE the text box, and before that was shown
+// only once a template was picked, because 'verbatim' had no from-scratch counterpart — so on the
+// default (no-template) path the officer could not ask for their exact text at all.
+// 'fresh_verbatim' is that counterpart.
 //
 // The old design default was 'onbrand' over an auto-selected template, so every poster took the
 // shape of whatever the library happened to return — twelve cramped numbered rows out of a
@@ -36,6 +37,7 @@ import {
   ClipboardPaste,
   Image as ImageIcon,
   MonitorPlay,
+  Send,
   Sparkles,
   Type,
 } from 'lucide-react';
@@ -59,7 +61,7 @@ import ReferencePicker, {
   type ReferenceSelection,
 } from '../components/ReferencePicker';
 import { SocialLogoStack } from '../components/SocialLogoStack';
-import { CardTitle } from '../components/CardTitle';
+import { Disclosure } from '../components/Disclosure';
 
 // ONE flat row of formats. The two-level पोस्टर/कॅप्शन picker it replaces asked a question
 // officers were not making a decision about — a caption is an ADD-ON to a social post, so
@@ -269,6 +271,11 @@ export default function NewGenerationPage() {
   // wording is not this tab's to change. Those two lanes never send a designMode at all.
   const fromArticle = isSocial && !verbatimText;
 
+  // What the folded "काय तयार करायचे?" row states, so collapsing it never hides the answer.
+  // Found rather than mapped: FORMATS is the one list of formats this page offers, and a
+  // second name table beside it could disagree with the cards.
+  const selectedFormat = FORMATS.find((option) => option.value === category);
+
   // Which library the template picker shows: twitter masters for the two social formats,
   // article masters for the लेख पोस्टर, youtube masters for the थंबनेल. विभाग is gone from this
   // form — a social post here is always the DGIPR brand.
@@ -402,63 +409,7 @@ export default function NewGenerationPage() {
         </div>
       </header>
 
-      {/* The submit sits ABOVE the form, not under it. The card below is a long
-          textarea followed by an upload card and the format cards, so a button at the
-          bottom is off-screen for most of the time anyone spends on this page — and this
-          form is filled in one pass, then submitted, rather than reviewed downward. The
-          error line stays with it so a refusal (too short, another run in flight) is
-          reported where the action was taken. */}
-      <section className="card card-action">
-        <div className="btn-row">
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={() => void startSubmit()}
-            disabled={submitting || awaitingRead}
-          >
-            {awaitingRead
-              ? STR.docReadingForSubmit
-              : submitting
-                ? STR.submitting
-                : STR.submit}
-          </button>
-        </div>
-        {error ? <p className="form-error">{error}</p> : null}
-      </section>
-
       <section className="card">
-        {/* क्रिएटिव्ह only, and now shown whether or not a template has been picked — this asks
-            where the poster's WORDS come from, which is a separate question from who designs it.
-            It used to be gated on a template because 'verbatim' had no from-scratch counterpart;
-            'fresh_verbatim' is that counterpart, so the officer can have their exact text on a
-            fully-AI poster. बॅनर and यूट्यूब ignore designMode entirely. */}
-        {isSocial ? (
-          <>
-            <p className="field-label">{STR.posterSourceLabel}</p>
-            <div className="segmented" style={{ marginTop: 10 }}>
-              <button
-                type="button"
-                className="output-option"
-                aria-pressed={contentSource === 'ai'}
-                disabled={submitting}
-                onClick={() => setContentSource('ai')}
-              >
-                <span className="name">{STR.posterSourceArticle}</span>
-                <span className="desc">{STR.posterSourceArticleDesc}</span>
-              </button>
-              <button
-                type="button"
-                className="output-option"
-                aria-pressed={contentSource === 'verbatim'}
-                disabled={submitting}
-                onClick={() => setContentSource('verbatim')}
-              >
-                <span className="name">{STR.posterSourceVerbatim}</span>
-                <span className="desc">{STR.posterSourceVerbatimDesc}</span>
-              </button>
-            </div>
-          </>
-        ) : null}
         <label className="field-label" htmlFor="note">
           <ClipboardPaste size={18} className="label-icon" aria-hidden="true" />
           {fromArticle ? STR.articleSourceLabel : STR.articlePasteLabel}
@@ -477,149 +428,230 @@ export default function NewGenerationPage() {
         ) : prefill === 'failed' ? (
           <p className="form-error">{STR.prefillFailed}</p>
         ) : null}
-        <textarea
-          id="note"
-          className="note-input"
-          placeholder={
-            fromArticle
-              ? STR.articleSourcePlaceholder
-              : STR.articlePastePlaceholder
-          }
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          style={{ marginTop: 10 }}
+        {/* The submit lives INSIDE the text box, bottom-right, the way a composer does.
+            It used to be a full-width तयार करा bar in its own card ABOVE the form — put
+            there because a button under the whole page (textarea + upload card + format
+            cards) is off-screen for most of the time spent here. Anchoring it to the box
+            keeps it in view without detaching it from what it acts on, and the error line
+            follows it so a refusal (too short, another run in flight) is still reported
+            where the action was taken. */}
+        <div className="note-field">
+          <textarea
+            id="note"
+            className="note-input"
+            placeholder={
+              fromArticle
+                ? STR.articleSourcePlaceholder
+                : STR.articlePastePlaceholder
+            }
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+          <button
+            type="button"
+            className="btn btn-primary note-send"
+            onClick={() => void startSubmit()}
+            disabled={submitting || awaitingRead}
+            title={
+              awaitingRead
+                ? STR.docReadingForSubmit
+                : submitting
+                  ? STR.submitting
+                  : STR.submit
+            }
+            aria-label={
+              awaitingRead
+                ? STR.docReadingForSubmit
+                : submitting
+                  ? STR.submitting
+                  : STR.submit
+            }
+          >
+            {submitting || awaitingRead ? (
+              <span className="spinner" aria-hidden="true" />
+            ) : (
+              <Send size={20} aria-hidden="true" />
+            )}
+          </button>
+        </div>
+        {error ? <p className="form-error">{error}</p> : null}
+
+        {/* Two opt-ins about the text above, in the card that holds it. Both are क्रिएटिव्ह-only
+            and both are OFF by default:
+
+            जसाच्या तसा मजकूर — print the box unchanged instead of writing the poster's copy out
+              of it. Was a pair of tabs above the box; almost every run wants the default, so an
+              unticked checkbox states it in a quarter of the height. Available with or without a
+              template ('fresh_verbatim' / 'onbrand').
+            कॅप्शनही तयार करा — the caption is a second paid call and can be added afterwards from
+              the detail page, so off is a cheap default rather than a lossy one.
+
+            बॅनर and यूट्यूब थंबनेल send neither value, so neither box is shown there — a control
+            that cannot affect the run would be a lie. */}
+        {isSocial ? (
+          <>
+            <label className="option-toggle">
+              <input
+                type="checkbox"
+                checked={verbatimText}
+                disabled={submitting}
+                onChange={(e) =>
+                  setContentSource(e.target.checked ? 'verbatim' : 'ai')
+                }
+              />
+              <span>
+                <span className="option-toggle-name">
+                  {STR.posterSourceVerbatim}
+                </span>
+                <span className="option-toggle-desc">
+                  {STR.posterSourceVerbatimDesc}
+                </span>
+              </span>
+            </label>
+            <label className="option-toggle">
+              <input
+                type="checkbox"
+                checked={wantCaption}
+                disabled={submitting}
+                onChange={(e) => setWantCaption(e.target.checked)}
+              />
+              <span>
+                <span className="option-toggle-name">
+                  {STR.captionToggleLabel}
+                </span>
+                <span className="option-toggle-desc">
+                  {STR.captionToggleHint}
+                </span>
+              </span>
+            </label>
+          </>
+        ) : null}
+
+        {/* A finished article often arrives as a file rather than in the clipboard — a Word
+            document, or a scanned press note. The shared intake reads it here; a scanned PDF
+            stops to ask which pages are worth OCR'ing before a single credit is spent.
+
+            EMBEDDED: inside this card rather than as one of its own, because the file is a
+            source for the same box above it — as its own card it read as a separate form and
+            an officer could finish the page without noticing the two were related.
+
+            LIVE mode (onTextChange): the file's text is a SECOND source counted beside the box
+            above, not something pushed into it — so pasting, uploading, or doing both all just
+            work. It used to be appended by a button inside the card, which meant an upload that
+            was never handed over was silently dropped and the submit complained the टिपणी was
+            too short. */}
+        <DocumentIntake
+          key={docKey}
+          storageKey={DOC_STORAGE_KEY}
+          embedded
+          // Names this surface so a paid OCR read lands on this feature's service card
+          // rather than being counted in the bill and attributed to nobody.
+          feature="social"
+          maxBytes={UPLOAD_FILE_MAX_BYTES}
+          onTextChange={(text) => {
+            setDocText(text);
+            if (text.trim()) setError(null);
+          }}
+          onStatusChange={setDocStatus}
+          readRequest={readRequest}
         />
       </section>
 
-      {/* A finished article often arrives as a file rather than in the clipboard — a Word
-          document, or a scanned press note. The shared intake reads it here; a scanned PDF
-          stops to ask which pages are worth OCR'ing before a single credit is spent. It sits
-          inline rather than behind a fold so every upload surface in the product looks the
-          same.
-
-          LIVE mode (onTextChange): the file's text is a SECOND source counted beside the box
-          above, not something pushed into it — so pasting, uploading, or doing both all just
-          work. It used to be appended by a button inside the card, which meant an upload that
-          was never handed over was silently dropped and the submit complained the टिपणी was
-          too short. */}
-      <DocumentIntake
-        key={docKey}
-        storageKey={DOC_STORAGE_KEY}
-        // Names this surface so a paid OCR read lands on this feature's service card
-        // rather than being counted in the bill and attributed to nobody.
-        feature="social"
-        maxBytes={UPLOAD_FILE_MAX_BYTES}
-        onTextChange={(text) => {
-          setDocText(text);
-          if (text.trim()) setError(null);
-        }}
-        onStatusChange={setDocStatus}
-        readRequest={readRequest}
-      />
-
       <section className="card">
-        <CardTitle icon={Sparkles}>{STR.mediaOutputLabel}</CardTitle>
-        <div className="output-picker output-picker-flow">
-          {FORMATS.map((option) => {
-            // व्हिडिओ is a shortcut, not a format this form can submit — /video runs its
-            // own two-gate flow.
-            const isLink = option.value === 'video';
-            // One active task per lane: the क्रिएटिव्ह card is gated by an in-flight
-            // social run (one n8n workflow, serial renders), लेख पोस्टर and यूट्यूब थंबनेल by an
-            // in-flight article-lane run. A selected card that becomes disabled is left
-            // selected — submit() re-checks both flags, and moving the choice under the
-            // cursor would be worse.
-            const busy =
-              !isLink &&
-              (isSocialCategory(option.value)
-                ? hasActiveSocialTask
-                : hasActiveArticleTask);
-            return (
-              <button
-                key={option.value}
-                type="button"
-                className="output-option"
-                aria-pressed={!isLink && category === option.value}
-                disabled={busy}
-                onClick={() => {
-                  if (isLink) router.push('/video');
-                  else setCategory(option.value as SelectableFormat);
-                }}
-              >
-                <span className="icon" aria-hidden="true">
-                  <option.icon size={30} strokeWidth={1.75} />
-                </span>
-                <span className="name">{option.name}</span>
-                <span className="desc">{option.desc}</span>
-              </button>
-            );
-          })}
-        </div>
-        {/* Sits with the format cards, not in its own section: "a post with a caption"
-            is part of choosing what to make. Social formats only — a लेख पोस्टर has no
-            caption to write. */}
-        {isSocial ? (
-          <label className="option-toggle">
-            <input
-              type="checkbox"
-              checked={wantCaption}
-              onChange={(e) => setWantCaption(e.target.checked)}
-            />
-            <span>
-              <span className="option-toggle-name">
-                {STR.captionToggleLabel}
-              </span>
-              <span className="option-toggle-desc">
-                {STR.captionToggleHint}
-              </span>
-            </span>
-          </label>
-        ) : null}
-        {/* The लेख पोस्टर twin of the caption toggle, in the same card for the same reason:
-            what the poster SAYS is part of choosing what to make. Social posters do not have
-            it — their headline is written into a multi-field copy object with no single line
-            to lock. Left blank (the normal case) the run reads the योजना / पुरस्कार / उपक्रम
-            name out of the note itself. */}
-        {isArticle ? (
-          <div className="option-field">
-            <label className="field-label" htmlFor="poster-heading">
-              <Type size={18} className="label-icon" aria-hidden="true" />
-              {STR.posterHeadingLabel}
-            </label>
-            <p className="hint">{STR.posterHeadingCreateHint}</p>
-            <input
-              id="poster-heading"
-              type="text"
-              maxLength={POSTER_HEADING_MAX_CHARS}
-              placeholder={STR.posterHeadingPlaceholder}
-              value={posterHeading}
-              onChange={(e) => setPosterHeading(e.target.value)}
-              style={{ marginTop: 10 }}
-            />
+        {/* Folded shut. The format is chosen once and then usually left alone (क्रिएटिव्ह is the
+            default and by far the most-used), while the poster heading and the template pin are
+            answered on few runs — at full height the three of them made this page read as far
+            more work than it is. The collapsed row still states the ANSWER, so folding it can
+            never hide which format the run will produce. */}
+        <Disclosure
+          icon={Sparkles}
+          title={STR.mediaOutputLabel}
+          summary={selectedFormat?.name}
+          summarySet
+        >
+          <div className="output-picker output-picker-flow">
+            {FORMATS.map((option) => {
+              // व्हिडिओ is a shortcut, not a format this form can submit — /video runs its
+              // own two-gate flow.
+              const isLink = option.value === 'video';
+              // One active task per lane: the क्रिएटिव्ह card is gated by an in-flight
+              // social run (one n8n workflow, serial renders), लेख पोस्टर and यूट्यूब थंबनेल by an
+              // in-flight article-lane run. A selected card that becomes disabled is left
+              // selected — submit() re-checks both flags, and moving the choice under the
+              // cursor would be worse.
+              const busy =
+                !isLink &&
+                (isSocialCategory(option.value)
+                  ? hasActiveSocialTask
+                  : hasActiveArticleTask);
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  className="output-option"
+                  aria-pressed={!isLink && category === option.value}
+                  disabled={busy}
+                  onClick={() => {
+                    if (isLink) router.push('/video');
+                    else setCategory(option.value as SelectableFormat);
+                  }}
+                >
+                  <span className="icon" aria-hidden="true">
+                    <option.icon size={30} strokeWidth={1.75} />
+                  </span>
+                  <span className="name">{option.name}</span>
+                  <span className="desc">{option.desc}</span>
+                </button>
+              );
+            })}
           </div>
-        ) : null}
-        {/* The optional template pin, folded shut. In the same card as the format cards
+          {/* What a लेख पोस्टर SAYS is part of choosing what to make, so it sits with the format
+            cards. Social posters do not have it — their headline is written into a multi-field
+            copy object with no single line to lock. Left blank (the normal case) the run reads
+            the योजना / पुरस्कार / उपक्रम name out of the note itself. */}
+          {isArticle ? (
+            <div className="option-field">
+              <label className="field-label" htmlFor="poster-heading">
+                <Type size={18} className="label-icon" aria-hidden="true" />
+                {STR.posterHeadingLabel}
+              </label>
+              <p className="hint">{STR.posterHeadingCreateHint}</p>
+              <input
+                id="poster-heading"
+                type="text"
+                maxLength={POSTER_HEADING_MAX_CHARS}
+                placeholder={STR.posterHeadingPlaceholder}
+                value={posterHeading}
+                onChange={(e) => setPosterHeading(e.target.value)}
+                style={{ marginTop: 10 }}
+              />
+            </div>
+          ) : null}
+          {/* The optional template pin, folded shut. In the same card as the format cards
             because it only qualifies the choice made there — and keyed by category so
             switching format remounts it against the right library. */}
-        <div className="option-field option-field-flush">
-          <ReferencePicker
-            key={pickerCategory}
-            category={pickerCategory}
-            brand="dgipr"
-            variant="disclosure"
-            value={reference}
-            onChange={setReference}
-            {...(isSocial
-              ? {
-                  // On this lane an empty selection means NO template is used and the poster is
-                  // designed from scratch — the opposite of the default wording, which promises
-                  // the platform will pick one. लेख and यूट्यूब still auto-select, so they keep it.
-                  noneLabel: STR.refPickerDisclosureNoneSocial,
-                  noneHint: STR.refPickerDisclosureHintSocial,
-                }
-              : {})}
-          />
-        </div>
+          <div className="option-field option-field-flush">
+            <ReferencePicker
+              key={pickerCategory}
+              category={pickerCategory}
+              brand="dgipr"
+              variant="disclosure"
+              value={reference}
+              onChange={setReference}
+              {...(isSocial
+                ? {
+                    // On this lane an empty selection means NO template is used and the poster is
+                    // designed from scratch — the opposite of the default wording, which promises
+                    // the platform will pick one. लेख and यूट्यूब still auto-select, so they keep it.
+                    noneLabel: STR.refPickerDisclosureNoneSocial,
+                    noneHint: STR.refPickerDisclosureHintSocial,
+                  }
+                : {})}
+            />
+          </div>
+        </Disclosure>
+        {/* OUTSIDE the fold: a busy lane is the reason a submit will be refused, and a
+            collapsed row would hide the explanation. */}
         {hasActiveSocialTask ? (
           <p className="info-callout">{STR.socialBusyInfo}</p>
         ) : null}

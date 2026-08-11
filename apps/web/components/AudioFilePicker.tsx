@@ -6,25 +6,54 @@
 // with their sizes and removable one by one — so they render one component rather than two
 // lookalikes that drift apart. A card, a hint, one upload button, and the list underneath.
 //
-// It owns both file guards, and they are here rather than on the server for the same reason:
-// a recording takes minutes to upload, so "wrong container" and "too big" have to be said at
-// the picker. The server still enforces the size (routes/dlo.ts, routes/transcriptions.ts)
-// against the same UPLOAD_FILE_MAX_BYTES, so this is the earlier of two answers, never the
-// only one.
+// Both file guards are decided by lib/filePicks, shared with the photograph picker and with
+// /dlo's combined sources card, and they run HERE rather than only on the server for the same
+// reason: a recording takes minutes to upload, so "wrong container" and "too big" have to be
+// said at the picker. The server still enforces the size (routes/dlo.ts,
+// routes/transcriptions.ts) against the same UPLOAD_FILE_MAX_BYTES, so this is the earlier of
+// two answers, never the only one.
 
 import { useRef, type ReactNode } from 'react';
 import { Mic, Music, X } from 'lucide-react';
-import {
-  AUDIO_FILE_ACCEPT,
-  isAudioFileName,
-  UPLOAD_FILE_MAX_BYTES,
-} from '@dgipr/schemas';
+import { AUDIO_FILE_ACCEPT, isAudioFileName } from '@dgipr/schemas';
+import { acceptFilePicks } from '../lib/filePicks';
 import { CardTitle } from './CardTitle';
 import { STR } from '../lib/strings';
 
 export function formatFileSize(bytes: number): string {
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+// The attached recordings, name + size + a way to drop one. Split out of the card below so
+// /dlo's combined sources card can list its recordings without also inheriting a heading, a
+// hint and an upload button it renders once for all three kinds of source.
+export function AudioFileList({
+  files,
+  onChange,
+}: {
+  files: readonly File[];
+  onChange: (files: File[]) => void;
+}) {
+  return (
+    <ul className="file-list">
+      {files.map((file, index) => (
+        <li key={`${file.name}-${file.size}`} className="file-row">
+          <Music size={20} aria-hidden="true" />
+          <span className="file-name">{file.name}</span>
+          <span className="file-size">{formatFileSize(file.size)}</span>
+          <button
+            type="button"
+            className="file-remove"
+            aria-label={`${STR.dloRemoveFile}: ${file.name}`}
+            onClick={() => onChange(files.filter((_, i) => i !== index))}
+          >
+            <X size={16} aria-hidden="true" />
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 export function AudioFilePicker({
@@ -61,28 +90,18 @@ export function AudioFilePicker({
 
   const addFiles = (list: FileList | null) => {
     if (!list || list.length === 0) return;
-    const picked = Array.from(list);
-    const audio = picked.filter((file) => isAudioFileName(file.name));
-    const accepted = audio.filter((file) => file.size <= UPLOAD_FILE_MAX_BYTES);
-    // Two different complaints, so two different messages. A pick that fails the container
-    // check never reaches the size check, and is reported as the wrong type.
-    onError(
-      audio.length < picked.length
-        ? STR.dloFileTypeError
-        : accepted.length < audio.length
-          ? STR.fileTooLargeError
-          : null,
-    );
-    if (accepted.length === 0) return;
-    const next = [
-      ...files,
-      // Same name AND size is the same recording picked twice; a genuine re-record differs
-      // in one or the other.
-      ...accepted.filter(
-        (file) =>
-          !files.some((p) => p.name === file.name && p.size === file.size),
-      ),
-    ];
+    const {
+      files: next,
+      added,
+      error,
+    } = acceptFilePicks({
+      current: files,
+      picked: Array.from(list),
+      isAllowedName: isAudioFileName,
+      typeError: STR.dloFileTypeError,
+    });
+    onError(error);
+    if (added === 0) return;
     onChange(maxFiles === undefined ? next : next.slice(0, maxFiles));
   };
 
@@ -126,23 +145,7 @@ export function AudioFilePicker({
           <p className="field-label" style={{ marginTop: 16 }}>
             {filesTitle}
           </p>
-          <ul className="file-list">
-            {files.map((file, index) => (
-              <li key={`${file.name}-${file.size}`} className="file-row">
-                <Music size={20} aria-hidden="true" />
-                <span className="file-name">{file.name}</span>
-                <span className="file-size">{formatFileSize(file.size)}</span>
-                <button
-                  type="button"
-                  className="file-remove"
-                  aria-label={`${STR.dloRemoveFile}: ${file.name}`}
-                  onClick={() => onChange(files.filter((_, i) => i !== index))}
-                >
-                  <X size={16} aria-hidden="true" />
-                </button>
-              </li>
-            ))}
-          </ul>
+          <AudioFileList files={files} onChange={onChange} />
         </>
       ) : null}
     </section>

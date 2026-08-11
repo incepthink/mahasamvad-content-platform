@@ -29,7 +29,7 @@
 //     button or OCR wait here.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FileText, ListChecks } from 'lucide-react';
+import { FileText, ListChecks, Trash2 } from 'lucide-react';
 import type {
   AnalyticsFeatureKey,
   DocumentKind,
@@ -90,7 +90,9 @@ export function DocumentIntake({
   maxBytes,
   title,
   hint,
+  autoOpenPicker = false,
   allowDeferredRead = false,
+  embedded = false,
   feature,
   onText,
   onTextChange,
@@ -114,6 +116,12 @@ export function DocumentIntake({
   // hint promises the file is not stored, and a DLO document IS archived with the intake.
   title?: string | undefined;
   hint?: string | undefined;
+  // Opens the file dialog as soon as the card appears. For a surface where this block is
+  // itself the answer to an "attach a document" button (/dlo): the officer has already said
+  // what they want, so the identical press inside the card that appears is a step with no
+  // decision in it. Ignored when the card mounts onto an in-flight job — a read already
+  // being paid for must never be interrupted by a file dialog.
+  autoOpenPicker?: boolean | undefined;
   // Makes the live page SELECTION itself the handover while the server is still in
   // `status === 'selecting'`, leaving the reading to whatever runs next. Only /dlo may set
   // this — it is the one surface with a job of its own downstream (the intake reads exactly
@@ -125,6 +133,12 @@ export function DocumentIntake({
   // LIVE mode only, in practice: a deferred document has no text, so there is nothing for the
   // handoff button to hand over.
   allowDeferredRead?: boolean | undefined;
+  // Renders as a plain block inside the caller's own card instead of as a card of its own.
+  // For a surface where the file sits BESIDE its text box rather than replacing it (the
+  // media room): a nested card there reads as a second, separate form, and the officer has
+  // to work out whether the two are related. Only the wrapper and the heading level change
+  // — every state below renders identically inside it.
+  embedded?: boolean | undefined;
   // Which sidebar feature this upload belongs to, for /analytics attribution only. The
   // document service is shared by four surfaces and knows nothing else about its caller, so
   // without it a PAID OCR read is countable in the bill and attributable to nobody. Optional
@@ -181,6 +195,20 @@ export function DocumentIntake({
     if (jobId) window.sessionStorage.setItem(storageKey, jobId);
     else window.sessionStorage.removeItem(storageKey);
   }, [jobId, storageKey]);
+
+  // Open the dialog with the card (see `autoOpenPicker`). Once per mount, and gated on
+  // sessionStorage rather than on `jobId`, because the re-attach effect above has not
+  // committed its state by the time this one runs — reading the store is the only way to
+  // know here whether this card is about to adopt a job. The click rides the officer's own
+  // click into the browser's transient activation window (a passive effect in the same tick),
+  // which is what makes the dialog allowed to open at all.
+  const autoOpened = useRef(false);
+  useEffect(() => {
+    if (!autoOpenPicker || autoOpened.current) return;
+    autoOpened.current = true;
+    if (window.sessionStorage.getItem(storageKey)) return;
+    fileInput.current?.click();
+  }, [autoOpenPicker, storageKey]);
 
   const isSelecting =
     detail?.status === 'selecting' ||
@@ -411,16 +439,25 @@ export function DocumentIntake({
 
   // ---------- render ----------
 
+  // Every state below is wrapped in the same shell, so `embedded` is decided once here
+  // rather than at six return sites. A string tag keeps its identity across renders, so
+  // switching it can never remount the tree inside (the ReferencePicker precedent).
+  const Shell = embedded ? 'div' : 'section';
+  const shellClass = embedded ? 'doc-intake-embedded' : 'card';
+  // Subordinate to the caller's own card heading when embedded; the look is identical and
+  // only the document outline differs (see CardTitle).
+  const titleLevel = embedded ? 3 : 2;
+
   if (gone && jobId) {
     return (
-      <section className="card">
+      <Shell className={shellClass}>
         <p className="form-error">{STR.docGone}</p>
         <div className="btn-row" style={{ marginTop: 12 }}>
           <button type="button" className="btn btn-primary" onClick={reset}>
             {STR.docUploadOther}
           </button>
         </div>
-      </section>
+      </Shell>
     );
   }
 
@@ -441,14 +478,20 @@ export function DocumentIntake({
             ? STR.docUploadOther
             : STR.docUpload}
       </button>
+      {/* Icon-only: this is the one destructive control in the row and it sat beside the
+          file picker as a same-sized worded button, which made "choose a file" and "throw
+          this document away" look like the same kind of action. The label still travels as
+          title + aria-label — the icon-btn doctrine — so nothing depends on reading a shape. */}
       {onRemove ? (
         <button
           type="button"
-          className="btn btn-small"
+          className="icon-btn icon-btn-sm icon-btn-danger"
           onClick={onRemove}
           disabled={uploading || extracting}
+          title={STR.docRemove}
+          aria-label={STR.docRemove}
         >
-          {STR.docRemove}
+          <Trash2 size={18} aria-hidden="true" />
         </button>
       ) : null}
       <input
@@ -466,23 +509,25 @@ export function DocumentIntake({
 
   if (!jobId) {
     return (
-      <section className="card">
+      <Shell className={shellClass}>
         {/* An <h2>, like every other card heading on the surfaces this appears on:
             .field-label is scoped to <label> in globals.css, so a <p> carrying it rendered
             unweighted. The two later states below use the same element for the same reason. */}
-        <CardTitle icon={FileText}>{title ?? STR.docUploadTitle}</CardTitle>
+        <CardTitle icon={FileText} level={titleLevel}>
+          {title ?? STR.docUploadTitle}
+        </CardTitle>
         <p className="hint">{hint ?? STR.docUploadHint}</p>
         <div className="btn-row" style={{ marginTop: 12 }}>
           {fileButton}
         </div>
         {error ? <p className="form-error">{error}</p> : null}
-      </section>
+      </Shell>
     );
   }
 
   if (!detail || detail.status === 'extracting') {
     return (
-      <section className="card">
+      <Shell className={shellClass}>
         <div className="dlo-processing">
           <span className="spinner spinner-lg" aria-hidden="true" />
           <p className="dlo-processing-title">{STR.docExtracting}</p>
@@ -500,18 +545,18 @@ export function DocumentIntake({
             </p>
           ) : null}
         </div>
-      </section>
+      </Shell>
     );
   }
 
   if (detail.status === 'failed' && pages.length === 0) {
     return (
-      <section className="card">
+      <Shell className={shellClass}>
         {detail.error ? <p className="form-error">{detail.error}</p> : null}
         <div className="btn-row" style={{ marginTop: 12 }}>
           {fileButton}
         </div>
-      </section>
+      </Shell>
     );
   }
 
@@ -519,8 +564,10 @@ export function DocumentIntake({
   // producing it is exactly the spend being authorised here.
   if (isSelecting) {
     return (
-      <section className="card">
-        <CardTitle icon={ListChecks}>{STR.docSelectTitle}</CardTitle>
+      <Shell className={shellClass}>
+        <CardTitle icon={ListChecks} level={titleLevel}>
+          {STR.docSelectTitle}
+        </CardTitle>
         <p className="hint">
           {reselecting ? STR.docChangeSelectionHint : STR.docSelectHint}
         </p>
@@ -574,13 +621,15 @@ export function DocumentIntake({
           )}
         </div>
         {error ? <p className="form-error">{error}</p> : null}
-      </section>
+      </Shell>
     );
   }
 
   return (
-    <section className="card">
-      <CardTitle icon={FileText}>{STR.docReviewTitle}</CardTitle>
+    <Shell className={shellClass}>
+      <CardTitle icon={FileText} level={titleLevel}>
+        {STR.docReviewTitle}
+      </CardTitle>
       <p className="hint">{STR.docReviewHint}</p>
       <p className="hint" style={{ marginTop: 8 }}>
         <FileText size={16} aria-hidden="true" /> {detail.fileName}
@@ -661,6 +710,6 @@ export function DocumentIntake({
         <p className="hint">{STR.docEmptySelection}</p>
       ) : null}
       {error ? <p className="form-error">{error}</p> : null}
-    </section>
+    </Shell>
   );
 }

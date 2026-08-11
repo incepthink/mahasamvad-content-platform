@@ -53,22 +53,19 @@ export const STR = {
     'क्रिएटिव्ह व यूट्यूब थंबनेलसाठी येथे लिहिलेला सर्व मजकूर पोस्टरवर छापला जातो — म्हणून फक्त जेवढे पोस्टरवर हवे तेवढेच लिहा. बॅनरसाठी मात्र या मजकुरातील मुख्य नाव / शीर्षक शोधून तेच बॅनरवर येते. खालून फाईलमधूनही मजकूर घेता येईल — दोन्ही एकत्रही करता येईल.',
   articlePastePlaceholder:
     'उदा. पोस्टरवर हवे असलेले मुद्दे, नावे, तारखा व आकडे येथे लिहा…',
-  // Content tabs above the text box, shown for the whole क्रिएटिव्ह (social) lane. They ask where
-  // the poster's WORDS come from, which is independent of who DESIGNS it (the template picker):
-  //   लेखातून मजकूर तयार करा  → generatePosterCopy writes the poster's words out of the box
-  //                              ('fresh' with no template, 'adaptive' with one);
-  //   जसाच्या तसा मजकूर        → the box is printed unchanged
-  //                              ('fresh_verbatim' with no template, 'onbrand' with one).
-  // Neither label may name the template any more: both answers are available with or without one.
-  // बॅनर and यूट्यूब ignore designMode entirely, so the tabs never appear there.
-  posterSourceLabel: 'पोस्टरवरील मजकूर कुठून घ्यायचा?',
+  // Where the poster's WORDS come from — independent of who DESIGNS it (the template picker).
+  // This was a pair of tabs above the text box ("लेखातून मजकूर तयार करा" / "जसाच्या तसा मजकूर")
+  // asking a question with a strong default: almost every run wants the copy written out of the
+  // box, so one OPT-IN checkbox under the box says the same thing in a quarter of the height.
+  // Unticked (the default) → generatePosterCopy writes the poster's words out of the box
+  // ('fresh' with no template, 'adaptive' with one); ticked → the box is printed unchanged
+  // ('fresh_verbatim' with no template, 'onbrand' with one). It may not name the template:
+  // both answers are available with or without one. बॅनर and यूट्यूब ignore designMode
+  // entirely, so it never appears there.
   posterSourceVerbatim: 'जसाच्या तसा मजकूर',
   posterSourceVerbatimDesc:
-    'खाली लिहिलेला मजकूर जसाच्या तसा पोस्टरवर छापला जातो — एकही शब्द बदलला जात नाही',
-  posterSourceArticle: 'लेखातून मजकूर तयार करा',
-  posterSourceArticleDesc:
-    'खाली दिलेल्या लेखातून मुख्य मुद्दे निवडून पोस्टरचा मजकूर AI तयार करते',
-  // The text box's own label/hint follow the tab above: in लेखावरून mode the box holds a
+    'वर लिहिलेला मजकूर जसाच्या तसा पोस्टरवर छापला जातो — एकही शब्द बदलला जात नाही. निवडले नाही तर त्यातून पोस्टरचा मजकूर AI तयार करते.',
+  // The text box's own label/hint follow that checkbox: unticked, the box holds a
   // finished article, not the poster's words, so promising "सर्व मजकूर पोस्टरवर छापला जातो"
   // there would be false.
   articleSourceLabel: 'तयार लेख येथे चिकटवा',
@@ -194,32 +191,44 @@ export const STR = {
     'बैठकीत जे ऐकले, ठरले किंवा आठवते ते सर्व येथे लिहा — मुद्दे, निर्णय, घोषणा, आकडेवारी.',
   dloNotesPlaceholder:
     'उदा. आजच्या बैठकीत मा. मंत्री महोदयांनी… असे जाहीर केले; योजनेसाठी … कोटी रुपयांची तरतूद…',
-  // Audio and documents are added through separate controls, and the difference is real: a
-  // recording is transcribed whole and has nothing to choose, while a document is read here
-  // and now — page by page, with the scanned ones stopping to ask which pages are worth
-  // OCR'ing before a single credit is spent.
+  // All three file sources are attached from ONE card (components/DloSourcesCard) — the
+  // question "what do you want to add?" is the same for each, and three cards asking it made
+  // the officer scroll past two they were not using. The hint carries the difference that is
+  // real: a recording and a photograph are read during प्रक्रिया, while a document is read
+  // here and now, page by page, with a scan stopping to ask which pages are worth OCR'ing
+  // before a single credit is spent.
+  dloAttachTitle: 'स्रोत जोडा',
+  dloAttachHint:
+    'बैठकीचे ध्वनिमुद्रण, कागदपत्रांचे फोटो आणि PDF / DOCX / TXT फाईल — एकावेळी अनेक जोडता येतील (प्रत्येकी कमाल ५० MB). ध्वनिमुद्रण व प्रतिमांमधील मजकूर प्रक्रियेदरम्यान वाचला जाईल; स्कॅन केलेल्या PDF मधून कोणती पृष्ठे वाचायची ते तुम्ही येथेच निवडाल.',
+
+  // UNUSED since the three cards became one: /dlo's recording control no longer titles
+  // itself, and /transcribe passes its own copy (transcribeNewTitle / transcribeHint).
+  // Kept so restoring a standalone recording card is one edit.
   dloAudioTitle: 'ध्वनिमुद्रण',
-  dloAudioUpload: 'ध्वनिफीत जोडा',
   dloAudioHint:
     'बैठकीचे ध्वनिमुद्रण — एकावेळी अनेक फाईल जोडता येतील (प्रत्येकी कमाल ५० MB). मोबाईलवरील नेहमीचे ध्वनिफीत प्रकार चालतात.',
+  dloAudioUpload: 'ध्वनिफीत जोडा',
   dloAudioFilesTitle: 'जोडलेली ध्वनिमुद्रणे',
 
-  // Photographs of documents (components/ImageFilePicker). The hint says what happens and
-  // when: unlike a document, an image is not read here — there are no pages to pick, so the
-  // reading waits for प्रक्रिया and its text arrives at the तपासणी step like a transcript.
+  // Photographs of documents. UNUSED title/hint, for the same reason as the recording pair
+  // above; what the photographs are for is now said once in dloSourcesHint.
   dloImagesTitle: 'प्रतिमा / छायाचित्रे',
-  dloImagesUpload: 'प्रतिमा जोडा',
   dloImagesHint:
     'शासन निर्णय, टिपणी, तक्ता किंवा नोटिशीचा फोटो अथवा स्क्रीनशॉट (JPG, PNG, WEBP — प्रत्येकी कमाल ५० MB). प्रतिमेतील मजकूर, तक्त्यांसह, प्रक्रियेदरम्यान वाचला जाईल आणि तपासणी टप्प्यावर दिसेल.',
+  dloImagesUpload: 'प्रतिमा जोडा',
   dloImagesFilesTitle: 'जोडलेल्या प्रतिमा',
   dloImageTypeError: 'कृपया प्रतिमा फाईल निवडा (JPG, PNG किंवा WEBP).',
   dloDocsTitle: 'कागदपत्रे (PDF / DOCX / TXT)',
   dloDocsHint:
     'शासन निर्णय, टिपणी किंवा इतर कागदपत्रे. प्रत्येक फाईल येथेच वाचली जाते — स्कॅन केलेल्या PDF मधून कोणती पृष्ठे वाचायची ते तुम्ही निवडाल.',
-  // One upload card's own heading; the section above it explains what documents are for.
+  // One document block's own heading, inside the sources card.
   dloDocsCardTitle: 'कागदपत्र',
   dloDocsIntakeHint:
     'PDF, DOCX किंवा TXT फाईल निवडा (कमाल ५० MB). स्कॅन केलेली PDF देखील चालते. फाईल या बैठकीसोबत जतन केली जाईल.',
+  // Two different controls. The first is the worded button in the attach row, shown only
+  // while there is no document block yet; the second is the + under the blocks, where it is
+  // the icon's title + aria-label rather than visible text.
+  dloDocsUpload: 'कागदपत्र जोडा',
   dloDocsAdd: 'आणखी कागदपत्र जोडा',
   dloRemoveFile: 'फाईल काढा',
 
@@ -390,6 +399,11 @@ export const STR = {
   dloResumeTitle: 'सुरू असलेले काम',
   dloResumeAction: 'पुढे चला →',
   dloRecent: 'मागील कामे',
+  // The list is folded shut by default, so the row has to state the answer it is hiding —
+  // how many pieces of work there are. Folding may hide the CONTROL, never the ANSWER
+  // (components/Disclosure).
+  dloWorkCountSuffix: 'कामे',
+  dloWorkCountNone: 'एकही नाही',
   dloMyWork: 'तुमचे काम',
   dloOtherWork: 'इतर कामे',
   dloListEmpty: 'अद्याप कोणतेही काम नाही. वरील फॉर्ममधून सुरुवात करा.',
@@ -507,7 +521,8 @@ export const STR = {
   docUpload: 'फाईल निवडा',
   docUploadOther: 'दुसरी फाईल निवडा',
   // Only on a surface that shows several upload cards at once (/dlo), where one document
-  // has to be droppable without touching the rest.
+  // has to be droppable without touching the rest. Carried by a bin icon as its title +
+  // aria-label, not printed — see the button in DocumentIntake.
   docRemove: 'हे कागदपत्र काढा',
   docUnsupported: 'फक्त PDF, DOCX आणि TXT फाईल्स चालतात.',
   docGone: 'ही फाईल आता उपलब्ध नाही. कृपया पुन्हा अपलोड करा.',
@@ -1427,19 +1442,18 @@ export const STR = {
   chatEmptyTitle: 'काय मदत करू?',
   chatEmptyHint:
     'काहीही विचारा — पत्राचा मसुदा, शासन निर्णयाचा अर्थ, चित्रात काय आहे, फाईलचा सारांश.',
-  chatEmptyNotice:
-    'हे सर्वसाधारण सहाय्यक आहे. प्रसिद्धीसाठी तयार होणाऱ्या मजकुरासाठी लेख-बातमी किंवा मुद्रितशोधन वापरा — नावांच्या शुद्धलेखनाची व तथ्यांची तपासणी तिथे होते.',
   chatPlaceholder: 'इथे लिहा…',
   chatSend: 'पाठवा',
   chatStop: 'थांबवा',
   chatThinking: 'विचार करत आहे…',
+  // Only read aloud: on screen this is a spinner, which says the same thing faster.
+  chatLoading: 'उघडत आहोत…',
   chatFailed: 'उत्तर तयार करता आले नाही. पुन्हा प्रयत्न करा.',
   chatLoadFailed: 'ही चॅट उघडता आली नाही.',
   chatYours: 'तुमच्या चॅट्स',
   chatOthers: 'इतर चॅट्स',
   chatNoThreads: 'अजून एकही चॅट नाही.',
   chatListFailed: 'चॅट्सची यादी उघडता आली नाही.',
-  chatListNotice: 'सर्व चॅट्स विभागातील सर्वांना दिसतात.',
   chatDelete: 'चॅट काढून टाका',
   chatDeleteConfirm: 'ही चॅट कायमची काढून टाकायची?',
   chatDeleteFailed: 'चॅट काढता आली नाही.',
@@ -1451,16 +1465,17 @@ export const STR = {
   chatAttachAudio: 'ध्वनिमुद्रण',
   chatAttachYouTube: 'यूट्युब लिंक',
   chatAttachRemove: 'काढून टाका',
+  // Nothing is uploaded, read or transcribed until the message is sent, so a picked file
+  // waits — and its chip says so rather than claiming to be ready.
+  chatAttachPending: 'पाठवल्यावर वाचली जाईल',
+  chatAttachWorking: 'फाईल्स वाचून घेत आहोत… त्यानंतर संदेश पाठवला जाईल.',
   chatAttachPreparing: 'तयार करत आहोत…',
   chatAttachTranscribing: 'ध्वनिमुद्रण लिहून घेत आहोत… (काही मिनिटे लागू शकतात)',
   chatAttachReady: 'तयार',
   chatAttachFailed: 'ही फाईल वाचता आली नाही.',
+  chatAttachEmpty: 'या फाईलमध्ये वाचण्यासारखा मजकूर मिळाला नाही.',
   chatAttachWait: 'फाईल तयार होईपर्यंत थांबा.',
   chatAttachTooMany: 'एका संदेशाला जास्तीत जास्त १० फाईल्स जोडता येतात.',
-  chatAttachAudioNotice:
-    'ध्वनिमुद्रणे व यूट्युब लिंक ध्वनिलेखन विभागातही जतन होतात, त्यामुळे तेच ध्वनिमुद्रण पुन्हा लिहून घ्यावे लागत नाही.',
-  chatAttachDocumentNotice:
-    'स्कॅन केलेल्या फाईलमधून कोणती पृष्ठे वाचायची ते निवडा — निवडलेली पृष्ठेच वाचली जातात.',
   chatAttachedImage: 'चित्र',
   chatCopy: 'कॉपी करा',
   chatCopied: 'कॉपी झाले',

@@ -52,11 +52,16 @@ import {
 } from '../lib/referenceGroups';
 import { STR } from '../lib/strings';
 
-// A band opens on two rows' worth of thumbnails and grows by the same each press. Count-
-// based rather than measured (the library page measures its resolved grid tracks): this
-// gallery sits inside a fold on a form, where "about two rows" is close enough and a
-// ResizeObserver per band is not worth what it buys.
+// A band opens on two rows' worth of thumbnails. Count-based rather than measured (the
+// library page measures its resolved grid tracks): this gallery sits inside a fold on a
+// form, where "about two rows" is close enough and a ResizeObserver per band is not worth
+// what it buys.
 const BAND_PAGE = 8;
+
+// How many more each आणखी दाखवा press reveals. Deliberately bigger than the opening page:
+// the first view is a glance, and someone who presses it is browsing the band rather than
+// scanning it, so a second press should rarely be needed.
+const BAND_MORE = 15;
 
 // The three master libraries. 'twitter' is the only one with several types, so it is also
 // the only one that offers a whole-TYPE pin (the API rejects a type pin on any other lane);
@@ -202,7 +207,7 @@ function BandSection({
             <button
               type="button"
               className="btn btn-small"
-              onClick={() => setShown((current) => current + BAND_PAGE)}
+              onClick={() => setShown((current) => current + BAND_MORE)}
             >
               {STR.refShowMore}
               <span className="ref-thumb-more-count">
@@ -351,8 +356,24 @@ export default function ReferencePicker({
   // The browse view: the same enabled-only pool, re-bucketed by what each master can
   // hold. Built off `groups` rather than `library.images` so the brand and category
   // filters above still decide the pool — a CMO master must not appear in a DGIPR run.
+  //
+  // SORTED BEFORE GROUPING (groupByBand preserves input order), with the SAME comparator
+  // /references uses, so a band reads identically on both pages: newest first, and a
+  // library page's disabled masters last. The pool here is enabled-only, so the isActive
+  // term is inert — it is kept so the two orderings cannot drift. Without the sort the
+  // band inherited `groups`' order, which is clustered by reference TYPE, so the same
+  // library came out arranged one way on this form and another way on /references.
   const bands = useMemo(
-    () => groupByBand(groups.flatMap((group) => group.images)),
+    () =>
+      groupByBand(
+        groups
+          .flatMap((group) => group.images)
+          .sort(
+            (a, b) =>
+              Number(b.isActive) - Number(a.isActive) ||
+              b.createdAt.localeCompare(a.createdAt),
+          ),
+      ),
     [groups],
   );
 

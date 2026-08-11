@@ -39,8 +39,16 @@ export function ChatWorkspace({ threadId }: { threadId: string | null }) {
   const attachments = useChatAttachments();
 
   const send = useCallback(
-    (content: string) => {
-      const payload = attachments.toPayload();
+    async (content: string): Promise<boolean> => {
+      // Uploading, reading and transcribing happen HERE, not when the file was picked: an
+      // attachment the officer thought better of, or a chat abandoned before sending, costs
+      // nothing at all.
+      const payload = await attachments.prepare();
+      if (payload.length === 0 && content.trim() === '') {
+        // Every attachment failed and there is no question to carry. The chips report why and
+        // stay put, so the officer can remove them or try again.
+        return false;
+      }
       // The tray is cleared as the turn leaves, exactly as the box is: the attachments now
       // belong to the message on screen, and leaving them behind would silently re-send the
       // same document with the next question.
@@ -49,6 +57,7 @@ export function ChatWorkspace({ threadId }: { threadId: string | null }) {
         // The rail's title and ordering only exist once the turn has landed.
         void list.refresh();
       });
+      return true;
     },
     [attachments, chat, list],
   );
@@ -129,11 +138,10 @@ export function ChatWorkspace({ threadId }: { threadId: string | null }) {
           attachments={attachments.attachments}
           preparing={attachments.preparing}
           full={attachments.full}
-          onAddImages={(files) => void attachments.addImages(files)}
-          onAddDocumentSlot={attachments.addDocumentSlot}
-          onDocumentText={attachments.setDocumentText}
-          onAddAudio={(files) => void attachments.addAudio(files)}
-          onAddYouTube={(video) => void attachments.addYouTube(video)}
+          onAddImages={attachments.addImages}
+          onAddDocuments={attachments.addDocuments}
+          onAddAudio={attachments.addAudio}
+          onAddYouTube={attachments.addYouTube}
           onRemoveAttachment={attachments.remove}
           onSend={send}
           onStop={chat.stop}

@@ -3,8 +3,9 @@
 // The rail of past chats: this browser's own above everyone else's.
 //
 // The split is ordering only (lib/chatDraft.ts) — every chat here is readable by anyone in the
-// department, which the notice at the foot says plainly. A chat feels private in a way an
-// intake does not, so it is worth stating rather than leaving to be discovered.
+// department, which is exactly why BOTH groups are listed here rather than only this browser's
+// own: the rail showing everyone's chats is what says the surface is shared. It carried a
+// sentence saying so too, removed on the officers' request as clutter.
 
 import Link from 'next/link';
 import { useState } from 'react';
@@ -107,7 +108,12 @@ export function ChatThreadRail({
       </div>
 
       <div className="chat-rail-scroll">
-        {loading ? <p className="chat-rail-empty">…</p> : null}
+        {loading ? (
+          <p className="chat-rail-empty" role="status">
+            <span className="spinner" aria-hidden="true" />
+            <span className="visually-hidden">{STR.chatLoading}</span>
+          </p>
+        ) : null}
         {error !== null ? (
           <p className="chat-rail-error" role="alert">
             {STR.chatListFailed}
@@ -166,8 +172,6 @@ export function ChatThreadRail({
           </p>
         ) : null}
       </div>
-
-      <p className="chat-rail-notice">{STR.chatListNotice}</p>
     </aside>
   );
 }

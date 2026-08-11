@@ -836,6 +836,57 @@ textarea.note-input {
   resize: vertical;
 }
 
+/* The create form's text box with its submit anchored inside, bottom-right (a
+   composer, not a form field followed by a button). The wrapper is only a
+   positioning context — the textarea keeps its own border and focus ring, so the
+   field looks identical to every other one in the product.
+
+   Two rules are load-bearing. The textarea reserves room at the bottom for the
+   button, or a long pasted article scrolls its last line underneath it. And resize
+   is off HERE only: the native grip sits in exactly the corner the button occupies,
+   so dragging it would send the run instead. 260px of default height is what pays
+   for that. */
+.note-field {
+  position: relative;
+  margin-top: 10px;
+}
+
+.note-field .note-input {
+  /* block, or the inline-level textarea leaves a descender gap under itself inside
+     the wrapper and the absolutely-placed button sits that much off the field. */
+  display: block;
+  padding-bottom: 74px;
+  resize: none;
+}
+
+/* `.btn.note-send`, not `.note-send`: this block sits ABOVE `.btn-primary`, so at
+   equal specificity that rule's `padding: 14px 34px` would win — 68px of padding in
+   a 56px border-box collapses the content area to zero and the 20px icon, a flex
+   item, shrinks away with it (the button then renders as a padded rectangle with
+   nothing in it). The extra class beats it without moving either block. */
+.btn.note-send {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  width: 56px;
+  min-height: 56px;
+  padding: 0;
+  border-radius: 50%;
+}
+
+/* Belt and braces: the icon must never be the thing that gives way if this button
+   is ever squeezed again. */
+.note-send > svg {
+  flex-shrink: 0;
+}
+
+/* The shared spinner is accent-on-accent-soft, which disappears on the maroon
+   fill; on this button it has to read as white. */
+.note-send .spinner {
+  border-color: rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+}
+
 .btn {
   display: inline-flex;
   align-items: center;
@@ -1024,6 +1075,21 @@ textarea.note-input {
 
 .option-field .hint {
   margin-top: 4px;
+}
+
+/* The upload intake EMBEDDED in the caller's own card (`embedded` on DocumentIntake), for
+   a surface where the file is a second source for the text box above it rather than a
+   replacement for it. A rule and a gap instead of a nested card, which read as a separate
+   form; the heading drops to an <h3> in the same move, so it sits under the card's own. */
+.doc-intake-embedded {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.doc-intake-embedded .card-title {
+  margin: 0 0 6px;
+  font-size: 1.02rem;
 }
 
 /* Same slot in the stack, but for a control that draws its own structure (the folded
@@ -2365,6 +2431,16 @@ details.fold[aria-disabled='true'] summary {
   width: 32px;
   height: 32px;
   border-radius: 9px;
+}
+
+/* A destructive icon control (drop this document). Quiet until hovered, then it states
+   itself in colour — never colour ALONE, the label being on title + aria-label like every
+   other .icon-btn. It must sit AFTER .icon-btn:hover, which has the same specificity and
+   would otherwise paint a delete button in the accent. */
+.icon-btn-danger:hover:not(:disabled) {
+  background: var(--err-soft);
+  border-color: var(--err);
+  color: var(--err);
 }
 
 .poster-icon-actions {
@@ -3974,6 +4050,72 @@ textarea.ref-desc-input {
   font-size: 1.02rem;
 }
 
+/* ---------- disclosure (components/Disclosure.tsx) ----------
+
+   A collapsible section inside a card. Same shape as the template picker's own disclosure
+   variant below, which predates it and is left as it is — that one's head is wired to the
+   picker's selection state. The rule both follow: folding a question shut may hide the
+   CONTROL but never the ANSWER, which is what the summary on the right is for. */
+.disclosure-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  background: none;
+  border: 0;
+  padding: 2px 0;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.disclosure-chevron {
+  display: flex;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.disclosure-head:hover .disclosure-chevron,
+.disclosure-head:hover .disclosure-label {
+  color: var(--accent);
+}
+
+.disclosure-label {
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+
+/* Pushed to the far end: what the run will actually produce. */
+.disclosure-summary {
+  margin-inline-start: auto;
+  color: var(--muted);
+  font-size: 0.9rem;
+  text-align: end;
+}
+
+.disclosure-summary-set {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* The body stays in the DOM while closed (the controls inside hold state and a fetched
+   template library), so the fold is `hidden` rather than an unmount — and this rule is what
+   keeps `display: block` below from overriding the UA's [hidden]. */
+.disclosure-body {
+  margin-top: 12px;
+}
+
+.disclosure-body[hidden] {
+  display: none;
+}
+
+/* A pager folded inside a card (the /dlo work list) sits directly under its last row, so it
+   does not need the 28px it takes under a full page of results. */
+.disclosure-body > .pagination {
+  margin-top: 16px;
+}
+
 /* The 'disclosure' variant: the same gallery behind one collapsed optional row. Closed
    MEANS automatic, which is why this variant carries no आपोआप / स्वतः निवडा card pair. */
 .ref-picker-disclosure-head {
@@ -4452,7 +4594,7 @@ a.thread-node:hover {
   border-color: var(--err);
 }
 
-/* ---------- photographs of documents (components/ImageFilePicker) ----------
+/* ---------- photographs of documents (components/ImageThumbnailGrid) ----------
    A grid rather than the .file-row list above, and that is the whole reason this block
    exists: a recording is a name and a size, while a photograph has to be LOOKED at — half a
    dozen phone snaps of a GR are told apart by what they show, never by IMG_20260811.jpg. The
@@ -5992,16 +6134,28 @@ a.thread-node:hover {
    colour — is the same system as every other page. */
 
 .chat-page {
-  /* Fills whatever .app-main has left after the footer. min-height: 0 is what
-     lets the scroller inside bound itself instead of pushing the page taller. */
-  flex: 1 1 auto;
-  min-height: 0;
+  /* The conversation owns the whole viewport; the footer sits BELOW it and is
+     reached by scrolling the page, rather than taking ~90px off every chat.
+     A DEFINITE height (not min-height) is what lets the two scrollers inside
+     bound themselves instead of growing the document. */
+  flex: none;
+  height: 100dvh;
   display: grid;
-  grid-template-columns: 288px minmax(0, 1fr);
-  background: var(--card);
+  grid-template-columns: 296px minmax(0, 1fr);
+
+  /* Local palette. The conversation is the warm canvas the rest of the product
+     already uses; white is reserved for the things that sit ON it — the answers
+     and the composer — so the page reads as layers rather than one white sheet.
+     The rail is a step deeper again, which is also what separates it from the
+     white app sidebar immediately to its left. */
+  --chat-canvas: #f7f1e7;
+  --chat-rail-bg: #efe6d8;
+
+  background: var(--chat-canvas);
 }
 
-/* The footer's usual breathing room would otherwise eat 48px of conversation. */
+/* The footer's usual breathing room would otherwise open a sand-coloured gap
+   under a full-height conversation. */
 .chat-page + .site-footer {
   margin-top: 0;
 }
@@ -6013,24 +6167,40 @@ a.thread-node:hover {
   flex-direction: column;
   min-height: 0;
   border-right: 1px solid var(--border);
-  background: var(--surface);
+  background: var(--chat-rail-bg);
 }
 
 .chat-rail-head {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 16px 14px;
-  border-bottom: 1px solid var(--border);
+  padding: 14px 10px 6px;
 }
 
+/* A row in the list, not a card sitting on top of it: flat until hovered, aligned
+   with the chat titles below it. Deliberately under the 56px primary height too —
+   this is navigation, and the screen's primary action is Send. */
 .chat-rail-new {
   flex: 1;
-  /* Deliberately under the 56px primary height: this is navigation inside a dense
-     list, not the screen's primary action — that is Send. */
-  min-height: 46px;
-  gap: 8px;
-  font-size: 1rem;
+  justify-content: flex-start;
+  min-height: 44px;
+  padding: 10px 12px;
+  gap: 10px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  border-radius: var(--r-sm);
+  /* It is a Link, so the global anchor underline would otherwise show. */
+  text-decoration: none;
+}
+
+/* :not(:disabled) so this outweighs .btn's own hover rule rather than racing it. */
+.chat-rail-new:hover:not(:disabled) {
+  background: var(--card);
+  border-color: transparent;
+  color: var(--accent-dark);
 }
 
 /* Only the drawer needs a close button. */
@@ -6042,7 +6212,7 @@ a.thread-node:hover {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 12px 10px 20px;
+  padding: 4px 10px 24px;
 }
 
 .chat-rail-group {
@@ -6159,15 +6329,6 @@ a.thread-node:hover {
   cursor: pointer;
 }
 
-.chat-rail-notice {
-  margin: 0;
-  padding: 12px 16px;
-  border-top: 1px solid var(--border);
-  font-size: 0.8rem;
-  line-height: 1.45;
-  color: var(--muted);
-}
-
 .chat-rail-scrim {
   display: none;
 }
@@ -6181,12 +6342,18 @@ a.thread-node:hover {
   min-height: 0;
 }
 
+/* The bar exists for the DRAWER TOGGLE, which only appears below 900px — see the
+   min-width block under it, where the whole header stops taking any space. */
 .chat-bar {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 12px 20px;
+  padding: 13px 24px;
   border-bottom: 1px solid var(--border);
+  /* A translucent white pane over the warm canvas, so the header reads as a
+     surface without being another opaque white slab. */
+  background: rgba(255, 255, 255, 0.62);
+  backdrop-filter: blur(10px);
 }
 
 .chat-bar-toggle {
@@ -6202,6 +6369,27 @@ a.thread-node:hover {
   text-overflow: ellipsis;
 }
 
+/* Wide: no header at all. The rail already names the open chat, so the bar was
+   ~50px of every conversation spent repeating it, and the toggle it exists for is
+   hidden at this width anyway. `display: contents` rather than `none` because the
+   <h1> is removed from SIGHT, not from the document — a page with no heading is a
+   page a screen reader cannot summarise. */
+@media (min-width: 901px) {
+  .chat-bar {
+    display: contents;
+  }
+
+  .chat-bar-title {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
 .chat-pane {
   display: flex;
   flex-direction: column;
@@ -6209,11 +6397,45 @@ a.thread-node:hover {
   flex: 1;
 }
 
+/* An empty chat centres the greeting and brings the composer up under it, rather
+   than leaving the box marooned at the foot of an empty screen. The composer is
+   the SAME element in both states — moved by layout, never re-mounted — so a
+   half-typed question and a picked attachment survive the first send. */
+.chat-pane--empty {
+  justify-content: center;
+}
+
+.chat-pane--empty .chat-scroll {
+  flex: 0 1 auto;
+  overflow: visible;
+  padding-bottom: 0;
+  /* Nothing is scrolling, so the fade would only dim the greeting. */
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+.chat-pane--empty .chat-composer-wrap {
+  padding-bottom: 10vh;
+}
+
 .chat-scroll {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 24px 20px 8px;
+  padding: 28px 20px 26px;
+  /* The last line does not get sliced off at the scroll boundary — it fades out
+     under the composer. The 24px it fades over is the padding above, so nothing
+     is dimmed once the conversation is scrolled to its end. */
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    #000 calc(100% - 24px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    #000 calc(100% - 24px),
+    transparent 100%
+  );
 }
 
 /* One measure for the turns and the composer, so the box lines up under the text
@@ -6225,36 +6447,24 @@ a.thread-node:hover {
 }
 
 .chat-empty {
-  padding: 12vh 0 0;
+  padding: 0 0 24px;
   text-align: center;
 }
 
 .chat-empty-title {
-  margin: 0 0 8px;
-  font-size: 1.5rem;
+  margin: 0 0 10px;
+  font-size: 1.9rem;
+  color: var(--accent-dark);
 }
 
 .chat-empty-hint {
-  margin: 0 auto 18px;
+  margin: 0 auto;
   max-width: 46ch;
   color: var(--muted);
 }
 
-.chat-empty-notice {
-  margin: 0 auto;
-  max-width: 52ch;
-  padding: 12px 16px;
-  border-radius: var(--r-md);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  font-size: 0.88rem;
-  line-height: 1.5;
-  color: var(--muted);
-  text-align: start;
-}
-
 .chat-turn {
-  margin: 0 0 26px;
+  margin: 0 0 28px;
 }
 
 .chat-turn--user {
@@ -6262,14 +6472,19 @@ a.thread-node:hover {
   justify-content: flex-end;
 }
 
-/* A question is contained and belongs to whoever asked it; an answer is prose and
-   runs the full measure with no container at all. */
+/* A question is contained and belongs to whoever asked it, so it sits in a pill on
+   the right; an answer is prose to be read and runs the full measure with no
+   container at all. The pill is the raised white surface and the answer is written
+   straight onto the canvas — the same relationship ChatGPT draws, inverted for a
+   light warm page. */
 .chat-bubble {
-  max-width: 85%;
-  padding: 12px 16px;
+  max-width: 82%;
+  padding: 12px 18px;
   border-radius: var(--r-lg);
   border-top-right-radius: var(--r-sm);
-  background: var(--accent-soft);
+  background: var(--card);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
 }
 
 .chat-user-text {
@@ -6279,13 +6494,10 @@ a.thread-node:hover {
   overflow-wrap: anywhere;
 }
 
+/* One rule for the answer whether it is still streaming or settled — they are the
+   same renderer now, which is what stops the text reflowing when the turn ends. */
 .chat-answer {
   overflow-wrap: anywhere;
-}
-
-.chat-answer--streaming {
-  margin: 0;
-  white-space: pre-wrap;
 }
 
 .chat-turn-error {
@@ -6362,6 +6574,15 @@ a.thread-node:hover {
   }
 }
 
+/* Opening a chat: a spinner where the turns will be, centred on the column so it
+   lands where the conversation is about to. */
+.chat-loading {
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding: 28px 0;
+}
+
 .chat-note {
   margin: 0 0 20px;
   color: var(--muted);
@@ -6395,6 +6616,7 @@ a.thread-node:hover {
   object-fit: cover;
 }
 
+/* Tinted, not white: these sit inside the white question pill. */
 .chat-chip {
   display: inline-flex;
   align-items: center;
@@ -6402,7 +6624,7 @@ a.thread-node:hover {
   max-width: 100%;
   padding: 5px 10px;
   border-radius: 999px;
-  background: var(--card);
+  background: var(--surface);
   border: 1px solid var(--border);
   font-size: 0.82rem;
 }
@@ -6420,11 +6642,11 @@ a.thread-node:hover {
 
 /* ----- the composer ----- */
 
+/* No border and no white band: the box itself is the surface here, floating on
+   the canvas the conversation scrolls over. */
 .chat-composer-wrap {
   flex: none;
-  padding: 8px 20px 16px;
-  border-top: 1px solid var(--border);
-  background: var(--card);
+  padding: 10px 20px 20px;
 }
 
 .chat-composer {
@@ -6433,9 +6655,7 @@ a.thread-node:hover {
   gap: 10px;
 }
 
-/* The shared upload card, sized to sit inside a composer rather than on a page of
-   its own. */
-.chat-document,
+/* The link card, sized to sit inside a composer rather than on a page of its own. */
 .chat-youtube {
   font-size: 0.95rem;
 }
@@ -6509,16 +6729,19 @@ a.thread-node:hover {
   display: flex;
   align-items: flex-end;
   gap: 8px;
-  padding: 8px 8px 8px 16px;
-  border: 1.5px solid var(--border-strong);
+  padding: 8px 8px 8px 18px;
+  border: 1.5px solid var(--border);
   border-radius: var(--r-xl);
   background: var(--card);
-  box-shadow: var(--shadow-sm);
-  transition: border-color 0.15s ease;
+  box-shadow: var(--shadow-md);
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
 .chat-input-row:focus-within {
   border-color: var(--accent);
+  box-shadow: var(--shadow-lg);
 }
 
 .chat-input {
@@ -6565,21 +6788,37 @@ a.thread-node:hover {
   background: var(--accent-soft);
 }
 
+/* The one primary action on this screen, so it is filled rather than outlined —
+   the tools beside it are ghosts and the box behind it is white. Icon-only and
+   round: its label lives on title + aria-label (see ChatComposer). */
 .chat-send {
-  min-height: 46px;
-  padding: 0 18px;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  min-height: 0;
+  padding: 0;
   margin-left: 6px;
-  gap: 6px;
-  border-radius: 999px;
-  font-size: 0.95rem;
+  border-radius: 50%;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
 }
 
-.chat-send--stop {
+.chat-send:hover:not(:disabled) {
+  background: var(--accent-dark);
+  border-color: var(--accent-dark);
+  color: #fff;
+}
+
+.chat-send--stop,
+.chat-send--stop:hover:not(:disabled) {
   background: var(--muted);
+  border-color: var(--muted);
+  color: #fff;
 }
 
 .chat-composer-note,
-.chat-composer-hint,
 .chat-composer-error {
   margin: 0;
   font-size: 0.82rem;
@@ -6590,15 +6829,22 @@ a.thread-node:hover {
   color: var(--warn);
 }
 
-.chat-composer-hint {
-  color: var(--muted);
-}
-
 .chat-composer-error {
   color: var(--err);
 }
 
-/* ----- narrow: the rail becomes a drawer ----- */
+/* ----- narrow ----- */
+
+/* Below this width the shell puts a sticky topbar above .app-main, so a full
+   100dvh conversation would hang that far past the fold. 63px is that bar,
+   measured: 42px logo row + 2 x 10px padding + its hairline. */
+@media (max-width: 860px) {
+  .chat-page {
+    height: calc(100dvh - 63px);
+  }
+}
+
+/* ----- the rail becomes a drawer ----- */
 
 @media (max-width: 900px) {
   .chat-page {
@@ -6649,16 +6895,6 @@ a.thread-node:hover {
 
   .chat-bubble {
     max-width: 92%;
-  }
-
-  /* The labels go; the icons carry the meaning at this width. */
-  .chat-send-label {
-    display: none;
-  }
-
-  .chat-send {
-    padding: 0;
-    width: 46px;
   }
 }
 

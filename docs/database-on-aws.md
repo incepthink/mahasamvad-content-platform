@@ -56,7 +56,12 @@ pnpm db:tunnel      # leave running in its own terminal, then `pnpm dev`
 ```
 
 `scripts/db-tunnel.sh` needs only a logged-in `aws` CLI (no pem — EC2 Instance Connect pushes
-a throwaway key). The local `.env` is already pointed at it:
+a throwaway key). It **reconnects on its own**: the long haul to us-east-2 resets connections
+often enough that a one-shot tunnel is not good enough when the whole local app sits behind
+it — a silent drop otherwise surfaces minutes later as a bare `fetch failed` from some
+unrelated page. A drop costs a few seconds and prints `Tunnel dropped — reconnecting`.
+
+The local `.env` is already pointed at it:
 
 ```
 SUPABASE_URL=http://localhost:8000

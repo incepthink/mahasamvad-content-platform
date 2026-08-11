@@ -16,6 +16,15 @@ import type { ChatThreadSummary } from '@dgipr/schemas';
 import { listChatThreads } from './api';
 import { readMyChatIds } from './chatDraft';
 
+// Held OUTSIDE the hook, because opening another chat re-mounts it: /chat and /chat/[id]
+// are separate pages, and two different [id]s re-mount too, so the state started at null
+// every time — the rail emptied and flashed a spinner over a list that had not changed.
+// The last known rows are seeded into state and then revalidated in the background, so the
+// list is only ever replaced by a newer one. Module scope, not localStorage: this is a
+// within-tab convenience, and a first load should still fetch.
+let cachedThreads: ChatThreadSummary[] | null = null;
+let cachedMyIds: readonly string[] = [];
+
 export function useChatThreadList(): {
   mine: ChatThreadSummary[];
   others: ChatThreadSummary[];
@@ -23,16 +32,21 @@ export function useChatThreadList(): {
   error: string | null;
   refresh: () => Promise<void>;
 } {
-  const [threads, setThreads] = useState<ChatThreadSummary[] | null>(null);
+  const [threads, setThreads] = useState<ChatThreadSummary[] | null>(
+    cachedThreads,
+  );
   const [error, setError] = useState<string | null>(null);
   // Read once per refresh rather than per render — localStorage reads are synchronous.
-  const [myIds, setMyIds] = useState<readonly string[]>([]);
+  const [myIds, setMyIds] = useState<readonly string[]>(cachedMyIds);
 
   const refresh = useCallback(async () => {
     try {
       const rows = await listChatThreads();
+      const ids = readMyChatIds();
+      cachedThreads = rows;
+      cachedMyIds = ids;
       setThreads(rows);
-      setMyIds(readMyChatIds());
+      setMyIds(ids);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

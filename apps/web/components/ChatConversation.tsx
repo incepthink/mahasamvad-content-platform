@@ -15,6 +15,7 @@ import type {
 } from '@dgipr/schemas';
 import { ChatComposer } from './ChatComposer';
 import { ChatMessageBubble } from './ChatMessageBubble';
+import { MarkdownText } from './MarkdownText';
 import { STR } from '../lib/strings';
 import type { DraftAttachment } from '../lib/useChatAttachments';
 
@@ -33,8 +34,7 @@ export function ChatConversation({
   preparing,
   full,
   onAddImages,
-  onAddDocumentSlot,
-  onDocumentText,
+  onAddDocuments,
   onAddAudio,
   onAddYouTube,
   onRemoveAttachment,
@@ -51,12 +51,11 @@ export function ChatConversation({
   preparing: boolean;
   full: boolean;
   onAddImages: (files: readonly File[]) => void;
-  onAddDocumentSlot: () => void;
-  onDocumentText: (slot: string, name: string, text: string) => void;
+  onAddDocuments: (files: readonly File[]) => void;
   onAddAudio: (files: readonly File[]) => void;
   onAddYouTube: (video: YouTubeVideo) => void;
   onRemoveAttachment: (key: string) => void;
-  onSend: (content: string) => void;
+  onSend: (content: string) => Promise<boolean>;
   onStop: () => void;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
@@ -86,9 +85,16 @@ export function ChatConversation({
   }, [thread?.id]);
 
   const empty = messages.length === 0 && streaming === null;
+  // The centred layout belongs to a chat with nothing in it, NOT to one still being
+  // fetched — otherwise opening a chat throws the composer into the middle of the screen
+  // and back down again as the turns land.
+  const centred = empty && !loading;
 
   return (
-    <section className="chat-pane">
+    // An empty chat centres the greeting with the composer under it (CSS only — the
+    // composer element is the same one in both states, so nothing typed or attached is
+    // lost when the first message moves it to the foot of the screen).
+    <section className={centred ? 'chat-pane chat-pane--empty' : 'chat-pane'}>
       <div
         className="chat-scroll"
         ref={scroller}
@@ -97,13 +103,17 @@ export function ChatConversation({
         aria-busy={sending}
       >
         <div className="chat-column">
-          {loading && empty ? <p className="chat-note">…</p> : null}
+          {loading && empty ? (
+            <p className="chat-loading" role="status">
+              <span className="spinner spinner-lg" aria-hidden="true" />
+              <span className="visually-hidden">{STR.chatLoading}</span>
+            </p>
+          ) : null}
 
           {empty && !loading ? (
             <div className="chat-empty">
               <h2 className="chat-empty-title">{STR.chatEmptyTitle}</h2>
               <p className="chat-empty-hint">{STR.chatEmptyHint}</p>
-              <p className="chat-empty-notice">{STR.chatEmptyNotice}</p>
             </div>
           ) : null}
 
@@ -125,12 +135,15 @@ export function ChatConversation({
                   {STR.chatThinking}
                 </p>
               ) : (
-                // Plain text while streaming, Markdown once settled: re-parsing half-written
-                // Markdown on every token makes headings and lists flicker in and out as their
-                // syntax completes.
-                <p className="chat-answer chat-answer--streaming">
-                  {streaming}
-                </p>
+                // Markdown WHILE it streams, not plain text that recompiles at the end.
+                // It used to render raw, on the argument that re-parsing half-written
+                // Markdown flickers as each `#` and `**` completes — but the cost of that
+                // was worse: the officer read `## शीर्षक` and `**ठळक**` for the whole
+                // answer and then watched the finished text reflow under them. The parser
+                // is a pure function over the string so far, so there is nothing to keep in
+                // sync; a token mid-word is momentarily literal and resolves on the next
+                // delta.
+                <MarkdownText text={streaming} className="chat-answer" />
               )}
             </article>
           ) : null}
@@ -151,8 +164,7 @@ export function ChatConversation({
             full={full}
             sending={sending}
             onAddImages={onAddImages}
-            onAddDocumentSlot={onAddDocumentSlot}
-            onDocumentText={onDocumentText}
+            onAddDocuments={onAddDocuments}
             onAddAudio={onAddAudio}
             onAddYouTube={onAddYouTube}
             onRemove={onRemoveAttachment}

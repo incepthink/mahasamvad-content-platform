@@ -63,8 +63,12 @@ export const EMPTY_DRAFT: DloDraft = {
   heading: '',
   styleReference: '',
   instructions: '',
-  documentSlotIds: [0],
-  nextSlotId: 1,
+  // No document block until one is asked for. It used to open with one, because the block WAS
+  // the control — there was no other way to reach a file dialog. The sources card's own
+  // "कागदपत्र जोडा" button is that way now, so an empty block on arrival is just height in
+  // front of a form most runs never use it for.
+  documentSlotIds: [],
+  nextSlotId: 0,
   audioNames: [],
   imageNames: [],
   youtube: [],
@@ -127,12 +131,13 @@ export function readDraft(): DloDraft | null {
         typeof parsed.styleReference === 'string' ? parsed.styleReference : '',
       instructions:
         typeof parsed.instructions === 'string' ? parsed.instructions : '',
-      documentSlotIds:
-        slotIds.length > 0 ? slotIds : EMPTY_DRAFT.documentSlotIds,
+      // An empty list is a real answer now — "this draft has no documents" — where it used to
+      // be restored to one block because the form could not show none.
+      documentSlotIds: slotIds,
       nextSlotId:
-        typeof parsed.nextSlotId === 'number' && parsed.nextSlotId > 0
+        typeof parsed.nextSlotId === 'number' && parsed.nextSlotId >= 0
           ? parsed.nextSlotId
-          : Math.max(...slotIds, 0) + 1,
+          : Math.max(...slotIds, -1) + 1,
       audioNames: Array.isArray(parsed.audioNames)
         ? parsed.audioNames.filter(
             (name): name is string => typeof name === 'string',
