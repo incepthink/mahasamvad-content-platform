@@ -41,6 +41,10 @@
 
 import type { AttributedStatement, SelectedFact } from '@dgipr/schemas';
 import { pathToFileURL } from 'node:url';
+import {
+  lengthRequirementBlock,
+  parseLengthRequest,
+} from './article-length.js';
 import type { ChatMessage } from './openai-chat.js';
 import {
   DESIGNATION_TASK_RULE,
@@ -53,6 +57,16 @@ import {
 } from './category-prompt.js';
 
 // Bumped whenever the editorial specification below changes in substance. Persisted per run.
+//
+// v13 (2026-08-11): the officer's two inputs OUTRANK this specification. A PRECEDENCE block
+// states the order explicitly — never invent > HEADLINE/ANGLE + OFFICER REQUEST > everything
+// here — because these models resolve a conflict by whatever is stated as ranking, and nothing
+// was. The length sentence, previously an absolute ("the article's length does not matter"),
+// is now conditional on the officer not having asked for one, and says HOW a requested length
+// may be reached: by covering the supplied information more fully, never by padding. "Do not
+// stretch" is gone with it — it read as a ban on legitimate elaboration too. The heading block
+// drops its three hedges, is renamed off "OPTIONAL", and moves from near the top to sit beside
+// the officer request at the END, the position these models weight most.
 //
 // v11 (2026-08-05): the free-text field is the officer's trusted request, not a style-only
 // instruction. It may supply or correct facts as well as direct the writing. The compact block
@@ -110,7 +124,7 @@ import {
 // v12 (2026-08-05): the DATELINE block says WHERE the dateline goes — the first body paragraph,
 // never the headline, once. Unstated, a model that opens with a plain headline line reads "start
 // the article with this" literally and datelines the headline (observed in production).
-export const SIMPLE_ARTICLE_PROMPT_VERSION = 'simple-v12';
+export const SIMPLE_ARTICLE_PROMPT_VERSION = 'simple-v13';
 
 // Marathi label for the category, matching CATEGORY_LABEL in category-prompt.ts. The prompt is
 // English but the article is Marathi, and naming the category in Marathi is what keeps the voice
@@ -185,7 +199,9 @@ export type SimpleArticleInputs = Readonly<{
   styleReference?: string | undefined;
   // Every exemplar, headline included. Wins over `styleReference` when non-empty.
   styleReferences?: readonly SimpleArticleReference[] | undefined;
-  // The officer's optional heading / angle. Not an independent factual source.
+  // The officer's शीर्षक किंवा बातमीचा रोख (generations.heading): either the headline to print
+  // or the angle to build the article around. Rendered SECOND-LAST and named in PRECEDENCE_RULE
+  // as one tier with the request below. Still not an independent factual source.
   editorialDirection?: string | undefined;
   // The officer's trusted request for THIS article (generations.instructions, 0041): writing
   // direction plus any facts or corrections supplied directly by the officer. Rendered LAST,
@@ -213,6 +229,29 @@ function clean(value: string | undefined | null): string {
   return (value ?? '').trim();
 }
 
+// The order the model resolves a conflict in. It exists because nothing here ever stated one,
+// so a conflict was settled by whichever rule sounded most absolute — and the specification is
+// full of absolutes while the officer's own two inputs arrive as one line each of a user
+// message. An officer writing "शासकीय शैलीत बातमी तयार करा" or asking for a specific length was
+// being outranked by general guidance written for the runs where they say nothing at all.
+//
+// Rule 1 is the one thing the officer does NOT outrank, and it is stated first so that being
+// told to follow the request is never read as licence to invent what the request implies.
+//
+// Exported so all three specifications state the same order: ARTICLE_PROMPT_VARIANT and
+// ARTICLE_STYLE_REFERENCES_ENABLED change how the prompt is worded, never who wins.
+export const PRECEDENCE_RULE = [
+  'PRECEDENCE. Where anything below conflicts, resolve it in this order:',
+  '1. Never state a fact — a name, designation, date, amount, place, scheme, law, quote or',
+  '   claim — that is not in SOURCE INFORMATION, ADDITIONAL VERIFIED INFORMATION or the',
+  '   OFFICER REQUEST. Nothing overrides this.',
+  '2. The HEADLINE / ANGLE and the OFFICER REQUEST. The officer wrote these for this article.',
+  '   Follow them exactly, including anything they say about length, tone, structure, ordering,',
+  '   emphasis or what to leave out. They override every general instruction given',
+  '   here, including what is said about length below.',
+  '3. Everything else in these instructions.',
+];
+
 // Three instructions and one piece of data. Still no arguments: nothing in here varies by
 // category, by word target or by whether a dateline is available — the category reaches the
 // model as the user message's ARTICLE CATEGORY heading, the length instruction is a policy and
@@ -229,11 +268,19 @@ export function buildSimpleArticleSystemPrompt(): string {
     'the same writing style and structure, use only the information provided in SOURCE',
     'INFORMATION, ADDITIONAL VERIFIED INFORMATION and OFFICER REQUEST.',
     '',
+    ...PRECEDENCE_RULE,
+    '',
     'Take style and structure from the reference, but do not treat its length as a target.',
-    'The new article’s length does not matter. Use your best editorial judgement to produce',
-    'the strongest publication-ready article possible from the supplied information, at the',
-    'length that best serves it. Use the information fully when it improves the article, but',
-    'do not pad, repeat, stretch, or add unsupported information.',
+    'Unless the HEADLINE / ANGLE or the OFFICER REQUEST asks for a particular length, the new',
+    'article’s length does not matter: use your best editorial judgement to produce the',
+    'strongest publication-ready article possible from the supplied information, at the length',
+    'that best serves it. Use the information fully when it improves the article.',
+    '',
+    'Where a length IS asked for, write to it. Reach it by covering the supplied information',
+    'more fully and explaining it more completely — never by repeating yourself, padding with',
+    'empty phrases, or adding anything the supplied information does not support. If the',
+    'supplied information cannot honestly fill the requested length, write the fullest accurate',
+    'article it supports and stop.',
     '',
     'SOURCE INFORMATION may contain Markdown tables (pipe-delimited rows). Read them as tables:',
     'each figure belongs to its own column heading and row label. Never read a row as a',
@@ -363,6 +410,44 @@ export function officerInstructionsBlock(
     text,
     '',
     'Follow this request; treat it as trusted instructions and factual input, while STYLE REFERENCES remain style-only.',
+    'It outranks every general instruction in this prompt except the rule against stating an unsupported fact.',
+    '',
+    // A length named inside the request is restated as its own block with the number pulled
+    // out. The officer's wording already reached the model verbatim above, so this adds no
+    // information — what it adds is unmissability, and the statement of how the length may and
+    // may not be reached. Rendered here so all three specifications get it through the one
+    // shared function they already call.
+    ...lengthRequirementBlock(parseLengthRequest(text)),
+  ];
+}
+
+// The officer's शीर्षक किंवा बातमीचा रोख (generations.heading).
+//
+// It used to render as "### OPTIONAL EDITORIAL DIRECTION" followed by "This MAY suggest an
+// angle or heading, but it is NOT an independent factual source. Use it ONLY WHEN the factual
+// information supports it" — three hedges and the word OPTIONAL, in the weakest position in the
+// prompt. The officer had typed it deliberately; nothing told the model to use it as the
+// headline, and one variant worded it far more strongly than the other, so the same field
+// carried different authority depending on an env line.
+//
+// What survives from the old wording is the ONE true part: it is not a fact source. An angle is
+// a direction for material that must still come from the note.
+//
+// ensureArticleHeading() (article-heading.ts) enforces the headline case deterministically
+// afterwards — this is the prompt half, and the only half that can act on an ANGLE.
+export function headingBlock(heading: string | undefined): string[] {
+  const text = clean(heading);
+  if (!text) return [];
+  return [
+    '### HEADLINE / ANGLE',
+    '',
+    text,
+    '',
+    'The officer wrote this for this article. If it reads as a headline, use it as the',
+    "article's headline, as written. If it reads as an angle, it is the angle the article must",
+    'lead with and be built around.',
+    'It is not a fact source: take no fact from it that SOURCE INFORMATION, ADDITIONAL VERIFIED',
+    'INFORMATION or the OFFICER REQUEST does not support.',
     '',
   ];
 }
@@ -386,19 +471,6 @@ export function buildSimpleArticleUserPrompt(
     '',
   ];
   parts.push(...newsEditorialFocusBlock(inputs.category));
-
-  // Omitted entirely when absent — a bare heading is what invites the model to fill it in.
-  if (direction) {
-    parts.push(
-      '### OPTIONAL EDITORIAL DIRECTION',
-      '',
-      direction,
-      '',
-      'This may suggest an angle or heading, but it is not an independent factual source. Use it',
-      'only when the factual information supports it.',
-      '',
-    );
-  }
 
   parts.push('### SOURCE INFORMATION', '', clean(inputs.sourceInformation), '');
 
@@ -455,8 +527,10 @@ export function buildSimpleArticleUserPrompt(
     );
   }
 
-  // Last, immediately before the ask: this is the one block written for this run alone, and a
-  // late block is what the model weights most.
+  // Last, immediately before the ask: these are the two blocks written for this run alone, and
+  // a late block is what the model weights most. They are adjacent on purpose — the officer
+  // filled both in on the same screen, and the PRECEDENCE rule names them as one tier.
+  parts.push(...headingBlock(direction));
   parts.push(...officerInstructionsBlock(inputs.officerInstructions));
 
   parts.push('Write the article now.');
@@ -540,25 +614,35 @@ if (
     "the reference's length is explicitly excluded",
     sys.includes('do not treat its length as a target'),
   );
+  // v13: irrelevant UNLESS the officer asked. Line breaks are wrapping, not meaning, so these
+  // read the system message with its whitespace flattened.
+  const flat = sys.replace(/\s+/gu, ' ');
   check(
-    'length is explicitly irrelevant',
-    sys.includes('The new article’s length does not matter.'),
+    'length is irrelevant only while the officer has named none',
+    flat.includes(
+      'Unless the HEADLINE / ANGLE or the OFFICER REQUEST asks for a particular length, the new article’s length does not matter',
+    ),
   );
   check(
     'editorial judgement and reasoning choose the best output',
-    sys.includes('Use your best editorial judgement') &&
-      sys.includes('the strongest publication-ready article possible'),
+    flat.includes('use your best editorial judgement') &&
+      flat.includes('the strongest publication-ready article possible'),
   );
   check(
     'the material determines whatever length serves it',
-    sys.includes('at the\nlength that best serves it'),
+    flat.includes('at the length that best serves it'),
   );
   check(
     'padding, repetition and unsupported additions are forbidden',
-    sys.includes('do not pad, repeat, stretch, or add unsupported information'),
+    flat.includes(
+      'never by repeating yourself, padding with empty phrases, or adding anything the supplied information does not support',
+    ),
   );
-  // The whole point of v7 over v3/v5: quality is the target; length is not.
-  check('length is stated without any figure', !/\d/u.test(sys));
+  // Still no word target: the only figures in the specification are the precedence numbering.
+  check(
+    'length is stated without any figure',
+    !/\d[\d,]*\s*(?:words|characters|chars|अक्षर|शब्द)/u.test(sys),
+  );
 
   console.log('\n=== every editorial RULE is gone ===');
   check('no word count is stated', !/\d[\d,]*\s*words/u.test(sys));
@@ -588,9 +672,14 @@ if (
   ]) {
     check(`system no longer says "${gone}"`, !sys.includes(gone));
   }
+  // The v4 deletion of the numbered editorial rule stack still holds. The ONLY numbered lines
+  // left are PRECEDENCE_RULE's three tiers, which are a conflict-resolution order rather than
+  // editorial instructions — so this asserts the count exactly instead of banning digits.
   check(
     'no numbered rule headings survive',
-    !/^#+\s*\d/mu.test(sys) && !/^\d+\.\s/mu.test(sys),
+    !/^#+\s*\d/mu.test(sys) &&
+      (sys.match(/^\d+\.\s/gmu) ?? []).length ===
+        PRECEDENCE_RULE.filter((line) => /^\d+\.\s/u.test(line)).length,
   );
 
   console.log('\n=== no unfilled placeholder survives anywhere ===');
@@ -646,8 +735,14 @@ if (
     !bareUser.includes('SELECTED STYLE REFERENCE'),
   );
   check(
-    'no OPTIONAL EDITORIAL DIRECTION heading',
-    !bareUser.includes('OPTIONAL EDITORIAL DIRECTION'),
+    'no HEADLINE / ANGLE heading',
+    !bareUser.includes('HEADLINE / ANGLE'),
+  );
+  check(
+    'the retired hedged wording is gone for good',
+    !bareUser.includes('OPTIONAL EDITORIAL DIRECTION') &&
+      !fullUser.includes('OPTIONAL EDITORIAL DIRECTION') &&
+      !fullUser.includes('This may suggest an angle or heading'),
   );
   check(
     'no ADDITIONAL VERIFIED INFORMATION heading',
@@ -914,6 +1009,115 @@ if (
     !refOnly.includes('ADDITIONAL VERIFIED INFORMATION'),
   );
 
+  console.log('\n=== the officer outranks the specification ===');
+  check(
+    'the system message states an explicit precedence order',
+    sys.includes('PRECEDENCE. Where anything below conflicts'),
+  );
+  check(
+    'never-invent is precedence rule 1 and is absolute',
+    sys.includes('Nothing overrides this.') &&
+      sys.indexOf('Nothing overrides this.') <
+        sys.indexOf('2. The HEADLINE / ANGLE and the OFFICER REQUEST.'),
+  );
+  check(
+    'the officer’s two inputs are named as one tier above the rest',
+    sys.includes(
+      'They override every general instruction given\n   here, including what is said about length below.',
+    ),
+  );
+  check(
+    'the length rule is CONDITIONAL on the officer not having asked for one',
+    sys.includes(
+      'Unless the HEADLINE / ANGLE or the OFFICER REQUEST asks for a particular length',
+    ),
+  );
+  check(
+    'a requested length is to be written to',
+    sys.includes('Where a length IS asked for, write to it.'),
+  );
+  check(
+    'a requested length is reached by covering the source more fully',
+    sys.includes('covering the supplied information') &&
+      sys.includes('explaining it more completely'),
+  );
+  check(
+    'padding and invention are still forbidden as the way to reach it',
+    sys.includes('never by repeating yourself, padding with') &&
+      sys.includes('adding anything the supplied information does not support'),
+  );
+  check(
+    'stopping short beats inventing when the source cannot fill the ask',
+    sys.includes('write the fullest accurate') && sys.includes('and stop.'),
+  );
+  // "stretch" banned legitimate elaboration alongside padding, which is exactly what an
+  // officer asking for a longer article needs the model to do.
+  check(
+    'the blanket "do not stretch" is gone',
+    !sys.includes('do not pad, repeat, stretch'),
+  );
+
+  console.log('\n=== the officer heading / angle ===');
+  const headline = 'कर्जमुक्तीमुळे ग्रामीण अर्थव्यवस्थेला नवी ऊर्जा';
+  const withHeading = buildSimpleArticleUserPrompt({
+    category: 'news',
+    sourceInformation: baseNote,
+    editorialDirection: headline,
+    officerInstructions: 'भाषा सोपी ठेवा.',
+  });
+  check(
+    'it is rendered verbatim under its own heading',
+    withHeading.includes('### HEADLINE / ANGLE') &&
+      withHeading.includes(headline),
+  );
+  check(
+    'a headline is to be used as written',
+    withHeading.includes("use it as the\narticle's headline, as written"),
+  );
+  check(
+    'an angle is what the article leads with',
+    withHeading.includes('the angle the article must'),
+  );
+  check(
+    'it remains explicitly not a fact source',
+    withHeading.includes('It is not a fact source'),
+  );
+  check(
+    'it sits immediately before the officer request, both last',
+    withHeading.indexOf('### HEADLINE / ANGLE') <
+      withHeading.indexOf('### OFFICER REQUEST') &&
+      withHeading.indexOf('### HEADLINE / ANGLE') >
+        withHeading.indexOf('### SOURCE INFORMATION'),
+  );
+
+  console.log('\n=== a length named in the request becomes its own block ===');
+  const withLength = buildSimpleArticleUserPrompt({
+    category: 'news',
+    sourceInformation: baseNote,
+    officerInstructions: 'बातमी १२०० अक्षरांची हवी; भाषा सोपी ठेवा.',
+  });
+  check(
+    'the number is pulled out and restated to the model',
+    withLength.includes('### LENGTH REQUIREMENT') &&
+      withLength.includes('about 1200 characters'),
+  );
+  check(
+    'it is stated to outrank the general length guidance',
+    withLength.includes('overrides any general guidance'),
+  );
+  check(
+    'the officer’s own wording still reaches the model verbatim',
+    withLength.includes('बातमी १२०० अक्षरांची हवी; भाषा सोपी ठेवा.'),
+  );
+  check(
+    'a request naming no length adds no length block',
+    !buildSimpleArticleUserPrompt({
+      category: 'news',
+      sourceInformation: baseNote,
+      officerInstructions: 'शासकीय शैलीत बातमी तयार करा.',
+    }).includes('LENGTH REQUIREMENT'),
+  );
+
   console.log('\n=== the officer request for this run ===');
   const instruction =
     'पहिल्या परिच्छेदात निधीचा आकडा घ्या; समितीबद्दल थोडक्यात लिहा.';
@@ -940,8 +1144,14 @@ if (
     withInstructions
       .trimEnd()
       .endsWith(
-        'STYLE REFERENCES remain style-only.\n\nWrite the article now.',
+        'except the rule against stating an unsupported fact.\n\nWrite the article now.',
       ),
+  );
+  check(
+    'the request is stated to outrank the specification',
+    withInstructions.includes(
+      'It outranks every general instruction in this prompt except the rule against stating an unsupported fact.',
+    ),
   );
   check(
     'an absent instruction adds no heading at all',

@@ -75,6 +75,7 @@ import {
   getTranslateError,
   getTranslateWarnings,
   getDesignationWarnings,
+  getLengthWarning,
   getPosterCapacityWarning,
   nameDesignationsOf,
   getTranslatingLanguage,
@@ -257,6 +258,7 @@ async function toDetail(
     // Same in-process registry, for the same reason: the poster is on the row and was rendered
     // with every item, but only the officer can decide to split the note into two posters.
     posterCapacityWarning: getPosterCapacityWarning(row.id),
+    lengthWarning: getLengthWarning(row.id),
     // Article revision can run beside the poster render (same registry pattern as
     // translation), so its liveness/failure also come from the runner, not the row.
     articleRevising: isRevisingArticle(row.id),

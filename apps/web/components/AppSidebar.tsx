@@ -20,6 +20,7 @@ import {
   Languages,
   LayoutTemplate,
   Menu,
+  MessagesSquare,
   Mic,
   PanelLeftClose,
   PanelLeftOpen,
@@ -40,6 +41,9 @@ const NAV_LINKS = [
   { href: '/glossary', label: STR.navGlossary, Icon: BookOpen },
   { href: '/references', label: STR.navReferences, Icon: LayoutTemplate },
   { href: '/video', label: STR.navVideo, Icon: Clapperboard },
+  // The catch-all, after the specific tools and before the two "look back at what happened"
+  // entries: it is a tool, not a record.
+  { href: '/chat', label: STR.navChat, Icon: MessagesSquare },
   { href: '/generations', label: STR.navHistory, Icon: History },
   { href: '/analytics', label: STR.navAnalytics, Icon: ChartColumn },
 ] as const;

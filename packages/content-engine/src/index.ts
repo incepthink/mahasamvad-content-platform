@@ -41,6 +41,19 @@ export {
   NEWS_DATELINE_TIME_ZONE,
   type ArticleDateline,
 } from './generation/article-dateline.js';
+// The officer's शीर्षक, enforced deterministically when it reads as a headline rather than an
+// angle, and the length they asked for, measured rather than instructed.
+export {
+  ensureArticleHeading,
+  looksLikeHeadline,
+} from './generation/article-heading.js';
+export {
+  measureArticleLength,
+  parseLengthRequest,
+  type LengthRequest,
+  type LengthUnit,
+  type LengthWarning,
+} from './generation/article-length.js';
 export { polishArticleWithSarvam } from './generation/polish-article.js';
 export { generateCopy } from './generation/generate-copy.js';
 export { extractFiveWOneH } from './generation/extract-5w1h.js';
@@ -167,6 +180,9 @@ export {
 } from './intake/pdf-shared.js';
 export { countPdfPages, OCR_MAX_TOTAL_PAGES } from './intake/pdf-split.js';
 export { extractDocxText } from './intake/docx.js';
+// A photograph of a document. Deliberately NOT behind ocr-provider.ts: that seam picks
+// between two PDF backends, and images always go through OpenAI — see image-ocr.ts.
+export { extractImageText } from './intake/image-ocr.js';
 export { extractTextFile } from './intake/text-file.js';
 // The kind-agnostic entry point every upload surface should use: probe for free, then
 // read only what the user selected. Wraps the PDF policy above rather than replacing it.
@@ -277,6 +293,15 @@ export {
   type ContinuousNarrationScene,
   type ShortenNarrationOptions,
 } from './video/shorten-narration.js';
+
+// The general assistant at /chat. Deliberately prompt-free — see the module header before
+// adding anything to the request.
+export {
+  MISC_CHAT_MODEL,
+  streamMiscChatReply,
+  type MiscChatTurn,
+  type MiscChatReply,
+} from './chat/misc-chat.js';
 
 // Cost metering — the runner opens a scope per job and reads the accumulator back.
 export {

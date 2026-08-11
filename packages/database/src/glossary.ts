@@ -201,24 +201,73 @@ export async function countGlossaryTerms(
   return count ?? 0;
 }
 
-// Returns the glossary terms whose Marathi form appears verbatim in `text`, sorted
-// by Marathi length descending so longer, more-specific terms win when they overlap
-// (e.g. a full name before a bare first name). Defaults to verified terms only —
-// only human-confirmed mappings should be locked into a translation. The verified
-// set is small, so we fetch it and filter in JS rather than query per term.
+// Which of a row's three surface forms is looked for in the text. 'marathi' is the default
+// and the only one every caller used until /translate gained a Marathi TARGET: there the
+// source is English or Hindi, so the Marathi column — the form the output must LAND on —
+// is the last thing that appears in the input.
+export type GlossaryMatchForm = 'marathi' | 'english' | 'hindi';
+
+// A Latin name must match as a whole phrase: "Wagh" is inside "Waghmare" and locking the
+// shorter row would rewrite a different person's name. Devanagari forms keep the plain
+// substring test they have always used — Marathi inflects by suffixing the surface form
+// (योजना → योजनेच्या), so a boundary check there would lose the common case.
+const LATIN_WORD_CHAR = /[A-Za-z0-9]/;
+
+function mentionsLatinPhrase(text: string, phrase: string): boolean {
+  const haystack = text.toLowerCase();
+  const needle = phrase.toLowerCase();
+  let from = 0;
+  for (;;) {
+    const at = haystack.indexOf(needle, from);
+    if (at < 0) return false;
+    from = at + needle.length;
+    const before = haystack[at - 1];
+    const after = haystack[at + needle.length];
+    if (
+      (before === undefined || !LATIN_WORD_CHAR.test(before)) &&
+      (after === undefined || !LATIN_WORD_CHAR.test(after))
+    ) {
+      return true;
+    }
+  }
+}
+
+// The surface form of `term` in `form`'s language. A row's Hindi spelling is optional and
+// defaults to the Marathi one — the same fallback the Hindi lock itself applies, so the
+// two cannot disagree about which string to look for.
+function glossaryForm(term: GlossaryTerm, form: GlossaryMatchForm): string {
+  if (form === 'english') return term.english.trim();
+  if (form === 'hindi') return (term.hindi ?? term.marathi).trim();
+  return term.marathi;
+}
+
+// Returns the glossary terms whose surface form appears verbatim in `text`, sorted by that
+// form's length descending so longer, more-specific terms win when they overlap (e.g. a
+// full name before a bare first name). Defaults to verified terms only — only
+// human-confirmed mappings should be locked into a translation. The verified set is small,
+// so we fetch it and filter in JS rather than query per term.
 export async function findGlossaryTermsInText(
   client: SupabaseClient,
   text: string,
-  opts: Readonly<{ verifiedOnly?: boolean }> = {},
+  opts: Readonly<{ verifiedOnly?: boolean; match?: GlossaryMatchForm }> = {},
 ): Promise<GlossaryTerm[]> {
   const verifiedOnly = opts.verifiedOnly ?? true;
+  const match = opts.match ?? 'marathi';
   const terms = await listGlossaryTerms(
     client,
     verifiedOnly ? { verifiedOnly: true, limit: 5000 } : { limit: 5000 },
   );
   return terms
-    .filter((t) => text.includes(t.marathi))
-    .sort((a, b) => b.marathi.length - a.marathi.length);
+    .filter((term) => {
+      const form = glossaryForm(term, match);
+      if (form.length === 0) return false;
+      return match === 'english'
+        ? mentionsLatinPhrase(text, form)
+        : text.includes(form);
+    })
+    .sort(
+      (a, b) => glossaryForm(b, match).length - glossaryForm(a, match).length,
+    );
 }
 
 // The designation → person map, built from the person rows that carry one (0032).

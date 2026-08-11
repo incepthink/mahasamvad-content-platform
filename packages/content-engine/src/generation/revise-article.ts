@@ -9,6 +9,7 @@
 // compression-biased scheme system prompt. Faithfulness runs LAST — feedback + inject are
 // the highest-risk paths for the model to "helpfully" invent supporting details.
 
+import { pathToFileURL } from 'node:url';
 import {
   ARTICLE_BODY_MAX_TOKENS,
   chatComplete,
@@ -34,6 +35,15 @@ import {
   applyDesignations,
   type DesignationIssue,
 } from './apply-designations.js';
+import { ensureArticleHeading } from './article-heading.js';
+import {
+  LENGTH_TOLERANCE,
+  fitArticleToLength,
+  lengthRequirementBlock,
+  measureArticleLength,
+  parseLengthRequest,
+  type LengthWarning,
+} from './article-length.js';
 import {
   findMissingInformation,
   findMissingApprovedFacts,
@@ -45,15 +55,33 @@ import {
 // the revision must fight the compression-biased scheme system prompt: pull in broader
 // supporting detail from the notes and let the article get longer instead of compressing.
 // Matches common Marathi + English "make it bigger / more detailed / use more info" phrasings.
-export function wantsExpansion(feedback: string): boolean {
+//
+// `currentArticle` makes a NUMERIC ask count too, and that was a real hole: an officer typing
+// "बातमी १२०० अक्षरांची हवी" matched none of the keywords below, so `expand` stayed false, the
+// expansion instruction was never emitted and findMissingInformation — the broad sweep that
+// finds unused note material so the article can legitimately grow — was skipped entirely. The
+// one shape of feedback that names a length exactly was the one shape that could not grow the
+// article. Passing the current article is what makes the test directional: asking for 400
+// characters when the draft is 1200 is a request to SHRINK, and must not turn on the machinery
+// for pulling more facts in.
+export function wantsExpansion(feedback: string, currentArticle = ''): boolean {
   const f = feedback.toLowerCase();
-  return (
+  const keyword =
     /\b(bigger|larger|longer|lengthen|expand|elaborate|detailed|comprehensive|in[- ]?depth)\b/.test(
       f,
     ) ||
     /\bmore (info|information|details?|content|points|facts)\b/.test(f) ||
     /\b(add|use|include|give|want) more\b/.test(f) ||
-    /मोठ|बिगर|अधिक|सविस्तर|लांब|जास्त|विस्तृत|विस्तार|आणखी|भरपूर/.test(feedback)
+    /मोठ|बिगर|अधिक|सविस्तर|लांब|जास्त|विस्तृत|विस्तार|आणखी|भरपूर/.test(
+      feedback,
+    );
+  if (keyword) return true;
+
+  const request = parseLengthRequest(feedback);
+  if (!request || !currentArticle.trim()) return false;
+  return (
+    measureArticleLength(currentArticle, request.unit) <
+    request.value * (1 - LENGTH_TOLERANCE)
   );
 }
 
@@ -66,6 +94,10 @@ export type RevisedArticle = Readonly<{
   // Approved designations the revised article could not carry as-is. Reported, never fatal —
   // same contract as GeneratedArticle.designationIssues.
   designationIssues: readonly DesignationIssue[];
+  // Set when the officer asked for a length the revision could not reach. Reported, never
+  // fatal — the same contract as designationIssues, and the honest answer when the note does
+  // not carry enough to fill the ask without inventing.
+  lengthWarning: LengthWarning | null;
 }>;
 
 function buildRevisionMessages(
@@ -79,9 +111,14 @@ function buildRevisionMessages(
   statements: readonly AttributedStatement[] = [],
   excludeFacts: readonly string[] = [],
   officerRequest = '',
+  heading = '',
 ): ChatMessage[] {
   const { article: currentArticle, factCheck: currentFactCheck } =
     splitContent(currentContent);
+  // A length may be named in either officer input. The feedback is the more recent statement
+  // of intent, so it wins; the stored request carries over when the feedback is silent.
+  const lengthRequest =
+    parseLengthRequest(feedback) ?? parseLengthRequest(officerRequest);
   const requiredRows = includedFactsBlock(includeFacts);
   const statementRows = statementBlock(statements);
   const excluded = excludeFacts.map((fact) => fact.trim()).filter(Boolean);
@@ -91,6 +128,19 @@ function buildRevisionMessages(
     note.trim(),
     '</NOTES>',
     '',
+    // The officer's शीर्षक किंवा बातमीचा रोख. It reached reviseArticle() as an argument from the
+    // beginning, but ONLY as allowed context for the coverage and faithfulness CHECKERS — the
+    // model doing the rewriting had never been shown it. So the heading survived a feedback
+    // round by accident, if the previous draft happened to keep it, and an officer who set an
+    // angle watched it drift away the first time they asked for any other change.
+    ...(heading.trim()
+      ? [
+          '<HEADLINE_ANGLE purpose="officer_headline_or_angle_not_fact_source">',
+          heading.trim(),
+          '</HEADLINE_ANGLE>',
+          '',
+        ]
+      : []),
     ...(officerRequest.trim()
       ? [
           '<OFFICER_REQUEST purpose="authoritative_instructions_and_facts">',
@@ -133,6 +183,13 @@ function buildRevisionMessages(
     ...(officerRequest.trim()
       ? ['FEEDBACK ने बदलले नसतील तर OFFICER_REQUEST मधील सूचना जपा.']
       : []),
+    // The heading needs the same "carry it through" sentence the request already had, or the
+    // block above is just more context for the model to weigh at its discretion.
+    ...(heading.trim()
+      ? [
+          'HEADLINE_ANGLE हा अधिकाऱ्याने या बातमीसाठीच दिलेला आहे. तो शीर्षकासारखा असेल तर तेच शीर्षक जसेच्या तसे वापरा; रोखासारखा असेल तर लेख त्याच रोखाने लिहा. FEEDBACK ने तो स्पष्टपणे बदलला असेल तरच बदला.',
+        ]
+      : []),
     // Rule 6 below forbids adding a पदनाम absent from NOTES; without this carve-out the
     // revision reads that as licence to strip the designations it was just handed.
     ...(designationBlock(designations).length > 0
@@ -161,6 +218,10 @@ function buildRevisionMessages(
           'याद्या किंवा लेखाशीर्ष यांसारखा प्रशासकीय तपशील भरून लांबी वाढवू नका.',
         ]
       : []),
+    // The number, pulled out of whichever officer input named it. The same English block the
+    // generation prompts render, so a length asked for at intake and a length asked for in the
+    // feedback box are put to the model in identical terms.
+    ...(lengthRequest ? ['', ...lengthRequirementBlock(lengthRequest)] : []),
     '',
     'अत्यंत महत्त्वाचे नियम:',
     officerRequest.trim()
@@ -173,6 +234,15 @@ function buildRevisionMessages(
     `6. NOTES${officerRequest.trim() ? ' किंवा OFFICER_REQUEST' : ''} मध्ये नसलेले कोणतेही नवीन तथ्य, नाव, तारीख, रक्कम, पदनाम, ठिकाण, योजना, कायदा, दावा, quote किंवा byline जोडू नका.`,
     '7. NOTES मधील खरी आणि महत्त्वाची माहिती वगळू नका.',
     '8. अंतिम लेख category च्या मूळ शैलीतच ठेवा.',
+    // Rules 8 and 11 of the category system prompt tell the model to keep the house style and
+    // register. An officer asking for simpler language, a different length or a different
+    // structure is asking for exactly the thing those rules protect, so the exception has to be
+    // stated — otherwise the general rule wins, which is what it is written to do.
+    ...(officerRequest.trim() || heading.trim()
+      ? [
+          `${officerRequest.trim() ? 'OFFICER_REQUEST' : ''}${officerRequest.trim() && heading.trim() ? ' आणि ' : ''}${heading.trim() ? 'HEADLINE_ANGLE' : ''} मध्ये शैली, सूर, लांबी, रचना, क्रम, भर किंवा काय वगळायचे याबाबत काही सांगितले असेल, तर ते वरील सर्वसाधारण नियमांवर वरचढ आहे — फक्त "टिपणीत नसलेले तथ्य जोडू नका" हा नियम त्याहून वरचढ राहतो.`,
+        ]
+      : []),
     '9. फक्त सुधारित लेख द्या; तथ्य-तपासणी यादी किंवा विभाजक जोडू नका.',
     '</TASK>',
   ].join('\n');
@@ -336,7 +406,10 @@ export async function reviseArticle(
   // The trusted request used for the original draft. Kept last for call-site compatibility.
   officerRequest?: string,
 ): Promise<RevisedArticle> {
-  const expand = wantsExpansion(feedback);
+  const { article: articleBeforeRevision } = splitContent(currentContent);
+  const expand = wantsExpansion(feedback, articleBeforeRevision);
+  const lengthRequest =
+    parseLengthRequest(feedback) ?? parseLengthRequest(officerRequest);
   const authoritativeSource = officerRequest?.trim()
     ? `${note.trim()}\n\n=== OFFICER REQUEST ===\n${officerRequest.trim()}`
     : note;
@@ -357,6 +430,7 @@ export async function reviseArticle(
       statements,
       excludeFacts,
       officerRequest,
+      heading,
     ),
     { maxTokens: ARTICLE_BODY_MAX_TOKENS },
   );
@@ -434,6 +508,18 @@ export async function reviseArticle(
     );
   }
 
+  // Measure the length the officer asked for and, on a miss, buy ONE rewrite. Placed after the
+  // faithfulness repair (which can only ever shorten) and before the appendix, so the article
+  // whose length is measured is the article that will be stored.
+  const { article: repairedArticle } = splitContent(content);
+  const fit = await fitArticleToLength(
+    repairedArticle,
+    authoritativeSource,
+    lengthRequest,
+    category,
+  );
+  if (fit.article !== repairedArticle) content = fit.article;
+
   // The revision prompts no longer emit the traceability appendix inline, so rebuild it
   // from the final revised article (scheme only) and stitch it on with the delimiter —
   // keeping the { content, article, factCheck } contract unchanged. News has no appendix.
@@ -448,7 +534,10 @@ export async function reviseArticle(
   const designationResult = applyDesignations(rawArticle, designations, {
     knownDesignations,
   });
-  const article = designationResult.text;
+  // Both deterministic passes sit after the last model call, for the same reason: the officer
+  // approved this exact text, so nothing downstream may reword it. A no-op unless `heading`
+  // reads as a headline rather than an angle (article-heading.ts).
+  const article = ensureArticleHeading(designationResult.text, heading);
   if (designationResult.issues.length > 0) {
     console.warn(
       `[designations] ${designationResult.issues.length} पदनाम सुधारित लेखात लागू करता आले नाही:`,
@@ -464,5 +553,136 @@ export async function reviseArticle(
     article,
     factCheck,
     designationIssues: designationResult.issues,
+    lengthWarning: fit.warning,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Free deterministic harness (no API key, no network, no spend):
+//   tsx src/generation/revise-article.ts --check
+//
+// The feedback path is where the officer's request was being lost — the heading never reached
+// the rewriting model at all, and a numeric length ask never turned on the expansion machinery
+// — so both are pinned here.
+// ---------------------------------------------------------------------------
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
+  let failures = 0;
+  const check = (label: string, condition: boolean): void => {
+    if (condition) console.log(`  ok    ${label}`);
+    else {
+      failures += 1;
+      console.error(`  FAIL  ${label}`);
+    }
+  };
+
+  const draft400 = 'क'.repeat(400);
+  const draft1200 = 'क'.repeat(1200);
+
+  console.log('\n=== a numeric length ask counts as an expansion request ===');
+  check(
+    '"१२०० अक्षरे" against a 400-character draft asks to grow',
+    wantsExpansion('बातमी १२०० अक्षरांची हवी', draft400),
+  );
+  check(
+    '"1200 characters" in English does too',
+    wantsExpansion('make it 1200 characters', draft400),
+  );
+  // Directional: the same sentence against a LONGER draft is a request to shrink, and must not
+  // turn on the machinery that pulls more note facts in.
+  check(
+    'the same ask against a 1200-character draft does NOT ask to grow',
+    !wantsExpansion('बातमी ४०० अक्षरांची हवी', draft1200),
+  );
+  check(
+    'a keyword ask still works with no article supplied',
+    wantsExpansion('लेख अधिक सविस्तर करा'),
+  );
+  check(
+    'an ordinary style request is not an expansion request',
+    !wantsExpansion('शासकीय शैलीत बातमी तयार करा.', draft400),
+  );
+
+  console.log('\n=== the officer’s inputs reach the rewriting model ===');
+  const heading = 'कर्जमुक्तीमुळे ग्रामीण अर्थव्यवस्थेला नवी ऊर्जा';
+  const request = 'भाषा सोपी ठेवा; बातमी १२०० अक्षरांची हवी.';
+  const messages = buildRevisionMessages(
+    'टिपणी मजकूर.',
+    '# मॉडेलचे शीर्षक\n\nपहिला परिच्छेद.',
+    'सुरुवात आणखी आकर्षक करा',
+    'news',
+    false,
+    [],
+    [],
+    [],
+    [],
+    request,
+    heading,
+  );
+  const user = messages[1]?.content ?? '';
+  check(
+    'the heading is rendered in its own block',
+    user.includes('<HEADLINE_ANGLE') && user.includes(heading),
+  );
+  check(
+    'the heading is carried through unless the feedback changes it',
+    user.includes('FEEDBACK ने तो स्पष्टपणे बदलला असेल तरच बदला'),
+  );
+  check(
+    'the officer request is still rendered as an authoritative source',
+    user.includes('<OFFICER_REQUEST') && user.includes(request),
+  );
+  check(
+    'both are stated to outrank the general style rules',
+    user.includes('वरील सर्वसाधारण नियमांवर वरचढ आहे'),
+  );
+  check(
+    'never-invent still outranks them',
+    user.includes('"टिपणीत नसलेले तथ्य जोडू नका" हा नियम त्याहून वरचढ राहतो'),
+  );
+  check(
+    'a length named in the request becomes the shared LENGTH REQUIREMENT block',
+    user.includes('### LENGTH REQUIREMENT') &&
+      user.includes('about 1200 characters'),
+  );
+
+  console.log('\n=== the feedback box wins over the stored request ===');
+  const overridden =
+    buildRevisionMessages(
+      'टिपणी मजकूर.',
+      'लेख.',
+      'बातमी ८०० अक्षरांची करा',
+      'news',
+      false,
+      [],
+      [],
+      [],
+      [],
+      request,
+      heading,
+    )[1]?.content ?? '';
+  check(
+    'the feedback’s length is the one put to the model',
+    overridden.includes('about 800 characters') &&
+      !overridden.includes('about 1200 characters'),
+  );
+
+  console.log('\n=== nothing is added when the officer said nothing ===');
+  const bare =
+    buildRevisionMessages(
+      'टिपणी मजकूर.',
+      'लेख.',
+      'सुरुवात बदला',
+      'news',
+      false,
+    )[1]?.content ?? '';
+  check('no heading block', !bare.includes('HEADLINE_ANGLE'));
+  check('no officer request block', !bare.includes('OFFICER_REQUEST'));
+  check('no length block', !bare.includes('LENGTH REQUIREMENT'));
+  check('no precedence carve-out', !bare.includes('वरचढ आहे'));
+
+  if (failures > 0) process.exitCode = 1;
+  else console.log('\nAll revise-article checks passed.');
 }

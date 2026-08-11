@@ -31,6 +31,8 @@ import { pathToFileURL } from 'node:url';
 import type { ChatMessage } from './openai-chat.js';
 import type { ArticleCategory, DesignationPair } from './category-prompt.js';
 import {
+  PRECEDENCE_RULE,
+  headingBlock,
   newsEditorialFocusBlock,
   officerInstructionsBlock,
 } from './simple-article-prompt.js';
@@ -51,7 +53,13 @@ import type {
 // v2 (2026-07-28): one sentence added, about length only — see item 4 in the header comment.
 // v6 (2026-08-05): OFFICER REQUEST is trusted writing direction and factual input, matching
 // simple-v11 without adding another rule stack.
-export const MINIMAL_ARTICLE_PROMPT_VERSION = 'minimal-v6';
+// v7 (2026-08-11): the shared PRECEDENCE_RULE and a conditional length sentence, matching the
+// other two specifications. Two defects fixed while there, both of which fought the officer's
+// authority directly: the length sentence had lost a clause and read "...at the length that
+// repeat, stretch, or add unsupported information", and the sentence after it licensed
+// dropping supplied information with no exception for material the officer had asked for. The
+// heading also moved to sit beside the officer request at the end, on the shared block.
+export const MINIMAL_ARTICLE_PROMPT_VERSION = 'minimal-v7';
 
 // The dictionary entry shape now lives in simple-article-prompt.ts, both variants rendering it
 // since simple-v4. Re-exported here so existing importers (and the package barrel) are unmoved.
@@ -79,12 +87,25 @@ export function buildMinimalArticleSystemPrompt(): string {
     'Take no fact, name, figure or wording from a reference, and never reproduce a',
     "reference's sign-off or writer credit.",
     '',
+    ...PRECEDENCE_RULE,
     '',
     'Take style and structure from the references, but do not treat their length as a target.',
-    'The new article’s length does not matter. Use your best editorial judgement to produce the',
-    'strongest publication-ready article possible from SOURCE INFORMATION and OFFICER REQUEST, at the length that',
-    'repeat, stretch, or add unsupported information.',
-    'Do not make it seem like you are just mentioning the facts from the sorce information, but rather write a complete article that is engaging and informative you can even skip some infromation it does not seem right for editorial flow of the article.',
+    'Unless the HEADLINE / ANGLE or the OFFICER REQUEST asks for a particular length, the new',
+    'article’s length does not matter: use your best editorial judgement to produce the',
+    'strongest publication-ready article possible from SOURCE INFORMATION and OFFICER REQUEST,',
+    'at the length that best serves it. Use the information fully when it improves the article,',
+    'but do not pad, repeat, or add unsupported information.',
+    '',
+    'Where a length IS asked for, write to it. Reach it by covering the supplied information',
+    'more fully and explaining it more completely — never by repeating yourself, padding with',
+    'empty phrases, or adding anything the supplied information does not support. If the',
+    'supplied information cannot honestly fill the requested length, write the fullest accurate',
+    'article it supports and stop.',
+    '',
+    'Do not make it read as a list of the facts from SOURCE INFORMATION. Write a complete',
+    'article that is engaging and informative; you may leave out supplied information that does',
+    'not serve the article’s editorial flow — unless the HEADLINE / ANGLE or the OFFICER REQUEST',
+    'asks for it, in which case it stays.',
     '',
     'SOURCE INFORMATION may contain Markdown tables (pipe-delimited rows). Read them as tables:',
     'each figure belongs to its own column heading and row label. Never read a row as a',
@@ -227,18 +248,18 @@ export function buildMinimalArticleUserPrompt(
     );
   }
 
-  if (direction) {
-    parts.push('### THE ANGLE THE OFFICER WANTS', '', direction, '');
-  }
-
   const location = clean(inputs.location);
   const date = clean(inputs.date);
   if (location && date) {
     parts.push('### DATELINE', '', `${location}, दि. ${date} :`, '');
   }
 
-  // Same block, same position as the standard variant — the variant changes wording density,
-  // never what the officer is allowed to ask for.
+  // Same two blocks, same position as the standard variant — the variant changes wording
+  // density, never what the officer is allowed to ask for or how much authority it carries.
+  // The heading moved here from above the dateline for that reason: it was worded more
+  // strongly here than in `standard`, so the same field carried different weight depending on
+  // an env line.
+  parts.push(...headingBlock(direction));
   parts.push(...officerInstructionsBlock(inputs.officerInstructions));
 
   parts.push('Write the article now.');
@@ -311,31 +332,70 @@ if (
   ]) {
     check(`system does not mention "${banned}"`, !sys.includes(banned));
   }
-  check('no figure appears anywhere in the system prompt', !/\d/u.test(sys));
+  // Still no word target. The only digits left are PRECEDENCE_RULE's three tiers, which are a
+  // conflict-resolution order rather than an editorial instruction.
+  check(
+    'no length figure appears anywhere in the system prompt',
+    !/\d[\d,]*\s*(?:words|characters|chars|अक्षर|शब्द)/u.test(sys),
+  );
+  check(
+    'the only numbered lines are the precedence tiers',
+    (sys.match(/^\d+\.\s/gmu) ?? []).length ===
+      PRECEDENCE_RULE.filter((line) => /^\d+\.\s/u.test(line)).length,
+  );
 
   console.log('\n=== length is the one thing NOT taken from the exemplars ===');
   check(
     "the references' length is explicitly excluded",
     sys.includes('do not treat their length as a target'),
   );
+  // v7: irrelevant UNLESS the officer asked. Line breaks are wrapping, not meaning.
+  const flatSys = sys.replace(/\s+/gu, ' ');
   check(
-    'length is explicitly irrelevant',
-    sys.includes('The new article’s length does not matter.'),
+    'length is irrelevant only while the officer has named none',
+    flatSys.includes(
+      'Unless the HEADLINE / ANGLE or the OFFICER REQUEST asks for a particular length, the new article’s length does not matter',
+    ),
   );
   check(
     'editorial judgement chooses the strongest output',
-    sys.includes('Use your best editorial judgement') &&
-      sys.includes('strongest publication-ready article possible'),
+    flatSys.includes('use your best editorial judgement') &&
+      flatSys.includes('strongest publication-ready article possible'),
   );
   check(
     'the material determines whatever length serves it',
-    sys.includes('at the length that\nbest serves it'),
+    flatSys.includes('at the length that best serves it'),
   );
   check(
     'padding, repetition and unsupported additions are forbidden',
-    sys.includes(
-      'do not pad,\nrepeat, stretch, or add unsupported information',
+    flatSys.includes('do not pad, repeat, or add unsupported information'),
+  );
+  check(
+    'a requested length is written to, by covering the source more fully',
+    flatSys.includes('Where a length IS asked for, write to it.') &&
+      flatSys.includes('covering the supplied information more fully') &&
+      flatSys.includes(
+        'never by repeating yourself, padding with empty phrases',
+      ),
+  );
+  check(
+    'stopping short beats inventing to fill a requested length',
+    flatSys.includes(
+      'cannot honestly fill the requested length, write the fullest accurate article it supports and stop',
     ),
+  );
+  // The v6 sentence was truncated mid-clause ("...at the length that repeat, stretch, or add
+  // unsupported information"), and the one after it licensed dropping supplied information with
+  // no exception for material the officer had asked for.
+  check(
+    'the truncated v6 length sentence is gone',
+    !flatSys.includes('at the length that repeat, stretch'),
+  );
+  check(
+    'dropping information is allowed only where the officer has not asked for it',
+    flatSys.includes(
+      'unless the HEADLINE / ANGLE or the OFFICER REQUEST asks for it, in which case it stays',
+    ) && !sys.includes('sorce'),
   );
   const bareUser = buildMinimalArticleUserPrompt({
     category,
@@ -367,7 +427,15 @@ if (
     'the note and request are named as factual sources',
     sys.includes('from SOURCE INFORMATION and OFFICER REQUEST'),
   );
-  check('invention is forbidden', sys.includes('Never invent or infer a name'));
+  // Was asserted against a sentence this specification has never carried, so it had been
+  // failing at HEAD. PRECEDENCE_RULE now genuinely supplies it, as rule 1 and as the one thing
+  // the officer's own request does not outrank.
+  check(
+    'invention is forbidden, above everything including the officer',
+    flatSys.includes(
+      'Never state a fact — a name, designation, date, amount, place, scheme, law, quote or claim',
+    ) && flatSys.includes('Nothing overrides this.'),
+  );
   check(
     'the dictionary is authoritative for spelling',
     sys.includes('NAME DICTIONARY gives a spelling, use it exactly'),

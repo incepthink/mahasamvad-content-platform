@@ -57,6 +57,11 @@ export * from './tweet.js';
 // AI explainer-video API schemas + shared tier pricing / SRT builder.
 export * from './video.js';
 
+// The general assistant at /chat: thread/message shapes, the attachment union and the SSE
+// event framing. Exported after document.js and youtube.js, whose upload and link rules its
+// attachments reuse rather than redefine.
+export * from './chat.js';
+
 // Department usage analytics (/analytics): the response shape, the reporting timezone and
 // the single USD→INR presentation rate. Carries machine keys only — every Marathi label on
 // that page lives in apps/web/lib/strings.ts.

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { ZodError } from 'zod';
 import { createServiceRoleClient } from '@dgipr/database';
 import { registerAnalyticsRoutes } from './routes/analytics.js';
+import { registerChatRoutes } from './routes/chat.js';
 import { registerDloRoutes } from './routes/dlo.js';
 import { registerDocumentRoutes } from './routes/documents.js';
 import { registerGenerationRoutes } from './routes/generations.js';
@@ -87,6 +88,8 @@ export async function createServer() {
       registerDloRoutes(instance, client);
       registerTranscriptionRoutes(instance, client);
       registerVideoRoutes(instance, client);
+      // The general assistant. The only route in this API that streams its response.
+      registerChatRoutes(instance, client);
       // Department usage analytics. Read-only and derived — writes nothing.
       registerAnalyticsRoutes(instance, client);
     },

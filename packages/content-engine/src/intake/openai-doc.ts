@@ -65,29 +65,65 @@ const PAGE_TIMEOUT_MS = Number.parseInt(
 // formatting second, because everything downstream — the glossary name lock, the designation
 // pass, the never-invent rule the article prompt rests on — treats this text as the source
 // document itself and cannot tell a helpful paraphrase from what was printed.
-const SYSTEM_PROMPT = [
-  'You transcribe pages of official Government of Maharashtra documents into Marathi text.',
-  'You are given ONE page. Return that page and nothing else.',
-  '',
-  'FIDELITY — this is not a summary and not a rewrite:',
-  '- Transcribe what is on the page. Never add, infer, complete or explain anything.',
-  '- Names, designations, scheme names, dates, amounts, percentages and every numeral must',
-  '  appear exactly as printed, in the script they are printed in. Do not convert Devanagari',
-  '  numerals to Latin or the reverse, and never restate a figure in your own words.',
-  '- The page may embed corrupted text (a legacy non-Unicode Marathi font). Read the page as',
-  '  it LOOKS. Where the rendered page and any embedded text disagree, the rendered page is',
-  '  correct — output correctly spelled Marathi, e.g. नोंदणी and निर्णय, never नोंिणी or ननणणय.',
-  '- If part of the page is genuinely illegible, write [अस्पष्ट] there. Do not guess.',
-  '',
-  'FORMAT — plain Markdown:',
-  '- Headings as Markdown headings, lists as Markdown lists.',
-  '- TABLES AS MARKDOWN TABLES, with every row and column kept. A table is the reason this',
-  '  step exists: never flatten one into a paragraph or a run of loose numbers.',
-  '- Join lines that the page merely wrapped, so sentences and names are not split.',
-  '- Omit running headers, running footers, the page number and scan artefacts.',
-  '- No preamble, no commentary, no code fences around the whole answer.',
-  '- An entirely blank page returns an empty answer.',
-].join('\n');
+// `subject` is what the model is looking at: a rendered PDF page, or a PHOTOGRAPH of one
+// (intake/image-ocr.ts, which shares this prompt so an officer's phone snap of a GR is held to
+// exactly the same fidelity rules as the same GR uploaded as a PDF). Only the opening two
+// lines and ONE fidelity bullet differ — everything about names, numerals, tables and format
+// is common, which is the reason this is a parameter rather than a second prompt free to drift.
+export function ocrSystemPrompt(subject: 'page' | 'image' = 'page'): string {
+  return [
+    'You transcribe pages of official Government of Maharashtra documents into Marathi text.',
+    ...(subject === 'image'
+      ? [
+          'You are given ONE image — a photograph, scan or screenshot of an official document,',
+          'notice, letter, table or page. Return what it shows and nothing else.',
+        ]
+      : ['You are given ONE page. Return that page and nothing else.']),
+    '',
+    'FIDELITY — this is not a summary and not a rewrite:',
+    `- Transcribe what is on the ${subject === 'image' ? 'image' : 'page'}. Never add, infer, complete or explain anything.`,
+    '- Names, designations, scheme names, dates, amounts, percentages and every numeral must',
+    '  appear exactly as printed, in the script they are printed in. Do not convert Devanagari',
+    '  numerals to Latin or the reverse, and never restate a figure in your own words.',
+    ...(subject === 'image'
+      ? [
+          // A photograph is taken by hand: it can be angled, shadowed, cropped or blurred, and
+          // the failure that matters is a plausible GUESS at a name or a figure, not a gap.
+          '- The photograph may be angled, shadowed, creased or out of focus. Read only what is',
+          '  actually legible, and never reconstruct a word, a name or a number from a partial',
+          '  or blurred impression of it.',
+          // The measured failure mode, and the one with consequences: on a real test page the
+          // prose came back perfect while ५०→७०, ६५.५→६६.५ and ११→३१ went through unremarked.
+          // A wrong amount or date in a government article is worse than a missing one, so the
+          // instruction is to slow down per digit and to admit a doubtful one.
+          '- DIGITS DESERVE A SECOND LOOK. Devanagari numerals are easily confused with one',
+          '  another — ५/६, ९/०, १/३, ७/९ — and a wrong amount, date or count is far worse than',
+          '  an admitted gap. Read every numeral digit by digit rather than recognising the',
+          '  number at a glance, and where a single digit is not clearly legible write [अस्पष्ट]',
+          '  in place of that figure instead of the closest-looking one.',
+          '- Describe nothing. Do not caption the photograph, do not say what it depicts and do',
+          '  not comment on its quality. If it carries no readable text at all, return an empty',
+          '  answer.',
+        ]
+      : [
+          '- The page may embed corrupted text (a legacy non-Unicode Marathi font). Read the page as',
+          '  it LOOKS. Where the rendered page and any embedded text disagree, the rendered page is',
+          '  correct — output correctly spelled Marathi, e.g. नोंदणी and निर्णय, never नोंिणी or ननणणय.',
+        ]),
+    `- If part of the ${subject === 'image' ? 'image' : 'page'} is genuinely illegible, write [अस्पष्ट] there. Do not guess.`,
+    '',
+    'FORMAT — plain Markdown:',
+    '- Headings as Markdown headings, lists as Markdown lists.',
+    '- TABLES AS MARKDOWN TABLES, with every row and column kept. A table is the reason this',
+    '  step exists: never flatten one into a paragraph or a run of loose numbers.',
+    '- Join lines that the page merely wrapped, so sentences and names are not split.',
+    '- Omit running headers, running footers, the page number and scan artefacts.',
+    '- No preamble, no commentary, no code fences around the whole answer.',
+    '- An entirely blank page returns an empty answer.',
+  ].join('\n');
+}
+
+const SYSTEM_PROMPT = ocrSystemPrompt('page');
 
 type ChatResponse = {
   choices: Array<{
@@ -99,7 +135,8 @@ type ChatResponse = {
 
 // Strip a fence the model wrapped the whole page in despite being told not to. Only when it
 // encloses the ENTIRE answer — a fenced block inside the page is the page's own content.
-function unwrapWholeAnswerFence(text: string): string {
+// Exported for image-ocr.ts, which reads the same kind of answer from the same model.
+export function unwrapWholeAnswerFence(text: string): string {
   const match = text.trim().match(/^```[a-zA-Z]*\n([\s\S]*)\n```$/);
   return match?.[1] ?? text;
 }

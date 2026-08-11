@@ -108,6 +108,7 @@ import {
   type Copy,
   type AttributedStatement,
   type DesignationWarning,
+  type LengthWarning,
   type NameDesignation,
   type SelectedFact,
   type PosterClearAction,
@@ -153,6 +154,14 @@ const posterCapacityWarnings = new Map<
   string,
   { needed: number; available: number }
 >();
+
+// The officer asked for an article of a given length (in तुमची विनंती or in the feedback box)
+// and the run could not reach it. The article is delivered regardless — a length is reached by
+// covering the supplied information more fully, so a source that does not carry enough leaves
+// an honest shortfall rather than filler. Transient for the same reason as the registries
+// above: the article is on the row, and this is a "the note did not have this much in it"
+// prompt that matters while the officer is reading the fresh output.
+const lengthWarnings = new Map<string, LengthWarning | null>();
 
 // Article revision may likewise run *alongside* the poster render: the article is
 // final and persisted before the poster phase starts, so the user can refine it
@@ -330,6 +339,12 @@ export function getTranslateWarnings(id: string): string[] | null {
 // Approved designations the latest article/revision could not apply as approved.
 export function getDesignationWarnings(id: string): DesignationWarning[] {
   return designationWarnings.get(id) ?? [];
+}
+
+// Set when the officer's requested article length was not reached (null when it was, when they
+// asked for none, or when no article ran this session).
+export function getLengthWarning(id: string): LengthWarning | null {
+  return lengthWarnings.get(id) ?? null;
 }
 
 // Set when the latest social poster carried more items than any master can lay out (null when
@@ -811,6 +826,7 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
               referenceUrl: simple.styleReference.url,
               fiveWOneH: simple.fiveWOneH,
               designationIssues: simple.designationIssues,
+              lengthWarning: simple.lengthWarning,
               styleReferenceMeta: simple.styleReferenceMeta as unknown,
             };
           })()
@@ -831,6 +847,9 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
               referenceUrl: full.reference?.url ?? null,
               fiveWOneH: full.fiveWOneH as unknown,
               designationIssues: full.designationIssues,
+              // The full pipeline has its own coverage loop and takes no length request; a
+              // length asked for there is honoured by the prompt alone, not measured.
+              lengthWarning: null as LengthWarning | null,
               styleReferenceMeta: null,
             };
           })();
@@ -845,6 +864,7 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
     // Report, never fail: the article is about to be persisted either way, and an officer who
     // can see "this designation did not apply" can fix it — one who cannot, cannot.
     designationWarnings.set(id, [...result.designationIssues]);
+    lengthWarnings.set(id, result.lengthWarning);
     await updateGeneration(client, id, {
       article: finalArticle,
       factCheck: result.factCheck,
@@ -2355,6 +2375,7 @@ export function startArticleFeedbackJob(
       row.instructions ?? undefined,
     );
     designationWarnings.set(id, [...revised.designationIssues]);
+    lengthWarnings.set(id, revised.lengthWarning);
     const revisedArticle = ensureArticleDateline(
       revised.article,
       articleCategoryOf(row.category),
@@ -2423,6 +2444,7 @@ export function startConcurrentArticleFeedbackJob(
             row.instructions ?? undefined,
           );
           designationWarnings.set(id, [...revised.designationIssues]);
+          lengthWarnings.set(id, revised.lengthWarning);
           const revisedArticle = ensureArticleDateline(
             revised.article,
             articleCategoryOf(row.category),

@@ -201,6 +201,16 @@ export const STR = {
   dloAudioHint:
     'बैठकीचे ध्वनिमुद्रण — एकावेळी अनेक फाईल जोडता येतील (प्रत्येकी कमाल ५० MB). मोबाईलवरील नेहमीचे ध्वनिफीत प्रकार चालतात.',
   dloAudioFilesTitle: 'जोडलेली ध्वनिमुद्रणे',
+
+  // Photographs of documents (components/ImageFilePicker). The hint says what happens and
+  // when: unlike a document, an image is not read here — there are no pages to pick, so the
+  // reading waits for प्रक्रिया and its text arrives at the तपासणी step like a transcript.
+  dloImagesTitle: 'प्रतिमा / छायाचित्रे',
+  dloImagesUpload: 'प्रतिमा जोडा',
+  dloImagesHint:
+    'शासन निर्णय, टिपणी, तक्ता किंवा नोटिशीचा फोटो अथवा स्क्रीनशॉट (JPG, PNG, WEBP — प्रत्येकी कमाल ५० MB). प्रतिमेतील मजकूर, तक्त्यांसह, प्रक्रियेदरम्यान वाचला जाईल आणि तपासणी टप्प्यावर दिसेल.',
+  dloImagesFilesTitle: 'जोडलेल्या प्रतिमा',
+  dloImageTypeError: 'कृपया प्रतिमा फाईल निवडा (JPG, PNG किंवा WEBP).',
   dloDocsTitle: 'कागदपत्रे (PDF / DOCX / TXT)',
   dloDocsHint:
     'शासन निर्णय, टिपणी किंवा इतर कागदपत्रे. प्रत्येक फाईल येथेच वाचली जाते — स्कॅन केलेल्या PDF मधून कोणती पृष्ठे वाचायची ते तुम्ही निवडाल.',
@@ -257,9 +267,17 @@ export const STR = {
   dloReviewInclude: 'बातमीत समाविष्ट करा',
   dloReviewExcluded: 'वगळले आहे',
   dloReviewKindAudio: 'ध्वनिमुद्रण',
+  dloReviewKindImage: 'प्रतिमा',
   dloReviewKindPdf: 'PDF कागदपत्र',
   dloReviewKindDocx: 'DOCX कागदपत्र',
   dloReviewKindTxt: 'TXT फाईल',
+  // The photograph beside its transcript, so a misread name can be checked against the
+  // original without leaving the page. The link opens it full size — a phone photo of a
+  // dense GR is unreadable at thumbnail width.
+  dloReviewImageOpen: 'मूळ प्रतिमा मोठी करून पाहा',
+  dloReviewImageAlt: 'जोडलेली प्रतिमा',
+  dloReviewImageEmpty:
+    'या प्रतिमेत वाचता येईल असा मजकूर आढळला नाही. मूळ प्रतिमा तपासा — गरज असल्यास मजकूर येथे स्वतः लिहू शकता.',
   dloReviewPagesSuffix: 'पृष्ठे',
   dloReviewPagesSelected: 'पृष्ठे निवडली',
   dloReviewNoPages: 'या PDF मधून एकही पान निवडलेले नाही.',
@@ -338,6 +356,17 @@ export const STR = {
   designationWarnNotFound:
     'यांचे पूर्ण नाव बातमीत आढळले नाही, त्यामुळे पदनाम जोडता आले नाही:',
   designationWarnCorrected: 'बातमीतील चुकीचे पदनाम बदलले:',
+  // Shown when the officer asked for a length in तुमची विनंती (or in the feedback box) and the
+  // article did not reach it. Deliberately says WHY: the platform does not invent material to
+  // fill a length, so the honest fix is more source material — or accepting the shorter piece.
+  lengthWarnTitle: 'मागितलेली लांबी गाठता आली नाही',
+  lengthWarnShort: (requested: string, actual: string) =>
+    `तुम्ही सुमारे ${requested} मागितले होते; बातमी ${actual} झाली आहे. दिलेल्या माहितीत एवढाच आशय असल्याने लांबी वाढवण्यासाठी नवीन मजकूर तयार केलेला नाही. अधिक लांब बातमीसाठी टिपणीत आणखी माहिती द्या.`,
+  lengthWarnLong: (requested: string, actual: string) =>
+    `तुम्ही सुमारे ${requested} मागितले होते; बातमी ${actual} झाली आहे. आणखी कमी केल्यास महत्त्वाची माहिती वगळावी लागली असती.`,
+  lengthUnitChars: (count: number) =>
+    `${count.toLocaleString('mr-IN')} अक्षरे`,
+  lengthUnitWords: (count: number) => `${count.toLocaleString('mr-IN')} शब्द`,
   // Shown on a social poster whose information held more items than any master template lays
   // out. The poster DOES carry every item — the design was stretched to fit — so this is a
   // "check it reads well, or split the note" prompt, not an error.
@@ -386,26 +415,41 @@ export const STR = {
   // A picked recording is a live browser handle and cannot survive a page reload, unlike the
   // typed text beside it. Name the files rather than pretending nothing was lost.
   dloDraftAudioLost: 'ही ध्वनिमुद्रणे पुन्हा जोडा —',
+  dloDraftImagesLost: 'या प्रतिमा पुन्हा जोडा —',
 
-  // Standalone Marathi-to-English/Hindi translation
+  // Standalone translation (mr→en, mr→hi, en→mr, hi→mr)
   translatePageTitle: 'भाषांतर (Translation)',
   translatePageIntro:
-    'मराठी मजकुराचे इंग्रजी किंवा हिंदी भाषांतर. भाषांतरापूर्वी नावे व पदनाम तपासली जातात, म्हणजे ती जशीच्या तशी राहतात.',
-  translateInputLabel: 'मराठी मजकूर येथे लिहा किंवा चिकटवा',
+    'मराठी मजकुराचे इंग्रजी किंवा हिंदी भाषांतर, आणि इंग्रजी किंवा हिंदी मजकुराचे मराठी भाषांतर. नावे व पदनाम शब्दकोशाप्रमाणे जशीच्या तशी राहतात.',
+  translateInputLabel: 'मजकूर येथे लिहा किंवा चिकटवा',
+  // The label above adapts to the direction; these three name the source language in it.
+  translateInputLabelMarathi: 'मराठी मजकूर येथे लिहा किंवा चिकटवा',
+  translateInputLabelEnglish: 'इंग्रजी मजकूर येथे लिहा किंवा चिकटवा',
+  translateInputLabelHindi: 'हिंदी मजकूर येथे लिहा किंवा चिकटवा',
   translateInputHint:
     'या मजकुराचे थेट भाषांतर केले जाईल. हा मजकूर जतन केला जाणार नाही.',
-  translateInputPlaceholder: 'भाषांतरासाठी मराठी मजकूर येथे लिहा…',
+  translateInputPlaceholder: 'भाषांतरासाठी मजकूर येथे लिहा…',
   translateAction: 'भाषांतर करा',
   translateMayTakeTime: 'मोठ्या मजकुराला एक-दोन मिनिटे लागू शकतात.',
   translateOverLimit: 'मजकूर १०,००० अक्षरांपेक्षा जास्त आहे.',
   translateOutputTitle: 'इंग्रजी भाषांतर',
   translateOutputTitleHindi: 'हिंदी भाषांतर',
+  translateOutputTitleMarathi: 'मराठी भाषांतर',
   translateLockedTerms: 'शब्दकोश संज्ञा वापरल्या',
 
-  // Target-language choice (standalone /translate page)
-  translateTargetLabel: 'कोणत्या भाषेत भाषांतर हवे?',
-  translateTargetEnglish: 'इंग्रजी',
-  translateTargetHindi: 'हिंदी',
+  // Direction choice (standalone /translate page). A DIRECTION rather than a target on its
+  // own: only four pairs are supported, and a source + target picker would offer मराठी →
+  // मराठी and इंग्रजी → हिंदी, neither of which exists.
+  translateDirectionLabel: 'कोणते भाषांतर हवे?',
+  translateDirectionMrEn: 'मराठी → इंग्रजी',
+  translateDirectionMrHi: 'मराठी → हिंदी',
+  translateDirectionEnMr: 'इंग्रजी → मराठी',
+  translateDirectionHiMr: 'हिंदी → मराठी',
+  // Shown in place of the name-review step on an X→मराठी run: there is nothing to confirm,
+  // because the dictionary's Marathi column IS the spelling the output is held to.
+  translateIntoMarathiNames:
+    'नावे शब्दकोशातील मराठी स्पेलिंगप्रमाणे ठेवली जातील — त्यासाठी वेगळी तपासणी लागत नाही. एखादे नाव चुकीचे वाटल्यास नाव-शब्दकोशात दुरुस्त करा.',
+
 
   // Pre-translation name check (shown before every translation; the confirmed
   // spellings are locked into the English output and saved to the नाव-शब्दकोश.
@@ -426,11 +470,13 @@ export const STR = {
   namesLockHindi: 'हिंदीत जसेच्या तसे ठेवा',
   namesLockHindiHint:
     'व्यक्ती/ठिकाण/संस्था/योजनेची नावे हिंदीत जशीच्या तशी ठेवा. विधानसभा, सहकारी संस्था यांसारखे सर्वसामान्य शब्द असतील तर खूण काढा — ते हिंदीत भाषांतरित होतील.',
-  // Warning shown above a Hindi translation whose output could not carry some locked
-  // names — the translation is delivered, but these need a human's eye.
+  // Warning shown above a translation whose output could not carry some locked names — the
+  // translation is delivered, but these need a human's eye. Deliberately does NOT name the
+  // language: the same line is shown for a Hindi translation, a Marathi one, and a
+  // generation's warnings on ArticleView.
   translateUnpreservedTitle: 'ही नावे तपासा',
   translateUnpreservedHint:
-    'खालील नावे हिंदी भाषांतरात जशीच्या तशी दिसत नाहीत — ती बदललेली असू शकतात. कृपया भाषांतरात तपासा:',
+    'खालील नावे भाषांतरात जशीच्या तशी दिसत नाहीत — ती बदललेली असू शकतात. कृपया भाषांतरात तपासा:',
   namesReviewEmpty:
     'या मजकुरात एकही नाव सापडले नाही. आवश्यक असल्यास खाली नाव जोडा.',
   namesAddName: '+ आणखी नाव जोडा',
@@ -1371,6 +1417,52 @@ export const STR = {
   videoStillPending: 'चित्र अजून काढलेले नाही',
   videoSceneFailed: 'हे दृश्य अयशस्वी झाले',
 
+  // ---------- चॅट (/chat) ----------
+  navChat: 'चॅट',
+  chatTitle: 'चॅट',
+  chatNew: 'नवीन चॅट',
+  chatNewShort: 'नवीन',
+  chatEmptyTitle: 'काय मदत करू?',
+  chatEmptyHint:
+    'काहीही विचारा — पत्राचा मसुदा, शासन निर्णयाचा अर्थ, चित्रात काय आहे, फाईलचा सारांश.',
+  chatEmptyNotice:
+    'हे सर्वसाधारण सहाय्यक आहे. प्रसिद्धीसाठी तयार होणाऱ्या मजकुरासाठी लेख-बातमी किंवा मुद्रितशोधन वापरा — नावांच्या शुद्धलेखनाची व तथ्यांची तपासणी तिथे होते.',
+  chatPlaceholder: 'इथे लिहा…',
+  chatSend: 'पाठवा',
+  chatStop: 'थांबवा',
+  chatThinking: 'विचार करत आहे…',
+  chatFailed: 'उत्तर तयार करता आले नाही. पुन्हा प्रयत्न करा.',
+  chatLoadFailed: 'ही चॅट उघडता आली नाही.',
+  chatYours: 'तुमच्या चॅट्स',
+  chatOthers: 'इतर चॅट्स',
+  chatNoThreads: 'अजून एकही चॅट नाही.',
+  chatListFailed: 'चॅट्सची यादी उघडता आली नाही.',
+  chatListNotice: 'सर्व चॅट्स विभागातील सर्वांना दिसतात.',
+  chatDelete: 'चॅट काढून टाका',
+  chatDeleteConfirm: 'ही चॅट कायमची काढून टाकायची?',
+  chatDeleteFailed: 'चॅट काढता आली नाही.',
+  chatOpenList: 'चॅट्सची यादी',
+  chatCloseList: 'यादी बंद करा',
+  chatAttach: 'फाईल जोडा',
+  chatAttachImage: 'चित्र',
+  chatAttachDocument: 'दस्तऐवज',
+  chatAttachAudio: 'ध्वनिमुद्रण',
+  chatAttachYouTube: 'यूट्युब लिंक',
+  chatAttachRemove: 'काढून टाका',
+  chatAttachPreparing: 'तयार करत आहोत…',
+  chatAttachTranscribing: 'ध्वनिमुद्रण लिहून घेत आहोत… (काही मिनिटे लागू शकतात)',
+  chatAttachReady: 'तयार',
+  chatAttachFailed: 'ही फाईल वाचता आली नाही.',
+  chatAttachWait: 'फाईल तयार होईपर्यंत थांबा.',
+  chatAttachTooMany: 'एका संदेशाला जास्तीत जास्त १० फाईल्स जोडता येतात.',
+  chatAttachAudioNotice:
+    'ध्वनिमुद्रणे व यूट्युब लिंक ध्वनिलेखन विभागातही जतन होतात, त्यामुळे तेच ध्वनिमुद्रण पुन्हा लिहून घ्यावे लागत नाही.',
+  chatAttachDocumentNotice:
+    'स्कॅन केलेल्या फाईलमधून कोणती पृष्ठे वाचायची ते निवडा — निवडलेली पृष्ठेच वाचली जातात.',
+  chatAttachedImage: 'चित्र',
+  chatCopy: 'कॉपी करा',
+  chatCopied: 'कॉपी झाले',
+
   // ---------- वापर विश्लेषण (/analytics) ----------
   navAnalytics: 'वापर विश्लेषण',
   analyticsTitle: 'वापर विश्लेषण',
@@ -1445,6 +1537,7 @@ export const STR = {
   analyticsTaskTranslationNames: 'भाषांतरापूर्वी नावांचा शोध',
   analyticsTaskEnglishTranslation: 'इंग्रजी भाषांतर',
   analyticsTaskHindiTranslation: 'हिंदी भाषांतर',
+  analyticsTaskMarathiTranslation: 'मराठी भाषांतर',
   analyticsTaskProofreading: 'मुद्रितशोधन व भाषा तपासणी',
   analyticsTaskSocialPost: 'सोशल मीडिया पोस्टर तयार करणे',
   analyticsTaskSocialCaption: 'सोशल मीडिया कॅप्शन लिहिणे',

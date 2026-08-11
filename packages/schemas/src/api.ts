@@ -135,6 +135,44 @@ export type RevisionTarget = z.infer<typeof RevisionTargetSchema>;
 export const TranslationLanguageSchema = z.enum(['en', 'hi']);
 export type TranslationLanguage = z.infer<typeof TranslationLanguageSchema>;
 
+// Languages the STANDALONE /translate page can move text BETWEEN — deliberately a wider
+// enum than TranslationLanguageSchema above, and deliberately a separate one.
+//
+// A generation's article is Marathi of record: it can only ever be translated OUT of
+// Marathi, and there is no `article_marathi` column for a Marathi target to land in. The
+// ad-hoc page has no such constraint — an English or Hindi press note that has to be
+// published in Marathi is the same one-off job in the other direction. Keeping the two
+// enums apart is what stops 'mr' reaching the generation path, where it would be
+// meaningless, rather than relying on every caller to remember.
+export const TextTranslationLanguageSchema = z.enum(['mr', 'en', 'hi']);
+export type TextTranslationLanguage = z.infer<
+  typeof TextTranslationLanguageSchema
+>;
+
+// The pairs /translate actually supports, listed rather than derived. Only mr→X and X→mr
+// exist today: English↔Hindi is not a Marathi-department need, and — more to the point —
+// the English path is a CHAT prompt that says "Marathi-to-English translator" in as many
+// words, so letting a Hindi source reach it would silently produce something nobody
+// specified. An unsupported pair is rejected at the edge with a clear message instead.
+export const TEXT_TRANSLATION_PAIRS = [
+  { source: 'mr', target: 'en' },
+  { source: 'mr', target: 'hi' },
+  { source: 'en', target: 'mr' },
+  { source: 'hi', target: 'mr' },
+] as const satisfies readonly {
+  source: TextTranslationLanguage;
+  target: TextTranslationLanguage;
+}[];
+
+export function isSupportedTranslationPair(
+  source: TextTranslationLanguage,
+  target: TextTranslationLanguage,
+): boolean {
+  return TEXT_TRANSLATION_PAIRS.some(
+    (pair) => pair.source === source && pair.target === target,
+  );
+}
+
 // A generation's note (टिपणी) has NO character ceiling. It used to be capped at 60,000,
 // which a pasted article plus an uploaded document's text could exceed for no good reason —
 // a whole scanned booklet is a legitimate source. The remaining bound is the API's 1 MiB
@@ -170,6 +208,25 @@ export const ARTICLE_WORD_TARGETS: Readonly<
 // for a paragraph of real direction and factual corrections, while keeping one request bounded.
 // Shared so the API's 400 and the form's own counter enforce the same number.
 export const ARTICLE_INSTRUCTIONS_MAX_CHARS = 2000;
+
+// What the officer is told when they asked for an article of a given length and the run could
+// not reach it. Lives here rather than in content-engine because all three of the engine, the
+// API payload and the web renderer need the same shape, and apps/web cannot import
+// content-engine (the DesignationWarning precedent).
+//
+// Structured rather than a ready-made sentence: the Marathi belongs in apps/web/lib/strings.ts
+// with every other user-facing string.
+export const LengthWarningSchema = z.object({
+  // What the officer asked for, in their own unit.
+  requested: z.number().int(),
+  unit: z.enum(['chars', 'words']),
+  // What the delivered article actually measures. Usually short of `requested`: the source did
+  // not carry enough to cover, and padding a government article is not an option the pipeline
+  // has. Can also be over, when a shorten was asked for and could not be met without dropping
+  // material the officer approved.
+  actual: z.number().int(),
+});
+export type LengthWarning = z.infer<typeof LengthWarningSchema>;
 
 // The floor on `note`. It was 20 — an ARTICLE minimum, from when every run on this route
 // was written from a टिपणी. The Creative and Social form now sends the POSTER'S OWN TEXT in
@@ -639,6 +696,12 @@ export const GenerationDetailSchema = z.object({
     .object({ needed: z.number().int(), available: z.number().int() })
     .nullable()
     .default(null),
+  // Set when the officer's request named an article length (तुमची विनंती, or the feedback box)
+  // that the run could not reach. The article is delivered either way: a length is reached by
+  // covering the supplied information more fully, and where the source does not carry enough,
+  // the honest answer is a shorter article plus this notice — not filler in a government
+  // article. Transient like the registries above, and defaulted so an older payload parses.
+  lengthWarning: LengthWarningSchema.nullable().default(null),
   // Article revision can also run alongside the main job: while the poster is still
   // rendering the article is already final, so the user may refine it without waiting
   // out the render. Like `translating`, it can't own status/step/error and is reported
@@ -717,7 +780,7 @@ export const CreateGlossaryTermRequestSchema = z.object({
   english: z.string().trim().min(1).max(200),
   hindi: z.string().trim().max(200).optional(),
   // Only meaningful on a person row; the /glossary form shows it for those only.
-  designation: z.string().trim().max(120).optional(),
+  designation: z.string().trim().optional(),
   termType: TermTypeSchema.optional(),
   verified: z.boolean().optional(),
   notes: z.string().trim().max(1_000).optional(),
@@ -732,7 +795,7 @@ export const UpdateGlossaryTermRequestSchema = z.object({
   english: z.string().trim().min(1).max(200).optional(),
   hindi: z.string().trim().max(200).nullable().optional(),
   // null clears the designation back to "print this name bare".
-  designation: z.string().trim().max(120).nullable().optional(),
+  designation: z.string().trim().nullable().optional(),
   termType: TermTypeSchema.optional(),
   verified: z.boolean().optional(),
   notes: z.string().trim().max(1_000).nullable().optional(),
@@ -810,20 +873,37 @@ export type PrepareTranslateTextRequest = z.infer<
   typeof PrepareTranslateTextRequestSchema
 >;
 
-export const TranslateTextRequestSchema = z.object({
-  text: z.string().trim().min(1).max(TRANSLATE_TEXT_MAX_CHARS),
-  // User-confirmed names from the review step. When present they are saved as verified
-  // glossary rows and locked into this translation; when absent the legacy path mines
-  // candidates into the review queue instead.
-  terms: z.array(TranslationTermInputSchema).max(200).optional(),
-  language: TranslationLanguageSchema.default('en'),
-});
+export const TranslateTextRequestSchema = z
+  .object({
+    text: z.string().trim().min(1).max(TRANSLATE_TEXT_MAX_CHARS),
+    // User-confirmed names from the review step. When present they are saved as verified
+    // glossary rows and locked into this translation; when absent the legacy path mines
+    // candidates into the review queue instead. Only the Marathi-source directions send
+    // these — the review card asks "is this Marathi name's English/Hindi spelling right?",
+    // a question a Marathi TARGET does not have (see the route).
+    terms: z.array(TranslationTermInputSchema).max(200).optional(),
+    language: TextTranslationLanguageSchema.default('en'),
+    // Both default to the original mr→en behaviour, so a client that predates the Marathi
+    // target sends neither and gets exactly what it always did.
+    sourceLanguage: TextTranslationLanguageSchema.default('mr'),
+  })
+  .superRefine((body, ctx) => {
+    if (isSupportedTranslationPair(body.sourceLanguage, body.language)) return;
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['language'],
+      message: `Unsupported translation pair ${body.sourceLanguage} → ${body.language}.`,
+    });
+  });
 export type TranslateTextRequest = z.infer<typeof TranslateTextRequestSchema>;
 
 export const TranslateTextResponseSchema = z.object({
   // The translation, in `language`. Read this, not `english`.
   translated: z.string(),
-  language: TranslationLanguageSchema,
+  language: TextTranslationLanguageSchema,
+  // Echoed back so the output card can label the run's direction without trusting a
+  // selector the user may have changed while the request was in flight.
+  sourceLanguage: TextTranslationLanguageSchema.default('mr'),
   // Legacy mirror of `translated`, sent only for language 'en'. Kept (optional) so a web
   // build deployed ahead of the API still parses the response; drop once both are current.
   english: z.string().optional(),
@@ -832,9 +912,10 @@ export const TranslateTextResponseSchema = z.object({
   // mining; nonzero only on the legacy no-terms path, and 0 there too if mining failed).
   lockedTermCount: z.number().int().nonnegative(),
   minedTermCount: z.number().int().nonnegative(),
-  // Locked names the Hindi output could not be made to carry (see translate-article.ts).
-  // The translation is still returned; the UI flags these for a human check. Empty for
-  // English and for a clean Hindi run.
+  // Locked names the output could not be made to carry (see translate-article.ts). The
+  // translation is still returned; the UI flags these for a human check. Always empty for
+  // English (whose names are locked in the prompt, with no post-hoc check to report on),
+  // and empty for a clean Hindi or Marathi run.
   unpreservedNames: z.array(z.string()),
 });
 export type TranslateTextResponse = z.infer<typeof TranslateTextResponseSchema>;

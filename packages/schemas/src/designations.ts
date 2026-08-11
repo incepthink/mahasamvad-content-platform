@@ -27,7 +27,10 @@ import { z } from 'zod';
 // never for a first name the source does not have.
 export const NameDesignationSchema = z.object({
   name: z.string().trim().min(1).max(200),
-  designation: z.string().trim().min(1).max(120),
+  // The officer sees and approves this value in the designation review before it reaches the
+  // article. Do not reject a legitimate long official title at submit time with a raw length
+  // error; the review itself is the authority for what should be printed.
+  designation: z.string().trim().min(1),
   // Request-only: "यापुढेही हेच वापरा" — also save this pairing to the नाव-शब्दकोश so the next
   // article about this person starts pre-filled. Absent/false = use it for THIS run only,
   // which is the right default when someone is named in a one-off capacity. Stripped before

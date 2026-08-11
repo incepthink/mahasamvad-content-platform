@@ -30,6 +30,7 @@ import {
   FileText,
   Heading1,
   MessageSquareText,
+  Image as ImageIcon,
   Music,
   PenLine,
   SquarePen,
@@ -102,6 +103,8 @@ function SourceStatusList({ intake }: { intake: DloIntakeDetail }) {
           <li key={`${file.name}-${index}`} className="file-row">
             {file.kind === 'audio' ? (
               <Music size={20} aria-hidden="true" />
+            ) : file.kind === 'image' ? (
+              <ImageIcon size={20} aria-hidden="true" />
             ) : (
               <FileText size={20} aria-hidden="true" />
             )}
@@ -283,6 +286,25 @@ function DloArticleOutput({
         </div>
         {/* Same as the detail page: rendered for reading, copied/downloaded raw. */}
         <MarkdownText text={article} className="article-body" />
+
+        {/* The officer typed their length request on THIS page, so the answer belongs here too
+            and not only on the detail page. The article is delivered either way — nothing is
+            invented to fill a count — so this says what fell short and why. */}
+        {detail?.lengthWarning ? (
+          <div className="info-callout warn" style={{ marginTop: 14 }}>
+            <p className="field-label">{STR.lengthWarnTitle}</p>
+            <p className="hint">
+              {(() => {
+                const { requested, actual, unit } = detail.lengthWarning;
+                const label =
+                  unit === 'words' ? STR.lengthUnitWords : STR.lengthUnitChars;
+                return actual < requested
+                  ? STR.lengthWarnShort(label(requested), label(actual))
+                  : STR.lengthWarnLong(label(requested), label(actual));
+              })()}
+            </p>
+          </div>
+        ) : null}
         <div className="btn-row" style={{ marginTop: 18 }}>
           <button type="button" className="btn" onClick={copyArticle}>
             {copied ? STR.copied : STR.copyText}

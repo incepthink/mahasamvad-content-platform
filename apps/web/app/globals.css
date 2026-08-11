@@ -4452,6 +4452,138 @@ a.thread-node:hover {
   border-color: var(--err);
 }
 
+/* ---------- photographs of documents (components/ImageFilePicker) ----------
+   A grid rather than the .file-row list above, and that is the whole reason this block
+   exists: a recording is a name and a size, while a photograph has to be LOOKED at — half a
+   dozen phone snaps of a GR are told apart by what they show, never by IMG_20260811.jpg. The
+   tiles are square and cropped so the grid stays even whatever mixture of portrait and
+   landscape shots was picked. */
+
+.image-grid {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.image-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fffdfa;
+  min-width: 0;
+}
+
+.image-tile img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: 8px;
+  background: var(--surface);
+  display: block;
+}
+
+.image-tile-name {
+  margin-top: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  /* One line: a camera file name is long and identical to its neighbours', so wrapping it
+     would push every tile taller to show nothing. The picture is the identifier. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.image-tile-size {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.image-tile .image-remove {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  /* Over the photograph, so it needs its own ground to stay visible on a dark shot. */
+  background: var(--card);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.image-tile .image-remove:hover {
+  background: var(--err-soft);
+  color: var(--err);
+  border-color: var(--err);
+}
+
+/* The review step: the photograph beside the text read out of it, because proofreading
+   Marathi OCR means comparing it with something. Collapses to one column on a phone, where
+   side by side would leave both halves too narrow to read. */
+
+.image-review {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) 1fr;
+  gap: 14px;
+  align-items: start;
+}
+
+.image-review .note-input {
+  min-height: 220px;
+}
+
+.image-review-shot {
+  display: block;
+  text-decoration: none;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.image-review-shot img {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  display: block;
+}
+
+.image-review-shot span {
+  display: block;
+  margin-top: 6px;
+  text-align: center;
+}
+
+.image-review-shot:hover span {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+@media (max-width: 720px) {
+  .image-review {
+    grid-template-columns: 1fr;
+  }
+
+  .image-review-shot img {
+    /* Full width would make a portrait shot taller than the phone, pushing the text box the
+       officer is here to edit off the screen entirely. */
+    max-height: 320px;
+    width: auto;
+    max-width: 100%;
+    margin: 0 auto;
+  }
+}
+
 /* ---------- YouTube links as a source (components/YouTubeLinkInput) ----------
    Deliberately built on the .file-row idiom above rather than a look of its own: a pasted
    link and an uploaded recording become the same kind of source, so the two lists sitting
@@ -5849,5 +5981,696 @@ a.thread-node:hover {
   .feature-card,
   .chart-tip {
     transition: none;
+  }
+}
+
+/* ---------- चॅट (/chat) ----------
+   The one route that opts out of `.page`. A conversation needs a fixed viewport
+   with its own scrolling region rather than a document that grows downward: the
+   composer has to stay reachable and the answer has to scroll under it.
+   Everything else — the tokens, the radius scale, 18px type, status as text and
+   colour — is the same system as every other page. */
+
+.chat-page {
+  /* Fills whatever .app-main has left after the footer. min-height: 0 is what
+     lets the scroller inside bound itself instead of pushing the page taller. */
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 288px minmax(0, 1fr);
+  background: var(--card);
+}
+
+/* The footer's usual breathing room would otherwise eat 48px of conversation. */
+.chat-page + .site-footer {
+  margin-top: 0;
+}
+
+/* ----- the rail ----- */
+
+.chat-rail {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.chat-rail-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.chat-rail-new {
+  flex: 1;
+  /* Deliberately under the 56px primary height: this is navigation inside a dense
+     list, not the screen's primary action — that is Send. */
+  min-height: 46px;
+  gap: 8px;
+  font-size: 1rem;
+}
+
+/* Only the drawer needs a close button. */
+.chat-rail-close {
+  display: none;
+}
+
+.chat-rail-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 10px 20px;
+}
+
+.chat-rail-group {
+  margin: 14px 8px 6px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.chat-rail-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chat-rail-item {
+  display: flex;
+  align-items: center;
+  border-radius: var(--r-sm);
+}
+
+.chat-rail-item:hover,
+.chat-rail-item.active {
+  background: var(--accent-soft);
+}
+
+.chat-rail-link {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 4px 10px 12px;
+  font-size: 0.95rem;
+  text-decoration: none;
+  /* One line, ellipsised: a title is a handle for finding a chat again, not a
+     summary, and wrapped titles make the list impossible to scan. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-rail-item.active .chat-rail-link {
+  font-weight: 600;
+  color: var(--accent-dark);
+}
+
+.chat-rail-delete {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  margin-right: 4px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  /* Hidden until the row is hovered or focused within, so a list of chats reads
+     as a list of chats and not as a column of delete buttons. */
+  opacity: 0;
+  transition:
+    opacity 0.12s ease,
+    color 0.12s ease;
+}
+
+.chat-rail-item:hover .chat-rail-delete,
+.chat-rail-delete:focus-visible {
+  opacity: 1;
+}
+
+.chat-rail-delete:hover {
+  color: var(--err);
+}
+
+/* Touch has no hover, so the control simply has to be present. */
+@media (hover: none) {
+  .chat-rail-delete {
+    opacity: 1;
+  }
+}
+
+.chat-rail-empty,
+.chat-rail-confirm,
+.chat-rail-error {
+  margin: 12px 10px;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.chat-rail-error {
+  padding: 10px 12px;
+  border-radius: var(--r-sm);
+  background: var(--err-soft);
+  color: var(--err);
+}
+
+.chat-rail-confirm {
+  padding: 10px 12px;
+  border-radius: var(--r-sm);
+  background: var(--warn-soft);
+  color: var(--text);
+}
+
+.chat-rail-confirm-cancel {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent-dark);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.chat-rail-notice {
+  margin: 0;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.chat-rail-scrim {
+  display: none;
+}
+
+/* ----- the conversation ----- */
+
+.chat-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.chat-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.chat-bar-toggle {
+  display: none;
+}
+
+.chat-bar-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.chat-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 24px 20px 8px;
+}
+
+/* One measure for the turns and the composer, so the box lines up under the text
+   it produced. Around 68 characters of Devanagari at this size. */
+.chat-column {
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+}
+
+.chat-empty {
+  padding: 12vh 0 0;
+  text-align: center;
+}
+
+.chat-empty-title {
+  margin: 0 0 8px;
+  font-size: 1.5rem;
+}
+
+.chat-empty-hint {
+  margin: 0 auto 18px;
+  max-width: 46ch;
+  color: var(--muted);
+}
+
+.chat-empty-notice {
+  margin: 0 auto;
+  max-width: 52ch;
+  padding: 12px 16px;
+  border-radius: var(--r-md);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: var(--muted);
+  text-align: start;
+}
+
+.chat-turn {
+  margin: 0 0 26px;
+}
+
+.chat-turn--user {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* A question is contained and belongs to whoever asked it; an answer is prose and
+   runs the full measure with no container at all. */
+.chat-bubble {
+  max-width: 85%;
+  padding: 12px 16px;
+  border-radius: var(--r-lg);
+  border-top-right-radius: var(--r-sm);
+  background: var(--accent-soft);
+}
+
+.chat-user-text {
+  margin: 0;
+  /* Shown exactly as typed, including the officer's own line breaks. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat-answer {
+  overflow-wrap: anywhere;
+}
+
+.chat-answer--streaming {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.chat-turn-error {
+  margin: 8px 0 0;
+  padding: 10px 14px;
+  border-radius: var(--r-md);
+  background: var(--err-soft);
+  color: var(--err);
+  font-size: 0.9rem;
+}
+
+.chat-turn-actions {
+  margin-top: 6px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.chat-turn--assistant:hover .chat-turn-actions,
+.chat-turn-actions:focus-within {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .chat-turn-actions {
+    opacity: 1;
+  }
+}
+
+.chat-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  padding: 6px 10px;
+}
+
+.chat-thinking {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  color: var(--muted);
+}
+
+.chat-dots {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.chat-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: chat-dot 1.1s infinite ease-in-out;
+}
+
+.chat-dots i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.chat-dots i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes chat-dot {
+  0%,
+  70%,
+  100% {
+    opacity: 0.25;
+  }
+  35% {
+    opacity: 1;
+  }
+}
+
+.chat-note {
+  margin: 0 0 20px;
+  color: var(--muted);
+}
+
+.chat-note--error {
+  color: var(--err);
+}
+
+/* ----- attachments on a sent turn ----- */
+
+.chat-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.chat-attach-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
+}
+
+.chat-attach-image {
+  max-width: 220px;
+  max-height: 220px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  object-fit: cover;
+}
+
+.chat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  font-size: 0.82rem;
+}
+
+.chat-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-chip-meta {
+  color: var(--muted);
+  flex: none;
+}
+
+/* ----- the composer ----- */
+
+.chat-composer-wrap {
+  flex: none;
+  padding: 8px 20px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--card);
+}
+
+.chat-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* The shared upload card, sized to sit inside a composer rather than on a page of
+   its own. */
+.chat-document,
+.chat-youtube {
+  font-size: 0.95rem;
+}
+
+.chat-tray {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chat-tray-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 7px 8px 7px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  font-size: 0.85rem;
+}
+
+/* Status as text AND colour, never colour alone (see the top of this file). */
+.chat-tray-item.is-ready {
+  border-color: var(--ok);
+  background: var(--ok-soft);
+}
+
+.chat-tray-item.is-failed {
+  border-color: var(--err);
+  background: var(--err-soft);
+}
+
+.chat-tray-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 22ch;
+}
+
+.chat-tray-state {
+  color: var(--muted);
+  flex: none;
+}
+
+.chat-tray-item.is-failed .chat-tray-state {
+  color: var(--err);
+}
+
+.chat-tray-remove {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.chat-tray-remove:hover {
+  color: var(--err);
+}
+
+.chat-input-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 8px 8px 8px 16px;
+  border: 1.5px solid var(--border-strong);
+  border-radius: var(--r-xl);
+  background: var(--card);
+  box-shadow: var(--shadow-sm);
+  transition: border-color 0.15s ease;
+}
+
+.chat-input-row:focus-within {
+  border-color: var(--accent);
+}
+
+.chat-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  padding: 12px 0;
+  font: inherit;
+  color: var(--text);
+  resize: none;
+  /* Grows with the text to a point, then scrolls — so a long paste never pushes
+     the send button off the screen. `field-sizing` is what does the growing and is
+     recent (Chrome 123+); the min-height is the fallback, so a browser without it
+     gets a composer-shaped box that scrolls rather than a single squeezed line. */
+  min-height: 3.2em;
+  max-height: 40vh;
+  field-sizing: content;
+}
+
+.chat-input:focus {
+  outline: none;
+}
+
+.chat-tools {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+
+.chat-tool {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border-radius: 50%;
+  color: var(--muted);
+}
+
+.chat-tool:hover:not(:disabled) {
+  color: var(--accent-dark);
+  background: var(--accent-soft);
+}
+
+.chat-send {
+  min-height: 46px;
+  padding: 0 18px;
+  margin-left: 6px;
+  gap: 6px;
+  border-radius: 999px;
+  font-size: 0.95rem;
+}
+
+.chat-send--stop {
+  background: var(--muted);
+}
+
+.chat-composer-note,
+.chat-composer-hint,
+.chat-composer-error {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.chat-composer-note {
+  color: var(--warn);
+}
+
+.chat-composer-hint {
+  color: var(--muted);
+}
+
+.chat-composer-error {
+  color: var(--err);
+}
+
+/* ----- narrow: the rail becomes a drawer ----- */
+
+@media (max-width: 900px) {
+  .chat-page {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .chat-rail {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 40;
+    width: min(320px, 86vw);
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    box-shadow: var(--shadow-lg);
+  }
+
+  .chat-rail.open {
+    transform: translateX(0);
+  }
+
+  .chat-rail-close,
+  .chat-bar-toggle {
+    display: grid;
+    place-items: center;
+    width: 42px;
+    height: 42px;
+    padding: 0;
+    border-radius: 50%;
+  }
+
+  .chat-rail-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 39;
+    border: none;
+    background: rgba(28, 22, 17, 0.45);
+    cursor: pointer;
+  }
+
+  .chat-scroll {
+    padding: 16px 14px 8px;
+  }
+
+  .chat-composer-wrap {
+    padding: 8px 14px 14px;
+  }
+
+  .chat-bubble {
+    max-width: 92%;
+  }
+
+  /* The labels go; the icons carry the meaning at this width. */
+  .chat-send-label {
+    display: none;
+  }
+
+  .chat-send {
+    padding: 0;
+    width: 46px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-rail,
+  .chat-turn-actions,
+  .chat-rail-delete {
+    transition: none;
+  }
+
+  .chat-dots i {
+    animation: none;
+    opacity: 0.6;
   }
 }

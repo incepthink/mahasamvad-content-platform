@@ -11,7 +11,8 @@
     "lint": "pnpm -r --if-present lint",
     "format": "prettier . --write",
     "format:check": "prettier . --check",
-    "n8n:push": "node --env-file-if-exists=.env n8n/push-workflows.mjs"
+    "n8n:push": "node --env-file-if-exists=.env n8n/push-workflows.mjs",
+    "db:tunnel": "bash scripts/db-tunnel.sh"
   },
   "devDependencies": {
     "@eslint/js": "^9.30.1",

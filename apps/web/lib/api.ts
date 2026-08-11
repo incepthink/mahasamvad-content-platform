@@ -74,6 +74,16 @@ import {
   type TranscriptionSummary,
   YouTubeVideoSchema,
   type YouTubeVideo,
+  ChatImageUploadResponseSchema,
+  ChatStreamEventSchema,
+  ChatThreadDetailSchema,
+  ChatThreadListSchema,
+  CreateChatThreadResponseSchema,
+  type ChatImageUploadResponse,
+  type ChatStreamEvent,
+  type ChatThreadDetail,
+  type ChatThreadSummary,
+  type SendChatMessageRequest,
   VideoProjectDetailSchema,
   VideoProjectSummarySchema,
   type CreateVideoProjectInput,
@@ -491,6 +501,13 @@ export async function updatePosterCopy(
     body: JSON.stringify(copy),
   });
   return z.object({ posterUrl: z.string() }).parse(body).posterUrl;
+}
+
+// One uploaded photograph from a /dlo intake, for the review card to show beside its
+// transcript. A URL rather than a fetch because it is an <img src>; it is a PROXY route
+// because `dlo-uploads` is private — see the route in apps/api/src/routes/dlo.ts.
+export function dloFileImageUrl(intakeId: string, index: number): string {
+  return `${API_URL}/api/dlo/intakes/${intakeId}/files/${index}/image`;
 }
 
 export function posterDownloadUrl(id: string): string {
@@ -1002,4 +1019,115 @@ export async function reopenVideoStoryboard(id: string): Promise<void> {
 // This never re-buys a scene render or narration.
 export async function restitchVideo(id: string): Promise<void> {
   await requestJson(`/api/video/projects/${id}/stitch`, { method: 'POST' });
+}
+
+// ---------------------------------------------------------------------------
+// /chat — the general assistant
+// ---------------------------------------------------------------------------
+
+export async function createChatThread(): Promise<string> {
+  const body = await requestJson('/api/chat/threads', { method: 'POST' });
+  return CreateChatThreadResponseSchema.parse(body).id;
+}
+
+// The rail. Carries no message bodies — that is what the thread's counters are for — so it
+// stays cheap enough to refresh whenever a chat is opened or a turn finishes.
+export async function listChatThreads(): Promise<ChatThreadSummary[]> {
+  const body = await requestJson('/api/chat/threads');
+  return ChatThreadListSchema.parse(body);
+}
+
+export async function getChatThread(id: string): Promise<ChatThreadDetail> {
+  const body = await requestJson(`/api/chat/threads/${id}`);
+  return ChatThreadDetailSchema.parse(body);
+}
+
+export async function deleteChatThread(id: string): Promise<void> {
+  const response = await fetch(`${API_URL}/api/chat/threads/${id}`, {
+    method: 'DELETE',
+  });
+  // 204, so there is no body to read — but a failure still carries one.
+  if (!response.ok) await readJsonResponse(response);
+}
+
+// One photograph, uploaded while the officer is still typing. By send time the attachment is
+// already a URL, so the turn itself is an ordinary JSON request.
+export async function uploadChatImage(
+  file: File,
+): Promise<ChatImageUploadResponse> {
+  const form = new FormData();
+  form.append('file', file);
+  const response = await fetch(`${API_URL}/api/chat/attachments/image`, {
+    method: 'POST',
+    body: form,
+  });
+  return ChatImageUploadResponseSchema.parse(await readJsonResponse(response));
+}
+
+// Send a turn and read the answer as it is written.
+//
+// `fetch` + a ReadableStream rather than EventSource, which can only GET — the turn carries a
+// body. The events are the same SSE framing either way (`data: {json}\n\n`), parsed here by
+// splitting on the blank line; a chunk boundary can fall anywhere, so the tail is buffered
+// rather than assumed to be a whole event. Mirrors chatCompleteStream's own reader.
+//
+// `signal` is the थांबवा button. Aborting stops the reading, not the server: the API finishes
+// the turn and stores whatever arrived, so a reload shows the partial answer rather than
+// losing paid tokens.
+export async function sendChatMessage(
+  threadId: string,
+  input: SendChatMessageRequest,
+  onEvent: (event: ChatStreamEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const response = await fetch(
+    `${API_URL}/api/chat/threads/${threadId}/messages`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+      ...(signal ? { signal } : {}),
+    },
+  );
+  // A refusal (empty message, oversized attachment, unknown thread) is ordinary JSON with an
+  // error body; only an accepted turn becomes an event stream.
+  if (!response.ok || !response.body) {
+    await readJsonResponse(response);
+    throw new ApiRequestError('चॅट सुरू करता आली नाही.', response.status);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      // Bare CR is never meaningful in this framing (a newline inside JSON is escaped), so
+      // dropping it makes the separator exactly "\n\n" however the server framed its lines.
+      buffer = (buffer + decoder.decode(value, { stream: true })).replace(
+        /\r/g,
+        '',
+      );
+      let separator = buffer.indexOf('\n\n');
+      while (separator !== -1) {
+        const frame = buffer.slice(0, separator);
+        buffer = buffer.slice(separator + 2);
+        for (const line of frame.split('\n')) {
+          if (!line.startsWith('data:')) continue;
+          const data = line.slice(5).trim();
+          if (data === '') continue;
+          const parsed = ChatStreamEventSchema.safeParse(
+            JSON.parse(data) as unknown,
+          );
+          // An unrecognised frame is skipped rather than thrown: a future event type must not
+          // break a client mid-answer.
+          if (parsed.success) onEvent(parsed.data);
+        }
+        separator = buffer.indexOf('\n\n');
+      }
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
 }

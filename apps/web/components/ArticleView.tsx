@@ -270,6 +270,26 @@ export function ArticleView({
         </div>
       ) : null}
 
+      {/* The officer asked for a length the article did not reach. Shown rather than silently
+          accepted, because the platform will not pad a government article to hit a count: the
+          shortfall is information the officer can act on (add source material, or accept the
+          shorter piece). Marathi only, like the block above — the translations derive from it. */}
+      {shownLang === 'mr' && detail.lengthWarning ? (
+        <div className="info-callout warn" style={{ marginBottom: 12 }}>
+          <p className="field-label">{STR.lengthWarnTitle}</p>
+          <p className="hint">
+            {(() => {
+              const { requested, actual, unit } = detail.lengthWarning;
+              const label =
+                unit === 'words' ? STR.lengthUnitWords : STR.lengthUnitChars;
+              return actual < requested
+                ? STR.lengthWarnShort(label(requested), label(actual))
+                : STR.lengthWarnLong(label(requested), label(actual));
+            })()}
+          </p>
+        </div>
+      ) : null}
+
       {/* Display only — the generator's Markdown structure rendered as real headings,
           lists and paragraphs. Copy, .txt/.md download and the PDF export below all
           keep reading `shown` raw, so what leaves the page is unchanged. */}

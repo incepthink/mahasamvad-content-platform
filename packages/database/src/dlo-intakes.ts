@@ -17,7 +17,12 @@ export type DloIntakeStep =
 // fetches the media itself (ElevenLabs Scribe's source_url). So such an entry carries a
 // `sourceUrl` and no `storagePath`, and is transcribed in the same phase as an uploaded
 // recording — see the transcribe phase in apps/api/src/jobs/dlo-runner.ts.
-export type DloIntakeFileKind = 'audio' | 'youtube' | 'pdf' | 'docx' | 'txt';
+// 'image' is a photograph or screenshot of a document. It is uploaded with the intake like a
+// recording and read by the job's extract phase (intake/image-ocr.ts), and stores its result
+// in `text` like a DOCX — an image has no pages, so there is nothing to select and nothing to
+// number.
+export type DloIntakeFileKind =
+  'audio' | 'youtube' | 'image' | 'pdf' | 'docx' | 'txt';
 // 'needs-selection' is a PDF that was probed but deliberately NOT read: its text layer was
 // unusable, so reading it means paid OCR, and the officer chooses which pages are worth it
 // before a single one is sent. Only PDFs ever hold this status.

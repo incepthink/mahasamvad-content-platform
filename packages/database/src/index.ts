@@ -60,6 +60,7 @@ export {
   deleteGlossaryTerm,
   type TermType,
   type TermSource,
+  type GlossaryMatchForm,
   type GlossaryTerm,
   type NewGlossaryTerm,
   type GlossaryTermPatch,
@@ -127,6 +128,24 @@ export {
   type TranscriptionPatch,
   type TranscriptionSummaryRow,
 } from './transcriptions.js';
+export {
+  CHAT_THREADS_TABLE,
+  CHAT_MESSAGES_TABLE,
+  insertChatThread,
+  updateChatThread,
+  getChatThread,
+  listChatThreads,
+  deleteChatThread,
+  insertChatMessage,
+  listChatMessages,
+  type ChatRole,
+  type ChatAttachmentKind,
+  type ChatAttachmentEntry,
+  type ChatThreadRow,
+  type ChatThreadPatch,
+  type ChatMessageRow,
+  type NewChatMessage,
+} from './chat.js';
 export {
   USAGE_EVENTS_TABLE,
   recordUsageEvent,

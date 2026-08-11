@@ -20,7 +20,8 @@
 //    filters on it. Losing it (cleared storage, a different machine, a new profile) costs
 //    ordering and nothing else: the intake is still in the list, one group down.
 //
-// The picked MP3s are deliberately NOT here. A File is a live handle behind a user gesture;
+// The picked MP3s and photographs are deliberately NOT here. A File is a live handle behind a
+// user gesture;
 // sessionStorage takes strings, and copying a whole recording (up to UPLOAD_FILE_MAX_BYTES)
 // into IndexedDB would
 // still yield a handle the browser will not re-grant. Within one SPA session they ride in the
@@ -47,6 +48,9 @@ export type DloDraft = Readonly<{
   nextSlotId: number;
   // Names only — see the header. Used to ask for the recordings back after a reload.
   audioNames: readonly string[];
+  // Same again for the photographs, and for exactly the same reason: a picked File cannot be
+  // serialized, so a reload keeps the names and the form asks for the files back.
+  imageNames: readonly string[];
   // YouTube sources, in full. Unlike a picked recording these ARE serializable — a link and
   // the title/thumbnail the probe returned are just strings — so they survive a reload
   // intact and need no "please add these again" callout.
@@ -62,6 +66,7 @@ export const EMPTY_DRAFT: DloDraft = {
   documentSlotIds: [0],
   nextSlotId: 1,
   audioNames: [],
+  imageNames: [],
   youtube: [],
 };
 
@@ -80,6 +85,23 @@ export function setPendingAudio(files: readonly File[]): void {
 
 export function clearPendingAudio(): void {
   pendingAudio = [];
+}
+
+// Photographs picked but not yet submitted — the same arrangement, kept as its own variable
+// rather than one mixed list so the form can rebuild its two pickers separately after a
+// client-side navigation.
+let pendingImages: File[] = [];
+
+export function getPendingImages(): File[] {
+  return pendingImages;
+}
+
+export function setPendingImages(files: readonly File[]): void {
+  pendingImages = [...files];
+}
+
+export function clearPendingImages(): void {
+  pendingImages = [];
 }
 
 function isBrowser(): boolean {
@@ -113,6 +135,11 @@ export function readDraft(): DloDraft | null {
           : Math.max(...slotIds, 0) + 1,
       audioNames: Array.isArray(parsed.audioNames)
         ? parsed.audioNames.filter(
+            (name): name is string => typeof name === 'string',
+          )
+        : [],
+      imageNames: Array.isArray(parsed.imageNames)
+        ? parsed.imageNames.filter(
             (name): name is string => typeof name === 'string',
           )
         : [],

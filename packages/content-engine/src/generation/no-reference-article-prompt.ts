@@ -9,16 +9,23 @@ import { pathToFileURL } from 'node:url';
 import { buildMinimalArticleMessages } from './minimal-article-prompt.js';
 import type { ChatMessage } from './openai-chat.js';
 import {
+  PRECEDENCE_RULE,
   buildSimpleArticleMessages,
   type SimpleArticleInputs,
 } from './simple-article-prompt.js';
 
+// v3 (2026-08-11): the officer's two inputs outrank this specification — the shared
+// PRECEDENCE_RULE, and a length sentence that is conditional on them rather than absolute. This
+// is the variant that actually runs by default, so it is where the officer's "बातमी १२००
+// अक्षरांची हवी" was being contradicted by a system-message "the article's length does not
+// matter" plus a blanket ban on stretching.
+//
 // v2 (2026-08-05): the system message states the OUTPUT SHAPE. v1 asked only for "the headline
 // on the first line", so the model wrote it as plain text — which every downstream consumer of
 // a headline reads as body (MarkdownText, the article PDF template) and which made
 // ensureArticleDateline prefix the dateline to the headline itself. It now asks for "# शीर्षक"
 // and says the dateline opens the first body paragraph, never the headline.
-export const NO_REFERENCE_ARTICLE_PROMPT_VERSION = 'no-reference-v2';
+export const NO_REFERENCE_ARTICLE_PROMPT_VERSION = 'no-reference-v3';
 
 // Disabled is the deliberate default for the current experiment. Setting the variable to the
 // single explicit opt-in value `true` restores the complete pre-existing selection + prompt
@@ -40,8 +47,17 @@ export function buildNoReferenceArticleSystemPrompt(): string {
     'provided in the user message. Use your best editorial judgement to make it coherent,',
     'readable and informative rather than a mechanical inventory of supplied facts.',
     '',
-    'The article’s length does not matter. Use the information fully when it improves the',
-    'article, but do not pad, repeat, stretch, infer, or add unsupported information.',
+    ...PRECEDENCE_RULE,
+    '',
+    'Unless the HEADLINE / ANGLE or the OFFICER REQUEST asks for a particular length, the',
+    'article’s length does not matter. Use the information fully when it improves the article,',
+    'but do not pad, repeat, infer, or add unsupported information.',
+    '',
+    'Where a length IS asked for, write to it. Reach it by covering the supplied information',
+    'more fully and explaining it more completely — never by repeating yourself, padding with',
+    'empty phrases, or adding anything the supplied information does not support. If the',
+    'supplied information cannot honestly fill the requested length, write the fullest accurate',
+    'article it supports and stop.',
     '',
     'SOURCE INFORMATION may contain Markdown tables (pipe-delimited rows). Read them as tables:',
     'each figure belongs to its own column heading and row label. Never read a row as a',
@@ -163,6 +179,47 @@ if (
   }
 
   const system = buildNoReferenceArticleSystemPrompt();
+  const flatSystem = system.replace(/\s+/gu, ' ');
+  check(
+    'the officer’s inputs are given an explicit precedence over this specification',
+    system.includes('PRECEDENCE. Where anything below conflicts') &&
+      flatSystem.includes(
+        'They override every general instruction given here, including what is said about length below.',
+      ),
+  );
+  check(
+    'never stating an unsupported fact still outranks the officer',
+    flatSystem.includes(
+      'Never state a fact — a name, designation, date, amount, place, scheme, law, quote or claim',
+    ) && flatSystem.includes('Nothing overrides this.'),
+  );
+  check(
+    'length is irrelevant only while the officer has named none',
+    flatSystem.includes(
+      'Unless the HEADLINE / ANGLE or the OFFICER REQUEST asks for a particular length, the article’s length does not matter',
+    ),
+  );
+  check(
+    'a requested length is written to, by covering the source more fully',
+    flatSystem.includes('Where a length IS asked for, write to it.') &&
+      flatSystem.includes('covering the supplied information more fully'),
+  );
+  check(
+    'padding and invention remain the forbidden way to reach it',
+    flatSystem.includes(
+      'never by repeating yourself, padding with empty phrases, or adding anything the supplied information does not support',
+    ),
+  );
+  check(
+    'stopping short beats inventing',
+    flatSystem.includes(
+      'cannot honestly fill the requested length, write the fullest accurate article it supports and stop',
+    ),
+  );
+  check(
+    'the blanket "do not stretch" is gone',
+    !system.includes('do not pad, repeat, stretch, infer'),
+  );
   check(
     'the headline is asked for as a Markdown heading',
     system.includes('written as a Markdown heading ("# शीर्षक")'),

@@ -31,8 +31,9 @@
 // outstanding.
 
 // CirclePlay stands in for a YouTube mark: lucide 1.x carries no brand icons.
-import { CirclePlay, FileText, Music } from 'lucide-react';
+import { CirclePlay, FileText, Image as ImageIcon, Music } from 'lucide-react';
 import type { DloIntakeDetail, DloIntakeFile } from '@dgipr/schemas';
+import { dloFileImageUrl } from '../lib/api';
 import {
   NOTES_KEY,
   filePageNumbers,
@@ -52,6 +53,10 @@ const KIND_LABEL: Record<DloIntakeFile['kind'], string> = {
   // A transcribed YouTube video behaves exactly like a recording from here on — one card,
   // one editable transcript — so only the badge and the icon distinguish it.
   youtube: STR.ytSourceLabel,
+  // A photograph read by the same OCR a PDF page gets, so from here on it is a card with one
+  // editable text — plus the picture itself, which is what makes checking a misread name
+  // possible at all.
+  image: STR.dloReviewKindImage,
   pdf: STR.dloReviewKindPdf,
   docx: STR.dloReviewKindDocx,
   txt: STR.dloReviewKindTxt,
@@ -128,6 +133,8 @@ export function DloSourceReview({
                   <CirclePlay size={20} aria-hidden="true" />
                 ) : file.kind === 'audio' ? (
                   <Music size={20} aria-hidden="true" />
+                ) : file.kind === 'image' ? (
+                  <ImageIcon size={20} aria-hidden="true" />
                 ) : (
                   <FileText size={20} aria-hidden="true" />
                 )
@@ -222,14 +229,57 @@ export function DloSourceReview({
               />
             ) : null}
 
+            {/* A photograph that read as nothing at all. Said plainly, and NOT as an error:
+                the OCR ran and answered honestly, so the actionable thing is to look at the
+                picture beside it — and, if the text is there but unreadable to the model, to
+                type it in, which the box below allows. */}
+            {file.kind === 'image' &&
+            file.status === 'done' &&
+            (edits[key] ?? file.text ?? '').trim().length === 0 ? (
+              <div className="info-callout" style={{ marginTop: 10 }}>
+                <p>{STR.dloReviewImageEmpty}</p>
+              </div>
+            ) : null}
+
             {!pages && !needsSelection && file.status !== 'failed' ? (
-              <textarea
-                className="note-input"
-                value={edits[key] ?? file.text ?? ''}
-                disabled={busy || excluded.has(key)}
-                onChange={(event) => onEdit(key, event.target.value)}
-                style={{ marginTop: 12, minHeight: 220 }}
-              />
+              // An image shows the original beside its transcript: proofreading Marathi OCR
+              // means comparing it with something, and the alternative is an officer checking
+              // a name against nothing. Everything else keeps the full-width box.
+              file.kind === 'image' && file.canPreview ? (
+                <div className="image-review">
+                  <a
+                    className="image-review-shot"
+                    href={dloFileImageUrl(intake.id, index)}
+                    target="_blank"
+                    rel="noreferrer"
+                    title={STR.dloReviewImageOpen}
+                  >
+                    {/* Plain <img>, like the YouTube thumbnails: this is served by the API
+                        out of the PRIVATE bucket, so next/image would need a remote pattern
+                        for it and could not optimise a one-off per-intake object anyway. */}
+                    <img
+                      src={dloFileImageUrl(intake.id, index)}
+                      alt={`${STR.dloReviewImageAlt}: ${file.name}`}
+                      loading="lazy"
+                    />
+                    <span>{STR.dloReviewImageOpen}</span>
+                  </a>
+                  <textarea
+                    className="note-input"
+                    value={edits[key] ?? file.text ?? ''}
+                    disabled={busy || excluded.has(key)}
+                    onChange={(event) => onEdit(key, event.target.value)}
+                  />
+                </div>
+              ) : (
+                <textarea
+                  className="note-input"
+                  value={edits[key] ?? file.text ?? ''}
+                  disabled={busy || excluded.has(key)}
+                  onChange={(event) => onEdit(key, event.target.value)}
+                  style={{ marginTop: 12, minHeight: 220 }}
+                />
+              )
             ) : null}
           </section>
         );

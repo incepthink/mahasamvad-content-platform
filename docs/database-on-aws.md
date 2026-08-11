@@ -47,33 +47,48 @@ Never move this route into it.
 
 ## Connecting from your laptop
 
-RDS has no public IP and PostgREST is internal-only, so local scripts (`embed:news`,
-`retrieve:test`, the harnesses) need a tunnel through the EC2 box. This is the one workflow
-the migration made harder.
-
-If you have the `general-instance` key pair:
+RDS has no public IP and PostgREST is internal-only, so **the whole local app** — not just
+scripts like `embed:news` and `retrieve:test` — needs a tunnel through the EC2 box. This is
+the one workflow the migration made harder.
 
 ```bash
-ssh -i <key>.pem -L 8000:pgrst-proxy:8000 -L 5432:dgipr-postgres.cba8c0aw8j13.us-east-2.rds.amazonaws.com:5432 ubuntu@3.149.1.222
+pnpm db:tunnel      # leave running in its own terminal, then `pnpm dev`
 ```
 
-If you do **not** have the pem — EC2 Instance Connect pushes a temporary key (valid 60s for
-authentication; the session then persists):
-
-```bash
-ssh-keygen -t ed25519 -f /tmp/ec2ic -N ""
-aws ec2-instance-connect send-ssh-public-key --region us-east-2 \
-  --instance-id i-004d93d88f687effa --instance-os-user ubuntu \
-  --availability-zone us-east-2a --ssh-public-key file:///tmp/ec2ic.pub
-ssh -i /tmp/ec2ic -L 8000:pgrst-proxy:8000 ubuntu@3.149.1.222
-```
-
-Then point the local `.env` at the tunnel:
+`scripts/db-tunnel.sh` needs only a logged-in `aws` CLI (no pem — EC2 Instance Connect pushes
+a throwaway key). The local `.env` is already pointed at it:
 
 ```
 SUPABASE_URL=http://localhost:8000
 SUPABASE_SERVICE_ROLE_KEY=<PGRST_SERVICE_JWT from .env>
 ```
+
+> **This is the production database.** There is no separate dev copy, so anything local dev
+> writes — a generation, a chat, a deletion — is a production write.
+
+**`-L 8000:pgrst-proxy:8000` does not work**, despite being the obvious command. `pgrst-proxy`
+is a compose-network alias, resolvable only from inside another container on that network;
+from the EC2 host it fails with `Temporary failure in name resolution`. The forward is still
+accepted, so the symptom is a tunnel that connects and then drops every request. The host can
+route to the container's IP directly, so the script looks that IP up per run rather than
+hardcoding it — it changes whenever the container is recreated.
+
+If you have the `general-instance` key pair, the equivalent by hand is:
+
+```bash
+IP=$(ssh -i <key>.pem ubuntu@3.149.1.222 \
+  "sudo docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' deploy-pgrst-proxy-1")
+ssh -i <key>.pem -L 8000:$IP:8000 \
+  -L 5432:dgipr-postgres.cba8c0aw8j13.us-east-2.rds.amazonaws.com:5432 ubuntu@3.149.1.222
+```
+
+Symptom cheat-sheet when local dev misbehaves:
+
+| What you see | What it means |
+|---|---|
+| `fetch failed` on every query | tunnel is down — run `pnpm db:tunnel` |
+| `Could not find the table 'public.x' in the schema cache` | `.env` points at the retired Supabase project, or a migration has not been applied to RDS |
+| `bind [127.0.0.1]:8000: Address already in use` | an older tunnel is still holding the port |
 
 For raw `psql`, tunnel 5432 and connect as `postgres` with `RDS_MASTER_PASSWORD`.
 

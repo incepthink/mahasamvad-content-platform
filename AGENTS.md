@@ -2965,6 +2965,227 @@ Not implemented yet: Canva integration, authentication.
 
 ## Latest Implementation Milestone
 
+- **The officer's request and heading OUTRANK the specification, and a requested length is
+  MEASURED** (2026-08-11, no migration): an officer asked for a 1200-character article in
+  **तुमची विनंती** and again in **बातमीत बदल हवा आहे?** on generation `4dc686aa`, and got 400
+  characters, then 700. The request was never dropped — it reached the model in both paths and
+  was outranked in five separate places, three of which were ours:
+  - **The system message said length is irrelevant, and banned the only way to reach one.**
+    `no-reference-v2` (the deployed default — `ARTICLE_STYLE_REFERENCES_ENABLED` is unset)
+    stated "The article's length does not matter … do not pad, repeat, **stretch**, infer, or
+    add unsupported information" as an absolute, in the system message, while the officer's ask
+    arrived as one line of a user block. Growing a 400-character article to 1200 IS "stretching",
+    so the two did not merely rank against each other — the general rule named the exact
+    operation required and forbade it. `ARTICLE_WORD_TARGETS` had also been dead code since
+    simple-v3 (no consumer, only a stale `.d.ts`), so nothing gave the model a scale at all.
+  - **The heading was hedged, and on the feedback path it did not exist.** It rendered as
+    "### OPTIONAL EDITORIAL DIRECTION" + "this **may** suggest an angle … use it **only when**
+    the factual information supports it", near the TOP (the weakest position), and the minimal
+    variant worded it far more strongly — so the same field carried different authority
+    depending on an env line. Worse, `reviseArticle` took `heading` and passed it **only** to
+    `findMissingInformation` and `findUnsupportedClaims` as allowed context: `buildRevisionMessages`
+    never received it, so the model doing the rewriting had never seen the officer's heading.
+    It survived a feedback round by accident.
+  - **A numeric ask could not turn on the expansion machinery.** `wantsExpansion()` is a keyword
+    regex (मोठ/अधिक/सविस्तर/…, bigger/longer/more…); "१२०० अक्षरे" matches none of it, so
+    `expand` stayed false, the expansion instruction was not emitted and `findMissingInformation`
+    — the broad sweep that finds unused note material so the article can legitimately grow — was
+    skipped. The one shape of feedback that names a length exactly was the one that could not grow.
+  - **The revision runs under a different, compression-permissive prompt** (`systemPromptFor`,
+    the full pipeline's category prompt: "दुय्यम तपशील संक्षिप्त करू शकता"), whose rules 8/11
+    protect exactly the house style an officer asking for simpler language is trying to change.
+  - **And nothing ever counted a character.** Every length statement in the repo was prose.
+    The fixes, in the repo's standing instruct-then-guarantee shape:
+  - **`PRECEDENCE_RULE`** (exported from `simple-article-prompt.ts`, emitted by all three
+    specifications) states the order explicitly: **1.** never state an unsupported fact —
+    nothing overrides this; **2.** the HEADLINE / ANGLE and the OFFICER REQUEST, followed
+    exactly, including length/tone/structure/ordering/emphasis/what to leave out, overriding
+    every general instruction including what is said about length; **3.** everything else. The
+    length sentence became CONDITIONAL on the officer not having asked, gained a paragraph on
+    HOW a requested length may be reached (covering the supplied information more fully, never
+    padding, and stopping short rather than inventing), and the blanket "do not stretch" is gone.
+  - **`headingBlock`** is shared by all three variants, unhedged, and moved to sit
+    **immediately before** the officer request at the END. Both are adjacent on purpose.
+  - **`article-length.ts`** — `parseLengthRequest` reads a length out of Marathi or English free
+    text (Devanagari + Latin digits, inflected units, ranges taking their upper bound, sane
+    bounds so a year or an amount is not a length), `lengthRequirementBlock` restates the number
+    to the model inside `officerInstructionsBlock` (so all three variants get it through one
+    shared function), and **`fitArticleToLength` MEASURES the output and buys ONE bounded
+    rewrite on a miss** — the `shorten-narration.ts` loop. A rewrite that does not get closer is
+    discarded; a failure keeps the paid article.
+  - **`article-heading.ts`** — `ensureArticleHeading` writes the officer's headline onto the
+    article deterministically, after the last model call. `generations.heading` is dual-purpose
+    ("शीर्षक द्या, **किंवा** बातमीचा रोख"), and only the headline half can be enforced; nothing
+    in Marathi separates a headline from an angle reliably (both are fragments), so
+    `looksLikeHeadline` is an admitted heuristic sized off the field's own placeholder — 4+
+    words, 15-200 chars, no sentence terminator — erring toward leaving the model's line alone.
+    The existing Markdown marker is preserved, since the variants disagree about the output shape.
+  - **The feedback path** now renders `<HEADLINE_ANGLE>`, carries it through unless the feedback
+    overrides it, states the precedence carve-out against the category prompt's style rules,
+    renders the same LENGTH REQUIREMENT block (feedback wins over the stored request), runs the
+    length fit and re-applies the heading. `wantsExpansion(feedback, currentArticle)` is now
+    directional: a numeric ask ABOVE the current length expands, one below it does not.
+  - **When the source cannot honestly fill the ask, the officer is TOLD** — `LengthWarning`
+    (`@dgipr/schemas`) → an in-process registry beside `designationWarnings` → `lengthWarning`
+    on the detail payload → a Marathi callout on `ArticleView` **and** on `/dlo`'s output step,
+    which is where the request was typed. The article is delivered either way; padding a
+    government article to hit a count is not an option the pipeline has.
+    Fixed in passing, and it had been failing at HEAD: **minimal-v6's length sentence was
+    textually broken** — a clause was lost, so it read "…at the length that repeat, stretch, or
+    add unsupported information" — and the sentence after it licensed dropping supplied
+    information with no exception for material the officer had asked for ("you can even skip
+    some infromation"). Its own harness reported three failures on this; all three now pass, and
+    one of them (`invention is forbidden`) was asserted against a sentence the variant had never
+    carried — `PRECEDENCE_RULE` now genuinely supplies it.
+    Versions: `simple-v13`, `minimal-v7`, `no-reference-v3` (persisted per run in
+    `style_reference_meta`, so output stays attributable). Verified 2026-08-11, all free:
+    workspace typecheck **7/7 green**, lint clean on all 15 touched files, and **seven harnesses
+    green** — the two new ones (`article-length`, `article-heading`), the three prompt variants,
+    `article-dateline`, and a new `tsx src/generation/revise-article.ts --check` pinning the
+    feedback path (the heading reaching the rewriting model, the precedence carve-out, the
+    directional numeric expansion, and feedback-over-stored-request). **Left for a real run**
+    (model spend): one /dlo article with "बातमी १२०० अक्षरांची हवी" in तुमची विनंती, confirming
+    the `[article-length]` rewrite fires and either lands in band or surfaces the callout; one
+    feedback round with a heading set, confirming it survives; and one "शासकीय शैलीत बातमी तयार
+    करा" run. **No migration, no n8n**; deploy is `@dgipr/schemas` → `@dgipr/content-engine`
+    dists → API + web (ship together — `lengthWarning` is a shared payload field, though its
+    schema default keeps a half-deploy from breaking).
+
+- **चॅट (`/chat`) — a general assistant, with no system prompt** (2026-08-11, migration 0044):
+  every surface in this platform is a narrow pipeline (a note in, an article/poster/transcript
+  out). There was nowhere to just ASK something — draft a covering letter, explain a GR, read a
+  photograph, summarise a forwarded PDF — so officers did that work in ChatGPT, outside the
+  platform. `/chat` is that catch-all: a conversation, the file intake the rest of the product
+  already has, and stored chats in a left rail.
+  **The defining decision is that there is no system prompt at all**, taken deliberately with
+  the user. Every other call here opens with a page of DGIPR rules because every other call has
+  one job; this one does not have a job, and any house prompt could only narrow what it is able
+  to help with (a Marathi-first instruction would answer an English question in Marathi; a
+  government-assistant persona would hedge on ordinary work). The consequences were accepted
+  and are written into `chat/misc-chat.ts`: this page does NOT inherit the glossary's
+  spellings, the never-invent rules or the Marathi-first contract, and anything meant for
+  publication belongs on /dlo or /proofread. If that file ever grows a `SYSTEM_PROMPT`, it is a
+  product decision to take with the department, not a tidy-up.
+  Almost nothing was written twice, which is the point:
+  - **Streaming already existed.** `chatCompleteStream` (`openai-chat.ts`) had the SSE parsing,
+    `stream_options.include_usage` and the non-streaming fallback; it was widened to accept
+    `MultimodalChatMessage` (an image can arrive on ANY turn, which `chatCompleteVision`'s
+    one-prompt-one-image shape cannot express) and a `lane`. Widening the INPUT type left all
+    ~40 existing call sites untouched.
+  - **So did the lane mechanism.** `openai-request.ts` already had `default` (1) and `ocr` (4);
+    a third, `chat` (`CHAT_MAX_CONCURRENCY`, default 4), is what keeps a WATCHED answer out of
+    the pipeline's serialized queue — and, just as much, keeps an officer's article out from
+    behind someone else's chat. The lane travels with the fallback too: without that, a
+    streaming failover would land in the default lane and block a generation. Expect chat to be
+    where 429 warnings appear first on a small org; that is the retry ladder working.
+  - **Audio and YouTube needed no new code.** The composer drives the existing
+    `/api/transcriptions` job, which brings the 0031 content-addressed cache with it — a
+    recording transcribed on /transcribe is instant here and vice versa. The visible cost is
+    that a chat recording also appears in /transcribe's history; the composer hint says so
+    rather than letting it surprise someone. Documents go through the shared `<DocumentIntake>`
+    in live mode, so a scanned PDF gets its page picker in the composer and **no page is OCR'd
+    unless it was ticked**.
+  - **Only images keep bytes** (the existing public posters bucket, `chat/` prefix); every
+    other kind is reduced to TEXT at attach time, so reopening a chat re-extracts and
+    re-transcribes nothing. An `imageUrl` from the client is accepted only if it starts with
+    our own bucket prefix — the field is otherwise an invitation to make the model fetch an
+    arbitrary URL.
+  Four things worth knowing before changing it. **ATTACH → PREPARE → SEND**: send is disabled
+  while anything is uploading, unread or transcribing, so a turn is never half-prepared. The
+  turn route persists the USER message before anything can fail and stores a PARTIAL answer on
+  failure — those tokens are paid for. **The hook owns thread creation**, because the obvious
+  arrangement (create the thread, re-key the hook on the new id) makes the reload effect fire
+  and replace the optimistic user message with the server's still-empty list; the URL is
+  therefore set with `history.replaceState`, since `router.replace` would remount the tree and
+  kill the stream being watched. And the SSE route writes to `reply.raw`, which bypasses
+  Fastify's reply pipeline: the **CORS header is written by hand** (without it the browser
+  rejects a stream the server is producing perfectly) and `X-Accel-Buffering: no` is set
+  (without it Caddy buffers the whole answer — streams fine locally, arrives in one lump in
+  production).
+  `dgipr.chat.mine` is ORDERING ONLY and must never become auth: every chat is readable and
+  openable by anyone, which is why the rail says so out loud rather than letting a surface that
+  FEELS private be assumed private.
+  **Deliberately excluded**: no `/analytics` card (`UsageFeature` is a closed six-value union
+  and a seventh feature means an aggregator, a card and a drill-down page; per-message
+  `cost_usd` is stored, so the history is there to build on), no glossary, no RAG, no thread
+  rename, no model picker.
+  Verified 2026-08-11: workspace typecheck **7/7 green**; lint clean on all 20 touched files;
+  prettier clean on every file I created, and `globals.css`'s only complaint is the
+  pre-existing CRLF — normalised, prettier's output is byte-identical to it, so do **not**
+  `--write` it. Live against a database **without 0044 applied** (the 0028 blast-radius
+  standard): the routes register, the image upload runs end to end and returns a CDN URL
+  matching the route's own prefix guard, every input guard answers in Marathi (no file, wrong
+  type, unknown thread), and only the two table-backed queries 500; `/chat` renders 200 with
+  the rail, composer and empty state. **Left for a real run** (0044 applied + model spend): a
+  streamed answer, one of each attachment kind, थांबवा mid-answer then reload, deletion, and a
+  1360/390 render pass. Deploy: **0044 → `@dgipr/schemas` → `@dgipr/database` →
+  `@dgipr/content-engine` dists → API + web** (API and web ship TOGETHER — the SSE event
+  framing is a shared contract). No n8n. New env, all optional: `OPENAI_MISC_CHAT_MODEL`,
+  `OPENAI_MISC_CHAT_REASONING_EFFORT`, `CHAT_MAX_CONCURRENCY`.
+
+- **A photograph of a document is a /dlo source** (2026-08-11, no migration, no n8n): officers
+  photograph GRs, notices, letters and tables with a phone as readily as they scan them, and
+  until now that material had to be turned into a PDF first. `/dlo`'s intake form gains a
+  **प्रतिमा / छायाचित्रे** card (JPG/PNG/WEBP, 50 MB each, no count limit) below the recordings
+  and YouTube cards, and the text comes back at the तपासणी step as an ordinary editable source.
+  - **One prompt, not two.** `openai-doc.ts`'s system prompt became
+    `ocrSystemPrompt('page' | 'image')` — the opening two lines and ONE fidelity bullet differ,
+    and everything about names, numerals, tables and format is shared, so a phone snap is held
+    to exactly the rules the same document scanned as a PDF is. The page variant is byte-identical
+    to what shipped. `image-ocr.ts` is the transport: same `OCR_MODEL`, same serialized `ocr`
+    lane, same cost meter.
+  - **No migration, and the reason is the design.** `files` is jsonb on `dlo_intakes`, so
+    `kind: 'image'` was additive; the text lands in `text` exactly as a DOCX's does, so
+    `DloSourceReview`, `combineIntakeSources`, `assembleDloText`, lineage and `/:id/generate`
+    needed **no changes at all**. Images ride the SAME multipart `files` field as the
+    recordings — the route classifies each part by extension, so a second field would have
+    been a second way to say the same thing.
+  - **Read by the JOB, not at the input step**, which inverts the document rule deliberately: a
+    PDF stops at a page picker because OCR is billed per PAGE and the officer decides which are
+    worth it, and an image IS one page — there is nothing to choose, so the only thing a wait in
+    front of the form would buy is the wait. It is metered like the PDF read (`document_ocr`).
+    Empty text is a real answer ("this photograph contributed nothing"), reported as a callout,
+    **never** a failed file.
+  - **Images always go through OpenAI, ignoring `OCR_PROVIDER`.** That flag is the PDF rollback:
+    it picks between two backends that both take a PDF, so honouring it here would mean a second
+    image path that runs only in a configuration nobody uses — i.e. the path that is broken on
+    the day it is finally needed.
+  - **`sharp` normalises before the call, and NOT for accuracy** — that was measured: a 3000 px
+    and a 1000 px render of the same page read equally well. It is there for EXIF auto-rotation
+    (a phone held upright writes a landscape image plus "rotate me", and ignoring the tag means
+    reading the page sideways) and to make the request deterministic and bounded. Failure to
+    normalise degrades to sending the original bytes, never to losing the source.
+  - **The review card shows the photograph BESIDE its editable transcript**
+    (`.image-review`), served by a new `GET /dlo/intakes/:id/files/:index/image` — a proxy
+    rather than a URL because `dlo-uploads` is PRIVATE, gated on a `canPreview` flag that keys
+    off the archived BYTES rather than the kind so a thumbnail can never 404.
+  - **The 10-document cap is gone** (`DloCreateDocumentsSchema`, the form's `MAX_DOCUMENTS`,
+    and the route's busboy `files` limit), at the operator's request and for a reason worth
+    keeping: busboy's `files` limit does not reject, it silently STOPS emitting parts, so a
+    capped intake quietly dropped sources the officer had watched upload. Per-file
+    `UPLOAD_FILE_MAX_BYTES` and the 64 MiB `documents` field are the limits that remain.
+  - **Known, measured, and NOT introduced here: Devanagari digits are unreliable.** On a
+    calibration page the prose and the Markdown table came back perfect while `₹२ कोटी`→`३२`,
+    `६५.५`→`६६.५`, `९८०`→`१८०`, `७१५`→`७२५`. The **deployed PDF path makes the same errors on
+    the same page** (verified by wrapping the image into a 1-page PDF and reading it through
+    `extractPdfPagesDetailed`), so this is a property of the OCR model on Devanagari numerals
+    that every scanned GR already goes through — images are at parity, not a regression.
+    `reasoning_effort: 'high'` was tried and did not help (`OPENAI_OCR_REASONING_EFFORT`,
+    default unset). The prompt gained a digit-by-digit rule telling the model to write
+    [अस्पष्ट] rather than the closest-looking digit; the officer's review step remains the only
+    real guard, which is precisely why the image is shown beside its text.
+  Verified 2026-08-11: workspace typecheck **7/7 green**, lint clean on all touched files;
+  a live OCR run on a Marathi calibration page (headings, prose, a 3-column table, Devanagari
+  numerals) returning correct Markdown; and a live API E2E — a `.bmp` refused with the Marathi
+  message, a real photograph creating an intake, reaching `ready` through `extract`, landing as
+  `kind: 'image'` / `status: 'done'` / `canPreview: true` with its table intact under the
+  `=== स्रोत: … ===` header, the thumbnail route answering 200 `image/png` with
+  `cache-control: private`, and both its guards 404. **Left for a real run**: a genuine
+  officer's phone photo (angled, shadowed, EXIF-rotated) end to end. New harness:
+  `tsx --env-file=../../.env src/intake/image-ocr.ts <photo.jpg>`. Deploy is
+  `@dgipr/schemas` → `@dgipr/database` → `@dgipr/content-engine` dists → API + web (ship
+  together — `canPreview` and `kind: 'image'` are a shared contract).
+
 - **The bottom edge is an edge, not a reserve — and a free-colour poster must be BRIGHT**
   (2026-08-10, no migration, no n8n, API only): generation 97b64542 came back with a tenth of
   the poster given over to a dead grey band above its own footer, and the artwork itself almost

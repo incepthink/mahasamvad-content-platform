@@ -664,6 +664,7 @@ const TASK_ORDER = [
   'translation_name_extraction',
   'english_translation',
   'hindi_translation',
+  'marathi_translation',
   'proofreading',
   'social_post_creation',
   'social_caption_creation',

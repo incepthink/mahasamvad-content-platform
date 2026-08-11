@@ -24,6 +24,7 @@
 import {
   createCostAccumulator,
   extractDocxText,
+  extractImageText,
   extractPdfPagesDetailed,
   probePdf,
   runInCostScope,
@@ -216,6 +217,32 @@ async function extractDocxEntry(
   return { ...entry, status: 'done', chars: text.length, text };
 }
 
+// A photograph of a document, read by the same model and under the same fidelity prompt a PDF
+// page gets (@dgipr/content-engine's image-ocr.ts).
+//
+// Read HERE rather than at the input step, unlike a document: a scan stops at the input step
+// because OCR is billed per PAGE and the officer has to choose which pages are worth it, but
+// an image is one page and there is nothing to choose — so the only thing waiting in front of
+// the form would buy is the wait itself. Metered like the PDF read for the same reason: this
+// is a paid pixel read, and `dlo_intakes` has no cost column, so the usage event is the only
+// record of it.
+//
+// Empty text is NOT a failure. A photograph carrying no readable words is a real answer, and
+// the review card shows it as a source that contributed nothing — which is checkable — where a
+// failed file reads as "something went wrong" and invites a pointless retry.
+async function extractImageEntry(
+  client: SupabaseClient,
+  entry: DloIntakeFileEntry,
+): Promise<DloIntakeFileEntry> {
+  const data = await downloadEntry(client, entry);
+  const cost = createCostAccumulator();
+  const text = await runInCostScope(cost, () =>
+    runInCostTask('document_ocr', () => extractImageText(entry.name, data)),
+  );
+  recordTasksFromCost(client, 'article', cost);
+  return { ...entry, status: 'done', chars: text.length, text };
+}
+
 export function startDloIntakeJob(client: SupabaseClient, id: string): void {
   runIntakeJob(client, id, async () => {
     const row = await getDloIntake(client, id);
@@ -397,10 +424,11 @@ export function startDloIntakeJob(client: SupabaseClient, id: string): void {
       await updateDloIntake(client, id, { files: entries });
     }
 
-    // --- extract: documents one by one; each failure stays on its own file. A PDF is
-    // only PROBED here — a scanned one waits at 'needs-selection' until the officer says
-    // which pages are worth OCR'ing, so this phase never spends credits on a page nobody
-    // asked for. DOCX is local and free, so it is simply read.
+    // --- extract: documents and photographs one by one; each failure stays on its own file.
+    // A PDF is only PROBED here — a scanned one waits at 'needs-selection' until the officer
+    // says which pages are worth OCR'ing, so this phase never spends credits on a page nobody
+    // asked for. DOCX is local and free, so it is simply read. An IMAGE is read outright: it
+    // is one page with nothing to select, so there is no question to stop and ask.
     await updateDloIntake(client, id, { step: 'extract' });
     for (const [index, entry] of entries.entries()) {
       // A document the officer uploaded and read at the INPUT step arrives already
@@ -411,7 +439,13 @@ export function startDloIntakeJob(client: SupabaseClient, id: string): void {
       // a document at create time (a deferred scan whose original could not be archived). Its
       // message is the actionable one; probing it would only fail again, less usefully.
       if (entry.status === 'failed') continue;
-      if (entry.kind !== 'pdf' && entry.kind !== 'docx') continue;
+      if (
+        entry.kind !== 'pdf' &&
+        entry.kind !== 'docx' &&
+        entry.kind !== 'image'
+      ) {
+        continue;
+      }
       try {
         entries[index] =
           entry.kind === 'pdf'
@@ -422,7 +456,9 @@ export function startDloIntakeJob(client: SupabaseClient, id: string): void {
               entry.pendingPages && entry.pendingPages.length > 0
               ? await extractPdfEntry(client, entry, entry.pendingPages)
               : await probePdfEntry(client, entry)
-            : await extractDocxEntry(client, entry);
+            : entry.kind === 'image'
+              ? await extractImageEntry(client, entry)
+              : await extractDocxEntry(client, entry);
       } catch (error) {
         entries[index] = {
           ...entry,

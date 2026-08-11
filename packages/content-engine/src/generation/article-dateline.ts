@@ -106,6 +106,22 @@ export function ensureArticleDateline(
   return lines.join('\n');
 }
 
+// The headline as a caller outside this module sees it: which line it is, and what it says.
+// Exported so ensureArticleHeading (article-heading.ts) shares this detection rather than
+// re-deriving it — the two passes must agree about which line is the headline, or one would
+// replace the line the other datelined.
+export function findHeadlineLine(
+  article: string,
+): Readonly<{ index: number; text: string }> | null {
+  const lines = article.trim().split(/\r?\n/);
+  const filled = lines
+    .map((value, index) => ({ index, value: value.trim() }))
+    .filter((line) => line.value.length > 0);
+  const index = headlineIndex(filled);
+  if (index === null) return null;
+  return { index, text: lines[index]?.trim() ?? '' };
+}
+
 // Which line — if any — is the article's headline rather than its first body paragraph.
 //
 // This used to be "the first line that is not a Markdown heading", which was correct only while

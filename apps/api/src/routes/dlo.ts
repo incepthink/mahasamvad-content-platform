@@ -7,6 +7,7 @@
 import type { FastifyInstance } from 'fastify';
 import {
   DLO_UPLOADS_BUCKET,
+  downloadFile,
   getDloIntake,
   insertDloIntake,
   insertGeneration,
@@ -31,6 +32,8 @@ import {
   DloGenerateRequestSchema,
   DloReextractFileRequestSchema,
   DloReviewPatchRequestSchema,
+  IMAGE_FILE_EXTENSIONS,
+  imageMimeForFileName,
   parseDloReviewState,
   parseYouTubeVideoId,
   serializeDloReviewState,
@@ -58,7 +61,11 @@ import { rememberDesignations } from '../jobs/designation-writeback.js';
 // ceiling itself is @dgipr/schemas' UPLOAD_FILE_MAX_BYTES — the same number the web picker
 // refuses at, so a file the browser accepted can never be rejected here.
 const MAX_FILE_BYTES = UPLOAD_FILE_MAX_BYTES;
-const MAX_FILES = 10;
+// No count limit, deliberately (2026-08-11): a meeting can produce a dozen recordings and a
+// booklet photographed page by page is a dozen images, and busboy's `files` limit does not
+// reject — it silently STOPS emitting parts, so a capped intake would have quietly dropped
+// sources the officer watched upload. Each file is still bounded by MAX_FILE_BYTES, which is
+// the limit that reflects what one upload can actually carry.
 // The `documents` field carries whole documents' worth of extracted Marathi text, and
 // busboy defaults a field to 1 MiB — which a couple of GRs in Devanagari (3 bytes a
 // character) will pass straight through. Raised to 64 MiB alongside the removal of the
@@ -78,15 +85,20 @@ const KIND_BY_EXTENSION: Record<string, UploadedFileKind> = {
   ...Object.fromEntries(
     AUDIO_FILE_EXTENSIONS.map((ext) => [ext, 'audio' as const]),
   ),
+  // Photographs of documents, from the same shared list for the same reason.
+  ...Object.fromEntries(
+    IMAGE_FILE_EXTENSIONS.map((ext) => [ext, 'image' as const]),
+  ),
   '.pdf': 'pdf',
   '.docx': 'docx',
 };
 
-// Fallback per kind. Recordings are stored under their OWN container's type
-// (`audioMimeForFileName`); this entry only covers a name with no known extension,
-// which `kindOf` cannot classify as audio in the first place.
+// Fallback per kind. Recordings and photographs are stored under their OWN container's type
+// (`audioMimeForFileName` / `imageMimeForFileName`); these entries only cover a name with no
+// known extension, which `kindOf` cannot classify as either in the first place.
 const CONTENT_TYPE_BY_KIND: Record<UploadedFileKind, string> = {
   audio: 'audio/mpeg',
+  image: 'image/jpeg',
   pdf: 'application/pdf',
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   txt: 'text/plain',
@@ -181,6 +193,11 @@ function toDetail(
       ...(entry.kind === 'pdf' && entry.storagePath !== undefined
         ? { canReextract: true }
         : {}),
+      // A photograph the review card can show beside its transcript. Gated on the bytes
+      // rather than on the kind, so the card never renders a thumbnail that would 404.
+      ...(entry.kind === 'image' && entry.storagePath !== undefined
+        ? { canPreview: true }
+        : {}),
       // A YouTube source's link and what the probe knew about it, so the review card can
       // name and link the video. Cheap enough for the poll — a URL and a title.
       ...(entry.sourceUrl !== undefined ? { sourceUrl: entry.sourceUrl } : {}),
@@ -238,7 +255,6 @@ export function registerDloRoutes(
     const parts = request.parts({
       limits: {
         fileSize: MAX_FILE_BYTES,
-        files: MAX_FILES,
         fieldSize: MAX_FIELD_BYTES,
       },
     });
@@ -286,7 +302,7 @@ export function registerDloRoutes(
           return reply.code(400).send({
             error: {
               message:
-                'फक्त ध्वनिमुद्रण (MP3, AAC, M4A), PDF आणि DOCX फाईल्स स्वीकारल्या जातात.',
+                'फक्त ध्वनिमुद्रण (MP3, AAC, M4A), प्रतिमा (JPG, PNG, WEBP), PDF आणि DOCX फाईल्स स्वीकारल्या जातात.',
             },
           });
         }
@@ -346,7 +362,11 @@ export function registerDloRoutes(
         DLO_UPLOADS_BUCKET,
         storagePath,
         upload.data,
-        audioMimeForFileName(upload.name) ?? CONTENT_TYPE_BY_KIND[upload.kind],
+        // The file's own container type where the extension names one — a .png stored as
+        // image/jpeg would be served back to the review card mislabelled.
+        audioMimeForFileName(upload.name) ??
+          imageMimeForFileName(upload.name) ??
+          CONTENT_TYPE_BY_KIND[upload.kind],
       );
       entries.push({
         name: upload.name,
@@ -572,6 +592,46 @@ export function registerDloRoutes(
             )
           : [];
       return toDetail(row, includeText, generations);
+    },
+  );
+
+  // An uploaded photograph, served back for the review card to show beside its transcript.
+  //
+  // A proxy rather than a URL, because `dlo-uploads` is PRIVATE — an officer's meeting
+  // material must not become a public object just so the card can display it, and a presigned
+  // URL would be a second way in with its own expiry to reason about. The bytes are already
+  // reachable to this process, so re-serving them is the smaller mechanism.
+  //
+  // GET, so the card is a plain <img src>; inline (no content-disposition), because this is a
+  // thumbnail, not a download. It is the ONE route here that answers with bytes.
+  app.get<{ Params: { id: string; index: string } }>(
+    '/dlo/intakes/:id/files/:index/image',
+    async (request, reply) => {
+      const row = await getDloIntake(client, request.params.id);
+      if (!row) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'Intake not found.' } });
+      }
+      const index = Number(request.params.index);
+      const entry = Number.isInteger(index) ? row.files[index] : undefined;
+      // One 404 for "no such file", "not an image" and "no archived bytes" alike: an <img>
+      // has nothing to do with the distinction, and the card only ever asks when the detail
+      // payload said canPreview.
+      if (!entry || entry.kind !== 'image' || entry.storagePath === undefined) {
+        return reply.code(404).send({ error: { message: 'Image not found.' } });
+      }
+      const data = await downloadFile(
+        client,
+        DLO_UPLOADS_BUCKET,
+        entry.storagePath,
+      );
+      return reply
+        .header('content-type', imageMimeForFileName(entry.name) ?? 'image/jpeg')
+        // The object is immutable — an intake's uploads are written once — so the browser
+        // may keep it. Private, because the bucket is: no shared cache should hold it.
+        .header('cache-control', 'private, max-age=3600')
+        .send(data);
     },
   );
 

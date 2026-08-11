@@ -10,7 +10,7 @@
 // Every request goes through openAiFetch, which serializes calls process-wide and retries
 // transient failures (429/5xx). Do not call fetch against api.openai.com directly.
 
-import { openAiFetch } from '../http/openai-request.js';
+import { openAiFetch, type OpenAiLane } from '../http/openai-request.js';
 import { recordChatUsage, type ChatUsage } from '../cost/cost-meter.js';
 
 const CHAT_URL = 'https://api.openai.com/v1/chat/completions';
@@ -97,6 +97,24 @@ export type ChatMessage = Readonly<{
   content: string;
 }>;
 
+// One piece of a multimodal turn. Only the /chat assistant builds these: it is the one caller
+// whose user turn can carry photographs alongside its text, and an image can arrive on ANY
+// turn of a conversation rather than as the single-image call chatCompleteVision serves.
+export type ChatContentPart =
+  | Readonly<{ type: 'text'; text: string }>
+  | Readonly<{ type: 'image_url'; image_url: Readonly<{ url: string }> }>;
+
+export type MultimodalChatMessage = Readonly<{
+  role: 'system' | 'user' | 'assistant';
+  content: readonly ChatContentPart[];
+}>;
+
+// What the two chat entry points accept. Widening the INPUT is safe for the ~40 existing call
+// sites — a `readonly ChatMessage[]` is still assignable — and it avoids either a second SSE
+// parser or a `content: string | Part[]` union that every reader of ChatMessage.content would
+// then have to narrow.
+export type AnyChatMessage = ChatMessage | MultimodalChatMessage;
+
 // gpt-5.x reasoning effort. Only consulted for gpt-5* models; ignored on gpt-4o.
 export type ReasoningEffort = 'none' | 'low' | 'medium' | 'high';
 
@@ -180,7 +198,7 @@ function requireApiKey(): string {
 // to override the default (e.g. a cheaper model for bulk offline data prep, or the
 // fine-tuned model id).
 export async function chatComplete(
-  messages: readonly ChatMessage[],
+  messages: readonly AnyChatMessage[],
   options?: {
     temperature?: number;
     responseFormat?: 'json_object';
@@ -191,6 +209,9 @@ export async function chatComplete(
     maxTokens?: number;
     // gpt-5* only; defaults to 'medium'. Ignored on gpt-4o (no reasoning stage).
     reasoningEffort?: ReasoningEffort;
+    // Which concurrency lane to queue in. Omitted = 'default', so every existing caller keeps
+    // the serialized pipeline behaviour.
+    lane?: OpenAiLane;
   },
 ): Promise<string> {
   const model = options?.model ?? CHAT_MODEL;
@@ -219,6 +240,7 @@ export async function chatComplete(
   const response = await openAiFetch(CHAT_URL, {
     label: 'chat',
     apiKey: requireApiKey(),
+    ...(options?.lane !== undefined ? { lane: options.lane } : {}),
     body: {
       model,
       messages,
@@ -264,7 +286,7 @@ type ChatStreamChunk = {
 // thrown as usual: those tokens are paid for, and silently re-running the call would bill them
 // a second time.
 export async function chatCompleteStream(
-  messages: readonly ChatMessage[],
+  messages: readonly AnyChatMessage[],
   options: {
     // Called with each incremental piece of the answer, in order. Concatenating every
     // chunk yields exactly the returned string.
@@ -273,6 +295,9 @@ export async function chatCompleteStream(
     model?: string;
     maxTokens?: number;
     reasoningEffort?: ReasoningEffort;
+    // Which concurrency lane to queue in. The /chat assistant passes 'chat' so a watched
+    // answer never waits behind an article generation, and vice versa.
+    lane?: OpenAiLane;
   },
 ): Promise<string> {
   const model = options.model ?? CHAT_MODEL;
@@ -299,6 +324,9 @@ export async function chatCompleteStream(
       ...(options.reasoningEffort !== undefined
         ? { reasoningEffort: options.reasoningEffort }
         : {}),
+      // The lane travels with the fallback: without it a streaming chat that failed over
+      // would land in the pipeline's serialized lane and block an article behind it.
+      ...(options.lane !== undefined ? { lane: options.lane } : {}),
     });
     // The caller is showing what it was handed, so give it the whole answer at once
     // rather than leaving it with a permanently empty view of a finished article.
@@ -311,6 +339,7 @@ export async function chatCompleteStream(
     response = await openAiFetch(CHAT_URL, {
       label: 'chat',
       apiKey: requireApiKey(),
+      ...(options.lane !== undefined ? { lane: options.lane } : {}),
       body: {
         model,
         messages,

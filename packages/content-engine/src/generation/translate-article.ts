@@ -36,11 +36,19 @@
 // spends credits twice for the same page. The one condition still fatal is an output that
 // is not a translation at all (see isUntranslated).
 //
+// MARATHI is also a TARGET, for the standalone /translate page only (an English or Hindi
+// press note that has to be published in Marathi). It rides the same purpose-built endpoint
+// as Hindi with the codes swapped, and the same deterministic name enforcement — with the
+// enforced target being the glossary row's MARATHI form, which is exactly the authoritative
+// spelling the whole dictionary exists to hold. That direction therefore needs no name
+// REVIEW step: there is nothing for a human to confirm, because the dictionary's Marathi
+// column already is the answer.
+//
 // Both paths translate in blocks, for different reasons: the chat tier caps max_tokens
 // (reasoning + reply) at 4096, and the translate endpoint rejects input over 2000 chars.
 
 import { pathToFileURL } from 'node:url';
-import type { TranslationLanguage } from '@dgipr/schemas';
+import type { TextTranslationLanguage } from '@dgipr/schemas';
 import type { TermType } from '@dgipr/database';
 import { recordTranslateCost } from '../cost/cost-meter.js';
 import { SARVAM_MODEL, sarvamChatComplete } from './sarvam-chat.js';
@@ -56,7 +64,7 @@ import { splitNoteIntoSections } from './generate-article.js';
 // path's LOCKED TERMS table); `hindi` is the target the Hindi path freezes the name to
 // (optional — defaults to the Marathi form when absent); `termType` tells the Hindi path
 // whether this is a true proper noun to freeze or a common noun that SHOULD be translated —
-// see HINDI_LOCKED_TERM_TYPES. The caller supplies the verified glossary subset present in
+// see LOCKED_TERM_TYPES. The caller supplies the verified glossary subset present in
 // the text (typically GlossaryTerm rows narrowed to these fields).
 export type GlossaryEntry = Readonly<{
   marathi: string;
@@ -81,11 +89,13 @@ export type TranslateOptions = Readonly<{
   // Overrides the per-block character budget (defaults below).
   maxCharsPerBlock?: number;
   // Language of the SOURCE text; defaults to Marathi, which is what every article path
-  // sends. 'en' exists for the /translate PDF path: a Marathi document can contain an
-  // English page, and that page still has to become Hindi. It only affects the Hindi
-  // branch (the endpoint's source_language_code) — an English source with target 'en'
-  // is a passthrough the caller handles, never a translation.
-  sourceLanguage?: 'mr' | 'en';
+  // sends. 'en' exists for two callers: the /translate PDF path (a Marathi document can
+  // contain an English page, and that page still has to become Hindi) and the Marathi
+  // TARGET direction. 'hi' is only ever a source when the target is Marathi. It affects
+  // the endpoint branch only (source_language_code + which glossary column names the term
+  // in the input) — an English source with target 'en' is a passthrough the caller
+  // handles, never a translation.
+  sourceLanguage?: TextTranslationLanguage;
 }>;
 
 // Keep each block well under Sarvam's 4096-token reply cap. Marathi (Devanagari) is
@@ -129,11 +139,13 @@ function isDegenerate(text: string): boolean {
   return unique / words.length < 0.25;
 }
 
-// The Hindi-specific failure: because Marathi and Hindi share Devanagari, a model can
-// "translate" by handing the input straight back — output that looks perfectly fine and
-// is completely wrong (exactly what the chat model does, which is why Hindi uses the
-// dedicated endpoint). English can never fail this way (a Devanagari reply is obviously
-// not English), so this check only runs for Hindi.
+// The Devanagari-to-Devanagari failure: because Marathi and Hindi share a script, a model
+// can "translate" by handing the input straight back — output that looks perfectly fine and
+// is completely wrong (exactly what the chat model does, which is why these directions use
+// the dedicated endpoint). It applies to mr→hi and hi→mr alike. English can never fail this
+// way (a Devanagari reply is obviously not English), so the chat path does not run it, and
+// on en→mr it is simply never satisfied — kept there because a free check that cannot fire
+// costs nothing and one that is conditional can be wired up wrong.
 //
 // A genuine Hindi rendering of Marathi prose overlaps its source only in names, numbers
 // and tatsama words — well under half the tokens in practice — so the 0.85 threshold has
@@ -197,14 +209,15 @@ function buildMessages(
   ];
 }
 
-// ---------- Hindi name fidelity (deterministic, post-translation) ----------
+// ---------- Endpoint-path name fidelity (deterministic, post-translation) ----------
 
-// Which glossary rows are frozen in the Hindi output. Person/place/org/scheme names are
-// proper nouns and must survive character-for-character. 'designation' and 'other' are
-// deliberately excluded: they are common nouns that SHOULD become Hindi (जिल्हाधिकारी →
-// जिला कलेक्टर), and enforcing them would fail every translation. An entry with no
-// termType is not enforced either — a missing type is not evidence of a proper noun.
-const HINDI_LOCKED_TERM_TYPES = new Set<TermType>([
+// Which glossary rows are frozen in the output. Person/place/org/scheme names are proper
+// nouns and must survive character-for-character. 'designation' and 'other' are
+// deliberately excluded: they are common nouns that SHOULD be translated (जिल्हाधिकारी →
+// जिला कलेक्टर, "District Collector" → जिल्हाधिकारी), and enforcing them would fail every
+// translation. An entry with no termType is not enforced either — a missing type is not
+// evidence of a proper noun.
+const LOCKED_TERM_TYPES = new Set<TermType>([
   'person',
   'place',
   'org',
@@ -222,26 +235,135 @@ function repairBudget(word: string): number {
   return Math.min(NAME_REPAIR_MAX_DISTANCE, Math.floor(word.length / 3));
 }
 
-// The Devanagari form the Hindi output must carry: the row's `hindi` override, or the
-// Marathi source form when none is set (the common case — most names are spelt identically
-// in both scripts).
-function hindiTargetForm(term: GlossaryEntry): string {
-  const hindi = term.hindi?.trim();
-  return hindi && hindi.length > 0 ? hindi : term.marathi;
+// A row's surface form in one language. Hindi falls back to the Marathi spelling when the
+// row carries no override — the common case, since most names are spelt identically in both
+// scripts — which is what makes `hindi` an optional column rather than a required one.
+function surfaceForm(
+  term: GlossaryEntry,
+  language: TextTranslationLanguage,
+): string {
+  if (language === 'en') return term.english.trim();
+  if (language === 'hi') {
+    const hindi = term.hindi?.trim();
+    return hindi && hindi.length > 0 ? hindi : term.marathi;
+  }
+  return term.marathi;
 }
 
-// Presence in the block is keyed on the SOURCE (Marathi) form — the block being scanned is
-// the Marathi source, so that is what tells us the name is in play for this block.
+// A Latin name is matched as a whole phrase (see the same rule in @dgipr/database's
+// findGlossaryTermsInText): "Wagh" is inside "Waghmare". Devanagari keeps the plain
+// substring test, because Marathi and Hindi inflect by suffixing the surface form.
+const LATIN_WORD_CHAR = /[A-Za-z0-9]/;
+
+function blockMentions(
+  block: string,
+  form: string,
+  language: TextTranslationLanguage,
+): boolean {
+  if (form.length === 0) return false;
+  if (language !== 'en') return block.includes(form);
+
+  const haystack = block.toLowerCase();
+  const needle = form.toLowerCase();
+  let from = 0;
+  for (;;) {
+    const at = haystack.indexOf(needle, from);
+    if (at < 0) return false;
+    from = at + needle.length;
+    const before = haystack[at - 1];
+    const after = haystack[at + needle.length];
+    if (
+      (before === undefined || !LATIN_WORD_CHAR.test(before)) &&
+      (after === undefined || !LATIN_WORD_CHAR.test(after))
+    ) {
+      return true;
+    }
+  }
+}
+
+// Presence in the block is keyed on the SOURCE form — the block being scanned is the source
+// text, so that is what tells us the name is in play for this block. Which column that is
+// depends on the direction: Marathi for an mr→hi run, English or Hindi for an X→mr one.
 function lockedNamesFor(
   block: string,
   glossary: readonly GlossaryEntry[],
+  sourceLanguage: TextTranslationLanguage,
 ): GlossaryEntry[] {
   return glossary.filter(
     (term) =>
       term.termType !== undefined &&
-      HINDI_LOCKED_TERM_TYPES.has(term.termType) &&
-      block.includes(term.marathi),
+      LOCKED_TERM_TYPES.has(term.termType) &&
+      blockMentions(block, surfaceForm(term, sourceLanguage), sourceLanguage),
   );
+}
+
+// ---------- "present, but declined" ----------
+//
+// A MARATHI output almost never carries a place or person name in its dictionary form,
+// because Marathi inflects nouns by SUFFIXING the case ending onto the word itself:
+// कोल्हापूर becomes कोल्हापुरात ("at Kolhapur"), मुंबई becomes मुंबईत, शिंदे becomes शिंदेंनी.
+// A verbatim check calls every one of those a lost name. Verified live on the very first
+// en→mr and hi→mr runs: both delivered a correct translation and both flagged कोल्हापूर,
+// which was sitting in the output as कोल्हापुरात.
+//
+// That matters more than one stray warning. This list is advisory — it asks an officer to
+// go and check these names by eye — so a warning that fires on correct output on nearly
+// every run is not a small annoyance, it trains people to ignore the list and takes the
+// real cases down with it. Hindi mostly escaped this because it marks case with separate
+// postpositions (कोल्हापुर में leaves the noun alone); Marathi does not, which is why the
+// new direction needed this and the old one did not.
+//
+// So a name also counts as present when an output word is that name with a short ending
+// glued on. Three bounds, each closing a way this could wave a wrong name through — the
+// cost of being wrong here is a MISSING warning, so they are deliberately tight:
+//
+//   1. the name must be at least MIN_INFLECTABLE_CHARS long. वाघ is three characters and
+//      is the opening of वाघमारे, a different surname; a name that short has no room to
+//      tell inflection from a different word, so it is held to a verbatim match.
+//   2. the ending may be at most MAX_INFLECTION_SUFFIX_CHARS. That covers the real case
+//      endings (ात, ाला, ाने, ाच्या, ांच्या, कर) without letting an arbitrary compound past.
+//   3. the stem may differ from the name by at most ONE edit, which is the ऱ्हस्व/दीर्घ
+//      alternation the ending triggers (कोल्हापूर → कोल्हापुर + ात). One edit, not two:
+//      this must NOT swallow a genuine spelling difference. A row whose `hindi` override
+//      is कोल्हापुर against a Marathi कोल्हापूर in the output is the SAME length with no
+//      ending, so it fails bound 2, falls through to the repair below, and is still
+//      corrected to the override exactly as before.
+const MIN_INFLECTABLE_CHARS = 5;
+const MAX_INFLECTION_SUFFIX_CHARS = 6;
+const EDGE_PUNCTUATION =
+  /^[\s,.;:।!?()[\]{}"'“”‘’…—–-]+|[\s,.;:।!?()[\]{}"'“”‘’…—–-]+$/g;
+
+function isInflectionOf(word: string, name: string): boolean {
+  if (name.length < MIN_INFLECTABLE_CHARS) return false;
+  if (word.length <= name.length) return false;
+  if (word.length - name.length > MAX_INFLECTION_SUFFIX_CHARS) return false;
+  return editDistance(word.slice(0, name.length), name) <= 1;
+}
+
+// Whether `text` carries `name` with an inflectional ending. A multi-word name declines on
+// its LAST word (Marathi inflects the head noun, which comes last), so the earlier words
+// must still match exactly — that is what stops this from loosening a multi-word
+// organisation into a different one.
+function mentionsInflected(text: string, name: string): boolean {
+  const nameWords = name.split(/\s+/).filter((w) => w.length > 0);
+  if (nameWords.length === 0) return false;
+  const head = nameWords.slice(0, -1);
+  const last = nameWords[nameWords.length - 1] ?? '';
+
+  const words = text.split(/\s+/).filter((w) => w.length > 0);
+  for (let i = 0; i + nameWords.length <= words.length; i += 1) {
+    const window = words.slice(i, i + nameWords.length);
+    const matchesHead = head.every(
+      (word, j) => (window[j] ?? '').replace(EDGE_PUNCTUATION, '') === word,
+    );
+    if (!matchesHead) continue;
+    const tail = (window[window.length - 1] ?? '').replace(
+      EDGE_PUNCTUATION,
+      '',
+    );
+    if (isInflectionOf(tail, last)) return true;
+  }
+  return false;
 }
 
 // Try to make one locked name present in the translated text.
@@ -269,6 +391,9 @@ function applyNameLock(
   target: string,
 ): { text: string; preserved: boolean } {
   if (text.includes(target)) return { text, preserved: true };
+  // Present but DECLINED is present. Checked before any repair, so an inflected name is
+  // reported as fine and its text is never touched — see mentionsInflected.
+  if (mentionsInflected(text, target)) return { text, preserved: true };
 
   const targetWords = target.split(/\s+/).filter((w) => w.length > 0);
   if (targetWords.length === 0) return { text, preserved: true };
@@ -327,15 +452,19 @@ function applyNameLock(
 function repairLockedNames(
   translated: string,
   lockedNames: readonly GlossaryEntry[],
+  targetLanguage: TextTranslationLanguage,
 ): { text: string; unpreserved: string[] } {
   let text = translated;
   const unpreserved: string[] = [];
 
   for (const term of lockedNames) {
-    // The output must carry the Hindi target form (the row's `hindi`, or the Marathi form
-    // by default). When they differ, the endpoint often leaves the Marathi spelling in
-    // place — that is exactly the near-miss applyNameLock repairs to the target.
-    const target = hindiTargetForm(term);
+    // The output must carry the TARGET form: the row's `hindi` (or the Marathi form by
+    // default) on an mr→hi run, and the row's Marathi spelling — the dictionary's
+    // authoritative one — on an X→mr run. Where source and target forms differ the
+    // endpoint often leaves the source spelling in place, and that is exactly the
+    // near-miss applyNameLock repairs to the target.
+    const target = surfaceForm(term, targetLanguage);
+    if (target.length === 0) continue;
     const result = applyNameLock(text, target);
     text = result.text;
     if (!result.preserved) unpreserved.push(target);
@@ -365,29 +494,32 @@ function splitToLimit(block: string, limit: number): string[] {
   return pieces;
 }
 
-// Translate a Marathi article into `language` block by block, honoring the locked
-// glossary. Blocks are translated sequentially and rejoined with blank lines so paragraph
-// breaks survive. Returns the assembled article plus the union of every block's
-// unpreserved locked names (Hindi only; see TranslationResult).
+// Translate an article into `language` block by block, honoring the locked glossary.
+// Blocks are translated sequentially and rejoined with blank lines so paragraph breaks
+// survive. Returns the assembled article plus the union of every block's unpreserved
+// locked names (endpoint paths only; see TranslationResult).
+//
+// English is the CHAT path (prompt + LOCKED TERMS table); Hindi and Marathi are the
+// purpose-built endpoint, which takes no prompt and so enforces names afterwards.
 export async function translateArticle(
-  marathiArticle: string,
+  sourceArticle: string,
   glossary: readonly GlossaryEntry[],
-  language: TranslationLanguage,
+  language: TextTranslationLanguage,
   options?: TranslateOptions,
 ): Promise<TranslationResult> {
+  const viaEndpoint = language !== 'en';
   const maxChars =
     options?.maxCharsPerBlock ??
-    (language === 'hi'
+    (viaEndpoint
       ? SARVAM_TRANSLATE_MAX_INPUT_CHARS
       : DEFAULT_MAX_CHARS_PER_BLOCK);
   const onProgress = options?.onProgress ?? (() => {});
-  const packed = splitNoteIntoSections(marathiArticle, maxChars);
+  const packed = splitNoteIntoSections(sourceArticle, maxChars);
   // The chat path tolerates an overlong block (it only costs tokens); the translate
   // endpoint rejects one outright, so enforce the cap there.
-  const blocks =
-    language === 'hi'
-      ? packed.flatMap((block) => splitToLimit(block, maxChars))
-      : packed;
+  const blocks = viaEndpoint
+    ? packed.flatMap((block) => splitToLimit(block, maxChars))
+    : packed;
 
   const sourceLanguage = options?.sourceLanguage ?? 'mr';
 
@@ -397,13 +529,14 @@ export async function translateArticle(
   const unpreserved = new Set<string>();
   for (const [index, block] of blocks.entries()) {
     onProgress(index, blocks.length);
-    if (language === 'hi') {
-      const result = await translateBlockToHindi(
+    if (viaEndpoint) {
+      const result = await translateBlockViaEndpoint(
         block,
         glossary,
         index,
         blocks.length,
         sourceLanguage,
+        language,
       );
       translated.push(result.text.trim());
       for (const name of result.unpreserved) unpreserved.add(name);
@@ -424,63 +557,78 @@ export async function translateArticle(
   };
 }
 
-// Hindi: the dedicated endpoint, then the glossary check. Names that drifted slightly are
-// repaired in place; a locked name that cannot be accounted for is REPORTED, and the
-// translation is delivered anyway (see the header — a verbatim check cannot distinguish a
-// mistranslated name from a correctly translated one, so it must not have the casting vote
-// over work the user already paid for).
+// Sarvam's language codes, one place. Adding a direction is adding a row here plus a pair
+// in TEXT_TRANSLATION_PAIRS — the endpoint itself is direction-agnostic.
+const SARVAM_LANGUAGE_CODES: Readonly<Record<TextTranslationLanguage, string>> =
+  {
+    mr: 'mr-IN',
+    en: 'en-IN',
+    hi: 'hi-IN',
+  };
+
+// Hindi and Marathi: the dedicated endpoint, then the glossary check. Names that drifted
+// slightly are repaired in place; a locked name that cannot be accounted for is REPORTED,
+// and the translation is delivered anyway (see the header — a verbatim check cannot
+// distinguish a mistranslated name from a correctly translated one, so it must not have the
+// casting vote over work the user already paid for).
 //
-// Only ONE failure retries: an output that is the Marathi original handed back. That is
+// Only ONE failure retries: an output that is the source handed straight back. That is
 // worth a second call because the endpoint is sampled, so a repeat request can genuinely
 // differ, and because the alternative is shipping untranslated text. Name drift is
 // deliberately NOT retried — the request is byte-identical and the endpoint takes no
 // prompt, so a second call buys the same output at full price. That retry is what made a
 // failing document cost twice.
 //
-// An ENGLISH source block (a stray English page of an otherwise Marathi PDF) takes the
-// same route with a different source code. The glossary check simply finds nothing to
-// lock there — its keys are Devanagari surface forms — which is the honest outcome:
-// those names are in Latin script and there is no verified Hindi spelling to enforce.
-async function translateBlockToHindi(
+// An ENGLISH source block reaches here two ways: a stray English page of an otherwise
+// Marathi PDF being made Hindi, and the whole en→mr direction. Its locked names are read
+// off the glossary's `english` column, and the enforced target off `marathi` — so
+// "Devendra Fadnavis" lands on the dictionary's देवेंद्र फडणवीस rather than on whatever the
+// endpoint transliterates.
+async function translateBlockViaEndpoint(
   block: string,
   glossary: readonly GlossaryEntry[],
   index: number,
   blockCount: number,
-  sourceLanguage: 'mr' | 'en' = 'mr',
+  sourceLanguage: TextTranslationLanguage,
+  targetLanguage: TextTranslationLanguage,
 ): Promise<{ text: string; unpreserved: string[] }> {
   const label = `block ${index + 1}/${blockCount}`;
-  const lockedNames = lockedNamesFor(block, glossary);
+  const lockedNames = lockedNamesFor(block, glossary, sourceLanguage);
 
   // Metered per ATTEMPT, not per block: a retry is a second charge, and an analytics page
   // that reported one would understate what a difficult document actually cost.
   const attempt = async (): Promise<string> => {
     recordTranslateCost(block.length);
     return sarvamTranslate(block, {
-      sourceLanguageCode: sourceLanguage === 'en' ? 'en-IN' : 'mr-IN',
-      targetLanguageCode: 'hi-IN',
+      sourceLanguageCode: SARVAM_LANGUAGE_CODES[sourceLanguage],
+      targetLanguageCode: SARVAM_LANGUAGE_CODES[targetLanguage],
     });
   };
 
-  // Belt and braces: the chat model's copy-back failure should be impossible here, but it
-  // is invisible to the eye in Devanagari, so it stays checked.
+  // Belt and braces: the chat model's copy-back failure should be impossible here, but
+  // between two Devanagari languages it is invisible to the eye, so it stays checked.
   let raw = await attempt();
   if (isUntranslated(block, raw)) {
     console.warn(
-      `[translate] ${label}: Hindi output came back as the Marathi original; retrying.`,
+      `[translate] ${label}: ${targetLanguage} output came back as the source text; retrying.`,
     );
     raw = await attempt();
     if (isUntranslated(block, raw)) {
       throw new Error(
-        `The Hindi translation of ${label} came back as the Marathi original, even after ` +
-          `a retry. Nothing was saved; try again.`,
+        `The ${targetLanguage} translation of ${label} came back as the original text, ` +
+          `even after a retry. Nothing was saved; try again.`,
       );
     }
   }
 
-  const { text, unpreserved } = repairLockedNames(raw, lockedNames);
+  const { text, unpreserved } = repairLockedNames(
+    raw,
+    lockedNames,
+    targetLanguage,
+  );
   if (unpreserved.length > 0) {
     console.warn(
-      `[translate] ${label}: Hindi output does not carry ${unpreserved.join(', ')}; ` +
+      `[translate] ${label}: ${targetLanguage} output does not carry ${unpreserved.join(', ')}; ` +
         `delivering the translation with a warning.`,
     );
   }
@@ -530,27 +678,155 @@ async function translateBlockToEnglish(
   return first;
 }
 
-// Run directly to eyeball a translation in isolation (needs SARVAM_API_KEY); pass 'hi'
-// for the Hindi path, otherwise English:
+// Run directly to eyeball a translation in isolation (needs SARVAM_API_KEY). The argument
+// is the DIRECTION; the two X→mr ones translate an English/Hindi sample instead:
 //
-//   tsx --env-file=../../.env src/generation/translate-article.ts [en|hi]
+//   tsx --env-file=../../.env src/generation/translate-article.ts [mr-en|mr-hi|en-mr|hi-mr]
 //
-// The sample glossary demonstrates the core guarantee in both directions: a surname that
+// (bare `en` / `hi` still mean mr→en / mr→hi.)
+//
+// The sample glossary demonstrates the core guarantee in every direction: a surname that
 // literally means "Tiger" (वाघ) must come out as "Wagh" in English and stay "वाघ" — not
 // "बाघ" — in Hindi, and the amounts must survive untouched either way. कोल्हापूर carries a
 // `hindi` override (कोल्हापुर) to exercise the dictionary: the Hindi output must land on
-// the override, not the Marathi spelling.
+// the override, not the Marathi spelling — and on an X→mr run the output must land back on
+// कोल्हापूर, whichever spelling the source used.
 //
 // It also carries the two shapes that used to abort a run: a multi-word organisation whose
 // generic components are legitimately re-rendered in Hindi, and a common noun mis-typed as
 // `org` (which is how विधानसभा ends up locked). Both must now finish the run and appear
 // under "unpreserved names" instead of throwing.
+//
+// `--check` runs the FREE half instead: the deterministic name-presence rules, with no key,
+// no network and no spend.
 if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href &&
+  process.argv.includes('--check')
+) {
+  let failures = 0;
+  const check = (label: string, ok: boolean): void => {
+    if (ok) console.log(`  ok    ${label}`);
+    else {
+      failures += 1;
+      console.error(`  FAIL  ${label}`);
+    }
+  };
+  // applyNameLock is the unit under test: `preserved` is what decides the warning, and
+  // `text` must come back untouched whenever a name was merely declined.
+  const lock = (text: string, target: string) => applyNameLock(text, target);
+
+  console.log('\n=== the live failure: a Marathi output declines the name ===');
+  {
+    const out =
+      'मुख्यमंत्री एकनाथ शिंदे यांच्या हस्ते आज कोल्हापुरात उद्घाटन झाले.';
+    const res = lock(out, 'कोल्हापूर');
+    check('कोल्हापुरात counts as कोल्हापूर present', res.preserved);
+    check('and the text is left byte-for-byte alone', res.text === out);
+  }
+  check(
+    'मुंबईत counts as मुंबई present',
+    lock('मुंबईत कार्यक्रम झाला.', 'मुंबई').preserved,
+  );
+  check(
+    'शिंदेंनी counts as शिंदे present',
+    lock('शिंदेंनी सांगितले की,', 'शिंदे').preserved,
+  );
+  check(
+    'trailing punctuation does not hide it',
+    lock('कार्यक्रम कोल्हापुरात.', 'कोल्हापूर').preserved,
+  );
+  check(
+    'a verbatim occurrence is still preserved',
+    lock('कोल्हापूर येथे बैठक झाली.', 'कोल्हापूर').preserved,
+  );
+
+  console.log('\n=== the inflection rule itself does not over-reach ===');
+  // These are asserted against isInflectionOf directly, not through applyNameLock, because
+  // a name that is a plain SUBSTRING of a longer word (वाघ inside वाघमारे) is accepted one
+  // step earlier by the long-standing `text.includes(target)` test. That looseness predates
+  // this change and is shared with the shipped mr→hi path, so it is deliberately left alone
+  // here — tightening it would re-report names on a direction nobody asked to change. What
+  // matters is that the NEW rule adds nothing to it.
+  check(
+    'वाघ is too short to earn inflection tolerance (वाघमारे)',
+    !isInflectionOf('वाघमारे', 'वाघ'),
+  );
+  check('पवार likewise (पवारकर)', !isInflectionOf('पवारकर', 'पवार'));
+  check(
+    'a long unrelated compound is not an inflection',
+    !isInflectionOf('कोल्हापूरविरुद्धचानिर्णय', 'कोल्हापूर'),
+  );
+  check(
+    'a two-edit stem is not an inflection (सोलापुरात is not कोल्हापूर)',
+    !isInflectionOf('सोलापुरात', 'कोल्हापूर'),
+  );
+  check(
+    'a same-length word is not an inflection (nothing was appended)',
+    !isInflectionOf('कोल्हापुर', 'कोल्हापूर'),
+  );
+  check(
+    'an absent name is still reported',
+    !lock('बैठक पार पडली.', 'कोल्हापूर').preserved,
+  );
+  check(
+    'a different place is still reported',
+    !lock('सोलापुरात बैठक झाली.', 'कोल्हापूर').preserved,
+  );
+
+  console.log(
+    '\n=== the mr→hi override must NOT be swallowed (it still repairs) ===',
+  );
+  {
+    // The `hindi` column exists to force कोल्हापुर over the Marathi कोल्हापूर. Same length,
+    // no ending, so it fails the suffix bound and reaches the repair as it always did.
+    const res = lock('कोल्हापूर में कार्यक्रम हुआ।', 'कोल्हापुर');
+    check('repaired to the override', res.text.includes('कोल्हापुर'));
+    check('and reported as preserved', res.preserved);
+  }
+
+  console.log('\n=== multi-word names decline on the LAST word only ===');
+  check(
+    'संवाद वारीचा counts as संवाद वारी present',
+    lock('राज्यभर संवाद वारीचा उपक्रम राबवला.', 'संवाद वारी').preserved,
+  );
+  check(
+    'a changed HEAD word is not waved through',
+    !lock('राज्यभर संवाद यात्रेचा उपक्रम.', 'संवाद वारी').preserved ||
+      // (if the repair legitimately fixed it, the text must show the real name)
+      lock('राज्यभर संवाद यात्रेचा उपक्रम.', 'संवाद वारी').text.includes(
+        'संवाद वारी',
+      ),
+  );
+
+  if (failures > 0) {
+    console.error(`\n${failures} check(s) failed.`);
+    process.exitCode = 1;
+  } else {
+    console.log('\nAll checks passed.');
+  }
+} else if (
   process.argv[1] &&
   import.meta.url === pathToFileURL(process.argv[1]).href
 ) {
-  const language: TranslationLanguage =
-    process.argv[2]?.toLowerCase() === 'hi' ? 'hi' : 'en';
+  const DIRECTIONS: Readonly<
+    Record<
+      string,
+      { source: TextTranslationLanguage; target: TextTranslationLanguage }
+    >
+  > = {
+    en: { source: 'mr', target: 'en' },
+    hi: { source: 'mr', target: 'hi' },
+    'mr-en': { source: 'mr', target: 'en' },
+    'mr-hi': { source: 'mr', target: 'hi' },
+    'en-mr': { source: 'en', target: 'mr' },
+    'hi-mr': { source: 'hi', target: 'mr' },
+  };
+  const direction = DIRECTIONS[process.argv[2]?.toLowerCase() ?? 'en'] ?? {
+    source: 'mr' as const,
+    target: 'en' as const,
+  };
+  const language = direction.target;
 
   const SAMPLE_GLOSSARY: GlossaryEntry[] = [
     { marathi: 'एकनाथ शिंदे', english: 'Eknath Shinde', termType: 'person' },
@@ -591,7 +867,31 @@ if (
     'विधानसभा अधिवेशनात देण्यात आली.',
   ].join('\n\n');
 
-  translateArticle(SAMPLE_ARTICLE, SAMPLE_GLOSSARY, language, {
+  // The X→mr directions need a non-Marathi input. These say the same thing as the Marathi
+  // sample, so a run can be read side by side: कोल्हापूर must come back with its dictionary
+  // spelling from the English "Kolhapur" and from the Hindi कोल्हापुर alike.
+  const SAMPLE_ENGLISH = [
+    'Chief Minister Eknath Shinde inaugurated a new scheme at Kolhapur today.',
+    'District Collector Mr. Wagh had organised the programme. The scheme will directly',
+    'benefit 500 families, and a total provision of Rs 2 crore has been made.',
+    'Samvad Wari will be run across the state.',
+  ].join('\n\n');
+
+  const SAMPLE_HINDI = [
+    'मुख्यमंत्री एकनाथ शिंदे के हाथों आज कोल्हापुर में नई योजना का उद्घाटन हुआ।',
+    'जिला कलेक्टर श्री वाघ ने कार्यक्रम का आयोजन किया था। इस योजना से ५०० परिवारों को',
+    'सीधा लाभ मिलेगा और कुल २ करोड़ रुपये का प्रावधान किया गया है।',
+  ].join('\n\n');
+
+  const input =
+    direction.source === 'en'
+      ? SAMPLE_ENGLISH
+      : direction.source === 'hi'
+        ? SAMPLE_HINDI
+        : SAMPLE_ARTICLE;
+
+  translateArticle(input, SAMPLE_GLOSSARY, language, {
+    sourceLanguage: direction.source,
     // onProgress also fires once at completion with i === n; don't log that as a block.
     onProgress: (i, n) => {
       if (i < n) console.log(`translating block ${i + 1}/${n}...`);
@@ -599,7 +899,7 @@ if (
   })
     .then((result) => {
       console.log(
-        `\n=== ${language === 'hi' ? 'Hindi' : 'English'} translation ===\n`,
+        `\n=== ${direction.source} → ${direction.target} translation ===\n`,
       );
       console.log(result.text);
       if (result.unpreservedNames.length > 0) {

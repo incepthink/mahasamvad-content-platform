@@ -1,13 +1,23 @@
-// Standalone Marathi→English/Hindi translation of ad-hoc pasted text (not tied to a
-// generation). Two-step like the per-generation flow: /translate/prepare returns the
-// text's proper nouns for the user to confirm/correct in place, then /translate
-// receives the confirmed set, saves it as verified glossary rows, and locks it into
-// the translation. Without `terms` (older client) the legacy path mines unverified
-// candidates into the review queue after translating instead.
+// Standalone translation of ad-hoc pasted text (not tied to a generation), in four
+// directions: mr→en, mr→hi, en→mr and hi→mr.
 //
-// The name check is language-independent: the same confirmed rows lock English spellings
-// for an English run and freeze the Devanagari forms for a Hindi one (see
-// translate-article.ts), so /translate/prepare needs no language of its own.
+// The MARATHI-SOURCE directions are two-step, like the per-generation flow:
+// /translate/prepare returns the text's proper nouns for the user to confirm/correct in
+// place, then /translate receives the confirmed set, saves it as verified glossary rows,
+// and locks it into the translation. Without `terms` (older client) the legacy path mines
+// unverified candidates into the review queue after translating instead. That check is
+// language-independent — the same confirmed rows lock English spellings for an English run
+// and freeze the Devanagari forms for a Hindi one — so /translate/prepare needs no
+// language of its own.
+//
+// The MARATHI-TARGET directions have no review step, and that is a property of the
+// dictionary rather than a shortcut. The review card asks "is this Marathi name's
+// English/Hindi spelling right?"; going INTO Marathi, the answer the output must land on is
+// the row's own `marathi` column, which is the reviewed, authoritative spelling already.
+// There is nothing left to confirm, so the glossary lookup runs against the SOURCE column
+// (english/hindi) and the enforcement in translate-article.ts targets `marathi`. The
+// extractor is skipped for the same reason it could not help: it mines Marathi surface
+// forms out of Marathi text, and neither of these inputs is Marathi.
 
 import type { FastifyInstance } from 'fastify';
 import {
@@ -24,6 +34,7 @@ import {
   insertGlossaryCandidates,
   recordUsageEvent,
   upsertGlossaryTerm,
+  type GlossaryMatchForm,
   type SupabaseClient,
 } from '@dgipr/database';
 import {
@@ -36,6 +47,7 @@ import {
   TranslateTextRequestSchema,
   TRANSLATE_DOCUMENT_MAX_BYTES,
   TRANSLATE_DOCUMENT_MAX_CHARS,
+  type TextTranslationLanguage,
 } from '@dgipr/schemas';
 import { prepareTranslationTerms } from '../jobs/translation-terms.js';
 import {
@@ -48,6 +60,27 @@ import {
   toDocumentDetail,
   type DocumentJob,
 } from '../jobs/translate-document.js';
+
+// The /analytics task each direction is billed under, keyed on the TARGET — that is what a
+// department head reads a row as ("Hindi translation"), and it is what the source-language
+// dimension on the usage event refines.
+const TRANSLATION_TASKS: Readonly<Record<TextTranslationLanguage, string>> = {
+  en: 'english_translation',
+  hi: 'hindi_translation',
+  mr: 'marathi_translation',
+};
+
+// Language code → the glossary COLUMN holding that language's surface form. Two
+// vocabularies on purpose: @dgipr/database names its own columns and knows nothing about
+// BCP-47-ish language codes, so the translation between them belongs here rather than as a
+// second meaning bolted onto either side.
+const GLOSSARY_COLUMNS: Readonly<
+  Record<TextTranslationLanguage, GlossaryMatchForm>
+> = {
+  mr: 'marathi',
+  en: 'english',
+  hi: 'hindi',
+};
 
 export function registerTranslateRoutes(
   app: FastifyInstance,
@@ -86,12 +119,18 @@ export function registerTranslateRoutes(
       }
     }
 
-    const terms = await findGlossaryTermsInText(client, body.text);
+    // Which column names the term in THIS input. Scanning `marathi` against an English
+    // press note would silently find nothing and lock no names at all — the failure would
+    // be a quietly transliterated minister rather than an error.
+    const terms = await findGlossaryTermsInText(client, body.text, {
+      match: GLOSSARY_COLUMNS[body.sourceLanguage],
+    });
     const glossary = terms.map((term) => ({
       marathi: term.marathi,
       english: term.english,
       hindi: term.hindi ?? undefined,
-      // Hindi freezes only true proper nouns; the type is what tells them apart.
+      // The endpoint paths freeze only true proper nouns; the type is what tells them
+      // apart from common nouns that should be translated normally.
       termType: term.termType,
     }));
 
@@ -103,9 +142,10 @@ export function registerTranslateRoutes(
     const { text: translated, unpreservedNames } = await runInCostScope(
       cost,
       () =>
-        runInCostTask(
-          body.language === 'hi' ? 'hindi_translation' : 'english_translation',
-          () => translateArticle(body.text, glossary, body.language),
+        runInCostTask(TRANSLATION_TASKS[body.language], () =>
+          translateArticle(body.text, glossary, body.language, {
+            sourceLanguage: body.sourceLanguage,
+          }),
         ),
     );
     recordTasksFromCost(client, 'translate', cost);
@@ -113,8 +153,12 @@ export function registerTranslateRoutes(
     // Legacy path only: with no confirmed set, mine unverified candidates into the
     // review queue (best-effort). The prepare flow already extracted these, so
     // re-mining there would just double the spend.
+    //
+    // A Marathi TARGET also arrives with no `terms` (it has no review step), but must NOT
+    // mine: the extractor reads Marathi surface forms out of Marathi text, and this input
+    // is English or Hindi, so it would fill the review queue with junk at full price.
     let minedTermCount = 0;
-    if (!body.terms) {
+    if (!body.terms && body.sourceLanguage === 'mr') {
       try {
         const candidates = await extractGlossaryCandidates(body.text);
         await insertGlossaryCandidates(
@@ -137,12 +181,13 @@ export function registerTranslateRoutes(
       feature: 'translate',
       action: 'translate_text',
       charCount: body.text.length,
-      detail: { language: body.language },
+      detail: { language: body.language, sourceLanguage: body.sourceLanguage },
     });
 
     return {
       translated,
       language: body.language,
+      sourceLanguage: body.sourceLanguage,
       // Legacy mirror for a web build deployed ahead of this API (it reads `english`).
       ...(body.language === 'en' ? { english: translated } : {}),
       lockedTermCount: glossary.length,

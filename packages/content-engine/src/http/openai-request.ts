@@ -88,11 +88,24 @@ function createLimiter(concurrency: number): Limiter {
 // happens when the server pushes back.
 //
 // Built on first use, not at import time, so `--env-file` / dotenv have run by then.
-export type OpenAiLane = 'default' | 'ocr';
+//
+// The 'chat' lane is the general assistant at /chat, and it exists for a reason the other two
+// do not share: someone is WATCHING it. A pipeline job that waits ninety seconds for a slot is
+// a progress bar moving slightly later; a chat that does is broken. It must not queue behind an
+// article generation, and — just as much — an officer's article must not queue behind someone
+// else's chat, which is what would happen if chat used the default lane.
+//
+// Consequence to know before tuning it: chat traffic now contributes to exactly the TPM bursts
+// concurrency-1 was chosen to prevent. The retry ladder below absorbs them (that is what it is
+// for) and the wait is charged to the chat that caused it, but on a small org expect 429
+// warnings to appear here first. CHAT_MAX_CONCURRENCY is the dial; 1 restores strict
+// one-at-a-time behaviour within chat while still keeping it out of the pipeline's way.
+export type OpenAiLane = 'default' | 'ocr' | 'chat';
 
 const LANE_CONCURRENCY: Readonly<Record<OpenAiLane, [string, number]>> = {
   default: ['OPENAI_MAX_CONCURRENCY', 1],
   ocr: ['OCR_MAX_CONCURRENCY', 4],
+  chat: ['CHAT_MAX_CONCURRENCY', 4],
 };
 
 const limiters = new Map<OpenAiLane, Limiter>();

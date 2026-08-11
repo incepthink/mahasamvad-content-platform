@@ -54,6 +54,12 @@ import {
   applyDesignations,
   type DesignationIssue,
 } from './apply-designations.js';
+import { ensureArticleHeading } from './article-heading.js';
+import {
+  fitArticleToLength,
+  parseLengthRequest,
+  type LengthWarning,
+} from './article-length.js';
 import type { ArticleCategory, DesignationPair } from './category-prompt.js';
 import {
   FACT_CHECK_DELIMITER,
@@ -167,6 +173,9 @@ export type SimpleGeneratedArticle = Readonly<{
   // would render six "टिपणीत नाही" placeholder rows.
   fiveWOneH: FiveWOneH | null;
   designationIssues: readonly DesignationIssue[];
+  // Set when the officer's request named a length this run could not reach without inventing.
+  // Reported rather than fixed: the alternative is filler in a government article.
+  lengthWarning: LengthWarning | null;
 }>;
 
 export async function generateArticleSimple(
@@ -243,9 +252,21 @@ export async function generateArticleSimple(
     );
   }
 
+  // The officer named a length: measure it, and buy ONE rewrite on a miss. Before the
+  // deterministic passes below, which must run on the text that will actually be stored.
+  const fit = await fitArticleToLength(
+    body,
+    options?.instructions?.trim()
+      ? `${note}\n\n=== OFFICER REQUEST ===\n${options.instructions.trim()}`
+      : note,
+    parseLengthRequest(options?.instructions) ??
+      parseLengthRequest(options?.heading),
+    category,
+  );
+
   // Deterministic and last, exactly as in the full pipeline: the officer approved "this person
   // is named with this title", and this pass — not the prompt — is the guarantee.
-  const designationResult = applyDesignations(body, designations, {
+  const designationResult = applyDesignations(fit.article, designations, {
     ...(options?.knownDesignations
       ? { knownDesignations: options.knownDesignations }
       : {}),
@@ -257,7 +278,11 @@ export async function generateArticleSimple(
     );
   }
 
-  const article = designationResult.text;
+  // The second deterministic guarantee, and the officer's other input: where they typed a
+  // HEADLINE rather than an angle, it is written onto the article here rather than left to the
+  // prompt. A no-op for an angle — see article-heading.ts on why the two cannot be told apart
+  // with certainty and why this errs toward leaving the model's line alone.
+  const article = ensureArticleHeading(designationResult.text, options?.heading);
   const fiveWOneH =
     selectedFacts.length > 0 ? fiveWOneHFromPointers(selectedFacts) : null;
 
@@ -296,6 +321,7 @@ export async function generateArticleSimple(
     },
     fiveWOneH,
     designationIssues: designationResult.issues,
+    lengthWarning: fit.warning,
   };
 }
 

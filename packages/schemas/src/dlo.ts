@@ -60,7 +60,12 @@ export const DloIntakeFileSchema = z.object({
   // 'youtube' is a recording that was never uploaded: the officer pasted a link and the
   // transcriber fetches the media itself. It behaves exactly like 'audio' from the review
   // step onward — one card, one editable transcript — so nothing downstream branches on it.
-  kind: z.enum(['audio', 'youtube', 'pdf', 'docx', 'txt']),
+  //
+  // 'image' is a photograph or screenshot of a document — the page a PDF would have held,
+  // arriving as pixels. It is uploaded with the intake like a recording and READ BY THE JOB
+  // (there is no page to pick, so there is nothing to decide before the spend), and from the
+  // review step onward it behaves like a DOCX: one card, one editable text.
+  kind: z.enum(['audio', 'youtube', 'image', 'pdf', 'docx', 'txt']),
   // 'needs-selection': a scanned PDF that was probed but deliberately NOT read, because
   // reading it costs OCR credits per page. It waits here until the officer picks pages.
   status: z.enum(['pending', 'needs-selection', 'done', 'failed']),
@@ -82,6 +87,11 @@ export const DloIntakeFileSchema = z.object({
   // when the intake was created — there is nothing left to re-read, so the review step
   // hides the override rather than offering a button that can only fail.
   canReextract: z.boolean().optional(),
+  // An 'image' source whose original is still in the private bucket, i.e. the review card can
+  // show the photograph beside its extracted text. Absent on every other kind. It is a
+  // separate flag rather than an inference from `kind` because the bytes are what decide:
+  // without them the card has nothing to display and must not render a broken thumbnail.
+  canPreview: z.boolean().optional(),
   // A 'youtube' source's link and what the probe knew about it, so the review card can name
   // and link the video instead of showing a bare URL. Absent on every other kind.
   sourceUrl: z.string().optional(),
@@ -169,6 +179,47 @@ export function isAudioFileName(fileName: string): boolean {
   return audioMimeForFileName(fileName) !== null;
 }
 
+// ---------- photographs of documents: the image formats the OCR path can read ----------
+//
+// Exactly what the OpenAI vision input accepts, which is what reads these (intake/image-ocr.ts
+// — images always go through OpenAI, whatever OCR_PROVIDER says; see that file's header).
+// Kept to the three formats a phone or a screenshot actually produces.
+//
+// HEIC/HEIF is deliberately absent: neither the browser nor the model can decode it, so it
+// would need a server-side conversion step and a new native dependency in the API image. Most
+// share sheets already hand over a JPG.
+//
+// Shared for the same reason the audio list is: the API validates an upload by its extension
+// and stores the object under the matching content type, while the web picker's `accept` must
+// offer exactly the same set.
+export const IMAGE_MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.png': 'image/png',
+  '.webp': 'image/webp',
+};
+
+export const IMAGE_FILE_EXTENSIONS: readonly string[] = Object.keys(
+  IMAGE_MIME_BY_EXTENSION,
+);
+
+export const IMAGE_FILE_ACCEPT: string = [
+  ...IMAGE_FILE_EXTENSIONS,
+  ...new Set(Object.values(IMAGE_MIME_BY_EXTENSION)),
+].join(',');
+
+// The content type to store a photograph under, or null when the name is not one. Driven by
+// the extension rather than the browser's reported type, exactly as the audio map is.
+export function imageMimeForFileName(fileName: string): string | null {
+  const dot = fileName.lastIndexOf('.');
+  if (dot === -1) return null;
+  return IMAGE_MIME_BY_EXTENSION[fileName.slice(dot).toLowerCase()] ?? null;
+}
+
+export function isImageFileName(fileName: string): boolean {
+  return imageMimeForFileName(fileName) !== null;
+}
+
 // A document the officer uploaded and READ at the input step, through the shared ephemeral
 // document service, before this intake existed. It arrives already extracted, so the intake
 // job has nothing to do with it — the route stores it as a finished file entry and every
@@ -200,11 +251,12 @@ export const DloPreReadDocumentSchema = z.object({
 });
 export type DloPreReadDocument = z.infer<typeof DloPreReadDocumentSchema>;
 
-// Same ceiling as the multipart file limit — an intake is a meeting's worth of material,
-// not a document library.
-export const DloCreateDocumentsSchema = z
-  .array(DloPreReadDocumentSchema)
-  .max(10);
+// No ceiling on the count, deliberately (2026-08-11) — an intake is a meeting's worth of
+// material and a meeting can produce a dozen GRs, so a round number here could only throw away
+// sources the officer had already read and paid for. Each document is still bounded
+// individually by UPLOAD_FILE_MAX_BYTES, and the request as a whole by the route's 64 MiB
+// `documents` field limit, which is the ceiling that actually reflects what can be sent.
+export const DloCreateDocumentsSchema = z.array(DloPreReadDocumentSchema);
 
 // ---------- durable review state (migration 0036) ----------
 //

@@ -36,15 +36,19 @@ import {
   EMPTY_DRAFT,
   clearDraft,
   clearPendingAudio,
+  clearPendingImages,
   getPendingAudio,
+  getPendingImages,
   readDraft,
   rememberMyIntakeId,
   setPendingAudio,
+  setPendingImages,
   writeDraft,
 } from '../lib/dloDraft';
 import { AiInstructionsField } from './AiInstructionsField';
 import { AudioFilePicker } from './AudioFilePicker';
 import { DocumentIntake, type DocumentSnapshot } from './DocumentIntake';
+import { ImageFilePicker } from './ImageFilePicker';
 import { StyleReferenceField } from './StyleReferenceField';
 import { YouTubeLinkInput } from './YouTubeLinkInput';
 import { STR } from '../lib/strings';
@@ -56,9 +60,6 @@ import { STR } from '../lib/strings';
 // One document upload card. Slots are identified by a counter rather than by array index so
 // that removing one cannot make the next card adopt its neighbour's in-flight job.
 type DocumentSlot = Readonly<{ id: number; snapshot: DocumentSnapshot | null }>;
-
-// Same ceiling the API puts on the documents array.
-const MAX_DOCUMENTS = 10;
 
 // The only article type this lane produces. The picker is gone from this form, so a draft
 // saved before that change (category: 'scheme') is simply not read back.
@@ -123,6 +124,13 @@ export function DloIntakeForm() {
   const [lostAudioNames, setLostAudioNames] = useState<readonly string[]>(() =>
     getPendingAudio().length === 0 ? draft.audioNames : [],
   );
+  // Photographs of documents. They ride the SAME multipart `files` field as the recordings —
+  // the API classifies an upload by its extension — so this is a second picker, not a second
+  // upload path; the two are separate state only because they are separate cards.
+  const [images, setImages] = useState<File[]>(() => getPendingImages());
+  const [lostImageNames, setLostImageNames] = useState<readonly string[]>(() =>
+    getPendingImages().length === 0 ? draft.imageNames : [],
+  );
   const [documents, setDocuments] = useState<DocumentSlot[]>(() =>
     draft.documentSlotIds.map((id) => ({ id, snapshot: null })),
   );
@@ -153,6 +161,7 @@ export function DloIntakeForm() {
         documentSlotIds: documents.map((slot) => slot.id),
         nextSlotId: nextSlotId.current,
         audioNames: files.map((file) => file.name),
+        imageNames: images.map((file) => file.name),
         youtube,
       });
     }, 500);
@@ -164,6 +173,7 @@ export function DloIntakeForm() {
     instructions,
     documents,
     files,
+    images,
     youtube,
   ]);
 
@@ -172,11 +182,22 @@ export function DloIntakeForm() {
     setPendingAudio(files);
   }, [files]);
 
+  useEffect(() => {
+    setPendingImages(images);
+  }, [images]);
+
   // The picker decides which picks are allowed in and reports the rest; this only has to
   // notice that a recording a reload could not keep has been attached again.
   const changeFiles = (next: File[]) => {
     setFiles(next);
     setLostAudioNames((prev) =>
+      prev.filter((name) => !next.some((file) => file.name === name)),
+    );
+  };
+
+  const changeImages = (next: File[]) => {
+    setImages(next);
+    setLostImageNames((prev) =>
       prev.filter((name) => !next.some((file) => file.name === name)),
     );
   };
@@ -192,12 +213,13 @@ export function DloIntakeForm() {
       : [],
   );
 
+  // No ceiling on the number of documents: a meeting can produce a dozen GRs, and the API
+  // stopped capping the array for the same reason (DloCreateDocumentsSchema).
   const addDocumentSlot = () => {
-    setDocuments((prev) =>
-      prev.length >= MAX_DOCUMENTS
-        ? prev
-        : [...prev, { id: nextSlotId.current++, snapshot: null }],
-    );
+    setDocuments((prev) => [
+      ...prev,
+      { id: nextSlotId.current++, snapshot: null },
+    ]);
     setError(null);
   };
 
@@ -218,7 +240,9 @@ export function DloIntakeForm() {
     }
     setDocuments([]);
     setYoutube([]);
+    setImages([]);
     clearPendingAudio();
+    clearPendingImages();
     clearDraft();
   };
 
@@ -229,6 +253,7 @@ export function DloIntakeForm() {
     if (
       notes.trim().length === 0 &&
       files.length === 0 &&
+      images.length === 0 &&
       attachedDocuments.length === 0 &&
       youtube.length === 0
     ) {
@@ -255,7 +280,10 @@ export function DloIntakeForm() {
       if (styleReference.trim()) {
         form.append('styleReference', styleReference.trim());
       }
+      // Recordings and photographs share one field: the route classifies each part by its
+      // extension, so a second field would only be a second way to say the same thing.
       for (const file of files) form.append('files', file, file.name);
+      for (const image of images) form.append('files', image, image.name);
       // Documents were handled here, at the input step, so read ones travel as text rather
       // than bytes — which stops a scanned PDF being OCR'd a second time by the job. A scan
       // still at its initial picker travels as its page selection instead and IS read by the
@@ -361,6 +389,28 @@ export function DloIntakeForm() {
         onError={setError}
       />
 
+      {/* Photographs of documents: a GR, a notice or a table snapped with a phone. Placed
+          with the attach-and-go sources rather than with the documents below, because that
+          is what it behaves like — there are no pages to choose, so nothing is read here and
+          the text arrives at the review step just as a transcript does. */}
+      <ImageFilePicker
+        files={images}
+        onChange={changeImages}
+        onError={setError}
+        notice={
+          lostImageNames.length > 0 ? (
+            <div className="info-callout" style={{ marginTop: 12 }}>
+              <p>{STR.dloDraftImagesLost}</p>
+              <ul>
+                {lostImageNames.map((name) => (
+                  <li key={name}>{name}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null
+        }
+      />
+
       {/* One card per document, each probing its file HERE — so a scanned PDF asks which pages
           are worth OCR'ing the moment it is attached. The selected pages are handed to the
           intake job unread by default; reading them in this card remains optional. */}
@@ -405,7 +455,6 @@ export function DloIntakeForm() {
           <button
             type="button"
             className="btn btn-small"
-            disabled={documents.length >= MAX_DOCUMENTS}
             onClick={addDocumentSlot}
           >
             {STR.dloDocsAdd}

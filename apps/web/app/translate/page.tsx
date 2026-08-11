@@ -1,6 +1,7 @@
 'use client';
 
-// Standalone Marathi→English/Hindi translation of pasted text OR an uploaded file.
+// Standalone translation of pasted text OR an uploaded file, in four directions:
+// मराठी → इंग्रजी, मराठी → हिंदी, इंग्रजी → मराठी and हिंदी → मराठी.
 //
 // ONE flow, deliberately. There used to be a second "PDF फाईल" tab running a parallel
 // background job (per-page, per-language, its own routes and its own page picker), which
@@ -10,11 +11,22 @@
 // user could have pasted into. From there everything is the text path: one submit, the name
 // check, one translation.
 //
-// The two-step submit is the point of the page: submitting first runs the name check
-// (TranslationTermsReview) so the user confirms/corrects every proper noun's spelling in
-// place, and only then does the translation run — with those names locked and saved to the
-// नाव-शब्दकोश for future runs. The target language is chosen before translating; for Hindi
-// the confirmed names are frozen in Devanagari rather than mapped to English.
+// The choice is a DIRECTION, not a target: only four pairs exist, and a source picker beside
+// a target picker would offer मराठी → मराठी and इंग्रजी → हिंदी, neither of which the API
+// accepts. One row of four pills cannot express an unsupported run.
+//
+// The two-step submit is the point of the page when the source is MARATHI: submitting first
+// runs the name check (TranslationTermsReview) so the user confirms/corrects every proper
+// noun's spelling in place, and only then does the translation run — with those names locked
+// and saved to the नाव-शब्दकोश for future runs. For Hindi the confirmed names are frozen in
+// Devanagari rather than mapped to English.
+//
+// Going INTO Marathi there is no review step, and that is not a shortcut — it is that the
+// question has no content. The card asks "is this Marathi name's English/Hindi spelling
+// right?"; here the spelling the output is held to is the dictionary's own `marathi` column,
+// already reviewed, and the API enforces it deterministically after translating (see
+// translate-article.ts). So the submit goes straight to the translation, and the card is
+// replaced by one line saying so.
 //
 // Nothing is stored — not the text, not the uploaded file (the intake job is in-memory with
 // a TTL).
@@ -26,8 +38,9 @@
 
 import { useState } from 'react';
 import {
+  TEXT_TRANSLATION_PAIRS,
   type PrepareTranslationResponse,
-  type TranslationLanguage,
+  type TextTranslationLanguage,
   type TranslationTermInput,
 } from '@dgipr/schemas';
 import { prepareTextTranslation, translateText } from '../../lib/api';
@@ -38,15 +51,47 @@ import { TranslationTermsReview } from '../../components/TranslationTermsReview'
 
 type TranslationResult = Readonly<{
   text: string;
-  language: TranslationLanguage;
+  source: TextTranslationLanguage;
+  language: TextTranslationLanguage;
   lockedTermCount: number;
-  // Locked names the Hindi output could not carry verbatim (empty for English).
+  // Locked names the output could not carry verbatim (always empty for English, whose
+  // names are locked in the prompt instead of checked afterwards).
   unpreservedNames: readonly string[];
 }>;
 
+// The pill row, in the order the pairs are declared in @dgipr/schemas — so the UI cannot
+// offer a direction the API would reject, and adding one is a single edit there plus a
+// label here.
+const DIRECTION_LABELS: Readonly<Record<string, string>> = {
+  'mr>en': STR.translateDirectionMrEn,
+  'mr>hi': STR.translateDirectionMrHi,
+  'en>mr': STR.translateDirectionEnMr,
+  'hi>mr': STR.translateDirectionHiMr,
+};
+
+const INPUT_LABELS: Readonly<Record<TextTranslationLanguage, string>> = {
+  mr: STR.translateInputLabelMarathi,
+  en: STR.translateInputLabelEnglish,
+  hi: STR.translateInputLabelHindi,
+};
+
+const OUTPUT_TITLES: Readonly<Record<TextTranslationLanguage, string>> = {
+  mr: STR.translateOutputTitleMarathi,
+  en: STR.translateOutputTitle,
+  hi: STR.translateOutputTitleHindi,
+};
+
+const DOWNLOAD_NAMES: Readonly<Record<string, string>> = {
+  'mr>en': 'marathi-english-translation.txt',
+  'mr>hi': 'marathi-hindi-translation.txt',
+  'en>mr': 'english-marathi-translation.txt',
+  'hi>mr': 'hindi-marathi-translation.txt',
+};
+
 export default function TranslatePage() {
   const [text, setText] = useState('');
-  const [language, setLanguage] = useState<TranslationLanguage>('en');
+  const [source, setSource] = useState<TextTranslationLanguage>('mr');
+  const [language, setLanguage] = useState<TextTranslationLanguage>('en');
   // Name-check flow: idle → preparing (extracting names) → review (card shown).
   const [prep, setPrep] = useState<'idle' | 'preparing' | 'review'>('idle');
   const [prepared, setPrepared] = useState<
@@ -58,8 +103,12 @@ export default function TranslatePage() {
   const [error, setError] = useState<string | null>(null);
 
   const disabled = submitting || prep !== 'idle' || text.trim().length === 0;
+  // The review card only has a question to ask about a MARATHI source (see the header).
+  const reviewsNames = source === 'mr';
 
-  // Any change to the text invalidates a prepared name list and an old result.
+  // Any change to the text or the direction invalidates a prepared name list and an old
+  // result. The direction matters as much as the text: names prepared against Marathi mean
+  // nothing once the box is expected to hold English.
   const resetFlow = () => {
     setResult(null);
     setPrep('idle');
@@ -67,8 +116,8 @@ export default function TranslatePage() {
     setError(null);
   };
 
-  // Step 1: extract the text's names for review. Failure returns to idle with a
-  // Marathi error — never silently translating with unchecked names.
+  // Step 1 on a Marathi source: extract the text's names for review. Failure returns to
+  // idle with a Marathi error — never silently translating with unchecked names.
   const startNameCheck = async () => {
     if (disabled) return;
     setPrep('preparing');
@@ -84,16 +133,22 @@ export default function TranslatePage() {
     }
   };
 
-  // Step 2: translate with the confirmed names locked (and saved verified). The
-  // result carries its own language so the output card can't mislabel itself if the
-  // selector is changed afterwards (changing it clears the result anyway).
-  const confirmTranslate = async (terms: TranslationTermInput[]) => {
+  // Step 2: translate, with the confirmed names locked and saved verified where there were
+  // any to confirm. The result carries its own direction so the output card cannot mislabel
+  // itself if the pills are changed afterwards (changing them clears the result anyway).
+  const runTranslation = async (terms?: TranslationTermInput[]) => {
     setSubmitting(true);
     setError(null);
     try {
-      const res = await translateText({ text: text.trim(), terms, language });
+      const res = await translateText({
+        text: text.trim(),
+        sourceLanguage: source,
+        language,
+        ...(terms ? { terms } : {}),
+      });
       setResult({
         text: res.translated,
+        source: res.sourceLanguage,
         language: res.language,
         lockedTermCount: res.lockedTermCount,
         unpreservedNames: res.unpreservedNames,
@@ -105,6 +160,18 @@ export default function TranslatePage() {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  // The one submit button. A Marathi source stops at the name check first; going INTO
+  // Marathi there is nothing to check, so it translates directly.
+  const submit = () => {
+    if (disabled) return;
+    if (reviewsNames) {
+      void startNameCheck();
+      return;
+    }
+    setResult(null);
+    void runTranslation();
   };
 
   const copyToClipboard = async () => {
@@ -124,8 +191,10 @@ export default function TranslatePage() {
       </header>
 
       <section className="card">
+        {/* The label names the SOURCE language, so the box says which language it is
+            waiting for rather than leaving the direction pills below to imply it. */}
         <label className="field-label" htmlFor="translate-text">
-          {STR.translateInputLabel}
+          {INPUT_LABELS[source]}
         </label>
         <p className="hint">{STR.translateInputHint}</p>
         <textarea
@@ -164,38 +233,50 @@ export default function TranslatePage() {
         {/* A <p>, not a <span>: .field-label is scoped to <label> and <p>, so a span
             got no weight and no block display and the question ran straight into the
             first button ("…भाषांतर हवे?इंग्रजी"). */}
-        <p className="field-label">{STR.translateTargetLabel}</p>
+        <p className="field-label">{STR.translateDirectionLabel}</p>
         <div
           className="lang-toggle"
           role="group"
-          aria-label={STR.translateTargetLabel}
+          aria-label={STR.translateDirectionLabel}
         >
-          {(['en', 'hi'] as const).map((option) => (
-            <button
-              key={option}
-              type="button"
-              className="btn btn-small"
-              aria-pressed={language === option}
-              disabled={submitting || prep !== 'idle'}
-              onClick={() => {
-                setLanguage(option);
-                // A result belongs to the language it was made in; changing the
-                // target invalidates it exactly like editing the text does.
-                resetFlow();
-              }}
-            >
-              {option === 'hi'
-                ? STR.translateTargetHindi
-                : STR.translateTargetEnglish}
-            </button>
-          ))}
+          {TEXT_TRANSLATION_PAIRS.map((pair) => {
+            const key = `${pair.source}>${pair.target}`;
+            return (
+              <button
+                key={key}
+                type="button"
+                className="btn btn-small"
+                aria-pressed={
+                  source === pair.source && language === pair.target
+                }
+                disabled={submitting || prep !== 'idle'}
+                onClick={() => {
+                  setSource(pair.source);
+                  setLanguage(pair.target);
+                  // A result belongs to the direction it was made in; changing the
+                  // direction invalidates it exactly like editing the text does.
+                  resetFlow();
+                }}
+              >
+                {DIRECTION_LABELS[key] ?? key}
+              </button>
+            );
+          })}
         </div>
+
+        {/* Said before the submit, not after it: an officer used to a two-step submit
+            should know the step is missing on purpose and where the spelling comes from. */}
+        {!reviewsNames ? (
+          <p className="hint" style={{ marginTop: 10 }}>
+            {STR.translateIntoMarathiNames}
+          </p>
+        ) : null}
 
         <div className="btn-row" style={{ marginTop: 14 }}>
           <button
             type="button"
             className="btn btn-primary"
-            onClick={startNameCheck}
+            onClick={submit}
             disabled={disabled}
           >
             {STR.translateAction}
@@ -217,8 +298,10 @@ export default function TranslatePage() {
           <TranslationTermsReview
             terms={prepared}
             busy={submitting}
-            language={language}
-            onConfirm={confirmTranslate}
+            // The card only ever renders on a Marathi source, where the target is
+            // en or hi — which is exactly what its own prop accepts.
+            language={language === 'hi' ? 'hi' : 'en'}
+            onConfirm={(terms) => void runTranslation(terms)}
             onCancel={() => {
               setPrep('idle');
               setPrepared(null);
@@ -230,11 +313,7 @@ export default function TranslatePage() {
 
       {result ? (
         <section className="card">
-          <h2>
-            {result.language === 'hi'
-              ? STR.translateOutputTitleHindi
-              : STR.translateOutputTitle}
-          </h2>
+          <h2>{OUTPUT_TITLES[result.language]}</h2>
           {result.unpreservedNames.length > 0 ? (
             <div className="info-callout warn" style={{ marginBottom: 12 }}>
               <p className="field-label">{STR.translateUnpreservedTitle}</p>
@@ -254,9 +333,8 @@ export default function TranslatePage() {
               className="btn"
               onClick={() =>
                 downloadBlob(
-                  result.language === 'hi'
-                    ? 'marathi-hindi-translation.txt'
-                    : 'marathi-english-translation.txt',
+                  DOWNLOAD_NAMES[`${result.source}>${result.language}`] ??
+                    'translation.txt',
                   result.text,
                   'text/plain',
                 )

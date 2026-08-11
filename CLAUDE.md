@@ -185,6 +185,29 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
     and is transcribed by the job. The `files` multipart path still accepts pdf/docx
     (back-compat); the web no longer uses it, so the job's probe/`needs-selection`
     machinery below is now reachable only through it.
+  - **PHOTOGRAPHS of documents are a source too** (2026-08-11, no migration): JPG/PNG/WEBP,
+    read by `extractImageText` (`content-engine/src/intake/image-ocr.ts`) with the SAME model,
+    lane and fidelity prompt a PDF page gets — `ocrSystemPrompt('image')` in `openai-doc.ts`
+    is one prompt with one conditional bullet, not a second one free to drift. They travel on
+    the SAME multipart `files` field as the recordings (the route classifies by extension) and
+    are read by the JOB's extract phase, not at the input step: a document stops there because
+    OCR is billed per page and the officer picks which pages are worth it, and an image is one
+    page with nothing to pick. Stored in `text` like a DOCX, so review/assembly/lineage needed
+    no changes. **Images always go through OpenAI, ignoring `OCR_PROVIDER`** — that flag picks
+    between two backends that both take a PDF. `sharp` normalises before the call: EXIF
+    auto-rotate (a sideways phone photo would otherwise be read sideways) plus OpenAI's own
+    downscale, done here so the request is deterministic and bounded — **not** an accuracy
+    fix, measured. Empty text is a real answer, not a failure. Web →
+    `components/ImageFilePicker.tsx` (thumbnail grid, below the YouTube card) and, at review,
+    the photograph BESIDE its editable transcript (`.image-review`) served by
+    `GET /dlo/intakes/:id/files/:index/image` — a proxy because `dlo-uploads` is private, and
+    gated on `canPreview`. **Known and measured: Devanagari DIGITS are unreliable** — a
+    calibration page returned perfect prose and tables while `₹२`→`३२`, `६५.५`→`६६.५`,
+    `९८०`→`१८०`. The deployed PDF path makes the SAME errors on the same page, so this is a
+    property of the OCR model, not of images; `reasoning_effort: high` was tried and did not
+    help (knob kept as `OPENAI_OCR_REASONING_EFFORT`, default unset). The officer's review step
+    is the only guard, which is exactly why the image sits beside its text. Free-ish harness:
+    `tsx --env-file=../../.env src/intake/image-ocr.ts <photo.jpg>`.
   Sarvam/extraction logic → `packages/content-engine/src/intake/*`
   (`sarvam-stt.ts`, `sarvam-doc.ts`, `docx.ts`; official `sarvamai`
   SDK, key `SARVAM_API_KEY`); rows/bucket → `packages/database/src/dlo-intakes.ts`
@@ -508,6 +531,36 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   officer's run (verified live against a database without 0043), which is also why an un-applied
   0043 costs only the three event-backed cards. The payload carries machine keys only; every
   Marathi label is in `apps/web/lib/strings.ts`.
+- **The general assistant (`/chat`) — the one surface that is not a pipeline.** Ask anything,
+  attach anything, chats stored and reopenable. Routes → `apps/api/src/routes/chat.ts` (create/
+  list/detail/delete a thread, the SSE turn, an image upload); engine →
+  `packages/content-engine/src/chat/misc-chat.ts`; rows → `packages/database/src/chat.ts`
+  (migration 0044, TWO tables); shapes + the SSE event framing + `chatTitleFrom` →
+  `packages/schemas/src/chat.ts`; web → `apps/web/app/chat/page.tsx` + `chat/[id]/page.tsx` →
+  `ChatWorkspace` (rail + conversation) with `ChatThreadRail`/`ChatConversation`/
+  `ChatMessageBubble`/`ChatComposer`, and `useChatThread`/`useChatThreadList`/
+  `useChatAttachments`/`lib/chatDraft.ts`.
+  Six things to know before changing it. **There is NO system prompt and that is the product
+  decision**, not an omission — the module header says why, and the consequence is that this
+  page does not inherit the glossary, the never-invent rules or the Marathi-first contract
+  (publishable text belongs on /dlo or /proofread). It runs on its own **`chat` concurrency
+  lane** (`CHAT_MAX_CONCURRENCY`, default 4) so a watched answer never queues behind an article
+  generation and never makes one queue behind it — the lane travels with
+  `chatCompleteStream`'s non-streaming fallback too, or a failover would land back in the
+  pipeline's lane. Streaming reuses `chatCompleteStream`, widened to accept
+  `MultimodalChatMessage` (an image can arrive on ANY turn, which is what `chatCompleteVision`
+  cannot express). **Attachments are reduced to TEXT before the turn is sent** — only images
+  keep bytes — so reopening a chat re-extracts and re-transcribes nothing; documents go through
+  the shared `<DocumentIntake>` (so the OCR spend gate is intact) and recordings/YouTube links
+  through the EXISTING `/api/transcriptions` job (so the 0031 cache applies, at the cost of a
+  chat recording also appearing in /transcribe's history). The turn route persists the USER
+  message BEFORE anything can fail and stores a PARTIAL answer on failure, because those tokens
+  are paid for. And the SSE route writes to `reply.raw`, which bypasses Fastify's reply
+  pipeline — so the **CORS header is written by hand** (without it the browser rejects a stream
+  the server is producing perfectly) and `X-Accel-Buffering: no` is set (without it Caddy
+  buffers the whole answer, which streams fine locally and arrives in one lump in production).
+  `dgipr.chat.mine` is ORDERING ONLY, never auth: every chat is readable by anyone, which the
+  rail says out loud.
 - Direct social publishing (post a completed twitter/facebook run's poster +
   caption to the OFFICIAL accounts): synchronous `POST /api/generations/:id/publish`
   in `apps/api/src/routes/generations.ts` (platform = the row's category; guards:
@@ -836,6 +889,37 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
     here (it is a fourth tier the hierarchy does not have). This function is the seam where the
     future approved-example tier slots in, matched on the SOURCE embedding. Free harness:
     `tsx src/generation/select-style-reference.ts`.
+  - **The officer's two inputs OUTRANK the specification** (2026-08-11). `PRECEDENCE_RULE`
+    (exported from `simple-article-prompt.ts`, emitted by all three variants) states the order:
+    never state an unsupported fact > the HEADLINE / ANGLE + the OFFICER REQUEST > everything
+    else in the prompt. Both officer blocks are rendered LAST and adjacent (`headingBlock` +
+    `officerInstructionsBlock`, both shared so `ARTICLE_PROMPT_VARIANT` changes wording density,
+    never authority). The length sentence is CONDITIONAL on the officer having named none — it
+    used to be a system-message absolute ("length does not matter") plus a ban on "stretching",
+    which is the exact operation a longer article needs, so an ask for 1200 characters returned
+    400. Two deterministic guarantees follow the last model call, the `applyDesignations`
+    doctrine: **`ensureArticleHeading`** (`article-heading.ts`) writes the officer's line onto
+    the article when it reads as a HEADLINE — `generations.heading` is dual-purpose and an ANGLE
+    cannot be enforced, so `looksLikeHeadline` is an admitted heuristic (4+ words, 15-200 chars,
+    no sentence terminator) that errs toward leaving the model's line alone; and
+    **`fitArticleToLength`** (`article-length.ts`) MEASURES a requested length and buys ONE
+    bounded rewrite on a miss (`parseLengthRequest` reads Devanagari/Latin digits + inflected
+    Marathi units + ranges; `lengthRequirementBlock` restates the number inside
+    `officerInstructionsBlock`, so every variant gets it through one function). A length is
+    reached by covering the source more fully, **never by padding** — where the source cannot
+    fill it, the run reports `LengthWarning` (`@dgipr/schemas` → registry beside
+    `designationWarnings` → `lengthWarning` on the detail payload → a callout on `ArticleView`
+    and on `/dlo`'s output step) rather than shipping filler. Free harnesses:
+    `tsx src/generation/{article-length,article-heading,revise-article --check}.ts`.
+  - **The FEEDBACK path had never seen the heading at all**: `reviseArticle` took it and passed
+    it only to the coverage/faithfulness CHECKERS, so a "बातमीत बदल हवा आहे?" round rewrote the
+    article with no knowledge of the officer's angle. `buildRevisionMessages` now renders
+    `<HEADLINE_ANGLE>`, carries it through unless the feedback overrides it, states the
+    precedence carve-out against `systemPromptFor`'s compression-permissive style rules, renders
+    the same LENGTH REQUIREMENT block (feedback wins over the stored request) and runs both
+    deterministic passes. `wantsExpansion(feedback, currentArticle)` is now directional — a
+    numeric ask above the current length counts as an expansion request, which is what unblocks
+    the `findMissingInformation` sweep that "१२०० अक्षरे" could never reach before.
   - **What survives in BOTH modes and must not be removed:** `applyDesignations` (deterministic,
     zero calls, the only structural name guarantee), every officer-approved input
     (`selectedFacts`, `statements`, `excludedFacts`, `nameDesignations`), the note as sole
@@ -1028,6 +1112,15 @@ the analytics page's six cards would read as never used. Self-contained and addi
 fire-and-forget and the aggregator treats a read failure as "not tracked", so an un-applied 0043
 disables three cards rather than any feature — verified live, a poster download still returned 200
 with the table absent. Apply before the API deploy anyway.
+`0044` — `chat_threads` + `chat_messages` (the general assistant at `/chat`). TWO tables rather
+than a `messages` jsonb column, unlike every other feature here: a chat GROWS a turn at a time,
+so a jsonb array would be read and rewritten wholesale on every message — quadratic, and the
+same lost-update hazard 0036 avoided by giving `review_state` its own column. The denormalized
+`title`/`message_count`/`last_message_at` exist so the rail's list query never touches
+`chat_messages`. Self-contained and additive; nothing outside /chat reads either table, so an
+un-applied 0044 disables that page alone — **verified live**: the routes register, the image
+upload works end to end, every input guard answers in Marathi, and only the two table-backed
+queries 500.
 `0037` — `transcriptions` (new table: standalone recording → Marathi text runs behind
 `/transcribe`). Self-contained and additive — nothing else reads it, and it provisions no
 bucket (the recordings go into 0018's private `dlo-uploads` under a `transcriptions/` prefix),
