@@ -1349,9 +1349,20 @@ export const STR = {
     'या दृश्यावर कोणते वाक्य ऐकू यावे ते ठरवा. शेजारच्या दृश्यातून मजकूर कापून इथे चिकटवा — शब्द तेच राहिले तर आवाज पुन्हा तयार करावा लागत नाही; फक्त दृश्यांची वेळ आवाजाशी जुळवली जाते.',
   videoInsertedSceneHint:
     'नवीन दृश्य. शेजारच्या दृश्यातील मजकूर कापून इथे चिकटवा आणि दृश्य-वर्णन लिहा. नवीन शब्द लिहू नका — तसे केल्यास संपूर्ण निवेदन पुन्हा तयार करावे लागेल.',
+  // The label is shared by BOTH gates — it is the same action (persist the
+  // edited scene list without starting a job) and the same words. Only the
+  // hint differs, because at gate 1 there is no rendered frame or measured
+  // audio yet for the save to preserve.
   videoSaveStoryboardScript: 'बदल जतन करा',
   videoSaveStoryboardScriptHint:
     'निवेदनाचे शब्द तेच ठेवून फक्त विभागणी बदलली, तर आवाज पुन्हा तयार होत नाही. ज्या दृश्यांची वेळ बदलेल तेवढीच दृश्ये पुन्हा तयार करावी लागतील.',
+  videoSaveScriptHint:
+    'बदल जतन होतील पण चित्रे तयार होणार नाहीत — खर्च होत नाही. संहिता पूर्ण झाल्यावर “स्टोरीबोर्ड तयार करा” दाबा.',
+  // Ready-script lane only. Removing a scene whose निवेदन still holds words
+  // would delete them from the officer's own final script, which the API
+  // refuses; the remedy is to move the words into a neighbour first.
+  videoRemoveSceneScriptHint:
+    'दृश्य काढण्यापूर्वी त्यातील निवेदन शेजारच्या दृश्यात हलवा. तयार संहितेतील शब्द काढता येत नाहीत.',
   videoSceneNeedsFrames:
     'या दृश्याची चित्रे अजून काढलेली नाहीत — खालील “या दृश्याची चित्रे तयार करा” वापरा.',
   // A stored scene with no frames yet (a just-saved inserted scene). The redraw

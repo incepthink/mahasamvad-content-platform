@@ -226,6 +226,13 @@ export default function VideoProjectPage({
   // have the most narration to illustrate.
   const canAddScene =
     detail.inputMode === 'note' ? (drafts ?? []).length < bounds.max : true;
+  // Removing is offered on BOTH lanes for the same reason narration editing is
+  // (see the gate-1 card below): on a ready-script project it is only legal
+  // once the scene's words have been moved into a neighbour, and the API's
+  // word-identity guard is what refuses the other case, in Marathi. Gating the
+  // control instead would remove the legal use too — an officer who merged two
+  // scenes' words then had no way to drop the emptied one.
+  const canRemoveScene = (drafts ?? []).length > bounds.min;
   // Gate-1 budget line: what the edited drafts are estimated to speak, against
   // the project's selected total. Estimated from characters, so it is a guide,
   // not a verdict — the storyboard job measures the real WAVs.
@@ -282,6 +289,35 @@ export default function VideoProjectPage({
           (stored.keyPoint ?? '') !== draft.keyPoint
         );
       }));
+  // Gate 1's equivalent, and it compares MORE fields than gate 2's: the briefs,
+  // the key point and the style paragraph are all editable here, where at gate 2
+  // a stored scene's briefs are changed through the redraw fold (which persists
+  // on its own) rather than through the draft.
+  const scriptDirty =
+    drafts !== null &&
+    detail.status === 'script_ready' &&
+    (styleDraft.trim() !== (detail.style ?? '').trim() ||
+      drafts.length !== detail.scenes.length ||
+      drafts.some((draft, index) => {
+        const stored =
+          draft.sourceIndex === undefined
+            ? undefined
+            : detail.scenes[draft.sourceIndex];
+        return (
+          stored === undefined ||
+          draft.sourceIndex !== index ||
+          stored.narration !== draft.narration ||
+          stored.visualBrief !== draft.visualBrief ||
+          (stored.endVisualBrief ?? '') !== draft.endVisualBrief ||
+          (stored.keyPoint ?? '') !== draft.keyPoint
+        );
+      }));
+  // Both gate-1 buttons refuse the same payloads the save route does, so an
+  // inserted scene has to be given its words and its brief here rather than
+  // failing server-side.
+  const scriptIncomplete = (drafts ?? []).some(
+    (d) => d.narration.trim().length === 0 || d.visualBrief.trim().length === 0,
+  );
   const allClipsReady =
     detail.scenes.length > 0 &&
     detail.scenes.every((scene) => scene.clipUrl !== undefined);
@@ -345,6 +381,23 @@ export default function VideoProjectPage({
         scenes: scriptPayload(drafts),
       });
       setDrafts(draftsFrom(updated.scenes));
+    });
+
+  // Gate 1's save. Same route, and deliberately NOT followed by
+  // startVideoStoryboard: an officer reworking a long script needs to bank the
+  // edits without buying a frame for every scene, and until this existed the
+  // only button that persisted anything was the one that spends. Reseeds for
+  // the same reason gate 2's does — an insert renumbers the stored scenes the
+  // drafts' sourceIndexes point at.
+  const saveScriptDraft = () =>
+    act(async () => {
+      if (!drafts) return;
+      const updated = await saveVideoScript(id, {
+        ...(styleDraft.trim() !== '' ? { style: styleDraft.trim() } : {}),
+        scenes: scriptPayload(drafts),
+      });
+      setDrafts(draftsFrom(updated.scenes));
+      setStyleDraft(updated.style ?? '');
     });
 
   const submitScript = () =>
@@ -450,8 +503,9 @@ export default function VideoProjectPage({
               onInsertAfter={
                 canAddScene ? () => insertSceneAfter(index) : undefined
               }
+              // Offered on the ready-script lane too — see canRemoveScene.
               onRemove={
-                detail.inputMode === 'note' && drafts.length > bounds.min
+                canRemoveScene
                   ? () =>
                       setDrafts((prev) =>
                         prev ? prev.filter((_, i) => i !== index) : prev,
@@ -462,7 +516,7 @@ export default function VideoProjectPage({
           ))}
           <section className="card">
             <div className="btn-row">
-              {detail.inputMode === 'note' && drafts.length < bounds.max ? (
+              {canAddScene ? (
                 <button
                   type="button"
                   className="btn"
@@ -487,23 +541,41 @@ export default function VideoProjectPage({
                   {STR.videoAddScene}
                 </button>
               ) : null}
+              {/* Persists the edits and stays here. Free — no frame is drawn,
+                  which is the whole point of it sitting beside the button that
+                  does draw them. */}
+              <button
+                type="button"
+                className="btn"
+                disabled={
+                  busy || !scriptDirty || narrationTooLong || scriptIncomplete
+                }
+                onClick={saveScriptDraft}
+              >
+                {busy ? STR.submitting : STR.videoSaveStoryboardScript}
+              </button>
               <button
                 type="button"
                 className="btn btn-primary"
-                disabled={
-                  busy ||
-                  narrationTooLong ||
-                  drafts.some(
-                    (d) =>
-                      d.narration.trim().length === 0 ||
-                      d.visualBrief.trim().length === 0,
-                  )
-                }
+                disabled={busy || narrationTooLong || scriptIncomplete}
                 onClick={submitScript}
               >
                 {busy ? STR.submitting : STR.videoToStoryboard}
               </button>
             </div>
+            {scriptDirty ? (
+              <p className="hint" style={{ marginTop: 8 }}>
+                {STR.videoSaveScriptHint}
+              </p>
+            ) : null}
+            {/* Only on the ready-script lane, and only when a remove is
+                actually reachable: on the note lane a scene's words are the
+                pipeline's own and may be dropped outright. */}
+            {detail.inputMode === 'script' && canRemoveScene ? (
+              <p className="hint" style={{ marginTop: 8 }}>
+                {STR.videoRemoveSceneScriptHint}
+              </p>
+            ) : null}
             {/* The running narration total against the project's selected
                 length. Advisory ONLY — it never blocks the submit, because the
                 storyboard job measures the real audio and shortens whatever
@@ -615,11 +687,7 @@ export default function VideoProjectPage({
                   // Same emptiness rules as gate 1's submit: the save route
                   // rejects a blank narration or brief, so an inserted scene
                   // must state both here rather than fail server-side.
-                  (drafts ?? []).some(
-                    (d) =>
-                      d.narration.trim().length === 0 ||
-                      d.visualBrief.trim().length === 0,
-                  )
+                  scriptIncomplete
                 }
                 onClick={saveStoryboardScript}
               >
