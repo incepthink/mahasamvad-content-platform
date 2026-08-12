@@ -9,11 +9,16 @@
 // "creatively" translating a known name. The caller passes the verified glossary subset
 // that appears in the article (see findGlossaryTermsInText in @dgipr/database).
 //
-// HINDI takes a different route, for a hard reason: the Sarvam CHAT model cannot do
-// Marathi→Hindi. Asked to, it returns the Marathi unchanged and calls it Hindi (verified
-// with three prompt shapes; see sarvam-translate.ts). So Hindi goes through Sarvam's
-// purpose-built translation endpoint, which has no prompt and therefore no way to be
-// handed a glossary table.
+// That chat path serves ONE direction, mr→en — its prompt says "Marathi-to-English
+// translator" and its LOCKED TERMS table is Marathi→English. Every other direction rides
+// Sarvam's purpose-built translation endpoint, which takes a pair of language codes and no
+// prompt (and therefore no glossary table).
+//
+// HINDI has to, for a hard reason: the Sarvam CHAT model cannot do Marathi→Hindi. Asked to,
+// it returns the Marathi unchanged and calls it Hindi (verified with three prompt shapes;
+// see sarvam-translate.ts). ENGLISH FROM HINDI goes the same way by choice — handing Hindi
+// to a prompt written about Marathi is how a translation nobody specified gets produced
+// quietly, and the endpoint has no such opinion about its inputs.
 //
 // The dictionary still governs the names — as ENFORCEMENT rather than instruction. Hindi
 // shares Devanagari with Marathi, so a name's correct Hindi form is USUALLY its Marathi
@@ -499,29 +504,46 @@ function splitToLimit(block: string, limit: number): string[] {
 // survive. Returns the assembled article plus the union of every block's unpreserved
 // locked names (endpoint paths only; see TranslationResult).
 //
-// English is the CHAT path (prompt + LOCKED TERMS table); Hindi and Marathi are the
+// mr→en is the CHAT path (prompt + LOCKED TERMS table); EVERY other direction is the
 // purpose-built endpoint, which takes no prompt and so enforces names afterwards.
+//
+// The branch is on the PAIR, not on the target alone. The chat prompt describes itself as a
+// Marathi-to-English translator and carries a Marathi→English glossary table, so it is the
+// right tool for exactly one direction; hi→en is a perfectly ordinary job for the endpoint,
+// whose only per-direction input is a pair of language codes. Routing hi→en by target would
+// have handed Hindi to a prompt written about Marathi — the reason that pair used to be
+// refused outright rather than served badly.
+//
+// Same source and target is a PASSTHROUGH, not a translation: nothing upstream is asked to
+// guess what language was pasted, so "translate this English text into English" is a
+// question the page can legitimately ask, and the only honest answer is the text itself.
+// Returned before any block is packed, so it costs no call and no credit.
 export async function translateArticle(
   sourceArticle: string,
   glossary: readonly GlossaryEntry[],
   language: TextTranslationLanguage,
   options?: TranslateOptions,
 ): Promise<TranslationResult> {
-  const viaEndpoint = language !== 'en';
+  const sourceLanguage = options?.sourceLanguage ?? 'mr';
+  const onProgress = options?.onProgress ?? (() => {});
+
+  if (sourceLanguage === language) {
+    onProgress(0, 0);
+    return { text: sourceArticle, unpreservedNames: [] };
+  }
+
+  const viaEndpoint = !(sourceLanguage === 'mr' && language === 'en');
   const maxChars =
     options?.maxCharsPerBlock ??
     (viaEndpoint
       ? SARVAM_TRANSLATE_MAX_INPUT_CHARS
       : DEFAULT_MAX_CHARS_PER_BLOCK);
-  const onProgress = options?.onProgress ?? (() => {});
   const packed = splitNoteIntoSections(sourceArticle, maxChars);
   // The chat path tolerates an overlong block (it only costs tokens); the translate
   // endpoint rejects one outright, so enforce the cap there.
   const blocks = viaEndpoint
     ? packed.flatMap((block) => splitToLimit(block, maxChars))
     : packed;
-
-  const sourceLanguage = options?.sourceLanguage ?? 'mr';
 
   const translated: string[] = [];
   // Union across blocks: the same name can be locked in several blocks, and the caller

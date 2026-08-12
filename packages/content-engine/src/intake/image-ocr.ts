@@ -186,7 +186,9 @@ export async function extractImageText(
             },
             {
               type: 'text',
-              text: 'Transcribe this image as Marathi Markdown, following your instructions exactly.',
+              // Markdown, not a language — see ocrSystemPrompt: the image's own language and
+              // script are what come back, so naming one here would override that rule.
+              text: 'Transcribe this image as Markdown, following your instructions exactly.',
             },
           ],
         },

@@ -1,7 +1,7 @@
 'use client';
 
-// Standalone translation of pasted text OR an uploaded file, in four directions:
-// मराठी → इंग्रजी, मराठी → हिंदी, इंग्रजी → मराठी and हिंदी → मराठी.
+// Standalone translation of pasted text OR an uploaded file, between मराठी, इंग्रजी and
+// हिंदी in any direction.
 //
 // ONE flow, deliberately. There used to be a second "PDF फाईल" tab running a parallel
 // background job (per-page, per-language, its own routes and its own page picker), which
@@ -17,12 +17,13 @@
 // heuristic; a wrong one sends Hindi to a prompt that calls itself a "Marathi-to-English
 // translator"). Nothing on this row appears, vanishes or switches itself off as they type.
 //
-// The SOURCE follows from the target, because the pairs the API serves — mr→en, mr→hi,
-// en→mr, hi→mr — leave it no freedom: इंग्रजी or हिंदी out means मराठी in. Only मराठी out is
-// ambiguous, and there the choice is between an ENGLISH and a HINDI source, which is a
-// SCRIPT test (Latin vs Devanagari) rather than a language guess. The box's own label names
-// the source the current target implies, so the derivation is visible without being a
-// question. Everything else downstream (whether the name-review step runs) follows from it.
+// The SOURCE is derived, never asked: Latin script in means an English source, Devanagari
+// means Marathi (or Hindi when मराठी is the target, since Marathi cannot be both). That is a
+// SCRIPT test rather than a language guess, and the API serves every pair it can produce —
+// including the identity ones, which come back unchanged instead of erroring — so no answer
+// on the row can ever be the wrong one to offer. The box's own label names the source the
+// current text and target imply, so the derivation is visible without being a question.
+// Everything else downstream (whether the name-review step runs) follows from it.
 //
 // The two-step submit is the point of the page when the source is MARATHI: submitting first
 // runs the name check (TranslationTermsReview) so the user confirms/corrects every proper
@@ -79,9 +80,8 @@ const TARGET_OPTIONS = [
 }[];
 
 // Latin letters vs Devanagari, the same 0.3 threshold content-engine's
-// detectProofreadLanguage uses. Only consulted when the target is मराठी, where the source is
-// either English or Hindi and those two are told apart by SCRIPT — no word list, no
-// मराठी/हिंदी judgement, nothing that can be wrong about a language.
+// detectProofreadLanguage uses. The text is consulted for its SCRIPT and nothing else — no
+// word list, no मराठी/हिंदी judgement, nothing that can be wrong about a language.
 const DEVANAGARI_RATIO_FOR_INDIC = 0.3;
 
 function writtenInDevanagari(text: string): boolean {
@@ -92,16 +92,24 @@ function writtenInDevanagari(text: string): boolean {
 }
 
 /**
- * The language the text must be in for the chosen target to be a translation the API serves.
- * Anything but मराठी out means मराठी in; मराठी out means English or Hindi in, which is the
- * one place the text itself is consulted — for its script, never for its language.
+ * The source language to send with the chosen target. Decided by SCRIPT, never by asking:
+ *
+ *   Latin script in  → the source is English, whichever target was picked.
+ *   Devanagari in    → मराठी, except when मराठी is the target, where it can only be हिंदी.
+ *
+ * The one language this cannot tell apart from Marathi is Hindi, and the tie goes to
+ * Marathi because that is what this department pastes. Every combination it can produce is
+ * a pair the API serves (TEXT_TRANSLATION_PAIRS covers all nine, identity included), which
+ * is what lets all three targets stay enabled with nothing left to reject — an English note
+ * asked for in हिंदी is en→hi, a real translation, and asked for in इंग्रजी it is en→en,
+ * which comes straight back unchanged rather than switching a button off.
  */
 function sourceForTarget(
   target: TextTranslationLanguage,
   text: string,
 ): TextTranslationLanguage {
-  if (target !== 'mr') return 'mr';
-  return writtenInDevanagari(text) ? 'hi' : 'en';
+  if (!writtenInDevanagari(text)) return 'en';
+  return target === 'mr' ? 'hi' : 'mr';
 }
 
 const INPUT_LABELS: Readonly<Record<TextTranslationLanguage, string>> = {
@@ -120,7 +128,9 @@ const DOWNLOAD_NAMES: Readonly<Record<string, string>> = {
   'mr>en': 'marathi-english-translation.txt',
   'mr>hi': 'marathi-hindi-translation.txt',
   'en>mr': 'english-marathi-translation.txt',
+  'en>hi': 'english-hindi-translation.txt',
   'hi>mr': 'hindi-marathi-translation.txt',
+  'hi>en': 'hindi-english-translation.txt',
 };
 
 export default function TranslatePage() {
