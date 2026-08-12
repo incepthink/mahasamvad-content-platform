@@ -99,8 +99,14 @@ export const VIDEO_TIER_PRICE_PER_SECOND_USD: Readonly<
   lite: KLING_720P_USD_PER_SECOND,
 };
 
-// The planner chooses any count inside this broad product limit. Duration and
-// story needs decide the result; there is no preferred count per time bucket.
+// The NOTE lane's planner range. Duration and story needs decide the result;
+// there is no preferred count per time bucket. It is not a ceiling on a stored
+// scene list: the READY-SCRIPT lane derives its scene count from how long the
+// supplied narration actually speaks (2026-08-12), so a long script legitimately
+// produces more scenes than this — see VIDEO_CLIP_MAX_SECONDS below and
+// splitReadyVideoScript. The note lane cannot reach it anyway: its budget is
+// VIDEO_TOTAL_SECONDS (30/60s), which eight 15-second clips already cover twice
+// over.
 export const VIDEO_SCENE_LIMIT: Readonly<{ min: number; max: number }> = {
   min: 1,
   max: 8,
@@ -115,11 +121,14 @@ export const VIDEO_SCENE_LIMIT: Readonly<{ min: number; max: number }> = {
 export const VIDEO_CLIP_MIN_SECONDS = 3;
 export const VIDEO_CLIP_MAX_SECONDS = 15;
 
-// Ready-script mode has no arbitrary character ceiling. Its meaningful guard
-// is the visual provider's capacity: eight clips at at most 15 seconds each.
-// The form estimates this for free; TTS later measures the authoritative time.
-export const VIDEO_SCRIPT_MAX_SECONDS =
-  VIDEO_SCENE_LIMIT.max * VIDEO_CLIP_MAX_SECONDS;
+// NOTE (2026-08-12): VIDEO_SCRIPT_MAX_SECONDS is DELETED. Ready-script mode had
+// a two-minute ceiling — eight clips at 15 seconds each — which was the note
+// lane's scene limit leaking onto a lane that has no reason to obey it. A ready
+// script's length is the officer's decision, so the scene count is now derived
+// from how long the narration speaks and nothing rejects a long one. The spend
+// guard is unchanged and is where it belongs: gate 2's explicit confirm, priced
+// from the real scene count (VIDEO_TIER_PRICE_PER_SECOND_USD). Do not
+// reintroduce a duration cap here without a provider fact to point at.
 
 // The officer-selected TOTAL video length per bucket — the narration's budget.
 // A soft target: the narrate phase shortens the worst-offending scenes while
@@ -468,8 +477,9 @@ export function narrationAudioMimeForFileName(fileName: string): string | null {
 // a real voice id (`shubh`, a 20-char ElevenLabs id).
 export const UPLOADED_NARRATION_VOICE = 'upload';
 
-// There is no generic video character ceiling. Ready narration is guarded by
-// its estimated spoken duration because that determines scene/render capacity.
+// There is no video character ceiling and, since 2026-08-12, no duration
+// ceiling either: a ready script is checked for being Marathi, and for nothing
+// else. Its length decides how many scenes it gets, not whether it is accepted.
 export const CreateVideoProjectRequestSchema = z
   .object({
     note: z.string().trim().min(20),
@@ -497,18 +507,6 @@ export const CreateVideoProjectRequestSchema = z
         code: z.ZodIssueCode.custom,
         path: ['narrationAudioUploaded'],
         message: 'निवेदनाचा ऑडिओ फक्त तयार संहितेसोबत देता येतो.',
-      });
-    }
-    if (
-      value.inputMode === 'script' &&
-      !value.narrationAudioUploaded &&
-      estimateNarrationSeconds(normalizeVideoNarrationScript(value.note)) >
-        VIDEO_SCRIPT_MAX_SECONDS
-    ) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['note'],
-        message: 'तयार निवेदनाचा अंदाज दोन मिनिटांपेक्षा जास्त आहे.',
       });
     }
   });
@@ -572,8 +570,14 @@ export const UpdateVideoScriptRequestSchema = z.object({
         durationSeconds: VideoSceneDurationSchema.optional(),
       }),
     )
-    .min(VIDEO_SCENE_LIMIT.min)
-    .max(VIDEO_SCENE_LIMIT.max),
+    // Only a floor. There WAS a VIDEO_SCENE_LIMIT.max ceiling here, which was
+    // the note lane's planner range applied to every stored scene list — it
+    // would now reject a ready-script project whose narration legitimately
+    // needs more than eight clips. The note lane's own ceiling is enforced
+    // where it is a product decision (the planner prompt, and the web's
+    // add-scene control), not on a save that must be able to store whatever
+    // the split produced.
+    .min(VIDEO_SCENE_LIMIT.min),
 });
 export type UpdateVideoScriptRequest = z.infer<
   typeof UpdateVideoScriptRequestSchema

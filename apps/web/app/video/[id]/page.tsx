@@ -218,6 +218,14 @@ export default function VideoProjectPage({
   }
 
   const bounds = VIDEO_SCENE_LIMIT;
+  // The eight-scene ceiling is the NOTE lane's product limit — its narration is
+  // budgeted at 30/60 seconds, so more cuts than that is chopping. A ready
+  // script's length is the officer's own and its scene count is derived from
+  // it (2026-08-12), so counting an already-longer project against eight would
+  // only remove the extra-visual-cut affordance from exactly the projects that
+  // have the most narration to illustrate.
+  const canAddScene =
+    detail.inputMode === 'note' ? (drafts ?? []).length < bounds.max : true;
   // Gate-1 budget line: what the edited drafts are estimated to speak, against
   // the project's selected total. Estimated from characters, so it is a guide,
   // not a verdict — the storyboard job measures the real WAVs.
@@ -440,9 +448,7 @@ export default function VideoProjectPage({
                 patchDraft(index, { keyPoint: value })
               }
               onInsertAfter={
-                drafts.length < bounds.max
-                  ? () => insertSceneAfter(index)
-                  : undefined
+                canAddScene ? () => insertSceneAfter(index) : undefined
               }
               onRemove={
                 detail.inputMode === 'note' && drafts.length > bounds.min
@@ -590,9 +596,7 @@ export default function VideoProjectPage({
                       redrawUnavailableHint: STR.videoInsertedSceneSaveFirst,
                     })}
                 onInsertAfter={
-                  (drafts ?? []).length < bounds.max
-                    ? () => insertSceneAfter(index)
-                    : undefined
+                  canAddScene ? () => insertSceneAfter(index) : undefined
                 }
               />
             );

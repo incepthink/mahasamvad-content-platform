@@ -1265,8 +1265,6 @@ export const STR = {
   videoScriptInputHint:
     'फक्त आवाजात वाचायचे निवेदन द्या. दृश्य-सूचना, वक्त्यांची नावे किंवा रंगमंच सूचना देऊ नका.',
   videoScriptEstimateLabel: 'मोफत अंदाज',
-  videoScriptEstimateOver:
-    'ही संहिता दोन मिनिटांपेक्षा मोठी दिसते. कृपया निवेदन लहान करा.',
   videoScriptMarathiOnly: 'तयार निवेदन मराठीत असणे आवश्यक आहे.',
   // Officer-supplied voiceover: the department's own voice, or a TTS product
   // whose plan gives no API access. The file replaces the synthesized track
@@ -1278,8 +1276,6 @@ export const STR = {
   videoNarrationAudioMeasured: 'दिलेल्या ध्वनिफीतीवरून',
   videoNarrationAudioUnreadable:
     'ही ध्वनिफीत ब्राउझरला वाचता आली नाही; तरीही पाठवून पाहता येईल.',
-  videoNarrationAudioTooLong:
-    'ही ध्वनिफीत दोन मिनिटांपेक्षा मोठी आहे. कृपया लहान ध्वनिफीत द्या.',
   videoNarrationAudioTooBig: 'ध्वनिफीत ५० MB पेक्षा मोठी असू शकत नाही.',
   videoHeadingLabel: 'शीर्षक / मुख्य मुद्दा (ऐच्छिक)',
   videoDurationLabel: 'व्हिडिओची लांबी',

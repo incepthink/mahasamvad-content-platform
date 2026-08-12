@@ -66,7 +66,6 @@ import {
 import {
   VIDEO_CLIP_MAX_SECONDS,
   VIDEO_CLIP_MIN_SECONDS,
-  VIDEO_SCRIPT_MAX_SECONDS,
   VIDEO_TOTAL_FIT_TOLERANCE,
   VIDEO_TOTAL_SECONDS,
   UPLOADED_NARRATION_VOICE,
@@ -314,14 +313,10 @@ export function startVideoScriptJob(
         : row.inputMode === 'script'
           ? await measureReadyScriptSeconds(client, id, row.note)
           : null;
-    if (measured && measured.seconds > VIDEO_SCRIPT_MAX_SECONDS) {
-      throw new Error(
-        `तयार निवेदनाचा प्रत्यक्ष आवाज ${measured.seconds.toFixed(1)} सेकंदांचा आहे आणि ` +
-          `कमाल ${VIDEO_SCRIPT_MAX_SECONDS} सेकंदांच्या मर्यादेपेक्षा मोठा आहे. ` +
-          `निवेदन लहान करून नवीन प्रकल्प तयार करा.`,
-      );
-    }
-
+    // No duration gate here since 2026-08-12: the measured narration decides
+    // how many clips the script gets, and there is no ceiling above it. It is
+    // still measured BEFORE the plan, because the scene count, the per-scene
+    // char cap and the clip windows all come off this number.
     const script =
       row.inputMode === 'script'
         ? await planReadyVideoScript(row.note, {
