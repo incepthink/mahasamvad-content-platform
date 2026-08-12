@@ -453,23 +453,13 @@ export const STR = {
   translateOutputTitleMarathi: 'मराठी भाषांतर',
   translateLockedTerms: 'शब्दकोश संज्ञा वापरल्या',
 
-  // Target choice (standalone /translate page). The row used to name a DIRECTION (मराठी →
-  // इंग्रजी) because a bare target picker would have offered pairs the API rejects. The
-  // SOURCE is now detected from the text itself, so three target names are enough — and a
-  // target that source cannot reach (its own language, or an unsupported pair) is DISABLED
-  // with a reason rather than hidden, so the officer sees the whole set and why.
+  // /translate's ONE question, and the only row on the page. All three answers are always
+  // enabled: the officer is never asked what language the text is in and the text is never
+  // inspected to guess it — the source follows from the target (see the page's header).
   translateDirectionLabel: 'कोणत्या भाषेत भाषांतर हवे?',
   translateTargetMarathi: 'मराठी',
   translateTargetEnglish: 'इंग्रजी',
   translateTargetHindi: 'हिंदी',
-  translateTargetSameLanguage: 'मजकूर याच भाषेत आहे.',
-  translateTargetUnsupported: 'हे भाषांतर उपलब्ध नाही.',
-  // The detected source, shown above the target row. मराठी and हिंदी share a script, so
-  // detection is a good guess and never a certainty — hence the one-tap correction beside
-  // it, offered only for Devanagari text (Latin vs Devanagari is a script test, not a guess).
-  translateDetectedLabel: 'ओळखलेली भाषा:',
-  translateDetectedIsMarathi: 'नाही, हा मजकूर मराठी आहे',
-  translateDetectedIsHindi: 'नाही, हा मजकूर हिंदी आहे',
   // Shown in place of the name-review step on an X→मराठी run: there is nothing to confirm,
   // because the dictionary's Marathi column IS the spelling the output is held to.
   translateIntoMarathiNames:
