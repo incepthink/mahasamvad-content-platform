@@ -11,9 +11,18 @@
 // user could have pasted into. From there everything is the text path: one submit, the name
 // check, one translation.
 //
-// The choice is a DIRECTION, not a target: only four pairs exist, and a source picker beside
-// a target picker would offer मराठी → मराठी and इंग्रजी → हिंदी, neither of which the API
-// accepts. One row of four pills cannot express an unsupported run.
+// The choice used to be a DIRECTION (मराठी → इंग्रजी), because a target picker on its own
+// would have offered मराठी → मराठी and इंग्रजी → हिंदी, neither of which the API accepts. The
+// SOURCE is now read off the text instead (detectTranslationSource), so the row asks the one
+// question left — which language to translate INTO — and sits directly under the box whose
+// contents it is about. A target that source cannot reach stays visible but DISABLED with a
+// reason, so an unsupported run still cannot be expressed and nothing appears or vanishes
+// under the officer's cursor as they type.
+//
+// Detection is a heuristic where मराठी and हिंदी are concerned (one script, see that module),
+// so it is shown rather than assumed, and correctable in one tap. Everything downstream —
+// which label the box carries, whether the name-review step runs, which targets are live —
+// follows from that one value.
 //
 // The two-step submit is the point of the page when the source is MARATHI: submitting first
 // runs the name check (TranslationTermsReview) so the user confirms/corrects every proper
@@ -36,14 +45,15 @@
 // TRANSLATE_TEXT_MAX_CHARS zod cap is still in force server-side, so an over-long text
 // surfaces as a request error rather than a local warning.
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
-  TEXT_TRANSLATION_PAIRS,
+  isSupportedTranslationPair,
   type PrepareTranslationResponse,
   type TextTranslationLanguage,
   type TranslationTermInput,
 } from '@dgipr/schemas';
 import { prepareTextTranslation, translateText } from '../../lib/api';
+import { detectTranslationSource } from '../../lib/detectTranslationSource';
 import { downloadBlob } from '../../lib/download';
 import { STR } from '../../lib/strings';
 import { DocumentIntake } from '../../components/DocumentIntake';
@@ -59,14 +69,25 @@ type TranslationResult = Readonly<{
   unpreservedNames: readonly string[];
 }>;
 
-// The pill row, in the order the pairs are declared in @dgipr/schemas — so the UI cannot
-// offer a direction the API would reject, and adding one is a single edit there plus a
-// label here.
-const DIRECTION_LABELS: Readonly<Record<string, string>> = {
-  'mr>en': STR.translateDirectionMrEn,
-  'mr>hi': STR.translateDirectionMrHi,
-  'en>mr': STR.translateDirectionEnMr,
-  'hi>mr': STR.translateDirectionHiMr,
+// The three languages a translation can go INTO. Which of them are live is decided per
+// render by isSupportedTranslationPair against the DETECTED source, so this list never has
+// to be kept in step with the pairs @dgipr/schemas supports — adding en↔hi there would light
+// two more buttons here with no edit.
+const TARGET_OPTIONS = [
+  { value: 'mr', label: STR.translateTargetMarathi },
+  { value: 'en', label: STR.translateTargetEnglish },
+  { value: 'hi', label: STR.translateTargetHindi },
+] as const satisfies readonly {
+  value: TextTranslationLanguage;
+  label: string;
+}[];
+
+// The bare language names, shared by the target buttons and the detected-source line so the
+// two can never call the same language different things.
+const LANGUAGE_NAMES: Readonly<Record<TextTranslationLanguage, string>> = {
+  mr: STR.translateTargetMarathi,
+  en: STR.translateTargetEnglish,
+  hi: STR.translateTargetHindi,
 };
 
 const INPUT_LABELS: Readonly<Record<TextTranslationLanguage, string>> = {
@@ -90,7 +111,11 @@ const DOWNLOAD_NAMES: Readonly<Record<string, string>> = {
 
 export default function TranslatePage() {
   const [text, setText] = useState('');
-  const [source, setSource] = useState<TextTranslationLanguage>('mr');
+  // The officer's correction of the detected source, when they made one. Null means "trust
+  // the detector", which is the normal case; it is cleared with everything else whenever the
+  // text changes, since a correction is about the text that was in the box when it was made.
+  const [sourceOverride, setSourceOverride] =
+    useState<TextTranslationLanguage | null>(null);
   const [language, setLanguage] = useState<TextTranslationLanguage>('en');
   // Name-check flow: idle → preparing (extracting names) → review (card shown).
   const [prep, setPrep] = useState<'idle' | 'preparing' | 'review'>('idle');
@@ -102,13 +127,30 @@ export default function TranslatePage() {
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const detected = useMemo(() => detectTranslationSource(text), [text]);
+  const source = sourceOverride ?? detected;
+  // Correcting मराठी/हिंदी is only offered for Devanagari text. Latin-vs-Devanagari is a
+  // script test rather than a guess, so an English box has nothing to second-guess.
+  const correctableSource = source === 'mr' || source === 'hi';
+
+  const targetIsAvailable = (target: TextTranslationLanguage) =>
+    isSupportedTranslationPair(source, target);
+  // The selected target survives a change of source when it still makes sense and is
+  // otherwise DERIVED rather than corrected in an effect — a target the current source
+  // cannot reach must never be what gets submitted, not even for the render in between.
+  const target = targetIsAvailable(language)
+    ? language
+    : (TARGET_OPTIONS.find((option) => targetIsAvailable(option.value))
+        ?.value ?? 'en');
+
   const disabled = submitting || prep !== 'idle' || text.trim().length === 0;
   // The review card only has a question to ask about a MARATHI source (see the header).
   const reviewsNames = source === 'mr';
 
-  // Any change to the text or the direction invalidates a prepared name list and an old
-  // result. The direction matters as much as the text: names prepared against Marathi mean
-  // nothing once the box is expected to hold English.
+  // Any change to the text or the target invalidates a prepared name list and an old
+  // result. The source is derived from the text, so a change of source is a change of text
+  // and comes through here too — names prepared against Marathi mean nothing once the box
+  // is read as Hindi. An explicit correction resets it as well (see the button).
   const resetFlow = () => {
     setResult(null);
     setPrep('idle');
@@ -143,7 +185,8 @@ export default function TranslatePage() {
       const res = await translateText({
         text: text.trim(),
         sourceLanguage: source,
-        language,
+        // `target`, never the raw `language` state — see its derivation above.
+        language: target,
         ...(terms ? { terms } : {}),
       });
       setResult({
@@ -191,8 +234,8 @@ export default function TranslatePage() {
       </header>
 
       <section className="card">
-        {/* The label names the SOURCE language, so the box says which language it is
-            waiting for rather than leaving the direction pills below to imply it. */}
+        {/* The label names the DETECTED source, so the box says which language it is
+            reading rather than leaving the target row below to imply it. */}
         <label className="field-label" htmlFor="translate-text">
           {INPUT_LABELS[source]}
         </label>
@@ -204,6 +247,9 @@ export default function TranslatePage() {
           value={text}
           onChange={(event) => {
             setText(event.target.value);
+            // A correction was made about the text that was in the box; new text is
+            // detected afresh.
+            setSourceOverride(null);
             resetFlow();
           }}
           style={{ marginTop: 10 }}
@@ -211,6 +257,71 @@ export default function TranslatePage() {
         <p className="hint char-count">
           {text.length.toLocaleString('en-IN')} {STR.docChars}
         </p>
+
+        {/* The target row sits with the text it is about, not in a card of its own two
+            scrolls further down. */}
+        <div className="translate-target">
+          <p className="field-label">{STR.translateDirectionLabel}</p>
+          <p className="hint translate-detected">
+            <span>
+              {STR.translateDetectedLabel}{' '}
+              <strong>{LANGUAGE_NAMES[source]}</strong>
+            </span>
+            {/* One tap to correct मराठी ↔ हिंदी. It is a correction of the SOURCE, so it
+                invalidates a prepared name list and an old result exactly as retyping the
+                text would. */}
+            {correctableSource ? (
+              <button
+                type="button"
+                className="btn btn-small btn-ghost"
+                disabled={submitting || prep !== 'idle'}
+                onClick={() => {
+                  setSourceOverride(source === 'mr' ? 'hi' : 'mr');
+                  resetFlow();
+                }}
+              >
+                {source === 'mr'
+                  ? STR.translateDetectedIsHindi
+                  : STR.translateDetectedIsMarathi}
+              </button>
+            ) : null}
+          </p>
+          <div
+            className="lang-toggle"
+            role="group"
+            aria-label={STR.translateDirectionLabel}
+          >
+            {TARGET_OPTIONS.map((option) => {
+              const available = targetIsAvailable(option.value);
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  className="btn btn-small"
+                  aria-pressed={target === option.value}
+                  disabled={!available || submitting || prep !== 'idle'}
+                  // Says WHY it is off: its own language, or a pair the API does not
+                  // serve (इंग्रजी → हिंदी is not a Marathi-department need).
+                  title={
+                    available
+                      ? undefined
+                      : option.value === source
+                        ? STR.translateTargetSameLanguage
+                        : STR.translateTargetUnsupported
+                  }
+                  onClick={() => {
+                    setLanguage(option.value);
+                    // A result belongs to the direction it was made in; changing the
+                    // target invalidates it exactly like editing the text does.
+                    resetFlow();
+                  }}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </section>
 
       {/* The document to translate usually arrives as a file, not in the clipboard.
@@ -225,54 +336,22 @@ export default function TranslatePage() {
         accept={['pdf', 'docx', 'txt']}
         onText={(value) => {
           setText(value);
+          setSourceOverride(null);
           resetFlow();
         }}
       />
 
-      <section className="card">
-        {/* A <p>, not a <span>: .field-label is scoped to <label> and <p>, so a span
-            got no weight and no block display and the question ran straight into the
-            first button ("…भाषांतर हवे?इंग्रजी"). */}
-        <p className="field-label">{STR.translateDirectionLabel}</p>
-        <div
-          className="lang-toggle"
-          role="group"
-          aria-label={STR.translateDirectionLabel}
-        >
-          {TEXT_TRANSLATION_PAIRS.map((pair) => {
-            const key = `${pair.source}>${pair.target}`;
-            return (
-              <button
-                key={key}
-                type="button"
-                className="btn btn-small"
-                aria-pressed={
-                  source === pair.source && language === pair.target
-                }
-                disabled={submitting || prep !== 'idle'}
-                onClick={() => {
-                  setSource(pair.source);
-                  setLanguage(pair.target);
-                  // A result belongs to the direction it was made in; changing the
-                  // direction invalidates it exactly like editing the text does.
-                  resetFlow();
-                }}
-              >
-                {DIRECTION_LABELS[key] ?? key}
-              </button>
-            );
-          })}
-        </div>
-
+      {/* The submit, as an action bar rather than a full sheet of white holding one button
+          (see .card-action). The name-review panel is a sibling below it, not a child: it
+          carries its own frame and would sit inside a tinted bar as a panel within a panel. */}
+      <section className="card card-action">
         {/* Said before the submit, not after it: an officer used to a two-step submit
             should know the step is missing on purpose and where the spelling comes from. */}
         {!reviewsNames ? (
-          <p className="hint" style={{ marginTop: 10 }}>
-            {STR.translateIntoMarathiNames}
-          </p>
+          <p className="hint">{STR.translateIntoMarathiNames}</p>
         ) : null}
 
-        <div className="btn-row" style={{ marginTop: 14 }}>
+        <div className="btn-row" style={{ marginTop: reviewsNames ? 0 : 14 }}>
           <button
             type="button"
             className="btn btn-primary"
@@ -294,22 +373,23 @@ export default function TranslatePage() {
             </span>
           ) : null}
         </div>
-        {prep === 'review' && prepared ? (
-          <TranslationTermsReview
-            terms={prepared}
-            busy={submitting}
-            // The card only ever renders on a Marathi source, where the target is
-            // en or hi — which is exactly what its own prop accepts.
-            language={language === 'hi' ? 'hi' : 'en'}
-            onConfirm={(terms) => void runTranslation(terms)}
-            onCancel={() => {
-              setPrep('idle');
-              setPrepared(null);
-            }}
-          />
-        ) : null}
         {error ? <p className="form-error">{error}</p> : null}
       </section>
+
+      {prep === 'review' && prepared ? (
+        <TranslationTermsReview
+          terms={prepared}
+          busy={submitting}
+          // The panel only ever renders on a Marathi source, where the target is en or
+          // hi — which is exactly what its own prop accepts.
+          language={target === 'hi' ? 'hi' : 'en'}
+          onConfirm={(terms) => void runTranslation(terms)}
+          onCancel={() => {
+            setPrep('idle');
+            setPrepared(null);
+          }}
+        />
+      ) : null}
 
       {result ? (
         <section className="card">

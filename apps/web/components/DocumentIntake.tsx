@@ -29,6 +29,7 @@
 //     button or OCR wait here.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { FileText, ListChecks, Trash2 } from 'lucide-react';
 import type {
   AnalyticsFeatureKey,
@@ -99,6 +100,7 @@ export function DocumentIntake({
   onStatusChange,
   readRequest,
   onRemove,
+  submitAction,
 }: {
   // Where this surface remembers its in-flight job across a refresh. Must be unique per
   // surface, or two pages would fight over one job.
@@ -168,6 +170,14 @@ export function DocumentIntake({
   // Offered by a surface that shows SEVERAL of these at once (/dlo), where dropping one
   // document has to be possible without dropping the others.
   onRemove?: (() => void) | undefined;
+  // The caller's own primary action (the media room's तयार करा), rendered beside the file
+  // controls in every state that HAS a file. A scanned PDF's page picker is tall enough to
+  // push the surface's own submit off screen, so the action has to be reachable from where
+  // the officer's attention already is — and it is the caller's node rather than a callback
+  // so the label, the disabled rule and the busy spinner stay owned by the one place that
+  // knows them. Not shown before a file is attached: the caller's own submit is still in
+  // view there, and a second copy of it would be noise.
+  submitAction?: ReactNode | undefined;
 }) {
   const [jobId, setJobId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -507,6 +517,11 @@ export function DocumentIntake({
     </>
   );
 
+  // Placed by hand in each row below rather than folded into `fileButton`, because the page
+  // picker swaps that button for a cancel one while re-picking pages — and the officer's own
+  // submit must not disappear with it.
+  const callerAction = jobId ? submitAction : null;
+
   if (!jobId) {
     return (
       <Shell className={shellClass}>
@@ -555,6 +570,7 @@ export function DocumentIntake({
         {detail.error ? <p className="form-error">{detail.error}</p> : null}
         <div className="btn-row" style={{ marginTop: 12 }}>
           {fileButton}
+          {callerAction}
         </div>
       </Shell>
     );
@@ -619,6 +635,7 @@ export function DocumentIntake({
           ) : (
             fileButton
           )}
+          {callerAction}
         </div>
         {error ? <p className="form-error">{error}</p> : null}
       </Shell>
@@ -705,6 +722,7 @@ export function DocumentIntake({
           </button>
         )}
         {fileButton}
+        {callerAction}
       </div>
       {text.trim().length === 0 ? (
         <p className="hint">{STR.docEmptySelection}</p>

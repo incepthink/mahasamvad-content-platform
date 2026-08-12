@@ -293,6 +293,23 @@ export default function NewGenerationPage() {
     [note, docText],
   );
 
+  // Is there anything to generate FROM? The same rule submit() enforces, applied to the
+  // control instead of to the press — a submit that can only be refused should not look
+  // available.
+  //
+  // The `unread` arm is what keeps a scanned PDF usable: its pages are ticked but nobody has
+  // paid to read them yet, so it contributes no text to combinedNote, and reading it and then
+  // submitting is exactly what startSubmit does. Testing the text alone would leave an officer
+  // whose only source is a scan with a dead button and no way forward.
+  const canSubmit =
+    combinedNote.length >= POSTER_TEXT_MIN_CHARS || docStatus === 'unread';
+  const submitBusy = submitting || awaitingRead;
+  const submitLabel = awaitingRead
+    ? STR.docReadingForSubmit
+    : submitting
+      ? STR.submitting
+      : STR.submit;
+
   // Drop the attached document. A remount is what clears the card's internal state, and the
   // stored job id has to go with it or the mount effect would re-attach the same file.
   const clearDocument = () => {
@@ -451,23 +468,11 @@ export default function NewGenerationPage() {
             type="button"
             className="btn btn-primary note-send"
             onClick={() => void startSubmit()}
-            disabled={submitting || awaitingRead}
-            title={
-              awaitingRead
-                ? STR.docReadingForSubmit
-                : submitting
-                  ? STR.submitting
-                  : STR.submit
-            }
-            aria-label={
-              awaitingRead
-                ? STR.docReadingForSubmit
-                : submitting
-                  ? STR.submitting
-                  : STR.submit
-            }
+            disabled={submitBusy || !canSubmit}
+            title={submitLabel}
+            aria-label={submitLabel}
           >
-            {submitting || awaitingRead ? (
+            {submitBusy ? (
               <span className="spinner" aria-hidden="true" />
             ) : (
               <Send size={20} aria-hidden="true" />
@@ -554,6 +559,31 @@ export default function NewGenerationPage() {
           }}
           onStatusChange={setDocStatus}
           readRequest={readRequest}
+          // Throw the attached file away without starting a run. "दुसरी फाईल निवडा" only ever
+          // REPLACED it, so an officer who decided to generate from the typed text alone had
+          // no way to detach the document — and in live mode its text is counted at submit
+          // whether or not anyone is still looking at it. Same clear the submit path runs.
+          //
+          // Offered only once there IS a file: the component renders this control in every
+          // state including the empty upload card, where /dlo needs it (its slot itself is
+          // dismissible) and this surface has nothing to delete.
+          {...(docStatus === 'empty' ? {} : { onRemove: clearDocument })}
+          // The same तयार करा, beside the file controls. A scanned PDF's page picker is taller
+          // than the viewport, so the composer's send button above it is off screen at exactly
+          // the moment the officer has finished choosing pages and wants to start the run.
+          submitAction={
+            <button
+              type="button"
+              className="btn btn-primary btn-small"
+              onClick={() => void startSubmit()}
+              disabled={submitBusy || !canSubmit}
+            >
+              {/* Label only — the shared .spinner is accent-on-accent-soft and vanishes on a
+                  maroon fill (the reason .note-send redefines it), and submitLabel already
+                  states which of the two waits this is. */}
+              {submitLabel}
+            </button>
+          }
         />
       </section>
 

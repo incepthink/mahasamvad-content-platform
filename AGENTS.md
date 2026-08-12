@@ -2965,6 +2965,50 @@ Not implemented yet: Canva integration, authentication.
 
 ## Latest Implementation Milestone
 
+- **/translate asks one question, and the SOURCE is read off the text** (2026-08-12, no
+  migration, web only — SUPERSEDES the four-pill direction row in the PDF-translation and
+  Hindi milestones below): the picker sat two cards below the box it was about and asked for a
+  DIRECTION (मराठी → इंग्रजी, …), which is really two questions welded together because a bare
+  target picker would have offered मराठी → मराठी and इंग्रजी → हिंदी, neither of which the API
+  accepts. The officer already knows what they pasted, so the source is now DETECTED
+  (`apps/web/lib/detectTranslationSource.ts`) and the row — three target names, directly under
+  the textarea — asks only which language to translate INTO.
+  - **An unavailable target stays visible and DISABLED with a reason**, never hidden: its own
+    language ("मजकूर याच भाषेत आहे.") or an unsupported pair ("हे भाषांतर उपलब्ध नाही." — a
+    Hindi or English source can only go to Marathi). Availability is asked of
+    `isSupportedTranslationPair` per render, so this row never has to be kept in step with the
+    pairs `@dgipr/schemas` supports; nothing appears or vanishes under the cursor as they type.
+  - **The selected target is DERIVED, not corrected in an effect** — `target` falls back to the
+    first pair the current source can reach, so a target that source cannot reach is never what
+    gets submitted, not even for the render in between.
+  - **Detection is a heuristic for मराठी vs हिंदी and is treated as one.** Latin vs Devanagari
+    is a script ratio (the same 0.3 threshold `detectProofreadLanguage` uses) and is reliable;
+    the two Devanagari languages are separated by whole-word function words that exist in only
+    one of them (को/की/के/से against आहे/आणि/यांनी), Marathi's agglutinated case endings
+    (…च्या, …ांनी) against Hindi's oblique plural (…ों), and ळ. Ties go to Marathi. Getting it
+    wrong is not cosmetic — a Hindi text sent as `sourceLanguage: 'mr'` reaches a chat prompt
+    that calls itself a "Marathi-to-English translator" — so the detected language is SHOWN
+    above the row with a one-tap correction beside it, offered only for Devanagari text. The
+    correction invalidates a prepared name list and an old result exactly as retyping would,
+    and is cleared whenever the text changes.
+  - Everything downstream follows from that one value: which language the box's label names,
+    whether the name-review step runs (Marathi source only, unchanged), and which targets are
+    live. The API is untouched — it always took an explicit `sourceLanguage` and still rejects
+    an unsupported pair at the edge.
+  - Also: the submit is now a `.card-action` bar and `TranslationTermsReview` a sibling below
+    it rather than a child, since `.names-review` carries its own frame and read as a panel
+    inside a panel.
+  Verified 2026-08-12, all free: `apps/web` typecheck green, lint clean and prettier clean on
+  both changed source files (`strings.ts` and `globals.css` report whole-file CRLF complaints
+  that are pre-existing — do NOT `--write` them); 11 detector assertions over real Marathi,
+  Hindi and English press-note text plus the empty/digits-only defaults; and 26 live browser
+  assertions at 1360 and 390 (the row inside and below the input card, three buttons, the
+  detected language for each of the three inputs, the disabled target and its stated reason on
+  a Hindi source — the reported case — the auto-selected मराठी beside it, the override round
+  trip, no override offered for English, no page errors, no horizontal overflow), with the
+  name-review panel exercised against a stubbed `/translate/prepare` so no model was called.
+  Deploy is web only.
+
 - **The officer's request and heading OUTRANK the specification, and a requested length is
   MEASURED** (2026-08-11, no migration): an officer asked for a 1200-character article in
   **तुमची विनंती** and again in **बातमीत बदल हवा आहे?** on generation `4dc686aa`, and got 400

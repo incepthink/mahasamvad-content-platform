@@ -20,7 +20,9 @@ export default function DloPage() {
   const { mine, others, active, loading, error } = useDloIntakeList();
 
   return (
-    <main className="page">
+    // .dlo-page only reserves room at the foot of the page (and of the site footer below it)
+    // for the intake form's pinned action bar — nothing else about the page depends on it.
+    <main className="page dlo-page">
       <header className="page-head">
         <div className="page-head-text">
           <h1 className="page-title">{STR.dloTitle}</h1>

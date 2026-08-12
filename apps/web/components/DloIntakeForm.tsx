@@ -23,6 +23,13 @@
 // tab — or reloading — does not lose it. The one exception is the picked MP3s: a File is a live
 // browser handle that cannot be serialized, so within a session they ride in a module variable
 // and across a reload only their names survive, and the form asks for them back by name.
+//
+// The one action sits in a bar pinned to the bottom of the viewport rather than in a card above
+// the fields. The form is several cards long, so a button at the top scrolls out of reach the
+// moment the officer starts working and a button at the bottom is only reachable after all the
+// optional material they did not fill in; pinned, it is in the same place throughout. It is
+// DISABLED until at least one source exists (see hasInput), so the "nothing was supplied"
+// refusal is expressed as a dead button instead of as an error after a press.
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -217,6 +224,18 @@ export function DloIntakeForm() {
       : [],
   );
 
+  // What the submit guard below tests, lifted out so the bar's button can be disabled by the
+  // same condition rather than by a second, drifting copy of it. "Any valid input" is any ONE
+  // source: typed notes, a recording, a photograph, a document with something to send, or a
+  // link. Everything else on the form (heading, instructions, style reference) is direction for
+  // material that does not exist yet, so none of it can enable the run on its own.
+  const hasInput =
+    notes.trim().length > 0 ||
+    files.length > 0 ||
+    images.length > 0 ||
+    attachedDocuments.length > 0 ||
+    youtube.length > 0;
+
   // The one slot that was just asked for, so its card opens the file dialog on arrival and no
   // other card ever does. A ref rather than state: it is read during the very render the
   // setDocuments below schedules, and it must NOT be restored from the draft — a reload
@@ -259,13 +278,9 @@ export function DloIntakeForm() {
   // the API's create route validates only that SOMETHING was supplied. The reviewed text
   // that becomes the article is likewise uncapped (DloGenerateRequestSchema).
   const submit = async () => {
-    if (
-      notes.trim().length === 0 &&
-      files.length === 0 &&
-      images.length === 0 &&
-      attachedDocuments.length === 0 &&
-      youtube.length === 0
-    ) {
+    // Kept as a guard even though the button is disabled without it: the disabled state is a
+    // courtesy, this is the rule.
+    if (!hasInput) {
       setError(STR.dloNeedInput);
       return;
     }
@@ -321,24 +336,6 @@ export function DloIntakeForm() {
 
   return (
     <>
-      {/* The action leads the form: everything below it is optional material, so an officer
-          who has only pasted notes can start the run without scrolling past every card they
-          did not fill in. Any complaint (nothing supplied, instructions too long) is
-          rendered here, where the button is. */}
-      <section className="card card-action">
-        <div className="btn-row">
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={submit}
-            disabled={submitting}
-          >
-            {submitting ? STR.submitting : STR.dloSubmit}
-          </button>
-        </div>
-        {error ? <p className="form-error">{error}</p> : null}
-      </section>
-
       {/* The card's own title and blurb are deliberately absent: the page header above already
           says what /dlo is for, and the notes label below says what this box takes. Repeating
           either put three sentences between the officer and the first thing they type. */}
@@ -484,6 +481,25 @@ export function DloIntakeForm() {
         value={styleReference}
         onChange={setStyleReference}
       />
+
+      {/* The action, pinned to the bottom of the content column (globals.css clears the left
+          rail with --sidebar-w). Every complaint the form can raise is rendered here rather
+          than beside the field that caused it — this strip is the one part of the page that is
+          always on screen, so a message put here cannot be missed, and the officer never
+          presses a button whose refusal is scrolled off somewhere above. */}
+      <div className="dlo-submitbar">
+        <div className="dlo-submitbar-inner">
+          {error ? <p className="form-error">{error}</p> : null}
+          <button
+            type="button"
+            className="btn btn-primary dlo-submit"
+            onClick={submit}
+            disabled={submitting || !hasInput}
+          >
+            {submitting ? STR.submitting : STR.dloSubmit}
+          </button>
+        </div>
+      </div>
     </>
   );
 }

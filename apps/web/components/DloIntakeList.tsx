@@ -121,7 +121,9 @@ export function DloIntakeList({
   const empty = !loading && !error && rows.length === 0;
 
   return (
-    <section className="card">
+    // .dlo-recent is the extra air above it: this card closes the page under the whole intake
+    // form, so it is not another of the form's cards and should not sit at a field's distance.
+    <section className="card dlo-recent">
       <Disclosure
         title={STR.dloRecent}
         icon={History}

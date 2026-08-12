@@ -26,7 +26,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
-  FileCheck2,
   FileText,
   Heading1,
   MessageSquareText,
@@ -69,7 +68,6 @@ import { useGeneration } from '../lib/useGeneration';
 import { useTasks } from '../lib/TasksProvider';
 import { AiInstructionsField } from './AiInstructionsField';
 import { CardTitle } from './CardTitle';
-import { DloCategoryPicker } from './DloCategoryPicker';
 import { DloSourceReview } from './DloSourceReview';
 import {
   DesignationReview,
@@ -178,11 +176,20 @@ function GenerationPhase({
           {STR.articleStreamingBadge}
         </span>
       </div>
-      {/* aria-live="polite" on a token stream would have a screen reader read the article
+      {/* Markdown WHILE it streams, not raw text that recompiles at the end — the /chat
+          reasoning, and the same parser: it is a pure function of the string so far, so
+          there is nothing to keep in sync and a marker caught mid-token (`#`, `**`) is
+          momentarily literal and resolves on the next delta. Rendering it raw meant the
+          officer read `# शीर्षक` for the whole draft and then watched the finished article
+          reflow under them. The write-head caret is now drawn by CSS on the last block
+          (.article-body--streaming), since there is no longer one text node to end.
+
+          aria-live="polite" on a token stream would have a screen reader read the article
           several times over, so the region is announced once and read on completion. */}
-      <div className="article-body article-body--streaming">
-        {draftText(streamed)}
-      </div>
+      <MarkdownText
+        text={streamed}
+        className="article-body article-body--streaming"
+      />
     </section>
   ) : null;
 
@@ -208,16 +215,22 @@ function GenerationPhase({
   );
 }
 
-// A blinking caret after the last character, so a pause between tokens reads as "still
-// writing" rather than "finished". Rendered as its own element because the text is plain
-// Devanagari and must stay copyable and selectable exactly as it is.
-function draftText(text: string) {
-  return (
-    <>
-      {text}
-      <span className="stream-caret" aria-hidden="true" />
-    </>
-  );
+// How long the finished article is, counted the way the officer's length request is counted.
+// Deliberately identical to measureArticleLength in @dgipr/content-engine (which apps/web
+// cannot import): heading markers are stripped because they are our output shape rather than
+// the officer's text, and this number sits on the same card as whatever the run's
+// lengthWarning quotes — measuring them differently would put two counts of one article a few
+// characters apart with nothing to explain it.
+function measureArticle(article: string): { words: number; chars: number } {
+  const text = article
+    .split(/\r?\n/u)
+    .map((line) => line.replace(/^#{1,6}\s+/u, ''))
+    .join('\n')
+    .trim();
+  return {
+    words: text ? text.split(/\s+/u).filter(Boolean).length : 0,
+    chars: [...text].length,
+  };
 }
 
 // Keep the DLO officer on the finished-article step while an LLM revision runs. The
@@ -281,11 +294,21 @@ function DloArticleOutput({
   return (
     <>
       <section className="card">
-        <div className="article-head">
-          <CardTitle icon={FileCheck2}>{STR.dloOutputTitle}</CardTitle>
-        </div>
+        {/* No card title: the rail above already says this step is तयार बातमी, and the
+            article's own headline is the first line of what follows. */}
         {/* Same as the detail page: rendered for reading, copied/downloaded raw. */}
         <MarkdownText text={article} className="article-body" />
+
+        {/* The officer's length request may be written in either unit, so the finished article
+            states both — otherwise checking it against what was asked for means counting by
+            eye. It is the CURRENT article, so a feedback revision moves it while the warning
+            below keeps quoting the run that produced it. */}
+        <p className="hint" style={{ marginTop: 12 }}>
+          {(() => {
+            const { words, chars } = measureArticle(article);
+            return `${STR.lengthUnitWords(words)} · ${STR.lengthUnitChars(chars)}`;
+          })()}
+        </p>
 
         {/* The officer typed their length request on THIS page, so the answer belongs here too
             and not only on the detail page. The article is delivered either way — nothing is
@@ -865,7 +888,10 @@ export default function DloWorkspace({ intakeId }: { intakeId: string }) {
   const designationsPending = designationNames === null || designationsLoading;
 
   return (
-    <main className="page">
+    // .dlo-page only reserves room at the foot of the page (and of the site footer) for the
+    // pinned action bar, so it is applied on the step that has one and nowhere else — carried
+    // onto the output step it would leave a band of empty page under the article.
+    <main className={`page${step === 'review' ? ' dlo-page' : ''}`}>
       {/* /dlo itself is where a second piece of work is started; this workspace no longer
           offers its own shortcut there. STR.dloNewWork is left in strings.ts unused. */}
       <div className="dlo-head">
@@ -956,30 +982,6 @@ export default function DloWorkspace({ intakeId }: { intakeId: string }) {
               </div>
             </section>
           ) : null}
-
-          <section className="card">
-            <div className="btn-row">
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={generate}
-                disabled={busy || pendingSelection || designationsPending}
-              >
-                {submitting ? STR.submitting : STR.dloGenerate}
-              </button>
-              {saving ? (
-                <span className="translating-note" aria-live="polite">
-                  <span className="spinner" aria-hidden="true" />
-                  {STR.dloReviewSaving}
-                </span>
-              ) : null}
-            </div>
-            {pendingSelection ? (
-              <p className="hint">{STR.dloReviewSelectionPending}</p>
-            ) : null}
-            {saveError ? <p className="form-error">{saveError}</p> : null}
-            {error ? <p className="form-error">{error}</p> : null}
-          </section>
 
           {/* The people the article will name and the पदनाम each carries — the first thing the
               officer sees on the review step. (The key-point summary that used to sit above this
@@ -1112,9 +1114,9 @@ export default function DloWorkspace({ intakeId }: { intakeId: string }) {
             </>
           ) : null}
 
-          <section className="card">
-            <DloCategoryPicker value={category} onChange={setCategory} />
-          </section>
+          {/* No "कोणता प्रकार?" picker: this lane produces बातमी only, and the intake form
+              stopped asking too. `category` still comes off the row, so a legacy intake saved
+              as a scheme keeps generating as one. */}
 
           <section className="card">
             <label className="field-label" htmlFor="dlo-review-heading">
@@ -1143,6 +1145,42 @@ export default function DloWorkspace({ intakeId }: { intakeId: string }) {
             value={styleReference}
             onChange={setStyleReference}
           />
+
+          {/* The one action of the review step, pinned to the foot of the content column exactly
+              as the intake form's is (globals.css, .dlo-submitbar). The step is several cards
+              long — designations, every source, the preview, the heading, the two style-side
+              fields — so a button at the top scrolls out of reach the moment the officer starts
+              correcting text, and one at the bottom is only reachable past material they may not
+              have touched. Every message the step can raise goes here with it: this strip is the
+              one part of the page always on screen, so a refusal put here cannot be scrolled
+              away from the button that caused it. */}
+          <div className="dlo-submitbar">
+            <div className="dlo-submitbar-inner">
+              {pendingSelection ? (
+                <p className="hint">{STR.dloReviewSelectionPending}</p>
+              ) : null}
+              {saveError ? <p className="form-error">{saveError}</p> : null}
+              {error ? <p className="form-error">{error}</p> : null}
+              {saving ? (
+                <span
+                  className="translating-note"
+                  aria-live="polite"
+                  style={{ alignSelf: 'center' }}
+                >
+                  <span className="spinner" aria-hidden="true" />
+                  {STR.dloReviewSaving}
+                </span>
+              ) : null}
+              <button
+                type="button"
+                className="btn btn-primary dlo-submit"
+                onClick={generate}
+                disabled={busy || pendingSelection || designationsPending}
+              >
+                {submitting ? STR.submitting : STR.dloGenerate}
+              </button>
+            </div>
+          </div>
         </>
       ) : null}
 

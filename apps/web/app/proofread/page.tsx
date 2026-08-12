@@ -309,20 +309,28 @@ export default function ProofreadPage() {
         <p className="hint char-count">
           {text.length.toLocaleString('en-IN')} {STR.docChars}
         </p>
-      </section>
 
-      {/* The text to check usually exists as a file — a draft press note, a scanned GR.
-          Keep the upload inline, like every other document surface in the product. */}
-      <DocumentIntake
-        storageKey="dgipr.proofread.document"
-        feature="proofread"
-        maxBytes={UPLOAD_FILE_MAX_BYTES}
-        onText={(value) => {
-          setText(value);
-          setResult(null);
-          setError(null);
-        }}
-      />
+        {/* The text to check usually exists as a file — a draft press note, a scanned GR.
+
+            EMBEDDED: inside this card, directly under the box it fills, rather than as a card
+            of its own — the media room's arrangement. As a separate card it read as a second,
+            unrelated form, when the file is simply another way of filling the box above.
+
+            HANDOFF mode (onText) is kept deliberately: this surface has ONE text box that the
+            file REPLACES, so the हा मजकूर वापरा press is what authorises the overwrite. Live
+            mode is for a surface that keeps the file BESIDE its own box. */}
+        <DocumentIntake
+          storageKey="dgipr.proofread.document"
+          embedded
+          feature="proofread"
+          maxBytes={UPLOAD_FILE_MAX_BYTES}
+          onText={(value) => {
+            setText(value);
+            setResult(null);
+            setError(null);
+          }}
+        />
+      </section>
 
       <section className="card card-action">
         <div className="btn-row">
