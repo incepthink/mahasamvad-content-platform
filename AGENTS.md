@@ -3018,9 +3018,51 @@ Not implemented yet: Canva integration, authentication.
     **Left for a real run** (one image charge each): a DGIPR `ठरलेले टेम्पलेट` poster and a
     `fresh` poster confirming 1280x1600 out with the design reaching the bottom edge, one
     feedback round on each confirming it stays 1280x1600, and one **CMO** run confirming it is
-    unchanged at 1280x1600. **Deploy order is the NORMAL one — API first, then `pnpm n8n:push`**
-    (rebuild `@dgipr/poster-renderer` → `@dgipr/content-engine` dists first). No migration, no
-    web change.
+    unchanged at 1280x1600. **Deploy order is INVERTED for this change — `pnpm n8n:push` FIRST,
+    then the API.** Pushing the workflow first is a genuine no-op (an old API sends no `size`,
+    the Set node defaults it to `'1280x1600'`, and every render is byte-for-byte what it is
+    today), whereas API-first has a real window: an old workflow ignores `size` and returns
+    1280x1600, whose 4:5 aspect the NEW `overlayTwitterChrome` reads as an already-finished
+    poster — so it stamps the band in place instead of appending, and the template lane can bury
+    its last line again until the push lands. The delivered size is right either way; it is the
+    burying guarantee that is briefly off. No migration, no web change, no new env.
+
+- **A ready video script has no length limit** (2026-08-12, no migration, no n8n —
+  RETIRES `VIDEO_SCRIPT_MAX_SECONDS`): `/video`'s तयार संहितेवरून lane refused anything
+  past two minutes (`तयार निवेदनाचा अंदाज दोन मिनिटांपेक्षा जास्त आहे.`), in four places —
+  the create schema's estimate, the create route's decoded uploaded track, the script
+  job's measured WAV, and the splitter. The number was never a provider fact: it was
+  `VIDEO_SCENE_LIMIT.max × VIDEO_CLIP_MAX_SECONDS`, i.e. the NOTE lane's eight-scene
+  planner range — which exists because that lane's narration is budgeted at 30/60s —
+  applied to a lane whose length is the officer's own. All four checks are deleted; the
+  scene count is simply `ceil(seconds / 15)` with nothing above it, and the spend
+  decision stays where it belongs, at gate 2's explicit confirm, priced from exactly
+  that count. `VIDEO_SCENE_LIMIT` survives as the note planner's range (unreachable
+  there anyway: 8 × 15s is twice its own budget), and the note lane is untouched.
+  Three consequences had to be handled or the removal would have shipped a hang and two
+  silent failures. `UpdateVideoScriptRequestSchema.scenes` lost its `.max` — that bound
+  was the same eight, and gate 1 would have rejected the save of a legitimately longer
+  project. The splitter's balanced partition recomputed each candidate segment's length
+  by looping over its words, making it O(scenes × words³) — invisible at ~330 words,
+  and a hung job at ten minutes; it now carries prefix sums and walks each split
+  backwards to the char cap, so a 12-minute script splits into 51 scenes in **219 ms**.
+  And the visual-plan call took `chatComplete`'s 4096-token default while emitting a
+  beat, two briefs, a shot hint and an overlay line PER SCENE — truncated JSON past
+  ~10 scenes, failing the parse after the call was billed; the budget now scales with
+  the scene count (emitted tokens are what bill, so the ceiling is free).
+  Fixed in passing, latent before this change and fatal to the run: `ceil(seconds / 15)`
+  can leave a fraction of a second of slack across the whole script, and the split cuts
+  only between words — so a script landing just past a multiple of 15 had **no legal
+  partition** at that count and threw. The derived count is now a floor and one more
+  scene is allowed (reproduced at 74s/12 sentences, which needs 6 scenes rather than 5).
+  Verified 2026-08-12, all free: workspace typecheck **7/7 green**, lint clean and
+  prettier clean on every hunk of mine (`strings.ts` and `video/[id]/page.tsx` carry
+  whole-file complaints that are pre-existing — do NOT `--write` them), and a splitter
+  check over 1/4/12/40/120-sentence scripts asserting byte-for-byte rejoin, the derived
+  scene count, the per-scene char cap and the running time. **Left for a real run**
+  (spend): one genuinely long ready script end to end — note that N scenes render
+  SERIALLY, so a 12-minute video is ~50 clips at ~$0.10/s of clip. Deploy is
+  `@dgipr/schemas` → `@dgipr/content-engine` dists → API + web.
 
 - **/translate asks one question, and the SOURCE is read off the text** (2026-08-12, no
   migration, web only — SUPERSEDES the four-pill direction row in the PDF-translation and

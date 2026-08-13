@@ -149,16 +149,32 @@ export type TextTranslationLanguage = z.infer<
   typeof TextTranslationLanguageSchema
 >;
 
-// The pairs /translate actually supports, listed rather than derived. Only mr→X and X→mr
-// exist today: English↔Hindi is not a Marathi-department need, and — more to the point —
-// the English path is a CHAT prompt that says "Marathi-to-English translator" in as many
-// words, so letting a Hindi source reach it would silently produce something nobody
-// specified. An unsupported pair is rejected at the edge with a clear message instead.
+// The pairs /translate supports: EVERY combination of the three languages, listed rather
+// than derived so the table stays the one place a direction is declared.
+//
+// It used to be mr→X and X→mr only, on the reasoning that English↔Hindi is not a
+// Marathi-department need and that the English path is a CHAT prompt calling itself a
+// "Marathi-to-English translator", which a Hindi source must not reach. The first half was
+// simply wrong in practice — an officer pasting an English note and asking for Hindi got a
+// switched-off button — and the second is a routing fact, not a capability limit:
+// translateArticle now takes the chat path ONLY for mr→en and sends every other direction
+// through Sarvam's purpose-built translate endpoint, which is direction-agnostic.
+//
+// The three IDENTITY pairs (mr→mr, en→en, hi→hi) are listed on purpose. Nothing here has
+// to guess what language was pasted, so a target that happens to match the source must be
+// answerable rather than rejected; translateArticle hands the text straight back for those
+// (no model call, no charge). That is what lets the page keep all three targets enabled
+// with nothing left to reject at the edge.
 export const TEXT_TRANSLATION_PAIRS = [
   { source: 'mr', target: 'en' },
   { source: 'mr', target: 'hi' },
+  { source: 'mr', target: 'mr' },
   { source: 'en', target: 'mr' },
+  { source: 'en', target: 'hi' },
+  { source: 'en', target: 'en' },
   { source: 'hi', target: 'mr' },
+  { source: 'hi', target: 'en' },
+  { source: 'hi', target: 'hi' },
 ] as const satisfies readonly {
   source: TextTranslationLanguage;
   target: TextTranslationLanguage;

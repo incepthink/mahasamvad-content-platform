@@ -96,10 +96,14 @@ and `posters/references/master-*.png` are already uploaded. Just confirm:
    the Docker image. Video storyboards therefore require `GEMINI_API_KEY` in
    `deploy/.env.prod` (or `OPENAI_API_KEY` with `VIDEO_IMAGE_PROVIDER=openai`).
    Then edit `Caddyfile` if your ACME email should differ from the default.
-7. **Launch**:
+7. **Launch**. The `api` image is built off the box and pulled (see
+   [Updating the API](#updating-the-api-build-locally-pull-on-the-box)), so push it from
+   your laptop first, then here:
    ```bash
-   docker compose up -d --build      # builds the monorepo image (lean, no Chromium)
-   docker compose logs -f api        # watch for "server listening" + no errors
+   docker login ghcr.io -u <github-user>   # once, unless the package is public
+   docker compose pull                     # api from GHCR; n8n/caddy/postgrest upstream
+   docker compose up -d
+   docker compose logs -f api              # watch for "server listening" + no errors
    ```
 8. **Smoke-test the API** publicly:
    ```bash
@@ -214,10 +218,115 @@ current API sends; pushing them ahead of an API deploy breaks both paths.
 
 ---
 
+## Updating the API: build locally, pull on the box
+
+The image is built **off** the EC2 host. Building there means a `pnpm install`, a monorepo
+build and a ~500 MB `playwright install chromium` competing for the RAM of a box that also
+runs n8n, on every deploy — for output that is identical wherever it is produced.
+
+> **What does *not* work**, because it silently appears to: `git pull` on the box then
+> `docker compose restart api`. The Dockerfile does `COPY . .` and `pnpm build` *inside* the
+> image, and the `api` service mounts no source volume — so pulled commits are never
+> compiled, and `restart` reuses the container's existing image regardless. You end up
+> debugging a fix against a container that never received it.
+
+### One-time setup
+
+1. **Create a GitHub PAT** (classic) with `write:packages`, and log in on your laptop:
+   ```bash
+   echo $GHCR_PAT | docker login ghcr.io -u <github-user> --password-stdin
+   ```
+2. **Push the first image** (see the deploy loop below). The package appears at
+   `https://github.com/users/<github-user>/packages`.
+3. **Give the box read access** — either make the package public (Package settings →
+   Change visibility), or `docker login ghcr.io` there with a PAT carrying `read:packages`.
+4. **Get the new compose file onto the box.** This is the one thing `git pull` *is* for
+   here — it ships `deploy/docker-compose.yml`, not the application:
+   ```bash
+   cd <repo> && git pull
+   ```
+
+### Every deploy
+
+On your laptop, from the repo root:
+
+```bash
+export TAG=$(git rev-parse --short HEAD)
+docker build --platform linux/amd64 -f deploy/api.Dockerfile \
+  -t ghcr.io/incepthink/dgipr-api:$TAG \
+  -t ghcr.io/incepthink/dgipr-api:latest .
+docker push ghcr.io/incepthink/dgipr-api:$TAG
+docker push ghcr.io/incepthink/dgipr-api:latest
+```
+
+On the box:
+
+```bash
+cd <repo>/deploy
+docker compose pull api     # must print a digest — see the gotcha below
+docker compose up -d api
+docker compose logs -f api  # "server listening", no errors
+curl https://api.indicex.xyz/health
+```
+
+Only changed layers upload, so after the first push a deploy is usually just the compiled
+`dist/` — seconds, not the whole ~1.5 GB image.
+
+**Order still matters**, unchanged: migrations → API → `pnpm n8n:push`. Web deploys itself
+from the Vercel git integration.
+
+### Rollback
+
+Every push is tagged with its commit, so rolling back is naming an older one in
+`deploy/.env` on the box (the same file that holds `N8N_SUBDOMAIN`):
+
+```bash
+echo 'API_TAG=<older-sha>' >> .env
+docker compose up -d api
+```
+
+### Gotchas
+
+- **Check the pull actually succeeded.** `build:` is kept in the compose file so
+  `docker compose build api` still works locally — the consequence is that if a pull fails
+  and no image is present, `up -d` will *build* on the box, which is the thing this whole
+  procedure exists to avoid.
+- **`up -d`, never `restart`.** `restart` reuses the existing container and its old image.
+- **Build for the box's architecture.** `--platform linux/amd64` is harmless on an x86_64
+  laptop and mandatory on an ARM Mac; without it the container dies immediately on `exec
+  format error`.
+- **Don't run `docker compose up` locally to build.** It would also start caddy and send it
+  to Let's Encrypt for the production domains. Use `docker build` (above) or
+  `docker compose build api`.
+
+### Without a registry
+
+If you'd rather not set up GHCR, pipe the image over SSH instead — same idea, no other
+change:
+
+```bash
+docker build --platform linux/amd64 -f deploy/api.Dockerfile -t dgipr-api:latest .
+docker save dgipr-api:latest | gzip | ssh <box> 'gunzip | docker load'
+```
+
+Set `image: dgipr-api:${API_TAG:-latest}` in the compose file and `docker compose up -d api`
+on the box. It works, but re-ships the entire image — well over a gigabyte before
+compression, thanks to the Chromium layer — on *every* deploy, where a registry sends only
+the layers that changed.
+
+---
+
 ## Operations notes
 
 - **Logs**: `docker compose logs -f api` / `... n8n`.
-- **Update the API**: `git pull && docker compose up -d --build`.
+- **Update the API**: build the image on your laptop, push it to GHCR, then on the box
+  `docker compose pull api && docker compose up -d api` — full procedure in
+  [Updating the API](#updating-the-api-build-locally-pull-on-the-box) below. **`git pull` on
+  the box does not update the API**: the Dockerfile compiles the source *into* the image and
+  the container mounts no source, so pulling commits there changes nothing that runs — the
+  same trap as n8n workflows. And **`docker compose restart api` never picks up a new
+  image**; it restarts the existing container, which is pinned to the image it was created
+  from. Use it only to clear wedged in-flight jobs.
 - **Update the workflows**: `pnpm n8n:push` (Phase C2) — *not* `git pull`, which cannot
   touch them. Do it after the API update, never before.
 - **n8n data** (workflows, credentials, encryption key) lives in the `n8n_data`

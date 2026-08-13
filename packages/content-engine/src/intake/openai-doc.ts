@@ -70,9 +70,20 @@ const PAGE_TIMEOUT_MS = Number.parseInt(
 // exactly the same fidelity rules as the same GR uploaded as a PDF). Only the opening two
 // lines and ONE fidelity bullet differ — everything about names, numerals, tables and format
 // is common, which is the reason this is a parameter rather than a second prompt free to drift.
+//
+// THE PROMPT DOES NOT ASK FOR MARATHI, AND MUST NOT. It used to open "…into Marathi text" and
+// close with "Transcribe this page as Marathi Markdown", which left an English or bilingual
+// document — an English annexure, a central-government letter, a GR with an English schedule —
+// only two ways to answer: translate it (silently replacing the source of truth this whole
+// product rests on) or return nothing. Returning nothing is what happened: every page came back
+// empty, extractPdfPagesViaOpenAI threw, that failed the file, and the intake died on
+// "कोणत्याही फाईलमधून मजकूर मिळाला नाही". The rule is TRANSCRIBE WHAT IS PRINTED, in the
+// language and script it is printed in — which is the same instruction Marathi always needed,
+// just stated without naming one language. Every Marathi-specific guarantee below (the legacy
+// non-Unicode font rule, the Devanagari numeral rules, [अस्पष्ट]) is untouched.
 export function ocrSystemPrompt(subject: 'page' | 'image' = 'page'): string {
   return [
-    'You transcribe pages of official Government of Maharashtra documents into Marathi text.',
+    'You transcribe pages of official Government of Maharashtra documents.',
     ...(subject === 'image'
       ? [
           'You are given ONE image — a photograph, scan or screenshot of an official document,',
@@ -80,8 +91,13 @@ export function ocrSystemPrompt(subject: 'page' | 'image' = 'page'): string {
         ]
       : ['You are given ONE page. Return that page and nothing else.']),
     '',
-    'FIDELITY — this is not a summary and not a rewrite:',
+    'FIDELITY — this is not a summary, not a rewrite and NEVER a translation:',
     `- Transcribe what is on the ${subject === 'image' ? 'image' : 'page'}. Never add, infer, complete or explain anything.`,
+    '- Reproduce every word in the LANGUAGE AND SCRIPT it is printed in. Marathi stays Marathi in',
+    '  Devanagari; English stays English in Latin; a page carrying both keeps both, line for line,',
+    '  in the order they appear. Most of these documents are Marathi, but many are English or',
+    '  bilingual and those are equally valid — never translate, transliterate or "correct" a page',
+    '  into another language, and never skip or blank a page because it is not in Marathi.',
     '- Names, designations, scheme names, dates, amounts, percentages and every numeral must',
     '  appear exactly as printed, in the script they are printed in. Do not convert Devanagari',
     '  numerals to Latin or the reverse, and never restate a figure in your own words.',
@@ -108,7 +124,8 @@ export function ocrSystemPrompt(subject: 'page' | 'image' = 'page'): string {
       : [
           '- The page may embed corrupted text (a legacy non-Unicode Marathi font). Read the page as',
           '  it LOOKS. Where the rendered page and any embedded text disagree, the rendered page is',
-          '  correct — output correctly spelled Marathi, e.g. नोंदणी and निर्णय, never नोंिणी or ननणणय.',
+          '  correct — on a Marathi page that means correctly spelled Marathi, e.g. नोंदणी and निर्णय,',
+          '  never नोंिणी or ननणणय.',
         ]),
     `- If part of the ${subject === 'image' ? 'image' : 'page'} is genuinely illegible, write [अस्पष्ट] there. Do not guess.`,
     '',
@@ -179,7 +196,9 @@ async function readOnePage(
             },
             {
               type: 'text',
-              text: 'Transcribe this page as Marathi Markdown, following your instructions exactly.',
+              // Says Markdown, never a language: the system prompt's rule is that the page's own
+              // language and script come back unchanged, and naming one here would override it.
+              text: 'Transcribe this page as Markdown, following your instructions exactly.',
             },
           ],
         },

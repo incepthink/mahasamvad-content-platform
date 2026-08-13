@@ -11,7 +11,6 @@ import {
   NARRATION_AUDIO_ACCEPT,
   UPLOAD_FILE_MAX_BYTES,
   VIDEO_CLIP_MAX_SECONDS,
-  VIDEO_SCRIPT_MAX_SECONDS,
   estimateNarrationSeconds,
   isMarathiVideoNarration,
   normalizeVideoNarrationScript,
@@ -115,15 +114,13 @@ export default function VideoPage() {
     usingUploadedAudio && audioSeconds !== null
       ? audioSeconds
       : estimateNarrationSeconds(normalizeVideoNarrationScript(note));
+  // Shown, never enforced (2026-08-12): the two-minute ceiling this used to be
+  // measured against is gone, so a long script simply gets more clips. The line
+  // stays because the scene count is what gate 2 will be priced from.
   const scriptSceneCount = Math.max(
     1,
     Math.ceil(scriptEstimateSeconds / VIDEO_CLIP_MAX_SECONDS),
   );
-  const scriptTooLong =
-    inputMode === 'script' &&
-    // An unmeasurable upload is never blocked here — the server decodes it.
-    !(usingUploadedAudio && audioSeconds === null) &&
-    scriptEstimateSeconds > VIDEO_SCRIPT_MAX_SECONDS;
   const scriptNotMarathi =
     inputMode === 'script' &&
     note.trim() !== '' &&
@@ -171,14 +168,6 @@ export default function VideoPage() {
         inputMode === 'script'
           ? STR.videoScriptTooShort
           : STR.videoNoteTooShort,
-      );
-      return;
-    }
-    if (scriptTooLong) {
-      setError(
-        usingUploadedAudio
-          ? STR.videoNarrationAudioTooLong
-          : STR.videoScriptEstimateOver,
       );
       return;
     }
@@ -285,10 +274,7 @@ export default function VideoPage() {
         {inputMode === 'script' && note.trim() !== '' ? (
           <>
             {usingUploadedAudio && audioSeconds === null ? null : (
-              <p
-                className={scriptTooLong ? 'form-error' : 'hint'}
-                style={{ marginTop: 8 }}
-              >
+              <p className="hint" style={{ marginTop: 8 }}>
                 {usingUploadedAudio
                   ? STR.videoNarrationAudioMeasured
                   : STR.videoScriptEstimateLabel}
@@ -297,13 +283,6 @@ export default function VideoPage() {
                   scriptEstimateSeconds,
                   scriptSceneCount,
                 )}
-                {scriptTooLong
-                  ? ` · ${
-                      usingUploadedAudio
-                        ? STR.videoNarrationAudioTooLong
-                        : STR.videoScriptEstimateOver
-                    }`
-                  : ''}
               </p>
             )}
             {scriptNotMarathi ? (
@@ -389,12 +368,7 @@ export default function VideoPage() {
             type="button"
             className="btn btn-primary"
             onClick={submit}
-            disabled={
-              submitting ||
-              activeProject !== null ||
-              scriptTooLong ||
-              scriptNotMarathi
-            }
+            disabled={submitting || activeProject !== null || scriptNotMarathi}
           >
             {submitting
               ? STR.submitting

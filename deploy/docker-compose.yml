@@ -7,16 +7,32 @@
 # The web app is NOT here — it runs on Vercel and calls `api` over public HTTPS.
 # Supabase is managed cloud (your existing project); nothing to run for it here.
 #
-# Bring it up from this directory:  docker compose up -d --build
+# Bring it up from this directory:  docker compose pull && docker compose up -d
+# (`--build` is NOT part of a deploy here — the api image is built off the box and
+#  pulled; see the note on the api service below and deploy/README.md.)
 #
 # Prereqs on the box:
 #   - Docker + Docker Compose plugin installed
 #   - deploy/.env.prod filled in (see .env.prod.example)
+#   - `docker login ghcr.io` (or a public package) so the api image can be pulled
 #   - DNS A-records: api.<domain> and n8n.<domain> -> this EC2's public IP
 #   - Security group inbound: 80 + 443 open to the world; 22 to your IP only
 
 services:
   api:
+    # The image is built OFF the box (laptop or CI) and pulled here — building on an
+    # EC2 box that also runs n8n means a pnpm install + monorepo build + a ~500 MB
+    # Chromium install competing for its RAM, every deploy. See deploy/README.md
+    # "Update the API".
+    #
+    # API_TAG comes from deploy/.env (the same file that carries N8N_SUBDOMAIN) and
+    # defaults to `latest`. Pin it to a git SHA there to roll back: set the value, then
+    # `docker compose up -d api`.
+    #
+    # `build:` is KEPT so `docker compose build api` still works locally — but note the
+    # consequence on the box: if `docker compose pull api` fails and the image is absent,
+    # `up -d` will BUILD it here rather than error. Always check the pull succeeded.
+    image: ghcr.io/incepthink/dgipr-api:${API_TAG:-latest}
     build:
       context: ..                      # repo root — the monorepo build needs it
       dockerfile: deploy/api.Dockerfile

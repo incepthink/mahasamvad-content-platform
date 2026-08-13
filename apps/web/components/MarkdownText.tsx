@@ -15,6 +15,7 @@
 // reading the raw string, so nothing the officer circulates changes.
 
 import { Fragment, type ReactNode } from 'react';
+import { precomposeCandraVowels } from '../lib/devanagari';
 
 const HEADING = /^(#{1,6})\s+(.*)$/;
 const BULLET = /^\s*([-*+•])\s+(.*)$/;
@@ -87,7 +88,11 @@ export function MarkdownText({
   text: string;
   className?: string;
 }) {
-  const source = text.replace(/\r\n?/g, '\n').split('\n');
+  // Mukta cannot anchor a candra sign to अ, so अॅ/अॉ become the precomposed ऍ/ऑ here —
+  // display only, exactly like the Markdown structure above. See lib/devanagari.ts.
+  const source = precomposeCandraVowels(text)
+    .replace(/\r\n?/g, '\n')
+    .split('\n');
   const blocks: ReactNode[] = [];
   let cursor = 0;
   let key = 0;

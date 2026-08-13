@@ -7,8 +7,6 @@ import {
   VIDEO_CLIP_MAX_SECONDS,
   VIDEO_KEY_POINT_MAX_CHARS,
   VIDEO_NARRATION_MAX_CHARS,
-  VIDEO_SCENE_LIMIT,
-  VIDEO_SCRIPT_MAX_SECONDS,
   VIDEO_STYLE_MAX_CHARS,
   allocateVideoSceneDurations,
   estimateNarrationSeconds,
@@ -84,47 +82,39 @@ function maxSceneChars(normalized: string, seconds: number): number {
   return Math.max(1, Math.floor(VIDEO_CLIP_MAX_SECONDS * charsPerSecond));
 }
 
-function segmentLength(words: readonly string[], start: number, end: number) {
-  let length = Math.max(0, end - start - 1);
-  for (let index = start; index < end; index++) {
-    length += words[index]!.length;
+// Prefix sums over "this word plus one joining space", so the length of any
+// word range is O(1). It used to be an inner loop, which made the partition
+// below O(scenes x words^3) — invisible while a script could not exceed two
+// minutes (~330 words), and the reason a ten-minute one would have hung the
+// job rather than merely costing more.
+function lengthPrefix(words: readonly string[]): number[] {
+  const prefix = new Array<number>(words.length + 1).fill(0);
+  for (const [index, word] of words.entries()) {
+    prefix[index + 1] = prefix[index]! + word.length + 1;
   }
-  return length;
+  return prefix;
+}
+
+// Chars in `words[start..end)` joined by single spaces.
+function segmentLength(prefix: readonly number[], start: number, end: number) {
+  return end > start ? prefix[end]! - prefix[start]! - 1 : 0;
 }
 
 function endsSentence(word: string): boolean {
   return /[.!?।॥]["'’”)]*$/.test(word);
 }
 
-// Balanced contiguous partition with a preference for sentence endings. The
-// returned chunks rejoin byte-for-byte to the whitespace-normalized script.
-export function splitReadyVideoScript(
-  script: string,
-  measuredSeconds?: number,
-): string[] {
-  const normalized = normalizeVideoNarrationScript(script);
-  const seconds = scriptSeconds(normalized, measuredSeconds);
-  if (seconds > VIDEO_SCRIPT_MAX_SECONDS) {
-    throw new Error('Ready narration exceeds the two-minute video limit.');
-  }
-
-  const requestedScenes = Math.max(
-    1,
-    Math.ceil(seconds / VIDEO_CLIP_MAX_SECONDS),
-  );
-  const sceneCharCap = maxSceneChars(normalized, seconds);
-  const words = normalized.split(' ');
-  if (words.some((word) => word.length > sceneCharCap)) {
-    throw new Error(
-      `Ready narration contains a word longer than ${sceneCharCap} characters.`,
-    );
-  }
-  const sceneCount = Math.min(
-    VIDEO_SCENE_LIMIT.max,
-    requestedScenes,
-    words.length,
-  );
-  const target = normalized.length / sceneCount;
+// Balanced contiguous partition into exactly `sceneCount` chunks of at most
+// `sceneCharCap` characters, preferring sentence endings. Returns null when no
+// such partition exists — the caller answers that by allowing one more scene,
+// which is why this reports rather than throws.
+function partitionWords(
+  words: readonly string[],
+  sceneCount: number,
+  sceneCharCap: number,
+): string[] | null {
+  const prefix = lengthPrefix(words);
+  const target = segmentLength(prefix, 0, words.length) / sceneCount;
   const infinity = Number.POSITIVE_INFINITY;
   const costs = Array.from({ length: sceneCount + 1 }, () =>
     Array<number>(words.length + 1).fill(infinity),
@@ -138,11 +128,15 @@ export function splitReadyVideoScript(
     const minimumEnd = parts;
     const maximumEnd = words.length - (sceneCount - parts);
     for (let end = minimumEnd; end <= maximumEnd; end++) {
-      for (let start = parts - 1; start < end; start++) {
+      // Walk BACKWARDS from the nearest split and stop at the char cap: a
+      // segment only grows as `start` moves left, so everything beyond the
+      // first over-long one is over-long too. That bound is what keeps a long
+      // script's partition cheap.
+      for (let start = end - 1; start >= parts - 1; start--) {
+        const length = segmentLength(prefix, start, end);
+        if (length > sceneCharCap) break;
         const prior = costs[parts - 1]![start]!;
         if (!Number.isFinite(prior)) continue;
-        const length = segmentLength(words, start, end);
-        if (length > sceneCharCap) continue;
         const distance = length - target;
         const sentenceReward =
           parts < sceneCount && endsSentence(words[end - 1]!)
@@ -157,11 +151,7 @@ export function splitReadyVideoScript(
     }
   }
 
-  if (!Number.isFinite(costs[sceneCount]![words.length]!)) {
-    throw new Error(
-      'Ready narration could not be divided into eight provider-sized scenes.',
-    );
-  }
+  if (!Number.isFinite(costs[sceneCount]![words.length]!)) return null;
 
   const chunks: string[] = [];
   let end = words.length;
@@ -170,12 +160,59 @@ export function splitReadyVideoScript(
     chunks.unshift(words.slice(start, end).join(' '));
     end = start;
   }
-  if (chunks.join(' ') !== normalized) {
+  return chunks;
+}
+
+// Balanced contiguous partition with a preference for sentence endings. The
+// returned chunks rejoin byte-for-byte to the whitespace-normalized script.
+export function splitReadyVideoScript(
+  script: string,
+  measuredSeconds?: number,
+): string[] {
+  const normalized = normalizeVideoNarrationScript(script);
+  const seconds = scriptSeconds(normalized, measuredSeconds);
+
+  // How many clips this narration NEEDS, with no ceiling above it (2026-08-12):
+  // the two-minute limit was the note lane's eight-scene planner range applied
+  // to a lane whose length is the officer's own. A longer script simply gets
+  // more scenes; the spend decision stays at gate 2, where the estimate is
+  // priced from exactly this count.
+  const requestedScenes = Math.max(
+    1,
+    Math.ceil(seconds / VIDEO_CLIP_MAX_SECONDS),
+  );
+  const sceneCharCap = maxSceneChars(normalized, seconds);
+  const words = normalized.split(' ');
+  if (words.some((word) => word.length > sceneCharCap)) {
     throw new Error(
-      'Ready narration changed while it was divided into scenes.',
+      `Ready narration contains a word longer than ${sceneCharCap} characters.`,
     );
   }
-  return chunks;
+
+  // The derived count is a FLOOR, not the answer. ceil(seconds / 15) leaves as
+  // little as a fraction of a second of slack across the whole script, and the
+  // split can only cut between words — so a script whose speech lands just past
+  // a multiple of 15 has no legal partition at that count and simply needs one
+  // more scene. (Latent before this change too, and it aborted the project.)
+  // An extra scene costs nothing but a shorter clip: the windows are allocated
+  // from the same measured total.
+  for (
+    let sceneCount = Math.min(requestedScenes, words.length);
+    sceneCount <= words.length;
+    sceneCount++
+  ) {
+    const chunks = partitionWords(words, sceneCount, sceneCharCap);
+    if (!chunks) continue;
+    if (chunks.join(' ') !== normalized) {
+      throw new Error(
+        'Ready narration changed while it was divided into scenes.',
+      );
+    }
+    return chunks;
+  }
+  throw new Error(
+    `Ready narration could not be divided into scenes of at most ${sceneCharCap} characters.`,
+  );
 }
 
 function systemPrompt(sceneCount: number): string {
@@ -237,6 +274,12 @@ export async function planReadyVideoScript(
     model: VIDEO_CHAT_MODEL,
     temperature: 0.3,
     responseFormat: 'json_object',
+    // Room for the ANSWER, and it grows with the script: the plan carries a
+    // beat, two briefs, a shot hint and an overlay line PER SCENE, so the
+    // 4096 default silently truncated the JSON once a script needed more than
+    // ~10 scenes — and a truncated plan fails the parse AFTER the call is
+    // billed. Billing is on tokens emitted, so an unused ceiling is free.
+    maxTokens: Math.max(4096, 600 + chunks.length * 450),
   });
   const result = schema.safeParse(parseJson(raw));
   if (!result.success) {

@@ -1901,16 +1901,6 @@ textarea.note-input {
   border-top: 1px solid var(--border);
 }
 
-/* "ओळखलेली भाषा: मराठी" beside its one-tap correction. Wraps on a phone rather than
-   squeezing the button. */
-.translate-detected {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 10px;
-  margin-bottom: 10px;
-}
-
 .lang-toggle {
   display: inline-flex;
   gap: 4px;

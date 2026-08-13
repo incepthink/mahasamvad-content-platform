@@ -28,7 +28,6 @@ import {
   UPLOAD_FILE_MAX_BYTES,
   UpdateSceneMotionRequestSchema,
   UpdateVideoScriptRequestSchema,
-  VIDEO_SCRIPT_MAX_SECONDS,
   allocateVideoSceneDurations,
   clipSecondsForNarration,
   estimateNarrationSeconds,
@@ -341,11 +340,11 @@ export function registerVideoRoutes(
         .send({ error: { message: ANOTHER_ACTIVE_MESSAGE } });
     }
 
-    // Decode + length-check BEFORE the row exists, so a rejected recording
-    // leaves nothing behind and the officer keeps the create form they are
-    // standing on. This is also the ONLY duration gate that matters for an
-    // uploaded track: the char-rate estimate the schema applies to a typed
-    // script is not a worse measurement here, it is the wrong one.
+    // Decode BEFORE the row exists, so an unreadable recording leaves nothing
+    // behind and the officer keeps the create form they are standing on. The
+    // decoded duration is no longer a gate (2026-08-12: the two-minute ceiling
+    // is gone on both halves of this lane) — it is what plans the scene count,
+    // the per-scene char cap and the clip windows.
     let narrationWav: Buffer | null = null;
     let narrationSeconds = 0;
     if (parsed.audio) {
@@ -364,15 +363,6 @@ export function registerVideoRoutes(
         });
       }
       narrationSeconds = wavDurationSeconds(narrationWav);
-      if (narrationSeconds > VIDEO_SCRIPT_MAX_SECONDS) {
-        return reply.code(400).send({
-          error: {
-            message:
-              `दिलेली ध्वनिफीत ${narrationSeconds.toFixed(0)} सेकंदांची आहे आणि ` +
-              `कमाल ${VIDEO_SCRIPT_MAX_SECONDS} सेकंदांच्या मर्यादेपेक्षा मोठी आहे.`,
-          },
-        });
-      }
     }
 
     const row = await insertVideoProject(client, {

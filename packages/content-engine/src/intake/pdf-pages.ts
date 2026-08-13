@@ -96,6 +96,28 @@ function filterToSelection(
   return pages.filter((page) => wanted.has(page.page));
 }
 
+// The text layer, read for the pages the user asked for, or null when there is nothing
+// usable there. Deliberately quiet and total-failure-tolerant: this only ever runs after a
+// read has already failed, so it must never replace that failure with a worse one, and it
+// deliberately does NOT consult textLayerVerdict — the alternative on this path is no text
+// at all, so imperfect-but-present characters the officer can see and correct at the review
+// step beat an empty source.
+async function textLayerFallback(
+  name: string,
+  data: Buffer,
+  selection: readonly number[] | undefined,
+): Promise<PdfPage[] | null> {
+  let pages: PdfPage[] | null = null;
+  try {
+    pages = await extractTextLayerPages(data);
+  } catch (error) {
+    console.warn(`[pdf-pages] text layer unreadable for ${name}:`, error);
+    return null;
+  }
+  const selected = selection ? filterToSelection(pages, selection) : pages;
+  return selected.some((page) => page.text.length > 0) ? selected : null;
+}
+
 // The full result, for callers that show the user which backend ran (/translate does —
 // OCR text deserves more scrutiny in review than a text layer does).
 export async function extractPdfPagesDetailed(
@@ -105,13 +127,34 @@ export async function extractPdfPagesDetailed(
 ): Promise<PdfExtraction> {
   const source = options?.source ?? 'auto';
 
-  // The default mode never looks at the text layer. `source: 'text-layer'` is still
+  // The default mode never looks at the text layer FIRST. `source: 'text-layer'` is still
   // honoured — it is an explicit caller/user override, not the policy default.
   if (source === 'ocr' || (source === 'auto' && pdfExtractionMode() === 'ocr')) {
-    return {
-      source: 'ocr',
-      pages: await extractPdfPagesViaProvider(name, data, options),
-    };
+    try {
+      return {
+        source: 'ocr',
+        pages: await extractPdfPagesViaProvider(name, data, options),
+      };
+    } catch (error) {
+      // OCR produced NOTHING — every page empty, or the provider failed outright. Before
+      // failing the file (which on /dlo can sink the whole intake with
+      // "कोणत्याही फाईलमधून मजकूर मिळाला नाही"), try the document's own text layer: it is
+      // local, free, instant and exact, so there is no reason to refuse a born-digital PDF
+      // just because the paid read came back blank. This is a LAST resort, not the policy —
+      // the tables and legacy-font reasons for preferring OCR are unchanged, and a genuinely
+      // scanned document has no text layer to fall back to, so it still fails as before.
+      console.warn(
+        `[pdf-pages] ${name}: ${ocrProviderName()} OCR returned no text — trying the PDF's own text layer before giving up.`,
+      );
+      const salvaged = await textLayerFallback(name, data, options?.pages);
+      if (salvaged) {
+        console.log(
+          `[pdf-pages] ${name}: recovered ${salvaged.length} page(s) from the text layer.`,
+        );
+        return { source: 'text-layer', pages: salvaged };
+      }
+      throw error;
+    }
   }
 
   let pages: PdfPage[] | null = null;

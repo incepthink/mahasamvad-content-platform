@@ -453,23 +453,13 @@ export const STR = {
   translateOutputTitleMarathi: 'मराठी भाषांतर',
   translateLockedTerms: 'शब्दकोश संज्ञा वापरल्या',
 
-  // Target choice (standalone /translate page). The row used to name a DIRECTION (मराठी →
-  // इंग्रजी) because a bare target picker would have offered pairs the API rejects. The
-  // SOURCE is now detected from the text itself, so three target names are enough — and a
-  // target that source cannot reach (its own language, or an unsupported pair) is DISABLED
-  // with a reason rather than hidden, so the officer sees the whole set and why.
+  // /translate's ONE question, and the only row on the page. All three answers are always
+  // enabled: the officer is never asked what language the text is in and the text is never
+  // inspected to guess it — the source follows from the target (see the page's header).
   translateDirectionLabel: 'कोणत्या भाषेत भाषांतर हवे?',
   translateTargetMarathi: 'मराठी',
   translateTargetEnglish: 'इंग्रजी',
   translateTargetHindi: 'हिंदी',
-  translateTargetSameLanguage: 'मजकूर याच भाषेत आहे.',
-  translateTargetUnsupported: 'हे भाषांतर उपलब्ध नाही.',
-  // The detected source, shown above the target row. मराठी and हिंदी share a script, so
-  // detection is a good guess and never a certainty — hence the one-tap correction beside
-  // it, offered only for Devanagari text (Latin vs Devanagari is a script test, not a guess).
-  translateDetectedLabel: 'ओळखलेली भाषा:',
-  translateDetectedIsMarathi: 'नाही, हा मजकूर मराठी आहे',
-  translateDetectedIsHindi: 'नाही, हा मजकूर हिंदी आहे',
   // Shown in place of the name-review step on an X→मराठी run: there is nothing to confirm,
   // because the dictionary's Marathi column IS the spelling the output is held to.
   translateIntoMarathiNames:
@@ -1275,8 +1265,6 @@ export const STR = {
   videoScriptInputHint:
     'फक्त आवाजात वाचायचे निवेदन द्या. दृश्य-सूचना, वक्त्यांची नावे किंवा रंगमंच सूचना देऊ नका.',
   videoScriptEstimateLabel: 'मोफत अंदाज',
-  videoScriptEstimateOver:
-    'ही संहिता दोन मिनिटांपेक्षा मोठी दिसते. कृपया निवेदन लहान करा.',
   videoScriptMarathiOnly: 'तयार निवेदन मराठीत असणे आवश्यक आहे.',
   // Officer-supplied voiceover: the department's own voice, or a TTS product
   // whose plan gives no API access. The file replaces the synthesized track
@@ -1288,8 +1276,6 @@ export const STR = {
   videoNarrationAudioMeasured: 'दिलेल्या ध्वनिफीतीवरून',
   videoNarrationAudioUnreadable:
     'ही ध्वनिफीत ब्राउझरला वाचता आली नाही; तरीही पाठवून पाहता येईल.',
-  videoNarrationAudioTooLong:
-    'ही ध्वनिफीत दोन मिनिटांपेक्षा मोठी आहे. कृपया लहान ध्वनिफीत द्या.',
   videoNarrationAudioTooBig: 'ध्वनिफीत ५० MB पेक्षा मोठी असू शकत नाही.',
   videoHeadingLabel: 'शीर्षक / मुख्य मुद्दा (ऐच्छिक)',
   videoDurationLabel: 'व्हिडिओची लांबी',
@@ -1363,9 +1349,20 @@ export const STR = {
     'या दृश्यावर कोणते वाक्य ऐकू यावे ते ठरवा. शेजारच्या दृश्यातून मजकूर कापून इथे चिकटवा — शब्द तेच राहिले तर आवाज पुन्हा तयार करावा लागत नाही; फक्त दृश्यांची वेळ आवाजाशी जुळवली जाते.',
   videoInsertedSceneHint:
     'नवीन दृश्य. शेजारच्या दृश्यातील मजकूर कापून इथे चिकटवा आणि दृश्य-वर्णन लिहा. नवीन शब्द लिहू नका — तसे केल्यास संपूर्ण निवेदन पुन्हा तयार करावे लागेल.',
+  // The label is shared by BOTH gates — it is the same action (persist the
+  // edited scene list without starting a job) and the same words. Only the
+  // hint differs, because at gate 1 there is no rendered frame or measured
+  // audio yet for the save to preserve.
   videoSaveStoryboardScript: 'बदल जतन करा',
   videoSaveStoryboardScriptHint:
     'निवेदनाचे शब्द तेच ठेवून फक्त विभागणी बदलली, तर आवाज पुन्हा तयार होत नाही. ज्या दृश्यांची वेळ बदलेल तेवढीच दृश्ये पुन्हा तयार करावी लागतील.',
+  videoSaveScriptHint:
+    'बदल जतन होतील पण चित्रे तयार होणार नाहीत — खर्च होत नाही. संहिता पूर्ण झाल्यावर “स्टोरीबोर्ड तयार करा” दाबा.',
+  // Ready-script lane only. Removing a scene whose निवेदन still holds words
+  // would delete them from the officer's own final script, which the API
+  // refuses; the remedy is to move the words into a neighbour first.
+  videoRemoveSceneScriptHint:
+    'दृश्य काढण्यापूर्वी त्यातील निवेदन शेजारच्या दृश्यात हलवा. तयार संहितेतील शब्द काढता येत नाहीत.',
   videoSceneNeedsFrames:
     'या दृश्याची चित्रे अजून काढलेली नाहीत — खालील “या दृश्याची चित्रे तयार करा” वापरा.',
   // A stored scene with no frames yet (a just-saved inserted scene). The redraw
