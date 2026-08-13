@@ -33,8 +33,20 @@ import sharp from 'sharp';
 import { loadScaled } from './article-chrome.js';
 import { CMO_BIG } from './cmo-geometry.js';
 
-// Masters + n8n social renders are always 1280x1600 (MASTER_DIMENSIONS in
-// content-engine), matching the 4:5 canvas cmo-header.png and the frame are authored at.
+/**
+ * The render size to request for a CMO poster. The chrome is overlaid rather than appended, so
+ * this is both what the model paints and what the officer receives — already 4:5.
+ */
+export const CMO_POSTER_SIZE = '1280x1600';
+
+// Masters + CMO renders are always 1280x1600 (MASTER_DIMENSIONS in content-engine),
+// matching the 4:5 canvas cmo-header.png and the frame are authored at.
+//
+// UNLIKE THE DGIPR LANE, THIS CHROME IS PURELY AN OVERLAY: the header and footer are pasted
+// ONTO the render, no canvas is added, so what the image model returns IS the finished poster
+// and it must already be 4:5. That is why CMO keeps 1280x1600 while DGIPR now asks for a
+// shorter 1280x1504 artwork and grows it back to 1600 (see twitter-chrome.ts). The two sizes
+// share one n8n workflow, so the render size travels in the webhook payload.
 // Because the chrome spans the full canvas, every asset is simply scaled to the poster
 // width and composited from the top-left / bottom, needing no per-element geometry —
 // loadScaled preserves each asset's aspect ratio, so a differently sized render still

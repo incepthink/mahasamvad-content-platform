@@ -46,6 +46,12 @@
               "name": "quality",
               "type": "string",
               "value": "={{ $json.body.quality || 'medium' }}"
+            },
+            {
+              "id": "a5",
+              "name": "size",
+              "type": "string",
+              "value": "={{ $json.body.size || '1280x1600' }}"
             }
           ]
         },
@@ -102,7 +108,7 @@
             {
               "name": "size",
               "parameterType": "formData",
-              "value": "1280x1600"
+              "value": "={{ $('DGIPR Post Form').first().json.size }}"
             },
             {
               "name": "quality",

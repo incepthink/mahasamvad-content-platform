@@ -1279,13 +1279,29 @@ Chromium): `pnpm --filter @dgipr/poster-renderer exec playwright install chromiu
   `html`-only.
 - **The social footer is APPENDED below the artwork (2026-08-10), so it can never cover text.**
   `overlayTwitterChrome` no longer pastes the band over the render: `footer-extension.ts` adds a
-  strip below it and the band is stamped there, making a finished social poster **1280x1691**.
-  The badge is still a destructive overlay. Three things not to break. The added strip is filled
+  strip below it and the band is stamped there.
+  The badge is still a destructive overlay. **The height for that strip is taken out of the
+  REQUEST, not off the finished image (2026-08-13):** the model is asked for
+  `SOCIAL_ARTWORK_SIZE` = **1280x1504** and the officer receives **1280x1600**, a true 4:5, so
+  the poster fills a 1080x1350 Canva/Instagram/Facebook portrait frame with no gap. It is 1504
+  and not 1600−91 because **gpt-image-2 requires both dimensions divisible by 16** (verified
+  live: `1280x1509` → 400 `"Width and height must both be divisible by 16"`), so the strip is
+  the 96px remainder — deliberately ~5px taller than the band, absorbed by the same join fill.
+  Any change here must keep artwork % 16 === 0 and strip ≥ band height; the constants live in
+  `twitter-chrome.ts` and are mirrored by `SOCIAL_ZONES.height` (which is the ARTWORK, not the
+  poster). **CMO is the exception and must stay 1280x1600**: `overlayCmoChrome` OVERLAYS its
+  header/footer rather than appending, so its render already is the finished poster — which is
+  why the render size now travels in the n8n payload (`size`, defaulted to `1280x1600` in the
+  workflow so a half-deploy renders exactly as before) instead of being pinned in the workflow.
+  Three more things not to break. The added strip is filled
   from the poster's own bottom edge (flat fill at the mean of the bottom 24 rows, or the last 6
   rows stretched and softened when that edge is textured) — that is what makes the join
   invisible, so do not replace it with a fixed colour. Idempotence across feedback rounds is
-  decided by **aspect** (4:5 = fresh artwork, extend; 4:5-plus-a-strip = already finished, stamp
-  in place), never by a flag or an absolute height. And the prompt side must stay in step:
+  decided by **aspect** (`DESIGN_ASPECT` 1:1.175 = fresh artwork, extend; `FINISHED_ASPECT` 4:5
+  = already finished, stamp in place), never by a flag or an absolute height; both are derived
+  from the constants rather than from the runtime band height, which is what makes the finished
+  poster exactly 4:5 whatever the footer asset measures. `poster:preview:chrome:twitter` asserts
+  both, so run it rather than eyeballing an MP4-sized PNG. And the prompt side must stay in step:
   `SOCIAL_ZONES.footerAppendedMargin` (**16px**) is what switches `reservedZoneBlock` /
   `fitToReserveRule` from "reserved cover zone" to "this is a JOIN"; clearing it is the one-line
   rollback to an overlaid footer, and leaving the old 120px reserve in place would letterbox

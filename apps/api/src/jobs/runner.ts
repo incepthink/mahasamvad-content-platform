@@ -69,6 +69,8 @@ import {
   measureClearedRegions,
   buildArticleScenePrompt,
   buildCmoCirclePhotoPrompt,
+  CMO_POSTER_SIZE,
+  SOCIAL_ARTWORK_SIZE,
   editImage,
   fitToYoutubeThumbnail,
   overlayYoutubeChrome,
@@ -1358,10 +1360,20 @@ type SocialPostResult = {
 // edits it with `prompt` at `quality`, and returns the poster PNG. Used by BOTH the initial
 // render (edit the chosen master) and the pixel-feedback render (edit the current poster) —
 // they differ only in which image and which prompt. Chrome is stamped by the caller.
+//
+// `size` is the render size, and it is per-BRAND because the two brands finish differently:
+// DGIPR's band is JOINED BELOW the artwork (so the model paints SOCIAL_ARTWORK_SIZE and the
+// officer receives 1280x1600), while CMO's chrome is OVERLAID (so what the model paints is
+// already the finished poster, CMO_POSTER_SIZE). It travels in the payload rather than being
+// pinned in the workflow, which is also what keeps the deploy safe in both directions: the
+// workflow defaults the field to '1280x1600', so an old API against the new workflow renders
+// exactly as it does today, and a new API against the old workflow is ignored rather than
+// broken.
 async function renderSocialPosterViaN8n(
   id: string,
   imageUrl: string,
   prompt: string,
+  size: string,
 ): Promise<Buffer> {
   const webhookUrl = requireEnv('N8N_SOCIAL_POST_WEBHOOK_URL');
   const webhookSecret = process.env.N8N_WEBHOOK_SECRET;
@@ -1379,6 +1391,7 @@ async function renderSocialPosterViaN8n(
       image_url: imageUrl,
       prompt,
       quality: imageQuality(),
+      size,
     }),
     signal: AbortSignal.timeout(420_000),
   });
@@ -1435,10 +1448,15 @@ async function renderSocialPosterFeedbackViaN8n(
     clearActions: clear.actions ?? [],
     contentInventory: clear.inventory ?? [],
   });
+  // Same per-brand sizes as the initial render: a DGIPR feedback round edits the finished
+  // 1280x1600 poster, the model erases the branding it can see (stampedChromeRule) and returns
+  // artwork, and overlayTwitterChrome joins a fresh band back on — so the poster stays exactly
+  // 4:5 through any number of rounds rather than growing or shrinking.
   const rawPoster = await renderSocialPosterViaN8n(
     id,
     currentPosterUrl,
     prompt,
+    brand === 'cmo' ? CMO_POSTER_SIZE : SOCIAL_ARTWORK_SIZE,
   );
   // The workflow leaves the reserved chrome zones untouched; re-stamp the chrome so
   // any drift from the edit is corrected (mirrors the article path). CMO re-stamps
@@ -1875,10 +1893,21 @@ async function renderAndStoreSocialPoster(
   // 5. Render. 'fresh' paints from scratch via the direct image call — no master, and no n8n;
   //    the template modes edit the chosen master through the thin workflow.
   await updateGeneration(client, id, { step: 'image' });
+  //
+  //    The size is the ARTWORK, not the finished poster: overlayTwitterChrome joins the
+  //    branding band onto a strip below it, and artwork + strip is exactly 1280x1600 (4:5) so
+  //    the officer's Canva/Instagram/Facebook portrait frame is filled with no gap. CMO is the
+  //    exception — its chrome is overlaid, so its render IS the finished poster. `isFresh` is
+  //    false for CMO by construction, so the direct call never needs that branch.
   const rawPoster = isFresh
-    ? await generateImage(prompt, { size: '1280x1600' })
-    : await renderSocialPosterViaN8n(id, resolved!.master.url, prompt);
-  // gpt-image-2 @ 1280x1600 — attribute the fixed tier price (image usage isn't measurable
+    ? await generateImage(prompt, { size: SOCIAL_ARTWORK_SIZE })
+    : await renderSocialPosterViaN8n(
+        id,
+        resolved!.master.url,
+        prompt,
+        brand === 'cmo' ? CMO_POSTER_SIZE : SOCIAL_ARTWORK_SIZE,
+      );
+  // gpt-image-2 on the social canvas — attribute the fixed tier price (image usage isn't measurable
   // whether it ran in n8n or the direct call). The copy above is metered by chatComplete.
   recordImageCost('twitter', imageQuality());
 

@@ -46,9 +46,17 @@ import {
 // that no longer asks for a void at all. reservedZoneBlock now tells the design to run off the
 // bottom edge in any colour it likes, exactly as it must run into the badge corner, and 16px is
 // only the gap between the last LINE OF TEXT and the band.
+//
+// `height` IS THE ARTWORK, NOT THE FINISHED POSTER (2026-08-13). The finished poster is
+// 1280x1600 — a true 4:5, so it drops into a 1080x1350 Canva/Instagram/Facebook portrait frame
+// with no gap — and the band is joined below what the model paints, so what the model is asked
+// for is 1280x1504. It is 1504 rather than 1600-91 because gpt-image-2 requires both dimensions
+// divisible by 16; the 96px remainder is the strip, slightly taller than the band, and the
+// difference is absorbed by the same edge-continuation fill that hides the join. Keep in sync
+// with SOCIAL_ARTWORK_HEIGHT in packages/poster-renderer/src/twitter-chrome.ts.
 const SOCIAL_ZONES: ReservedZoneGeometry = {
   width: 1280,
-  height: 1600,
+  height: 1504,
   lockupWidth: 180,
   lockupHeight: 170,
   footerHeight: 91,
@@ -417,7 +425,7 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
       // than the officer has items it is an instruction to find more content — of which there is
       // none, so the model reused what it already had (generation 7c33fa93). Density is now
       // explicitly subordinate to the exactly-once rule; the canvas definition stays, because it
-      // is what keeps "usable" from meaning the full 1600px height.
+      // is what keeps "usable" from meaning the full artwork height.
       "Use the provided reference image as the PRIMARY STRUCTURAL GUIDE for the poster, not as a pixel-locked blueprint. Preserve its recognisable overall composition, visual hierarchy and design idea wherever they work for the supplied information. STRUCTURE means geometry and visual hierarchy—not the meaning, factual content, or element type of any reference slot. Content completeness, readability and reserved-zone safety OUTRANK the reference's exact widths, heights, proportions, section boundaries and imagery zones. You may intelligently resize, widen, move or extend components when the supplied information needs a different amount of space; do not redesign unnecessarily and do not compress everything onto one side. Distribute the supplied information across the usable canvas — the USABLE CANVAS is the area above the bottom margin described at the end of these instructions and outside the reserved top-right corner. Match the reference's density ONLY as far as the supplied information reaches: where it runs out, stop. Never repeat or invent content to match the reference's fullness.",
       "The reference image controls STRUCTURE ONLY, not colour. Choose the poster's colour palette freely and creatively; ensure strong contrast and easy readability for every Marathi word and Devanagari numeral.",
       // …and "strong contrast" alone is what let a real render come back charcoal-on-black.
@@ -471,7 +479,9 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
     //   - the Marathi must come out character-exact (a displaced matra is a different word);
     //   - the branding zones must survive, because the badge and footer are composited in code
     //     afterwards and a poster that ignores them ships with its own text destroyed;
-    //   - the canvas is 4:5 and carries one poster.
+    //   - the canvas is portrait and carries one poster. Deliberately not called "4:5" any
+    //     more: the FINISHED poster is 4:5, but the canvas the model paints is the artwork
+    //     above the joined-on branding band (SOCIAL_ZONES), which is slightly shorter.
     // Every other decision — composition, colour, imagery, illustration, texture, type — is the
     // model's, and the brief says so in as many words.
     //
@@ -484,7 +494,7 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
     const freshLines: string[] = [
       "You are an award-winning poster designer working for DGIPR — the Directorate General of Information and Public Relations, Government of Maharashtra, India. This poster goes out on the department's official social media and will be read on a phone by ordinary Maharashtra citizens.",
       '',
-      'Design a single, complete 4:5 portrait poster for the Marathi content below. Design it from scratch, as an original piece of work.',
+      'Design a single, complete portrait poster for the Marathi content below. Design it from scratch, as an original piece of work.',
       '',
       'YOU HAVE FULL CREATIVE CONTROL, AND YOU SHOULD USE IT. The composition, the colour palette, the imagery, the illustration style, any photography, the texture and material, the typographic scale and hierarchy, the graphic devices — all of it is yours to decide, and you should decide it boldly. Build the poster around whatever serves THIS message: an illustration, a photograph, hand-drawn artwork, a symbolic graphic, a textured or patterned ground, a large colour field, a strong piece of typography. Give it one clear visual idea and a real focal point, with confident contrast between the largest element and the smallest. Craft, depth and personality are wanted here. Do NOT produce a safe, template-shaped layout of a coloured rectangle above a list of rows — that is the failure mode. A citizen scrolling past should stop because the poster is genuinely good to look at.',
       '',
@@ -619,7 +629,7 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
   ];
   if (!hasPhoto) locked.push(TEXT_ONLY_LOCK);
   locked.push(
-    'Single 4:5 portrait poster. Typography: bold, high-contrast, highly legible Devanagari (Marathi). Government public-notice aesthetic: clean, serious, trustworthy.',
+    'Single portrait poster. Typography: bold, high-contrast, highly legible Devanagari (Marathi). Government public-notice aesthetic: clean, serious, trustworthy.',
   );
   locked.push(
     'Render ALL Marathi text crisply and correctly in Devanagari, spelled exactly as below.',
@@ -1009,7 +1019,7 @@ if (
       failures.push(
         'fixed-template prompt still offers "use more of the canvas"',
       );
-    // (e) "Fill the usable canvas" must not read as the full 1600px height.
+    // (e) "Fill the usable canvas" must not read as the full artwork height.
     if (
       !onbrand.includes('the USABLE CANVAS is the area above the bottom margin')
     )
@@ -1034,8 +1044,8 @@ if (
     //     crossing the zone. See reserved-zone-rule.ts.
     for (const needle of [
       'top-right 180 x 170 pixels',
-      '1280 x 1600 output',
-      'y=1584',
+      '1280 x 1504 output',
+      'y=1488',
       'THE BOTTOM EDGE IS A JOIN, NOT A COVER ZONE',
       'DO NOT CUT A HOLE IN IT',
       'continue through unbroken',
@@ -1173,8 +1183,8 @@ if (
     // (a) ONE geometry across the whole file, and it is the real one.
     for (const needle of [
       'top-right 180 x 170 pixels',
-      '1280 x 1600 output',
-      'y=1584',
+      '1280 x 1504 output',
+      'y=1488',
       'DESIGN ALL THE WAY DOWN TO THE VERY BOTTOM EDGE',
     ]) {
       if (!freshPrompt.includes(needle))

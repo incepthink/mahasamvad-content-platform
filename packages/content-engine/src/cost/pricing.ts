@@ -59,7 +59,10 @@ export function priceText(
 // Image cost is a FIXED per-render tier price, not measured: the default poster
 // render happens inside n8n (no usage returned) and gpt-image pricing is effectively
 // a flat price per (size, quality) tier anyway. `kind` maps to the render sizes in use —
-// `article` = 1536x1024, `twitter` = 1280x1600, `youtube` = 1280x720. Values from the cost
+// `article` = 1536x1024, `twitter` = 1280x1504 (the artwork; the delivered poster is 1280x1600
+// once the branding strip is joined on — see twitter-chrome.ts), `youtube` = 1280x720. The
+// twitter figure covered a 1280x1600 render until 2026-08-13 and is left unchanged: it is a
+// flat per-tier price and the two sizes sit in the same tier. Values from the cost
 // model; youtube is the smallest canvas of the three and priced a touch under `article`,
 // whose 1536x1024 is the nearest landscape tier.
 export type ImageKind = 'article' | 'twitter' | 'youtube';

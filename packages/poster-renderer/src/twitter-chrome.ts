@@ -15,14 +15,30 @@
 // THE FOOTER IS APPENDED, NOT PASTED OVER (2026-08-10). The badge is still a destructive
 // overlay — it sits in a corner that almost never holds the tail of a sentence — but the
 // full-width footer band is now stamped onto a strip ADDED BELOW the artwork
-// (footer-extension.ts), so a finished poster is 1280x1691 rather than 1280x1600. The band was
-// burying the last line of long posters, and the reserve protecting it could only ever be a
-// request: an image model has no ruler, and the same prompt tells it three times over to show
-// every point and match the reference's density. Appending makes the failure impossible
-// instead of unlikely. What the prompt asks for at the bottom is that the DESIGN run off the
-// edge in whatever colours it uses, with only a 16px cushion below the last line of text — see
-// footerAppendedMargin in build-poster-prompt.ts. It asked for a calm plain-background margin
-// first, and that produced a poster with 173 flat grey pixels above its own footer.
+// (footer-extension.ts). The band was burying the last line of long posters, and the reserve
+// protecting it could only ever be a request: an image model has no ruler, and the same prompt
+// tells it three times over to show every point and match the reference's density. Appending
+// makes the failure impossible instead of unlikely. What the prompt asks for at the bottom is
+// that the DESIGN run off the edge in whatever colours it uses, with only a 16px cushion below
+// the last line of text — see footerAppendedMargin in build-poster-prompt.ts. It asked for a
+// calm plain-background margin first, and that produced a poster with 173 flat grey pixels
+// above its own footer.
+//
+// AND THE FINISHED POSTER IS 4:5 AGAIN (2026-08-13). Appending made the delivered file
+// 1280x1691 — 1:1.32, no longer the 4:5 the whole product assumes. Officers place these on a
+// 1080x1350 Canva canvas, where a taller-than-4:5 image leaves a gap down each side that they
+// then close by hand, displacing the design. So the height is taken out of the REQUEST rather
+// than off the finished image: the model is asked for SOCIAL_ARTWORK_HEIGHT, the strip is
+// joined below it, and the sum is exactly SOCIAL_POSTER_HEIGHT. Cropping the artwork instead
+// would have reopened the burying bug this file exists to close, and squashing it distorts.
+//
+// The artwork height is NOT 1600 - 91. gpt-image-2 requires BOTH dimensions divisible by 16
+// ("Invalid size '1280x1509'. Width and height must both be divisible by 16." — verified live
+// 2026-08-13, a 400 that arrives in ~1s and would fail the run after the copy call is paid
+// for). So the artwork is 1504 (16 x 94) and the appended strip is the 96px remainder, which
+// is a little taller than the band's own ~91px: the extra ~5px is filled by the same
+// edge-continuation that makes the join invisible, so it reads as the poster, not as padding.
+// Any future change to either number must keep artwork % 16 === 0 and strip >= band height.
 
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -35,8 +51,8 @@ const ASSETS_DIR = resolve(
   '../assets',
 );
 
-// Base units are pixels on the twitter canvas itself: masters and n8n renders are
-// always 1280x1600 (MASTER_DIMENSIONS in content-engine), so the scale factor is
+// Base units are pixels on the twitter canvas itself: masters are always 1280 wide
+// (MASTER_DIMENSIONS in content-engine) and so is every render, so the scale factor is
 // normally 1 — it only kicks in if the model ever returns another width.
 const ASSET_BASE_WIDTH = 1280;
 const LOCKUP_WIDTH = 160;
@@ -54,9 +70,32 @@ const LABEL_COLOUR = '#17324d';
 // intended footer artwork occupies the bottom 239 pixels.
 const SOCIAL_FOOTER_SOURCE_HEIGHT = 239;
 
-// The ARTWORK the image model is asked for, as height/width. A finished poster is taller than
-// this, by the appended footer strip. Used only to tell the two apart — see overlayTwitterChrome.
-const DESIGN_ASPECT = 1600 / ASSET_BASE_WIDTH;
+/**
+ * The finished DGIPR social poster: 1280x1600, a true 4:5, which is what drops into a
+ * 1080x1350 Canva/Instagram/Facebook portrait frame with no gap.
+ */
+export const SOCIAL_POSTER_HEIGHT = 1600;
+
+/**
+ * The canvas the IMAGE MODEL is asked for — the finished poster minus the strip the branding
+ * band is joined onto. Must stay divisible by 16 (gpt-image-2 rejects anything else) and must
+ * leave a strip at least as tall as the band. Keep in sync with SOCIAL_ZONES.height in
+ * content-engine/src/generation/build-poster-prompt.ts, which is what the prompt reserves.
+ */
+export const SOCIAL_ARTWORK_HEIGHT = 1504;
+
+/** The render size to request for DGIPR social artwork, e.g. for generateImage / n8n. */
+export const SOCIAL_ARTWORK_SIZE = `${ASSET_BASE_WIDTH}x${SOCIAL_ARTWORK_HEIGHT}`;
+
+/** How much canvas is added below the artwork. Taller than the band by design — see the header. */
+const FOOTER_STRIP_HEIGHT = SOCIAL_POSTER_HEIGHT - SOCIAL_ARTWORK_HEIGHT;
+
+// The two shapes overlayTwitterChrome has to tell apart, as height/width: fresh artwork, and a
+// finished poster coming back round through a feedback edit. Both are derived from the
+// constants above rather than from the runtime band height, so the finished poster is exactly
+// 4:5 whatever the footer asset measures.
+const DESIGN_ASPECT = SOCIAL_ARTWORK_HEIGHT / ASSET_BASE_WIDTH;
+const FINISHED_ASPECT = SOCIAL_POSTER_HEIGHT / ASSET_BASE_WIDTH;
 
 export type GovernmentLockupRaster = Readonly<{
   data: Buffer;
@@ -173,11 +212,11 @@ async function loadSocialFooter(targetWidth: number): Promise<Raster> {
 //
 // IDEMPOTENCE. This runs on initial renders AND on pixel-feedback re-renders, and a feedback
 // round edits the poster this function last produced — which already carries its appended
-// strip. Extending unconditionally would grow the poster by ~91px every round. So the two
-// cases are told apart by ASPECT rather than by a flag or a stored dimension: a fresh render
-// comes back at the artwork's 4:5, a finished poster at 4:5-plus-a-strip. Aspect rather than
-// absolute height because the model is not contractually bound to return 1280 wide, and
-// everything else in this file already scales off the width it actually got.
+// strip. Extending unconditionally would grow the poster by a strip every round. So the two
+// cases are told apart by ASPECT rather than by a flag or a stored dimension: fresh artwork
+// comes back at DESIGN_ASPECT (1:1.175), a finished poster at FINISHED_ASPECT (4:5). Aspect
+// rather than absolute height because the model is not contractually bound to return 1280
+// wide, and everything else in this file already scales off the width it actually got.
 export async function overlayTwitterChrome(poster: Buffer): Promise<Buffer> {
   const meta = await sharp(poster).metadata();
   if (!meta.width || !meta.height) {
@@ -191,16 +230,20 @@ export async function overlayTwitterChrome(poster: Buffer): Promise<Buffer> {
   ]);
 
   const aspect = meta.height / meta.width;
-  const finishedAspect = DESIGN_ASPECT + footer.height / meta.width;
   const alreadyExtended =
-    Math.abs(aspect - finishedAspect) < Math.abs(aspect - DESIGN_ASPECT);
+    Math.abs(aspect - FINISHED_ASPECT) < Math.abs(aspect - DESIGN_ASPECT);
 
+  // The strip is the remainder that makes the finished poster exactly 4:5, never the band's own
+  // height — that is what closes the ~5px the divisible-by-16 artwork leaves over. The max() is
+  // a floor, not a policy: a band taller than the remainder would otherwise be cropped.
+  const strip = Math.max(
+    footer.height,
+    Math.round(FOOTER_STRIP_HEIGHT * scale),
+  );
   const base = alreadyExtended
     ? poster
-    : await extendCanvasForFooter(poster, footer.height);
-  const baseHeight = alreadyExtended
-    ? meta.height
-    : meta.height + footer.height;
+    : await extendCanvasForFooter(poster, strip);
+  const baseHeight = alreadyExtended ? meta.height : meta.height + strip;
 
   const margin = Math.round(LOCKUP_MARGIN * scale);
   return sharp(base)

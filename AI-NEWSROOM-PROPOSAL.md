@@ -1,62 +1,116 @@
-Proposal for AI NewsRoom
-An Integrated Content Operations Platform for the Directorate General of Information and Public Relations (DGIPR)
+# Proposal for AI NewsRoom
 
-1. Purpose of this proposal
-   The Directorate General of Information and Public Relations (DGIPR) is expected to convert meetings, policy decisions, government resolutions, press briefings, scheme information and field updates into accurate public communication across several formats and languages. This work must often be completed within hours, while preserving factual accuracy, correct Marathi, official designations and government visual identity.
+## A Secure On-Premises AI Content Operations Platform for the Directorate General of Information and Public Relations (DGIPR)
 
-AI NewsRoom is proposed as a single, Marathi-first workspace for this complete process. It helps authorised officers receive source material, review it, create publication-ready drafts, produce visual and video communication, translate and proofread content, make revisions, reuse approved material and monitor departmental usage.
+> **Government information processed within government-controlled infrastructure.**
+
+## 1. Purpose of this proposal
+
+The Directorate General of Information and Public Relations (DGIPR) is expected to convert meetings, policy decisions, government resolutions, press briefings, scheme information and field updates into accurate public communication across several formats and languages. This work must often be completed within hours, while preserving factual accuracy, correct Marathi, official designations and government visual identity.
+
+Because this work involves official, sensitive and sometimes unpublished government information, data security cannot be treated as an optional feature. Secure on-premises AI is therefore the foundation of the proposed AI NewsRoom. Approved AI models, the departmental knowledge base, document embeddings, the vector database and core processing services will operate within infrastructure controlled by DGIPR or an approved government data centre.
+
+AI NewsRoom is proposed as a secure, Marathi-first workspace built on this department-controlled AI foundation. It helps authorised officers receive source material, review it, create publication-ready drafts, produce visual and video communication, translate and proofread content, make revisions, reuse approved material and monitor departmental usage.
 
 The purpose of AI NewsRoom is not to replace the judgement or approval authority of DGIPR officers. Its purpose is to remove repetitive production work, make the source of every communication easier to review, and enable the DGIPR team to deliver more consistent output across more channels.
 
-This document presents AI NewsRoom as one unified product. Its capabilities are therefore described together as the intended operational scope, without separating them into current and future feature lists. 2. Executive summary
+This document presents AI NewsRoom as one unified product. Its capabilities are therefore described together as the intended operational scope, without separating them into current and future feature lists.
+
+## 2. Executive summary
+
+AI NewsRoom will give DGIPR a dedicated on-premises AI capability for government communication. Unlike a general-purpose public AI application, it will allow the department to control where official information is processed, where institutional knowledge is stored, who can access it and how the underlying AI models are operated and updated. The objective is not merely to provide access to AI tools, but to establish a secure AI environment owned and governed by the department.
+
 Government information commonly reaches DGIPR in fragmented forms: handwritten or typed notes, long meeting recordings, WhatsApp voice notes, YouTube press conferences, scanned government documents, photographed letters, spreadsheets embedded in PDFs and previously published articles. Officers must manually listen, copy, correct, condense, translate, design and reformat the same material multiple times before it can be used for a news article, social post, poster, thumbnail or video.
 
 This creates avoidable delays and several operational risks:
 
-facts can change while being copied between people and applications;
-names, designations, dates, amounts and scheme titles may be rendered inconsistently;
-Marathi content may be grammatically correct but may not follow the department's established public-communication style;
-designers may receive incomplete briefs or templates that do not fit the amount of information;
-every new format can become a separate production exercise;
-corrections may be communicated informally, making versions difficult to trace;
-valuable historical content is difficult to search and reuse;
-management has limited visibility into output volume, processing activity and attributable service usage;
-urgent work depends heavily on the availability of specialist writers, translators, transcribers, designers and video editors.
+- facts can change while being copied between people and applications;
+- names, designations, dates, amounts and scheme titles may be rendered inconsistently;
+- Marathi content may be grammatically correct but may not follow the department's established public-communication style;
+- designers may receive incomplete briefs or templates that do not fit the amount of information;
+- every new format can become a separate production exercise;
+- corrections may be communicated informally, making versions difficult to trace;
+- valuable historical content is difficult to search and reuse;
+- management has limited visibility into output volume, processing activity and attributable service usage;
+- urgent work depends heavily on the availability of specialist writers, translators, transcribers, designers and video editors;
+- using uncontrolled public AI tools can expose sensitive or unpublished government material to external systems;
+- externally hosted tools can limit departmental control over data residency, retention, access and auditability.
 
-AI NewsRoom addresses these problems through a governed source-to-publication workflow. Official material remains the factual authority. Officers review extracted text, selected pages, names, designations and key facts before generation. The platform then helps produce consistent Marathi articles, creatives, captions, translations, thumbnails and videos from that approved source. Results remain editable, versioned and reusable, while management receives department-level operational visibility.
+AI NewsRoom addresses these problems through a secure, on-premises and governed source-to-publication workflow. Official documents remain the factual authority. Semantic Search and Retrieval-Augmented Generation (RAG) retrieve relevant authorised material from the department's private knowledge base and provide it to the model as controlled context. Evaluation and source-faithfulness checks help identify unsupported output, while officers retain final review and approval authority. The result is a department-controlled AI capability rather than dependence on a public AI application.
 
-Because DGIPR handles government information, AI NewsRoom will also be offered through a secure on-premises deployment. The AI models, departmental knowledge base, vector database and sensitive processing workflows can operate within infrastructure controlled by the department. This provides greater data sovereignty, security and administrative control while reducing the need to transmit sensitive source material to external AI services. 3. Why the department needs AI NewsRoom
-3.1 Faster response to public-information requirements
+## 3. Why the department needs AI NewsRoom
+
+### 3.1 Protection of government information and data sovereignty
+
+DGIPR handles meeting records, government resolutions, policy information, official correspondence and material that may not yet be public. Processing such material through uncontrolled consumer AI applications can create risks relating to confidentiality, data retention, jurisdiction and unauthorised reuse.
+
+AI NewsRoom addresses this requirement through secure on-premises AI inference and department-controlled storage. Source documents, recordings, embeddings, generated content and operational records can remain within authorised infrastructure. Role-Based Access Control (RBAC), encryption and audit logging provide administrative safeguards, while external services or integrations are used only where specifically approved by the department.
+
+### 3.2 Faster response to public-information requirements
 Announcements, meetings and policy decisions often require simultaneous communication through news articles, social platforms, websites and video. AI NewsRoom reduces the time spent repeatedly converting the same source into each format and allows longer processing tasks to continue in the background while officers handle other work.
-3.2 Stronger factual control
+
+### 3.3 Stronger factual control
 General-purpose writing tools can produce fluent text without making it easy to determine which source supported a statement. AI NewsRoom is designed around the opposite principle: official inputs provide the facts, and historical articles or design templates provide style and structure only. Review stages, source views and fact-coverage checks keep the officer close to the original material.
-3.3 Consistent Marathi and official terminology
+
+### 3.4 Consistent Marathi and official terminology
 Government communication requires more than literal translation or ordinary grammar checking. It requires consistent spellings of people, places, departments and schemes; correct current designations; appropriate Devanagari rendering; and a recognisable Mahasamvad-style editorial voice. A shared verified glossary and specialised Marathi workflows make this consistency repeatable across the department.
-3.4 Reduced dependence on disconnected external tools
+
+### 3.5 Reduced dependence on disconnected external tools
 Transcription, drafting, translation, proofreading, poster creation, caption writing, video preparation and historical research are often performed in separate applications or by separate vendors. AI NewsRoom brings these activities into one workflow, reducing hand-offs, duplicate data entry and loss of context.
-3.5 Better use of institutional knowledge
+
+### 3.6 Better use of institutional knowledge
 Previously published Mahasamvad material contains valuable knowledge about departmental writing style and the history of schemes, projects and decisions. AI NewsRoom turns that archive into a usable institutional resource rather than leaving it as a collection that must be searched manually.
-3.6 More transparent operations
+
+### 3.7 More transparent operations
 Management can see how many outputs are being produced, which functions are being used, how activity changes over time and which user-facing tasks account for processing activity. This supports planning, utilisation review and more informed procurement oversight.
-3.7 Regular in-office training and continued support from HashCase
+
+### 3.8 Regular in-office training and continued support from HashCase
 Successful adoption requires more than making the software available. DGIPR employees must understand how to prepare source material, review generated content, use the approval controls and incorporate AI NewsRoom into their daily work.
 
 The team behind AI NewsRoom, HashCase, has been visiting the DGIPR office regularly to train employees in the use of the tool and to understand the department's practical working requirements. HashCase will continue these office visits and training sessions in the future, providing hands-on guidance, follow-up assistance and support whenever employees need help adopting the platform.
 
-This continuing relationship gives DGIPR an implementation partner that remains involved after delivery, responds to practical usage challenges and helps employees use the platform effectively. It ensures that AI NewsRoom develops in response to the department's real operational needs and that staff receive continued enablement rather than being left to adopt the tool without assistance. 4. Proposed solution
-AI NewsRoom will provide a unified digital workspace for DGIPR officers through web and mobile applications. An officer can begin with raw or approved source material and move through the complete communication lifecycle:
+This continuing relationship gives DGIPR an implementation partner that remains involved after delivery, responds to practical usage challenges and helps employees use the platform effectively. It ensures that AI NewsRoom develops in response to the department's real operational needs and that staff receive continued enablement rather than being left to adopt the tool without assistance.
 
-Receive notes, recordings, links, documents or photographs.
-Convert speech and documents into reviewable text.
-Select only the relevant pages and sources.
-Correct extraction errors, names, designations and key facts.
-Create an article, news report, caption, poster, thumbnail, translation, transcript or video.
-Review factual coverage, wording, layout, imagery and branding.
-Request precise revisions without restarting the entire task.
-Download or publish the approved output through the appropriate authorised channel.
-Reuse the same approved material for other formats.
-Search previous work and review department-level usage. 5. Complete functional scope
-5.1 Unified intake of government source material
+## 4. Proposed solution
+
+### 4.1 Secure on-premises AI foundation
+
+The central component of AI NewsRoom will be a private AI environment deployed within DGIPR-controlled infrastructure or an approved government data centre. HashCase will deploy, configure and adapt approved language, vision, speech and document-processing models for DGIPR's Marathi-first communication requirements. Where appropriate and supported by evaluation, selected models can be fine-tuned or adapted using department-approved datasets; government information will not be used to train a public model.
+
+The on-premises architecture will be designed around the following components, sized and configured for DGIPR's operational requirements:
+
+- locally hosted Large Language Models (LLMs) for drafting, summarisation, question answering and assisted review;
+- Marathi-capable speech-to-text, Optical Character Recognition (OCR) and multimodal document understanding;
+- a private departmental knowledge base containing authorised government documents and approved Mahasamvad material;
+- Semantic Search using embeddings stored in a department-controlled vector database;
+- Retrieval-Augmented Generation (RAG) to ground responses in relevant approved sources;
+- document-level citations, source provenance and traceability between inputs and generated outputs;
+- Role-Based Access Control (RBAC), encryption, audit logging and configurable retention controls;
+- model evaluation, monitoring, version control and controlled upgrades;
+- backups, disaster recovery and continuing operational support.
+
+The AI model will not be treated as the department's factual database. Official documents remain the source of truth. RAG retrieves relevant authorised material for each task and supplies it to the model as controlled context, allowing departmental knowledge to be updated without repeatedly retraining the complete model.
+
+A formal AI evaluation framework will measure retrieval relevance, source coverage, factual faithfulness, Marathi language quality, terminology consistency and unsupported-claim rates. Representative DGIPR test cases will be used to assess significant model, prompt or retrieval changes before deployment. This technical evaluation complements, but does not replace, human-in-the-loop review and the officer's final publication authority.
+
+### 4.2 Unified source-to-publication workflow
+
+On top of this secure AI foundation, AI NewsRoom will provide a unified digital workspace for DGIPR officers through web and mobile applications. An officer can begin with raw or approved source material and move through the complete communication lifecycle:
+
+1. Receive notes, recordings, links, documents or photographs.
+2. Convert speech and documents into reviewable text.
+3. Select only the relevant pages and sources.
+4. Correct extraction errors, names, designations and key facts.
+5. Create an article, news report, caption, poster, thumbnail, translation, transcript or video.
+6. Review factual coverage, wording, layout, imagery and branding.
+7. Request precise revisions without restarting the entire task.
+8. Download or publish the approved output through the appropriate authorised channel.
+9. Reuse the same approved material for other formats.
+10. Search previous work and review department-level usage.
+
+## 5. Complete functional scope
+
+### 5.1 Unified intake of government source material
 AI NewsRoom accepts the forms in which government information actually arrives, including:
 
 pasted meeting notes, press notes, scheme briefs and approved articles;
@@ -366,44 +420,47 @@ user documentation with screenshots and step-by-step journeys.
 
 The objective is to make advanced content-production support usable by officers without requiring them to understand the underlying services or write specialised instructions.
 
-5.25 Secure on-premises AI and knowledge architecture
-AI NewsRoom will include the option of a dedicated on-premises AI deployment for DGIPR. The selected language and multimodal models can be hosted on department-controlled servers or an approved government data-centre environment, allowing sensitive government material to be processed within the authorised infrastructure.
-The deployment can include:
-locally hosted Large Language Models (LLMs) for drafting, summarisation, question answering and assisted review;
-Marathi-capable speech-to-text and Optical Character Recognition (OCR) services;
-a private departmental knowledge base containing authorised documents and approved Mahasamvad material;
-Semantic Search using embeddings and a vector database;
-Retrieval-Augmented Generation (RAG) to ground responses in approved departmental sources;
-document-level citations and source provenance for traceability;
-Role-Based Access Control (RBAC), audit logging and administrative permissions;
-encryption for data at rest and in transit;
-model evaluation, monitoring and version control;
-controlled model updates, backups and disaster-recovery procedures;
-optional fine-tuning or parameter-efficient adaptation using approved departmental datasets where evaluation demonstrates a measurable benefit.
-This architecture provides data residency and data sovereignty while enabling DGIPR to retain control over its models, knowledge repositories, access policies and operational records. External integrations, where specifically approved, can be isolated and governed according to departmental security policy.
-The recommended approach is not to rely on model memory as the factual repository. Official documents remain the source of truth, while RAG supplies relevant authorised information to the model for each task. This makes the knowledge base easier to update and reduces the risk of outdated or unsupported responses. 6. Expected organisational benefits
-6.1 Shorter content turnaround
+## 6. Expected organisational benefits
+
+### 6.1 Government data sovereignty
+
+DGIPR retains control over sensitive source material, AI inference, departmental knowledge indexes, generated outputs and operational records. The department can determine where this information is stored, who may access it, which models are approved and how model and data updates are governed.
+
+### 6.2 Reduced dependence on public AI platforms
+
+A department-controlled AI environment reduces dependence on general-purpose public AI services and provides a governed path for security review, integration, capacity expansion and model upgrades. It also allows the AI capability to be adapted to DGIPR's Marathi terminology, workflows and institutional knowledge.
+
+### 6.3 Shorter content turnaround
+
 One approved source can be converted into an article, translation, poster, caption, thumbnail and video without recreating the brief for every specialist. Background processing and targeted retries further reduce delay.
-6.2 Greater output capacity from the same team
+### 6.4 Greater output capacity from the same team
+
 Routine transcription, first-draft preparation, reformatting, translation, visual adaptation and subtitle preparation consume substantial staff time. Automating the repeatable portion allows officers to concentrate on source validation, judgement and approval.
-6.3 Fewer avoidable factual and language errors
+### 6.5 Fewer avoidable factual and language errors
+
 Source review, name checks, designation confirmation, glossary controls, numeric safeguards and fact-coverage views create multiple opportunities to detect errors before publication.
-6.4 Consistent government identity
+### 6.6 Consistent government identity
+
 Central brand controls and a governed template library reduce inconsistent logos, misplaced footers, unsuitable layouts and creative variation that does not match departmental standards.
-6.5 Better multilingual reach
+### 6.7 Better multilingual reach
+
 The same verified content can be made available in Marathi, English and Hindi while keeping proper names under officer control. This supports broader and faster public access to government information.
-6.6 Improved reuse of approved content
+### 6.8 Improved reuse of approved content
+
 Searchable history, related-work threads and format conversion allow the department to reuse a valid source rather than restarting every social, poster or translation request.
-6.7 Stronger institutional memory
+### 6.9 Stronger institutional memory
 Historical Mahasamvad material becomes useful for writing style, topic progression and evidence-backed “What Changed?” communication. Knowledge remains available even when staff roles change.
-6.8 Reduced avoidable processing expenditure
+### 6.10 Reduced avoidable processing expenditure
+
 Selecting pages before scanned-document reading, reusing existing transcripts, regenerating only one video scene, reassembling stored clips and retrying only failed stages all reduce repeat processing.
-6.9 Better management and procurement visibility
+### 6.11 Better management and procurement visibility
+
 Department-level dashboards connect output counts and activity to understandable tasks and units. This provides a more defensible basis for evaluating utilisation and planning future capacity.
 
-7. Conclusion
-   The Directorate General of Information and Public Relations needs to be fast, accurate, multilingual, visually consistent and accountable at the same time. Existing fragmented processes make those requirements unnecessarily difficult to satisfy, especially when the same team must handle recordings, long documents, news writing, translation, social media, design and video under deadline.
+## 7. Conclusion
 
-AI NewsRoom provides a practical operating environment for that responsibility. It converts official source material into reviewable and reusable communication assets while keeping the officer in control of facts, terminology, revisions and publication. It also protects institutional knowledge through shared glossaries, approved templates, searchable history and evidence-backed use of the Mahasamvad archive.
+The Directorate General of Information and Public Relations needs an AI capability that is secure before it is fast, and controlled before it is convenient. Government documents, recordings, unpublished decisions and institutional knowledge should be processed under government-defined access, retention and security policies rather than through uncontrolled public AI applications.
 
-By treating the full content lifecycle as one connected process, AI NewsRoom can help the department communicate more quickly, use staff time more effectively, reduce avoidable errors, maintain a consistent public identity and demonstrate the operational value of its digital-content investment.
+AI NewsRoom will provide DGIPR with its own secure on-premises AI environment. The department will retain control over its information, approved models, private knowledge base and operational records. Semantic Search, a department-controlled vector database and Retrieval-Augmented Generation will ground AI assistance in authorised sources, while evaluation, traceability and human-in-the-loop approval will provide safeguards for official communication.
+
+Built on this secure foundation, the platform will convert official source material into reviewable and reusable articles, translations, creatives, videos and public-information assets. This combination of data sovereignty, Marathi-first AI and practical content automation is the central value of AI NewsRoom.

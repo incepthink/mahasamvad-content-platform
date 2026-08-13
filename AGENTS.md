@@ -2965,6 +2965,63 @@ Not implemented yet: Canva integration, authentication.
 
 ## Latest Implementation Milestone
 
+- **The social poster is 4:5 again, so Canva has no gap to close** (2026-08-13, no migration):
+  officers place a finished twitter/facebook poster on a 1080x1350 Canva canvas, and it did not
+  fit — it left an unfilled gap down each side, which they were closing by hand by displacing
+  the design. The cause was ours and three days old: appending the footer (2026-08-10) had made
+  the delivered file **1280x1691**, i.e. 1:1.32, where 1080x1350 is 4:5. Resolution was never
+  the issue — 1280x1600 drops into that frame perfectly, and downscaling to 1080 would only cost
+  29% of the pixels — so the fix is the ASPECT.
+  The height for the strip is now taken out of the **request** rather than off the finished
+  image: the model is asked for **1280x1504** and `overlayTwitterChrome` joins the band onto a
+  96px strip below it, for exactly **1280x1600**. That is deliberately not the two alternatives.
+  Cropping 91px off a 1600-tall render would reopen the text-burying bug the append exists to
+  close (a crop is unconditional; a shorter canvas still means the band lands on pixels the
+  model never painted), and squashing 1600 into 1509 is a 5.7% anisotropic distortion, visible
+  on faces and the emblem.
+  - **It is 1504, not 1600−91, because gpt-image-2 requires both dimensions divisible by 16.**
+    Verified live before writing any code: `1280x1509` returns a 400 in ~1.1s —
+    `"Invalid size '1280x1509'. Width and height must both be divisible by 16."` — which on the
+    real path would have failed every social run *after* the copy call was paid for. `1280x1504`
+    was then confirmed accepted and returning exactly 1280x1504. The 96px strip is ~5px taller
+    than the band's own ~91px, and that difference is absorbed by the same edge-continuation
+    fill that already hides the join, so it reads as poster rather than as padding. The
+    invariant to keep: **artwork % 16 === 0 and strip ≥ band height.**
+  - **CMO must stay 1280x1600 and would have been broken by a global change.** `overlayCmoChrome`
+    OVERLAYS its full-width leader header and footer instead of appending, so what the model
+    paints IS the finished CMO poster — already 4:5, already fine in Canva. But both brands share
+    ONE n8n workflow, whose size was a hardcoded form field. So the render size now travels in
+    the webhook payload (`size`), and the workflow's Set node defaults it to `'1280x1600'`. That
+    default is what makes the deploy safe in **both** directions: an old API against the new
+    workflow renders exactly as today, and a new API against the old workflow has its `size`
+    ignored rather than mis-rendered. Neither half can produce a broken poster.
+  - **Masters are deliberately left at 1280x1600.** They are the edit INPUT, not the output; the
+    prompt already calls the reference structural rather than pixel-locked and licenses reflow,
+    so a 5.7% aspect difference is immaterial. Re-normalising would mean rewriting 91 immutable
+    library objects and would break the `aspect-ratio: 4 / 5` thumbnails on `/references`.
+  - `SOCIAL_ZONES.height` is now the **artwork** (1504), not the poster, so the content floor
+    moves y=1584 → **y=1488**. Both `DESIGN_ASPECT` (1:1.175) and `FINISHED_ASPECT` (4:5) are
+    derived from the constants rather than from the runtime band height — that is what makes the
+    finished poster exactly 4:5 whatever the footer asset measures — and the idempotence test
+    still cleanly separates them (gap 0.075). "Single 4:5 portrait poster" became "single
+    portrait poster" on the two lanes that paint artwork; CMO's line is untouched, being true.
+    Verified 2026-08-13, all free except the two size probes (~$0.04 total): workspace typecheck
+    **7/7 green**, eslint clean on every touched file, prettier clean on my hunks (the four
+    whole-file complaints are pre-existing CRLF — confirmed per file, zero content diff — so do
+    NOT `--write` them); four prompt harnesses green with new assertions pinning `1280 x 1504
+    output` and `y=1488`; and `poster:preview:chrome:twitter` rewritten into a **regression
+    test** that renders the real 1280x1504 artwork and asserts the finished poster is exactly
+    1280x1600 and that re-stamping does not grow it — the check an eyeball is bad at. Plus an
+    offline geometry pass on the hostile cases: a textured (dark column / warm block) bottom edge
+    still finishes 1280x1600 at aspect 1.2500, a feedback round-trip lands back on 1600, a
+    finished poster handed back in does not grow, and a 1024-wide render still comes out 4:5.
+    **Left for a real run** (one image charge each): a DGIPR `ठरलेले टेम्पलेट` poster and a
+    `fresh` poster confirming 1280x1600 out with the design reaching the bottom edge, one
+    feedback round on each confirming it stays 1280x1600, and one **CMO** run confirming it is
+    unchanged at 1280x1600. **Deploy order is the NORMAL one — API first, then `pnpm n8n:push`**
+    (rebuild `@dgipr/poster-renderer` → `@dgipr/content-engine` dists first). No migration, no
+    web change.
+
 - **/translate asks one question, and the SOURCE is read off the text** (2026-08-12, no
   migration, web only — SUPERSEDES the four-pill direction row in the PDF-translation and
   Hindi milestones below): the picker sat two cards below the box it was about and asked for a

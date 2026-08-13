@@ -394,11 +394,12 @@ if (
     lockupHeight: 130,
     footerHeight: 70,
   };
-  // The social lane, whose footer is APPENDED below the artwork rather than pasted over it.
-  // Mirrors SOCIAL_ZONES in build-poster-prompt.ts.
+  // The social lane, whose footer is APPENDED below the artwork rather than pasted over it —
+  // so `height` is the ARTWORK the model paints (1504), not the 1600-tall 4:5 poster the
+  // officer receives. Mirrors SOCIAL_ZONES in build-poster-prompt.ts.
   const SOCIAL: ReservedZoneGeometry = {
     width: 1280,
-    height: 1600,
+    height: 1504,
     lockupWidth: 180,
     lockupHeight: 170,
     footerHeight: 91,
@@ -418,8 +419,8 @@ if (
     failures.push('thumbnail content floor drifted off y=650');
   // The appended floor is set by the MARGIN, not by the band height — getting this wrong is
   // how the poster would come back letterboxed above its own footer.
-  if (contentBottomY(SOCIAL) !== 1584)
-    failures.push('appended-footer content floor drifted off y=1584');
+  if (contentBottomY(SOCIAL) !== 1488)
+    failures.push('appended-footer content floor drifted off y=1488');
   if (footerIsAppended(POSTER) || !footerIsAppended(SOCIAL))
     failures.push('footerIsAppended does not distinguish the two lanes');
 
@@ -700,7 +701,15 @@ if (
     );
   }
   need(socialZones, '16 pixels', 'appended lane lost the text cushion');
-  need(socialZones, 'y=1584', 'appended lane content floor drifted');
+  need(socialZones, 'y=1488', 'appended lane content floor drifted');
+  // The artwork canvas, not the 1600-tall finished poster. If this ever reads 1600 again the
+  // model is being asked for a canvas the band is then joined below, and the delivered file
+  // stops being 4:5 — which is the gap officers were closing by hand in Canva.
+  need(
+    socialZones,
+    '1280 x 1504 output',
+    'appended lane artwork canvas drifted',
+  );
   need(socialZones, 'RESERVED BADGE CORNER', 'appended lane lost its heading');
   deny(
     socialZones,
