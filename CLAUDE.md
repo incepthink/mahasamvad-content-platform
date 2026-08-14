@@ -825,6 +825,28 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   BOTH libraries (`anyLayoutById`), and `listRecentPosterStyles(client, limit, categories)` is
   SCOPED per lane so a social coverage can't bar an article pick. Harnesses (free):
   `tsx src/generation/{article-poster-layouts,build-article-poster-prompt}.ts`.
+- **Social poster arrangement = ONE assigned ANCHOR, and it is the only design assignment the
+  fresh lane still emits** (`generation/poster-placements.ts`, 2026-08-14). 14 anchors across 6
+  families (`immersive`/`anchored`/`divided`/`centred`/`stacked`/`typographic`), picked per run by
+  the same seeded, recency-aware picker the palette and layout use. Each states ONE thing — where
+  the visual weight sits and how the canvas is divided — and nothing else, which is what
+  distinguishes it from the retired `poster-layouts.ts` archetypes that specified whole posters;
+  a harness assertion fails on that library's vocabulary (`kicker`, `bullet`, `card`,
+  `reversed-out`) and on any instruction over 420 chars. **Read the bullet below with this in
+  mind: the palette and the composition archetype are still ASSIGNED and still persisted, but
+  neither has reached the image prompt since 2026-08-10 — the anchor is the one that does.**
+  Eligibility is a HARD FILTER before the pick (`imagery`, `maxItems` against
+  `posterCopyItemCount` of the written copy), which is what lets the prompt state the arrangement
+  firmly instead of hedging it: an arrangement the content cannot carry is never assigned. The
+  block (`arrangementBlock` in `build-poster-prompt.ts`, emitted second to last, before the chrome)
+  hands every other decision back explicitly, is outranked by exactly three things (all content
+  shown, readability, reserved zones) and names the two default shapes as what the retreat may NOT
+  be. **The redo bars the previous version's anchor AND family on BOTH buttons** (colour is barred
+  only by the recolour button), which is what makes पुन्हा तयार करा structurally guarantee a
+  different-shaped poster rather than re-send an identical prompt. Persisted as
+  `poster_style.placementId`/`placementFamily` — jsonb, no migration; an absent one is normal
+  (article runs, template-edit runs, every row before this) and never nulls the style. Free
+  harness: `tsx src/generation/poster-placements.ts`.
 - **Social poster look = TWO assigned rotations, not the model's taste.** A fresh (fully-AI)
   social poster gets a **colour palette** (`generation/poster-palettes.ts` — 18 entries, 3 per
   family across `cool|teal|green|purple|neutral|warm`, each with 4 exact **hex** values and a

@@ -22,6 +22,17 @@ export type ExtractPdfOptions = Readonly<{
   // Pages finished, for the OCR path's chunk-by-chunk progress. Never called on
   // the text-layer path, which returns in one step.
   onProgress?: ((pagesDone: number, pageCount: number) => void) | undefined;
+  // One page's text, the moment it lands — so a caller can persist and SHOW it while the
+  // rest of the document is still being read. A 400-page scan is a long time to look at a
+  // spinner, and the pages exist long before the last one does.
+  //
+  // Pages arrive OUT OF ORDER: the reads run concurrently, so this fires 3, 1, 7, 2… The
+  // caller is expected to file each one by `page.page` rather than append it, or the
+  // document shuffles in front of the officer.
+  //
+  // Best-effort and advisory: it never affects the returned array, and a caller that throws
+  // in here must not be able to lose a page that was already read and paid for.
+  onPage?: ((page: PdfPage) => void) | undefined;
   // The user's page selection: 1-based ORIGINAL page numbers. Undefined = the whole
   // document. On the OCR path ONLY these pages are sent to Sarvam — that is the entire
   // point of the option, since OCR is billed per page and a page nobody selected is a

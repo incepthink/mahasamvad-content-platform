@@ -11,7 +11,7 @@ The Directorate General of Information and Public Relations (DGIPR) manages a wi
 HashCase proposes a **Complete AI-Powered Public Relations Solution** that combines:
 
 - a secure, on-premises AI platform developed for DGIPR;
-- one or two trained HashCase professionals working from the DGIPR office;
+- one or two trained HashCase professionals working on-site at a DGIPR-designated office location;
 - end-to-end production of finished, review-ready outputs;
 - specialised workflows for articles, translations, creatives, videos, interviews, media intelligence, presentations and RFPs; and
 - continuous training, quality control and identification of new opportunities for AI-assisted departmental work.
@@ -502,7 +502,7 @@ This structure combines AI speed with professional operation and departmental ac
 
 ## 25. On-Site Personnel, Training and Continuous Support
 
-One or two HashCase professionals will work from the DGIPR office as the operational bridge between departmental teams and the AI platform. Their work will include:
+One or two HashCase professionals will work on-site at a DGIPR-designated office location as the operational bridge between departmental teams and the AI platform. Their work will include:
 
 - operating the complete solution;
 - accepting and coordinating content assignments;

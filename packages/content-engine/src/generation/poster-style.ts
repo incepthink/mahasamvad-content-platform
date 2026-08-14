@@ -28,6 +28,11 @@ import {
   articleLayoutById,
   type ArticlePosterLayout,
 } from './article-poster-layouts.js';
+import {
+  placementById,
+  type PlacementFamily,
+  type PosterPlacement,
+} from './poster-placements.js';
 
 // Both poster kinds store their assigned composition in the SAME `generations.poster_style`
 // column, and they draw from two different libraries — portrait social archetypes
@@ -56,6 +61,18 @@ export type PosterStyle = Readonly<{
   family: PaletteFamily;
   layoutId: string;
   coverage: LayoutCoverage;
+  // The ARRANGEMENT the fresh social lane was assigned (poster-placements.ts, 2026-08-14) —
+  // optional because no row written before that date has one, because the article lane does not
+  // use this library, and because the template-edit modes are assigned nothing at all. jsonb, so
+  // adding it needed no migration: 0028's column has no column schema.
+  //
+  // Unlike `layoutId` beside it, this one DOES reach the image prompt, and that asymmetry is the
+  // thing to know when reading a stored style. The layout is a rotation that no longer influences
+  // the render (retired 2026-08-10, kept for the id history); the placement is what the poster was
+  // actually asked to be arranged as. It is persisted for two readers: the recency ring, and the
+  // redo button, which bars this exact id and family so the next version cannot repeat the shape.
+  placementId?: string | undefined;
+  placementFamily?: PlacementFamily | undefined;
   // Absent when the render failed before it could be measured, or on a CMO/edit-mode run.
   measured?: MeasuredColours | undefined;
 }>;
@@ -68,6 +85,11 @@ export type StyleHistory = Readonly<{
   families: readonly PaletteFamily[];
   layoutIds: readonly string[];
   coverages: readonly LayoutCoverage[];
+  // The arrangements the last few fresh social posters were assigned. These are the ring that
+  // most directly answers "why does every poster look the same shape", because unlike the layout
+  // ids above them they describe something the image model was actually told.
+  placementIds: readonly string[];
+  placementFamilies: readonly PlacementFamily[];
   measuredBuckets: readonly string[];
   // One human-readable line per recent poster, newest first, for the art director's
   // "design something different from these" brief.
@@ -79,6 +101,8 @@ export const EMPTY_STYLE_HISTORY: StyleHistory = {
   families: [],
   layoutIds: [],
   coverages: [],
+  placementIds: [],
+  placementFamilies: [],
   measuredBuckets: [],
   treatments: [],
 };
@@ -112,6 +136,10 @@ export function parsePosterStyle(value: unknown): PosterStyle | null {
   const layout = anyLayoutById(str(raw.layoutId));
   if (!palette || !layout) return null;
   const measured = parseMeasured(raw.measured);
+  // An unresolvable or absent placement is NOT fatal to the style, unlike the palette and layout
+  // above: every row written before 2026-08-14, every article run and every template-edit run
+  // legitimately has none, and nulling those would throw away their colour history too.
+  const placement = placementById(str(raw.placementId));
   return {
     paletteId: palette.id,
     // Trust the library over the stored copy: if a palette was re-classified, the CURRENT
@@ -119,6 +147,11 @@ export function parsePosterStyle(value: unknown): PosterStyle | null {
     family: palette.family,
     layoutId: layout.id,
     coverage: layout.coverage,
+    // Same "trust the library" rule as the palette family — a re-classified anchor spreads
+    // against where it sits now, not where it sat when the row was written.
+    ...(placement
+      ? { placementId: placement.id, placementFamily: placement.family }
+      : {}),
     ...(measured ? { measured } : {}),
   };
 }
@@ -129,12 +162,17 @@ export function buildPosterStyle(
   // Either library's archetype — the social and article paths both call this.
   layout: AnyLayout,
   measured?: MeasuredColours | undefined,
+  // Fresh social runs only; the article lane and the template-edit modes pass nothing.
+  placement?: PosterPlacement | undefined,
 ): PosterStyle {
   return {
     paletteId: palette.id,
     family: palette.family,
     layoutId: layout.id,
     coverage: layout.coverage,
+    ...(placement
+      ? { placementId: placement.id, placementFamily: placement.family }
+      : {}),
     ...(measured ? { measured } : {}),
   };
 }
@@ -171,7 +209,13 @@ export function familyHonoured(family: PaletteFamily, hueBucket: string): boolea
 export function describePosterStyle(style: PosterStyle): string {
   const palette = paletteById(style.paletteId);
   const layout = anyLayoutById(style.layoutId);
-  const parts = [palette?.palette ?? style.paletteId, layout?.name ?? style.layoutId];
+  // The ARRANGEMENT is what the image model was told, so it describes the poster; the layout is a
+  // rotation that has not reached a prompt since 2026-08-10. Prefer the one that is true.
+  const placement = placementById(style.placementId);
+  const parts = [
+    palette?.palette ?? style.paletteId,
+    placement?.name ?? layout?.name ?? style.layoutId,
+  ];
   if (style.measured && style.measured.groundIsWarm) {
     parts.push('rendered with a warm cream background');
   }
@@ -191,6 +235,11 @@ export const PALETTE_ID_RING = 5;
 export const LAYOUT_ID_RING = 4;
 export const BUCKET_RING = 3;
 export const TREATMENT_RING = 4;
+// 14 anchors across 6 families, so barring 3 families still leaves at least half the library and
+// barring 5 ids leaves nine. Both are upper bounds, not promises — pickPlacement skips any filter
+// that would empty the pool.
+export const PLACEMENT_FAMILY_RING = 3;
+export const PLACEMENT_ID_RING = 5;
 
 export function toStyleHistory(stored: readonly unknown[]): StyleHistory {
   const styles = stored
@@ -218,6 +267,19 @@ export function toStyleHistory(stored: readonly unknown[]): StyleHistory {
     families: dedupe(styles.map((s) => s.family), FAMILY_RING),
     layoutIds: dedupe(styles.map((s) => s.layoutId), LAYOUT_ID_RING),
     coverages: dedupe(styles.map((s) => s.coverage), COVERAGE_RING),
+    // Filtered before de-duplication: a run with no placement (article, template-edit, or any
+    // row older than 2026-08-14) must not occupy a ring slot with an empty string, or a few
+    // legacy rows would fill the ring and stop it barring anything real.
+    placementIds: dedupe(
+      styles.map((s) => s.placementId ?? '').filter((id) => id.length > 0),
+      PLACEMENT_ID_RING,
+    ),
+    placementFamilies: dedupe(
+      styles
+        .map((s) => s.placementFamily)
+        .filter((f): f is PlacementFamily => f !== undefined),
+      PLACEMENT_FAMILY_RING,
+    ),
     measuredBuckets: dedupe(
       styles
         .map((s) => s.measured?.hueBucket ?? '')
@@ -235,7 +297,11 @@ export function posterStyleLabel(value: unknown): string | null {
   if (!style) return null;
   const palette = paletteById(style.paletteId);
   const layout = anyLayoutById(style.layoutId);
-  const parts = [palette?.label, layout?.label].filter(
+  // Same choice as describePosterStyle, and here it matters to the officer rather than to a log:
+  // the label sits under the poster on the detail page, so it must name the arrangement the
+  // poster was actually asked for rather than a rotation nothing acted on.
+  const placement = placementById(style.placementId);
+  const parts = [palette?.label, placement?.label ?? layout?.label].filter(
     (p): p is string => typeof p === 'string' && p.length > 0,
   );
   return parts.length > 0 ? parts.join(' · ') : null;
@@ -334,6 +400,77 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     if (mixed.layoutIds.length !== 2) {
       failures.push(`mixed history lost a layout: ${JSON.stringify(mixed.layoutIds)}`);
     }
+  }
+
+  // 7. THE ARRANGEMENT (2026-08-14). It shares the 0028 column with everything above and had no
+  //    migration, so the two things that matter are that it survives a round trip and that its
+  //    ABSENCE is harmless — every row written before it, every article run and every
+  //    template-edit run legitimately has none, and nulling those would throw away their colour
+  //    history as well.
+  {
+    const { POSTER_PLACEMENTS, placementById } = await import(
+      './poster-placements.js'
+    );
+    const anchor = POSTER_PLACEMENTS[2] as PosterPlacement;
+    const withPlacement = buildPosterStyle(palette, layout, undefined, anchor);
+    const backP = parsePosterStyle(JSON.parse(JSON.stringify(withPlacement)));
+    if (backP?.placementId !== anchor.id)
+      failures.push(`the placement was lost in the round trip: ${backP?.placementId}`);
+    if (backP?.placementFamily !== anchor.family)
+      failures.push('the placement family was not resolved from the library');
+
+    // A style with NO placement still parses — this is the pre-2026-08-14 row, and it is the
+    // majority of the table.
+    const legacy = parsePosterStyle(JSON.parse(JSON.stringify(built)));
+    if (!legacy) failures.push('a style with no placement failed to parse');
+    if (legacy?.placementId !== undefined)
+      failures.push('a style with no placement invented one');
+    // …and so does one naming an anchor the library no longer has: it loses the arrangement,
+    // never the whole style.
+    const stale = parsePosterStyle({
+      ...JSON.parse(JSON.stringify(withPlacement)),
+      placementId: 'retired_anchor',
+    });
+    if (!stale) failures.push('an unresolvable placement nulled the whole style');
+    if (stale?.placementId !== undefined)
+      failures.push('an unresolvable placement id survived the parse');
+
+    // The label names the ARRANGEMENT, not the layout: the layout is a rotation that has not
+    // reached a prompt since 2026-08-10, and the officer reads this under the poster.
+    const labelled = posterStyleLabel(withPlacement);
+    if (!labelled?.includes(anchor.label))
+      failures.push(`the label does not name the arrangement: ${labelled}`);
+    if (labelled?.includes(layout.label))
+      failures.push(
+        'the label still names the retired composition rotation beside the arrangement',
+      );
+    // An article/legacy row has no arrangement, so it keeps naming its layout rather than losing
+    // half its label.
+    if (!posterStyleLabel(built)?.includes(layout.label))
+      failures.push('a style with no arrangement lost its layout label');
+
+    // The history ring carries placements, and a run WITHOUT one must not occupy a slot — a few
+    // legacy rows would otherwise fill the ring and stop it barring anything real.
+    const mixedHistory = toStyleHistory([
+      withPlacement,
+      built,
+      buildPosterStyle(
+        POSTER_PALETTES[3] as PosterPalette,
+        POSTER_LAYOUTS[2] as PosterLayout,
+        undefined,
+        POSTER_PLACEMENTS[7] as PosterPlacement,
+      ),
+    ]);
+    if (mixedHistory.placementIds.length !== 2)
+      failures.push(
+        `placement ring took ${mixedHistory.placementIds.length} entries from 2 placed + 1 unplaced style`,
+      );
+    if (mixedHistory.placementIds.some((id) => placementById(id) === null))
+      failures.push('the placement ring carries an id the library cannot resolve');
+    if (mixedHistory.placementFamilies.length === 0)
+      failures.push('the placement family ring came back empty');
+    if (EMPTY_STYLE_HISTORY.placementIds.length !== 0)
+      failures.push('the empty history is not empty for placements');
   }
 
   if (failures.length > 0) {

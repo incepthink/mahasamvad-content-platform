@@ -26,9 +26,10 @@ export type DocumentKind = z.infer<typeof DocumentKindSchema>;
 // default — so the only bound left is the box's memory: an intake job holds the file's bytes
 // in process for its TTL, so a very large upload costs RAM for up to 60 minutes.
 //
-// The page-selection spend gate is untouched and is what still keeps a 300-page scan cheap:
-// nothing is read until pages are ticked, and OCR_MAX_TOTAL_PAGES (env
-// SARVAM_DOC_MAX_TOTAL_PAGES, default 50) bounds that SELECTION, not the file.
+// The page-selection spend gate is untouched and is what keeps a 300-page scan cheap:
+// nothing is read until pages are ticked. It is now the ONLY gate — OCR_MAX_TOTAL_PAGES no
+// longer defaults to 50 and is off unless SARVAM_DOC_MAX_TOTAL_PAGES is set, since every
+// page it refused had already been chosen on purpose.
 export const DOCUMENT_MAX_BYTES = Number.POSITIVE_INFINITY;
 
 // Which backend produced the page text. Shown to the user because it changes how hard the

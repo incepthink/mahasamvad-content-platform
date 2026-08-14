@@ -137,6 +137,11 @@ async function downloadEntry(
   return downloadFile(client, DLO_UPLOADS_BUCKET, entry.storagePath);
 }
 
+// How often a running PDF read reports its page count onto the row. `files` is one jsonb
+// blob rewritten in full on every update, so this is a real cost at 400 pages, not a
+// nicety — see extractPdfEntry.
+const PROGRESS_WRITE_MS = 2_000;
+
 // Look at a PDF without paying for it. A born-digital file's text layer is free, so it is
 // read here and the officer never sees a selection step for it. A SCANNED file stops at
 // 'needs-selection' carrying only its page count: reading it costs OCR credits per page,
@@ -173,11 +178,22 @@ async function probePdfEntry(
 // `pages` is the officer's selection and is what bounds the spend — only these pages are
 // sent to OCR. 'auto' rather than a forced 'ocr' even here, because the selected pages may
 // carry a readable text layer even when the document as a whole did not.
+//
+// While it runs it reports PROGRESS onto the row (`pagesRead`), so प्रक्रिया can fill in a
+// row per page instead of showing a spinner for what, on a long scan, is many minutes.
+// Throttled rather than written per page: `files` is one jsonb blob holding every source, so
+// each write re-sends the whole thing — writing per page on a 400-page document would rewrite
+// a growing blob 400 times, which is quadratic and would become its own bottleneck. Every
+// PROGRESS_WRITE_MS the officer sees a small group of pages appear, which nobody notices.
+//
+// `index` is where this entry sits in the row's `files`, needed because the progress write
+// has to re-read and patch that array; omit it and the read simply runs without reporting.
 async function extractPdfEntry(
   client: SupabaseClient,
   entry: DloIntakeFileEntry,
   pages: readonly number[],
   source: 'auto' | 'ocr' = 'auto',
+  progress?: Readonly<{ intakeId: string; index: number }>,
 ): Promise<DloIntakeFileEntry> {
   const data = await downloadEntry(client, entry);
   // A cost scope around the read itself rather than around the whole job: this function is
@@ -187,14 +203,52 @@ async function extractPdfEntry(
   // so the event is the only record. A born-digital PDF read from its text layer spends
   // nothing and records nothing — recordOcrCost only fires on the pixel path.
   const cost = createCostAccumulator();
+
+  // Fire-and-forget, throttled, and never allowed to fail the read: these pages are already
+  // paid for, so a progress write that loses a race or hits a transient database error must
+  // cost the animation, not the document.
+  const readPages: number[] = [];
+  let lastWrite = 0;
+  let writing: Promise<void> = Promise.resolve();
+  const reportProgress = (): void => {
+    if (!progress) return;
+    const now = Date.now();
+    if (now - lastWrite < PROGRESS_WRITE_MS) return;
+    lastWrite = now;
+    // Snapshot ascending: the reads finish out of order, and a list that jumps around would
+    // make the rows reshuffle in front of the officer.
+    const seen = [...readPages].sort((a, b) => a - b);
+    // Chained rather than fired in parallel, so two writes can never interleave and land
+    // an older snapshot last.
+    writing = writing.then(async () => {
+      try {
+        const current = await getDloIntake(client, progress.intakeId);
+        const files = current?.files ? [...current.files] : null;
+        const target = files?.[progress.index];
+        if (!files || !target) return;
+        files[progress.index] = { ...target, readPages: seen };
+        await updateDloIntake(client, progress.intakeId, { files });
+      } catch (error) {
+        console.warn('[dlo] page progress write failed (ignored):', error);
+      }
+    });
+  };
+
   const extracted = await runInCostScope(cost, () =>
     runInCostTask('document_ocr', () =>
       extractPdfPagesDetailed(entry.name, data, {
         source,
         pages,
+        onPage: (page) => {
+          readPages.push(page.page);
+          reportProgress();
+        },
       }),
     ),
   );
+  // Let the last in-flight progress write land before the caller overwrites this entry with
+  // its finished form, or a late write could resurrect a stale partial count.
+  await writing;
   recordTasksFromCost(client, 'article', cost);
   return {
     name: entry.name,
@@ -454,7 +508,10 @@ export function startDloIntakeJob(client: SupabaseClient, id: string): void {
               // a question they have already answered, so it is read here instead — bounded to
               // their selection, so the spend gate is exactly the one they authorised.
               entry.pendingPages && entry.pendingPages.length > 0
-              ? await extractPdfEntry(client, entry, entry.pendingPages)
+              ? await extractPdfEntry(client, entry, entry.pendingPages, 'auto', {
+                  intakeId: id,
+                  index,
+                })
               : await probePdfEntry(client, entry)
             : entry.kind === 'image'
               ? await extractImageEntry(client, entry)
@@ -509,6 +566,8 @@ export function startDloExtractionJob(
           client,
           entry,
           selection.pages,
+          'auto',
+          { intakeId: id, index: selection.index },
         );
       } catch (error) {
         entries[selection.index] = {
@@ -554,7 +613,10 @@ export function startDloFileReextractionJob(
     // intake stays usable, exactly as in the initial extraction phase.
     const entries = [...row.files];
     try {
-      entries[index] = await extractPdfEntry(client, entry, pages, 'ocr');
+      entries[index] = await extractPdfEntry(client, entry, pages, 'ocr', {
+        intakeId: id,
+        index,
+      });
     } catch (error) {
       entries[index] = {
         ...entry,

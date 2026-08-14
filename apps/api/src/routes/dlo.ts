@@ -37,8 +37,6 @@ import {
   parseDloReviewState,
   parseYouTubeVideoId,
   serializeDloReviewState,
-  UPLOAD_FILE_MAX_BYTES,
-  UPLOAD_FILE_MAX_MB,
   YouTubeSourcesSchema,
   type DloIntakeDetail,
   type DloIntakeGeneration,
@@ -57,15 +55,20 @@ import { startGenerationJob } from '../jobs/runner.js';
 import { rememberDesignations } from '../jobs/designation-writeback.js';
 
 // Meeting recordings and scanned GRs are big, so this route overrides the conservative global
-// multipart limits (10 MiB / 1 file, sized for reference-image uploads) per request. The
-// ceiling itself is @dgipr/schemas' UPLOAD_FILE_MAX_BYTES — the same number the web picker
-// refuses at, so a file the browser accepted can never be rejected here.
-const MAX_FILE_BYTES = UPLOAD_FILE_MAX_BYTES;
-// No count limit, deliberately (2026-08-11): a meeting can produce a dozen recordings and a
-// booklet photographed page by page is a dozen images, and busboy's `files` limit does not
-// reject — it silently STOPS emitting parts, so a capped intake would have quietly dropped
-// sources the officer watched upload. Each file is still bounded by MAX_FILE_BYTES, which is
-// the limit that reflects what one upload can actually carry.
+// multipart limits (10 MiB / 1 file, sized for reference-image uploads) per request.
+//
+// No per-file ceiling any more: a two-hour meeting recording and a photographed booklet both
+// pass 50 MB routinely, and refusing them at the door is a failure the officer can do nothing
+// about (the DOCUMENT_MAX_BYTES / references.ts reasoning — those two routes already accept
+// any size). busboy treats Infinity as "unlimited", so this override now exists purely to
+// LIFT the global cap in index.ts. The bound that remains is the box's memory: toBuffer()
+// holds each upload in process for the length of one request. /transcribe is unchanged and
+// still enforces UPLOAD_FILE_MAX_BYTES.
+const MAX_FILE_BYTES = Number.POSITIVE_INFINITY;
+// No count limit either, deliberately (2026-08-11): a meeting can produce a dozen recordings
+// and a booklet photographed page by page is a dozen images, and busboy's `files` limit does
+// not reject — it silently STOPS emitting parts, so a capped intake would have quietly
+// dropped sources the officer watched upload.
 // The `documents` field carries whole documents' worth of extracted Marathi text, and
 // busboy defaults a field to 1 MiB — which a couple of GRs in Devanagari (3 bytes a
 // character) will pass straight through. Raised to 64 MiB alongside the removal of the
@@ -186,6 +189,12 @@ function toDetail(
       // Lean on purpose: the page picker only needs the COUNT, so a scanned PDF
       // awaiting selection costs the poll nothing.
       ...(entry.pageCount !== undefined ? { pageCount: entry.pageCount } : {}),
+      // Which pages have landed so far, so प्रक्रिया can fill in a row per page while the
+      // read runs. Ships on the LEAN shape by design — the whole point is that these are
+      // page numbers and not the page text.
+      ...(entry.readPages !== undefined
+        ? { readPages: [...entry.readPages] }
+        : {}),
       ...(entry.pdfSource !== undefined ? { pdfSource: entry.pdfSource } : {}),
       // Only a PDF whose original is still archived can be re-read; a document read at
       // the input step after its ephemeral job expired has no bytes left, so the review
@@ -313,19 +322,19 @@ export function registerDloRoutes(
         });
       }
     } catch (error) {
-      // @fastify/multipart raises FST_REQ_FILE_TOO_LARGE from toBuffer when a
-      // part exceeds the per-request fileSize limit above.
+      // @fastify/multipart raises FST_REQ_FILE_TOO_LARGE from toBuffer when a part exceeds
+      // the per-request fileSize limit above. That limit is now unlimited, so this branch is
+      // unreachable and is kept only so a future ceiling has somewhere to land — hence a
+      // message that names no number (the documents.ts precedent).
       if (
         typeof error === 'object' &&
         error !== null &&
         'code' in error &&
         error.code === 'FST_REQ_FILE_TOO_LARGE'
       ) {
-        return reply.code(413).send({
-          error: {
-            message: `फाईल खूप मोठी आहे (कमाल ${UPLOAD_FILE_MAX_MB.toLocaleString('mr-IN')} MB प्रति फाईल).`,
-          },
-        });
+        return reply
+          .code(413)
+          .send({ error: { message: 'फाईल खूप मोठी आहे.' } });
       }
       throw error;
     }

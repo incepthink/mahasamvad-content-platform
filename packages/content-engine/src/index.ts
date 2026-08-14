@@ -406,6 +406,7 @@ export {
 } from './generation/classify-poster-type.js';
 export {
   generatePosterCopy,
+  posterCopyItemCount,
   type PosterCopy,
   type GeneratePosterCopyInput,
   type GeneratePosterCopyResult,
@@ -458,6 +459,22 @@ export {
   type LayoutNeed,
   type LayoutAvoid,
 } from './generation/poster-layouts.js';
+// The arrangement rotation for the fully-AI social lane: WHERE the visual weight sits and how the
+// canvas is divided, one anchor per run. Not a rebuild of POSTER_LAYOUTS above — that library
+// specified whole posters and was retired from the prompt in 2026-08; an anchor states placement
+// only and is filtered against the content before it can be assigned. It is also what the redo
+// button bars, so a re-render cannot repeat the previous version's shape.
+export {
+  POSTER_PLACEMENTS,
+  pickPlacement,
+  placementById,
+  eligiblePlacements,
+  type PosterPlacement,
+  type PlacementFamily,
+  type PlacementImagery,
+  type PlacementNeed,
+  type PlacementAvoid,
+} from './generation/poster-placements.js';
 // What one run was assigned + what its render measured (generations.poster_style, migration
 // 0028), and the reader that turns the last few rows into the pickers' avoid sets.
 export {

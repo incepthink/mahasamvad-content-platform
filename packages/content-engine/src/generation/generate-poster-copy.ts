@@ -359,6 +359,24 @@ export async function generatePosterCopy(
   };
 }
 
+// How many content items a finished copy object actually carries — the longest array among its
+// values, which is the list field whatever the registry called it (`points` / `stats` /
+// `milestones`; see listFieldFor). Deliberately registry-AGNOSTIC rather than switching on
+// copyStyle: a custom type renders on the generic registry, a future registry would add a fourth
+// name, and this only ever needs the count.
+//
+// Used by the arrangement rotation (poster-placements.ts) to bar an anchor that cannot hold this
+// much content. Reading it off the WRITTEN COPY rather than off the note is what makes it right:
+// the generic registry self-bounds to 3-6 points, so a twelve-sentence note produces six items,
+// and counting the note would have excluded every capped anchor for no reason.
+export function posterCopyItemCount(copy: PosterCopy): number {
+  let longest = 0;
+  for (const value of Object.values(copy)) {
+    if (Array.isArray(value)) longest = Math.max(longest, value.length);
+  }
+  return longest;
+}
+
 // --- CLI harness -----------------------------------------------------------
 //   tsx --env-file=../../.env src/generation/generate-poster-copy.ts [--file=note.txt]
 if (

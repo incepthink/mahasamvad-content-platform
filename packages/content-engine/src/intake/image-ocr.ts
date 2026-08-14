@@ -35,10 +35,10 @@ import {
 
 const CHAT_URL = 'https://api.openai.com/v1/chat/completions';
 
-// Same budget as one PDF page, and for the same reason: a dense Marathi page plus its tables
-// runs ~2-3k tokens, billing is on what is emitted, and an exhausted ceiling comes back as
-// silently truncated output rather than an error.
-const IMAGE_MAX_TOKENS = 8_000;
+// NO OUTPUT CEILING, matching the PDF path — see the constant block in openai-doc.ts. There
+// was an 8,000-token cap here; on gpt-5 that budget is shared with reasoning tokens, and
+// exhausting it truncates silently rather than erroring. Billing is on tokens emitted, so it
+// was never saving anything.
 
 const IMAGE_TIMEOUT_MS = Number.parseInt(
   process.env.OPENAI_OCR_TIMEOUT_MS ?? `${5 * 60_000}`,
@@ -166,7 +166,7 @@ export async function extractImageText(
     timeoutMs: options?.timeoutMs ?? IMAGE_TIMEOUT_MS,
     body: {
       model: OCR_MODEL,
-      max_completion_tokens: IMAGE_MAX_TOKENS,
+      // No max_completion_tokens — see the note above the timeout constant.
       ...(IMAGE_REASONING_EFFORT
         ? { reasoning_effort: IMAGE_REASONING_EFFORT }
         : {}),
@@ -201,7 +201,7 @@ export async function extractImageText(
 
   if (body.choices[0]?.finish_reason === 'length') {
     console.warn(
-      `[image-ocr] ${name}: the image did not fit in ${IMAGE_MAX_TOKENS} tokens (finish_reason: length) — its tail may be missing.`,
+      `[image-ocr] ${name}: hit the model's output limit (finish_reason: length) — its tail may be missing.`,
     );
   }
   return unwrapWholeAnswerFence(body.choices[0]?.message.content ?? '').trim();

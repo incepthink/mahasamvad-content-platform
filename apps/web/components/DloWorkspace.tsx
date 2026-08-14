@@ -26,6 +26,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
+  Check,
   FileText,
   Heading1,
   MessageSquareText,
@@ -41,6 +42,7 @@ import type {
   KnownDesignation,
   PreparedName,
 } from '@dgipr/schemas';
+import { DLO_DESIGNATION_RESOLVER_VERSION } from '@dgipr/schemas';
 import {
   articlePdfDownloadUrl,
   extractDloPages,
@@ -118,10 +120,53 @@ function SourceStatusList({ intake }: { intake: DloIntakeDetail }) {
                   ? STR.dloFileStatusFailed
                   : STR.dloFileStatusPending}
             </span>
+            <PageReadProgress file={file} />
           </li>
         ))}
       </ul>
     </>
+  );
+}
+
+// Pages landing one by one while a PDF is still being read.
+//
+// A scanned document is one paid model call per page, so a long one is minutes of work with
+// nothing to look at — and the pages exist long before the last one does. Each page that has
+// come back gets its own row here, so the officer can see the document being read rather than
+// a spinner that says nothing about how far along it is.
+//
+// Renders only while the file is still working: once it is 'done' the review step shows the
+// real text, and once it is 'failed' the error is the thing to read. The API sends WHICH pages
+// have landed rather than how many, because they finish out of order — see readPages.
+function PageReadProgress({ file }: { file: DloIntakeDetail['files'][number] }) {
+  const read = file.readPages;
+  if (
+    file.kind !== 'pdf' ||
+    file.status === 'done' ||
+    file.status === 'failed' ||
+    !read ||
+    read.length === 0
+  ) {
+    return null;
+  }
+  return (
+    <div className="page-progress">
+      <p className="page-progress-count">
+        {file.pageCount !== undefined
+          ? `${read.length.toLocaleString('mr-IN')} / ${file.pageCount.toLocaleString('mr-IN')} ${STR.dloPagesRead}`
+          : `${read.length.toLocaleString('mr-IN')} ${STR.dloPagesRead}`}
+      </p>
+      <ul className="page-progress-list">
+        {read.map((page) => (
+          <li key={page} className="page-progress-row">
+            <Check size={14} aria-hidden="true" />
+            <span>
+              {STR.dloPageLabel} {page.toLocaleString('mr-IN')}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -501,7 +546,8 @@ export default function DloWorkspace({ intakeId }: { intakeId: string }) {
     if (saved.styleReference) setStyleReference(saved.styleReference);
     if (saved.instructions) setInstructions(saved.instructions);
     if (saved.designations) {
-      const currentResolver = saved.designations.resolverVersion === 2;
+      const currentResolver =
+        saved.designations.resolverVersion === DLO_DESIGNATION_RESOLVER_VERSION;
       restoredFromSave.current.designations = currentResolver;
       if (currentResolver) {
         setDesignationNames([...saved.designations.names]);
@@ -603,7 +649,7 @@ export default function DloWorkspace({ intakeId }: { intakeId: string }) {
       designations:
         designationNames !== null
           ? {
-              resolverVersion: 2,
+              resolverVersion: DLO_DESIGNATION_RESOLVER_VERSION,
               names: designationNames,
               known: knownDesignations,
               edits: designationEdits,

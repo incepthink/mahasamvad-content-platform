@@ -1,0 +1,111 @@
+# Build the @dgipr/api container image and push it to GHCR.
+#
+# This exists so that NOTHING is ever compiled on the EC2 box. Building there means a
+# pnpm install + a six-package `tsc` run + a ~500 MB Chromium install competing for the
+# RAM of a host that also runs n8n, Caddy and PostgREST — which is why it took ~15
+# minutes and died non-deterministically in the TypeScript step. The output is identical
+# wherever it is produced, so it is produced here.
+#
+# Deploying afterwards is, on the box:
+#
+#   cd <repo>/deploy && docker compose pull api && docker compose up -d api
+#
+# `up -d`, never `restart` — restart reuses the container's existing image. Full
+# procedure and rollback in deploy/README.md, "Updating the API".
+#
+# The image name is PINNED rather than derived from ${{ github.repository }}: the repo is
+# `mahasamvad-content-platform` but deploy/docker-compose.yml pulls `dgipr-api`. Change
+# both or neither.
+
+name: api image
+
+on:
+  push:
+    branches: [main]
+    # Deny-list, not an allow-list: the default is to build, and only changes that
+    # provably cannot affect the running API are skipped. An allow-list silently stops
+    # producing images the day someone adds a directory nobody remembered to list.
+    #
+    # apps/web deploys itself from Vercel; n8n/** ships via `pnpm n8n:push`;
+    # supabase/** migrations are applied by hand. None of them change what the API runs.
+    paths-ignore:
+      - 'apps/web/**'
+      - 'docs/**'
+      - 'n8n/**'
+      - 'supabase/**'
+      - '**/*.md'
+  # Manual trigger, for a rebuild after a skipped push or an infrastructure-only change.
+  workflow_dispatch:
+
+# A second push while the first is still building makes the first one's image obsolete
+# before it lands. Cancel it rather than racing to tag `latest`.
+concurrency:
+  group: api-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # lets GITHUB_TOKEN push to GHCR — no PAT needed for this half
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The build context is the repo ROOT (pnpm monorepo — the API imports the workspace
+      # packages), which is why `context: .` below and not `deploy/`.
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Two tags per build: the short commit SHA (immutable — this is what `API_TAG` in
+      # deploy/.env names for a rollback) and `latest` (what a plain deploy pulls).
+      # `prefix=` strips metadata-action's default `sha-`, so the tag is a bare short SHA
+      # and matches `git rev-parse --short HEAD` exactly.
+      #
+      # This step also emits the org.opencontainers.image.source label, which is what
+      # tells GHCR to link the package back to this repository. That link is what makes
+      # GITHUB_TOKEN's `packages: write` sufficient — see README "One-time setup" if the
+      # first push 403s on a package that already exists from a manual laptop build.
+      - name: Compute tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/incepthink/dgipr-api
+          tags: |
+            type=sha,format=short,prefix=
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/api.Dockerfile
+          # The box is a t3.small/t3.medium — x86_64. Building arm64 here would need
+          # QEMU emulation and produce an image that dies with `exec format error`
+          # on this host anyway.
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Persist the layer cache between runs, so an ordinary source-only change
+          # reuses the pnpm-install and Chromium layers and only re-runs `tsc`.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # Without this, buildx publishes a multi-arch index carrying an attestation
+          # manifest, which shows up in the GHCR UI as a phantom `unknown/unknown`
+          # architecture beside the real one. Nothing here consumes provenance.
+          provenance: false
+
+      - name: Deploy command
+        run: |
+          echo "Pushed: ${{ steps.meta.outputs.tags }}"
+          echo ""
+          echo "On the EC2 box:"
+          echo "  cd <repo>/deploy && docker compose pull api && docker compose up -d api"

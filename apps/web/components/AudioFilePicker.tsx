@@ -9,13 +9,18 @@
 // Both file guards are decided by lib/filePicks, shared with the photograph picker and with
 // /dlo's combined sources card, and they run HERE rather than only on the server for the same
 // reason: a recording takes minutes to upload, so "wrong container" and "too big" have to be
-// said at the picker. The server still enforces the size (routes/dlo.ts,
-// routes/transcriptions.ts) against the same UPLOAD_FILE_MAX_BYTES, so this is the earlier of
-// two answers, never the only one.
+// said at the picker. The server still enforces the size (routes/transcriptions.ts) against
+// the same UPLOAD_FILE_MAX_BYTES, so this is the earlier of two answers, never the only one.
+// The size half is now stated by the CALLER, because only /transcribe still has a ceiling to
+// state: /dlo's intake route dropped its per-file cap, so its sources card passes none.
 
 import { useRef, type ReactNode } from 'react';
 import { Mic, Music, X } from 'lucide-react';
-import { AUDIO_FILE_ACCEPT, isAudioFileName } from '@dgipr/schemas';
+import {
+  AUDIO_FILE_ACCEPT,
+  UPLOAD_FILE_MAX_BYTES,
+  isAudioFileName,
+} from '@dgipr/schemas';
 import { acceptFilePicks } from '../lib/filePicks';
 import { CardTitle } from './CardTitle';
 import { STR } from '../lib/strings';
@@ -99,6 +104,10 @@ export function AudioFilePicker({
       picked: Array.from(list),
       isAllowedName: isAudioFileName,
       typeError: STR.dloFileTypeError,
+      // /transcribe's own route (routes/transcriptions.ts) still caps a recording at this,
+      // so the picker says so first rather than after the upload. /dlo's sources card
+      // deliberately passes none — its intake route has no per-file ceiling.
+      maxBytes: UPLOAD_FILE_MAX_BYTES,
     });
     onError(error);
     if (added === 0) return;

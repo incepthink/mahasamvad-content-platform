@@ -2965,6 +2965,198 @@ Not implemented yet: Canva integration, authentication.
 
 ## Latest Implementation Milestone
 
+- **The fresh social poster is assigned an ARRANGEMENT, and the redo bars the previous one**
+  (2026-08-14, no migration, no n8n): two complaints about the fully-AI social lane — every
+  poster came out with the same object placement (imagery one side, text the other), and pressing
+  the redo button returned a poster of the same shape. Both had one cause, and it was ours.
+  **The fresh lane's image prompt contained no structural instruction at all.** The runner still
+  ASSIGNS a palette and a composition archetype per run and still writes them to
+  `generations.poster_style`, but the 2026-08-10 hand-over stopped `buildPosterPrompt` emitting
+  COLOUR SPECIFICATION / ART DIRECTION / COMPOSITION — so the assignment was recorded and then
+  thrown away. With nothing said about arrangement, gpt-image falls back to its prior for
+  "headline + points + scene brief", which is one of two shapes; and because the prompt was
+  **byte-identical across regenerates** (the seed fed only the two pickers, whose output never
+  reached the string), a redo re-sent the same prompt and got the same poster. The two failure
+  modes had already been NAMED in the brief that morning, which did not help: this repo learned
+  with `NO_TEXT_RULE` that image models answer negatives badly — "do not default to those two
+  shapes" leaves nothing to execute, so the model executes the default.
+  - **`generation/poster-placements.ts` (new) — 14 PLACEMENT ANCHORS across 6 families**
+    (`immersive`/`anchored`/`divided`/`centred`/`stacked`/`typographic`), seeded and
+    recency-aware, the `pickPalette`/`pickLayout` shape exactly. **It is deliberately not
+    `poster-layouts.ts` rebuilt**, and the distinction is the whole design: those eleven
+    archetypes specified the entire poster (where the kicker goes, what the body rows look like,
+    what sits behind the headline) and were retired for the correct reason — they were eleven
+    spellings of one poster, two of them literally "photograph down one side, text down the
+    other". An anchor states ONE thing: where the visual weight sits and how the canvas is
+    divided. A harness assertion enforces that, failing on the retired spec's own vocabulary
+    (`kicker`, `bullet`, `card`, `reversed-out`) and on any instruction over 420 characters.
+  - **The objection this had to answer was that a firmly-stated arrangement the content cannot
+    carry is worse than the boring default.** So eligibility is a HARD FILTER computed before the
+    pick, the `poster-layouts.ts` photo-filter doctrine: `imagery` (an imagery-led anchor is never
+    offered a text-only poster) and `maxItems` (an anchor that gives most of the canvas to imagery
+    is never offered a nine-point run). The assigned anchor is satisfiable **by construction**,
+    which is what earns the firm wording — it is stated as a decision rather than hedged into
+    uselessness. Both inputs are deterministic and free: `hasImagery` from the copy's own verdict,
+    and `itemCount` from the new `posterCopyItemCount` — read off the WRITTEN COPY, not the note,
+    because the generic registry self-bounds to 3-6 points, so counting a twelve-sentence note
+    would have excluded every capped anchor for nothing. The verbatim lane makes no copy call and
+    passes 0 = unknown, which bars nothing.
+  - **The block hands everything else back, in as many words**, or it reads as the retired
+    specification returning and the model starts waiting to be told the colours too. Colour,
+    medium, illustration style, typography, texture, graphic devices and every proportion within
+    the arrangement stay the model's, and the surrounding creative-control paragraphs are
+    untouched. **Exactly three things outrank it, named**: all the content shown, every word
+    readable, the reserved zones clear — the ranked-carve-out shape the fixed-template lane
+    already uses, rather than an open-ended "unless it doesn't work", which a model takes every
+    time. And the retreat is CLOSED: the two default shapes are named again as what it may not
+    fall back to. Emitted second to last, after every hand-over paragraph and before the chrome
+    blocks, which stay last on every lane.
+  - **The redo is now a guarantee, not a re-roll.** `startPosterRegenerateJob` parses
+    `row.posterStyle` UNCONDITIONALLY (it used to read it only on the recolour path) and bars the
+    current version's placement id AND family on **both** buttons, where colour is still barred
+    only by "वेगळ्या रंगात तयार करा" — a plain redo is not a complaint about the palette, but
+    it is always a request for a different shape. The recency ring only knows about OTHER runs, so
+    without this a new seed could land straight back on what the officer just rejected. Asserted
+    at every anchor and every version in the harness.
+  - **No migration**: `poster_style` is jsonb, so `placementId`/`placementFamily` were additive.
+    An absent or unresolvable placement is NOT fatal to the style (every pre-2026-08-14 row, every
+    article run and every template-edit run legitimately has none, and nulling those would discard
+    their colour history too), and unplaced rows do not occupy a slot in the ring. The Marathi
+    style label under the poster now names the ARRANGEMENT rather than the composition rotation,
+    because the arrangement is what the render was actually asked for; a row without one still
+    names its layout.
+  Verified 2026-08-14, all free: workspace typecheck **7/7 green**, eslint clean on all six touched
+  files, prettier clean on the new file and on every hunk of mine (the other four report whole-file
+  complaints **confirmed already failing at HEAD** — do NOT `--write` them); eight harnesses green,
+  including the new `tsx src/generation/poster-placements.ts` (content filters absolute in both
+  directions across 1-12 items, the rotation spreading with no family repeating back to back, and
+  the redo guarantee at every anchor x version) and 7 new prompt assertions (the anchor's words
+  reach the model, the hand-back sentence, the ranked carve-out, the closed retreat, block
+  position, all 14 anchors producing distinct prompts, and the prompt staying **byte-identical**
+  when no anchor is supplied); plus a simulation of one run and four reloads returning five
+  different families. **Left for a real run** (one image charge each): a fresh social poster
+  confirming the log's `placement=` matches the render's actual arrangement, then a reload
+  confirming the shape changes. Deploy is `@dgipr/content-engine` dist → API; no migration, no
+  n8n, no web change.
+
+- **A news article DECIDES what the news is; it does not restate the note** (2026-08-14, no
+  migration, no n8n — SUPERSEDES the minister-scoped `NEWS_MINISTER_EDITORIAL_FOCUS` of the
+  2026-07-29 milestone): generation `eaa0356f` (from intake `11961f50`, a scanned note about the
+  rebuilt हायामाउंट राज्य अतिथीगृह) came back as an inventory. Nothing was invented and nothing
+  was wrong — it was simply not journalism. It restated the note **in the note's own order**: an
+  entire paragraph of plot area, built-up area, a floor-by-floor suite breakdown and per-suite
+  square metres, then the full eligibility list of every service cadre — and put the actual news,
+  the Chief Minister inaugurating the building on 13 August, in the **LAST** paragraph.
+  The cause was a conditional. The ONLY block in the whole simplified path that carried editorial
+  selection — factual pool not a completeness checklist, omit routine detail, do not write
+  minutes — opened `When SOURCE INFORMATION concerns a minister's meeting, visit, review or
+  remarks`, and **every** instruction in it hung off that condition. A departmental note about a
+  building is not minister-shaped, so the model received no selection guidance at all, while the
+  system message said "Use the information fully when it improves the article." Confirmed from
+  the row rather than guessed: `style_reference_meta.promptVersion` = `standard-no-reference-v3`
+  with `articleCount: 0`, i.e. the deployed variant, with **no exemplar** to demonstrate the
+  shape either (`ARTICLE_STYLE_REFERENCES_ENABLED` is unset).
+  - **`NEWS_MINISTER_EDITORIAL_FOCUS` → `NEWS_EDITORIAL_FOCUS`, unconditional for `news`.** It
+    now opens with the lead rule — read all of SOURCE INFORMATION, identify the single most
+    newsworthy development, build the headline and first paragraph on it — and states plainly
+    that **the source's ORDER is not the news order**, because an official note opens with
+    background and puts the event at the end while a news report does the opposite. The minister
+    case survives as one branch of that rule, so nothing that worked before lost its instruction.
+  - **The compressible detail is NAMED**, because "omit what does not serve the flow" is too
+    abstract to act on when every supplied fact is true and official: measurements and technical
+    specifications; floor-by-floor / unit-by-unit / year-by-year breakdowns that add up to a total
+    the article already gives; exhaustive lists of cadres, designations or committee members;
+    file and reference numbers and internal procedure; the same fact restated. Attached to it,
+    the two things a licence to omit must never become — never invent to cover a gap, and never
+    alter a figure that survives the cut.
+  - **`ONE LIST IS ALWAYS KEPT`, and its POSITION is the finding.** The closing
+    `यावेळी … उपस्थित होते` line is DGIPR house convention (deliberately restored to the prompt on
+    2026-07-27), not an inventory. Carved out as a sub-clause **inside** the "compress long lists"
+    bullet it did **not** fire — a live run on a real minister's-event transcript still dropped
+    the whole attendance paragraph. It held only once restated positively as its own block, LAST.
+    That is the `NO_TEXT_RULE` lesson again; do not fold it back into the bullet, and do not put
+    the word `attendees` back into that bullet. Both are harness-asserted.
+  - **The no-reference system message gained the sentence the MINIMAL variant already had** —
+    do not read as a list of the supplied facts, do not follow the source's order, you may leave
+    out what does not serve the article — plus one line saying a Markdown table is a working
+    breakdown rather than the news (give the total and the meaningful split, not a sentence per
+    row). That variant is the only one with no exemplar at all, so it needed it most and was the
+    one missing it.
+  - Scheme articles are **untouched**: a योजना-लेख legitimately prints amounts, eligibility and
+    deadlines, and the tiered-completeness principle is citizen-first, not short.
+  - Versions `simple-v14` / `minimal-v8` / `no-reference-v4`. The last is bumped for the shared
+    USER-message change as well, because the promptVersion recorded on the deployed path is
+    `${variant}-${NO_REFERENCE_ARTICLE_PROMPT_VERSION}` and does **not** carry
+    `SIMPLE_ARTICLE_PROMPT_VERSION` — without the bump a v14 article would be attributed to v3.
+    Verified 2026-08-14: all three prompt harnesses green (24 new assertions, each one the shape
+    of an observed failure), `article-length` / `article-heading` / `article-dateline` still
+    green, content-engine typecheck + eslint + prettier clean. Three assertions had to be
+    tightened from a bare phrase to the `###` heading (`no HEADLINE / ANGLE heading`, and the two
+    `OFFICER REQUEST` ones) — the new block names both officer inputs, since they are what may
+    override its omission licence. **Live on the two real notes**: the guest-house note now leads
+    `# पुनर्रचित हायामाउंट राज्य अतिथीगृहाचे मुख्यमंत्र्यांच्या हस्ते उद्घाटन` with the date and time in
+    the first paragraph, the entire specification paragraph gone and 57/6/51 kept as the one
+    meaningful split (1,239 chars against ~2,100); the minister transcript keeps its
+    `– सार्वजनिक आरोग्यमंत्री प्रकाश आबिटकर` headline, its directive lead and its attendance line.
+    **Left for a real run**: one /dlo article through the deployed pipeline, where the name
+    dictionary is supplied — the CLI harness passes none, which is why its attendance line reads
+    the transcript's own `कातकर`/`शिनगारे` rather than the glossary's `काटकर`/`शिंगारे`. Deploy is
+    `@dgipr/content-engine` dist → API; no web change, no new env. Rollback is `git revert` of the
+    three prompt files.
+
+- **A designation mention must be a WORD, not a substring** (2026-08-14, no migration — PARTLY
+  SUPERSEDES the portfolio-alias half of the 2026-07-29 milestone): a DLO's press-note intake
+  (`f6a1e632`, `0-pressnote.pdf`) put four people on the व्यक्ती व पदनाम card, three of whom are
+  named nowhere in the document — `दादाजी भुसे` (शालेय शिक्षण मंत्री), `बाबासाहेब पाटील`
+  (सहकार मंत्री), `गणेश नाईक` (वन मंत्री) and `सुधा`. Verified against the stored `combinedText`
+  (4574 chars): `नाईक` and `भुसे` occur **0** times, and every trigger was a substring of an
+  unrelated word.
+  - **`suggestOfficeHolders` matched with a bare `String.includes`.** `designationMentionForms`
+    emits `X मंत्री`, `X विभाग` **and bare `X`** for a portfolio title, so the pipeline was
+    scanning the whole document for the two characters **वन** — and found them inside
+    **`दूरध्वनी`** on the letterhead. `सहकार` came out of `प्रयत्नांना **सहकार**्य करावे`.
+    Fixed two ways, deliberately belt-and-braces: matching is now WHOLE-WORD
+    (`maskWholeWordOccurrences`, which also performs rule 2's span masking in the same pass, so
+    the उपमुख्यमंत्री/मुख्यमंत्री carve-out is unchanged), and the **bare portfolio form is
+    emitted only when it is multi-word**. A single-word portfolio (वन, सहकार, कृषी, महसूल) is an
+    ordinary Marathi noun and accepting it as a mention of an office is a lottery; a multi-word
+    phrase (`उच्च व तंत्रशिक्षण`) is not, and is exactly what `normalizePortfolioMentions`
+    produces — so the code-mixed STT case the alias exists for still works, asserted.
+  - **`findGlossaryTermsInText` is `text.includes(form)`**, which is correct for the locks it was
+    written for (Marathi inflects by suffix, so `मुंबई` must keep matching inside `मुंबईत`) and
+    wrong for a ONE-WORD person: `सुधा` matched inside `**सुधा**रित योजना`. Filtered in
+    `mergeTextTerms` via `isStandalonePersonMention`, **not** in the shared DB helper, whose other
+    callers (/proofread, the translate and scheme-name locks) genuinely want substring matching.
+    Only **one-word** person rows are tightened — a multi-word full name is specific enough that a
+    substring hit is the real person and must survive `देवेंद्र फडणवीसांनी`. This matches the
+    stance `resolveSurnameDesignations` has always taken on a bare surname.
+  - **Rule 4 on `resolveSurnameDesignations`**, an adjacent hole this very document would have hit
+    had the dictionary held one `पाटील` instead of several: a surname occurring ONLY inside a
+    longer person the text actually names belongs to that person. The note's signatory
+    `कृष्णकुमार पाटील` must not hand his surname the Cooperation Minister's title. Same per-
+    occurrence masking `dropNestedPersonRows` does one level up, so a note carrying both the full
+    name and a genuinely bare `पाटील यांनी` still resolves.
+  - **`PreparedName.mention`** (schema-defaulted `''`, no migration) carries the phrase that CAUSED
+    a suggestion, rendered on the card as `टिपणीतील “…” मुळे सुचवले`. A suggested person is by
+    definition not named in the document, so without it the row is unfalsifiable — the officer is
+    told to untick it "if wrong" with nothing to judge against, which reads as the platform
+    inventing people.
+  - **The pre-tick is deliberately UNCHANGED.** `दादाजी भुसे` still appears on this note, because
+    `शालेय शिक्षण विभाग` genuinely is in it — that is the department alias working as specified,
+    now labelled. Flipping department-derived suggestions to unticked is a one-line change in
+    `DesignationReview.valueFor`, but it would re-break the case AGENTS.md measured on 2026-07-28
+    (default-off was silently ignored on 3 of 4 runs), so it is a product call, not a cleanup.
+  Verified 2026-08-14, free except one extraction call: the harness
+  (`npx tsx src/jobs/translation-terms.ts`) at **51 checks green**, including 13 new ones built
+  from verbatim spans of that intake (`दूरध्वनी`, `सहकार्य`, `सुधारित`, the signature block) and
+  regression guards that the multi-word portfolio and a standalone `वन विभाग` still resolve;
+  workspace typecheck **7/7 green**; eslint clean on all touched files (prettier's remaining
+  complaints are pre-existing CRLF plus pre-existing lines in `strings.ts` — do NOT `--write`
+  them). **Live `POST /api/designations/prepare` on the real 4574-char text now returns exactly
+  two rows** — `कृष्णकुमार पाटील` (the actual signatory, blank designation) and `दादाजी भुसे`
+  carrying `mention: "शालेय शिक्षण विभाग"`. No migration, no n8n; deploy is `@dgipr/schemas` dist
+  → API + web.
+
 - **The social poster is 4:5 again, so Canva has no gap to close** (2026-08-13, no migration):
   officers place a finished twitter/facebook poster on a 1080x1350 Canva canvas, and it did not
   fit — it left an unfilled gap down each side, which they were closing by hand by displacing

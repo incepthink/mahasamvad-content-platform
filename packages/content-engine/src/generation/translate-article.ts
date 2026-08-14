@@ -480,20 +480,48 @@ function repairLockedNames(
 
 // Split a block that still exceeds the endpoint's hard input cap. splitNoteIntoSections
 // packs whole paragraphs and never breaks one up, so a single long paragraph can come back
-// over budget — fine for the chat path, a 4xx on the translate endpoint. Sentence
-// boundaries (।/./!/?) keep the pieces translatable; a sentence longer than the cap is
-// passed through and left for the API to reject loudly.
-function splitToLimit(block: string, limit: number): string[] {
+// over budget. Prefer sentence boundaries (।/./!/?), then whitespace, and finally make a
+// hard character cut for an uninterrupted string. Every returned piece is guaranteed to fit
+// the endpoint; long pasted text must never consume earlier chunks and then fail on one
+// oversized sentence near the end.
+export function splitToLimit(block: string, limit: number): string[] {
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw new RangeError('Translation chunk limit must be a positive integer.');
+  }
   if (block.length <= limit) return [block];
+
   const sentences = block.split(/(?<=[।.!?])\s+/);
+  const units: string[] = [];
+  for (const sentence of sentences) {
+    let remaining = sentence.trim();
+    while (remaining.length > limit) {
+      // Search backwards for a word boundary inside the allowed window. If the text has no
+      // whitespace (a long URL, OCR artifact, or adversarial input), `limit` remains the hard
+      // cut point. JavaScript counts UTF-16 code units, which is conservative for Sarvam's
+      // character limit: it can over-count an astral symbol but can never submit extra units.
+      let cutAt = limit;
+      for (let index = limit; index > 0; index -= 1) {
+        if (/\s/u.test(remaining.charAt(index))) {
+          cutAt = index;
+          break;
+        }
+      }
+
+      const piece = remaining.slice(0, cutAt).trimEnd();
+      if (piece.length > 0) units.push(piece);
+      remaining = remaining.slice(cutAt).trimStart();
+    }
+    if (remaining.length > 0) units.push(remaining);
+  }
+
   const pieces: string[] = [];
   let buffer = '';
-  for (const sentence of sentences) {
-    if (buffer.length > 0 && buffer.length + sentence.length + 1 > limit) {
+  for (const unit of units) {
+    if (buffer.length > 0 && buffer.length + unit.length + 1 > limit) {
       pieces.push(buffer);
       buffer = '';
     }
-    buffer = buffer.length > 0 ? `${buffer} ${sentence}` : sentence;
+    buffer = buffer.length > 0 ? `${buffer} ${unit}` : unit;
   }
   if (buffer.length > 0) pieces.push(buffer);
   return pieces;

@@ -39,10 +39,7 @@ import type {
   DloPreReadDocument,
   YouTubeVideo,
 } from '@dgipr/schemas';
-import {
-  ARTICLE_INSTRUCTIONS_MAX_CHARS,
-  UPLOAD_FILE_MAX_BYTES,
-} from '@dgipr/schemas';
+import { ARTICLE_INSTRUCTIONS_MAX_CHARS } from '@dgipr/schemas';
 import { createDloIntake } from '../lib/api';
 import {
   EMPTY_DRAFT,
@@ -411,10 +408,13 @@ export function DloIntakeForm() {
             // A block inside the sources card rather than a card of its own — a nested card
             // reads as a separate form, and the heading drops to an <h3> in the same move.
             embedded
-            // Same per-file ceiling as this form's recordings. Only /dlo passes it: the shared
-            // document service has no upload cap of its own, so this is a limit on what an
-            // INTAKE will carry, not a new rule for /translate or /proofread.
-            maxBytes={UPLOAD_FILE_MAX_BYTES}
+            // No per-file ceiling, deliberately: the shared document service this card
+            // uploads to has none (DOCUMENT_MAX_BYTES is unlimited), so a cap here would
+            // refuse a scanned booklet the server would happily have read — and a refusal at
+            // the door is one the officer can do nothing about. The spend gate is unchanged
+            // and is what still keeps a big scan cheap: nothing is OCR'd until pages are
+            // ticked. What remains is the box's memory, the intake job holding the bytes for
+            // its TTL.
             // /dlo is the one surface that can read a scan later: its live initial selection is
             // the handover, and the intake job reads exactly those pages from the archived
             // original. Waiting for OCR in this card is optional, not the price of going on.

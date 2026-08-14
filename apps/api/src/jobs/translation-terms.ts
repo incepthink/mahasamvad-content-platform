@@ -46,10 +46,20 @@ async function mergeTextTerms(
   client: SupabaseClient,
   text: string,
 ): Promise<MergedTerm[]> {
-  const [candidates, glossaryRows] = await Promise.all([
+  const [candidates, allGlossaryRows] = await Promise.all([
     extractGlossaryCandidates(text),
     findGlossaryTermsInText(client, text, { verifiedOnly: false }),
   ]);
+
+  // `findGlossaryTermsInText` decides presence with a bare `text.includes(form)`, which is right
+  // for the locks it was written for (Marathi inflects by suffix, so "मुंबई" must still match
+  // inside "मुंबईत") and wrong for a ONE-WORD person: a short name is indistinguishable from a
+  // syllable of an ordinary word. A live intake put "सुधा" on the review card because the press
+  // note said "सुधारित योजना". Filtered here rather than in the shared helper, whose other
+  // callers (/proofread, the translate and scheme-name locks) genuinely want substring matching.
+  const glossaryRows = allGlossaryRows.filter((row) =>
+    isStandalonePersonMention(text, row.termType, row.marathi),
+  );
 
   // Merge by Marathi surface form; an existing glossary row wins over a freshly extracted
   // candidate (its English form may already be human-corrected, and only it can carry a
@@ -195,7 +205,14 @@ export function designationMentionForms(designation: string): string[] {
     !NON_PORTFOLIO_MINISTER_PREFIXES.has(portfolio) &&
     !portfolio.endsWith('राज्य')
   ) {
-    forms.push(`${portfolio} विभाग`, portfolio);
+    forms.push(`${portfolio} विभाग`);
+    // The BARE portfolio noun is emitted only when it is a multi-word phrase. A single word
+    // ("वन", "सहकार", "कृषी", "महसूल") is an ordinary Marathi noun, so accepting it as a mention
+    // of the office is a lottery: a live intake proposed the Forest Minister because the
+    // letterhead read "दूरध्वनी", and the Cooperation Minister because the closing line asked for
+    // "सहकार्य". A multi-word phrase ("उच्च व तंत्रशिक्षण") does not occur by accident, and it is
+    // the form `normalizePortfolioMentions` produces — which is the case this alias exists for.
+    if (/\s/u.test(portfolio)) forms.push(portfolio);
   }
   return forms;
 }
@@ -226,8 +243,12 @@ export function suggestOfficeHolders(
   let remaining = searchableText;
 
   for (const { title, mention } of mentions) {
-    if (!remaining.includes(mention)) continue;
-    remaining = remaining.split(mention).join(' ');
+    // WHOLE-WORD, not substring. This is the rule that stops "वन" matching inside "दूरध्वनी"
+    // and "सहकार" inside "सहकार्य"; masking the matched spans (rule 2) falls out of the same
+    // pass, so the उपमुख्यमंत्री/मुख्यमंत्री carve-out is unchanged.
+    const masked = maskWholeWordOccurrences(remaining, mention);
+    if (!masked.matched) continue;
+    remaining = masked.text;
 
     const holders = personsByDesignation.get(title) ?? [];
     // Rule 1 — ambiguous or empty means propose nothing. Silence is the correct answer here;
@@ -245,6 +266,8 @@ export function suggestOfficeHolders(
       inGlossary: true,
       verified: true,
       suggested: true,
+      // The phrase that caused the lookup, so the card can show WHY this person is on it.
+      mention,
       // The title came from the dictionary's reverse lookup, not from a title standing beside
       // a name in the note — by definition, since the note does not name this person at all.
       fromText: false,
@@ -275,28 +298,80 @@ export function suggestOfficeHolders(
 //      them must have their stored title written somewhere in the text. Otherwise nothing is
 //      proposed, because attributing a directive to the wrong official is the failure this
 //      whole feature exists to prevent — and the officer can still type the title on the card.
-const SURNAME_BOUNDARY = /[\p{L}\p{M}\p{N}]/u;
+// A letter, matra or digit touching either end of a match means the "word" is only a fragment of
+// a longer one. In Devanagari the TRAILING side does most of the work, because the words that
+// swallow a short name tend to extend it: सुधा→सुधा‌रित, सहकार→सहकार्‌य, वन→दूरध्व‌नी.
+const WORD_CHARACTER = /[\p{L}\p{M}\p{N}]/u;
+
+function isWordBoundedAt(text: string, at: number, length: number): boolean {
+  const before = text[at - 1];
+  const after = text[at + length];
+  return (
+    (before === undefined || !WORD_CHARACTER.test(before)) &&
+    (after === undefined || !WORD_CHARACTER.test(after))
+  );
+}
 
 function mentionsWord(text: string, word: string): boolean {
+  if (!word) return false;
   let from = 0;
   for (;;) {
     const at = text.indexOf(word, from);
     if (at < 0) return false;
     from = at + word.length;
-    const before = text[at - 1];
-    const after = text[at + word.length];
-    if (
-      (before === undefined || !SURNAME_BOUNDARY.test(before)) &&
-      (after === undefined || !SURNAME_BOUNDARY.test(after))
-    ) {
-      return true;
+    if (isWordBoundedAt(text, at, word.length)) return true;
+  }
+}
+
+// Blank out every WHOLE-WORD occurrence of `word`, reporting whether there was one. Same-length
+// spaces, so positions are stable and masking can never splice two neighbours into a new match.
+export function maskWholeWordOccurrences(
+  text: string,
+  word: string,
+): { matched: boolean; text: string } {
+  if (!word) return { matched: false, text };
+  let out = text;
+  let matched = false;
+  let from = 0;
+  for (;;) {
+    const at = out.indexOf(word, from);
+    if (at < 0) return { matched, text: out };
+    from = at + word.length;
+    if (isWordBoundedAt(out, at, word.length)) {
+      matched = true;
+      out =
+        out.slice(0, at) +
+        ' '.repeat(word.length) +
+        out.slice(at + word.length);
     }
   }
 }
 
+// Is this glossary row's Marathi form really NAMED in the text, rather than merely contained in
+// it? Only asked of `person` rows, and only tightened for ONE-WORD names — a multi-word full name
+// is specific enough that a substring hit is the real person, and it must keep matching through
+// Marathi's case suffixes ("देवेंद्र फडणवीसांनी"). A one-word row gets no such benefit of the
+// doubt, which matches how `resolveSurnameDesignations` has always treated a bare surname.
+export function isStandalonePersonMention(
+  text: string,
+  termType: TermType,
+  marathi: string,
+): boolean {
+  if (termType !== 'person') return true;
+  const name = marathi.trim();
+  if (!name) return true;
+  if (/\s/u.test(name)) return true;
+  return mentionsWord(text, name);
+}
+
+//   4. a surname that occurs ONLY inside a longer person the text actually names belongs to that
+//      person, not to the minister who happens to share it. The press note signed by
+//      "कृष्णकुमार पाटील" must not hand his surname the Cooperation Minister's title — the same
+//      masking `dropNestedPersonRows` does, one level up.
 export function resolveSurnameDesignations(
   text: string,
   personsByDesignation: ReadonlyMap<string, readonly string[]>,
+  namesInText: readonly string[] = [],
 ): Map<string, string> {
   // Invert to full name → title, and group by surname.
   const bySurname = new Map<string, { name: string; designation: string }[]>();
@@ -316,8 +391,19 @@ export function resolveSurnameDesignations(
 
   const resolved = new Map<string, string>();
   for (const [surname, candidates] of bySurname) {
-    // Rule 1.
-    if (!mentionsWord(text, surname)) continue;
+    // Rules 1 and 4 together: the surname must stand on its own somewhere OUTSIDE every longer
+    // person the text names. Masking per occurrence rather than suppressing the surname outright
+    // keeps a note that names both कृष्णकुमार पाटील and a bare "पाटील यांनी" working.
+    const outsideKnownPeople = namesInText
+      .map((name) => name.trim())
+      .filter(
+        (name) =>
+          name.length > surname.length &&
+          name.split(/\s+/u).includes(surname) &&
+          text.includes(name),
+      )
+      .reduce((remaining, name) => remaining.split(name).join(' '), text);
+    if (!mentionsWord(outsideKnownPeople, surname)) continue;
     // Rule 2 — the full name is present, so this is not the surname-only case.
     const usable = candidates.filter(
       (candidate) => !text.includes(candidate.name),
@@ -487,8 +573,13 @@ export async function prepareDesignations(
   );
 
   // "फडणवीस" → the देवेंद्र फडणवीस row's title. Best-effort like the reverse lookup it sits
-  // beside: an empty map simply means no surname was resolvable.
-  const bySurname = resolveSurnameDesignations(text, personsByDesignation);
+  // beside: an empty map simply means no surname was resolvable. The people the text actually
+  // names are passed in so a shared surname is not taken off one of them (rule 4).
+  const bySurname = resolveSurnameDesignations(
+    text,
+    personsByDesignation,
+    persons.map((term) => term.marathi),
+  );
 
   const names = persons.map((term) => {
     // The dictionary wins where it has an answer — it is the reviewed, cross-article spelling.
@@ -509,6 +600,8 @@ export async function prepareDesignations(
       // A surname resolved through a full-name row is a dictionary SUGGESTION, so the card
       // labels it and the officer can untick it — the same treatment as the reverse lookup.
       suggested: fromSurname.length > 0,
+      // The name itself is the evidence here: it is in the text, only under a shorter form.
+      mention: fromSurname ? term.marathi : '',
       fromText: fromText.length > 0,
     };
   });
@@ -523,6 +616,7 @@ export async function prepareDesignations(
       inGlossary: true,
       verified: true,
       suggested: true,
+      mention: surname,
       fromText: false,
     });
   }
@@ -713,6 +807,102 @@ if (
       dictionary,
     ).length === 0,
   );
+
+  console.log(
+    '\n=== the pressnote regression: a substring is NOT a mention of an office ===',
+  );
+  {
+    // Verbatim spans from intake f6a1e632 (0-pressnote.pdf), which put three ministers on the
+    // review card. None of them is named anywhere in that document.
+    const ministers = new Map<string, string[]>([
+      ['वन मंत्री', ['गणेश नाईक']],
+      ['सहकार मंत्री', ['बाबासाहेब पाटील']],
+      ['शालेय शिक्षण मंत्री', ['दादाजी भुसे']],
+      ['उच्च व तंत्रशिक्षण मंत्री', ['चंद्रकांत पाटील']],
+    ]);
+    check(
+      '"दूरध्वनी" does not propose the वन मंत्री',
+      suggestOfficeHolders(
+        'डॉ. आंबेडकर रोड, पुणे ४११ ००१. दूरध्वनी:- [अस्पष्ट]',
+        [],
+        ministers,
+      ).length === 0,
+    );
+    check(
+      '"सहकार्य" does not propose the सहकार मंत्री',
+      suggestOfficeHolders(
+        'शासनाच्या प्रयत्नांना सहकार्य करावे, असे आवाहन करण्यात येत आहे.',
+        [],
+        ministers,
+      ).length === 0,
+    );
+    check(
+      'the bare one-word portfolio is not a mention form at all',
+      !designationMentionForms('वन मंत्री').includes('वन') &&
+        !designationMentionForms('सहकार मंत्री').includes('सहकार'),
+    );
+    check(
+      'a multi-word portfolio keeps its bare form (the code-mixed STT case)',
+      designationMentionForms('उच्च व तंत्रशिक्षण मंत्री').includes(
+        'उच्च व तंत्रशिक्षण',
+      ),
+    );
+    check(
+      'a genuine standalone "वन विभाग" still resolves',
+      suggestOfficeHolders('वन विभाग यांनी अहवाल सादर केला.', [], ministers)
+        .length === 1,
+    );
+    check(
+      'the suggestion carries the phrase that caused it',
+      suggestOfficeHolders('वन विभाग यांनी अहवाल सादर केला.', [], ministers)[0]
+        ?.mention === 'वन विभाग',
+    );
+
+    // The whole pressnote, minus the department line, must propose nobody at all.
+    const pressnote =
+      'डॉ. आंबेडकर रोड पुणे ४११ ००१. दूरध्वनी:- [अस्पष्ट] प्राधान्याने ' +
+      'राज्यातील खाजगी अनुदानित व अंशतः अनुदानित शाळांसाठी अनुकंपा नियुक्तीची सुधारित ' +
+      'योजना लागू करण्यात आली आहे. प्रक्रिया विहित कालमर्यादेत पूर्ण होण्यासाठी ' +
+      'शासनाच्या प्रयत्नांना सहकार्य करावे, असे आवाहन करण्यात येत आहे. ' +
+      '(कृष्णकुमार पाटील) शिक्षण संचालक, महाराष्ट्र राज्य, पुणे.';
+    check(
+      'the real pressnote proposes NO minister',
+      suggestOfficeHolders(pressnote, [], ministers).length === 0,
+    );
+    check(
+      'a one-word person row is not matched inside "सुधारित"',
+      !isStandalonePersonMention(pressnote, 'person', 'सुधा'),
+    );
+    check(
+      'a one-word person genuinely named IS matched',
+      isStandalonePersonMention('सुधा यांनी माहिती दिली.', 'person', 'सुधा'),
+    );
+    check(
+      'a multi-word name keeps substring matching (Marathi case suffixes)',
+      isStandalonePersonMention(
+        'देवेंद्र फडणवीसांनी निर्देश दिले.',
+        'person',
+        'देवेंद्र फडणवीस',
+      ),
+    );
+    check(
+      'non-person rows are never filtered (मुंबई inside मुंबईत)',
+      isStandalonePersonMention('मुंबईत बैठक झाली.', 'place', 'मुंबई'),
+    );
+    check(
+      'the signatory’s surname is not handed the minister’s title',
+      resolveSurnameDesignations(pressnote, ministers, ['कृष्णकुमार पाटील'])
+        .size === 0,
+    );
+    check(
+      'but a genuinely bare surname elsewhere still resolves',
+      resolveSurnameDesignations(
+        `${pressnote} त्यानंतर पाटील यांनी आढावा घेतला.`,
+        new Map([['सहकार मंत्री', ['बाबासाहेब पाटील']]]),
+        ['कृष्णकुमार पाटील'],
+      ).get('पाटील') === 'सहकार मंत्री',
+    );
+  }
 
   console.log('\n=== degrades quietly ===');
   check(

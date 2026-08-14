@@ -62,6 +62,12 @@ export type DloIntakeFileEntry = Readonly<{
   // How many pages this PDF has in total, from the free probe. Known before anything
   // is read, because it is what the page picker lists.
   pageCount?: number;
+  // Which of the selected pages have been transcribed so far, ascending. Written DURING the
+  // read so प्रक्रिया can fill in a row per page rather than spin; page numbers rather than
+  // the partial text (the detail poll deliberately withholds text) and rather than a count
+  // (pages finish out of order). Gone once the file is read — extractPdfEntry rebuilds the
+  // entry rather than spreading it.
+  readPages?: readonly number[];
   // Which backend read this PDF — OCR text deserves more scrutiny in review, and
   // only a text-layer read is worth offering to re-read with OCR.
   pdfSource?: 'text-layer' | 'ocr';

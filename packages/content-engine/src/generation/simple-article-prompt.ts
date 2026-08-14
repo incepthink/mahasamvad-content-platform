@@ -124,7 +124,10 @@ import {
 // v12 (2026-08-05): the DATELINE block says WHERE the dateline goes — the first body paragraph,
 // never the headline, once. Unstated, a model that opens with a plain headline line reads "start
 // the article with this" literally and datelines the headline (observed in production).
-export const SIMPLE_ARTICLE_PROMPT_VERSION = 'simple-v13';
+// v14 (2026-08-14): NEWS EDITORIAL FOCUS is unconditional for `news` and says which fact leads
+// and which supplied details are worth printing — see the block's own header for the production
+// article that forced it. The minister case survives as one branch of the lead rule.
+export const SIMPLE_ARTICLE_PROMPT_VERSION = 'simple-v14';
 
 // Marathi label for the category, matching CATEGORY_LABEL in category-prompt.ts. The prompt is
 // English but the article is Marathi, and naming the category in Marathi is what keeps the voice
@@ -134,33 +137,79 @@ const CATEGORY_LABEL: Record<ArticleCategory, string> = {
   scheme: 'योजना-लेख (scheme / feature article)',
 };
 
-// The editorial distinction the category label and exemplars cannot safely be left to imply.
-// Real Mahasamvad meeting reports are not minutes: their headline and lead communicate what the
-// minister said, decided, directed or promised, while the meeting supplies context. Conditional
-// on the source actually being minister-shaped so an agency notice or non-minister news item is
-// never forced to invent a minister.
+// The editorial judgement the category label and the exemplars cannot safely be left to imply:
+// WHICH fact leads, and WHICH supplied facts are worth printing at all.
+//
+// Until 2026-08-14 this block was scoped to a minister's meeting ("When SOURCE INFORMATION
+// concerns a minister's meeting, visit, review or remarks…") and every selection instruction in
+// it — factual pool not a checklist, omit routine detail, do not write minutes — hung off that
+// opening condition. So an ordinary departmental note received NO selection guidance at all.
+// Observed on intake 11961f50 (a note about a rebuilt state guest house): the model restated the
+// note in the note's own order — plot area, built-up area and a floor-by-floor suite breakdown
+// as a whole paragraph, then the full eligibility list of every service cadre — and put the
+// actual news, the Chief Minister inaugurating it on 13 August, in the LAST paragraph. Nothing
+// was invented and nothing was wrong; it simply was not a news article.
+//
+// So the two instructions are now unconditional for `news` and the minister case is one branch
+// of the first. The second half names the categories of detail that a government note is full of
+// and a news report is not, because "omit what does not serve the flow" is too abstract to act
+// on when every supplied fact is true and official.
+//
+// This stays NEWS-only. A योजना-लेख legitimately prints amounts, eligibility and deadlines —
+// those ARE the citizen-facing facts there, and the tiered-completeness principle is
+// citizen-first, not short.
 //
 // Exported for minimal-article-prompt.ts so ARTICLE_PROMPT_VARIANT changes wording density, not
 // the product's NEWS editorial goal.
-export const NEWS_MINISTER_EDITORIAL_FOCUS = [
-  "When SOURCE INFORMATION concerns a minister's meeting, visit, review or remarks, first",
-  'identify what the principal minister is actually communicating to the public. Build the',
-  "headline, lead and article around that minister's strongest source-supported statement,",
-  'decision, direction, assurance, announcement or next step, and attribute it clearly to that',
-  'minister. If several ministers or topics appear, choose one principal public-facing angle;',
-  'include the others only when they directly support it.',
+export const NEWS_EDITORIAL_FOCUS = [
+  'DECIDE WHAT THE NEWS IS BEFORE WRITING. Read all of SOURCE INFORMATION and identify the',
+  'single most newsworthy development in it — the decision, announcement, launch, inauguration,',
+  'event, direction or change a reader most needs to know. Build the headline and the first',
+  'paragraph around that, and place everything else after it as supporting context.',
   '',
-  'Treat SOURCE INFORMATION as a factual pool, not a completeness checklist. Use only the',
-  'context and supporting facts that help readers understand the central ministerial message.',
-  'You may omit unrelated agenda items, routine procedure, attendee lists, repetition and any',
-  'other supplied detail that does not serve the editorial flow. Do not write meeting minutes',
-  'or a summary of every supplied fact. Never invent or transfer a statement, decision or',
-  'attribution.',
+  "The source's ORDER is not the news order. An official note usually opens with background and",
+  'states the event, the date or the decision at the very end. A news report does the opposite.',
+  'Never lead with a fact merely because the source states it first.',
+  '',
+  "When SOURCE INFORMATION concerns a minister's meeting, visit, review or remarks, the news is",
+  'what the principal minister is communicating to the public: build the headline and lead around',
+  "that minister's strongest source-supported statement, decision, direction, assurance,",
+  'announcement or next step, and attribute it clearly to that minister. If several ministers or',
+  'topics appear, choose one principal public-facing angle; include the others only when they',
+  'directly support it.',
+  '',
+  'TREAT SOURCE INFORMATION AS A FACTUAL POOL, NOT A COMPLETENESS CHECKLIST. A supplied fact',
+  'earns its place by helping a reader understand the news — not by being present in the source.',
+  'Compress or leave out administrative and technical material that does not serve it, unless',
+  'that material IS the news or the HEADLINE / ANGLE or OFFICER REQUEST asks for it. Typically:',
+  '',
+  '- measurements and technical specifications: plot and built-up area, dimensions, capacities,',
+  '  unit sizes, model and version numbers;',
+  '- floor-by-floor, unit-by-unit, item-by-item or year-by-year breakdowns that add up to a total',
+  '  the article already gives — print the total and the one split that matters, not the',
+  '  enumeration;',
+  '- exhaustive lists of eligible categories, cadres, designations or committee members — name',
+  '  the few that matter and close with a summarising clause;',
+  '- file, circular, reference and page numbers, internal procedure and routine agenda items;',
+  '- the same fact restated in different words.',
+  '',
+  'Omitting such a detail is correct editing, not an error. But never invent or transfer a fact',
+  'to cover what you left out, and never alter one you keep: every name, designation, date,',
+  'amount and figure that stays in the article stays exactly as supplied.',
+  '',
+  'Do not write meeting minutes, a specification sheet, or a summary of every supplied fact.',
+  'Write a publication-ready Mahasamvad news report.',
+  '',
+  'ONE LIST IS ALWAYS KEPT. Where SOURCE INFORMATION reports an event and says who else was',
+  'present, the article ends with the Mahasamvad attendance line — "यावेळी <नावे, पदनामांसह>',
+  'उपस्थित होते." That closing line is house convention rather than an inventory, so the rule',
+  'above about long lists does not apply to it. Name the dignitaries the source names, in the',
+  'source’s own spellings, and close the group with a summarising phrase where it is a long one.',
 ].join('\n');
 
 export function newsEditorialFocusBlock(category: ArticleCategory): string[] {
   return category === 'news'
-    ? ['### NEWS EDITORIAL FOCUS', '', NEWS_MINISTER_EDITORIAL_FOCUS, '']
+    ? ['### NEWS EDITORIAL FOCUS', '', NEWS_EDITORIAL_FOCUS, '']
     : [];
 }
 
@@ -734,9 +783,12 @@ if (
     'no SELECTED STYLE REFERENCE heading',
     !bareUser.includes('SELECTED STYLE REFERENCE'),
   );
+  // The HEADING, not the phrase: since v14 the news focus block names both officer inputs by
+  // name (they are what may override its omission licence), so a bare substring test would fail
+  // on a prompt that correctly renders neither block.
   check(
     'no HEADLINE / ANGLE heading',
-    !bareUser.includes('HEADLINE / ANGLE'),
+    !bareUser.includes('### HEADLINE / ANGLE'),
   );
   check(
     'the retired hedged wording is gone for good',
@@ -762,15 +814,134 @@ if (
     bareUser.includes('### SOURCE INFORMATION') && bareUser.includes(baseNote),
   );
   check(
-    'news receives the minister-centred editorial focus',
+    'news receives the editorial focus',
     bareUser.includes('### NEWS EDITORIAL FOCUS') &&
-      bareUser.includes('factual pool, not a completeness checklist') &&
+      bareUser.includes(
+        'TREAT SOURCE INFORMATION AS A FACTUAL POOL, NOT A COMPLETENESS CHECKLIST',
+      ) &&
       bareUser.includes('Do not write meeting minutes'),
   );
   check(
     'scheme receives no news editorial focus',
     !fullUser.includes('NEWS EDITORIAL FOCUS') &&
-      !fullUser.includes('factual pool, not a completeness checklist'),
+      !fullUser.includes('FACTUAL POOL, NOT A COMPLETENESS CHECKLIST'),
+  );
+
+  // v14. Every check below is the shape of a real failure: intake 11961f50 restated a
+  // departmental note in the note's own order — spec sheet, then every eligible cadre — and put
+  // the Chief Minister's inauguration last. If a news article ever reads as an inventory again,
+  // start here.
+  console.log('\n=== the news focus is UNCONDITIONAL, not minister-gated ===');
+  check(
+    'selection no longer hangs off a minister condition',
+    !NEWS_EDITORIAL_FOCUS.startsWith('When SOURCE INFORMATION concerns') &&
+      NEWS_EDITORIAL_FOCUS.indexOf('DECIDE WHAT THE NEWS IS BEFORE WRITING') <
+        NEWS_EDITORIAL_FOCUS.indexOf(
+          "When SOURCE INFORMATION concerns a minister's",
+        ),
+  );
+  check(
+    'the minister case survives as a branch of the lead rule',
+    NEWS_EDITORIAL_FOCUS.includes(
+      "When SOURCE INFORMATION concerns a minister's meeting, visit, review or remarks",
+    ) && NEWS_EDITORIAL_FOCUS.includes('one principal public-facing angle'),
+  );
+  check(
+    'the headline and lead are built on the most newsworthy development',
+    NEWS_EDITORIAL_FOCUS.includes(
+      'identify the\nsingle most newsworthy development',
+    ) &&
+      NEWS_EDITORIAL_FOCUS.includes(
+        'Build the headline and the first\nparagraph around that',
+      ),
+  );
+  check(
+    "the source's order is explicitly not the news order",
+    NEWS_EDITORIAL_FOCUS.includes("The source's ORDER is not the news order") &&
+      NEWS_EDITORIAL_FOCUS.includes(
+        'states the event, the date or the decision at the very end',
+      ) &&
+      NEWS_EDITORIAL_FOCUS.includes(
+        'Never lead with a fact merely because the source states it first',
+      ),
+  );
+  check(
+    'a supplied fact must earn its place',
+    NEWS_EDITORIAL_FOCUS.includes(
+      'earns its place by helping a reader understand the news — not by being present in the source',
+    ),
+  );
+
+  console.log('\n=== the compressible detail is named, not left abstract ===');
+  for (const [label, needle] of [
+    ['measurements / specifications', 'plot and built-up area, dimensions'],
+    ['floor-by-floor breakdowns', 'floor-by-floor, unit-by-unit'],
+    ['the total beats the enumeration', 'not the\n  enumeration'],
+    ['exhaustive cadre lists', 'cadres, designations or committee members'],
+    [
+      'file and reference numbers',
+      'file, circular, reference and page numbers',
+    ],
+    ['restated facts', 'the same fact restated in different words'],
+  ] as const) {
+    check(`${label} are named`, NEWS_EDITORIAL_FOCUS.includes(needle));
+  }
+  check(
+    'omission is licensed only when it does not serve the news',
+    NEWS_EDITORIAL_FOCUS.includes('Omitting such a detail is correct editing'),
+  );
+  // Measured regression: the first draft of the cadre bullet said "attendees", and a live run on
+  // a real minister's-event transcript dropped the closing "यावेळी … उपस्थित होते" paragraph —
+  // which is DGIPR house convention (restored to the prompt on purpose in 2026-07-27) and not an
+  // inventory. Do not put "attendees" back in that bullet.
+  check(
+    'the Mahasamvad attendance line is carved out of the list rule',
+    NEWS_EDITORIAL_FOCUS.includes('ONE LIST IS ALWAYS KEPT') &&
+      NEWS_EDITORIAL_FOCUS.includes(
+        'यावेळी <नावे, पदनामांसह>\nउपस्थित होते.',
+      ) &&
+      NEWS_EDITORIAL_FOCUS.includes(
+        'the rule\nabove about long lists does not apply to it',
+      ) &&
+      !/designations, attendees/u.test(NEWS_EDITORIAL_FOCUS),
+  );
+  // Position is the point, and the first attempt proved it: as a sub-clause INSIDE the "compress
+  // long lists" bullet the carve-out did not fire — the same live transcript still lost its
+  // closing paragraph. It only held once it became its own block, stated positively, LAST. Do
+  // not fold it back into the bullet.
+  check(
+    'and it is stated last, as its own block',
+    NEWS_EDITORIAL_FOCUS.trimEnd().endsWith(
+      'close the group with a summarising phrase where it is a long one.',
+    ) &&
+      NEWS_EDITORIAL_FOCUS.indexOf('ONE LIST IS ALWAYS KEPT') >
+        NEWS_EDITORIAL_FOCUS.indexOf(
+          '- exhaustive lists of eligible categories',
+        ),
+  );
+  check(
+    'the officer can always keep a detail the rule would drop',
+    NEWS_EDITORIAL_FOCUS.includes(
+      'unless\nthat material IS the news or the HEADLINE / ANGLE or OFFICER REQUEST asks for it',
+    ),
+  );
+  // The one thing a licence to omit must never become: a licence to paper over the gap, or to
+  // round a figure that survived the cut.
+  check(
+    'omitting never becomes inventing, and a kept figure is never altered',
+    NEWS_EDITORIAL_FOCUS.includes(
+      'never invent or transfer a fact\nto cover what you left out',
+    ) &&
+      NEWS_EDITORIAL_FOCUS.includes(
+        'stays in the article stays exactly as supplied',
+      ),
+  );
+  check(
+    'the output is named as a news report, not minutes or a spec sheet',
+    NEWS_EDITORIAL_FOCUS.includes(
+      'Do not write meeting minutes, a specification sheet',
+    ) &&
+      NEWS_EDITORIAL_FOCUS.includes('publication-ready Mahasamvad news report'),
   );
   check(
     'the user prompt states no length at all',
@@ -1158,7 +1329,7 @@ if (
     !buildSimpleArticleUserPrompt({
       category: 'news',
       sourceInformation: baseNote,
-    }).includes('OFFICER REQUEST'),
+    }).includes('### OFFICER REQUEST'),
   );
   check(
     'a whitespace-only instruction is treated as absent',
@@ -1166,7 +1337,7 @@ if (
       category: 'news',
       sourceInformation: baseNote,
       officerInstructions: '   \n  ',
-    }).includes('OFFICER REQUEST'),
+    }).includes('### OFFICER REQUEST'),
   );
   check(
     'omitting it leaves the prompt byte-for-byte as it was',

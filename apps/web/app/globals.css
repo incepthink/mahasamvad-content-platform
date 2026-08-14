@@ -3222,6 +3222,17 @@ details.fold .fold-body.gl-add-body {
   font-size: 0.75rem;
 }
 
+/* Why a suggested person is on the card: the phrase in the officer's own text that the
+   dictionary lookup matched. Quiet, and indented under the name it explains. */
+.names-suggest-because {
+  display: block;
+  margin-top: 4px;
+  padding-left: 26px;
+  color: var(--muted);
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
 /* Read-only post-generation person/designation summary. Kept visually quieter than the
    editable pre-translation/DLO review because it is an audit note, not a gate. */
 .used-names-card {
@@ -4604,6 +4615,53 @@ a.thread-node:hover {
   color: var(--muted);
   font-size: 0.85rem;
   white-space: nowrap;
+}
+
+/* Pages landing one by one while a scanned PDF is read (PageReadProgress).
+   `:has()` rather than putting flex-wrap on .file-row itself, so the wrap applies only to a
+   row that actually carries this block and every other file list is untouched. */
+.file-row:has(.page-progress) {
+  flex-wrap: wrap;
+}
+
+.page-progress {
+  flex-basis: 100%;
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+
+.page-progress-count {
+  margin: 0 0 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* Capped and scrollable: a 400-page scan would otherwise push the rest of the
+   progress screen off the bottom while it read. */
+.page-progress-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.page-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.page-progress-row svg {
+  flex-shrink: 0;
+  color: var(--ok);
 }
 
 .file-row .file-remove {

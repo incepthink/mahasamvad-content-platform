@@ -199,14 +199,14 @@ export const STR = {
   // before a single credit is spent.
   dloAttachTitle: 'स्रोत जोडा',
   dloAttachHint:
-    'बैठकीचे ध्वनिमुद्रण, कागदपत्रांचे फोटो आणि PDF / DOCX / TXT फाईल — एकावेळी अनेक जोडता येतील (प्रत्येकी कमाल ५० MB). ध्वनिमुद्रण व प्रतिमांमधील मजकूर प्रक्रियेदरम्यान वाचला जाईल; स्कॅन केलेल्या PDF मधून कोणती पृष्ठे वाचायची ते तुम्ही येथेच निवडाल.',
+    'बैठकीचे ध्वनिमुद्रण, कागदपत्रांचे फोटो आणि PDF / DOCX / TXT फाईल — एकावेळी अनेक जोडता येतील, फाईलच्या आकाराची मर्यादा नाही. ध्वनिमुद्रण व प्रतिमांमधील मजकूर प्रक्रियेदरम्यान वाचला जाईल; स्कॅन केलेल्या PDF मधून कोणती पृष्ठे वाचायची ते तुम्ही येथेच निवडाल.',
 
   // UNUSED since the three cards became one: /dlo's recording control no longer titles
   // itself, and /transcribe passes its own copy (transcribeNewTitle / transcribeHint).
   // Kept so restoring a standalone recording card is one edit.
   dloAudioTitle: 'ध्वनिमुद्रण',
   dloAudioHint:
-    'बैठकीचे ध्वनिमुद्रण — एकावेळी अनेक फाईल जोडता येतील (प्रत्येकी कमाल ५० MB). मोबाईलवरील नेहमीचे ध्वनिफीत प्रकार चालतात.',
+    'बैठकीचे ध्वनिमुद्रण — एकावेळी अनेक फाईल जोडता येतील, आकाराची मर्यादा नाही. मोबाईलवरील नेहमीचे ध्वनिफीत प्रकार चालतात.',
   dloAudioUpload: 'ध्वनिफीत जोडा',
   dloAudioFilesTitle: 'जोडलेली ध्वनिमुद्रणे',
 
@@ -214,7 +214,7 @@ export const STR = {
   // above; what the photographs are for is now said once in dloSourcesHint.
   dloImagesTitle: 'प्रतिमा / छायाचित्रे',
   dloImagesHint:
-    'शासन निर्णय, टिपणी, तक्ता किंवा नोटिशीचा फोटो अथवा स्क्रीनशॉट (JPG, PNG, WEBP — प्रत्येकी कमाल ५० MB). प्रतिमेतील मजकूर, तक्त्यांसह, प्रक्रियेदरम्यान वाचला जाईल आणि तपासणी टप्प्यावर दिसेल.',
+    'शासन निर्णय, टिपणी, तक्ता किंवा नोटिशीचा फोटो अथवा स्क्रीनशॉट (JPG, PNG, WEBP — आकाराची मर्यादा नाही). प्रतिमेतील मजकूर, तक्त्यांसह, प्रक्रियेदरम्यान वाचला जाईल आणि तपासणी टप्प्यावर दिसेल.',
   dloImagesUpload: 'प्रतिमा जोडा',
   dloImagesFilesTitle: 'जोडलेल्या प्रतिमा',
   dloImageTypeError: 'कृपया प्रतिमा फाईल निवडा (JPG, PNG किंवा WEBP).',
@@ -224,7 +224,7 @@ export const STR = {
   // One document block's own heading, inside the sources card.
   dloDocsCardTitle: 'कागदपत्र',
   dloDocsIntakeHint:
-    'PDF, DOCX किंवा TXT फाईल निवडा (कमाल ५० MB). स्कॅन केलेली PDF देखील चालते. फाईल या बैठकीसोबत जतन केली जाईल.',
+    'PDF, DOCX किंवा TXT फाईल निवडा — आकाराची मर्यादा नाही. स्कॅन केलेली PDF देखील चालते. फाईल या बैठकीसोबत जतन केली जाईल.',
   // Two different controls. The first is the worded button in the attach row, shown only
   // while there is no document block yet; the second is the + under the blocks, where it is
   // the icon's title + aria-label rather than visible text.
@@ -266,6 +266,9 @@ export const STR = {
   dloFileStatusDone: 'पूर्ण ✓',
   dloFileStatusFailed: 'अयशस्वी',
   dloCharsSuffix: 'अक्षरे',
+  // Pages landing one by one while a scanned PDF is still being read (PageReadProgress).
+  dloPagesRead: 'पृष्ठे वाचली',
+  dloPageLabel: 'पृष्ठ',
   dloReviewTitle: 'मजकूर तपासा व दुरुस्त करा',
   dloReviewHint:
     'खालील मजकूर टिपणी, ध्वनिमुद्रण व कागदपत्रांतून तयार झाला आहे. नावे, आकडे, पदनामे व योजनांची नावे तपासून हवे ते बदल करा — हाच मजकूर बातमीचा एकमेव आधार असेल.',
@@ -338,6 +341,11 @@ export const STR = {
   designationsSuggested: 'शब्दकोशातून सुचवलेले',
   designationsSuggestHint:
     'टिपणीत पदनाम आहे पण नाव नाही. नाव-शब्दकोशानुसार हे पदनाम खालील व्यक्तीचे आहे आणि ते बातमीत वापरले जाईल. चुकीचे असल्यास खूण काढून टाका.',
+  // Prefix for the phrase in the officer's own text that caused a suggestion. Without it the
+  // card names a person who is nowhere in their document and gives no way to judge whether that
+  // is right — which reads as the platform inventing people.
+  designationsSuggestedFrom: 'टिपणीतील',
+  designationsSuggestedFromSuffix: 'मुळे सुचवले',
   // The पदनाम was read off the officer's own note, where the title stands immediately before
   // the name ("उपमुख्यमंत्री एकनाथ शिंदे"). Labelled so it is clear this came from the text and
   // not from the शब्दकोश — the officer can clear it like any other.

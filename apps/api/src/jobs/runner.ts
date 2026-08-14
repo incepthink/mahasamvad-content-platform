@@ -38,6 +38,9 @@ import {
   pickArticleReference,
   pickLayout,
   pickPalette,
+  pickPlacement,
+  placementById,
+  posterCopyItemCount,
   resolvePosterSubject,
   toStyleHistory,
   recordImageCost,
@@ -56,6 +59,7 @@ import {
   type ArticleDesignMode,
   type ImageQuality,
   type PaletteFamily,
+  type PlacementFamily,
   type PosterDesignMode,
   type PosterStyle,
   type PosterSubject,
@@ -1698,9 +1702,20 @@ async function renderAndStoreSocialPoster(
   // Diversifies the assignment per run (id on a first render, `${id}:v${n}` on a regenerate, so a
   // redo looks new rather than repeating the previous poster).
   seed: string,
-  // Extra colour families this render must avoid, on top of the recent history — set by the
-  // "different colours" redo so the new version cannot land back in the family being rejected.
-  avoidFamilies: readonly PaletteFamily[] = [],
+  // What this render must avoid ON TOP of the recent history, set by the redo buttons so a new
+  // version cannot reproduce the one the officer just rejected. The recency ring only knows about
+  // OTHER runs — a redo of this row is not in it yet — so without this a fresh seed could
+  // legitimately land back on exactly what it was asked to replace.
+  //
+  //   families   — colour, and ONLY on the "different colours" redo: a plain redo is not a
+  //                complaint about the palette.
+  //   placement* — the ARRANGEMENT, on EVERY redo, which is what makes the reload button
+  //                structurally guarantee a different-shaped poster rather than hope for one.
+  avoid: Readonly<{
+    families?: readonly PaletteFamily[] | undefined;
+    placementIds?: readonly string[] | undefined;
+    placementFamilies?: readonly PlacementFamily[] | undefined;
+  }> = {},
 ): Promise<{ postType: string; title: string | null }> {
   // A fully-AI poster: designed from scratch, with NO reference of any kind. TWO modes land here,
   // differing only in where the poster's words come from — 'fresh' has generatePosterCopy write
@@ -1828,7 +1843,7 @@ async function renderAndStoreSocialPoster(
   const assignedPalette = isFresh
     ? pickPalette(seed, {
         ids: history?.paletteIds,
-        families: [...(history?.families ?? []), ...avoidFamilies],
+        families: [...(history?.families ?? []), ...(avoid.families ?? [])],
       })
     : undefined;
   const assignedLayout = isFresh
@@ -1847,6 +1862,46 @@ async function renderAndStoreSocialPoster(
       )
     : undefined;
 
+  // 3a-ii. THE ARRANGEMENT — the one assignment above that actually reaches the image model
+  //     (2026-08-14). The palette and the layout beside it are recorded for poster_style and
+  //     nothing else, retired from the prompt on 2026-08-10; this one is emitted, because handing
+  //     the composition over entirely did not produce varied compositions. It produced gpt-image's
+  //     two habits — a band over rows, or a picture down one side and text down the other — on run
+  //     after run, which is exactly what the officer reported.
+  //
+  //     WHY IT IS SAFE TO STATE FIRMLY, which is the objection it has to answer: the anchor is
+  //     filtered against what this poster actually contains BEFORE it can be picked, so an
+  //     arrangement the content cannot carry is never assigned. Both inputs are deterministic and
+  //     free — no model call decides eligibility:
+  //
+  //       hasImagery — the copy's own verdict. On a fresh run layoutSpec is null so this is
+  //                    true, and the model invents the imagery; the flag is here for the
+  //                    text-only case rather than as decoration.
+  //       itemCount  — read off the WRITTEN COPY, not the note. The generic registry self-bounds
+  //                    to 3-6 points, so a twelve-sentence note yields six items; counting the
+  //                    note would have excluded every capacity-capped anchor for no reason. The
+  //                    verbatim lane makes no copy call, so it passes 0 = unknown, which bars
+  //                    nothing and leaves the whole library eligible.
+  const assignedPlacement = isFresh
+    ? pickPlacement(
+        seed,
+        {
+          hasImagery: copyResult?.hasPhoto ?? true,
+          itemCount: copyResult ? posterCopyItemCount(copyResult.copy) : 0,
+        },
+        {
+          ids: [
+            ...(history?.placementIds ?? []),
+            ...(avoid.placementIds ?? []),
+          ],
+          families: [
+            ...(history?.placementFamilies ?? []),
+            ...(avoid.placementFamilies ?? []),
+          ],
+        },
+      )
+    : undefined;
+
   // 3b. Art direction — RETIRED (2026-08-10). It designed a treatment WITHIN an assigned palette
   //     and an assigned composition, and buildPosterPrompt no longer emits any of the three: the
   //     fresh brief names the client and hands the whole design over to the image model. A paid
@@ -1857,7 +1912,12 @@ async function renderAndStoreSocialPoster(
   if (assignedPalette && assignedLayout) {
     console.log(
       `[job ${id}] style: palette=${assignedPalette.id} (${assignedPalette.family}) layout=${assignedLayout.id} (${assignedLayout.coverage})` +
-        ` | avoided families=[${(history?.families ?? []).join(',')}${avoidFamilies.length ? `+${avoidFamilies.join(',')}` : ''}]` +
+        // The arrangement is logged separately from the two beside it BECAUSE it is the only one
+        // that reached the prompt — when a poster comes back the wrong shape, this line is what
+        // says whether it was assigned the wrong anchor or ignored the right one.
+        ` placement=${assignedPlacement?.id ?? 'none'} (${assignedPlacement?.family ?? '-'})` +
+        ` | avoided families=[${(history?.families ?? []).join(',')}${(avoid.families ?? []).length ? `+${(avoid.families ?? []).join(',')}` : ''}]` +
+        ` placements=[${(history?.placementIds ?? []).join(',')}${(avoid.placementIds ?? []).length ? `+${(avoid.placementIds ?? []).join(',')}` : ''}]` +
         ` measured=[${(history?.measuredBuckets ?? []).join(',')}]` +
         `${artDirection ? '' : ' (undirected)'}`,
     );
@@ -1888,6 +1948,8 @@ async function renderAndStoreSocialPoster(
     artDirection: artDirection ?? undefined,
     assignedPalette,
     assignedLayout,
+    // The only one of these four the prompt actually emits — see the assignment above.
+    assignedPlacement,
   });
 
   // 5. Render. 'fresh' paints from scratch via the direct image call — no master, and no n8n;
@@ -1926,7 +1988,15 @@ async function renderAndStoreSocialPoster(
     } catch (error) {
       console.warn(`[job ${id}] could not measure poster colours:`, error);
     }
-    posterStyle = buildPosterStyle(assignedPalette, assignedLayout, measured);
+    // The arrangement rides along in the same jsonb value (no migration — 0028's column has no
+    // column schema). Persisting it is what lets a redo bar this exact shape, and what lets the
+    // next few runs spread away from it.
+    posterStyle = buildPosterStyle(
+      assignedPalette,
+      assignedLayout,
+      measured,
+      assignedPlacement,
+    );
     if (measured) {
       const complied = familyHonoured(
         assignedPalette.family,
@@ -2237,12 +2307,31 @@ export function startPosterRegenerateJob(
 
     const version = await nextVersion(client, id);
 
-    // A "different colours" redo bars THIS run's current family outright, on top of the usual
-    // recent-history spread. Without it the new seed could legitimately re-pick the very family
-    // the officer just rejected — the recency ring only knows about other runs, and a redo of
-    // this row is not yet in it.
-    const current = options.recolour ? parsePosterStyle(row.posterStyle) : null;
-    const avoidFamilies: PaletteFamily[] = current ? [current.family] : [];
+    // What this redo must not reproduce. The recency ring only knows about OTHER runs — a redo of
+    // this row is not in it yet — so without barring the current version explicitly, a fresh seed
+    // could land straight back on what the officer just pressed the button to replace.
+    //
+    // The row is parsed UNCONDITIONALLY now, where it used to be read only on the recolour path,
+    // because the two axes are barred on different terms:
+    //
+    //   colour      — only on "वेगळ्या रंगात तयार करा". A plain redo is not a complaint about the
+    //                 palette, and barring a family nobody objected to narrows the rotation for
+    //                 nothing.
+    //   arrangement — on EVERY redo, both buttons. "Give me another one" means another SHAPE
+    //                 first of all; that is the whole of what the officer reported when a reload
+    //                 returned the same poster with different wording. Barring the id and its
+    //                 family is what makes that a guarantee rather than a new roll of the dice
+    //                 (poster-placements.ts's harness asserts it at every version and anchor).
+    const current = parsePosterStyle(row.posterStyle);
+    const avoidFamilies: PaletteFamily[] =
+      options.recolour && current ? [current.family] : [];
+    // Resolved through the library rather than trusted from the row, so an anchor removed from
+    // the library since the last render simply bars nothing instead of poisoning the pool.
+    const currentPlacement = placementById(current?.placementId);
+    const avoidPlacement = {
+      placementIds: currentPlacement ? [currentPlacement.id] : [],
+      placementFamilies: currentPlacement ? [currentPlacement.family] : [],
+    };
 
     // Thumbnail lane. There is no palette or composition assignment to re-roll here (the
     // reference and the message decide the look), so a redo is a fresh selection + render at
@@ -2328,7 +2417,7 @@ export function startPosterRegenerateJob(
       designMode,
       version,
       `${id}:v${version}`,
-      avoidFamilies,
+      { families: avoidFamilies, ...avoidPlacement },
     );
 
     await insertRevision(client, {

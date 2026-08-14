@@ -7,9 +7,19 @@
 // background job (per-page, per-language, its own routes and its own page picker), which
 // meant two upload experiences, two page pickers and two shapes of result on one page. Now
 // the shared <DocumentIntake> reads any pdf/docx/txt — including a scanned PDF, whose pages
-// are picked before a single OCR credit is spent — and drops the text into the same box the
-// user could have pasted into. From there everything is the text path: one submit, the name
+// are picked before a single OCR credit is spent — and its text is a SECOND source counted
+// beside the box above it. From there everything is the text path: one submit, the name
 // check, one translation.
+//
+// The upload runs in LIVE mode (onTextChange), not handoff, and the submit reads an unread
+// scan itself — the media room's arrangement, for the same reason. In handoff mode the file's
+// text reached this page only when a button INSIDE the upload card was pressed, so a scanned
+// PDF took three presses in three different places (निवडलेली पृष्ठे वाचा → हा मजकूर वापरा →
+// भाषांतर करा) and an officer who pressed only the last one was told to write something to
+// translate while their document sat there, read and ignored. Now भाषांतर करा is enough on its
+// own: it triggers the OCR read of the ticked pages if that has not happened yet and continues
+// into the translation as soon as the text lands. The page picker is still the spend gate —
+// no page is read unless it was ticked — the press that authorises it has just moved.
 //
 // ONE question is asked — which language to translate INTO — and its three answers are
 // ALWAYS enabled. The officer is not asked what language they pasted, and the text is not
@@ -46,7 +56,7 @@
 // TRANSLATE_TEXT_MAX_CHARS zod cap is still in force server-side, so an over-long text
 // surfaces as a request error rather than a local warning.
 
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   type PrepareTranslationResponse,
   type TextTranslationLanguage,
@@ -55,7 +65,10 @@ import {
 import { prepareTextTranslation, translateText } from '../../lib/api';
 import { downloadBlob } from '../../lib/download';
 import { STR } from '../../lib/strings';
-import { DocumentIntake } from '../../components/DocumentIntake';
+import {
+  DocumentIntake,
+  type DocumentIntakeStatus,
+} from '../../components/DocumentIntake';
 import { TranslationTermsReview } from '../../components/TranslationTermsReview';
 
 type TranslationResult = Readonly<{
@@ -112,6 +125,10 @@ function sourceForTarget(
   return target === 'mr' ? 'hi' : 'mr';
 }
 
+// Where the upload card remembers its in-flight job. Named once because the remove control
+// has to clear it by hand — see clearDocument.
+const DOC_STORAGE_KEY = 'dgipr.translate.document';
+
 const INPUT_LABELS: Readonly<Record<TextTranslationLanguage, string>> = {
   mr: STR.translateInputLabelMarathi,
   en: STR.translateInputLabelEnglish,
@@ -135,6 +152,21 @@ const DOWNLOAD_NAMES: Readonly<Record<string, string>> = {
 
 export default function TranslatePage() {
   const [text, setText] = useState('');
+  // The uploaded file's text, kept BESIDE the textarea rather than pushed into it: the two
+  // are independent sources and either one alone is a complete job.
+  const [docText, setDocText] = useState('');
+  const [docStatus, setDocStatus] = useState<DocumentIntakeStatus>('empty');
+  // Bumping this asks the upload card to run its selected-page extraction. A counter rather
+  // than a flag so a retry after a failed read is an explicit new request.
+  const [readRequest, setReadRequest] = useState(0);
+  // The submit is waiting for that read to land before it can translate anything.
+  const [awaitingRead, setAwaitingRead] = useState(false);
+  const readRequestedForSubmitRef = useRef(false);
+  // What the upload card last published, so an identical re-publish (a re-render of the
+  // card, a poll that changed nothing) cannot throw away a finished translation.
+  const docTextRef = useRef('');
+  // Remounts the upload card to drop a finished document (its own state is internal).
+  const [docKey, setDocKey] = useState(0);
   // The page's one question. इंग्रजी is the department's commonest job and so is the default.
   const [target, setTarget] = useState<TextTranslationLanguage>('en');
   // Name-check flow: idle → preparing (extracting names) → review (card shown).
@@ -147,12 +179,25 @@ export default function TranslatePage() {
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // What actually gets translated: typed text, uploaded file, or both, in that order.
+  // Blank-line separated so a pasted note and an attached document read as two blocks.
+  const combinedText = useMemo(
+    () => [text.trim(), docText.trim()].filter(Boolean).join('\n\n'),
+    [text, docText],
+  );
+
   // Never asked, never guessed at as a LANGUAGE — see sourceForTarget. Every target the row
   // offers therefore yields a pair the API serves, which is what lets all three stay enabled
   // with nothing left to reject.
-  const source = sourceForTarget(target, text);
+  const source = sourceForTarget(target, combinedText);
 
-  const disabled = submitting || prep !== 'idle' || text.trim().length === 0;
+  // The `unread` arm is what keeps a scanned PDF usable: its pages are ticked but nobody has
+  // paid to read them yet, so it contributes nothing to combinedText, and reading it and then
+  // translating is exactly what startSubmit does. Testing the text alone would leave an
+  // officer whose only source is a scan with a dead button and no way forward.
+  const canSubmit = combinedText.length > 0 || docStatus === 'unread';
+  const busy = submitting || awaitingRead || prep !== 'idle';
+  const disabled = busy || !canSubmit;
   // The review card only has a question to ask about a MARATHI source (see the header).
   const reviewsNames = source === 'mr';
 
@@ -166,15 +211,28 @@ export default function TranslatePage() {
     setError(null);
   };
 
+  // Throw the attached file away without translating it. "दुसरी फाईल निवडा" only ever
+  // REPLACED it, so an officer who decided to translate the pasted text alone had no way to
+  // detach the document — and in live mode its text is counted at submit whether or not
+  // anyone is still looking at it. A remount is what clears the card's internal state, and
+  // the stored job id has to go with it or the mount effect would re-attach the same file.
+  const clearDocument = () => {
+    window.sessionStorage.removeItem(DOC_STORAGE_KEY);
+    docTextRef.current = '';
+    setDocText('');
+    setDocStatus('empty');
+    setDocKey((n) => n + 1);
+    resetFlow();
+  };
+
   // Step 1 on a Marathi source: extract the text's names for review. Failure returns to
   // idle with a Marathi error — never silently translating with unchecked names.
   const startNameCheck = async () => {
-    if (disabled) return;
     setPrep('preparing');
     setError(null);
     setResult(null);
     try {
-      const res = await prepareTextTranslation(text.trim());
+      const res = await prepareTextTranslation(combinedText);
       setPrepared(res.terms);
       setPrep('review');
     } catch {
@@ -191,7 +249,7 @@ export default function TranslatePage() {
     setError(null);
     try {
       const res = await translateText({
-        text: text.trim(),
+        text: combinedText,
         sourceLanguage: source,
         language: target,
         ...(terms ? { terms } : {}),
@@ -215,7 +273,7 @@ export default function TranslatePage() {
   // The one submit button. A Marathi source stops at the name check first; going INTO
   // Marathi there is nothing to check, so it translates directly.
   const submit = () => {
-    if (disabled) return;
+    if (combinedText.length === 0) return;
     if (reviewsNames) {
       void startNameCheck();
       return;
@@ -223,6 +281,51 @@ export default function TranslatePage() {
     setResult(null);
     void runTranslation();
   };
+
+  // भाषांतर करा, pressed. An attached scan whose ticked pages nobody has read yet is read
+  // FIRST and the translation continues by itself when the text lands (the effect below) —
+  // so the officer never has to find a second button in the upload card. `reading` is
+  // included because a read already under way needs waiting for, not starting again.
+  const startSubmit = () => {
+    if (docStatus === 'unread' || docStatus === 'reading') {
+      setAwaitingRead(true);
+      if (docStatus === 'unread') {
+        readRequestedForSubmitRef.current = true;
+        setReadRequest((request) => request + 1);
+      }
+      return;
+    }
+    submit();
+  };
+
+  // Held in a ref so the effect below can run on the document's status alone and still call
+  // the CURRENT closure — one that can see the text the read just produced.
+  const startSubmitRef = useRef(startSubmit);
+  useEffect(() => {
+    startSubmitRef.current = startSubmit;
+  });
+  useEffect(() => {
+    if (!awaitingRead) return;
+    if (docStatus === 'unread') {
+      // A file attached while we were already waiting, or a read that failed and left pages
+      // ticked: ask once more rather than sitting on a spinner for ever.
+      if (!readRequestedForSubmitRef.current) {
+        readRequestedForSubmitRef.current = true;
+        setReadRequest((request) => request + 1);
+      }
+      return;
+    }
+    if (docStatus === 'ready') {
+      readRequestedForSubmitRef.current = false;
+      setAwaitingRead(false);
+      startSubmitRef.current();
+    } else if (docStatus === 'failed' || docStatus === 'empty') {
+      // Nothing came back. Stop waiting and leave the card's own error standing rather than
+      // translating an empty selection.
+      readRequestedForSubmitRef.current = false;
+      setAwaitingRead(false);
+    }
+  }, [awaitingRead, docStatus]);
 
   const copyToClipboard = async () => {
     if (!result) return;
@@ -279,7 +382,7 @@ export default function TranslatePage() {
                 type="button"
                 className="btn btn-small"
                 aria-pressed={target === option.value}
-                disabled={submitting || prep !== 'idle'}
+                disabled={busy}
                 onClick={() => {
                   setTarget(option.value);
                   // A result belongs to the direction it was made in; changing the target
@@ -294,20 +397,42 @@ export default function TranslatePage() {
         </div>
       </section>
 
-      {/* The document to translate usually arrives as a file, not in the clipboard.
-              The shared intake reads pdf/docx/txt and drops the text into the box above,
-              where it is edited and translated like anything else — a scanned PDF stops to
-              ask which pages are worth OCR'ing before a credit is spent. No character
-              budget is passed: this page imposes no length limit on the text, so page
-              selection is about OCR spend, not about trimming to fit. */}
+      {/* The document to translate usually arrives as a file, not in the clipboard. The
+              shared intake reads pdf/docx/txt — a scanned PDF stops to ask which pages are
+              worth OCR'ing before a credit is spent — and its text is counted beside the box
+              above, in LIVE mode, so there is no hand-over button to find and no way to leave
+              an upload behind. No character budget is passed: this page imposes no length
+              limit on the text, so page selection is about OCR spend, not about trimming. */}
       <DocumentIntake
-        storageKey="dgipr.translate.document"
+        key={docKey}
+        storageKey={DOC_STORAGE_KEY}
         feature="translate"
         accept={['pdf', 'docx', 'txt']}
-        onText={(value) => {
-          setText(value);
+        onTextChange={(value) => {
+          // Only a real change may invalidate a finished translation.
+          if (value === docTextRef.current) return;
+          docTextRef.current = value;
+          setDocText(value);
           resetFlow();
         }}
+        onStatusChange={setDocStatus}
+        readRequest={readRequest}
+        // Offered only once there IS a file: the component renders this control in every
+        // state including the empty upload card, where there is nothing to delete.
+        {...(docStatus === 'empty' ? {} : { onRemove: clearDocument })}
+        // The same भाषांतर करा, beside the file controls. A scanned PDF's page picker is
+        // taller than the viewport, so the submit below it is off screen at exactly the
+        // moment the officer has finished choosing pages.
+        submitAction={
+          <button
+            type="button"
+            className="btn btn-primary btn-small"
+            onClick={startSubmit}
+            disabled={disabled}
+          >
+            {awaitingRead ? STR.docReadingForSubmit : STR.translateAction}
+          </button>
+        }
       />
 
       {/* The submit, as an action bar rather than a full sheet of white holding one button
@@ -324,11 +449,17 @@ export default function TranslatePage() {
           <button
             type="button"
             className="btn btn-primary"
-            onClick={submit}
+            onClick={startSubmit}
             disabled={disabled}
           >
             {STR.translateAction}
           </button>
+          {awaitingRead ? (
+            <span className="translating-note">
+              <span className="spinner" aria-hidden="true" />
+              {STR.docReadingForSubmit}
+            </span>
+          ) : null}
           {prep === 'preparing' ? (
             <span className="translating-note">
               <span className="spinner" aria-hidden="true" />

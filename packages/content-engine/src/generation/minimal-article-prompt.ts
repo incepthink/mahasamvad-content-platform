@@ -59,7 +59,12 @@ import type {
 // repeat, stretch, or add unsupported information", and the sentence after it licensed
 // dropping supplied information with no exception for material the officer had asked for. The
 // heading also moved to sit beside the officer request at the end, on the shared block.
-export const MINIMAL_ARTICLE_PROMPT_VERSION = 'minimal-v7';
+// v8 (2026-08-14): the shared NEWS EDITORIAL FOCUS block this variant already renders became
+// unconditional for `news` and gained the lead rule plus the list of detail a news report
+// compresses — see NEWS_EDITORIAL_FOCUS in simple-article-prompt.ts. No change in this file's
+// own system message: it already carried the "do not make it read as a list of the facts"
+// sentence the other two were missing.
+export const MINIMAL_ARTICLE_PROMPT_VERSION = 'minimal-v8';
 
 // The dictionary entry shape now lives in simple-article-prompt.ts, both variants rendering it
 // since simple-v4. Re-exported here so existing importers (and the package barrel) are unmoved.
@@ -406,10 +411,15 @@ if (
     'user prompt has no TARGET LENGTH block',
     !bareUser.includes('TARGET LENGTH'),
   );
+  // The shared block, asserted here only for its PRESENCE on this variant — its content is
+  // pinned by simple-article-prompt.ts's harness, which owns it.
   check(
-    'news receives the minister-centred editorial focus',
+    'news receives the shared editorial focus',
     bareUser.includes('### NEWS EDITORIAL FOCUS') &&
-      bareUser.includes('factual pool, not a completeness checklist') &&
+      bareUser.includes('DECIDE WHAT THE NEWS IS BEFORE WRITING') &&
+      bareUser.includes(
+        'TREAT SOURCE INFORMATION AS A FACTUAL POOL, NOT A COMPLETENESS CHECKLIST',
+      ) &&
       bareUser.includes('Do not write meeting minutes'),
   );
   const schemeUser = buildMinimalArticleUserPrompt({

@@ -1,11 +1,28 @@
 'use client';
 
-// Ad-hoc proofreading of pasted Marathi/English text. Single synchronous step
-// (no review phase like /translate): submit → the API returns only CONFIRMED
-// genuine mistakes (grammar/spelling/punctuation/name/style) plus a corrected
+// Ad-hoc proofreading of pasted Marathi/English text OR an uploaded file. Single
+// synchronous step (no review phase like /translate): submit → the API returns only
+// CONFIRMED genuine mistakes (grammar/spelling/punctuation/name/style) plus a corrected
 // text that is a deterministic patch of the input. Nothing is stored.
+//
+// The upload runs in LIVE mode (onTextChange), not handoff, and the submit reads an unread
+// scan itself — /translate's arrangement, for the same reason. In handoff mode the file's
+// text reached this page only when a button INSIDE the upload card was pressed, so a
+// scanned PDF took three presses in three different places (निवडलेली पृष्ठे वाचा →
+// हा मजकूर वापरा → तपासणी करा) and an officer who pressed only the last one was told to
+// write something to check while their document sat there, read and ignored. Now
+// तपासणी करा is enough on its own: it triggers the OCR read of the ticked pages if that
+// has not happened yet and continues into the check as soon as the text lands. The page
+// picker is still the spend gate — no page is read unless it was ticked — the press that
+// authorises it has just moved.
+//
+// The file's text is counted BESIDE the textarea rather than pushed into it, so a pasted
+// note and an attached document are two independent sources and either one alone is a
+// complete job. Both are joined at submit, and the string actually sent is remembered
+// (`checkedText`) because the corrected text and its highlight replay are only meaningful
+// against the exact input they were produced from.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   UPLOAD_FILE_MAX_BYTES,
   buildProofreadHighlights,
@@ -16,7 +33,14 @@ import {
 import { proofreadText } from '../../lib/api';
 import { downloadBlob } from '../../lib/download';
 import { PROOFREAD_TYPE_LABELS, STR } from '../../lib/strings';
-import { DocumentIntake } from '../../components/DocumentIntake';
+import {
+  DocumentIntake,
+  type DocumentIntakeStatus,
+} from '../../components/DocumentIntake';
+
+// Where the upload card remembers its in-flight job. Named once because the remove control
+// has to clear it by hand — see clearDocument.
+const DOC_STORAGE_KEY = 'dgipr.proofread.document';
 
 // Display order for error-severity issues; style advisories render separately.
 const ERROR_TYPE_ORDER = [
@@ -229,26 +253,121 @@ function CorrectedArticle({
 
 export default function ProofreadPage() {
   const [text, setText] = useState('');
+  // The uploaded file's text, kept BESIDE the textarea rather than pushed into it: the two
+  // are independent sources and either one alone is a complete job.
+  const [docText, setDocText] = useState('');
+  const [docStatus, setDocStatus] = useState<DocumentIntakeStatus>('empty');
+  // Bumping this asks the upload card to run its selected-page extraction. A counter rather
+  // than a flag so a retry after a failed read is an explicit new request.
+  const [readRequest, setReadRequest] = useState(0);
+  // The submit is waiting for that read to land before it can check anything.
+  const [awaitingRead, setAwaitingRead] = useState(false);
+  const readRequestedForSubmitRef = useRef(false);
+  // What the upload card last published, so an identical re-publish (a re-render of the
+  // card, a poll that changed nothing) cannot throw away a finished check.
+  const docTextRef = useRef('');
+  // Remounts the upload card to drop a finished document (its own state is internal).
+  const [docKey, setDocKey] = useState(0);
   const [checking, setChecking] = useState(false);
   const [result, setResult] = useState<ProofreadResponse | null>(null);
+  // The exact string the current result was produced from. The corrected text is a
+  // deterministic patch of it and buildProofreadHighlights replays that patch, so anything
+  // else here — the textarea alone, a since-edited value — would mark the wrong words.
+  const [checkedText, setCheckedText] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  const disabled = checking || text.trim().length === 0;
+  // What actually gets checked: typed text, uploaded file, or both, in that order.
+  // Blank-line separated so a pasted note and an attached document read as two blocks.
+  const combinedText = useMemo(
+    () => [text.trim(), docText.trim()].filter(Boolean).join('\n\n'),
+    [text, docText],
+  );
+
+  // The `unread` arm is what keeps a scanned PDF usable: its pages are ticked but nobody has
+  // paid to read them yet, so it contributes nothing to combinedText, and reading it and then
+  // checking is exactly what startSubmit does. Testing the text alone would leave an officer
+  // whose only source is a scan with a dead button and no way forward.
+  const canSubmit = combinedText.length > 0 || docStatus === 'unread';
+  const busy = checking || awaitingRead;
+  const disabled = busy || !canSubmit;
+
+  const resetFlow = () => {
+    setResult(null);
+    setError(null);
+  };
+
+  // Throw the attached file away without checking it. A remount is what clears the card's
+  // internal state, and the stored job id has to go with it or the mount effect would
+  // re-attach the same file.
+  const clearDocument = () => {
+    window.sessionStorage.removeItem(DOC_STORAGE_KEY);
+    docTextRef.current = '';
+    setDocText('');
+    setDocStatus('empty');
+    setDocKey((n) => n + 1);
+    resetFlow();
+  };
 
   const submit = async () => {
-    if (disabled) return;
+    if (combinedText.length === 0) return;
     setChecking(true);
     setError(null);
     setResult(null);
+    setCheckedText(combinedText);
     try {
-      setResult(await proofreadText({ text: text.trim() }));
+      setResult(await proofreadText({ text: combinedText }));
     } catch (e) {
       setError(e instanceof Error ? e.message : STR.proofreadError);
     } finally {
       setChecking(false);
     }
   };
+
+  // तपासणी करा, pressed. An attached scan whose ticked pages nobody has read yet is read
+  // FIRST and the check continues by itself when the text lands (the effect below) — so the
+  // officer never has to find a second button in the upload card. `reading` is included
+  // because a read already under way needs waiting for, not starting again.
+  const startSubmit = () => {
+    if (docStatus === 'unread' || docStatus === 'reading') {
+      setAwaitingRead(true);
+      if (docStatus === 'unread') {
+        readRequestedForSubmitRef.current = true;
+        setReadRequest((request) => request + 1);
+      }
+      return;
+    }
+    void submit();
+  };
+
+  // Held in a ref so the effect below can run on the document's status alone and still call
+  // the CURRENT closure — one that can see the text the read just produced.
+  const startSubmitRef = useRef(startSubmit);
+  useEffect(() => {
+    startSubmitRef.current = startSubmit;
+  });
+  useEffect(() => {
+    if (!awaitingRead) return;
+    if (docStatus === 'unread') {
+      // A file attached while we were already waiting, or a read that failed and left pages
+      // ticked: ask once more rather than sitting on a spinner for ever.
+      if (!readRequestedForSubmitRef.current) {
+        readRequestedForSubmitRef.current = true;
+        setReadRequest((request) => request + 1);
+      }
+      return;
+    }
+    if (docStatus === 'ready') {
+      readRequestedForSubmitRef.current = false;
+      setAwaitingRead(false);
+      startSubmitRef.current();
+    } else if (docStatus === 'failed' || docStatus === 'empty') {
+      // Nothing came back. Stop waiting and leave the card's own error standing rather than
+      // checking an empty selection.
+      readRequestedForSubmitRef.current = false;
+      setAwaitingRead(false);
+    }
+  }, [awaitingRead, docStatus]);
 
   const copyCorrected = async () => {
     if (!result?.correctedText) return;
@@ -278,7 +397,7 @@ export default function ProofreadPage() {
     result.issues.length === 0 &&
     result.unverifiedNames.length === 0;
   const correctedUnchanged =
-    result?.correctedText != null && result.correctedText === text.trim();
+    result?.correctedText != null && result.correctedText === checkedText;
 
   return (
     <main className="page">
@@ -301,8 +420,7 @@ export default function ProofreadPage() {
           value={text}
           onChange={(event) => {
             setText(event.target.value);
-            setResult(null);
-            setError(null);
+            resetFlow();
           }}
           style={{ marginTop: 10 }}
         />
@@ -316,19 +434,40 @@ export default function ProofreadPage() {
             of its own — the media room's arrangement. As a separate card it read as a second,
             unrelated form, when the file is simply another way of filling the box above.
 
-            HANDOFF mode (onText) is kept deliberately: this surface has ONE text box that the
-            file REPLACES, so the हा मजकूर वापरा press is what authorises the overwrite. Live
-            mode is for a surface that keeps the file BESIDE its own box. */}
+            LIVE mode (onTextChange): its text is counted beside the box rather than pushed
+            into it, so there is no hand-over button to find and no way to leave an upload
+            behind. See the header. */}
         <DocumentIntake
-          storageKey="dgipr.proofread.document"
+          key={docKey}
+          storageKey={DOC_STORAGE_KEY}
           embedded
           feature="proofread"
           maxBytes={UPLOAD_FILE_MAX_BYTES}
-          onText={(value) => {
-            setText(value);
-            setResult(null);
-            setError(null);
+          onTextChange={(value) => {
+            // Only a real change may invalidate a finished check.
+            if (value === docTextRef.current) return;
+            docTextRef.current = value;
+            setDocText(value);
+            resetFlow();
           }}
+          onStatusChange={setDocStatus}
+          readRequest={readRequest}
+          // Offered only once there IS a file: the component renders this control in every
+          // state including the empty upload card, where there is nothing to delete.
+          {...(docStatus === 'empty' ? {} : { onRemove: clearDocument })}
+          // The same तपासणी करा, beside the file controls. A scanned PDF's page picker is
+          // taller than the viewport, so the submit below it is off screen at exactly the
+          // moment the officer has finished choosing pages.
+          submitAction={
+            <button
+              type="button"
+              className="btn btn-primary btn-small"
+              onClick={startSubmit}
+              disabled={disabled}
+            >
+              {awaitingRead ? STR.docReadingForSubmit : STR.proofreadAction}
+            </button>
+          }
         />
       </section>
 
@@ -337,11 +476,17 @@ export default function ProofreadPage() {
           <button
             type="button"
             className="btn btn-primary"
-            onClick={submit}
+            onClick={startSubmit}
             disabled={disabled}
           >
             {STR.proofreadAction}
           </button>
+          {awaitingRead ? (
+            <span className="translating-note">
+              <span className="spinner" aria-hidden="true" />
+              {STR.docReadingForSubmit}
+            </span>
+          ) : null}
           {checking ? (
             <span className="translating-note">
               <span className="spinner" aria-hidden="true" />
@@ -404,7 +549,7 @@ export default function ProofreadPage() {
                 <p className="hint">{STR.proofreadCorrectedUnchanged}</p>
               ) : null}
               <CorrectedArticle
-                original={text}
+                original={checkedText}
                 corrected={result.correctedText}
                 issues={result.issues}
               />

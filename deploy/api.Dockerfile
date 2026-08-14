@@ -41,20 +41,27 @@ COPY packages/schemas/package.json packages/schemas/
 COPY packages/social-publisher/package.json packages/social-publisher/
 RUN pnpm install --frozen-lockfile --filter "@dgipr/api..."
 
-# Now the source, then build the api + its workspace deps in topological order
-# (NOT apps/web — that's Vercel's job).
-COPY . .
-RUN pnpm --filter "@dgipr/api..." --if-present build
-
 # Chromium for the article-PDF export. --with-deps apt-installs the shared libraries it
 # needs (and fonts-liberation, which is the template's Latin fallback) and works fine on
 # -slim, which is still Debian bookworm with apt. PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD is
 # overridden for this RUN only, so the install layer above stays lean and cached.
 # Cost: ~400-500MB of image and ~200-300MB peak RSS per export — check the box's memory
 # headroom, since it also runs n8n.
+#
+# THIS LAYER MUST STAY ABOVE `COPY . .`. It needs no application source — `playwright`
+# is a direct dependency of @dgipr/poster-renderer, whose package.json is already copied
+# above, so `pnpm --filter ... exec` resolves the binary from node_modules. Below the
+# copy it was invalidated by EVERY source change, re-running an apt install and a
+# ~500 MB browser download on every single build. Up here it only re-runs when the
+# lockfile or a package.json changes.
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 RUN PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=0 \
     pnpm --filter @dgipr/poster-renderer exec playwright install --with-deps chromium
+
+# Now the source, then build the api + its workspace deps in topological order
+# (NOT apps/web — that's Vercel's job).
+COPY . .
+RUN pnpm --filter "@dgipr/api..." --if-present build
 
 # Bind to all interfaces inside the container (the app defaults to 127.0.0.1,
 # which would be unreachable from outside). PORT/CORS_ORIGIN/etc. come from the

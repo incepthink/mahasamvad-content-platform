@@ -25,7 +25,14 @@ import {
 // a headline reads as body (MarkdownText, the article PDF template) and which made
 // ensureArticleDateline prefix the dateline to the headline itself. It now asks for "# शीर्षक"
 // and says the dateline opens the first body paragraph, never the headline.
-export const NO_REFERENCE_ARTICLE_PROMPT_VERSION = 'no-reference-v3';
+// v4 (2026-08-14): this variant has NO exemplar at all, so nothing demonstrated the shape of a
+// news report and the model reproduced the note's own order and inventory (see
+// NEWS_EDITORIAL_FOCUS in simple-article-prompt.ts). It now says so directly: do not read as a
+// list of the supplied facts, do not follow the source's order, a table is a working breakdown
+// rather than the news. This constant is bumped for the shared USER-message change too — the
+// recorded promptVersion on this path is `${variant}-${this}` and does not carry
+// SIMPLE_ARTICLE_PROMPT_VERSION, so without the bump a v14 article would be attributed to v3.
+export const NO_REFERENCE_ARTICLE_PROMPT_VERSION = 'no-reference-v4';
 
 // Disabled is the deliberate default for the current experiment. Setting the variable to the
 // single explicit opt-in value `true` restores the complete pre-existing selection + prompt
@@ -59,9 +66,17 @@ export function buildNoReferenceArticleSystemPrompt(): string {
     'supplied information cannot honestly fill the requested length, write the fullest accurate',
     'article it supports and stop.',
     '',
+    'Do not make the article read as a list of the facts in SOURCE INFORMATION, and do not',
+    'follow that section’s order simply because it is the order given. Decide what the article is',
+    'about, lead with it, and use the rest as supporting context. You may leave out supplied',
+    'information that does not serve the article — unless the HEADLINE / ANGLE or the OFFICER',
+    'REQUEST asks for it, in which case it stays.',
+    '',
     'SOURCE INFORMATION may contain Markdown tables (pipe-delimited rows). Read them as tables:',
     'each figure belongs to its own column heading and row label. Never read a row as a',
-    'sentence, and never attach a figure to the wrong heading.',
+    'sentence, and never attach a figure to the wrong heading. A table is usually a working',
+    'breakdown rather than the news: give the reader the total and whatever split is meaningful,',
+    'not a sentence per row.',
     '',
     'Where the NAME DICTIONARY gives a spelling, use it exactly. Where a title is given after a',
     "name, use it before that person's full name on first mention and before their bare surname",

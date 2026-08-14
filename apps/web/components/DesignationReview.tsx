@@ -207,6 +207,17 @@ export function DesignationReview({
               ) : (
                 <span className="glossary-marathi">{term.marathi}</span>
               )}
+              {/* The phrase in the officer's own text that caused this suggestion. A suggested
+                  person is by definition NOT named in the document, so without this the row is
+                  unfalsifiable — the officer is asked to untick "if wrong" with nothing to
+                  judge it against. Older API responses default `mention` to '' and simply show
+                  nothing here. */}
+              {term.suggested && term.mention ? (
+                <span className="names-suggest-because">
+                  {STR.designationsSuggestedFrom} “{term.mention}”{' '}
+                  {STR.designationsSuggestedFromSuffix}
+                </span>
+              ) : null}
             </div>
 
             <div className="glossary-cell">

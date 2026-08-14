@@ -96,9 +96,9 @@ and `posters/references/master-*.png` are already uploaded. Just confirm:
    the Docker image. Video storyboards therefore require `GEMINI_API_KEY` in
    `deploy/.env.prod` (or `OPENAI_API_KEY` with `VIDEO_IMAGE_PROVIDER=openai`).
    Then edit `Caddyfile` if your ACME email should differ from the default.
-7. **Launch**. The `api` image is built off the box and pulled (see
-   [Updating the API](#updating-the-api-build-locally-pull-on-the-box)), so push it from
-   your laptop first, then here:
+7. **Launch**. The `api` image is built by GitHub Actions and pulled (see
+   [Updating the API](#updating-the-api-github-actions-builds-the-box-only-pulls)), so make
+   sure a workflow run has gone green first, then here:
    ```bash
    docker login ghcr.io -u <github-user>   # once, unless the package is public
    docker compose pull                     # api from GHCR; n8n/caddy/postgrest upstream
@@ -218,11 +218,14 @@ current API sends; pushing them ahead of an API deploy breaks both paths.
 
 ---
 
-## Updating the API: build locally, pull on the box
+## Updating the API: GitHub Actions builds, the box only pulls
 
-The image is built **off** the EC2 host. Building there means a `pnpm install`, a monorepo
-build and a ~500 MB `playwright install chromium` competing for the RAM of a box that also
-runs n8n, on every deploy — for output that is identical wherever it is produced.
+**Nothing is ever compiled on the EC2 host.** `.github/workflows/api-image.yml` builds the
+image on every push to `main` and pushes it to GHCR; the box downloads it and restarts.
+Building on the box means a `pnpm install`, a six-package `tsc` run and a ~500 MB
+`playwright install chromium` competing for the RAM of a host that also runs n8n, Caddy and
+PostgREST — which is why it took ~15 minutes and died non-deterministically in the
+TypeScript step. The output is identical wherever it is produced.
 
 > **What does *not* work**, because it silently appears to: `git pull` on the box then
 > `docker compose restart api`. The Dockerfile does `COPY . .` and `pnpm build` *inside* the
@@ -232,23 +235,93 @@ runs n8n, on every deploy — for output that is identical wherever it is produc
 
 ### One-time setup
 
-1. **Create a GitHub PAT** (classic) with `write:packages`, and log in on your laptop:
-   ```bash
-   echo $GHCR_PAT | docker login ghcr.io -u <github-user> --password-stdin
-   ```
-2. **Push the first image** (see the deploy loop below). The package appears at
-   `https://github.com/users/<github-user>/packages`.
+1. **Push this commit to `main`.** The workflow runs and creates the package at
+   `https://github.com/users/incepthink/packages`. Watch it under the repo's Actions tab;
+   the first run is a cold cache and takes several minutes, later ones are much shorter.
+2. **If that first run fails with a 403 on the package**, a `dgipr-api` package already
+   exists from an earlier manual laptop push and is not linked to this repository. Fix it
+   once at Package settings → *Manage Actions access* → add the repo with **Write**, or
+   delete the old package and re-run. The workflow emits the
+   `org.opencontainers.image.source` label, so a package it creates itself links
+   automatically and this never recurs.
 3. **Give the box read access** — either make the package public (Package settings →
-   Change visibility), or `docker login ghcr.io` there with a PAT carrying `read:packages`.
+   Change visibility), or on the box `docker login ghcr.io -u incepthink` with a PAT
+   carrying `read:packages`. Once; Docker stores the credential.
 4. **Get the new compose file onto the box.** This is the one thing `git pull` *is* for
    here — it ships `deploy/docker-compose.yml`, not the application:
    ```bash
    cd <repo> && git pull
    ```
 
+No secrets to configure: the workflow pushes with the automatic `GITHUB_TOKEN`.
+
 ### Every deploy
 
-On your laptop, from the repo root:
+Push to `main`, wait for the Actions run to go green, then **on the box only**:
+
+```bash
+cd <repo>/deploy
+docker compose pull api     # must print a digest — see the gotcha below
+docker compose up -d api
+docker compose logs -f api  # "server listening", no errors
+curl https://api.indicex.xyz/health
+```
+
+That is the whole deploy — a layer download and a container recreate, on the order of a
+minute. The box never runs a compiler.
+
+**Order still matters**, unchanged: migrations → API → `pnpm n8n:push`. Web deploys itself
+from the Vercel git integration.
+
+**A recreate kills in-flight jobs.** The API is a single-process service (see the orphan
+reaper note in CLAUDE.md — two instances would fight over each other's jobs), so this is a
+stop-then-start, not a rolling swap, and any article/video/DLO run in progress dies with the
+old container. Deploy when it is quiet. Do not add a second `api` replica to avoid it.
+
+### Which commits trigger a build
+
+The workflow ignores pushes that touch only `apps/web/**`, `docs/**`, `n8n/**`,
+`supabase/**` and `**/*.md` — none of which change what the API runs. It is a deny-list on
+purpose: the default is to build, so a new directory nobody remembered to list still
+produces an image. For an infrastructure-only rebuild, use the **Run workflow** button
+(`workflow_dispatch`) on the Actions tab.
+
+### Rollback
+
+Every build is tagged with its short commit SHA, so rolling back is naming an older one in
+`deploy/.env` on the box (the same file that holds `N8N_SUBDOMAIN`) — no rebuild, no revert
+commit, no CI wait:
+
+```bash
+echo 'API_TAG=<older-sha>' >> .env
+docker compose up -d api
+```
+
+Roll forward again by removing that line (back to `latest`) and `up -d api`.
+
+### Gotchas
+
+- **Check the pull actually succeeded.** There is no `build:` key in the compose file, so a
+  failed pull is now a loud error rather than a silent fifteen-minute build on the box —
+  but it still leaves the *old* container running. Read the `pull` output before `up -d`.
+- **`up -d`, never `restart`.** `restart` reuses the existing container and its old image.
+  It is for clearing a wedged process, not for deploying.
+- **Architecture is pinned to `linux/amd64`** in the workflow, matching the `t3.*` box. If
+  the host is ever moved to a Graviton (`t4g.*`) instance, change `platforms:` in
+  `.github/workflows/api-image.yml` too, or the container dies instantly on `exec format
+  error`.
+- **Don't run `docker compose up` locally.** It would also start caddy and send it to
+  Let's Encrypt for the production domains. To build the image locally, call docker
+  directly: `docker build -f deploy/api.Dockerfile -t dgipr-api:local ..` from `deploy/`.
+- **Keep the Chromium layer above `COPY . .`** in `api.Dockerfile`. Below it, every source
+  change re-runs an apt install and a ~500 MB browser download; above it, it is cached
+  until the lockfile changes. It needs no application source.
+
+### Fallback: build on your laptop
+
+If Actions is unavailable (outage, exhausted minutes) and something must ship, the manual
+path still works — it is the same image, produced somewhere else. From the repo root, with
+`docker login ghcr.io` done once using a PAT carrying `write:packages`:
 
 ```bash
 export TAG=$(git rev-parse --short HEAD)
@@ -259,69 +332,22 @@ docker push ghcr.io/incepthink/dgipr-api:$TAG
 docker push ghcr.io/incepthink/dgipr-api:latest
 ```
 
-On the box:
+Then pull on the box as usual. `--platform linux/amd64` is not optional on an ARM Mac.
 
-```bash
-cd <repo>/deploy
-docker compose pull api     # must print a digest — see the gotcha below
-docker compose up -d api
-docker compose logs -f api  # "server listening", no errors
-curl https://api.indicex.xyz/health
-```
-
-Only changed layers upload, so after the first push a deploy is usually just the compiled
-`dist/` — seconds, not the whole ~1.5 GB image.
-
-**Order still matters**, unchanged: migrations → API → `pnpm n8n:push`. Web deploys itself
-from the Vercel git integration.
-
-### Rollback
-
-Every push is tagged with its commit, so rolling back is naming an older one in
-`deploy/.env` on the box (the same file that holds `N8N_SUBDOMAIN`):
-
-```bash
-echo 'API_TAG=<older-sha>' >> .env
-docker compose up -d api
-```
-
-### Gotchas
-
-- **Check the pull actually succeeded.** `build:` is kept in the compose file so
-  `docker compose build api` still works locally — the consequence is that if a pull fails
-  and no image is present, `up -d` will *build* on the box, which is the thing this whole
-  procedure exists to avoid.
-- **`up -d`, never `restart`.** `restart` reuses the existing container and its old image.
-- **Build for the box's architecture.** `--platform linux/amd64` is harmless on an x86_64
-  laptop and mandatory on an ARM Mac; without it the container dies immediately on `exec
-  format error`.
-- **Don't run `docker compose up` locally to build.** It would also start caddy and send it
-  to Let's Encrypt for the production domains. Use `docker build` (above) or
-  `docker compose build api`.
-
-### Without a registry
-
-If you'd rather not set up GHCR, pipe the image over SSH instead — same idea, no other
-change:
-
-```bash
-docker build --platform linux/amd64 -f deploy/api.Dockerfile -t dgipr-api:latest .
-docker save dgipr-api:latest | gzip | ssh <box> 'gunzip | docker load'
-```
-
-Set `image: dgipr-api:${API_TAG:-latest}` in the compose file and `docker compose up -d api`
-on the box. It works, but re-ships the entire image — well over a gigabyte before
-compression, thanks to the Chromium layer — on *every* deploy, where a registry sends only
-the layers that changed.
+Without any registry at all, pipe the image over SSH — `docker save dgipr-api:latest | gzip
+| ssh <box> 'gunzip | docker load'`, with `image: dgipr-api:${API_TAG:-latest}` in the
+compose file. It works, but re-ships well over a gigabyte on *every* deploy (the Chromium
+layer), where a registry sends only the layers that changed.
 
 ---
 
 ## Operations notes
 
 - **Logs**: `docker compose logs -f api` / `... n8n`.
-- **Update the API**: build the image on your laptop, push it to GHCR, then on the box
+- **Update the API**: push to `main`, wait for the GitHub Actions run, then on the box
   `docker compose pull api && docker compose up -d api` — full procedure in
-  [Updating the API](#updating-the-api-build-locally-pull-on-the-box) below. **`git pull` on
+  [Updating the API](#updating-the-api-github-actions-builds-the-box-only-pulls) below.
+  Nothing is compiled on the box. **`git pull` on
   the box does not update the API**: the Dockerfile compiles the source *into* the image and
   the container mounts no source, so pulling commits there changes nothing that runs — the
   same trap as n8n workflows. And **`docker compose restart api` never picks up a new

@@ -10,6 +10,7 @@ import type { PosterCopy, TemplateBrand } from './generate-poster-copy.js';
 import type { ArtDirection } from './art-direction.js';
 import type { PosterPalette } from './poster-palettes.js';
 import type { PosterLayout } from './poster-layouts.js';
+import type { PosterPlacement } from './poster-placements.js';
 import {
   clearSpaceRule,
   contentInventoryLines,
@@ -155,6 +156,15 @@ export type BuildPosterPromptInput = Readonly<{
   artDirection?: ArtDirection | undefined;
   assignedPalette?: PosterPalette | undefined;
   assignedLayout?: PosterLayout | undefined;
+  // NOT one of the three retired above, and the distinction is the whole point (2026-08-14).
+  // Those were a SPECIFICATION — exact hexes, a treatment, and an archetype that named what went
+  // in every zone. This is one sentence about where the visual weight sits and how the canvas is
+  // divided, and it exists because handing the arrangement over entirely did not produce varied
+  // arrangements: it produced the image model's two default shapes, run after run. See
+  // poster-placements.ts for why an anchor is not an archetype, and why it can be stated firmly
+  // (it is filtered against the content before it is ever assigned). Absent = no block, so every
+  // caller that does not supply one gets a byte-identical prompt.
+  assignedPlacement?: PosterPlacement | undefined;
 }>;
 
 // BRIGHTNESS. Only for the lane where the image model chooses the colours itself — the
@@ -174,6 +184,46 @@ export type BuildPosterPromptInput = Readonly<{
 // whole point is that it is not negotiable.
 const BRIGHT_LOOK_RULE =
   'MAKE IT BRIGHT, VIVID AND EYE-CATCHING. This poster is published on social media and read on a phone, so it must look light, fresh and inviting at a glance. Build it on a LIGHT, luminous ground — white, off-white, or a light clean tint of the chosen colour — covering most of the poster, and carry the design with clear, saturated, confident colour in the panels, bands, headings, figures, icons and accents. Dark tones are for small blocks, headings and accents only. Do NOT make the poster dark, black, charcoal, near-black, slate, night-mode, muted, dull, washed-out, greyscale, monochrome or moody, and do NOT let a black or very dark panel occupy a large part of the canvas or serve as the main background. Any photograph must be bright, colourful and naturally lit — never desaturated, greyscale, darkened or overlaid with a dark scrim. A dark, drab or low-energy poster is a failed poster even when every other rule is followed.';
+
+// THE ARRANGEMENT BLOCK (2026-08-14) — the one design decision the fresh lane makes for the
+// model, and the only structural instruction it receives.
+//
+// It exists because the 2026-08-10 hand-over solved the wrong half of the problem. Handing the
+// design over raised the craft, which is what the officer reported; it did not vary the
+// ARRANGEMENT, because an image model handed a headline, a list and a scene brief has two habits
+// and no reason to leave them. The brief already NAMES both habits as failure modes, and that is
+// a negative — which is precisely the thing NO_TEXT_RULE had to be rewritten to stop being. "Do
+// not default to those two shapes" gives the model nothing to do instead, so it does them.
+//
+// FOUR PROPERTIES, each answering an objection this block would otherwise deserve:
+//
+//   1. IT SAYS WHY. The arrangement is not presented as taste but as the reason it exists — that
+//      consecutive posters from one department must not come out the same shape. A model given a
+//      constraint with a stated purpose honours it far better than one given a bare rule.
+//   2. IT CONSTRAINS PLACEMENT AND NOTHING ELSE, and lists what it is NOT taking, because the
+//      surrounding brief has just spent four paragraphs handing those decisions over. Without the
+//      hand-back sentence this reads as the specification returning, and the model quite
+//      reasonably starts waiting to be told the rest.
+//   3. IT IS OUTRANKED BY EXACTLY THREE THINGS, named. Not "unless it doesn't work" — a model
+//      takes an open-ended exit every time, which would put us straight back at the default. The
+//      three are the ones that are not taste anywhere in this file: all the content shown, every
+//      word readable, the branding zones clear. This is the same ranked-carve-out shape the
+//      fixed-template lane already uses ("content completeness, readability and reserved-zone
+//      safety OUTRANK the reference's exact widths").
+//   4. THE FALLBACK IS CLOSED. The carve-out's obvious abuse is to invoke it and land back on a
+//      band over rows, so the two default shapes are named again as what the retreat may NOT be.
+//
+// The anchor itself is only ever assigned to content that can carry it (poster-placements.ts
+// filters on imagery and item count before the pick), which is what earns the firm wording.
+function arrangementBlock(placement: PosterPlacement): string {
+  return [
+    `ARRANGEMENT FOR THIS POSTER — one decision, and only this one, has been made for you, so that consecutive posters from this department do not all come out in the same shape: ${placement.instruction}`,
+    '',
+    'Everything else remains entirely yours: the colours, whether there is imagery at all and in what medium, the illustration style, the typography, the texture, the graphic devices, and every proportion within that arrangement. Design a genuinely well-composed poster AROUND this arrangement — do not simply drop the content into it.',
+    '',
+    'Three things outrank it, and only these three: showing every piece of the supplied Marathi content, keeping every word comfortably readable, and keeping the reserved branding zones clear. If the content truly cannot sit in this arrangement, bend it only as far as those three require — and even then, do not retreat to a coloured band above a list of rows, or to a canvas split down the middle with a picture on one side and text on the other.',
+  ].join('\n');
+}
 
 // RETIRED (2026-08-07): CHROME_ZONE_GEOMETRY (280x270 / 130px) and its prose twin
 // CHROME_ZONES. Both are gone and must not come back — SOCIAL_ZONES below is now the single
@@ -496,7 +546,23 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
       '',
       'Design a single, complete portrait poster for the Marathi content below. Design it from scratch, as an original piece of work.',
       '',
-      'YOU HAVE FULL CREATIVE CONTROL, AND YOU SHOULD USE IT. The composition, the colour palette, the imagery, the illustration style, any photography, the texture and material, the typographic scale and hierarchy, the graphic devices — all of it is yours to decide, and you should decide it boldly. Build the poster around whatever serves THIS message: an illustration, a photograph, hand-drawn artwork, a symbolic graphic, a textured or patterned ground, a large colour field, a strong piece of typography. Give it one clear visual idea and a real focal point, with confident contrast between the largest element and the smallest. Craft, depth and personality are wanted here. Do NOT produce a safe, template-shaped layout of a coloured rectangle above a list of rows — that is the failure mode. A citizen scrolling past should stop because the poster is genuinely good to look at.',
+      // TWO FAILURE MODES, BOTH NAMED (the second added 2026-08-14). Removing the assigned
+      // COMPOSITION archetype did not make the lane varied — it made it default, and an image
+      // model handed a headline, a bullet list and a scene brief has exactly two habits. One is
+      // the band-over-rows stack this sentence already named. The other, reported from live
+      // output, is the canvas halved with a photograph down one side and the text down the
+      // other — which is, not coincidentally, what two of the eleven retired archetypes
+      // (`photo_column`, `left_rail`) used to ask for outright. Naming only one of the two left
+      // the model a second safe shape to fall into, and it did, run after run.
+      //
+      // NEITHER SHAPE IS BANNED, and the wording has to keep saying so: a photo panel beside a
+      // text panel is a perfectly good poster, and the department has published plenty. The
+      // defect is arriving there by default rather than by decision. This is deliberately the
+      // same "do NOT default to X or Y — those are the tired defaults" shape the colour
+      // paragraph below already uses against the saffron-on-cream prior, for the same reason:
+      // a prohibition would narrow the lane, and narrowing it is what produced the sameness in
+      // the first place.
+      'YOU HAVE FULL CREATIVE CONTROL, AND YOU SHOULD USE IT. The composition, the colour palette, the imagery, the illustration style, any photography, the texture and material, the typographic scale and hierarchy, the graphic devices — all of it is yours to decide, and you should decide it boldly. Build the poster around whatever serves THIS message: an illustration, a photograph, hand-drawn artwork, a symbolic graphic, a textured or patterned ground, a large colour field, a strong piece of typography. Give it one clear visual idea and a real focal point, with confident contrast between the largest element and the smallest. Craft, depth and personality are wanted here. Do NOT fall into a safe, template-shaped layout — neither a coloured rectangle above a list of rows, nor a canvas divided down the middle with a photograph filling one side and a column of text on the other. Those two are what gets produced when the composition is not really being decided, and between them they are the failure mode. Neither shape is forbidden — but reaching for one by habit, rather than because this particular message asked for it, is exactly what makes every poster look like the last one. Decide the arrangement from THIS content, and let it be asymmetric, layered, full-bleed, diagonal, off-grid, built around one dominant image, or carried on type alone. A citizen scrolling past should stop because the poster is genuinely good to look at.',
       '',
       // READABILITY rides on the colour paragraph rather than becoming a rule of its own — it is
       // a consideration, and a separate block would give it weight the officer did not ask for.
@@ -588,6 +654,17 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
       '',
       'PHOTOGRAPHS MUST LOOK LIKE REAL PHOTOGRAPHS. This rule applies only where you actually choose to use photography — illustration, line art, flat-vector artwork, symbolic graphics, motifs and texture are all still fully open to you, and this does not push you toward photography or away from those. But any photographic element on this poster must read as a genuine photograph taken with a camera: real people with natural faces, skin and expressions, authentic skin, hair, fabric and material textures, real natural or ambient light with believable shadows and reflections, realistic depth of field, and true-to-life colour. Do NOT produce a 3D render, CGI, a video-game or animated-film look, a plastic or waxy digital-human look, an airbrushed stock-photo composite, an obviously AI-generated face, or a photo-illustration hybrid that is half painting and half photograph. People, clothing, vehicles, buildings, streets and interiors must be recognisably Maharashtra, India. If a convincing photograph is not achievable for this subject, use illustration or a graphic treatment instead — a clearly stylised illustration is a good poster, but a photograph that looks fake is not.',
     );
+    // THE ARRANGEMENT, second to last — after every block that hands a decision over, and before
+    // the chrome blocks, which must stay last. The position is deliberate: these models weight
+    // the end of a prompt most, and this is the one structural instruction the lane gives. Above
+    // it sit the paragraphs saying the composition is the model's to decide; this narrows exactly
+    // one axis of that and says so in its own first sentence, so the two are not in conflict.
+    //
+    // Absent on any caller that supplies no placement, which keeps every existing prompt shape
+    // byte-identical (the harness asserts that).
+    if (input.assignedPlacement) {
+      freshLines.push('', arrangementBlock(input.assignedPlacement));
+    }
     // The chrome blocks, LAST and in the fixed-template path's order — that path is the one
     // whose posters come back with the branding sitting correctly, and these three blocks are
     // the whole of the difference. Nothing about the STAMP differs between the two modes:
@@ -797,7 +874,10 @@ if (
   void Promise.all([
     import('./poster-palettes.js'),
     import('./poster-layouts.js'),
-  ]).then(([{ pickPalette }, { pickLayout }]) => {
+    // The arrangement rotation, for section 4d(h) below. Loaded here with the other two so the
+    // callback can stay one scope rather than nesting a second dynamic import inside itself.
+    import('./poster-placements.js'),
+  ]).then(([{ pickPalette }, { pickLayout }, { POSTER_PLACEMENTS, pickPlacement }]) => {
     for (const seed of ['run-alpha', 'run-beta']) {
       const palette = pickPalette(seed);
       const layout = pickLayout(seed, {
@@ -872,12 +952,27 @@ if (
         if (!prompt.includes(needle))
           failures.push(`${seed}: the fresh brief lost "${needle}"`);
       }
-      // 4. THE FAILURE MODE, NAMED. These prompts respond far better to a described defect than
-      //    to an abstraction — the same finding as reserved-zone-rule.ts's "DO NOT CUT A HOLE".
-      //    The defect here is the poster the eleven retired archetypes all produced.
-      if (!prompt.includes('coloured rectangle above a list of rows'))
+      // 4. BOTH FAILURE MODES, NAMED. These prompts respond far better to a described defect
+      //    than to an abstraction — the same finding as reserved-zone-rule.ts's "DO NOT CUT A
+      //    HOLE". The defects here are the two posters the eleven retired archetypes produced
+      //    between them: the band-over-rows stack, and the side-by-side photo/text split
+      //    (`photo_column`, `left_rail`). Naming only the first left the model a second safe
+      //    shape to default into, which is what it did on live runs until 2026-08-14. If
+      //    posters ever go back to one arrangement, check whether one of these was dropped.
+      for (const needle of [
+        'coloured rectangle above a list of rows',
+        'photograph filling one side and a column of text on the other',
+      ])
+        if (!prompt.includes(needle))
+          failures.push(
+            `${seed}: the fresh brief no longer names the template-shaped layout "${needle}" as a failure mode`,
+          );
+      // …and the escape hatch beside them. Both shapes are legitimate posters; the defect is
+      // defaulting to one. A future edit that hardens either into a prohibition would narrow
+      // this lane again, which is the thing that caused the sameness to begin with.
+      if (!prompt.includes('Neither shape is forbidden'))
         failures.push(
-          `${seed}: the fresh brief does not name the template-shaped layout as the failure mode`,
+          `${seed}: the fresh brief now BANS the two default layouts instead of naming them as defaults`,
         );
       // 5. THE ANTI-DEFAULT. Not a colour restriction — the opposite. gpt-image's "Indian
       //    government Marathi poster -> saffron on cream" prior measured 5/8 warm cream grounds
@@ -1307,6 +1402,136 @@ if (
       failures.push(
         'a fresh run with no subject imagery does not carry the photo-realism rule',
       );
+
+    // (h) THE ARRANGEMENT BLOCK (2026-08-14). Everything else in section 4d asserts that a
+    //     design specification does NOT reach the model; this one asserts that one sentence of
+    //     PLACEMENT does, and the difference between the two is the thing a future reader has to
+    //     get right. The retired spec named what went in every zone, in a prompt that had already
+    //     handed the composition over — this narrows one axis and says so. It is here because
+    //     handing arrangement over produced gpt-image's two default shapes run after run, which
+    //     naming them as failure modes (above) did not fix: a negative gives a model nothing to
+    //     execute.
+    {
+      const ANCHORS = POSTER_PLACEMENTS;
+      const anchor = pickPlacement('harness-arrangement', {
+        hasImagery: true,
+        itemCount: 3,
+      });
+      const arranged = buildPosterPrompt({
+        copy: COPY,
+        copyStyle: 'info_bullets',
+        designMode: 'fresh',
+        brand: 'dgipr',
+        masterUrl: '',
+        hasPhoto: true,
+        assignedPlacement: anchor,
+      });
+
+      // 1. The assigned anchor's own words reach the model. Unlike layout.instruction, which
+      //    section 4d asserts must NOT appear.
+      if (!arranged.includes(anchor.instruction))
+        failures.push(
+          "the assigned arrangement's instruction did not reach the fresh prompt",
+        );
+      if (!arranged.includes('ARRANGEMENT FOR THIS POSTER'))
+        failures.push('the fresh prompt lost the arrangement heading');
+
+      // 2. IT MUST HAND EVERYTHING ELSE BACK. Without this sentence the block reads as the
+      //    specification returning, and the model starts waiting to be told the colours and the
+      //    medium too — which is exactly the poster this lane was rebuilt to stop producing.
+      if (!arranged.includes('Everything else remains entirely yours'))
+        failures.push(
+          'the arrangement block no longer hands the other decisions back — it reads as a spec',
+        );
+      if (!arranged.includes('YOU HAVE FULL CREATIVE CONTROL'))
+        failures.push(
+          'the arrangement block displaced the creative-control paragraph it has to sit under',
+        );
+
+      // 3. THE CARVE-OUT IS RANKED AND CLOSED. Exactly three things outrank the arrangement, and
+      //    the retreat may not be to either default shape — an open-ended "unless it doesn't
+      //    work" is an exit a model takes every time, straight back to a band over rows.
+      if (!arranged.includes('Three things outrank it, and only these three'))
+        failures.push(
+          'the arrangement is no longer ranked against completeness/readability/reserved zones',
+        );
+      if (!arranged.includes('do not retreat to a coloured band above a list of rows'))
+        failures.push(
+          "the arrangement block's escape hatch no longer closes the two default shapes",
+        );
+
+      // 4. POSITION. Second to last: after every hand-over paragraph, before the chrome blocks,
+      //    which must stay last on every lane (the fit rule is the final word).
+      if (!arranged.trimEnd().endsWith('cross into either reserved zone.'))
+        failures.push(
+          'the arrangement block displaced the chrome blocks from the end of the prompt',
+        );
+      const atArrangement = arranged.indexOf('ARRANGEMENT FOR THIS POSTER');
+      for (const [label, needle] of [
+        ['the creative-control brief', 'YOU HAVE FULL CREATIVE CONTROL'],
+        ['the content', 'CONTENT TO TYPESET'],
+        ['the photo-realism rule', 'PHOTOGRAPHS MUST LOOK LIKE REAL PHOTOGRAPHS'],
+      ] as const) {
+        if (arranged.indexOf(needle) > atArrangement)
+          failures.push(`the arrangement block was emitted before ${label}`);
+      }
+      if (arranged.indexOf('RESERVED') < atArrangement)
+        failures.push('the arrangement block was emitted after the reserved zones');
+
+      // 5. ADDITIVE. A caller that supplies no anchor gets the prompt it got before this existed,
+      //    byte for byte — the template lanes, the article lane and every existing test above
+      //    depend on that.
+      if (
+        freshPrompt !==
+        buildPosterPrompt({
+          copy: COPY,
+          copyStyle: 'info_bullets',
+          designMode: 'fresh',
+          brand: 'dgipr',
+          masterUrl: '',
+          hasPhoto: true,
+        })
+      )
+        failures.push(
+          'the fresh prompt is no longer byte-identical without an assigned arrangement',
+        );
+
+      // 6. THE ANCHOR VARIES THE PROMPT. The reload button's whole mechanism is that a different
+      //    anchor produces a different instruction — if two anchors ever rendered the same block,
+      //    a redo would be a re-roll of nothing.
+      const rendered = new Set(
+        ANCHORS.map((p) =>
+          buildPosterPrompt({
+            copy: COPY,
+            copyStyle: 'info_bullets',
+            designMode: 'fresh',
+            brand: 'dgipr',
+            masterUrl: '',
+            hasPhoto: true,
+            assignedPlacement: p,
+          }),
+        ),
+      );
+      if (rendered.size !== ANCHORS.length)
+        failures.push(
+          `${ANCHORS.length} anchors produced only ${rendered.size} distinct prompts`,
+        );
+
+      // 7. It reaches the VERBATIM lane too — that lane makes no copy call, so it has fewer
+      //    structural cues than any other and needs the anchor most.
+      const verbatimArranged = buildPosterPrompt({
+        copy: {},
+        information: 'ही एक चाचणी सूचना आहे.',
+        copyStyle: 'info_bullets',
+        designMode: 'fresh_verbatim',
+        brand: 'dgipr',
+        masterUrl: '',
+        hasPhoto: false,
+        assignedPlacement: anchor,
+      });
+      if (!verbatimArranged.includes(anchor.instruction))
+        failures.push('the fresh_verbatim lane did not receive its arrangement');
+    }
 
     // 4e. THE FULLY-AI VERBATIM ('fresh_verbatim') BRANCH — the officer's own words on a poster
     //     the model designs from scratch. It is the fourth cell of the design x content grid and

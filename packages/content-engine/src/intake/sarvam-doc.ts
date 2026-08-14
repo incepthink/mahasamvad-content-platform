@@ -262,8 +262,9 @@ async function extractChunkPages(
 //
 // `options.pages` restricts this to the user's selection, and doing so is the whole reason
 // the option exists: OCR is billed per page, so a page the user did not select must never
-// reach Sarvam. The page-count ceiling below therefore bounds the SELECTION, which is what
-// makes a handful of pages out of a 300-page scan a usable request.
+// reach Sarvam. That selection is now the ONLY spend gate — the page-count ceiling below is
+// off unless SARVAM_DOC_MAX_TOTAL_PAGES is set, because every page here was ticked on
+// purpose and a real booklet runs past any round number worth defaulting to.
 export async function extractPdfPagesViaOcr(
   name: string,
   data: Buffer,

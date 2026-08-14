@@ -80,6 +80,15 @@ export const PreparedNameSchema = z.object({
   // suggestion visible and reversible, not by making it inert.
   // Defaulted so an older API (which omits the field) still parses against a newer web build.
   suggested: z.boolean().default(false),
+  // The phrase in the text that CAUSED a `suggested` row — the office title, department phrase
+  // or surname the lookup matched on. Empty on an ordinary row.
+  //
+  // It exists because a suggestion is otherwise unfalsifiable to the reader: the card names a
+  // person who does not appear in their document, with no way to see why. A real intake proposed
+  // three ministers off `शालेय शिक्षण विभाग` (the department that issued the GR), `सहकार्य` and
+  // `दूरध्वनी` — and the officer could only conclude the platform was inventing people. Showing
+  // the matched phrase turns "untick if wrong" into a judgement they can actually make.
+  mention: z.string().default(''),
   // True when `designation` was READ OFF THE NOTE rather than the dictionary: the note writes
   // the title immediately before the name ("उपमुख्यमंत्री एकनाथ शिंदे"), so the officer's own
   // text is the source. This is not an inference — the invention rule is about producing a

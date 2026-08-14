@@ -79,6 +79,20 @@ export const DloIntakeFileSchema = z.object({
   // Total pages in this PDF, from the free probe — what the page picker lists before
   // anything has been read. Always present on a 'needs-selection' file.
   pageCount: z.number().int().nonnegative().optional(),
+  // Which of this PDF's selected pages have been transcribed SO FAR, ascending. Written
+  // while the read is still running, so प्रक्रिया can show pages landing one by one instead
+  // of a spinner — a 400-page scan is a long wait and the pages exist long before the last
+  // one does.
+  //
+  // PAGE NUMBERS, not the partial text: the detail poll ships text only on `?text=1`
+  // precisely so a running intake does not re-send a whole document every 2.5 seconds, and
+  // streaming partial transcripts would hand that cost straight back at the worst possible
+  // size. A few hundred integers is nothing by comparison.
+  //
+  // And numbers rather than a bare count, because pages finish OUT OF ORDER — the reads run
+  // concurrently. A count would force the UI to tick the first N rows, which is a claim about
+  // which pages are done that is simply false.
+  readPages: z.array(z.number().int().positive()).optional(),
   // Which backend read this PDF. Surfaced because OCR misreads names and amounts
   // while a text layer is exact — and it gates the "read it with OCR instead" offer.
   pdfSource: z.enum(['text-layer', 'ocr']).optional(),
@@ -102,11 +116,15 @@ export type DloIntakeFile = z.infer<typeof DloIntakeFileSchema>;
 
 // ---------- how big one uploaded file may be ----------
 //
-// The ceiling for a single file on the officer-facing intake surfaces: /dlo's recordings and
-// documents, and /transcribe's recordings. It lives here because it is asked in three places
-// and must be answered identically in all of them — the two API routes enforce it, and the web
-// pickers refuse an oversized file BEFORE the upload starts, which on a meeting recording is
+// The ceiling for a single file on **/transcribe**. It is asked in two places and must be
+// answered identically in both — routes/transcriptions.ts enforces it, and the web picker
+// refuses an oversized recording BEFORE the upload starts, which on a meeting recording is
 // the difference between a refusal now and a refusal several minutes from now.
+//
+// /dlo no longer uses it: its intake route accepts any size (routes/dlo.ts), matching the
+// shared document service and /references, because a two-hour recording and a photographed
+// booklet both pass 50 MB routinely and a refusal at the door is one the officer cannot act
+// on. So this is deliberately NOT a product-wide upload cap any more.
 //
 // `_MB` is stated rather than derived so the Marathi copy and the messages cannot disagree with
 // the number actually enforced.
@@ -314,10 +332,20 @@ export const DloReviewDesignationExtraSchema = z.object({
 
 // `names` and `known` both ride on the PAID prepare call, so both are stored. `known` going
 // stale is harmless — it is only the autocomplete datalist.
+// Version of the free/dictionary resolver around the paid name extraction. Bump it whenever a
+// resolver change means a SAVED snapshot's suggestions are now wrong — the web then refreshes
+// them once, keeping the officer's text corrections, edits and extras.
+//   2 → portfolio/designation attribution fix (2026-07-29)
+//   3 → mentions must be whole WORDS: `वन` no longer matched inside `दूरध्वनी`, `सहकार` inside
+//       `सहकार्य`, `सुधा` inside `सुधारित` (2026-08-14)
+export const DLO_DESIGNATION_RESOLVER_VERSION = 3;
+
 export const DloReviewDesignationsSchema = z.object({
-  // Version of the free/dictionary resolver around the paid name extraction. Old snapshots
-  // remain parseable, but the web refreshes their suggestions once when this is absent.
-  resolverVersion: z.literal(2).optional(),
+  // A plain int, NOT a literal: a literal would make every blob written under an older resolver
+  // fail to parse, and `designations` failing takes the whole review_state with it — so bumping
+  // the version would silently discard the officer's OCR corrections and unticked pages. An
+  // unrecognised value simply means "stale", which is the behaviour that was wanted anyway.
+  resolverVersion: z.number().int().optional(),
   names: z.array(PreparedNameSchema),
   known: z.array(KnownDesignationSchema),
   edits: z.record(z.string(), DloReviewDesignationEditSchema),
