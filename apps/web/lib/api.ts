@@ -89,6 +89,7 @@ import {
   type CreateVideoProjectInput,
   type RegenerateStillRequest,
   type UpdateSceneMotionRequest,
+  type ReplanVideoScriptRequest,
   type UpdateVideoScriptRequest,
   type VideoProjectDetail,
   type VideoProjectSummary,
@@ -946,6 +947,22 @@ export async function saveVideoScript(
 ): Promise<VideoProjectDetail> {
   const body = await requestJson(`/api/video/projects/${id}/script`, {
     method: 'PUT',
+    body: JSON.stringify(input),
+  });
+  return VideoProjectDetailSchema.parse(body);
+}
+
+// Gate 1's re-plan, synchronous: persists the officer's scene split exactly as
+// typed, then re-derives every field the pipeline owns (visual brief, end
+// brief, shot hint, beat, key point) and the clip windows. One text call — no
+// frame is drawn and no narration is re-synthesized. The narration itself and
+// the style paragraph are never touched.
+export async function replanVideoScript(
+  id: string,
+  input: ReplanVideoScriptRequest,
+): Promise<VideoProjectDetail> {
+  const body = await requestJson(`/api/video/projects/${id}/script/replan`, {
+    method: 'POST',
     body: JSON.stringify(input),
   });
   return VideoProjectDetailSchema.parse(body);

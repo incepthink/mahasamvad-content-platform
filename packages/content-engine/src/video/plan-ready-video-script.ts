@@ -252,19 +252,41 @@ function userContent(
   ].join('\n');
 }
 
-export async function planReadyVideoScript(
-  script: string,
-  options: Readonly<{
-    heading?: string | undefined;
-    // Duration of a real synthesized WAV of this exact script in the configured
-    // voice. Supply it whenever TTS is available: it decides the scene count,
-    // the per-scene char cap and the clip windows, none of which a fixed
-    // chars-per-second constant can get right across two TTS providers.
-    measuredSeconds?: number | undefined;
-  }> = {},
-): Promise<GeneratedVideoScript> {
-  const normalized = normalizeVideoNarrationScript(script);
-  const chunks = splitReadyVideoScript(normalized, options.measuredSeconds);
+// One scene's visual metadata — everything the pipeline derives FROM a
+// narration rather than reading out of it.
+export interface DescribedVideoScene {
+  visualBrief: string;
+  endVisualBrief?: string | undefined;
+  keyPoint: string;
+  beat: string;
+  shotHint: string;
+}
+
+export interface DescribedVideoScenes {
+  title: string;
+  style: string;
+  scenes: DescribedVideoScene[];
+}
+
+// The AI half of the ready-script plan, with the split taken as GIVEN.
+//
+// Split out from `planReadyVideoScript` (2026-08-14) because the two halves
+// have different owners once a project exists: the boundaries become the
+// officer's, edited card by card at gate 1, while the visuals stay the
+// pipeline's to (re)derive. `planReadyVideoScript` still owns both at create
+// time; the gate-1 re-plan supplies the officer's own chunks and calls only
+// this.
+//
+// The narration is passed for CONTEXT and for the key-point digit guard, and is
+// never returned — the prompt says so twice, and every field this produces is
+// derived rather than transcribed.
+export async function describeVideoScenes(
+  chunks: readonly string[],
+  options: Readonly<{ heading?: string | undefined }> = {},
+): Promise<DescribedVideoScenes> {
+  if (chunks.length === 0) {
+    throw new Error('Cannot plan visuals for an empty scene list.');
+  }
   const schema = visualPlanSchema(chunks.length);
   const messages: ChatMessage[] = [
     { role: 'system', content: systemPrompt(chunks.length) },
@@ -287,6 +309,39 @@ export async function planReadyVideoScript(
       `Ready-script visual plan did not match the expected schema:\n${result.error.message}`,
     );
   }
+  return {
+    title: result.data.title,
+    style: result.data.style,
+    scenes: chunks.map((narration, index) => {
+      const visual = result.data.scenes[index]!;
+      const endVisualBrief = visual.end_visual_brief?.trim();
+      return {
+        visualBrief: visual.visual_brief,
+        ...(endVisualBrief ? { endVisualBrief } : {}),
+        keyPoint: keyPointOf(visual.key_point, narration),
+        beat: visual.beat,
+        shotHint: visual.shot_hint,
+      };
+    }),
+  };
+}
+
+export async function planReadyVideoScript(
+  script: string,
+  options: Readonly<{
+    heading?: string | undefined;
+    // Duration of a real synthesized WAV of this exact script in the configured
+    // voice. Supply it whenever TTS is available: it decides the scene count,
+    // the per-scene char cap and the clip windows, none of which a fixed
+    // chars-per-second constant can get right across two TTS providers.
+    measuredSeconds?: number | undefined;
+  }> = {},
+): Promise<GeneratedVideoScript> {
+  const normalized = normalizeVideoNarrationScript(script);
+  const chunks = splitReadyVideoScript(normalized, options.measuredSeconds);
+  const described = await describeVideoScenes(chunks, {
+    ...(options.heading !== undefined ? { heading: options.heading } : {}),
+  });
 
   // Weights stay char-derived (they are relative, so the rate cancels out), but
   // the TOTAL is the measured one when we have it — that is what the clip
@@ -296,18 +351,19 @@ export async function planReadyVideoScript(
     Math.ceil(scriptSeconds(normalized, options.measuredSeconds)),
   );
   return {
-    title: options.heading ?? result.data.title,
-    style: result.data.style,
+    title: options.heading ?? described.title,
+    style: described.style,
     scenes: chunks.map((narration, index) => {
-      const visual = result.data.scenes[index]!;
-      const endVisualBrief = visual.end_visual_brief?.trim();
+      const visual = described.scenes[index]!;
       return {
         narration,
-        visualBrief: visual.visual_brief,
-        ...(endVisualBrief ? { endVisualBrief } : {}),
-        keyPoint: keyPointOf(visual.key_point, narration),
+        visualBrief: visual.visualBrief,
+        ...(visual.endVisualBrief !== undefined
+          ? { endVisualBrief: visual.endVisualBrief }
+          : {}),
+        keyPoint: visual.keyPoint,
         beat: visual.beat,
-        shotHint: visual.shot_hint,
+        shotHint: visual.shotHint,
         plannedDurationSeconds: plannedDurations[index]!,
       };
     }),

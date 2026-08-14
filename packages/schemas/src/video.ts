@@ -583,6 +583,42 @@ export type UpdateVideoScriptRequest = z.infer<
   typeof UpdateVideoScriptRequestSchema
 >;
 
+// Gate 1's "AI ने पुन्हा तयार करा": persist the officer's scene split exactly as
+// typed, then let the model re-derive every field the pipeline OWNS (visual
+// brief, end brief, shot hint, beat, on-screen key point) and re-weight the
+// clip windows.
+//
+// It is a separate schema from the save request above for one load-bearing
+// reason: `visualBrief` there is `.min(1)`, and a scene the officer has just
+// inserted has NO brief — supplying one is the entire point of pressing this.
+// Reusing the save schema would therefore reject exactly the payload the
+// feature exists to accept. Narration keeps its floor and its one-clip ceiling,
+// because those are the officer's own words and the model never touches them.
+//
+// `style` is deliberately absent. The style paragraph is an input to every
+// frame prompt, so regenerating it would invalidate every rendered frame; the
+// re-plan keeps whatever is stored, and gate 1's textarea remains the way to
+// change it.
+export const ReplanVideoScriptRequestSchema = z.object({
+  scenes: z
+    .array(
+      z.object({
+        sourceIndex: z.number().int().min(0).optional(),
+        narration: z.string().trim().min(1).max(VIDEO_NARRATION_MAX_CHARS),
+        // Optional, and blank is normal: an existing scene sends its current
+        // brief so a failed call leaves something in place, while a new one
+        // sends nothing at all.
+        visualBrief: z.string().trim().optional(),
+        endVisualBrief: z.string().trim().optional(),
+        keyPoint: z.string().trim().max(VIDEO_KEY_POINT_MAX_CHARS).optional(),
+      }),
+    )
+    .min(VIDEO_SCENE_LIMIT.min),
+});
+export type ReplanVideoScriptRequest = z.infer<
+  typeof ReplanVideoScriptRequestSchema
+>;
+
 // Per-scene frame regeneration; an edited brief rides along so "change the
 // description and redraw" is one call. `frame` picks which frame to redraw
 // (default start). Redrawing the START also regenerates the end frame — the

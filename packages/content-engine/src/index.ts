@@ -209,8 +209,11 @@ export {
   type VideoScriptOptions,
 } from './video/generate-video-script.js';
 export {
+  describeVideoScenes,
   planReadyVideoScript,
   splitReadyVideoScript,
+  type DescribedVideoScene,
+  type DescribedVideoScenes,
 } from './video/plan-ready-video-script.js';
 export {
   planVideoScenes,
