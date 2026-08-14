@@ -253,11 +253,17 @@ export default function VideoProjectPage({
   const narrationOverBudget =
     detail.inputMode === 'note' &&
     totalNarrationSeconds > narrationTarget * VIDEO_TOTAL_FIT_TOLERANCE;
-  // Unlike the running total above, this one BLOCKS: the save route rejects a
-  // narration longer than one clip's worth of speech (no clip may exceed
-  // VIDEO_CLIP_MAX_SECONDS), so letting the press through only produced a raw
-  // zod `too_big` payload. The card that is over says so, and the remedy is to
-  // split the line across two scenes.
+  // Unlike the running total above, this one BLOCKS the two buttons that COMMIT
+  // a split: the save route rejects a narration longer than one clip's worth of
+  // speech (no clip may exceed VIDEO_CLIP_MAX_SECONDS), so letting the press
+  // through only produced a raw zod `too_big` payload. The card that is over
+  // says so, and the remedy is to split the line across two scenes.
+  //
+  // It deliberately does NOT gate the re-plan (2026-08-14): that call never
+  // writes narration, its schema therefore carries no ceiling, and a scene the
+  // ready-script splitter itself produced past this constant would otherwise
+  // leave the officer unable to redescribe ANY scene until they had first
+  // rewritten words the button was never going to touch.
   const narrationTooLong = (drafts ?? []).some(
     (d) => d.narration.trim().length > VIDEO_NARRATION_MAX_CHARS,
   );
@@ -585,15 +591,16 @@ export default function VideoProjectPage({
                 </button>
               ) : null}
               {/* Re-derives every pipeline-owned field over the current split.
-                  Unlike the two buttons beside it, a blank दृश्य-वर्णन does not
-                  disable it — supplying one is what it is for. It is always
-                  available (no `scriptDirty` gate): re-planning an unchanged
-                  split is a legitimate "try again" on a description the officer
-                  does not like, and it costs one text call. */}
+                  Unlike the two buttons beside it, neither a blank दृश्य-वर्णन
+                  nor an over-long narration disables it — supplying the first is
+                  what it is for, and the second is text it does not write. It is
+                  always available (no `scriptDirty` gate): re-planning an
+                  unchanged split is a legitimate "try again" on a description
+                  the officer does not like, and it costs one text call. */}
               <button
                 type="button"
                 className="btn"
-                disabled={busy || narrationTooLong || narrationIncomplete}
+                disabled={busy || narrationIncomplete}
                 onClick={replanScript}
               >
                 {busy ? STR.submitting : STR.videoReplanScript}

@@ -592,8 +592,24 @@ export type UpdateVideoScriptRequest = z.infer<
 // reason: `visualBrief` there is `.min(1)`, and a scene the officer has just
 // inserted has NO brief — supplying one is the entire point of pressing this.
 // Reusing the save schema would therefore reject exactly the payload the
-// feature exists to accept. Narration keeps its floor and its one-clip ceiling,
-// because those are the officer's own words and the model never touches them.
+// feature exists to accept.
+//
+// Narration keeps its floor and DELIBERATELY NOT the save route's one-clip
+// ceiling (2026-08-14). This request neither writes nor rewrites narration —
+// it is sent as CONTEXT so the model can describe each scene — so a line over
+// VIDEO_NARRATION_MAX_CHARS is not something this call could introduce, and
+// rejecting it blocks the one operation on the page that does not touch the
+// words. Stored narration legitimately runs past that constant in two ordinary
+// cases: the ready-script splitter bounds its chunks by the rate that script
+// was MEASURED at, which is higher than the configured rate whenever the
+// speaker reads faster than the voice's calibration; and any project written
+// before NARRATION_CHARS_PER_SECOND was set for the deployed voice was capped
+// against the old, larger ceiling. In both, the officer was left with a raw
+// zod `too_big` payload on a button that would not have changed the line
+// anyway. The per-clip fit is still guaranteed where it is actually decided —
+// windows come from clipSecondsForNarration (clamped to VIDEO_CLIP_MAX_SECONDS)
+// and the storyboard job measures the real WAV — and the save/submit buttons,
+// which DO commit a split, keep the ceiling.
 //
 // `style` is deliberately absent. The style paragraph is an input to every
 // frame prompt, so regenerating it would invalidate every rendered frame; the
@@ -604,7 +620,7 @@ export const ReplanVideoScriptRequestSchema = z.object({
     .array(
       z.object({
         sourceIndex: z.number().int().min(0).optional(),
-        narration: z.string().trim().min(1).max(VIDEO_NARRATION_MAX_CHARS),
+        narration: z.string().trim().min(1),
         // Optional, and blank is normal: an existing scene sends its current
         // brief so a failed call leaves something in place, while a new one
         // sends nothing at all.
