@@ -40,6 +40,16 @@ export default function DloPage() {
         loading={loading}
         error={error}
       />
+
+      <style jsx global>{`
+        .dlo-page .file-row .file-name {
+          flex: 1;
+          min-width: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+      `}</style>
     </main>
   );
 }
