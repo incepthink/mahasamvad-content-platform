@@ -452,6 +452,7 @@ export async function overlayVideoLogo(
     );
     const lockup = await renderGovernmentLockup(
       Math.round(width * VIDEO_LOCKUP_WIDTH_RATIO),
+      { background: 'transparent' },
     );
     await writeFile(logoPath, lockup.data);
     const margin = Math.max(4, Math.round(width * VIDEO_LOCKUP_MARGIN_RATIO));
@@ -581,6 +582,7 @@ export async function assembleSilentVideo(
     );
     const lockup = await renderGovernmentLockup(
       Math.round(width * VIDEO_LOCKUP_WIDTH_RATIO),
+      { background: 'transparent' },
     );
     const logoPath = join(dir, 'video-logo.png');
     await writeFile(logoPath, lockup.data);

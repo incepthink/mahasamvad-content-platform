@@ -2482,6 +2482,24 @@ details.fold[aria-disabled='true'] summary {
   margin-top: 12px;
 }
 
+/* Canva requires its mark to be accompanied by visible action text. This keeps the control
+   compact beside the square poster actions while preserving the required clear label. */
+.canva-link {
+  width: auto;
+  gap: 7px;
+  padding: 0 10px;
+  font-size: 0.84rem;
+  font-weight: 650;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.canva-link img {
+  display: block;
+  width: 18px;
+  height: 18px;
+}
+
 /* "Same note, other platform" — an .icon-btn carrying the platform mark, its name, and
    a trailing arrow, so it grows past the square. It sits in the same row as the actions
    on this run; the arrow is what says this one navigates instead of acting. */

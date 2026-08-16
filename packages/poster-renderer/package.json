@@ -31,6 +31,7 @@
     "poster:preview:article": "tsx scripts/preview-article.ts",
     "poster:preview:chrome": "tsx scripts/preview-article-chrome.ts",
     "poster:preview:chrome:twitter": "tsx scripts/preview-twitter-chrome.ts",
+    "poster:verify:canva": "tsx scripts/verify-canva-layers.ts",
     "poster:preview:chrome:cmo": "tsx scripts/preview-cmo-chrome.ts",
     "poster:preview:chrome:youtube": "tsx scripts/preview-youtube-chrome.ts",
     "poster:preview:markers": "tsx scripts/preview-feedback-marker.ts",

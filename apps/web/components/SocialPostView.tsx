@@ -46,6 +46,7 @@ import {
   type AnnotatorMode,
 } from './PosterAnnotator';
 import { PosterVersionStrip } from './PosterVersionStrip';
+import { CanvaLink } from './CanvaLink';
 
 type ChangeTab = 'caption' | 'poster';
 
@@ -387,6 +388,7 @@ export function SocialPostView({
               >
                 <Download size={18} strokeWidth={1.9} aria-hidden="true" />
               </a>
+              <CanvaLink generationId={detail.id} />
               <button
                 type="button"
                 className="icon-btn"

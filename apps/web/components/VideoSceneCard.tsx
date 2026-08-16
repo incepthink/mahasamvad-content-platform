@@ -90,6 +90,7 @@ export function VideoSceneCard({
   onRemove,
   onRedraw,
   onRedrawEnd,
+  onDeleteEndFrame,
   onMotionBriefSave,
   onReanimate,
   onInsertAfter,
@@ -112,6 +113,10 @@ export function VideoSceneCard({
   // edited start brief; onRedrawEnd re-edits only the end frame.
   onRedraw?: (brief: string) => void;
   onRedrawEnd?: ((endBrief: string) => void) | undefined;
+  // Drops the end frame: the scene keeps its start frame and animates from that
+  // alone. Free — no frame is drawn — so it sits beside the redraw button
+  // rather than behind the spend confirmations.
+  onDeleteEndFrame?: (() => void) | undefined;
   // Saves the scene's motion direction. Free — it feeds the CLIP prompt only,
   // so no frame is discarded and the edit lands on the next animation.
   onMotionBriefSave?: ((motionBrief: string) => void) | undefined;
@@ -130,6 +135,11 @@ export function VideoSceneCard({
   // when the stored brief changes (the motionDraft pattern below) — reseeding
   // on every open discarded whatever the officer had just typed.
   const [briefOpen, setBriefOpen] = useState<'start' | 'end' | null>(null);
+  // Two-step confirm for dropping the end frame. It costs nothing and a new one
+  // can be drawn afterwards, but it discards a frame the officer has already
+  // reviewed and it sits next to the redraw button — so a misclick must not
+  // take it.
+  const [deleteEndArmed, setDeleteEndArmed] = useState(false);
   const storedStartBrief = scene.openingVisualBrief ?? scene.visualBrief;
   const storedEndBrief = scene.endVisualBrief ?? '';
   const [startDraft, setStartDraft] = useState(storedStartBrief);
@@ -161,7 +171,12 @@ export function VideoSceneCard({
   const openDraft = briefOpen === 'end' ? endDraft : startDraft;
 
   const heading = `${STR.videoSceneLabel} ${index + 1}`;
-  const hasEndFrame = scene.endVisualBrief !== undefined;
+  // An EMPTY end brief is not an end frame: gate 2 overlays the draft, which
+  // carries '' for a scene that has none, so testing `!== undefined` showed a
+  // permanently-pending end-frame panel on legacy scenes and on any scene whose
+  // end frame was just deleted.
+  const hasEndFrame =
+    storedEndBrief.trim() !== '' || scene.endStillUrl !== undefined;
   // Nothing has been drawn for this scene yet — a stored scene the officer just
   // inserted, or one whose brief changed. The control is the same fold, but
   // "पुन्हा काढा" ("redraw") is the wrong word when there is no frame to redraw,
@@ -443,7 +458,7 @@ export function VideoSceneCard({
           {STR.videoSceneNeedsFrames}
         </p>
       ) : null}
-      {onRedraw || (hasEndFrame && onRedrawEnd) || onReanimate ? (
+      {onRedraw || onRedrawEnd || onReanimate ? (
         <div className="btn-row" style={{ marginTop: 12 }}>
           {onRedraw ? (
             <button
@@ -461,16 +476,19 @@ export function VideoSceneCard({
                 : STR.videoEditStartBrief}
             </button>
           ) : null}
-          {hasEndFrame && onRedrawEnd ? (
+          {/* Offered with no end frame too — that is the way back after one is
+              deleted, and the same route renders it either way. */}
+          {onRedrawEnd ? (
             <button
               type="button"
               className="btn btn-small"
               disabled={busy}
-              onClick={() =>
-                setBriefOpen((open) => (open === 'end' ? null : 'end'))
-              }
+              onClick={() => {
+                setDeleteEndArmed(false);
+                setBriefOpen((open) => (open === 'end' ? null : 'end'));
+              }}
             >
-              {STR.videoEditEndBrief}
+              {hasEndFrame ? STR.videoEditEndBrief : STR.videoAddEndFrame}
             </button>
           ) : null}
           {onReanimate ? (
@@ -577,9 +595,55 @@ export function VideoSceneCard({
                 ? needsFirstFrames
                   ? STR.videoRenderSceneFrames
                   : STR.videoRedrawStill
-                : STR.videoRedrawEndStill}
+                : hasEndFrame
+                  ? STR.videoRedrawEndStill
+                  : STR.videoRenderEndStill}
             </button>
+            {/* Beside the redraw, because this is the other answer to the same
+                question: the officer is looking at an end frame they do not
+                want. Free, so it is not held behind the spend confirmations —
+                but two-step, so it is not taken by a misclick. */}
+            {briefOpen === 'end' && hasEndFrame && onDeleteEndFrame ? (
+              deleteEndArmed ? (
+                <>
+                  <button
+                    type="button"
+                    className="btn btn-small btn-danger"
+                    disabled={busy}
+                    onClick={() => {
+                      setDeleteEndArmed(false);
+                      setBriefOpen(null);
+                      onDeleteEndFrame();
+                    }}
+                  >
+                    {STR.videoDeleteEndStillConfirm}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-small"
+                    disabled={busy}
+                    onClick={() => setDeleteEndArmed(false)}
+                  >
+                    {STR.videoAnimateCancel}
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-small"
+                  disabled={busy}
+                  onClick={() => setDeleteEndArmed(true)}
+                >
+                  {STR.videoDeleteEndStill}
+                </button>
+              )
+            ) : null}
           </div>
+          {briefOpen === 'end' && hasEndFrame && onDeleteEndFrame ? (
+            <p className="hint" style={{ marginTop: 8 }}>
+              {STR.videoDeleteEndStillHint}
+            </p>
+          ) : null}
         </>
       ) : null}
 

@@ -28,6 +28,7 @@ import {
   estimateNarrationSeconds,
 } from '@dgipr/schemas';
 import {
+  deleteVideoSceneEndFrame,
   narrateVideo,
   reanimateVideoScene,
   regenerateVideoStill,
@@ -433,6 +434,17 @@ export default function VideoProjectPage({
       }),
     );
 
+  // Free and immediate: the scene drops its end frame and animates from the
+  // start frame alone. The gate-2 draft is cleared alongside the row — the card
+  // there renders the DRAFT's end brief over the stored scene, so leaving it
+  // behind would both keep a phantom end frame on screen and put the deleted
+  // brief straight back on the next "बदल जतन करा".
+  const deleteEndFrame = (index: number, cardIndex: number) =>
+    act(async () => {
+      await deleteVideoSceneEndFrame(id, index);
+      patchDraft(cardIndex, { endVisualBrief: '' });
+    });
+
   return (
     <main className="page">
       <div className="article-head">
@@ -650,6 +662,8 @@ export default function VideoProjectPage({
                         void redrawStill(draft.sourceIndex!, brief),
                       onRedrawEnd: (endBrief: string) =>
                         void redrawEndStill(draft.sourceIndex!, endBrief),
+                      onDeleteEndFrame: () =>
+                        void deleteEndFrame(draft.sourceIndex!, index),
                       onMotionBriefSave: (motionBrief: string) =>
                         void saveMotionBrief(draft.sourceIndex!, motionBrief),
                     }
@@ -781,6 +795,9 @@ export default function VideoProjectPage({
           onRedrawEndStill={(index, endBrief) =>
             void redrawEndStill(index, endBrief)
           }
+          // The fix panel maps card position to scene index directly (it walks
+          // detail.scenes, not the drafts), so the two indexes are the same one.
+          onDeleteEndFrame={(index) => void deleteEndFrame(index, index)}
           onSaveMotionBrief={(index, motionBrief) =>
             void saveMotionBrief(index, motionBrief)
           }

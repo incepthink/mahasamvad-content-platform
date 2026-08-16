@@ -34,6 +34,7 @@ import {
 } from './PosterAnnotator';
 import { PosterImageFeedbackBox } from './PosterImageFeedbackBox';
 import { PosterVersionStrip } from './PosterVersionStrip';
+import { CanvaLink } from './CanvaLink';
 
 export function PosterPanel({
   detail,
@@ -162,6 +163,7 @@ export function PosterPanel({
             >
               <Download size={18} strokeWidth={1.9} aria-hidden="true" />
             </a>
+            <CanvaLink generationId={detail.id} />
             {/* A fresh redesign of this same run. Only offered on the pixel-feedback
                 lane: in `html` mode the poster is typeset from a cached scene and the
                 two folds below are the way it changes. */}

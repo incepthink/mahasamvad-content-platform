@@ -258,14 +258,13 @@ function toDetail(
       ...(scene.clipPath
         ? { clipUrl: publicUrlIn(client, VIDEOS_BUCKET, scene.clipPath) }
         : {}),
-      // A clip animated from an older frame (start OR end) — or from an older
-      // motion brief — than the one on screen; the fix panel's re-animate
-      // affordance keys off this.
+      // A clip animated from an older frame (start OR end), from an end frame
+      // the officer has since DELETED, or from an older motion brief — than what
+      // is on screen; the fix panel's re-animate affordance keys off this.
       ...(scene.clipPath !== undefined &&
       ((scene.stillVersion !== undefined &&
         scene.clipStillVersion !== scene.stillVersion) ||
-        (scene.endStillPath !== undefined &&
-          scene.clipEndStillVersion !== scene.endStillVersion) ||
+        scene.clipEndStillVersion !== scene.endStillVersion ||
         (scene.clipMotionBrief !== undefined &&
           scene.clipMotionBrief !== (scene.motionBrief ?? '')))
         ? { clipStale: true }
@@ -491,7 +490,23 @@ export function registerVideoRoutes(
       ) {
         return reply.code(409).send({ error: { message: BUSY_MESSAGE } });
       }
-      if (row.inputMode === 'script') {
+      // Word identity used to be enforced on the WHOLE ready-script lane, which
+      // also refused a typo fix — and the words are not actually frozen when the
+      // voice is synthesized: the narrate phase keys its cached WAV on the joined
+      // SCENE narrations (`continuousNarrationIsCurrent`), not on `row.note`, so
+      // an edit simply invalidates the track and it is re-synthesized from the
+      // edited text. The guard therefore now covers only the case where the words
+      // genuinely cannot change — the narration IS the officer's own recording,
+      // which no edit can re-record. That is also what keeps the voice phase's
+      // uploaded-narration branch unreachable; without this it would surface as a
+      // raw throw at the top of the storyboard job instead of a Marathi refusal.
+      //
+      // Two things this no longer protects, both acceptable and neither on the
+      // normal path: `row.note` keeps the ORIGINAL script, so re-running the gate-0
+      // script job discards the edits; and the clip windows were derived from a
+      // measured WAV of that original, so a materially longer edit extends them
+      // (or, once clips are rendered and windows frozen, is speed-fitted).
+      if (row.inputMode === 'script' && narrationIsUploaded(row.scenes)) {
         const submitted = normalizeVideoNarrationScript(
           body.scenes.map((scene) => scene.narration).join(' '),
         );
@@ -500,7 +515,7 @@ export function registerVideoRoutes(
           return reply.code(400).send({
             error: {
               message:
-                'तयार संहितेतील निवेदन बदलता येत नाही. दृश्य-वर्णन मात्र संपादित करता येईल.',
+                'तुम्ही दिलेल्या ध्वनिफीतीतील शब्द बदलता येत नाहीत. दृश्य-वर्णन मात्र संपादित करता येईल.',
             },
           });
         }
@@ -790,6 +805,67 @@ export function registerVideoRoutes(
       });
       startSceneStillJob(client, row.id, index, returnTo, frame);
       return reply.code(202).send({ id: row.id });
+    },
+  );
+
+  // One scene's END frame, deleted. Synchronous and free — nothing is rendered
+  // and nothing is re-billed; the scene simply returns to the legacy
+  // single-frame shape and animates first-frame-only. The stored PNG is left in
+  // the bucket (frames are versioned and immutable, exactly as a redrawn frame's
+  // predecessor is), so the only thing removed is the row's reference to it.
+  //
+  // 'completed' and 'failed' are accepted for the same reason the motion route
+  // takes them: the fix panel is where an officer learns the ending was wrong.
+  // A clip already animated from that frame KEEPS its clipEndStillVersion — the
+  // motion-brief lineage trick — so clipIsCurrent (and the detail payload's
+  // clipStale) both see that this scene's clip no longer matches what is on
+  // screen, and the officer is offered a re-animate instead of the old ending
+  // being silently re-shipped.
+  app.delete<{ Params: { id: string; index: string } }>(
+    '/video/projects/:id/scenes/:index/end-frame',
+    async (request, reply) => {
+      const row = await getVideoProject(client, request.params.id);
+      if (!row) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'Video project not found.' } });
+      }
+      const index = Number(request.params.index);
+      const scene = Number.isInteger(index) ? row.scenes[index] : undefined;
+      if (!scene) {
+        return reply.code(404).send({ error: { message: 'Scene not found.' } });
+      }
+      if (
+        (row.status !== 'storyboard_ready' &&
+          row.status !== 'completed' &&
+          row.status !== 'failed') ||
+        isVideoJobRunning(row.id)
+      ) {
+        return reply.code(409).send({ error: { message: BUSY_MESSAGE } });
+      }
+      // Idempotent: a scene that already has no end frame is not an error (a
+      // double press, or a legacy single-frame scene), it is the requested
+      // state.
+      if (
+        scene.endVisualBrief === undefined &&
+        scene.endStillPath === undefined
+      ) {
+        return toDetail(client, row);
+      }
+      const scenes = [...row.scenes];
+      const kept: {
+        -readonly [K in keyof VideoSceneEntry]: VideoSceneEntry[K];
+      } = { ...scene };
+      delete kept.endVisualBrief;
+      delete kept.endStillPath;
+      delete kept.endStillVersion;
+      // clipEndStillVersion survives as LINEAGE while a clip exists — that
+      // mismatch is the whole staleness signal. With no clip it records nothing.
+      if (scene.clipPath === undefined) delete kept.clipEndStillVersion;
+      scenes[index] = kept;
+      await updateVideoProject(client, row.id, { scenes });
+      const updated = await getVideoProject(client, row.id);
+      return toDetail(client, updated!);
     },
   );
 

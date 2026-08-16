@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { ZodError } from 'zod';
 import { createServiceRoleClient } from '@dgipr/database';
 import { registerAnalyticsRoutes } from './routes/analytics.js';
+import { registerCanvaRoutes } from './routes/canva.js';
 import { registerChatRoutes } from './routes/chat.js';
 import { registerDloRoutes } from './routes/dlo.js';
 import { registerDocumentRoutes } from './routes/documents.js';
@@ -74,6 +75,7 @@ export async function createServer() {
   await app.register(
     async (instance) => {
       registerGenerationRoutes(instance, client);
+      registerCanvaRoutes(instance, client);
       registerGlossaryRoutes(instance, client);
       registerTranslateRoutes(instance, client);
       // Generic file upload → pages of text. It still persists no document and no text;

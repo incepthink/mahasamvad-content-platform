@@ -32,10 +32,15 @@ export {
 export type { BuildArticlePosterHtmlInput } from './article-template.js';
 export { overlayArticleChrome } from './article-chrome.js';
 export {
+  buildCanvaSocialPosterLayers,
   overlayTwitterChrome,
   SOCIAL_ARTWORK_HEIGHT,
   SOCIAL_ARTWORK_SIZE,
   SOCIAL_POSTER_HEIGHT,
+} from './twitter-chrome.js';
+export type {
+  CanvaPosterLayer,
+  CanvaSocialPosterLayers,
 } from './twitter-chrome.js';
 export { overlayCmoChrome, CMO_POSTER_SIZE } from './cmo-chrome.js';
 export {

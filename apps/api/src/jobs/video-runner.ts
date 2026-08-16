@@ -1187,15 +1187,20 @@ async function renderSceneClip(
 
 // A scene's clip is current when it was animated from BOTH frames the user is
 // looking at AND at the scene's current window (undefined = pre-measure legacy
-// clip = current, so old projects aren't re-billed; a scene with no end frame
-// skips the end check the same way). Anything else needs a render.
+// clip = current, so old projects aren't re-billed; a scene that never had an
+// end frame carries undefined on both sides and matches the same way).
+// Anything else needs a render.
 function clipIsCurrent(scene: VideoSceneEntry): boolean {
   return (
     scene.clipPath !== undefined &&
     scene.clipStillVersion !== undefined &&
     scene.clipStillVersion === scene.stillVersion &&
-    (scene.endStillPath === undefined ||
-      scene.clipEndStillVersion === scene.endStillVersion) &&
+    // Both undefined = a scene with no end frame (legacy, or one the officer
+    // deleted before it was ever animated) = current. A DELETED end frame
+    // leaves the clip's lineage behind on purpose, so this mismatch is what
+    // re-renders that scene first-frame-only instead of re-shipping the ending
+    // that was just removed.
+    scene.clipEndStillVersion === scene.endStillVersion &&
     (scene.clipDurationSeconds === undefined ||
       scene.clipDurationSeconds === scene.durationSeconds) &&
     // The motion brief has no frame version behind it, so its lineage is the

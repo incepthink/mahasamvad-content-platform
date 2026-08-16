@@ -24,6 +24,7 @@ export function VideoResultView({
   busy,
   onRedrawStill,
   onRedrawEndStill,
+  onDeleteEndFrame,
   onSaveMotionBrief,
   onReanimateScene,
   onNarrate,
@@ -37,6 +38,9 @@ export function VideoResultView({
   // from the start); onRedrawEndStill re-edits only the end frame.
   onRedrawStill: (index: number, brief: string) => void;
   onRedrawEndStill: (index: number, endBrief: string) => void;
+  // Drops one scene's end frame. Free; the scene's clip is then reported stale
+  // and re-animating it stays the officer's call.
+  onDeleteEndFrame: (index: number) => void;
   // Saves one scene's motion direction. Free and frame-preserving; it applies
   // when that scene is re-animated from the same panel.
   onSaveMotionBrief: (index: number, motionBrief: string) => void;
@@ -188,6 +192,7 @@ export function VideoResultView({
               busy={busy}
               onRedraw={(brief) => onRedrawStill(index, brief)}
               onRedrawEnd={(endBrief) => onRedrawEndStill(index, endBrief)}
+              onDeleteEndFrame={() => onDeleteEndFrame(index)}
               onMotionBriefSave={(motionBrief) =>
                 onSaveMotionBrief(index, motionBrief)
               }

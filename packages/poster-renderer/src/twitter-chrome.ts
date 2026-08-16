@@ -66,6 +66,12 @@ const LABEL_MAX_WIDTH = 154;
 const LABEL_FONT_SIZE = 21;
 const LABEL = 'महाराष्ट्र शासन';
 const LABEL_COLOUR = '#17324d';
+// The card-less variant sits directly on footage with NOTHING behind it — no
+// card, no panel, no halo — so the navy wordmark would disappear on any dark
+// scene. It is set in white instead, which is the broadcast default over
+// footage. Change this one constant if a light-footage deployment wants the
+// navy back.
+const LABEL_COLOUR_ON_FOOTAGE = '#ffffff';
 // footer-new-poster.png was exported on a 3376x4219 transparent canvas; the
 // intended footer artwork occupies the bottom 239 pixels.
 const SOCIAL_FOOTER_SOURCE_HEIGHT = 239;
@@ -104,13 +110,32 @@ export type GovernmentLockupRaster = Readonly<{
 }>;
 type Raster = GovernmentLockupRaster;
 
+export type CanvaPosterLayer = Readonly<{
+  png: Buffer;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}>;
+
+export type CanvaSocialPosterLayers = Readonly<{
+  base: Buffer;
+  logo: CanvaPosterLayer;
+  footer: CanvaPosterLayer;
+  width: number;
+  height: number;
+}>;
+
 // Render the Marathi wordmark through Sharp/Pango with the bundled Devanagari
 // font. The emblem remains a high-resolution raster, while the label is freshly
 // shaped at the output size so both stay sharp and perfectly centred.
-async function renderGovernmentLabel(scale: number): Promise<Raster> {
+async function renderGovernmentLabel(
+  scale: number,
+  colour: string,
+): Promise<Raster> {
   const data = await sharp({
     text: {
-      text: `<span foreground="${LABEL_COLOUR}">${LABEL}</span>`,
+      text: `<span foreground="${colour}">${LABEL}</span>`,
       font: `Mukta SemiBold ${LABEL_FONT_SIZE}`,
       fontfile: resolve(ASSETS_DIR, 'fonts/Mukta-SemiBold.ttf'),
       width: Math.round(LABEL_MAX_WIDTH * scale),
@@ -128,12 +153,16 @@ async function renderGovernmentLabel(scale: number): Promise<Raster> {
   return { data, width: meta.width, height: meta.height };
 }
 
-async function buildGovernmentLockup(scale: number): Promise<Raster> {
+async function buildGovernmentLockup(
+  scale: number,
+  background: GovernmentLockupBackground,
+): Promise<Raster> {
   const width = Math.round(LOCKUP_WIDTH * scale);
   const height = Math.round(LOCKUP_HEIGHT * scale);
   const stroke = Math.max(1, 1.5 * scale);
   const strokeInset = stroke / 2;
   const cornerRadius = LOCKUP_CORNER_RADIUS * scale;
+  const onFootage = background === 'transparent';
   const card = Buffer.from(
     `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
       <rect x="${strokeInset}" y="${strokeInset}"
@@ -144,23 +173,44 @@ async function buildGovernmentLockup(scale: number): Promise<Raster> {
   );
   const [emblem, label] = await Promise.all([
     loadScaled('poster-logo-new.png', EMBLEM_TARGET_WIDTH * scale),
-    renderGovernmentLabel(scale),
+    renderGovernmentLabel(
+      scale,
+      onFootage ? LABEL_COLOUR_ON_FOOTAGE : LABEL_COLOUR,
+    ),
   ]);
+  const marks = [
+    {
+      input: emblem.data,
+      left: Math.round((width - emblem.width) / 2),
+      top: Math.round(EMBLEM_TOP * scale),
+    },
+    {
+      input: label.data,
+      left: Math.round((width - label.width) / 2),
+      top: Math.round(LABEL_TOP * scale),
+    },
+  ];
 
+  if (!onFootage) {
+    return {
+      data: await sharp(card).composite(marks).png().toBuffer(),
+      width,
+      height,
+    };
+  }
+
+  // Nothing behind the marks at all: no card, no panel, no halo — the emblem
+  // and the wordmark composite straight onto the footage.
   return {
-    data: await sharp(card)
-      .composite([
-        {
-          input: emblem.data,
-          left: Math.round((width - emblem.width) / 2),
-          top: Math.round(EMBLEM_TOP * scale),
-        },
-        {
-          input: label.data,
-          left: Math.round((width - label.width) / 2),
-          top: Math.round(LABEL_TOP * scale),
-        },
-      ])
+    data: await sharp({
+      create: {
+        width,
+        height,
+        channels: 4,
+        background: { r: 0, g: 0, b: 0, alpha: 0 },
+      },
+    })
+      .composite(marks)
       .png()
       .toBuffer(),
     width,
@@ -168,17 +218,33 @@ async function buildGovernmentLockup(scale: number): Promise<Raster> {
   };
 }
 
+/**
+ * `card` (default) is the white rounded badge the social and YouTube posters
+ * carry. `transparent` drops the card so the emblem + wordmark sit directly on
+ * the artwork — what the explainer video wants, since a white square over
+ * live-action footage reads as a sticker.
+ */
+export type GovernmentLockupBackground = 'card' | 'transparent';
+
+export type GovernmentLockupOptions = Readonly<{
+  background?: GovernmentLockupBackground;
+}>;
+
 // Shared with the explainer-video path so posters and videos always use the
 // exact same Maharashtra Government emblem + wordmark artwork. Callers choose
 // the target width; the social poster uses 160px on a 1280px canvas, while
 // video intentionally asks for a slightly larger proportion.
 export async function renderGovernmentLockup(
   targetWidth: number,
+  options: GovernmentLockupOptions = {},
 ): Promise<GovernmentLockupRaster> {
   if (!Number.isFinite(targetWidth) || targetWidth <= 0) {
     throw new Error('Government lockup target width must be positive.');
   }
-  return buildGovernmentLockup(targetWidth / LOCKUP_WIDTH);
+  return buildGovernmentLockup(
+    targetWidth / LOCKUP_WIDTH,
+    options.background ?? 'card',
+  );
 }
 
 async function loadSocialFooter(targetWidth: number): Promise<Raster> {
@@ -205,6 +271,102 @@ async function loadSocialFooter(targetWidth: number): Promise<Raster> {
     .png()
     .toBuffer();
   return { data, width, height };
+}
+
+// Canva's Magic Layers is useful for the model-painted body of a poster, but it also tries to
+// reconstruct the small official emblem and the fine-print footer when they arrive flattened
+// into that same bitmap. Preserve those pixels exactly by lifting the two chrome rectangles out
+// of an already-finished poster. The returned base has transparent holes under them and the two
+// crops carry the exact pixels that were removed, so stacking base -> logo -> footer is
+// pixel-identical without requiring a separately stored pre-chrome render.
+//
+// The logo crop is deliberately the complete rectangular badge footprint, including its few
+// background-coloured corner pixels. That makes the reconstruction lossless while ensuring
+// Magic Layers sees none of the emblem or Marathi wordmark underneath the separate Canva layer.
+export async function buildCanvaSocialPosterLayers(
+  poster: Buffer,
+): Promise<CanvaSocialPosterLayers> {
+  const meta = await sharp(poster).metadata();
+  if (!meta.width || !meta.height) {
+    throw new Error('Could not read social poster dimensions for Canva.');
+  }
+
+  const scale = meta.width / ASSET_BASE_WIDTH;
+  const [lockup, footerRaster] = await Promise.all([
+    renderGovernmentLockup(LOCKUP_WIDTH * scale),
+    loadSocialFooter(meta.width),
+  ]);
+  const margin = Math.round(LOCKUP_MARGIN * scale);
+  const logoLeft = meta.width - lockup.width - margin;
+  const logoTop = margin;
+  const footerTop = meta.height - footerRaster.height;
+  if (logoLeft < 0 || logoTop < 0 || footerTop < 0) {
+    throw new Error(
+      'Social poster is too small for its Canva branding layers.',
+    );
+  }
+
+  const [logo, footer, rawBase] = await Promise.all([
+    sharp(poster)
+      .extract({
+        left: logoLeft,
+        top: logoTop,
+        width: lockup.width,
+        height: lockup.height,
+      })
+      .png()
+      .toBuffer(),
+    sharp(poster)
+      .extract({
+        left: 0,
+        top: footerTop,
+        width: meta.width,
+        height: footerRaster.height,
+      })
+      .png()
+      .toBuffer(),
+    sharp(poster).ensureAlpha().raw().toBuffer({ resolveWithObject: true }),
+  ]);
+  if (rawBase.info.channels !== 4) {
+    throw new Error('Could not prepare an RGBA social poster for Canva.');
+  }
+  const clearAlpha = (
+    left: number,
+    top: number,
+    width: number,
+    height: number,
+  ): void => {
+    for (let y = top; y < top + height; y += 1) {
+      for (let x = left; x < left + width; x += 1) {
+        rawBase.data[(y * meta.width + x) * 4 + 3] = 0;
+      }
+    }
+  };
+  clearAlpha(logoLeft, logoTop, lockup.width, lockup.height);
+  clearAlpha(0, footerTop, meta.width, footerRaster.height);
+  const base = await sharp(rawBase.data, { raw: rawBase.info })
+    .png()
+    .toBuffer();
+
+  return {
+    base,
+    logo: {
+      png: logo,
+      left: logoLeft,
+      top: logoTop,
+      width: lockup.width,
+      height: lockup.height,
+    },
+    footer: {
+      png: footer,
+      left: 0,
+      top: footerTop,
+      width: meta.width,
+      height: footerRaster.height,
+    },
+    width: meta.width,
+    height: meta.height,
+  };
 }
 
 // Composite the white emblem + Marathi wordmark lockup into the top-right corner, and

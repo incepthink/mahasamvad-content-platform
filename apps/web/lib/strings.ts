@@ -824,6 +824,7 @@ export const STR = {
   // Icon-button row under a social poster + the icon pair inside the caption box.
   // Icon-only controls, so every one of these is its title/aria-label — never visible text.
   iconDownloadPoster: 'पोस्टर डाउनलोड करा',
+  iconOpenPosterInCanva: 'Canva मध्ये पोस्टर उघडा',
   iconRedesignPoster: 'वेगळी रचना तयार करा',
   iconRecolourPoster: 'वेगळ्या रंगात तयार करा',
   iconEditPoster: 'चित्रात बदल करा (पोस्टरवर खूण करा)',
@@ -1398,10 +1399,20 @@ export const STR = {
   videoRedrawStillNote:
     'प्रारंभ फ्रेम बदलली की या दृश्याला अंतिम फ्रेम असल्यास तीही तिच्यावरून नव्याने काढली जाते.',
   videoRedrawEndStill: 'अंतिम फ्रेम पुन्हा काढा',
+  // Same fold, same button, when the scene has no end frame yet — either a
+  // legacy single-frame scene or one whose end frame was deleted below.
+  videoRenderEndStill: 'अंतिम फ्रेम तयार करा',
+  // Removes the end frame outright: the scene keeps only its start frame and
+  // animates from that. Free, and two-step because it discards reviewed work.
+  videoDeleteEndStill: 'अंतिम फ्रेम नको',
+  videoDeleteEndStillConfirm: 'होय, अंतिम फ्रेम काढून टाका',
+  videoDeleteEndStillHint:
+    'अंतिम फ्रेम काढून टाकल्यास हे दृश्य फक्त प्रारंभ फ्रेमवरून तयार होईल. याचा खर्च नाही, आणि हवी असल्यास अंतिम फ्रेम पुन्हा तयार करता येते. या दृश्याचा व्हिडिओ आधीच तयार असेल तर तो पुन्हा तयार करावा लागेल.',
   // The fold's TOGGLE. Deliberately different from the two labels above, which
   // belong to the primary button inside the fold — the one that actually spends.
   videoEditStartBrief: 'प्रारंभ फ्रेमचे वर्णन बदला',
   videoEditEndBrief: 'अंतिम फ्रेमचे वर्णन बदला',
+  videoAddEndFrame: 'अंतिम फ्रेम जोडा',
   videoInsertedSceneSaveFirst:
     'हे नवीन दृश्य अजून जतन झालेले नाही. खालील “बदल जतन करा” दाबल्यावर या दृश्याची चित्रे काढता येतील.',
   videoEndStillPending: 'अंतिम फ्रेम अजून काढलेली नाही',

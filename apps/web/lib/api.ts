@@ -514,6 +514,12 @@ export function posterDownloadUrl(id: string): string {
   return `${API_URL}/api/generations/${id}/poster.png`;
 }
 
+// A normal navigation rather than fetch: the API redirects through Canva OAuth and finally
+// into the new Canva design, all in the tab opened by the user's click.
+export function posterCanvaUrl(id: string): string {
+  return `${API_URL}/api/canva/generations/${id}`;
+}
+
 // The article as a printable A4 PDF (DGIPR letterhead, Chromium-typeset Devanagari — a
 // browser-side PDF library cannot shape Marathi conjuncts, so the API renders it).
 // A URL rather than a fetch for the same reason posterDownloadUrl is one: only the server
@@ -968,6 +974,19 @@ export async function regenerateVideoStill(
   await requestJson(`/api/video/projects/${id}/scenes/${index}/still`, {
     method: 'POST',
     body: JSON.stringify(input),
+  });
+}
+
+// One scene's END frame, removed. Free and synchronous: nothing is rendered
+// and the scene returns to the single-frame shape (it animates from its start
+// frame only). A clip already rendered from that ending is marked stale rather
+// than discarded, so re-animating it stays the officer's call.
+export async function deleteVideoSceneEndFrame(
+  id: string,
+  index: number,
+): Promise<void> {
+  await requestJson(`/api/video/projects/${id}/scenes/${index}/end-frame`, {
+    method: 'DELETE',
   });
 }
 

@@ -19,6 +19,18 @@ The long-term product will:
 Scaffolding is done. The core generation pipeline and a first web product on top of
 it are implemented and working end-to-end:
 
+- **Layered Canva handoff protects official social branding** (2026-08-15, no migration):
+  the existing Canva OAuth button no longer sends an ordinary DGIPR twitter/facebook poster as
+  one flattened bitmap. The API extracts the exact top-right Government lockup and bottom DGIPR
+  footer pixels from the completed poster, makes matching transparent holes in the remaining
+  artwork, packages those three images as separately named objects in a one-slide PPTX, and uses
+  Canva's Design Import API. The officer applies Magic Layers only to `Mahasamvad editable
+  artwork`; the logo and footer remain untouched, selectable Canva image elements. Extracting
+  from the final stored PNG avoids a new storage column, and re-stacking the three layers is
+  verified pixel-for-pixel identical to the published PNG. CMO, article and
+  YouTube posters keep the former flat asset handoff because their chrome geometry is different.
+  Deploy by rebuilding `@dgipr/poster-renderer` and the API; no migration and no n8n.
+
 - **Android Share → automatic ध्वनिलेखन** (2026-08-06, no migration): the web app is now an
   installable PWA and registers `share_target` for audio, so an officer can choose Mahasamvad
   directly from WhatsApp/Recorder's Android Share sheet instead of first saving the recording
@@ -83,7 +95,14 @@ it are implemented and working end-to-end:
   stored clips; the supplied outro is already fully branded and is not
   double-stamped. The lockup comes from the SAME `renderGovernmentLockup` used
   by Twitter/Facebook chrome, but video targets 15% of frame width versus the
-  social canvas's 12.5% (20% larger proportionally), at the top-right. All work
+  social canvas's 12.5% (20% larger proportionally), at the top-right.
+  **Amended 2026-08-15: video passes `{ background: 'transparent' }`** — nothing
+  behind the marks at all (no white card, no panel, no halo), the emblem and
+  wordmark compositing straight onto the footage, and the wordmark set in white
+  (`LABEL_COLOUR_ON_FOOTAGE` in `twitter-chrome.ts`) since the navy would vanish
+  on a dark scene. The poster and YouTube lanes keep the default white card.
+  Consequence to know: with nothing behind it, the white wordmark is weak over
+  BRIGHT footage — the emblem still reads, being saffron. All work
   is local ffmpeg/Sharp post-processing; no model sees or paints the logo and no
   paid generation is added. Narrated output pads the audio track with silence
   through the outro so a downstream shortest-stream transcode cannot cut it off.
@@ -2926,7 +2945,7 @@ second tier-audit pass corrects mis-tiers, sectioned long-note drafts are tier-a
 coverage loop guards both sides (missing foreground/supporting facts AND over-expanded
 mention/omit detail). RAG stays style-only and the faithfulness/fact-check guards are untouched.
 
-Not implemented yet: Canva integration, authentication.
+Canva OAuth authentication and poster handoff are implemented in `apps/api/src/routes/canva.ts`.
 
 ## Planned Architecture
 
@@ -2935,7 +2954,7 @@ Not implemented yet: Canva integration, authentication.
 - `packages/content-engine`: document processing, AI, RAG, article generation, and revision logic
 - `packages/database`: Supabase queries, database helpers, and database types
 - `packages/schemas`: shared Zod schemas and TypeScript types (poster copy + generation API)
-- `packages/poster-renderer`: poster-generation logic (Canva integration still future)
+- `packages/poster-renderer`: poster-generation logic and lossless Canva brand-layer extraction
 - `supabase/migrations`: SQL migrations
 - `n8n/workflow-exports`: committed n8n workflow exports (`social-post-v2-api.json`, `article-poster-v1-api.json`)
 - `docs`: project documentation
