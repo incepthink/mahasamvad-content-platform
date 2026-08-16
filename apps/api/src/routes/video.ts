@@ -25,6 +25,7 @@ import {
   CreateVideoProjectRequestSchema,
   NARRATION_AUDIO_EXTENSIONS,
   RegenerateStillRequestSchema,
+  ReplanVideoScriptRequestSchema,
   UPLOAD_FILE_MAX_BYTES,
   UpdateSceneMotionRequestSchema,
   UpdateVideoScriptRequestSchema,
@@ -39,9 +40,11 @@ import {
 import { decodeAudioToWav, wavDurationSeconds } from '@dgipr/poster-renderer';
 import {
   clipProviderApiKeyEnv,
+  describeVideoScenes,
   frameProviderApiKeyEnv,
   narrationKeyPresent,
   narrationProviderApiKeyEnv,
+  type DescribedVideoScene,
 } from '@dgipr/content-engine';
 import {
   isVideoJobRunning,
@@ -88,6 +91,222 @@ function hasEverySceneClip(row: VideoProjectRow): boolean {
     row.scenes.length > 0 &&
     row.scenes.every((scene) => scene.clipPath !== undefined)
   );
+}
+
+// One card as it arrives from gate 1. The save route and the re-plan route
+// disagree only about whether a blank `visualBrief` is acceptable (it is, for
+// a scene the officer has just inserted and is asking the AI to describe), so
+// they share this shape with the brief optional and the save route's own
+// schema keeps the `.min(1)` that guarantees it.
+type IncomingScene = Readonly<{
+  sourceIndex?: number | undefined;
+  narration: string;
+  visualBrief?: string | undefined;
+  endVisualBrief?: string | undefined;
+  keyPoint?: string | undefined;
+}>;
+
+// Reconcile the submitted cards against the STORED scenes: which ones keep
+// their paid frames, which start over, and what rides along either way.
+// Extracted from the script save route (2026-08-14) so the re-plan route
+// reuses it rather than growing a second copy of the lineage rules — they are
+// the only thing standing between an inserted card and a discarded storyboard.
+function reconcileScriptScenes(
+  row: VideoProjectRow,
+  incoming: readonly IncomingScene[],
+  styleChanged: boolean,
+): VideoSceneEntry[] {
+  return incoming.map((scene, index) => {
+    // Identity first, position only as the legacy fallback: an inserted
+    // scene shifts every later card, and matching by position would then
+    // compare each against its neighbour and discard a storyboard of paid
+    // frames. A sourceIndex past the stored array is treated as new.
+    const existing =
+      scene.sourceIndex === undefined
+        ? row.scenes[index]
+        : row.scenes[scene.sourceIndex];
+    // Same BOTH briefs + an existing still ⇒ keep the frames (and their
+    // clip lineage); anything else starts over as pending. The end brief
+    // counts because the end frame is rendered from it — an edited end
+    // brief with a kept frame would show a frame of the old description.
+    // The key point is deliberately NOT in this test: it is burned on at
+    // stitch time and no frame is rendered from it, so editing one must
+    // never throw away a paid frame.
+    if (
+      !styleChanged &&
+      existing &&
+      existing.visualBrief === scene.visualBrief &&
+      existing.endVisualBrief === scene.endVisualBrief &&
+      existing.stillPath !== undefined
+    ) {
+      return {
+        ...existing,
+        narration: scene.narration,
+        ...(scene.keyPoint !== undefined ? { keyPoint: scene.keyPoint } : {}),
+      };
+    }
+    // A brief changed (or new scene): the frames start over, but the plan
+    // lineage and the narration-audio cache ride along — audio depends
+    // only on narration text + voice (narrationIsCurrent re-checks), so
+    // dropping it here would re-bill TTS for a pure visual edit.
+    return {
+      narration: scene.narration,
+      visualBrief: scene.visualBrief ?? '',
+      ...(scene.endVisualBrief !== undefined
+        ? { endVisualBrief: scene.endVisualBrief }
+        : {}),
+      ...(scene.keyPoint !== undefined
+        ? { keyPoint: scene.keyPoint }
+        : existing?.keyPoint !== undefined
+          ? { keyPoint: existing.keyPoint }
+          : {}),
+      // Preserve the timeline the script writer saw. A genuinely new scene
+      // gets a provisional text-derived weight; the continuous voice phase
+      // normalises all weights back to the selected 30/60-second total.
+      durationSeconds:
+        existing?.durationSeconds ??
+        clipSecondsForNarration(estimateNarrationSeconds(scene.narration)),
+      status: 'pending',
+      ...(existing?.beat !== undefined ? { beat: existing.beat } : {}),
+      ...(existing?.shotHint !== undefined
+        ? { shotHint: existing.shotHint }
+        : {}),
+      ...(existing?.narrationAudioPath !== undefined
+        ? { narrationAudioPath: existing.narrationAudioPath }
+        : {}),
+      ...(existing?.narrationAudioVersion !== undefined
+        ? { narrationAudioVersion: existing.narrationAudioVersion }
+        : {}),
+      ...(existing?.narrationAudioText !== undefined
+        ? { narrationAudioText: existing.narrationAudioText }
+        : {}),
+      ...(existing?.narrationAudioVoice !== undefined
+        ? { narrationAudioVoice: existing.narrationAudioVoice }
+        : {}),
+      ...(existing?.narrationAudioSeconds !== undefined
+        ? { narrationAudioSeconds: existing.narrationAudioSeconds }
+        : {}),
+    };
+  });
+}
+
+// Overwrite one scene's pipeline-owned fields with a freshly planned
+// description, keeping its narration and its narration-audio cache.
+//
+// The load-bearing part is what is DROPPED. `openingVisualBrief` and
+// `motionBrief` are derived from `visualBrief` by the storyboard job's
+// direction phase, which regenerates them only when they are MISSING — so
+// carrying them across a re-plan would silently animate the new frames with
+// the old brief's choreography. The frame/clip lineage goes for the ordinary
+// reason (it was rendered from a description that no longer exists); at
+// `script_ready` none of it is present anyway, so that half is defensive.
+// Built as an explicit KEEP list rather than by omitting the derived keys: the
+// scene entry has ~28 fields and all but these are either overwritten below or
+// deliberately discarded, so listing the survivors is both shorter and the
+// thing worth reading. A field added to VideoSceneEntry later is therefore
+// dropped by a re-plan until someone decides it should survive one, which is
+// the safe direction for a type whose members are mostly render lineage.
+function applyDescribedVisuals(
+  scene: VideoSceneEntry,
+  visual: DescribedVideoScene,
+): VideoSceneEntry {
+  return {
+    // The officer's words, and the audio already measured for them. Narration
+    // is not this call's to change, and the TTS cache keys on the joined text
+    // (narrationIsCurrent re-checks it), so carrying it costs nothing and
+    // dropping it would re-bill a synthesis for a visual edit.
+    narration: scene.narration,
+    durationSeconds: scene.durationSeconds,
+    ...(scene.narrationAudioPath !== undefined
+      ? { narrationAudioPath: scene.narrationAudioPath }
+      : {}),
+    ...(scene.narrationAudioVersion !== undefined
+      ? { narrationAudioVersion: scene.narrationAudioVersion }
+      : {}),
+    ...(scene.narrationAudioText !== undefined
+      ? { narrationAudioText: scene.narrationAudioText }
+      : {}),
+    ...(scene.narrationAudioVoice !== undefined
+      ? { narrationAudioVoice: scene.narrationAudioVoice }
+      : {}),
+    ...(scene.narrationAudioSeconds !== undefined
+      ? { narrationAudioSeconds: scene.narrationAudioSeconds }
+      : {}),
+    visualBrief: visual.visualBrief,
+    // Re-added only when the new plan asks for an end frame: a scene that had
+    // one and no longer needs it must lose the field outright, or it animates
+    // first-to-last against a description nothing will render.
+    ...(visual.endVisualBrief !== undefined
+      ? { endVisualBrief: visual.endVisualBrief }
+      : {}),
+    // Empty is meaningful and is kept as such — that scene gets no overlay.
+    keyPoint: visual.keyPoint,
+    beat: visual.beat,
+    shotHint: visual.shotHint,
+    status: 'pending',
+  };
+}
+
+// Re-splitting the narration across scenes (the officer moving words into
+// an inserted card) leaves the JOINED script byte-identical, so the
+// measured WAV stays current and the voice phase returns early without
+// touching a thing — including the windows. Those windows are where the
+// visual cuts fall against one continuous narration track, so leaving
+// them alone is a silent de-sync: the picture would cut to the new scene
+// while the donor's sentence is still being spoken. Nothing errors.
+//
+// So the split is re-weighted here, against the SAME measured total. The
+// sum is unchanged, which is what keeps every later cut aligned; only the
+// scenes whose share moved get a new window, and clipIsCurrent then
+// invalidates exactly those clips (it compares clipDurationSeconds) so
+// the next animate re-renders the donor and the newcomer and nothing else.
+//
+// Mutates `scenes` in place and reports whether it did, so a caller with its
+// own fallback (the re-plan, which estimates from characters when the words
+// themselves changed) knows whether one is still needed.
+function reweightMeasuredSplit(
+  row: VideoProjectRow,
+  scenes: VideoSceneEntry[],
+): boolean {
+  const previousJoined = continuousNarrationText(row.scenes);
+  const nextJoined = continuousNarrationText(scenes);
+  const measuredSeconds = row.scenes.reduce(
+    (sum, scene) => sum + (scene.narrationAudioSeconds ?? 0),
+    0,
+  );
+  const splitChanged =
+    scenes.length !== row.scenes.length ||
+    scenes.some(
+      (scene, index) => scene.narration !== row.scenes[index]?.narration,
+    );
+  if (
+    !splitChanged ||
+    previousJoined !== nextJoined ||
+    previousJoined === '' ||
+    measuredSeconds <= 0
+  ) {
+    return false;
+  }
+  const durations = allocateVideoSceneDurations(
+    scenes.map((scene) => Math.max(1, scene.narration.trim().length)),
+    measuredSeconds,
+  );
+  const weightTotal = scenes.reduce(
+    (sum, scene) => sum + Math.max(1, scene.narration.trim().length),
+    0,
+  );
+  for (const [index, scene] of scenes.entries()) {
+    scenes[index] = {
+      ...scene,
+      durationSeconds: durations[index]!,
+      // The card's "निवेदन X.X से." share. Recomputed with the windows or
+      // it would keep quoting the donor's pre-split length.
+      narrationAudioSeconds:
+        (measuredSeconds * Math.max(1, scene.narration.trim().length)) /
+        weightTotal,
+    };
+  }
+  return true;
 }
 
 // What a scene's status SHOULD be, read off what it actually has in Storage.
@@ -523,8 +742,8 @@ export function registerVideoRoutes(
       // The officer's edited style/setting paragraph. It is an input to EVERY
       // frame prompt, so changing it makes every rendered frame stale — which
       // matters because this route also accepts storyboard_ready, where frames
-      // exist. A changed style therefore skips the keep-frames branch below
-      // entirely and sends every scene back to pending.
+      // exist. A changed style therefore suppresses reconcileScriptScenes'
+      // keep-frames branch entirely and sends every scene back to pending.
       const style = body.style ?? row.style;
       const styleChanged = style !== row.style;
 
@@ -547,138 +766,123 @@ export function registerVideoRoutes(
         claimed.add(scene.sourceIndex);
       }
 
-      const scenes: VideoSceneEntry[] = body.scenes.map((incoming, index) => {
-        // Identity first, position only as the legacy fallback: an inserted
-        // scene shifts every later card, and matching by position would then
-        // compare each against its neighbour and discard a storyboard of paid
-        // frames. A sourceIndex past the stored array is treated as new.
-        const existing =
-          incoming.sourceIndex === undefined
-            ? row.scenes[index]
-            : row.scenes[incoming.sourceIndex];
-        // Same BOTH briefs + an existing still ⇒ keep the frames (and their
-        // clip lineage); anything else starts over as pending. The end brief
-        // counts because the end frame is rendered from it — an edited end
-        // brief with a kept frame would show a frame of the old description.
-        // The key point is deliberately NOT in this test: it is burned on at
-        // stitch time and no frame is rendered from it, so editing one must
-        // never throw away a paid frame.
-        if (
-          !styleChanged &&
-          existing &&
-          existing.visualBrief === incoming.visualBrief &&
-          existing.endVisualBrief === incoming.endVisualBrief &&
-          existing.stillPath !== undefined
-        ) {
-          return {
-            ...existing,
-            narration: incoming.narration,
-            ...(incoming.keyPoint !== undefined
-              ? { keyPoint: incoming.keyPoint }
-              : {}),
-          };
-        }
-        // A brief changed (or new scene): the frames start over, but the plan
-        // lineage and the narration-audio cache ride along — audio depends
-        // only on narration text + voice (narrationIsCurrent re-checks), so
-        // dropping it here would re-bill TTS for a pure visual edit.
-        return {
-          narration: incoming.narration,
-          visualBrief: incoming.visualBrief,
-          ...(incoming.endVisualBrief !== undefined
-            ? { endVisualBrief: incoming.endVisualBrief }
-            : {}),
-          ...(incoming.keyPoint !== undefined
-            ? { keyPoint: incoming.keyPoint }
-            : existing?.keyPoint !== undefined
-              ? { keyPoint: existing.keyPoint }
-              : {}),
-          // Preserve the timeline the script writer saw. A genuinely new scene
-          // gets a provisional text-derived weight; the continuous voice phase
-          // normalises all weights back to the selected 30/60-second total.
-          durationSeconds:
-            existing?.durationSeconds ??
-            clipSecondsForNarration(
-              estimateNarrationSeconds(incoming.narration),
-            ),
-          status: 'pending',
-          ...(existing?.beat !== undefined ? { beat: existing.beat } : {}),
-          ...(existing?.shotHint !== undefined
-            ? { shotHint: existing.shotHint }
-            : {}),
-          ...(existing?.narrationAudioPath !== undefined
-            ? { narrationAudioPath: existing.narrationAudioPath }
-            : {}),
-          ...(existing?.narrationAudioVersion !== undefined
-            ? { narrationAudioVersion: existing.narrationAudioVersion }
-            : {}),
-          ...(existing?.narrationAudioText !== undefined
-            ? { narrationAudioText: existing.narrationAudioText }
-            : {}),
-          ...(existing?.narrationAudioVoice !== undefined
-            ? { narrationAudioVoice: existing.narrationAudioVoice }
-            : {}),
-          ...(existing?.narrationAudioSeconds !== undefined
-            ? { narrationAudioSeconds: existing.narrationAudioSeconds }
-            : {}),
-        };
-      });
-
-      // Re-splitting the narration across scenes (the officer moving words into
-      // an inserted card) leaves the JOINED script byte-identical, so the
-      // measured WAV stays current and the voice phase returns early without
-      // touching a thing — including the windows. Those windows are where the
-      // visual cuts fall against one continuous narration track, so leaving
-      // them alone is a silent de-sync: the picture would cut to the new scene
-      // while the donor's sentence is still being spoken. Nothing errors.
-      //
-      // So the split is re-weighted here, against the SAME measured total. The
-      // sum is unchanged, which is what keeps every later cut aligned; only the
-      // scenes whose share moved get a new window, and clipIsCurrent then
-      // invalidates exactly those clips (it compares clipDurationSeconds) so
-      // the next animate re-renders the donor and the newcomer and nothing else.
-      const previousJoined = continuousNarrationText(row.scenes);
-      const nextJoined = continuousNarrationText(scenes);
-      const measuredSeconds = row.scenes.reduce(
-        (sum, scene) => sum + (scene.narrationAudioSeconds ?? 0),
-        0,
-      );
-      const splitChanged =
-        scenes.length !== row.scenes.length ||
-        scenes.some(
-          (scene, index) => scene.narration !== row.scenes[index]?.narration,
-        );
-      if (
-        splitChanged &&
-        previousJoined === nextJoined &&
-        previousJoined !== '' &&
-        measuredSeconds > 0
-      ) {
-        const durations = allocateVideoSceneDurations(
-          scenes.map((scene) => Math.max(1, scene.narration.trim().length)),
-          measuredSeconds,
-        );
-        const weightTotal = scenes.reduce(
-          (sum, scene) => sum + Math.max(1, scene.narration.trim().length),
-          0,
-        );
-        for (const [index, scene] of scenes.entries()) {
-          scenes[index] = {
-            ...scene,
-            durationSeconds: durations[index]!,
-            // The card's "निवेदन X.X से." share. Recomputed with the windows or
-            // it would keep quoting the donor's pre-split length.
-            narrationAudioSeconds:
-              (measuredSeconds * Math.max(1, scene.narration.trim().length)) /
-              weightTotal,
-          };
-        }
-      }
+      const scenes = reconcileScriptScenes(row, body.scenes, styleChanged);
+      reweightMeasuredSplit(row, scenes);
 
       await updateVideoProject(client, row.id, {
         scenes,
         ...(styleChanged ? { style } : {}),
       });
+      const updated = await getVideoProject(client, row.id);
+      return toDetail(client, updated!);
+    },
+  );
+
+  // "AI ने पुन्हा तयार करा" — gate 1's re-plan. The officer has re-split the
+  // narration (typically by inserting a scene and typing only its निवेदन), and
+  // every field the PIPELINE owns is now blank or describes the old split.
+  // This persists their split exactly as typed and re-derives the rest:
+  // visual brief, end brief, shot hint, beat, on-screen key point, and the clip
+  // windows.
+  //
+  // Four deliberate limits, each of them the thing this could easily have done
+  // instead and should not:
+  //  - The narration is never sent back by the model and never written here.
+  //    The split is the officer's; only its description is ours. On the
+  //    ready-script lane that is also the law — the word-identity guard below
+  //    is the same one the save route runs.
+  //  - `script_ready` ONLY. At gate 2 this would replace briefs that paid
+  //    frames were rendered from, discarding a storyboard for a text call.
+  //  - The style paragraph is left alone. It feeds every frame prompt, so
+  //    regenerating it would invalidate every frame rather than the edited
+  //    ones; gate 1's textarea remains the way to change it.
+  //  - Synchronous, and the row stays at `script_ready`. Flipping it to
+  //    `scripting` would replace the review cards the officer is working in
+  //    with a progress bar (the caption-editing rationale) for one text call.
+  app.post<{ Params: { id: string } }>(
+    '/video/projects/:id/script/replan',
+    async (request, reply) => {
+      const body = ReplanVideoScriptRequestSchema.parse(request.body);
+      const row = await getVideoProject(client, request.params.id);
+      if (!row) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'Video project not found.' } });
+      }
+      if (row.status !== 'script_ready' || isVideoJobRunning(row.id)) {
+        return reply.code(409).send({ error: { message: BUSY_MESSAGE } });
+      }
+      if (row.inputMode === 'script') {
+        const submitted = normalizeVideoNarrationScript(
+          body.scenes.map((scene) => scene.narration).join(' '),
+        );
+        const original = normalizeVideoNarrationScript(row.note);
+        if (submitted !== original) {
+          return reply.code(400).send({
+            error: {
+              message:
+                'तयार संहितेतील निवेदन बदलता येत नाही. दृश्य-वर्णन मात्र संपादित करता येईल.',
+            },
+          });
+        }
+      }
+      const claimed = new Set<number>();
+      for (const scene of body.scenes) {
+        if (scene.sourceIndex === undefined) continue;
+        if (claimed.has(scene.sourceIndex)) {
+          return reply.code(400).send({
+            error: { message: 'एकच दृश्य दोनदा पाठवले आहे.' },
+          });
+        }
+        claimed.add(scene.sourceIndex);
+      }
+
+      // Reconciled first so the audio cache and the plan lineage ride along
+      // exactly as they do on a save; the visuals are then overwritten on top.
+      const scenes = reconcileScriptScenes(row, body.scenes, false);
+      const described = await describeVideoScenes(
+        scenes.map((scene) => scene.narration),
+        { ...(row.heading ? { heading: row.heading } : {}) },
+      );
+      for (const [index, scene] of scenes.entries()) {
+        scenes[index] = applyDescribedVisuals(scene, described.scenes[index]!);
+      }
+
+      // Windows, free in all three cases — and which case applies turns on
+      // whether a MEASURED timeline still describes this narration.
+      //
+      //  1. The officer moved words between scenes: the joined script is
+      //     byte-identical, so the measured WAV still applies and every share
+      //     is re-weighted against that real total.
+      //  2. Nothing about the split moved (a plain "try again" on a
+      //     description the officer did not like): the stored windows were
+      //     measured and are still exactly right, so they are LEFT ALONE.
+      //     Re-deriving them here would trade a measurement for an estimate,
+      //     which is the one direction this must never move.
+      //  3. The words themselves changed (note lane only — the guard above
+      //     forbids it otherwise): nothing measured describes them any more,
+      //     so each scene falls back to its own character estimate and the
+      //     storyboard job's voice phase measures for real before a frame is
+      //     bought.
+      const measuredTotal = row.scenes.reduce(
+        (sum, scene) => sum + (scene.narrationAudioSeconds ?? 0),
+        0,
+      );
+      const measuredStillApplies =
+        measuredTotal > 0 &&
+        continuousNarrationText(row.scenes) === continuousNarrationText(scenes);
+      if (!reweightMeasuredSplit(row, scenes) && !measuredStillApplies) {
+        for (const [index, scene] of scenes.entries()) {
+          scenes[index] = {
+            ...scene,
+            durationSeconds: clipSecondsForNarration(
+              estimateNarrationSeconds(scene.narration),
+            ),
+          };
+        }
+      }
+
+      await updateVideoProject(client, row.id, { scenes });
       const updated = await getVideoProject(client, row.id);
       return toDetail(client, updated!);
     },

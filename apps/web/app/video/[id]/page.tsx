@@ -33,6 +33,7 @@ import {
   reanimateVideoScene,
   regenerateVideoStill,
   reopenVideoStoryboard,
+  replanVideoScript,
   restitchVideo,
   saveVideoScript,
   saveVideoSceneMotion,
@@ -253,11 +254,17 @@ export default function VideoProjectPage({
   const narrationOverBudget =
     detail.inputMode === 'note' &&
     totalNarrationSeconds > narrationTarget * VIDEO_TOTAL_FIT_TOLERANCE;
-  // Unlike the running total above, this one BLOCKS: the save route rejects a
-  // narration longer than one clip's worth of speech (no clip may exceed
-  // VIDEO_CLIP_MAX_SECONDS), so letting the press through only produced a raw
-  // zod `too_big` payload. The card that is over says so, and the remedy is to
-  // split the line across two scenes.
+  // Unlike the running total above, this one BLOCKS the two buttons that COMMIT
+  // a split: the save route rejects a narration longer than one clip's worth of
+  // speech (no clip may exceed VIDEO_CLIP_MAX_SECONDS), so letting the press
+  // through only produced a raw zod `too_big` payload. The card that is over
+  // says so, and the remedy is to split the line across two scenes.
+  //
+  // It deliberately does NOT gate the re-plan (2026-08-14): that call never
+  // writes narration, its schema therefore carries no ceiling, and a scene the
+  // ready-script splitter itself produced past this constant would otherwise
+  // leave the officer unable to redescribe ANY scene until they had first
+  // rewritten words the button was never going to touch.
   const narrationTooLong = (drafts ?? []).some(
     (d) => d.narration.trim().length > VIDEO_NARRATION_MAX_CHARS,
   );
@@ -318,6 +325,13 @@ export default function VideoProjectPage({
   // failing server-side.
   const scriptIncomplete = (drafts ?? []).some(
     (d) => d.narration.trim().length === 0 || d.visualBrief.trim().length === 0,
+  );
+  // The re-plan's own precondition, and deliberately NOT `scriptIncomplete`: a
+  // missing दृश्य-वर्णन is exactly what it is being pressed to supply, so
+  // blocking on one would disable the button in the case it exists for. Only
+  // the narration is required, because that is the input the model plans FROM.
+  const narrationIncomplete = (drafts ?? []).some(
+    (d) => d.narration.trim().length === 0,
   );
   const allClipsReady =
     detail.scenes.length > 0 &&
@@ -382,6 +396,41 @@ export default function VideoProjectPage({
         scenes: scriptPayload(drafts),
       });
       setDrafts(draftsFrom(updated.scenes));
+    });
+
+  // Gate 1's re-plan. Sends the same split the save would, but the fields the
+  // AI is about to overwrite are sent only so a FAILED call leaves the current
+  // text on screen — a blank brief is expected here, which is why the route has
+  // its own schema (the save route's requires one).
+  const replanPayload = (list: SceneDraft[]) =>
+    list.map((draft) => ({
+      ...(draft.sourceIndex !== undefined
+        ? { sourceIndex: draft.sourceIndex }
+        : {}),
+      narration: draft.narration,
+      ...(draft.visualBrief.trim() !== ''
+        ? { visualBrief: draft.visualBrief.trim() }
+        : {}),
+      ...(draft.endVisualBrief.trim() !== ''
+        ? { endVisualBrief: draft.endVisualBrief.trim() }
+        : {}),
+      ...(draft.keyPoint.trim() !== ''
+        ? { keyPoint: draft.keyPoint.trim() }
+        : {}),
+    }));
+
+  // Persists the split and re-derives every pipeline-owned field on top of it,
+  // in one synchronous call. Reseeds afterwards for the same reason the two
+  // saves do — an insert renumbers the stored scenes the drafts point at — and
+  // additionally because every card's description has just been replaced.
+  const replanScript = () =>
+    act(async () => {
+      if (!drafts) return;
+      const updated = await replanVideoScript(id, {
+        scenes: replanPayload(drafts),
+      });
+      setDrafts(draftsFrom(updated.scenes));
+      setStyleDraft(updated.style ?? '');
     });
 
   // Gate 1's save. Same route, and deliberately NOT followed by
@@ -553,6 +602,21 @@ export default function VideoProjectPage({
                   {STR.videoAddScene}
                 </button>
               ) : null}
+              {/* Re-derives every pipeline-owned field over the current split.
+                  Unlike the two buttons beside it, neither a blank दृश्य-वर्णन
+                  nor an over-long narration disables it — supplying the first is
+                  what it is for, and the second is text it does not write. It is
+                  always available (no `scriptDirty` gate): re-planning an
+                  unchanged split is a legitimate "try again" on a description
+                  the officer does not like, and it costs one text call. */}
+              <button
+                type="button"
+                className="btn"
+                disabled={busy || narrationIncomplete}
+                onClick={replanScript}
+              >
+                {busy ? STR.submitting : STR.videoReplanScript}
+              </button>
               {/* Persists the edits and stays here. Free — no frame is drawn,
                   which is the whole point of it sitting beside the button that
                   does draw them. */}
@@ -580,6 +644,12 @@ export default function VideoProjectPage({
                 {STR.videoSaveScriptHint}
               </p>
             ) : null}
+            {/* Always shown, because the button is always live — and because
+                the one thing an officer needs to know before pressing it is
+                what it will NOT touch. */}
+            <p className="hint" style={{ marginTop: 8 }}>
+              {STR.videoReplanScriptHint}
+            </p>
             {/* Only on the ready-script lane, and only when a remove is
                 actually reachable: on the note lane a scene's words are the
                 pipeline's own and may be dropped outright. */}

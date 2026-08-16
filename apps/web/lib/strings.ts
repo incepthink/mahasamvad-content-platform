@@ -1367,6 +1367,13 @@ export const STR = {
     'निवेदनाचे शब्द तेच ठेवून फक्त विभागणी बदलली, तर आवाज पुन्हा तयार होत नाही. ज्या दृश्यांची वेळ बदलेल तेवढीच दृश्ये पुन्हा तयार करावी लागतील.',
   videoSaveScriptHint:
     'बदल जतन होतील पण चित्रे तयार होणार नाहीत — खर्च होत नाही. संहिता पूर्ण झाल्यावर “स्टोरीबोर्ड तयार करा” दाबा.',
+  // Gate 1's re-plan. Named for what it regenerates rather than for the button
+  // beside it: "पुन्हा तयार करा" alone reads as "make the whole video again",
+  // and the one thing this must promise is that the officer's own निवेदन is
+  // safe.
+  videoReplanScript: 'AI ने दृश्य-वर्णन पुन्हा तयार करा',
+  videoReplanScriptHint:
+    'तुम्ही लिहिलेले निवेदन जसेच्या तसे राहील. प्रत्येक दृश्याचे वर्णन, शॉट, पडद्यावरील ओळ आणि वेळ AI पुन्हा तयार करेल — नवीन जोडलेल्या दृश्यांचीही. चित्रे तयार होत नाहीत, त्यामुळे खर्च नगण्य आहे.',
   // Ready-script lane only. Removing a scene whose निवेदन still holds words
   // would delete them from the officer's own final script, which the API
   // refuses; the remedy is to move the words into a neighbour first.

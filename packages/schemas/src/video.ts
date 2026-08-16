@@ -583,6 +583,58 @@ export type UpdateVideoScriptRequest = z.infer<
   typeof UpdateVideoScriptRequestSchema
 >;
 
+// Gate 1's "AI ने पुन्हा तयार करा": persist the officer's scene split exactly as
+// typed, then let the model re-derive every field the pipeline OWNS (visual
+// brief, end brief, shot hint, beat, on-screen key point) and re-weight the
+// clip windows.
+//
+// It is a separate schema from the save request above for one load-bearing
+// reason: `visualBrief` there is `.min(1)`, and a scene the officer has just
+// inserted has NO brief — supplying one is the entire point of pressing this.
+// Reusing the save schema would therefore reject exactly the payload the
+// feature exists to accept.
+//
+// Narration keeps its floor and DELIBERATELY NOT the save route's one-clip
+// ceiling (2026-08-14). This request neither writes nor rewrites narration —
+// it is sent as CONTEXT so the model can describe each scene — so a line over
+// VIDEO_NARRATION_MAX_CHARS is not something this call could introduce, and
+// rejecting it blocks the one operation on the page that does not touch the
+// words. Stored narration legitimately runs past that constant in two ordinary
+// cases: the ready-script splitter bounds its chunks by the rate that script
+// was MEASURED at, which is higher than the configured rate whenever the
+// speaker reads faster than the voice's calibration; and any project written
+// before NARRATION_CHARS_PER_SECOND was set for the deployed voice was capped
+// against the old, larger ceiling. In both, the officer was left with a raw
+// zod `too_big` payload on a button that would not have changed the line
+// anyway. The per-clip fit is still guaranteed where it is actually decided —
+// windows come from clipSecondsForNarration (clamped to VIDEO_CLIP_MAX_SECONDS)
+// and the storyboard job measures the real WAV — and the save/submit buttons,
+// which DO commit a split, keep the ceiling.
+//
+// `style` is deliberately absent. The style paragraph is an input to every
+// frame prompt, so regenerating it would invalidate every rendered frame; the
+// re-plan keeps whatever is stored, and gate 1's textarea remains the way to
+// change it.
+export const ReplanVideoScriptRequestSchema = z.object({
+  scenes: z
+    .array(
+      z.object({
+        sourceIndex: z.number().int().min(0).optional(),
+        narration: z.string().trim().min(1),
+        // Optional, and blank is normal: an existing scene sends its current
+        // brief so a failed call leaves something in place, while a new one
+        // sends nothing at all.
+        visualBrief: z.string().trim().optional(),
+        endVisualBrief: z.string().trim().optional(),
+        keyPoint: z.string().trim().max(VIDEO_KEY_POINT_MAX_CHARS).optional(),
+      }),
+    )
+    .min(VIDEO_SCENE_LIMIT.min),
+});
+export type ReplanVideoScriptRequest = z.infer<
+  typeof ReplanVideoScriptRequestSchema
+>;
+
 // Per-scene frame regeneration; an edited brief rides along so "change the
 // description and redraw" is one call. `frame` picks which frame to redraw
 // (default start). Redrawing the START also regenerates the end frame — the
