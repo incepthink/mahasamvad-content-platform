@@ -23,21 +23,28 @@ import {
 } from '@dgipr/database';
 import {
   CreateVideoProjectRequestSchema,
+  IMAGE_FILE_EXTENSIONS,
   NARRATION_AUDIO_EXTENSIONS,
   RegenerateStillRequestSchema,
   ReplanVideoScriptRequestSchema,
   UPLOAD_FILE_MAX_BYTES,
+  UPLOAD_FILE_MAX_MB,
   UpdateSceneMotionRequestSchema,
   UpdateVideoScriptRequestSchema,
   allocateVideoSceneDurations,
   clipSecondsForNarration,
   estimateNarrationSeconds,
+  isImageFileName,
   narrationAudioMimeForFileName,
   normalizeVideoNarrationScript,
   type VideoProjectDetail,
   type VideoProjectSummary,
 } from '@dgipr/schemas';
-import { decodeAudioToWav, wavDurationSeconds } from '@dgipr/poster-renderer';
+import {
+  decodeAudioToWav,
+  normalizeReferenceImage,
+  wavDurationSeconds,
+} from '@dgipr/poster-renderer';
 import {
   clipProviderApiKeyEnv,
   describeVideoScenes,
@@ -104,7 +111,46 @@ type IncomingScene = Readonly<{
   visualBrief?: string | undefined;
   endVisualBrief?: string | undefined;
   keyPoint?: string | undefined;
+  referenceImagePath?: string | undefined;
 }>;
+
+// Where this project's reference pictures live. Every submitted path is checked
+// against it — the chat `imageUrl` guard, for the same reason: a storage path
+// taken from the client is otherwise a standing invitation to point the frame
+// model at any object in the bucket, including another project's frames.
+function referencePathPrefix(id: string): string {
+  return `projects/${id}/references/`;
+}
+
+// What a submitted card's reference picture RESOLVES to, given what is stored.
+// Three inputs, three outcomes, and the distinction is the whole reason the
+// field is optional rather than always sent:
+//   a path      → attach (or replace) it
+//   ''          → the officer removed it
+//   undefined   → not mentioned, so leave the stored one alone (a client that
+//                 predates this feature must not detach every picture it saves)
+function nextReferenceImagePath(
+  scene: IncomingScene,
+  existing: VideoSceneEntry | undefined,
+): string | undefined {
+  if (scene.referenceImagePath === undefined)
+    return existing?.referenceImagePath;
+  return scene.referenceImagePath === '' ? undefined : scene.referenceImagePath;
+}
+
+// Refuse a payload naming an object this project does not own, BEFORE anything
+// is written. Returns the offending path, or null when every card is clean.
+function foreignReferencePath(
+  id: string,
+  scenes: readonly IncomingScene[],
+): string | null {
+  for (const scene of scenes) {
+    const path = scene.referenceImagePath;
+    if (path === undefined || path === '') continue;
+    if (!path.startsWith(referencePathPrefix(id))) return path;
+  }
+  return null;
+}
 
 // Reconcile the submitted cards against the STORED scenes: which ones keep
 // their paid frames, which start over, and what rides along either way.
@@ -125,10 +171,15 @@ function reconcileScriptScenes(
       scene.sourceIndex === undefined
         ? row.scenes[index]
         : row.scenes[scene.sourceIndex];
-    // Same BOTH briefs + an existing still ⇒ keep the frames (and their
-    // clip lineage); anything else starts over as pending. The end brief
-    // counts because the end frame is rendered from it — an edited end
-    // brief with a kept frame would show a frame of the old description.
+    const referenceImagePath = nextReferenceImagePath(scene, existing);
+    // Same BOTH briefs, the same reference picture, and an existing still ⇒
+    // keep the frames (and their clip lineage); anything else starts over as
+    // pending. The end brief counts because the end frame is rendered from it —
+    // an edited end brief with a kept frame would show a frame of the old
+    // description — and the reference picture counts for exactly the same
+    // reason: it is an input to the start-frame prompt, so attaching, replacing
+    // or removing one means the frame on screen was drawn against something
+    // that is no longer what the officer asked for.
     // The key point is deliberately NOT in this test: it is burned on at
     // stitch time and no frame is rendered from it, so editing one must
     // never throw away a paid frame.
@@ -137,6 +188,7 @@ function reconcileScriptScenes(
       existing &&
       existing.visualBrief === scene.visualBrief &&
       existing.endVisualBrief === scene.endVisualBrief &&
+      existing.referenceImagePath === referenceImagePath &&
       existing.stillPath !== undefined
     ) {
       return {
@@ -160,6 +212,7 @@ function reconcileScriptScenes(
         : existing?.keyPoint !== undefined
           ? { keyPoint: existing.keyPoint }
           : {}),
+      ...(referenceImagePath !== undefined ? { referenceImagePath } : {}),
       // Preserve the timeline the script writer saw. A genuinely new scene
       // gets a provisional text-derived weight; the continuous voice phase
       // normalises all weights back to the selected 30/60-second total.
@@ -217,6 +270,13 @@ function applyDescribedVisuals(
     // dropping it would re-bill a synthesis for a visual edit.
     narration: scene.narration,
     durationSeconds: scene.durationSeconds,
+    // The officer's reference picture is theirs, not a field this call owns —
+    // re-describing a scene must not detach the photograph the description is
+    // supposed to be about. It is already reconciled (attached/replaced/removed)
+    // by reconcileScriptScenes before this runs, so `scene` carries the answer.
+    ...(scene.referenceImagePath !== undefined
+      ? { referenceImagePath: scene.referenceImagePath }
+      : {}),
     ...(scene.narrationAudioPath !== undefined
       ? { narrationAudioPath: scene.narrationAudioPath }
       : {}),
@@ -448,6 +508,20 @@ function toDetail(
         ? { endVisualBrief: scene.endVisualBrief }
         : {}),
       ...(scene.keyPoint !== undefined ? { keyPoint: scene.keyPoint } : {}),
+      // Both halves, unlike every other storage path on this payload. The URL
+      // renders the thumbnail on the card; the PATH is what gate 1 sends back
+      // on the save that keeps the picture attached, so shipping only the URL
+      // would force the client to reverse a public URL into the object it names.
+      ...(scene.referenceImagePath
+        ? {
+            referenceImagePath: scene.referenceImagePath,
+            referenceImageUrl: publicUrlIn(
+              client,
+              VIDEOS_BUCKET,
+              scene.referenceImagePath,
+            ),
+          }
+        : {}),
       durationSeconds: scene.durationSeconds,
       status: scene.status,
       ...(scene.beat !== undefined ? { beat: scene.beat } : {}),
@@ -765,6 +839,11 @@ export function registerVideoRoutes(
         }
         claimed.add(scene.sourceIndex);
       }
+      if (foreignReferencePath(row.id, body.scenes)) {
+        return reply.code(400).send({
+          error: { message: 'संदर्भ चित्र या प्रकल्पाचे नाही.' },
+        });
+      }
 
       const scenes = reconcileScriptScenes(row, body.scenes, styleChanged);
       reweightMeasuredSplit(row, scenes);
@@ -836,6 +915,11 @@ export function registerVideoRoutes(
         }
         claimed.add(scene.sourceIndex);
       }
+      if (foreignReferencePath(row.id, body.scenes)) {
+        return reply.code(400).send({
+          error: { message: 'संदर्भ चित्र या प्रकल्पाचे नाही.' },
+        });
+      }
 
       // Reconciled first so the audio cache and the plan lineage ride along
       // exactly as they do on a save; the visuals are then overwritten on top.
@@ -885,6 +969,93 @@ export function registerVideoRoutes(
       await updateVideoProject(client, row.id, { scenes });
       const updated = await getVideoProject(client, row.id);
       return toDetail(client, updated!);
+    },
+  );
+
+  // One reference picture for a scene's start frame, stored and handed back as
+  // a path + public URL. Separate from the save (the chat-attachment shape) so
+  // the file travels while the officer is still writing the scene, leaving the
+  // save an ordinary JSON request that carries only the path.
+  //
+  // Uploading ATTACHES NOTHING. The picture reaches a scene only when the
+  // returned path comes back on a save, which is what makes "बदल जतन करा" mean
+  // the same thing for this control as for every other field on the card — and
+  // is why the route is not scene-scoped: at gate 1 a card may be one the
+  // officer has just inserted, with no stored scene to address.
+  //
+  // Gate 1 only. This is a spend-shaping input reviewed before any frame is
+  // bought; at gate 2 the equivalent action is the redraw fold, which spends.
+  app.post<{ Params: { id: string } }>(
+    '/video/projects/:id/reference-image',
+    async (request, reply) => {
+      const row = await getVideoProject(client, request.params.id);
+      if (!row) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'Video project not found.' } });
+      }
+      if (row.status !== 'script_ready' || isVideoJobRunning(row.id)) {
+        return reply.code(409).send({ error: { message: BUSY_MESSAGE } });
+      }
+      const file = await request.file({
+        limits: { fileSize: UPLOAD_FILE_MAX_BYTES, files: 1 },
+      });
+      if (!file) {
+        return reply
+          .code(400)
+          .send({ error: { message: 'कोणतेही चित्र मिळाले नाही.' } });
+      }
+      // Extension-driven, never the browser's reported type — the audio and the
+      // /dlo photograph paths make the same call, and for the same reason.
+      if (!isImageFileName(file.filename)) {
+        // Drain the part first so busboy is not left mid-stream.
+        await file.toBuffer();
+        return reply.code(400).send({
+          error: {
+            message: `हे चित्र स्वीकारता येत नाही. ${IMAGE_FILE_EXTENSIONS.join(', ')} पैकी एक द्या.`,
+          },
+        });
+      }
+      let data: Buffer;
+      try {
+        data = await file.toBuffer();
+      } catch (error) {
+        if ((error as { code?: string }).code === 'FST_REQ_FILE_TOO_LARGE') {
+          return reply.code(413).send({
+            error: {
+              message: `चित्र खूप मोठे आहे. कमाल ${UPLOAD_FILE_MAX_MB} MB.`,
+            },
+          });
+        }
+        throw error;
+      }
+      // Normalised HERE, with the officer standing in front of the form, rather
+      // than inside the paid storyboard job: the frame clients send a reference
+      // inline as `image/png`, so exactly one representation may reach Storage,
+      // and an unreadable file must be refused now rather than hours later.
+      let png: Buffer;
+      try {
+        png = await normalizeReferenceImage(data);
+      } catch (error) {
+        request.log.error(error);
+        return reply.code(400).send({
+          error: {
+            message:
+              'हे चित्र वाचता आले नाही. दुसऱ्या स्वरूपात (उदा. JPG) पुन्हा द्या.',
+          },
+        });
+      }
+      // Random object name rather than a scene-indexed one: at gate 1 the cards
+      // are still being inserted and reordered, so a name derived from a scene's
+      // position would point at the wrong scene the moment one moved.
+      const token = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+      const path = `${referencePathPrefix(row.id)}${token}.png`;
+      await uploadFile(client, VIDEOS_BUCKET, path, png, 'image/png');
+      return {
+        name: file.filename,
+        path,
+        url: publicUrlIn(client, VIDEOS_BUCKET, path),
+      };
     },
   );
 
@@ -1312,6 +1483,39 @@ export function registerVideoRoutes(
       await updateVideoProject(client, row.id, {
         status: 'storyboard_ready',
         step: 'stills',
+        error: null,
+      });
+      return reply.code(200).send({ id: row.id });
+    },
+  );
+
+  // Send a project back to gate 1 so the officer can rework the SCRIPT — the
+  // narration split, the briefs, the key points and the style paragraph — after
+  // seeing the frames those inputs produced. The twin of the route above, one
+  // gate earlier, and a pure state flip for the same reason: no job runs and
+  // nothing is re-rendered, so every frame already in Storage stays on the row
+  // and the storyboard job then draws only the scenes an edit sent back to
+  // 'pending'. Gate 1's save route already accepts a project carrying frames
+  // (that is what reconcileScriptScenes' keep-frames branch is for), so nothing
+  // downstream needed a change.
+  app.post<{ Params: { id: string } }>(
+    '/video/projects/:id/reopen-script',
+    async (request, reply) => {
+      const row = await getVideoProject(client, request.params.id);
+      if (!row) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'Video project not found.' } });
+      }
+      // storyboard_ready ONLY. Both gates are idle statuses of the SAME active
+      // project, so there is no findActiveVideoProject check to make here —
+      // unlike the reopen above, which revives a finished or failed one.
+      if (row.status !== 'storyboard_ready' || isVideoJobRunning(row.id)) {
+        return reply.code(409).send({ error: { message: BUSY_MESSAGE } });
+      }
+      await updateVideoProject(client, row.id, {
+        status: 'script_ready',
+        step: null,
         error: null,
       });
       return reply.code(200).send({ id: row.id });

@@ -86,6 +86,8 @@ import {
   type SendChatMessageRequest,
   VideoProjectDetailSchema,
   VideoProjectSummarySchema,
+  VideoReferenceImageUploadResponseSchema,
+  type VideoReferenceImageUploadResponse,
   type CreateVideoProjectInput,
   type RegenerateStillRequest,
   type UpdateSceneMotionRequest,
@@ -974,6 +976,25 @@ export async function replanVideoScript(
   return VideoProjectDetailSchema.parse(body);
 }
 
+// One scene's reference picture, uploaded at gate 1 while the officer is still
+// writing the scene. It ATTACHES NOTHING on its own: the returned `path` is
+// what a later save carries, so the picture lands with the rest of the card's
+// edits rather than behind the officer's back. Free — nothing is rendered.
+export async function uploadVideoSceneReferenceImage(
+  id: string,
+  file: File,
+): Promise<VideoReferenceImageUploadResponse> {
+  const form = new FormData();
+  form.append('file', file);
+  const response = await fetch(
+    `${API_URL}/api/video/projects/${id}/reference-image`,
+    { method: 'POST', body: form },
+  );
+  return VideoReferenceImageUploadResponseSchema.parse(
+    await readJsonResponse(response),
+  );
+}
+
 // Renders keyframe stills for every scene that lacks a current one (cents, not
 // dollars — the cheap preview gate before any Veo spend).
 export async function startVideoStoryboard(id: string): Promise<void> {
@@ -1047,6 +1068,15 @@ export async function narrateVideo(id: string): Promise<void> {
 // edited before animating again. Preserves every clip already rendered.
 export async function reopenVideoStoryboard(id: string): Promise<void> {
   await requestJson(`/api/video/projects/${id}/reopen-storyboard`, {
+    method: 'POST',
+  });
+}
+
+// Step back from gate 2 to gate 1 so the script (narration split, briefs, key
+// points, style) can be edited again. Free: every rendered frame stays on the
+// row, and only a scene an edit invalidates is redrawn afterwards.
+export async function reopenVideoScript(id: string): Promise<void> {
+  await requestJson(`/api/video/projects/${id}/reopen-script`, {
     method: 'POST',
   });
 }

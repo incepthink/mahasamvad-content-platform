@@ -18,6 +18,7 @@ import { use, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { VideoProjectDetail, VideoScene } from '@dgipr/schemas';
 import {
+  UPLOAD_FILE_MAX_BYTES,
   VIDEO_NARRATION_MAX_CHARS,
   VIDEO_SCENE_LIMIT,
   VIDEO_STYLE_MAX_CHARS,
@@ -32,6 +33,7 @@ import {
   narrateVideo,
   reanimateVideoScene,
   regenerateVideoStill,
+  reopenVideoScript,
   reopenVideoStoryboard,
   replanVideoScript,
   restitchVideo,
@@ -39,6 +41,7 @@ import {
   saveVideoSceneMotion,
   startVideoAnimation,
   startVideoStoryboard,
+  uploadVideoSceneReferenceImage,
 } from '../../../lib/api';
 import { useVideoProject } from '../../../lib/useVideoProject';
 import {
@@ -52,6 +55,20 @@ import { VideoStatusChip } from '../../../components/VideoStatusChip';
 import { VideoResultView } from '../../../components/VideoResultView';
 
 type SceneDraft = {
+  // React's key, and it must NOT be the array position. With key={index},
+  // deleting scene i unmounts the LAST card and re-renders every card from i
+  // onward with different content — so one deletion rewrites the text of every
+  // scene below it. That is merely wasteful on its own, but it is fatal once
+  // the browser's translator has re-parented those text nodes into <font>
+  // wrappers: React still holds the originals, and removing one throws
+  // "removeChild … not a child of this node". Keyed by identity, a deletion
+  // unmounts exactly the deleted card and leaves every other card's DOM alone.
+  //
+  // Derived, not a random id, so it stays stable across a reseed: a stored
+  // scene keeps `s{index}` after every save, which is what preserves a gate-2
+  // card's open brief fold. Inserted scenes take a counter, since they have no
+  // stored position to name them by until the save lands.
+  uid: string;
   // Which STORED scene this card is, so the API can keep its frames and clip
   // lineage when an insert shifts every later card's position. Undefined marks
   // a scene the officer just inserted, which has nothing rendered yet.
@@ -65,16 +82,47 @@ type SceneDraft = {
   // The on-screen Marathi line. Blank is a real answer meaning "no overlay on
   // this scene", so it is stored as '' rather than undefined.
   keyPoint: string;
+  // The officer's reference picture for this scene's start frame. BOTH halves
+  // are held: the URL renders the thumbnail, and the PATH is what the save
+  // sends. '' means "no picture", and — because the field is always sent — that
+  // is also how a removal reaches the API.
+  referenceImagePath: string;
+  referenceImageUrl: string;
   beat?: string | undefined;
 };
 
+// Names an inserted card until a save turns it into a stored scene. Module
+// scope so it never repeats within a session — two cards inserted at the same
+// position must not collide on a key, which `new-${index}` did.
+let insertedSceneSeq = 0;
+
+function blankDraft(): SceneDraft {
+  insertedSceneSeq += 1;
+  return {
+    uid: `n${insertedSceneSeq}`,
+    narration: '',
+    visualBrief: '',
+    endVisualBrief: '',
+    keyPoint: '',
+    referenceImagePath: '',
+    referenceImageUrl: '',
+    durationSeconds: clipSecondsForNarration(0),
+  };
+}
+
 function draftsFrom(scenes: readonly VideoScene[]): SceneDraft[] {
   return scenes.map((scene, index) => ({
+    uid: `s${index}`,
     sourceIndex: index,
     narration: scene.narration,
     visualBrief: scene.visualBrief,
     endVisualBrief: scene.endVisualBrief ?? '',
     keyPoint: scene.keyPoint ?? '',
+    // Seeded on BOTH gates even though only gate 1 can edit it: gate 2's save
+    // sends the same field, so an unseeded draft would send '' and silently
+    // detach a picture the officer attached before the storyboard was rendered.
+    referenceImagePath: scene.referenceImagePath ?? '',
+    referenceImageUrl: scene.referenceImageUrl ?? '',
     durationSeconds: scene.durationSeconds,
     beat: scene.beat,
   }));
@@ -109,8 +157,14 @@ function WorkingCard({ detail }: { detail: VideoProjectDetail }) {
                     gap: 12,
                   }}
                 >
+                  {/* One interpolated string, not `{a} {b}: {c}`. Three sibling
+                      text nodes are what the browser's translator merges into a
+                      single <font>, after which React's own references to them
+                      are no longer children of this <span> and removing one
+                      throws NotFoundError. A lone text child is safe: React
+                      removes the ELEMENT, which the translator never reparents. */}
                   <span className="file-name" style={{ whiteSpace: 'normal' }}>
-                    {STR.videoSceneLabel} {index + 1}: {scene.narration}
+                    {`${STR.videoSceneLabel} ${index + 1}: ${scene.narration}`}
                   </span>
                   <span className="file-size">
                     {scene.status === 'done' || scene.status === 'still-ready'
@@ -167,6 +221,15 @@ export default function VideoProjectPage({
   const [styleDraft, setStyleDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  // Reference-picture upload state, kept OUT of `busy`/`formError`: a picture
+  // travelling for one card must not disable the rest of the page, and its
+  // failure belongs on that card rather than under the action buttons. Keyed by
+  // draft uid, never index, so an insert mid-upload cannot move either onto a
+  // different scene.
+  const [referenceBusyUid, setReferenceBusyUid] = useState<string | null>(null);
+  const [referenceErrors, setReferenceErrors] = useState<
+    Record<string, string>
+  >({});
   // Two-step confirm for the full animate (irreversible spend).
   const [animateArmed, setAnimateArmed] = useState(false);
   const lastStatus = useRef<VideoProjectDetail['status'] | null>(null);
@@ -317,7 +380,8 @@ export default function VideoProjectPage({
           stored.narration !== draft.narration ||
           stored.visualBrief !== draft.visualBrief ||
           (stored.endVisualBrief ?? '') !== draft.endVisualBrief ||
-          (stored.keyPoint ?? '') !== draft.keyPoint
+          (stored.keyPoint ?? '') !== draft.keyPoint ||
+          (stored.referenceImagePath ?? '') !== draft.referenceImagePath
         );
       }));
   // Both gate-1 buttons refuse the same payloads the save route does, so an
@@ -344,6 +408,60 @@ export default function VideoProjectPage({
       prev ? prev.map((d, i) => (i === index ? { ...d, ...patch } : d)) : prev,
     );
 
+  // Uploads one card's reference picture and holds the returned path on the
+  // DRAFT. Deliberately outside `act()`: this is not a project action, it must
+  // not disable the whole page while a photograph travels, and — most of all —
+  // it must not `refresh()`, which would reseed the drafts and discard every
+  // unsaved edit on the page. Nothing is attached until the officer saves.
+  //
+  // Keyed by the draft's uid rather than its index, so an insert or a removal
+  // while an upload is in flight cannot move the spinner onto another card.
+  const pickReferenceImage = async (index: number, file: File) => {
+    const draft = drafts?.[index];
+    if (!draft) return;
+    const uid = draft.uid;
+    const clearError = () =>
+      setReferenceErrors((prev) => {
+        if (prev[uid] === undefined) return prev;
+        const next = { ...prev };
+        delete next[uid];
+        return next;
+      });
+    // Refused here rather than by the API, the picker rule: an oversized file
+    // must not be uploaded before being rejected.
+    if (file.size > UPLOAD_FILE_MAX_BYTES) {
+      setReferenceErrors((prev) => ({ ...prev, [uid]: STR.fileTooLargeError }));
+      return;
+    }
+    clearError();
+    setReferenceBusyUid(uid);
+    try {
+      const uploaded = await uploadVideoSceneReferenceImage(id, file);
+      // By identity, not by the index this started with — the officer may have
+      // inserted or removed a card while the file was travelling.
+      setDrafts((prev) =>
+        prev
+          ? prev.map((d) =>
+              d.uid === uid
+                ? {
+                    ...d,
+                    referenceImagePath: uploaded.path,
+                    referenceImageUrl: uploaded.url,
+                  }
+                : d,
+            )
+          : prev,
+      );
+    } catch (e) {
+      setReferenceErrors((prev) => ({
+        ...prev,
+        [uid]: e instanceof Error ? e.message : STR.genericError,
+      }));
+    } finally {
+      setReferenceBusyUid((current) => (current === uid ? null : current));
+    }
+  };
+
   // A new card carries no sourceIndex, so the API treats it as new rather than
   // adopting a neighbour's frames. It starts blank on purpose: its narration is
   // moved out of a neighbour by the officer (which is what keeps the joined
@@ -352,17 +470,7 @@ export default function VideoProjectPage({
   const insertSceneAfter = (index: number) =>
     setDrafts((prev) =>
       prev
-        ? [
-            ...prev.slice(0, index + 1),
-            {
-              narration: '',
-              visualBrief: '',
-              endVisualBrief: '',
-              keyPoint: '',
-              durationSeconds: clipSecondsForNarration(0),
-            },
-            ...prev.slice(index + 1),
-          ]
+        ? [...prev.slice(0, index + 1), blankDraft(), ...prev.slice(index + 1)]
         : prev,
     );
 
@@ -382,6 +490,9 @@ export default function VideoProjectPage({
       // "drop the overlay on this scene", which omitting the field would
       // silently discard.
       keyPoint: draft.keyPoint.trim(),
+      // Same rule, same reason: '' is how a removed reference picture reaches
+      // the API, and omitting the field means "leave the stored one alone".
+      referenceImagePath: draft.referenceImagePath,
     }));
 
   // Gate 2's save. Same route as gate 1 (it already accepts storyboard_ready)
@@ -417,6 +528,11 @@ export default function VideoProjectPage({
       ...(draft.keyPoint.trim() !== ''
         ? { keyPoint: draft.keyPoint.trim() }
         : {}),
+      // Sent unconditionally, unlike the fields above it: this one is not being
+      // re-derived by the model, so '' has to mean "removed" here exactly as it
+      // does on the save. Omitting it would restore a picture the officer had
+      // just detached the moment they pressed "AI ने पुन्हा तयार करा".
+      referenceImagePath: draft.referenceImagePath,
     }));
 
   // Persists the split and re-derives every pipeline-owned field on top of it,
@@ -532,7 +648,7 @@ export default function VideoProjectPage({
           </section>
           {drafts.map((draft, index) => (
             <VideoSceneCard
-              key={index}
+              key={draft.uid}
               index={index}
               scene={{
                 narration: draft.narration,
@@ -561,6 +677,22 @@ export default function VideoProjectPage({
               onKeyPointChange={(value) =>
                 patchDraft(index, { keyPoint: value })
               }
+              // Gate 1 ONLY. The handlers are not passed at gate 2 or on the
+              // fix panel, which is what keeps the control off those cards —
+              // there a frame has been bought, and the affordance for changing
+              // it is the redraw fold, which spends.
+              onReferenceImagePick={(file: File) =>
+                void pickReferenceImage(index, file)
+              }
+              onReferenceImageRemove={() =>
+                patchDraft(index, {
+                  referenceImagePath: '',
+                  referenceImageUrl: '',
+                })
+              }
+              referenceImageUrl={draft.referenceImageUrl || undefined}
+              referenceImageBusy={referenceBusyUid === draft.uid}
+              referenceImageError={referenceErrors[draft.uid]}
               onInsertAfter={
                 canAddScene ? () => insertSceneAfter(index) : undefined
               }
@@ -583,20 +715,7 @@ export default function VideoProjectPage({
                   className="btn"
                   disabled={busy}
                   onClick={() =>
-                    setDrafts((prev) =>
-                      prev
-                        ? [
-                            ...prev,
-                            {
-                              narration: '',
-                              visualBrief: '',
-                              endVisualBrief: '',
-                              keyPoint: '',
-                              durationSeconds: clipSecondsForNarration(0),
-                            },
-                          ]
-                        : prev,
-                    )
+                    setDrafts((prev) => (prev ? [...prev, blankDraft()] : prev))
                   }
                 >
                   {STR.videoAddScene}
@@ -671,7 +790,9 @@ export default function VideoProjectPage({
                   estimate — it was MEASURED at create time, and the per-scene
                   shares of that WAV sum to it. Labelling it "अंदाज" would
                   understate what the pipeline actually knows. */}
-              {narrationIsUploaded
+              {/* Joined into ONE expression rather than left as two adjacent
+                  text children — see the note in WorkingCard. */}
+              {(narrationIsUploaded
                 ? `${STR.videoNarrationAudioMeasured}: ${videoReadyScriptEstimate(
                     measuredNarrationSeconds,
                     detail.scenes.length,
@@ -681,8 +802,11 @@ export default function VideoProjectPage({
                       totalNarrationSeconds,
                       drafts.length,
                     )}`
-                  : videoNarrationTotal(totalNarrationSeconds, narrationTarget)}
-              {narrationOverBudget ? ` ${STR.videoNarrationTotalOver}` : ''}
+                  : videoNarrationTotal(
+                      totalNarrationSeconds,
+                      narrationTarget,
+                    )) +
+                (narrationOverBudget ? ` ${STR.videoNarrationTotalOver}` : '')}
             </p>
             <p className="hint" style={{ marginTop: 8 }}>
               {STR.videoToStoryboardHint}
@@ -709,7 +833,7 @@ export default function VideoProjectPage({
                 : detail.scenes[draft.sourceIndex];
             return (
               <VideoSceneCard
-                key={draft.sourceIndex ?? `new-${index}`}
+                key={draft.uid}
                 index={index}
                 scene={{
                   ...(stored ?? {
@@ -777,7 +901,23 @@ export default function VideoProjectPage({
               >
                 {busy ? STR.submitting : STR.videoSaveStoryboardScript}
               </button>
+              {/* Back to gate 1, where the briefs, key points and style
+                  paragraph are editable. Gated on `storyboardDirty` like the
+                  two spending buttons below, and for a plainer reason: the
+                  status change reseeds the drafts from the stored scenes, so
+                  an unsaved re-split would be discarded on the way. */}
+              <button
+                type="button"
+                className="btn"
+                disabled={busy || storyboardDirty}
+                onClick={() => void act(() => reopenVideoScript(id))}
+              >
+                {busy ? STR.submitting : STR.videoBackToScript}
+              </button>
             </div>
+            <p className="hint" style={{ marginBottom: 12 }}>
+              {STR.videoBackToScriptHint}
+            </p>
             {storyboardDirty ? (
               <p className="hint" style={{ marginBottom: 12 }}>
                 {STR.videoSaveStoryboardScriptHint}

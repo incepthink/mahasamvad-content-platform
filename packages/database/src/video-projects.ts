@@ -50,6 +50,14 @@ export type VideoSceneEntry = Readonly<{
   // rendered (Chromium-typeset, never model-painted). Absent or empty ⇒ no
   // overlay for this scene.
   keyPoint?: string;
+  // The officer's own reference picture for this scene's START frame, in the
+  // public videos bucket. It is an INPUT TO THE FRAME PROMPT, like the visual
+  // brief and the project's style paragraph — so attaching, replacing or
+  // removing one sends the scene back to pending exactly as an edited brief
+  // does, and the render attaches it in place of scene 1's world reference.
+  // Unversioned: each upload writes its own random object name, so a replaced
+  // picture is a different path rather than a new version of one.
+  referenceImagePath?: string;
   // Whole seconds, 3-15 (Kling's bounds) — DERIVED from the scene's measured
   // narration audio (clipSecondsForNarration). Legacy rows carry 4/6/8 from
   // the fixed-window era; WINDOW FREEZE keeps their rendered clips valid.

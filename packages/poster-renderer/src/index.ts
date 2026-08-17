@@ -69,6 +69,12 @@ export type {
 // from what SHIPPED rather than from what was merely assigned (see poster-colours.ts).
 export { measurePosterColours, hueBucketOf } from './poster-colours.js';
 export type { PosterColours, HueBucket } from './poster-colours.js';
+// Turns a picture an officer uploaded into upright, bounded PNG bytes — the one
+// representation the image clients may assume they are holding.
+export {
+  normalizeReferenceImage,
+  UnreadableImageError,
+} from './reference-image.js';
 export { renderHtmlToPng } from './render-html.js';
 export type { RenderOptions } from './render-html.js';
 export { renderHtmlToPdf, ChromiumUnavailableError } from './render-html.js';

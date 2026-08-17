@@ -19,6 +19,71 @@ The long-term product will:
 Scaffolding is done. The core generation pipeline and a first web product on top of
 it are implemented and working end-to-end:
 
+- **A scene can carry the officer's own reference picture** (2026-08-17, no migration): the
+  only way to tell `/video` what a place, person or object actually looks like was to describe
+  it in words, and a Marathi government explainer often turns on a specific building, office or
+  scheme logo that no paragraph pins down. Gate 1's scene card (`संहिता तपासा व संपादित करा`)
+  now takes one picture per scene; the officer names it in that scene's दृश्य-वर्णन ("the
+  building in the attached image") and it is attached to the START frame render.
+  - **Gate 1 ONLY, by construction, not by a flag**: the control renders only when the page
+    supplies `onReferenceImagePick`, which gate 2 and the post-render fix panel do not. There a
+    frame has been bought and the affordance for changing it is the redraw fold, which spends.
+  - **Uploading attaches nothing.** `POST /video/projects/:id/reference-image` stores the file
+    and hands back a path (the chat-attachment shape, so it travels while the officer is still
+    typing); the picture reaches a scene only when that path comes back on a save. So
+    "बदल जतन करा" means the same thing for this control as for every other field on the card.
+    The route is project-scoped rather than scene-scoped because a gate-1 card may be one just
+    inserted, with no stored scene to address, and the object name is random for the same
+    reason — a scene-indexed name would point at the wrong scene the moment a card moved.
+  - **It is an input to the frame prompt, so it invalidates frames like a brief does.**
+    `reconcileScriptScenes`' keep-frames test now compares it beside both briefs: attaching,
+    replacing or removing one sends the scene back to `pending`. The re-plan's explicit KEEP
+    list carries it — it is the officer's input, not a field the model owns, and re-describing
+    a scene must not detach the photograph the description is about.
+  - **Three states on the wire, and the third is what makes an old client safe**: a path
+    attaches, `''` REMOVES (the `keyPoint` rule), and OMITTING the field leaves the stored one
+    alone. Both gates seed it into their drafts, so a gate-2 save cannot send `''` and silently
+    detach a picture. Submitted paths are checked against `projects/{id}/references/` before
+    anything is written — chat's `imageUrl` prefix guard, for the same reason.
+  - **The officer's picture WINS over scene 1's world reference, and it is one or the other.**
+    `renderFrame` carries a single reference image because two inline pictures under one
+    instruction leave the model guessing which is which (`generateGeminiImage` refuses the pair
+    outright). Given the choice, an explicit "this is the building I mean" beats inferred
+    cross-scene continuity — the picture was attached precisely because the style paragraph was
+    not saying it. Best-effort exactly as `loadWorldReference` is: a failed download degrades to
+    the world reference, then to the style paragraph, never to a failed scene.
+  - **`SUPPLIED_REFERENCE_RULE` is a SEPARATE prompt rule, not `WORLD_REFERENCE_RULE` reused**
+    (`buildKeyframePrompt`'s 4th arg became `'world' | 'supplied'`). That rule tells the model
+    the attached picture is a frame of this very video and asks it to inherit the film look —
+    false and unhelpful for a phone photograph of a real building, and silent about the thing
+    the picture was attached for. The new rule says reproduce the subject's real appearance but
+    **do not copy the photograph**: framing, action and light still come from the scene
+    description, or an attached picture would quietly override the shot the pipeline planned.
+    Harness-asserted in both directions, including that a supplied picture is never called an
+    earlier scene.
+  - **Normalised at UPLOAD time** (`normalizeReferenceImage`, new in `@dgipr/poster-renderer`,
+    which owns sharp — `apps/api` has no image dependency): PNG out always (the frame clients
+    send a reference inline as a hardcoded `image/png`, so exactly one representation may reach
+    Storage), EXIF auto-rotate (a phone held upright writes a landscape image plus a "rotate me"
+    tag — intake/image-ocr.ts's finding), and a 2048px long-edge bound (the reference travels as
+    base64 in the request body). Unlike the OCR normaliser it is NOT best-effort: the officer is
+    standing in front of the form, so an unreadable file is refused there rather than stored and
+    failed hours later inside a paid storyboard job.
+  - **No migration**: `scenes` is jsonb, so `referenceImagePath` was additive. The detail
+    payload ships BOTH the path and the URL, unlike every other storage path on it — the URL
+    renders the thumbnail and the path is what the save carries back, so the client never has to
+    reverse a public URL into the object it names.
+  Verified 2026-08-17, all free: workspace typecheck **7/7 green**, eslint clean on all 12
+  touched files, prettier clean on every hunk of mine (the six whole-file complaints are
+  pre-existing CRLF — confirmed per file against `git show HEAD:`, with zero content diff, so do
+  NOT `--write` them); the prompt harness at 46 checks including 3 new ones; and an offline
+  check of the normaliser (a 3000x4000 JPEG → 1536x2048 PNG, a small image not upscaled, junk
+  refused as `UnreadableImageError`). **Left for a real run** (image spend): attach a photograph
+  to one scene, name it in the दृश्य-वर्णन, save, and confirm the scene returns to pending and
+  its rendered start frame shows that subject. Deploy is `@dgipr/schemas` → `@dgipr/database` →
+  `@dgipr/poster-renderer` → `@dgipr/content-engine` dists → API + web (ship together — the
+  scene's two reference fields are a shared contract). No migration, no n8n, no new env.
+
 - **Layered Canva handoff protects official social branding** (2026-08-15, no migration):
   the existing Canva OAuth button no longer sends an ordinary DGIPR twitter/facebook poster as
   one flattened bitmap. The API extracts the exact top-right Government lockup and bottom DGIPR

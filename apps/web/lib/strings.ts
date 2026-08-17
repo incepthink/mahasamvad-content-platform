@@ -1338,6 +1338,22 @@ export const STR = {
   videoEndBriefLabel: 'अंतिम दृश्य-वर्णन (इंग्रजी)',
   videoEndBriefHint:
     'ऐच्छिक. दरवाजा पूर्ण बंद होणे किंवा वस्तू दुसऱ्या व्यक्तीकडे पोहोचणे यासारखी ठरावीक अंतिम स्थिती आवश्यक असेल तरच लिहा. अन्यथा रिकामे ठेवा.',
+  // Gate 1 only. The picture is reference material for the START frame, so the
+  // hint says both things an officer needs before using it: name it in the
+  // दृश्य-वर्णन (an attached photograph nobody refers to changes little), and
+  // press जतन करा (uploading alone attaches nothing).
+  videoReferenceImageLabel: 'संदर्भ चित्र (ऐच्छिक)',
+  videoReferenceImageHint:
+    'या दृश्यासाठी एखादी इमारत, व्यक्ती, वस्तू किंवा ठिकाण नेमके तसेच दिसावे असे वाटत असेल तर त्याचा फोटो जोडा. वरील दृश्य-वर्णनात त्याचा उल्लेख करा — उदा. “the building in the attached image”. फोटोची हुबेहूब नक्कल होणार नाही; फक्त तो विषय खरा दिसेल.',
+  videoReferenceImageAdd: 'चित्र जोडा',
+  videoReferenceImageReplace: 'चित्र बदला',
+  videoReferenceImageRemove: 'चित्र काढा',
+  videoReferenceImageUploading: 'चित्र चढवत आहोत…',
+  videoReferenceImageAlt: 'या दृश्यासाठी जोडलेले संदर्भ चित्र',
+  // Said on the card, not only in the page's save hint: attaching a picture is
+  // the one edit here that looks like it took effect on its own.
+  videoReferenceImageSaveHint:
+    'हा बदल “बदल जतन करा” दाबल्यावरच लागू होईल, आणि या दृश्याची चित्रे पुन्हा काढावी लागतील.',
   videoMotionBriefLabel: 'दृश्यातील हालचाल आणि अभिनय',
   videoMotionBriefEditHint:
     'या दृश्यात काय घडते — हावभाव, हातांची व वस्तूंची हालचाल, कॅमेरा — हे क्रमाने इंग्रजीत लिहा. चित्रे बदलत नाहीत; हा मजकूर फक्त पुढच्या वेळी हे दृश्य तयार करताना वापरला जातो.',
@@ -1429,7 +1445,12 @@ export const STR = {
   videoAnimateConfirm: 'नक्की तयार करायचा? हा खर्च परत मिळत नाही.',
   videoAnimateConfirmYes: 'होय, व्हिडिओ तयार करा',
   videoAnimateCancel: 'रद्द करा',
+  // Gate 2 → gate 1. Free, and the hint says so as well as saying what
+  // survives — an officer looking at paid frames needs to know this button
+  // does not throw them away.
   videoBackToScript: 'संहितेकडे परत जा',
+  videoBackToScriptHint:
+    'निवेदनाची विभागणी, दृश्य-वर्णने, पडद्यावरील ओळी व शैली पुन्हा बदलता येतील. खर्च होत नाही आणि तयार झालेली चित्रे तशीच राहतात — ज्या दृश्याचे वर्णन बदलाल तेवढ्याच दृश्याचे चित्र पुन्हा काढावे लागेल.',
 
   // Rendering + result
   videoAnimatingHint:

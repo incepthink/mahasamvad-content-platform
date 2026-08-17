@@ -25,6 +25,24 @@ const SETTING_RULE =
 const WORLD_REFERENCE_RULE =
   'An attached image comes from an earlier scene in this video. Keep its visual world, colour treatment and production style. When the new scene uses the same recurring person or object, preserve that identity and appearance; create the new location and action described here.';
 
+// The officer's own photograph, attached to ONE scene at gate 1. Deliberately a
+// different rule from WORLD_REFERENCE_RULE rather than the same one reused: that
+// rule tells the model the picture is a frame of this very video and asks it to
+// inherit the film look, which is false and unhelpful for a phone photograph of
+// a real building, and it says nothing about the thing the officer actually
+// attached the picture for.
+//
+// It is reference MATERIAL, not a frame to reproduce: the scene description
+// still decides the framing, the action and the light, or an attached picture
+// would quietly override the shot the rest of the pipeline planned.
+const SUPPLIED_REFERENCE_RULE =
+  'The attached image is reference material supplied for this scene. Where the scene description refers to that place, person, object or activity, reproduce its real appearance faithfully. Do not copy the attached photograph itself: compose the framing, action, camera position and lighting described here, in the visual style above.';
+
+// Which single picture, if any, is attached to a start-frame render. One at a
+// time by construction — the frame seam carries one reference image, because two
+// inline pictures under one instruction leave the model guessing which is which.
+export type KeyframeReference = 'world' | 'supplied';
+
 export const CLIP_NEGATIVE_PROMPT =
   'talking, lip sync, distorted anatomy, extra limbs, extra fingers, identity ' +
   'changes, face morphing, flicker, jitter, camera shake, abrupt cuts, cartoon, ' +
@@ -34,7 +52,7 @@ export function buildKeyframePrompt(
   style: string,
   visualBrief: string,
   shotHint?: string,
-  hasWorldReference?: boolean,
+  reference?: KeyframeReference,
 ): string {
   return [
     `Visual style: ${style.trim()}`,
@@ -45,7 +63,8 @@ export function buildKeyframePrompt(
     SETTING_RULE,
     REALISM_RULE,
     FEW_PEOPLE_RULE,
-    ...(hasWorldReference ? [WORLD_REFERENCE_RULE] : []),
+    ...(reference === 'world' ? [WORLD_REFERENCE_RULE] : []),
+    ...(reference === 'supplied' ? [SUPPLIED_REFERENCE_RULE] : []),
     NO_TALKING_RULE,
   ].join('\n');
 }
@@ -250,7 +269,8 @@ if (
     'She studies the phone, her concern turns to recognition, then she relaxes into a genuine smile and nods once.';
 
   const start = buildKeyframePrompt(style, brief, hint);
-  const startWithRef = buildKeyframePrompt(style, brief, hint, true);
+  const startWithRef = buildKeyframePrompt(style, brief, hint, 'world');
+  const startWithSupplied = buildKeyframePrompt(style, brief, hint, 'supplied');
   const end = buildEndFramePrompt(style, endBrief, hint);
   const motion = buildClipMotionPrompt(
     style,
@@ -289,6 +309,23 @@ if (
   check(
     'start frame: recurring identity follows the reference',
     startWithRef.includes('preserve that identity and appearance'),
+  );
+  // The two reference kinds must stay DISTINCT rules. Collapsing them back into
+  // one would tell the model an officer's phone photograph is a frame of this
+  // video (so inherit its film look) and would drop the only sentence saying
+  // what the attached picture is for.
+  check(
+    'start frame: a supplied picture is not called an earlier scene',
+    !startWithSupplied.includes('earlier scene') &&
+      startWithSupplied.includes('reference material supplied for this scene'),
+  );
+  check(
+    'start frame: a supplied picture is reference, not the frame to copy',
+    startWithSupplied.includes('Do not copy the attached photograph itself'),
+  );
+  check(
+    'start frame: no reference rule without a reference',
+    !start.includes('attached image') && !start.includes('attached photograph'),
   );
   check(
     'end frame: names the required destination',

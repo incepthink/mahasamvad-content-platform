@@ -66,9 +66,18 @@ import { rememberDesignations } from '../jobs/designation-writeback.js';
 // still enforces UPLOAD_FILE_MAX_BYTES.
 const MAX_FILE_BYTES = Number.POSITIVE_INFINITY;
 // No count limit either, deliberately (2026-08-11): a meeting can produce a dozen recordings
-// and a booklet photographed page by page is a dozen images, and busboy's `files` limit does
-// not reject — it silently STOPS emitting parts, so a capped intake would have quietly
-// dropped sources the officer watched upload.
+// and a booklet photographed page by page is a dozen images, so a capped intake would refuse
+// sources the officer watched upload.
+//
+// It must be STATED, not omitted, and that distinction cost a production outage (2026-08-17):
+// @fastify/multipart DEEP-merges the per-request limits into the ones `index.ts` registered
+// (`deepmergeAll({ headers }, options, opts)`), key by key — it does NOT replace the object.
+// So dropping this key in the 2026-08-11 change did not lift the cap, it exposed the global
+// `files: 1`, and every two-file intake 413'd with a raw English `reach files limit`. Nor is
+// that failure silent: bare busboy stops emitting parts, but the plugin subscribes to
+// `filesLimit` and throws. Anything this route wants to differ from the global config has to
+// name itself here.
+const MAX_FILES = Number.POSITIVE_INFINITY;
 // The `documents` field carries whole documents' worth of extracted Marathi text, and
 // busboy defaults a field to 1 MiB — which a couple of GRs in Devanagari (3 bytes a
 // character) will pass straight through. Raised to 64 MiB alongside the removal of the
@@ -265,6 +274,7 @@ export function registerDloRoutes(
       limits: {
         fileSize: MAX_FILE_BYTES,
         fieldSize: MAX_FIELD_BYTES,
+        files: MAX_FILES,
       },
     });
     try {

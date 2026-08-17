@@ -41,6 +41,7 @@ import {
   narrationVoice,
   synthesizeNarration,
   totalCostUsd,
+  type KeyframeReference,
   type VeoAspectRatio,
 } from '@dgipr/content-engine';
 import {
@@ -434,6 +435,48 @@ async function loadWorldReference(
   }
 }
 
+// Which single picture this scene's START frame is rendered against, and which
+// rule the prompt therefore carries.
+//
+// The officer's own uploaded reference WINS over scene 1's frame, and it is one
+// or the other rather than both. That is not a shortcut: renderFrame carries ONE
+// reference image because two inline pictures under a single instruction leave
+// the model guessing which is which — generateGeminiImage refuses the pair
+// outright rather than send an ambiguous request. Given the choice, an explicit
+// "this is the building I mean" beats inferred cross-scene continuity: the
+// officer attached the picture precisely because the style paragraph and scene 1
+// were not saying what they wanted.
+//
+// Best-effort in exactly the way loadWorldReference is: a failed download must
+// not cost a storyboard, so a missing object degrades to the world reference and
+// then to the style paragraph alone, rather than failing the scene.
+async function loadSceneReference(
+  client: SupabaseClient,
+  row: VideoProjectRow,
+  index: number,
+  scene: VideoSceneEntry,
+  scenes: readonly VideoSceneEntry[],
+): Promise<{ png: Buffer; kind: KeyframeReference } | undefined> {
+  if (scene.referenceImagePath) {
+    try {
+      const png = await downloadFile(
+        client,
+        VIDEOS_BUCKET,
+        scene.referenceImagePath,
+      );
+      return { png, kind: 'supplied' };
+    } catch (error) {
+      console.warn(
+        `[video] scene ${index + 1}: could not load the supplied reference ` +
+          `image (${errorMessage(error)}); falling back to the usual ` +
+          'cross-scene reference.',
+      );
+    }
+  }
+  const world = await loadWorldReference(client, row, index, scenes);
+  return world ? { png: world, kind: 'world' } : undefined;
+}
+
 // Renders one scene's reviewed frames.
 // - 'pair': a fresh START frame, then the END frame edited from it (when the
 //   scene has an endVisualBrief — legacy scenes without one stay single-frame).
@@ -455,16 +498,22 @@ async function renderSceneFrames(
   let startPng: Buffer;
 
   if (which === 'pair') {
-    const worldReference = await loadWorldReference(client, row, index, scenes);
+    const reference = await loadSceneReference(
+      client,
+      row,
+      index,
+      scene,
+      scenes,
+    );
     const rendered = await renderFrame({
       prompt: buildKeyframePrompt(
         row.style ?? '',
         scene.openingVisualBrief ?? scene.visualBrief,
         scene.shotHint,
-        worldReference !== undefined,
+        reference?.kind,
       ),
       aspect: aspectOf(row),
-      ...(worldReference ? { referenceFramePng: worldReference } : {}),
+      ...(reference ? { referenceFramePng: reference.png } : {}),
     });
     startPng = rendered;
     startVersion = await uploadVersioned(
@@ -529,6 +578,13 @@ async function renderSceneFrames(
       ? { endVisualBrief: scene.endVisualBrief }
       : {}),
     ...(scene.keyPoint !== undefined ? { keyPoint: scene.keyPoint } : {}),
+    // The officer's reference picture rides through a re-render like the briefs
+    // do: it is what this frame was drawn against, so dropping it here would
+    // detach it the first time a scene was redrawn and quietly draw the NEXT
+    // redraw from the style paragraph instead.
+    ...(scene.referenceImagePath !== undefined
+      ? { referenceImagePath: scene.referenceImagePath }
+      : {}),
     durationSeconds: scene.durationSeconds,
     status: 'still-ready',
     ...(startPath !== undefined ? { stillPath: startPath } : {}),

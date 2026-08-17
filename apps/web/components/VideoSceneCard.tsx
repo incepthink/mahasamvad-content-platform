@@ -19,6 +19,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { VideoScene } from '@dgipr/schemas';
 import {
+  IMAGE_FILE_ACCEPT,
   VIDEO_KEY_POINT_MAX_CHARS,
   VIDEO_NARRATION_MAX_CHARS,
   estimateNarrationSeconds,
@@ -34,11 +35,16 @@ import {
 function SceneStatusChip({ scene }: { scene: VideoScene }) {
   if (scene.status === 'still-rendering' || scene.status === 'animating') {
     return (
+      // The label is wrapped rather than left as a bare text node beside the
+      // spinner element: a text node with an element sibling is the other shape
+      // the translator reparents, and React must be able to remove it.
       <span className="translating-note">
         <span className="spinner" aria-hidden="true" />
-        {scene.status === 'animating'
-          ? VIDEO_SCENE_STATUS_LABELS.animating
-          : VIDEO_SCENE_STATUS_LABELS['still-rendering']}
+        <span>
+          {scene.status === 'animating'
+            ? VIDEO_SCENE_STATUS_LABELS.animating
+            : VIDEO_SCENE_STATUS_LABELS['still-rendering']}
+        </span>
       </span>
     );
   }
@@ -94,6 +100,11 @@ export function VideoSceneCard({
   onMotionBriefSave,
   onReanimate,
   onInsertAfter,
+  onReferenceImagePick,
+  onReferenceImageRemove,
+  referenceImageUrl,
+  referenceImageBusy,
+  referenceImageError,
   redrawUnavailableHint,
   reanimateLabel,
 }: {
@@ -124,6 +135,17 @@ export function VideoSceneCard({
   // Inserts a blank scene directly after this one. Its narration is moved out
   // of a neighbour by the officer, never invented and never left empty.
   onInsertAfter?: (() => void) | undefined;
+  // gate 1 (mode 'edit') ONLY — the officer's own reference picture for this
+  // scene's start frame. The card never uploads: it hands the picked File up,
+  // because the upload is project-scoped (a card may be one just inserted, with
+  // no stored scene to address) and the page owns the project id. Rendered only
+  // when onReferenceImagePick is supplied, which is what keeps the control off
+  // gate 2 and off the post-render fix panel.
+  onReferenceImagePick?: ((file: File) => void) | undefined;
+  onReferenceImageRemove?: (() => void) | undefined;
+  referenceImageUrl?: string | undefined;
+  referenceImageBusy?: boolean | undefined;
+  referenceImageError?: string | undefined;
   // Shown in place of the redraw buttons when this card has no stored scene
   // behind it yet, so an officer is told what to do instead of being handed a
   // button that cannot reach the API.
@@ -135,6 +157,11 @@ export function VideoSceneCard({
   // when the stored brief changes (the motionDraft pattern below) — reseeding
   // on every open discarded whatever the officer had just typed.
   const [briefOpen, setBriefOpen] = useState<'start' | 'end' | null>(null);
+  // The file input is hidden and driven by a button, so the control matches
+  // every other affordance on this card instead of the browser's default chrome.
+  // Its value is cleared after each pick, or re-choosing the SAME file fires no
+  // change event and the officer sees nothing happen.
+  const referenceInputRef = useRef<HTMLInputElement | null>(null);
   // Two-step confirm for dropping the end frame. It costs nothing and a new one
   // can be drawn afterwards, but it discards a frame the officer has already
   // reviewed and it sits next to the redraw button — so a misclick must not
@@ -199,10 +226,14 @@ export function VideoSceneCard({
             </button>
           ) : null}
         </div>
+        {/* Every text-bearing element on this card holds exactly ONE text child,
+            interpolated rather than left as `{label}: {value}`. Adjacent text
+            nodes are merged into a single <font> by the browser's translator,
+            which detaches the nodes React is holding — the next removal then
+            throws "removeChild … not a child of this node". Removing a whole
+            ELEMENT stays safe, because element nodes are not reparented. */}
         {scene.beat ? (
-          <p className="hint">
-            {STR.videoSceneBeatLabel}: {scene.beat}
-          </p>
+          <p className="hint">{`${STR.videoSceneBeatLabel}: ${scene.beat}`}</p>
         ) : null}
         <label className="field-label" htmlFor={`scene-narration-${index}`}>
           {STR.videoNarrationLabel}
@@ -210,15 +241,15 @@ export function VideoSceneCard({
         {/* The writer saw this planned visual window. The speech estimate is a
             guide; all boxes are synthesized later as one continuous track. */}
         <p className="hint">
-          {onNarrationChange
+          {(onNarrationChange
             ? STR.videoNarrationHint
-            : STR.videoNarrationLockedHint}
-          {scene.narration.trim().length > 0
-            ? ` · ${videoNarrationEstimate(
-                estimateNarrationSeconds(scene.narration),
-                scene.durationSeconds,
-              )}`
-            : ''}
+            : STR.videoNarrationLockedHint) +
+            (scene.narration.trim().length > 0
+              ? ` · ${videoNarrationEstimate(
+                  estimateNarrationSeconds(scene.narration),
+                  scene.durationSeconds,
+                )}`
+              : '')}
         </p>
         {/* Deliberately no maxLength on the textarea: silently truncating a
             pasted paragraph loses the officer's words, which is worse than
@@ -290,6 +321,74 @@ export function VideoSceneCard({
           disabled={busy}
           onChange={(event) => onEndBriefChange?.(event.target.value)}
         />
+        {/* The officer's own reference picture — gate 1 only, and only when the
+            page supplies the handler. It sits directly under the two briefs
+            because it is read TOGETHER with them: the picture does its work by
+            being named in the दृश्य-वर्णन above. */}
+        {onReferenceImagePick ? (
+          <>
+            <p className="field-label" style={{ marginTop: 12 }}>
+              {STR.videoReferenceImageLabel}
+            </p>
+            <p className="hint">{STR.videoReferenceImageHint}</p>
+            <input
+              ref={referenceInputRef}
+              type="file"
+              accept={IMAGE_FILE_ACCEPT}
+              style={{ display: 'none' }}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = '';
+                if (file) onReferenceImagePick(file);
+              }}
+            />
+            {referenceImageUrl ? (
+              <img
+                src={referenceImageUrl}
+                alt={STR.videoReferenceImageAlt}
+                style={{
+                  display: 'block',
+                  marginTop: 8,
+                  width: '100%',
+                  maxWidth: 240,
+                  borderRadius: 8,
+                }}
+              />
+            ) : null}
+            <div className="btn-row" style={{ marginTop: 8 }}>
+              <button
+                type="button"
+                className="btn btn-small"
+                disabled={busy || referenceImageBusy}
+                onClick={() => referenceInputRef.current?.click()}
+              >
+                {referenceImageBusy
+                  ? STR.videoReferenceImageUploading
+                  : referenceImageUrl
+                    ? STR.videoReferenceImageReplace
+                    : STR.videoReferenceImageAdd}
+              </button>
+              {referenceImageUrl && onReferenceImageRemove ? (
+                <button
+                  type="button"
+                  className="btn btn-small"
+                  disabled={busy || referenceImageBusy}
+                  onClick={onReferenceImageRemove}
+                >
+                  {STR.videoReferenceImageRemove}
+                </button>
+              ) : null}
+            </div>
+            {referenceImageUrl ? (
+              <p className="hint" style={{ marginTop: 6 }}>
+                {STR.videoReferenceImageSaveHint}
+              </p>
+            ) : null}
+            {referenceImageError ? (
+              <p className="form-error">{referenceImageError}</p>
+            ) : null}
+          </>
+        ) : null}
         {onInsertAfter ? (
           <div className="btn-row" style={{ marginTop: 12 }}>
             <button
@@ -369,9 +468,7 @@ export function VideoSceneCard({
         <p style={{ marginTop: 10 }}>{scene.narration}</p>
       )}
       {scene.keyPoint && scene.keyPoint.trim() !== '' ? (
-        <p className="hint">
-          {STR.videoKeyPointReviewLabel}: {scene.keyPoint}
-        </p>
+        <p className="hint">{`${STR.videoKeyPointReviewLabel}: ${scene.keyPoint}`}</p>
       ) : null}
       <p className="hint">
         {videoSceneTiming(scene.durationSeconds, scene.narrationSeconds)}

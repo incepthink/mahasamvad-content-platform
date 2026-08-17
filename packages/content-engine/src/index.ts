@@ -234,6 +234,7 @@ export {
   buildAvoidClause,
   fitClipPrompt,
   CLIP_NEGATIVE_PROMPT,
+  type KeyframeReference,
 } from './video/video-prompts.js';
 export {
   generateVeoClip,

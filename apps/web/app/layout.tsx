@@ -52,9 +52,18 @@ export default function RootLayout({
 }: Readonly<{
   children: ReactNode;
 }>) {
+  // suppressHydrationWarning below is about the browser's TRANSLATOR, not about
+  // anything this app renders. Chrome sees a Marathi page under an English UI
+  // locale and translates it BEFORE React hydrates, stamping lang="en" +
+  // class="translated-ltr" onto <html>; extensions do the same to <body>.
+  // Without it the console opens on a hydration error no code change here can
+  // resolve. It suppresses the ATTRIBUTE mismatch on these two elements only —
+  // one level deep — so a genuine mismatch inside the app is still reported.
+  // It does NOT make the app translation-safe on its own: that is the stable
+  // keys + wrapped text nodes on the pages React mutates heavily.
   return (
-    <html lang="mr">
-      <body className={devanagari.className}>
+    <html lang="mr" suppressHydrationWarning>
+      <body className={devanagari.className} suppressHydrationWarning>
         <PwaRegistration />
         <TasksProvider>
           <AppSidebar />

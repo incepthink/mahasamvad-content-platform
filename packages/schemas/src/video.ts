@@ -352,6 +352,14 @@ export const VideoSceneSchema = z.object({
   // the deadline, the count, the scheme name). Absent or empty ⇒ this scene
   // gets no overlay, which is also how an officer turns the feature off.
   keyPoint: z.string().optional(),
+  // A picture the officer attached at gate 1 as reference material for THIS
+  // scene's start frame ("use this building / this person / this object", named
+  // from the दृश्य-वर्णन). Both halves are shipped, unlike every other storage
+  // path here: the URL renders the thumbnail, and the PATH is what gate 1 sends
+  // back on the save that attaches it, so the round-trip needs no reverse
+  // mapping from a public URL to the object it names.
+  referenceImageUrl: z.string().optional(),
+  referenceImagePath: z.string().optional(),
   durationSeconds: VideoSceneDurationSchema,
   status: VideoSceneStatusSchema,
   // Planner's Marathi one-liner: the information this scene must convey.
@@ -567,6 +575,13 @@ export const UpdateVideoScriptRequestSchema = z.object({
         // Empty string is meaningful and must survive: it CLEARS the overlay
         // for this scene, so it cannot be min(1) like the briefs.
         keyPoint: z.string().trim().max(VIDEO_KEY_POINT_MAX_CHARS).optional(),
+        // The storage path of this scene's reference picture, as returned by
+        // the upload route. THREE states, and the difference matters: a path
+        // attaches (or replaces) the picture, an empty string REMOVES it, and
+        // OMITTING the field leaves whatever is stored alone — which is what
+        // stops a client that predates this feature from silently detaching
+        // every officer's reference image on an ordinary save.
+        referenceImagePath: z.string().trim().optional(),
         durationSeconds: VideoSceneDurationSchema.optional(),
       }),
     )
@@ -627,12 +642,34 @@ export const ReplanVideoScriptRequestSchema = z.object({
         visualBrief: z.string().trim().optional(),
         endVisualBrief: z.string().trim().optional(),
         keyPoint: z.string().trim().max(VIDEO_KEY_POINT_MAX_CHARS).optional(),
+        // Carried through the re-plan for the same reason the narration is: the
+        // reference picture is the officer's own input, not a field the model
+        // owns, so re-describing a scene must not detach the photograph the
+        // description is meant to be about.
+        referenceImagePath: z.string().trim().optional(),
       }),
     )
     .min(VIDEO_SCENE_LIMIT.min),
 });
 export type ReplanVideoScriptRequest = z.infer<
   typeof ReplanVideoScriptRequestSchema
+>;
+
+// One reference picture, stored ahead of the save that attaches it (the chat
+// attachment shape). Uploading is a separate call so the file travels while the
+// officer is still writing the scene, and the save itself stays an ordinary
+// JSON request carrying only the path.
+//
+// Nothing is attached by uploading: the picture reaches a scene only when the
+// returned `path` comes back on a save, which is what makes "जतन करा" mean the
+// same thing for this control as for every other field on the card.
+export const VideoReferenceImageUploadResponseSchema = z.object({
+  name: z.string(),
+  path: z.string(),
+  url: z.string(),
+});
+export type VideoReferenceImageUploadResponse = z.infer<
+  typeof VideoReferenceImageUploadResponseSchema
 >;
 
 // Per-scene frame regeneration; an edited brief rides along so "change the
