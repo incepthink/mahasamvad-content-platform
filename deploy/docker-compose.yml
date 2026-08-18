@@ -18,8 +18,25 @@
 #   - DNS A-records: api.<domain> and n8n.<domain> -> this EC2's public IP
 #   - Security group inbound: 80 + 443 open to the world; 22 to your IP only
 
+# Log rotation, applied to every service below via `<<: *logging`.
+#
+# Docker's json-file driver keeps EVERYTHING by default, on a 30 GB root volume that also
+# holds two container images and the n8n data volume. 50m x 5 caps each service at 250 MB.
+#
+# This bounds the disk; it does NOT give you history. `docker compose up -d api` (every
+# deploy) creates a NEW container and the old one's logs go with it. The durable record of
+# what ran and what failed is the DATABASE — generations/dlo_intakes/video_projects/
+# transcriptions each carry status + error. See deploy/health-check.js.
+x-logging: &logging
+  logging:
+    driver: json-file
+    options:
+      max-size: "50m"
+      max-file: "5"
+
 services:
   api:
+    <<: *logging
     # The image is built by GitHub Actions (.github/workflows/api-image.yml) on every
     # push to main and pulled here — building on an EC2 box that also runs n8n means a
     # pnpm install + a six-package tsc run + a ~500 MB Chromium install competing for
@@ -53,6 +70,7 @@ services:
     # No host port mapping — Caddy is the only public entrypoint.
 
   n8n:
+    <<: *logging
     image: n8nio/n8n:latest
     restart: unless-stopped
     environment:
@@ -73,6 +91,7 @@ services:
       - n8n_data:/home/node/.n8n       # persists workflows, credentials, encryption key
 
   caddy:
+    <<: *logging
     image: caddy:2
     restart: unless-stopped
     ports:
@@ -96,6 +115,7 @@ services:
   # Never publish this. It has no rate limiting and its JWT grants BYPASSRLS —
   # it is reachable only over the internal compose network, by `api`.
   postgrest:
+    <<: *logging
     image: postgrest/postgrest:v12.2.3
     restart: unless-stopped
     env_file:
@@ -116,6 +136,7 @@ services:
   # and a syntax error in it would take the public site down. Nothing in this
   # migration touches it.
   pgrst-proxy:
+    <<: *logging
     image: caddy:2                     # already on the box — no new image to pull
     restart: unless-stopped
     volumes:

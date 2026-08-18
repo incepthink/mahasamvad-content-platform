@@ -40,6 +40,24 @@ export type GeneratePosterCopyInput = Readonly<{
   // Full scheme/org names known to occur verbatim in the note (verified glossary rows). Used
   // both to instruct the model (LOCKED NAMES) and to deterministically repair a truncation.
   lockedSchemeNames?: readonly string[] | undefined;
+  // CONTENT-LED COPY — set only by the fully-AI ('fresh') lane.
+  //
+  // Every registry above states its body list as a RANGE with a floor ('bullets: 4 to 6 items',
+  // 'stats: 2-4 items', 'milestones: 3-4 items') and puts every field in `required`. On a
+  // template lane that is right: the master has a fixed number of rows and a subhead line, and
+  // copy that under-fills them leaves holes in someone else's layout.
+  //
+  // On the fresh lane there IS no layout yet — the copy is what the design is then built around,
+  // so a floor of three or four items means every fresh poster starts life as three or four
+  // items whatever the note said, and a mandatory subhead means a note that is one announcement
+  // still gets a supporting line written to fill the slot. That is invented content in the
+  // never-invent lane, and it is a large part of why every fresh poster comes back as the same
+  // stack of rows.
+  //
+  // With this set, the note decides how much copy there is: no floor, no target, and an empty
+  // string wherever the note supports nothing. COMMON already says as much in general terms and
+  // was losing to the specific per-field lines, which is the usual way round.
+  contentLed?: boolean | undefined;
 }>;
 
 export type GeneratePosterCopyResult = Readonly<{
@@ -270,8 +288,28 @@ export async function generatePosterCopy(
     );
   }
 
+  // CONTENT-LED: the note decides how much copy there is. Rewrite the registry's own list-range
+  // line rather than appending a contradiction after it — a range is concrete and an appended
+  // "as many as the notes support" is abstract, and the concrete one wins (the NO_TEXT_RULE
+  // finding). The remaining lines still describe what each field IS, which is what the model
+  // needs; they simply stop being obligations.
+  if (input.contentLed) {
+    const listField = listFieldFor(copyStyle);
+    systemLines = systemLines.map((line) =>
+      line.startsWith(`- ${listField}:`)
+        ? `- ${listField}: one entry for each distinct point the notes actually make — no minimum, no target and no maximum. One entry is a valid answer and so is an empty array. Never split one fact across two entries to reach a count, never merge two distinct facts into one to fit a count, and never pad with a point the notes do not make.`
+        : line,
+    );
+    systemLines.push(
+      'THE NOTES DECIDE THE SHAPE OF THIS COPY — there is no template and no slot list to fill.',
+      'Write ONLY the fields the notes genuinely support. Any other field must be an empty string; an empty field is a correct answer and is never a hole to be filled. Do not write a kicker, a subhead, an intro, a label or a call to action that the notes do not support.',
+      'A poster that is one strong headline with no kicker, no subhead and no points is complete and correct. So is a headline with two points. Length is not a quality signal here.',
+    );
+  }
+
   // Pin the body-slot count to the master's real capacity so copy cannot over/under-fill.
-  if (slotCount > 0) {
+  // Never on the content-led lane: that run has no master, so there is no capacity to pin to.
+  if (slotCount > 0 && !input.contentLed) {
     systemLines.push(
       `The master template has room for EXACTLY ${slotCount} ${listFieldFor(copyStyle)}. Produce exactly that many.`,
     );

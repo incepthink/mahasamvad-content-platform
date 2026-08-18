@@ -1825,6 +1825,13 @@ async function renderAndStoreSocialPoster(
       brand,
       layoutSpec: resolved?.master.layoutSpec ?? null,
       lockedSchemeNames,
+      // CONTENT-LED on the fully-AI lane only. A fresh run has no master and no slot count, so
+      // the registry's own floors ('3 to 6 points') and its mandatory kicker/subhead were the
+      // only things deciding how much copy a poster carried — which meant every fresh poster
+      // started life as the same three-to-six-row stack whatever the note said, and a one-
+      // announcement note got a supporting line invented to fill the slot. The template lanes
+      // keep the floors: there the master really does have rows to fill.
+      contentLed: isFresh,
     });
   }
 

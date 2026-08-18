@@ -25,6 +25,8 @@ Files in this directory:
 | `docker-compose.yml` | api + n8n + caddy on the EC2 host |
 | `Caddyfile` | Reverse proxy + automatic TLS for `api.indicex.xyz` and `n8n.indicex.xyz` |
 | `.env.prod.example` | Template for the API container's runtime env (copy to `.env.prod`) |
+| `health-check.js` | Stuck-job + 24h-failure digest, read from the DB (the record that survives a deploy) |
+| `health-check.sh` | Cron wrapper for the above — silent when healthy, so a quiet mailbox is the all-clear |
 
 ---
 
@@ -343,7 +345,28 @@ layer), where a registry sends only the layers that changed.
 
 ## Operations notes
 
-- **Logs**: `docker compose logs -f api` / `... n8n`.
+- **Logs**: `docker compose logs -f api` / `... n8n`. Rotated at 50 MB x 5 per service
+  (the `x-logging` anchor in `docker-compose.yml`) so they cannot fill the 30 GB root
+  volume. **They are not history**: `docker compose up -d api` creates a new container and
+  the old one's logs go with it, so an empty `--since=24h` right after a deploy means
+  "no history", not "no errors".
+- **Finding errors in the log**: pino logs errors as `"level":50`, not the word "error", and
+  a *handled* rejection (a 413 file cap, a Marathi 400) never reaches the error handler at
+  all — it appears as an ordinary `"level":30` line with a 4xx `statusCode`. So:
+  ```bash
+  docker compose logs --since=24h --no-color api \
+    | grep -E '"level":(50|60)|\] failed:|"statusCode":(4[0-9][0-9]|5[0-9][0-9])'
+  ```
+  Do **not** grep for a bare `429` — it matches the digits inside `time` and `responseTime`
+  on roughly one healthy line in a thousand.
+- **Is anything broken right now?** `./health-check.sh` — a stuck-job + 24h-failure digest
+  read from the DATABASE, which is where every job persists its own `status`/`error` and is
+  the only record that survives a deploy. It prints **nothing when healthy**, so it is a
+  cron one-liner (see the header of `health-check.sh`); a quiet mailbox is the all-clear.
+  It is the only thing that reports a **stuck** run — a wedged job never sets `failed`, so
+  it is invisible in the UI, in `/analytics` and in the logs alike, and the officer just
+  watches a spinner. Idle video review gates are deliberately excluded (a project may sit
+  at one for a week and be perfectly healthy).
 - **Update the API**: push to `main`, wait for the GitHub Actions run, then on the box
   `docker compose pull api && docker compose up -d api` — full procedure in
   [Updating the API](#updating-the-api-github-actions-builds-the-box-only-pulls) below.

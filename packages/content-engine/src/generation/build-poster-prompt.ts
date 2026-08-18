@@ -343,6 +343,132 @@ function buildChange(copyStyle: string, c: PosterCopy): string {
   return lines.join('\n');
 }
 
+// The fresh (fully-AI) lane's rendering of the SAME copy object.
+//
+// buildChange() above doubles as a LAYOUT SPEC. Every one of its labels names a position or a
+// size: "(small tag near the top)", "(largest block)", "(line under the headline)", "(in the body
+// list zone)", "(dated, top to bottom)", "(bold side/left emphasis text)", "(make it prominent)".
+// On the template lanes that is exactly right and must not change — the model is editing a master
+// in place, and that master really does have a body list zone.
+//
+// On the fresh lane it is false, and it is the loudest thing in the prompt. The brief a few lines
+// above hands the composition over and states outright that "the labels below name what each
+// piece of text IS — they do not tell you where to put it" — and then the very next thing the
+// model reads is the words "body list zone" followed by a numbered list. The concrete instruction
+// beats the abstract permission, every time; this repo already learned that with NO_TEXT_RULE,
+// where a bare "no signage" lost to a scene description containing a door plate and the model
+// painted signage and filled it with gibberish. So the fresh lane gets ROLE-ONLY labels, and the
+// items are unnumbered — an enumerated list is itself a suggestion to draw an enumerated list.
+//
+// It also OMITS an empty field instead of printing a bare label. `SUBHEAD:` with nothing after it
+// is an empty slot on a form, and simple-article-prompt.ts already documented what a model does
+// with one of those ("a heading with nothing under it is exactly the shape that invites a model
+// to fill it in") — which on a poster means inventing a supporting line the note never had.
+function freshText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function freshItems(
+  arr: unknown,
+  render: (item: Record<string, unknown>) => string,
+): string[] {
+  const items = Array.isArray(arr) ? arr : [];
+  return items
+    .map((item) => render((item ?? {}) as Record<string, unknown>).trim())
+    .filter(Boolean)
+    .map((line) => `  - ${line}`);
+}
+
+function freshIconHint(item: Record<string, unknown>): string {
+  const hint = freshText(item.icon_hint);
+  return hint ? `  [icon idea: ${hint}]` : '';
+}
+
+function buildFreshChange(copyStyle: string, c: PosterCopy): string {
+  const out: string[] = [];
+  const add = (label: string, value: unknown): void => {
+    const v = freshText(value);
+    if (v) out.push(`${label}: ${v}`);
+  };
+  const addList = (label: string, lines: string[]): void => {
+    if (lines.length > 0) out.push(`${label}:`, ...lines);
+  };
+
+  if (copyStyle === 'quote') {
+    const at = (c.attribution ?? {}) as Record<string, unknown>;
+    const who = [freshText(at.name), freshText(at.title)]
+      .filter(Boolean)
+      .join(', ');
+    add('TAG', c.topic_label);
+    add('SUBJECT LINE', c.headline);
+    add('QUOTE', c.quote_text);
+    add('SPOKEN BY', who);
+    addList(
+      'SUPPORTING POINTS',
+      freshItems(c.points, (p) => `${freshText(p.text)}${freshIconHint(p)}`),
+    );
+  } else if (copyStyle === 'timeline') {
+    add('EMPHASIS PHRASE', c.side_label);
+    add('HEADLINE', c.headline);
+    add('INTRO LINE', c.intro);
+    addList(
+      'DATED MILESTONES (chronological)',
+      freshItems(c.milestones, (m) =>
+        [freshText(m.date), freshText(m.text)].filter(Boolean).join(' — '),
+      ),
+    );
+  } else if (copyStyle === 'campaign') {
+    const sch = (c.schedule ?? {}) as Record<string, unknown>;
+    add('TAG', c.kicker);
+    add('HEADLINE', c.headline);
+    add('SUPPORTING LINE', c.subhead);
+    add('DATE', sch.date);
+    add('TIME', sch.time);
+    add('AUDIENCE / ELIGIBILITY', c.audience);
+    add('CALL TO ACTION', c.cta);
+    addList(
+      'FIGURES',
+      freshItems(
+        c.stats,
+        (st) =>
+          `${freshText(st.value)} — ${freshText(st.label)}${freshIconHint(st)}`,
+      ),
+    );
+  } else {
+    // alert, info_bullets and the generic registry the fresh lane actually runs on.
+    add('TAG', c.kicker);
+    add('HEADLINE', c.headline);
+    add('SUPPORTING LINE', c.subhead);
+    addList(
+      'SUPPORTING POINTS',
+      freshItems(c.bullets, (b) => {
+        const e = (Array.isArray(b.emphasis) ? b.emphasis : [])
+          .map((x) => freshText(x))
+          .filter(Boolean);
+        return `${freshText(b.text)}${e.length ? `  [emphasise: ${e.join(' | ')}]` : ''}`;
+      }),
+    );
+  }
+  return out.join('\n');
+}
+
+// HOW THE FACTS RELATE IS PART OF THE CONTENT, AND THE ARRANGEMENT IS THE MODEL'S.
+//
+// The complaint this answers: every fresh poster lays its information out as a column of rows,
+// one under another, each with a numeral or an icon — regardless of whether the facts are a
+// sequence, a comparison, a breakdown or four unrelated announcements. Two causes, and the
+// labels above were only one of them; this is the other. Nothing in the brief had ever said
+// that the ARRANGEMENT OF THE INFORMATION was a decision at all. The composition paragraph
+// hands over where the visual weight sits (and poster-placements.ts narrows exactly that one
+// axis) — neither says anything about how a set of facts is organised on the page.
+//
+// Written positively and without a required vocabulary, on purpose. Naming a list of permitted
+// structures would rebuild the retired archetype library one level up, and banning the row stack
+// would be a negative — both mistakes this file has made before. The row stack stays explicitly
+// valid; what it stops being is automatic.
+const INFORMATION_DISPLAY_RULE =
+  'HOW THE INFORMATION IS ARRANGED IS YOURS TO DECIDE. What you have been given is a set of facts, and the relationship between them is part of the content: some information is a sequence, some is a comparison, some is one whole broken into its parts, some is a set of figures, some is a single statement that needs nothing beside it. Read what THESE particular facts are to each other, and let that decide how they are shown. A column of rows one under another, each tagged with a numeral or an icon, is ONE valid answer among many — it is not the default, and it is not what a set of points automatically becomes. Steps or stages, a before-and-after, a side-by-side comparison, a breakdown, a grouping, figures given real size and weight, a branching or radiating arrangement, a path, a map, or one dominant statement with everything else set small are all equally open to you, as is any treatment you judge better that is not named here. Nothing in that list is required and nothing is forbidden: choose a treatment because THIS information asked for it, not because it is the safe shape. You may also treat different pieces differently — a figure set as a figure, the line beside it set as a sentence. Whatever you choose, every piece of the Marathi text must still appear in full and stay easy to read.';
+
 // Keep the reserved-zone numbers in sync with packages/poster-renderer/src/cmo-geometry.ts.
 const CMO_ZONES =
   'RESERVED ZONES — official CMO branding AND the photograph are stamped onto the finished poster afterwards by software, so keep them clear: (1) the TOP HEADER BAND — the full-width blue leader lockup with the three leaders and the महाराष्ट्र शासन emblem — occupies the TOP ~19% of the poster height; place NO headline, text, figures, faces or logos inside that band, and START the headline BELOW it. (2) the full-width BOTTOM ~8% strip (the footer and social-handle band); place nothing there. (3) the UPPER-RIGHT PHOTO CIRCLE — the round photo window in the upper-right area — is filled with a photograph by software afterwards; leave it a QUIET, PLAIN background (a soft solid colour or a gentle continuation of the design), place NO text, faces, subjects or important content inside it, and do NOT draw any circle, ring, border or outline there. The left-column headline and the body points must NOT overlap that circle. FINAL CHECK before finishing: nothing important may sit inside the top ~19% header band, the bottom ~8% footer strip, or the upper-right photo circle.';
@@ -617,8 +743,19 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
         : [
             'CONTENT TO TYPESET — reproduce this Marathi text EXACTLY as written, character for character: every letter, every matra and vowel sign, every conjunct (जोडाक्षर), every anusvara, every Devanagari numeral. Do not re-spell, re-word, translate, transliterate, abbreviate, correct or add to it, and do not drop a line because the composition feels tight. Render it crisply. No English body text. The labels below name what each piece of text IS — they do not tell you where to put it, how large to set it, or what shape to give it; those are your decisions.',
             '',
-            change,
+            // buildFreshChange, NOT the `change` the template lanes use: role-only labels, no
+            // numbering, and an unsupplied field omitted rather than printed as an empty slot.
+            // The sentence immediately above promises exactly that, and `change` contradicted it
+            // in its own first label.
+            buildFreshChange(copyStyle, copy),
           ]),
+      '',
+      // The arrangement of the INFORMATION — distinct from the arrangement of the CANVAS, which
+      // is what the composition paragraph above and the placement anchor below both address.
+      // Emitted on both fresh shapes: the verbatim branch already tells the model to decide what
+      // is a headline and what is a list, and this is the same permission carried through to how
+      // those pieces then relate on the page.
+      INFORMATION_DISPLAY_RULE,
     ];
     if (sceneBrief) {
       freshLines.push(
@@ -1402,6 +1539,133 @@ if (
       failures.push(
         'a fresh run with no subject imagery does not carry the photo-realism rule',
       );
+
+    // (i) THE INFORMATION IS NOT PRE-SHAPED INTO ROWS (2026-08-18). Two independent causes of
+    //     "every poster is a numbered list", and this section pins both so neither can come
+    //     back by a well-meaning edit.
+    //
+    //     FIRST, the labels. buildChange() is a layout spec — its labels name positions and
+    //     sizes — and it must keep being one on the template lanes, where a master really does
+    //     have a body list zone. The fresh lane must NOT see it: a sentence promising the
+    //     labels do not dictate placement, followed by a label reading "body list zone", is a
+    //     prompt arguing with itself, and the concrete half wins.
+    //
+    //     SECOND, the permission. Nothing had ever told the model that the arrangement of the
+    //     INFORMATION was a decision at all — the composition paragraph and the placement
+    //     anchor both address the arrangement of the CANVAS, which is a different question.
+    {
+      const freshInfo = buildPosterPrompt({
+        copy: COPY,
+        copyStyle: 'info_bullets',
+        designMode: 'fresh',
+        brand: 'dgipr',
+        masterUrl: '',
+        hasPhoto: true,
+      });
+      const onbrandLabels = buildPosterPrompt({
+        copy: COPY,
+        copyStyle: 'info_bullets',
+        designMode: 'adaptive',
+        brand: 'dgipr',
+        masterUrl: 'https://example.test/master.png',
+        hasPhoto: true,
+      });
+
+      // The placement language, gone from fresh and INTACT on a template lane. Asserting both
+      // directions is the point: deleting these labels outright would quietly damage the lane
+      // whose posters currently come back correct.
+      // The PARENTHESISED label forms specifically. A bare 'largest block' would also match the
+      // shrink-to-fit rule ("Shrink the HEADLINE first: it is the largest block"), which is a
+      // legitimate instruction about what to reduce, not a label telling the model where to put
+      // something — the distinction this whole section turns on.
+      const PLACEMENT_LABELS = [
+        '(in the body list zone)',
+        '(largest block)',
+        '(small tag',
+        '(line under the headline)',
+        '(largest text block)',
+        '(dated, top to bottom)',
+        '(make it prominent)',
+      ];
+      for (const label of PLACEMENT_LABELS) {
+        if (freshInfo.includes(label))
+          failures.push(
+            `the fresh prompt carries the placement label "${label}", which contradicts its own "the labels do not tell you where to put it" sentence`,
+          );
+      }
+      if (!onbrandLabels.includes('(in the body list zone)'))
+        failures.push(
+          'a template-lane prompt lost its body-list-zone label — those lanes edit a master that really has one',
+        );
+
+      // Role-only labels reach the model, so it still knows what each string IS.
+      for (const label of ['HEADLINE:', 'SUPPORTING POINTS:']) {
+        if (!freshInfo.includes(label))
+          failures.push(`the fresh prompt no longer labels ${label}`);
+      }
+      // ...and the items are not pre-enumerated. An enumerated list is itself a suggestion to
+      // draw an enumerated list.
+      if (/\n\s+1\. माहुली/.test(freshInfo))
+        failures.push(
+          'the fresh prompt numbers its content items, which suggests the row stack it is trying not to default to',
+        );
+
+      // An unsupplied field is OMITTED, never printed as an empty slot for the model to fill.
+      const freshSparse = buildPosterPrompt({
+        copy: {
+          headline: 'चार प्राथमिक आरोग्य केंद्रांचे उन्नतीकरण',
+          kicker: '',
+          subhead: '',
+          bullets: [],
+          scene_brief: '',
+        } as unknown as PosterCopy,
+        copyStyle: 'info_bullets',
+        designMode: 'fresh',
+        brand: 'dgipr',
+        masterUrl: '',
+        hasPhoto: false,
+      });
+      for (const empty of ['SUPPORTING LINE:', 'TAG:', 'SUPPORTING POINTS:']) {
+        if (freshSparse.includes(empty))
+          failures.push(
+            `a headline-only run still emits an empty "${empty}" slot, which invites the model to invent one`,
+          );
+      }
+      if (!freshSparse.includes('HEADLINE:'))
+        failures.push('a headline-only run lost its headline label');
+
+      // The permission itself, on BOTH fresh shapes.
+      const freshVerbatim = buildPosterPrompt({
+        copy: {} as unknown as PosterCopy,
+        copyStyle: 'generic',
+        designMode: 'fresh_verbatim',
+        brand: 'dgipr',
+        masterUrl: '',
+        hasPhoto: true,
+        information: 'चार प्राथमिक आरोग्य केंद्रांचे उन्नतीकरण होणार आहे.',
+      });
+      for (const [name, prompt] of [
+        ['fresh', freshInfo],
+        ['fresh_verbatim', freshVerbatim],
+      ] as const) {
+        if (!prompt.includes('HOW THE INFORMATION IS ARRANGED IS YOURS TO DECIDE'))
+          failures.push(`the ${name} prompt lost the information-display rule`);
+      }
+      // It hands the decision over rather than prescribing a structure — otherwise it has
+      // become the retired archetype library one level up.
+      if (
+        !freshInfo.includes('is ONE valid answer among many') ||
+        !freshInfo.includes('Nothing in that list is required and nothing is forbidden')
+      )
+        failures.push(
+          'the information-display rule stopped handing the decision over — it now reads as a prescription or a ban',
+        );
+      // ...and it must not reach a lane that is editing a master's fixed geometry.
+      if (onbrandLabels.includes('HOW THE INFORMATION IS ARRANGED IS YOURS TO DECIDE'))
+        failures.push(
+          'the information-display rule reached a template lane, where the reference decides the arrangement',
+        );
+    }
 
     // (h) THE ARRANGEMENT BLOCK (2026-08-14). Everything else in section 4d asserts that a
     //     design specification does NOT reach the model; this one asserts that one sentence of
