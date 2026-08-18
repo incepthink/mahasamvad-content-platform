@@ -22,6 +22,9 @@ import { useState } from 'react';
 import type { PdfTextSourceValue } from '@dgipr/schemas';
 import { type PageLike, defaultPageKey } from '../lib/documentSelection';
 import { STR } from '../lib/strings';
+// The page text is CORRECTED here, by hand, in Marathi — an InScript keyboard assembles each
+// character in stages a controlled box can overwrite half-formed. See ComposeSafeInput.
+import { ComposeSafeTextarea } from './ComposeSafeInput';
 import { ExtractedText, hasTable } from './ExtractedText';
 import { PageRangeSelector } from './PageRangeSelector';
 
@@ -260,11 +263,11 @@ export function DocumentPages({
                   {isOpen && text !== null && onEdit ? (
                     isEditing ? (
                       <>
-                        <textarea
+                        <ComposeSafeTextarea
                           className="note-input"
                           value={text}
                           disabled={busy}
-                          onChange={(event) => onEdit(key, event.target.value)}
+                          onChange={(next) => onEdit(key, next)}
                           style={{ marginTop: 10, minHeight: 220 }}
                         />
                         {tabular ? (

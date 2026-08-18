@@ -42,6 +42,9 @@ import {
   sourceText,
 } from '../lib/dloReview';
 import { STR } from '../lib/strings';
+// Uncontrolled by design: correcting a name or an amount in a transcript is exactly the
+// Marathi-typing path that lost characters under a controlled box. See ComposeSafeInput.
+import { ComposeSafeTextarea } from './ComposeSafeInput';
 import { DocumentPages } from './DocumentPages';
 
 function marathiNumber(value: number): string {
@@ -97,11 +100,11 @@ export function DloSourceReview({
               (edits[NOTES_KEY] ?? intake.notes).length,
             )} ${STR.dloCharsSuffix}`}
           />
-          <textarea
+          <ComposeSafeTextarea
             className="note-input"
             value={edits[NOTES_KEY] ?? intake.notes}
             disabled={busy || excluded.has(NOTES_KEY)}
-            onChange={(event) => onEdit(NOTES_KEY, event.target.value)}
+            onChange={(next) => onEdit(NOTES_KEY, next)}
             style={{ marginTop: 12, minHeight: 180 }}
           />
         </section>
@@ -264,19 +267,19 @@ export function DloSourceReview({
                     />
                     <span>{STR.dloReviewImageOpen}</span>
                   </a>
-                  <textarea
+                  <ComposeSafeTextarea
                     className="note-input"
                     value={edits[key] ?? file.text ?? ''}
                     disabled={busy || excluded.has(key)}
-                    onChange={(event) => onEdit(key, event.target.value)}
+                    onChange={(next) => onEdit(key, next)}
                   />
                 </div>
               ) : (
-                <textarea
+                <ComposeSafeTextarea
                   className="note-input"
                   value={edits[key] ?? file.text ?? ''}
                   disabled={busy || excluded.has(key)}
-                  onChange={(event) => onEdit(key, event.target.value)}
+                  onChange={(next) => onEdit(key, next)}
                   style={{ marginTop: 12, minHeight: 220 }}
                 />
               )

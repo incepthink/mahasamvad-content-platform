@@ -8,6 +8,9 @@
 import { useState } from 'react';
 import type { Copy } from '@dgipr/schemas';
 import { STR } from '../lib/strings';
+// Every field here is Marathi poster copy typed on an InScript keyboard, which a controlled
+// box can overwrite half-formed. See ComposeSafeInput.
+import { ComposeSafeInput, ComposeSafeTextarea } from './ComposeSafeInput';
 
 function TextField({
   label,
@@ -21,11 +24,7 @@ function TextField({
   return (
     <div className="copy-field">
       <label>{label}</label>
-      <input
-        type="text"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      />
+      <ComposeSafeInput type="text" value={value} onChange={onChange} />
     </div>
   );
 }
@@ -95,10 +94,10 @@ function BulletListEditor({
       makeEmpty={() => ({ text: '' })}
       onChange={onChange}
       renderRow={(item, update) => (
-        <input
+        <ComposeSafeInput
           type="text"
           value={item.text}
-          onChange={(e) => update({ ...item, text: e.target.value })}
+          onChange={(next) => update({ ...item, text: next })}
         />
       )}
     />
@@ -217,17 +216,17 @@ export function CopyEditForm({
             onChange={(stats) => set({ stats })}
             renderRow={(item, update) => (
               <div className="btn-row" style={{ gap: 8 }}>
-                <input
+                <ComposeSafeInput
                   type="text"
                   placeholder="आकडा"
                   value={item.value}
-                  onChange={(e) => update({ ...item, value: e.target.value })}
+                  onChange={(next) => update({ ...item, value: next })}
                 />
-                <input
+                <ComposeSafeInput
                   type="text"
                   placeholder="लेबल"
                   value={item.label}
-                  onChange={(e) => update({ ...item, label: e.target.value })}
+                  onChange={(next) => update({ ...item, label: next })}
                 />
               </div>
             )}
@@ -244,10 +243,10 @@ export function CopyEditForm({
           />
           <div className="copy-field">
             <label>अवतरण मजकूर</label>
-            <textarea
+            <ComposeSafeTextarea
               rows={3}
               value={draft.quote_text}
-              onChange={(e) => set({ quote_text: e.target.value })}
+              onChange={(next) => set({ quote_text: next })}
             />
           </div>
           <TextField
@@ -272,10 +271,10 @@ export function CopyEditForm({
             makeEmpty={() => ({ text: '', icon_hint: 'info' })}
             onChange={(points) => set({ points })}
             renderRow={(item, update) => (
-              <input
+              <ComposeSafeInput
                 type="text"
                 value={item.text}
-                onChange={(e) => update({ ...item, text: e.target.value })}
+                onChange={(next) => update({ ...item, text: next })}
               />
             )}
           />
@@ -301,18 +300,18 @@ export function CopyEditForm({
             onChange={(milestones) => set({ milestones })}
             renderRow={(item, update) => (
               <div className="btn-row" style={{ gap: 8 }}>
-                <input
+                <ComposeSafeInput
                   type="text"
                   placeholder="तारीख"
                   style={{ maxWidth: 140 }}
                   value={item.date}
-                  onChange={(e) => update({ ...item, date: e.target.value })}
+                  onChange={(next) => update({ ...item, date: next })}
                 />
-                <input
+                <ComposeSafeInput
                   type="text"
                   placeholder="मजकूर"
                   value={item.text}
-                  onChange={(e) => update({ ...item, text: e.target.value })}
+                  onChange={(next) => update({ ...item, text: next })}
                 />
               </div>
             )}

@@ -18,6 +18,7 @@ import { useId } from 'react';
 import { Sparkles } from 'lucide-react';
 import { ARTICLE_INSTRUCTIONS_MAX_CHARS } from '@dgipr/schemas';
 import { STR } from '../lib/strings';
+import { ComposeSafeTextarea } from './ComposeSafeInput';
 
 export function AiInstructionsField({
   value,
@@ -38,13 +39,15 @@ export function AiInstructionsField({
         {STR.aiInstructionsLabel}
       </label>
       <p className="hint">{STR.aiInstructionsHint}</p>
-      <textarea
+      {/* Uncontrolled by design: an InScript keyboard assembles a character in stages, and a
+          controlled box lets React overwrite it half-formed. See ComposeSafeInput. */}
+      <ComposeSafeTextarea
         id={id}
         className="note-input instructions-input"
         rows={4}
         placeholder={STR.aiInstructionsPlaceholder}
         value={value}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={onChange}
         style={{ marginTop: 10 }}
       />
       {value.trim().length > 0 ? (

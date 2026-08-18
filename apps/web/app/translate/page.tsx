@@ -70,6 +70,7 @@ import {
   type DocumentIntakeStatus,
 } from '../../components/DocumentIntake';
 import { TranslationTermsReview } from '../../components/TranslationTermsReview';
+import { ComposeSafeTextarea } from '../../components/ComposeSafeInput';
 
 type TranslationResult = Readonly<{
   text: string;
@@ -350,13 +351,15 @@ export default function TranslatePage() {
           {INPUT_LABELS[source]}
         </label>
         <p className="hint">{STR.translateInputHint}</p>
-        <textarea
+        {/* Uncontrolled by design: an InScript keyboard assembles each Marathi character in
+            stages a controlled box can overwrite half-formed. See ComposeSafeInput. */}
+        <ComposeSafeTextarea
           id="translate-text"
           className="note-input"
           placeholder={STR.translateInputPlaceholder}
           value={text}
-          onChange={(event) => {
-            setText(event.target.value);
+          onChange={(next) => {
+            setText(next);
             resetFlow();
           }}
           style={{ marginTop: 10 }}

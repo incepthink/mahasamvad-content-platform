@@ -70,6 +70,9 @@ import { useGeneration } from '../lib/useGeneration';
 import { useTasks } from '../lib/TasksProvider';
 import { AiInstructionsField } from './AiInstructionsField';
 import { CardTitle } from './CardTitle';
+// Uncontrolled by design — every box on this screen takes Marathi typed on an InScript
+// keyboard, which a controlled box can overwrite half-formed. See ComposeSafeInput.
+import { ComposeSafeInput, ComposeSafeTextarea } from './ComposeSafeInput';
 import { DloSourceReview } from './DloSourceReview';
 import {
   DesignationReview,
@@ -407,11 +410,11 @@ function DloArticleOutput({
             {STR.articleFeedbackTitle}
           </label>
           <p className="hint">{STR.articleFeedbackHint}</p>
-          <textarea
+          <ComposeSafeTextarea
             id="dlo-article-feedback"
             value={feedback}
-            onChange={(event) => {
-              setFeedback(event.target.value);
+            onChange={(next) => {
+              setFeedback(next);
               setFeedbackError(null);
             }}
             placeholder={STR.feedbackPlaceholder}
@@ -1074,10 +1077,10 @@ export default function DloWorkspace({ intakeId }: { intakeId: string }) {
             ) : null}
             {!perSource ? (
               <>
-                <textarea
+                <ComposeSafeTextarea
                   className="note-input"
                   value={combinedText}
-                  onChange={(event) => setCombinedText(event.target.value)}
+                  onChange={setCombinedText}
                   style={{ marginTop: 12, minHeight: 320 }}
                 />
                 <p className="hint" style={{ marginTop: 6 }}>
@@ -1170,12 +1173,12 @@ export default function DloWorkspace({ intakeId }: { intakeId: string }) {
               {STR.headingLabel}
             </label>
             <p className="hint">{STR.headingHint}</p>
-            <input
+            <ComposeSafeInput
               id="dlo-review-heading"
               type="text"
               placeholder={STR.headingPlaceholder}
               value={heading}
-              onChange={(event) => setHeading(event.target.value)}
+              onChange={setHeading}
               style={{ marginTop: 10 }}
             />
           </section>

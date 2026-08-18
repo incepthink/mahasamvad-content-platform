@@ -16,6 +16,7 @@
 import { useId } from 'react';
 import { BookOpen } from 'lucide-react';
 import { STR } from '../lib/strings';
+import { ComposeSafeTextarea } from './ComposeSafeInput';
 
 export function StyleReferenceField({
   value,
@@ -35,13 +36,15 @@ export function StyleReferenceField({
         {STR.styleRefLabel}
       </label>
       <p className="hint">{STR.styleRefHint}</p>
-      <textarea
+      {/* Uncontrolled by design — see ComposeSafeInput. A pasted article arrives whole, but an
+          officer may still correct it by hand, and that is the path that loses characters. */}
+      <ComposeSafeTextarea
         id={id}
         className="note-input"
         rows={6}
         placeholder={STR.styleRefPlaceholder}
         value={value}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={onChange}
         style={{ marginTop: 10 }}
       />
     </section>

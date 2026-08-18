@@ -5,6 +5,9 @@
 
 import { useState } from 'react';
 import { STR } from '../lib/strings';
+// Feedback is written in Marathi on an InScript keyboard, which a controlled box can
+// overwrite half-formed. See ComposeSafeInput.
+import { ComposeSafeTextarea } from './ComposeSafeInput';
 
 export function FeedbackBox({
   title,
@@ -74,9 +77,9 @@ export function FeedbackBox({
             ))}
           </div>
         ) : null}
-        <textarea
+        <ComposeSafeTextarea
           value={feedback}
-          onChange={(e) => setFeedback(e.target.value)}
+          onChange={setFeedback}
           placeholder={STR.feedbackPlaceholder}
           rows={3}
           disabled={disabled || sending}

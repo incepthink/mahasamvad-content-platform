@@ -47,6 +47,9 @@ import {
 } from './PosterAnnotator';
 import { PosterVersionStrip } from './PosterVersionStrip';
 import { CanvaLink } from './CanvaLink';
+// The caption, the marker notes and the change note are all written in Marathi on an InScript
+// keyboard, which a controlled box can overwrite half-formed. See ComposeSafeInput.
+import { ComposeSafeInput, ComposeSafeTextarea } from './ComposeSafeInput';
 
 type ChangeTab = 'caption' | 'poster';
 
@@ -574,12 +577,12 @@ export function SocialPostView({
               {STR.captionLabel}
             </label>
             <div className="caption-box">
-              <textarea
+              <ComposeSafeTextarea
                 id="social-caption"
                 className="social-caption-edit"
                 value={captionDraft}
-                onChange={(e) => {
-                  setCaptionDraft(e.target.value);
+                onChange={(next) => {
+                  setCaptionDraft(next);
                   setCaptionError(null);
                 }}
                 onBlur={() => void saveCaptionOnBlur()}
@@ -678,14 +681,14 @@ export function SocialPostView({
                       <span className="marker-note-badge" aria-hidden="true">
                         {i + 1}
                       </span>
-                      <input
+                      <ComposeSafeInput
                         type="text"
                         value={marker.note}
                         placeholder={STR.markerNotePlaceholder}
                         aria-label={`${STR.markerLabel} ${i + 1}`}
                         maxLength={500}
                         disabled={showSpinner || sendingChange}
-                        onChange={(e) => setNote(marker.id, e.target.value)}
+                        onChange={(next) => setNote(marker.id, next)}
                       />
                       <button
                         type="button"
@@ -741,14 +744,14 @@ export function SocialPostView({
                         >
                           {CLEAR_LETTERS[i] ?? i + 1}
                         </span>
-                        <input
+                        <ComposeSafeInput
                           type="text"
                           value={c.note}
                           placeholder={STR.clearRegionNotePlaceholder}
                           aria-label={`${STR.clearRegionLabel} ${CLEAR_LETTERS[i] ?? i + 1}`}
                           maxLength={500}
                           disabled={showSpinner || sendingChange}
-                          onChange={(e) => setClearNote(c.id, e.target.value)}
+                          onChange={(next) => setClearNote(c.id, next)}
                         />
                         <button
                           type="button"
@@ -843,10 +846,10 @@ export function SocialPostView({
                     ))}
                   </div>
                 ) : null}
-                <textarea
+                <ComposeSafeTextarea
                   value={changeDraft}
-                  onChange={(e) => {
-                    setChangeDraft(e.target.value);
+                  onChange={(next) => {
+                    setChangeDraft(next);
                     setChangeError(null);
                   }}
                   placeholder={

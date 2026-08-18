@@ -28,6 +28,7 @@ import {
   Square,
   X,
 } from 'lucide-react';
+import { ComposeSafeTextarea, isComposingEvent } from './ComposeSafeInput';
 import { YouTubeLinkInput } from './YouTubeLinkInput';
 import { STR } from '../lib/strings';
 import {
@@ -110,6 +111,10 @@ export function ChatComposer({
   // Enter sends, Shift+Enter is a newline — the chat convention. A composer that needed a
   // mouse for every message would be slower than the tool it replaces.
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    // An IME uses Enter to COMMIT the word it is assembling — on an InScript or phonetic
+    // Marathi keyboard that keystroke belongs to the keyboard, not to us. Sending on it fires
+    // the message mid-word AND swallows the character being committed.
+    if (isComposingEvent(event)) return;
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       submit();
@@ -166,10 +171,13 @@ export function ChatComposer({
       ) : null}
 
       <div className="chat-input-row">
-        <textarea
+        {/* Uncontrolled by design — see ComposeSafeInput. Clearing after a successful send
+            still works: setText('') is a value this box did not report, so it is written
+            through to the DOM. */}
+        <ComposeSafeTextarea
           className="chat-input"
           value={text}
-          onChange={(event) => setText(event.target.value)}
+          onChange={setText}
           onKeyDown={onKeyDown}
           placeholder={STR.chatPlaceholder}
           // Only while the attachments are being prepared: that text is already committed to

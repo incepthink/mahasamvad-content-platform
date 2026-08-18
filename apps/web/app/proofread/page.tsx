@@ -33,6 +33,7 @@ import {
 import { proofreadText } from '../../lib/api';
 import { downloadBlob } from '../../lib/download';
 import { PROOFREAD_TYPE_LABELS, STR } from '../../lib/strings';
+import { ComposeSafeTextarea } from '../../components/ComposeSafeInput';
 import {
   DocumentIntake,
   type DocumentIntakeStatus,
@@ -413,13 +414,16 @@ export default function ProofreadPage() {
           {STR.proofreadInputLabel}
         </label>
         <p className="hint">{STR.proofreadInputHint}</p>
-        <textarea
+        {/* Uncontrolled by design: this box is pasted into, but it is also TYPED into, and
+            an InScript keyboard assembles each Marathi character in stages a controlled box
+            can overwrite half-formed. See ComposeSafeInput. */}
+        <ComposeSafeTextarea
           id="proofread-text"
           className="note-input"
           placeholder={STR.proofreadInputPlaceholder}
           value={text}
-          onChange={(event) => {
-            setText(event.target.value);
+          onChange={(next) => {
+            setText(next);
             resetFlow();
           }}
           style={{ marginTop: 10 }}

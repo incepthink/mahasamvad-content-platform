@@ -55,6 +55,7 @@ import {
   writeDraft,
 } from '../lib/dloDraft';
 import { AiInstructionsField } from './AiInstructionsField';
+import { ComposeSafeInput, ComposeSafeTextarea } from './ComposeSafeInput';
 import { DloSourcesCard } from './DloSourcesCard';
 import { DocumentIntake, type DocumentSnapshot } from './DocumentIntake';
 import { StyleReferenceField } from './StyleReferenceField';
@@ -342,12 +343,15 @@ export function DloIntakeForm() {
           {STR.dloNotesLabel}
         </label>
         <p className="hint">{STR.dloNotesHint}</p>
-        <textarea
+        {/* Uncontrolled by design: this is the box officers type Marathi into all day, and an
+            InScript keyboard assembles each character in stages a controlled box can overwrite
+            half-formed. See ComposeSafeInput. */}
+        <ComposeSafeTextarea
           id="dlo-notes"
           className="note-input"
           placeholder={STR.dloNotesPlaceholder}
           value={notes}
-          onChange={(event) => setNotes(event.target.value)}
+          onChange={setNotes}
           style={{ marginTop: 10 }}
         />
         {notes.length > 0 ? (
@@ -462,12 +466,12 @@ export function DloIntakeForm() {
           {STR.headingLabel}
         </label>
         <p className="hint">{STR.headingHint}</p>
-        <input
+        <ComposeSafeInput
           id="dlo-heading"
           type="text"
           placeholder={STR.headingPlaceholder}
           value={heading}
-          onChange={(event) => setHeading(event.target.value)}
+          onChange={setHeading}
           style={{ marginTop: 10 }}
         />
       </section>

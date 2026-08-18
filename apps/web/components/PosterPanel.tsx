@@ -35,6 +35,9 @@ import {
 import { PosterImageFeedbackBox } from './PosterImageFeedbackBox';
 import { PosterVersionStrip } from './PosterVersionStrip';
 import { CanvaLink } from './CanvaLink';
+// The poster heading is the officer's own Marathi line, typed on an InScript keyboard, which
+// a controlled box can overwrite half-formed. See ComposeSafeInput.
+import { ComposeSafeInput } from './ComposeSafeInput';
 
 export function PosterPanel({
   detail,
@@ -487,12 +490,12 @@ function PosterHeadingEditor({
       </p>
       {open ? (
         <>
-          <input
+          <ComposeSafeInput
             type="text"
             maxLength={POSTER_HEADING_MAX_CHARS}
             placeholder={STR.posterHeadingPlaceholder}
             value={value}
-            onChange={(e) => setValue(e.target.value)}
+            onChange={setValue}
             disabled={disabled}
           />
           <p className="hint">{STR.posterHeadingHint}</p>

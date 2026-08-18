@@ -31,6 +31,9 @@ import type {
   TranslationTermInput,
 } from '@dgipr/schemas';
 import { STR } from '../lib/strings';
+// Every editable cell here holds a Devanagari name typed on an InScript keyboard, which a
+// controlled box can overwrite half-formed. See ComposeSafeInput.
+import { ComposeSafeInput } from './ComposeSafeInput';
 
 type PreparedTerm = PrepareTranslationResponse['terms'][number];
 
@@ -198,13 +201,13 @@ export function TranslationTermsReview({
                 <span className="glossary-field-label">
                   {STR.glossaryEnglish}
                 </span>
-                <input
+                <ComposeSafeInput
                   type="text"
                   value={english[i] ?? ''}
-                  onChange={(e) =>
+                  onChange={(value) =>
                     setEnglish((prev) => {
                       const next = [...prev];
-                      next[i] = e.target.value;
+                      next[i] = value;
                       return next;
                     })
                   }
@@ -217,13 +220,13 @@ export function TranslationTermsReview({
                 <span className="glossary-field-label">
                   {STR.glossaryHindi}
                 </span>
-                <input
+                <ComposeSafeInput
                   type="text"
                   value={hindi[i] ?? ''}
-                  onChange={(e) =>
+                  onChange={(value) =>
                     setHindi((prev) => {
                       const next = [...prev];
-                      next[i] = e.target.value;
+                      next[i] = value;
                       return next;
                     })
                   }
@@ -273,14 +276,14 @@ export function TranslationTermsReview({
         <div key={i} className="names-review-row is-extra">
           <div className="glossary-cell">
             <span className="glossary-field-label">{STR.glossaryMarathi}</span>
-            <input
+            <ComposeSafeInput
               type="text"
               value={extra.marathi}
               placeholder={STR.namesAddMarathiPlaceholder}
-              onChange={(e) =>
+              onChange={(value) =>
                 setExtras((prev) =>
                   prev.map((row, j) =>
-                    j === i ? { ...row, marathi: e.target.value } : row,
+                    j === i ? { ...row, marathi: value } : row,
                   ),
                 )
               }
@@ -292,14 +295,14 @@ export function TranslationTermsReview({
               <span className="glossary-field-label">
                 {STR.glossaryEnglish}
               </span>
-              <input
+              <ComposeSafeInput
                 type="text"
                 value={extra.english}
                 placeholder={STR.namesAddEnglishPlaceholder}
-                onChange={(e) =>
+                onChange={(value) =>
                   setExtras((prev) =>
                     prev.map((row, j) =>
-                      j === i ? { ...row, english: e.target.value } : row,
+                      j === i ? { ...row, english: value } : row,
                     ),
                   )
                 }
@@ -310,14 +313,14 @@ export function TranslationTermsReview({
           {showHindi ? (
             <div className="glossary-cell">
               <span className="glossary-field-label">{STR.glossaryHindi}</span>
-              <input
+              <ComposeSafeInput
                 type="text"
                 value={extra.hindi}
                 placeholder={STR.namesAddHindiPlaceholder}
-                onChange={(e) =>
+                onChange={(value) =>
                   setExtras((prev) =>
                     prev.map((row, j) =>
-                      j === i ? { ...row, hindi: e.target.value } : row,
+                      j === i ? { ...row, hindi: value } : row,
                     ),
                   )
                 }

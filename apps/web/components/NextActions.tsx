@@ -23,6 +23,9 @@ import { createGeneration, requestArticlePoster } from '../lib/api';
 import { useTasks } from '../lib/TasksProvider';
 import { STR } from '../lib/strings';
 import ReferencePicker, { type ReferenceSelection } from './ReferencePicker';
+// The edited note and heading are typed in Marathi on an InScript keyboard, which a
+// controlled box can overwrite half-formed. See ComposeSafeInput.
+import { ComposeSafeInput, ComposeSafeTextarea } from './ComposeSafeInput';
 
 // Every block reports a successful spawn so the page can refresh the thread
 // strip — essential for the social paths, which never navigate away.
@@ -173,17 +176,17 @@ function EditNoteBlock({ detail, onSpawned }: BlockProps) {
       <summary>{STR.editNoteTitle}</summary>
       <div className="fold-body">
         <p className="hint">{STR.editNoteHint}</p>
-        <textarea
+        <ComposeSafeTextarea
           className="note-input"
           value={note}
-          onChange={(e) => setNote(e.target.value)}
+          onChange={setNote}
           style={{ marginTop: 10 }}
         />
-        <input
+        <ComposeSafeInput
           type="text"
           placeholder={STR.headingPlaceholder}
           value={heading}
-          onChange={(e) => setHeading(e.target.value)}
+          onChange={setHeading}
           style={{ marginTop: 10 }}
         />
         <div className="btn-row" style={{ marginTop: 16 }}>

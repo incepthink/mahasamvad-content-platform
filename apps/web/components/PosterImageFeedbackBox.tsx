@@ -19,6 +19,9 @@ import type {
 } from '@dgipr/schemas';
 import { STR } from '../lib/strings';
 import { ClearActionToggle, clearActionLabel } from './ClearActionToggle';
+// Marker notes and the overall note are written in Marathi on an InScript keyboard, which a
+// controlled box can overwrite half-formed. See ComposeSafeInput.
+import { ComposeSafeInput, ComposeSafeTextarea } from './ComposeSafeInput';
 import {
   CLEAR_LETTERS,
   type AnnotatorMode,
@@ -176,14 +179,14 @@ export function PosterImageFeedbackBox({
             <span className="marker-note-badge" aria-hidden="true">
               {i + 1}
             </span>
-            <input
+            <ComposeSafeInput
               type="text"
               value={marker.note}
               placeholder={STR.markerNotePlaceholder}
               aria-label={`${STR.markerLabel} ${i + 1}`}
               maxLength={500}
               disabled={disabled || sending}
-              onChange={(e) => onNoteChange(marker.id, e.target.value)}
+              onChange={(next) => onNoteChange(marker.id, next)}
             />
             <button
               type="button"
@@ -228,14 +231,14 @@ export function PosterImageFeedbackBox({
               <span className="marker-note-badge clear-badge" aria-hidden="true">
                 {CLEAR_LETTERS[i] ?? i + 1}
               </span>
-              <input
+              <ComposeSafeInput
                 type="text"
                 value={c.note}
                 placeholder={STR.clearRegionNotePlaceholder}
                 aria-label={`${STR.clearRegionLabel} ${CLEAR_LETTERS[i] ?? i + 1}`}
                 maxLength={500}
                 disabled={disabled || sending}
-                onChange={(e) => onClearNoteChange?.(c.id, e.target.value)}
+                onChange={(next) => onClearNoteChange?.(c.id, next)}
               />
               <button
                 type="button"
@@ -276,9 +279,9 @@ export function PosterImageFeedbackBox({
             ))}
           </div>
         ) : null}
-        <textarea
+        <ComposeSafeTextarea
           value={feedback}
-          onChange={(e) => setFeedback(e.target.value)}
+          onChange={setFeedback}
           placeholder={
             markers.length > 0
               ? STR.posterOverallNotePlaceholder
