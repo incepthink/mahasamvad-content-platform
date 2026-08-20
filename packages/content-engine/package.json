@@ -34,7 +34,8 @@
     "what-changed:demo": "tsx --env-file=../../.env src/scripts/what-changed-demo.ts",
     "what-changed:test": "tsx --test src/what-changed/find-topic-articles.test.ts src/what-changed/render-carousel.test.ts",
     "translate:test": "tsx --test src/generation/translate-article.test.ts",
-    "polish:test": "tsx --env-file=../../.env src/generation/polish-article.ts"
+    "polish:test": "tsx --env-file=../../.env src/generation/polish-article.ts",
+    "youtube:check": "tsx src/intake/youtube-audio.ts --check"
   },
   "dependencies": {
     "@dgipr/database": "workspace:*",
@@ -42,6 +43,7 @@
     "@dgipr/schemas": "workspace:*",
     "@mozilla/readability": "^0.6.0",
     "adm-zip": "^0.6.0",
+    "ffmpeg-static": "^5.3.0",
     "jsdom": "^29.1.1",
     "mammoth": "^1.12.0",
     "pdf-lib": "^1.17.1",

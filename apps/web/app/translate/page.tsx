@@ -41,6 +41,12 @@
 // and saved to the नाव-शब्दकोश for future runs. For Hindi the confirmed names are frozen in
 // Devanagari rather than mapped to English.
 //
+// भाषांतर करा stays LIVE through that second step, and pressing it there confirms the open
+// card with whatever spellings have been typed into it — it does not re-run the extraction.
+// The card carries its own confirm button, but a real name list is long enough to push that
+// button below the fold, so the button the officer already pressed once has to keep working
+// rather than sit greyed out while the page waits for a second one they cannot see.
+//
 // Going INTO Marathi there is no review step, and that is not a shortcut — it is that the
 // question has no content. The card asks "is this Marathi name's English/Hindi spelling
 // right?"; here the spelling the output is held to is the dictionary's own `marathi` column,
@@ -175,6 +181,9 @@ export default function TranslatePage() {
   const [prepared, setPrepared] = useState<
     PrepareTranslationResponse['terms'] | null
   >(null);
+  // Bumping this asks the open name-review card to confirm itself with the spellings
+  // currently typed into it — see the submit below.
+  const [confirmRequest, setConfirmRequest] = useState(0);
   const [result, setResult] = useState<TranslationResult | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -197,8 +206,19 @@ export default function TranslatePage() {
   // translating is exactly what startSubmit does. Testing the text alone would leave an
   // officer whose only source is a scan with a dead button and no way forward.
   const canSubmit = combinedText.length > 0 || docStatus === 'unread';
+  // Locks the target row: an open review card was extracted for one target (its columns
+  // and its Hindi lock follow it), so changing the target under it would discard the
+  // officer's corrections through resetFlow.
   const busy = submitting || awaitingRead || prep !== 'idle';
-  const disabled = busy || !canSubmit;
+  // The submit is NOT disabled merely because the name-review card is open. That card is
+  // the second half of this page's one submit, not a modal to be answered elsewhere: the
+  // officer corrects a spelling and presses भाषांतर करा, which is the button they pressed
+  // to get here and the only one above the fold on a long name list. Pressing it there
+  // confirms the card with what they have typed (see submit). Everything that is genuinely
+  // in flight — the name extraction, an OCR read, the translation itself — still disables
+  // it, since re-pressing those would either double-charge or discard work.
+  const disabled =
+    submitting || awaitingRead || prep === 'preparing' || !canSubmit;
   // The review card only has a question to ask about a MARATHI source (see the header).
   const reviewsNames = source === 'mr';
 
@@ -275,6 +295,13 @@ export default function TranslatePage() {
   // Marathi there is nothing to check, so it translates directly.
   const submit = () => {
     if (combinedText.length === 0) return;
+    // The review card is already open: this press IS the confirmation. Re-running the name
+    // check instead would throw away every spelling the officer just corrected and re-bill
+    // the extraction for a list they are looking at.
+    if (prep === 'review') {
+      setConfirmRequest((request) => request + 1);
+      return;
+    }
     if (reviewsNames) {
       void startNameCheck();
       return;
@@ -483,6 +510,7 @@ export default function TranslatePage() {
         <TranslationTermsReview
           terms={prepared}
           busy={submitting}
+          confirmRequest={confirmRequest}
           // The panel only ever renders on a Marathi source, where the target is en or
           // hi — which is exactly what its own prop accepts.
           language={target === 'hi' ? 'hi' : 'en'}

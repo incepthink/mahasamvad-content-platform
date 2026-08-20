@@ -6,16 +6,21 @@
 // stores and sends to the transcriber — and apps/web cannot import content-engine
 // (pdfjs/sarvam/openai). The combineIntakeSources / tweetWeightedLength precedent.
 //
-// THE REASON THERE IS NO DOWNLOADER ANYWHERE IN THIS REPO: ElevenLabs Scribe takes a
-// `source_url` and fetches the media itself — its docs list YouTube explicitly ("Supports
-// hosted video or audio files, YouTube video URLs, TikTok video URLs, and other video
-// hosting services"). So a YouTube source never becomes bytes on our side: no yt-dlp binary
-// in the API image, no bot-check exposure from a datacentre IP, no archive object, and no
-// per-video vendor. What we store is the URL. See intake/elevenlabs-stt.ts.
+// THERE IS NOW A DOWNLOADER, AND THIS COMMENT USED TO SAY THE OPPOSITE. The feature was
+// built on ElevenLabs Scribe's `source_url`, which fetches the media itself — its docs
+// still list YouTube explicitly ("Supports hosted video or audio files, YouTube video
+// URLs, TikTok video URLs, and other video hosting services") — so a YouTube source never
+// became bytes on our side: no yt-dlp binary in the API image, no bot-check exposure from
+// a datacentre IP, no archive object. That stopped working on 2026-08-19: every YouTube
+// link comes back `Failed to download the file from the provided URL (upstream status
+// 400)`, YouTube's answer to THEM, while a plain hosted MP3 URL still works. So the audio
+// is now pulled with yt-dlp on our side and handed to the STT provider as an ordinary
+// recording — see intake/youtube-audio.ts, which owns that and the reasons.
 //
-// The consequence worth knowing is that Sarvam CANNOT serve this — its batch STT takes
-// uploaded bytes only — so a deployment on STT_PROVIDER=sarvam fails YouTube sources
-// individually with a Marathi message rather than pretending to transcribe them.
+// What is unchanged: this file still only recognises and canonicalises a link, and what
+// we STORE is still the URL. What changed downstream is that a link is no longer
+// ElevenLabs-only — with the download path on (the default), STT_PROVIDER=sarvam can serve
+// one too, since it receives bytes like any uploaded recording.
 
 import { z } from 'zod';
 

@@ -147,6 +147,14 @@ export {
   sttSupportsSourceUrl,
 } from './intake/stt-provider.js';
 export { transcribeAudioFiles } from './intake/sarvam-stt.js';
+// A pasted link is resolved to bytes here since ElevenLabs' YouTube fetching broke
+// (2026-08-19) — see intake/youtube-audio.ts. Exported so a route can report which way a
+// deployment is configured; the resolution itself happens inside transcribeAudio.
+export {
+  youTubeAudioSource,
+  ytDlpPath,
+  type YouTubeAudioSource,
+} from './intake/youtube-audio.js';
 // A recording reaches the seam either as bytes we hold or as a URL the provider fetches for
 // itself (a YouTube link — see audio-input.ts and @dgipr/schemas' youtube.ts).
 export {

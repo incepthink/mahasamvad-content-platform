@@ -262,11 +262,21 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
   verbatim"; correcting text before it becomes an article is /dlo's review step.
   Audio container rules are NOT redefined here: `AUDIO_FILE_ACCEPT`/`audioMimeForFileName`
   come from `schemas/src/dlo.ts`, so the picker can never offer a file the API refuses.
-- **YouTube links as a source (both /dlo and /transcribe) — no downloader, by design.**
-  ElevenLabs Scribe takes a **`source_url`** and fetches the media itself (its docs name
-  YouTube explicitly; `source_url` supersedes the presigned-only `cloud_storage_url`), so a
-  pasted link never becomes bytes on our side: no yt-dlp in the API image, no bot-check
-  exposure, no archive object. **Check this before adding any downloader.** Link recognition
+- **YouTube links as a source (both /dlo and /transcribe) — yt-dlp since 2026-08-19.**
+  This bullet used to read "no downloader, by design": ElevenLabs Scribe takes a
+  **`source_url`** and fetched the media itself (its docs name YouTube explicitly;
+  `source_url` supersedes the presigned-only `cloud_storage_url`), so a pasted link never
+  became bytes on our side. That broke for EVERY YouTube video — `Failed to download the
+  file from the provided URL (upstream status 400)`, which is what YouTube answered THEM —
+  while a plain hosted MP3 URL still works through the same field. The audio is now
+  downloaded on the API box and handed to the STT provider as an ordinary recording:
+  `content-engine/src/intake/youtube-audio.ts` (the whole story, the measured YouTube facts
+  behind its yt-dlp arguments, and the `YOUTUBE_AUDIO_SOURCE=provider` rollback), resolved
+  at the seam in `stt-provider.ts` so **every** provider can serve a link — including
+  Sarvam, which could not before. The binary is installed by `deploy/api.Dockerfile`
+  (arch-aware, `YTDLP_VERSION`); ffmpeg comes from `ffmpeg-static`, now a content-engine
+  dependency. Free harness: `tsx src/intake/youtube-audio.ts --check`; live:
+  `tsx src/intake/youtube-audio.ts <url>`. Link recognition
   + the probe shapes → `packages/schemas/src/youtube.ts` (`parseYouTubeVideoId` —
   `youtu.be`/no-scheme/`m.`/`music.`/`nocookie`/`/embed/`/`/shorts/`/`/live/`, strict
   11-char id; `canonicalYouTubeUrl`, which is what is STORED so a pasted `&t=` cannot ask
@@ -275,12 +285,16 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
   (`POST /api/youtube/probe`, public oEmbed — no key, no quota, title/channel/thumbnail and
   deliberately **no duration**, which would need a YouTube Data API key; a failed probe
   answers **200 with the id alone** so a private/unlisted video still submits). The STT seam
-  takes either shape (`intake/audio-input.ts`, a UNION not optional fields); `elevenlabs-stt.ts`
-  swaps its multipart `file` field for `source_url`; **Sarvam cannot serve one**, so
-  `transcribeAudio` fails those inputs individually with a Marathi message while the
-  intake's uploaded recordings still deliver. Two consequences to keep: the 0031 transcript
-  cache is keyed on the audio BYTES, so it does not apply (empty hash, skipped on read and
-  write-back), and **no migration** was needed — `files` is jsonb on both tables, so
+  takes either shape (`intake/audio-input.ts`, a UNION not optional fields) and, since
+  2026-08-19, RESOLVES a URL input to bytes before dispatch, so both providers serve one;
+  `elevenlabs-stt.ts` keeps its `source_url` branch (it swaps its multipart `file` field for
+  it) for the `YOUTUBE_AUDIO_SOURCE=provider` rollback and for non-YouTube hosted media,
+  and the Marathi "Sarvam cannot fetch a link" refusal is now reachable only in that mode.
+  A download failure is a per-input `{ error }` exactly as that refusal was, so the intake's
+  uploaded recordings still deliver. Two consequences to keep: the 0031 transcript
+  cache is keyed on the audio BYTES and the download happens BELOW the cache layer, so it
+  still does not apply to a link (empty hash, skipped on read and write-back — a follow-up
+  if a re-uploaded press conference ever matters), and **no migration** was needed — `files` is jsonb on both tables, so
   `kind: 'youtube'` + `sourceUrl`/`sourceAuthor`/`sourceThumbnailUrl` were additive and
   everything from the review step onward treats such a source exactly like a recording.
   Both create routes re-derive the video id server-side rather than trusting the client.

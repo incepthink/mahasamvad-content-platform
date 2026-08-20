@@ -23,7 +23,7 @@
 // translated normally instead of frozen — which is what lets an over-locked document
 // translate at all.
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type {
   PrepareTranslationResponse,
   TermType,
@@ -55,6 +55,7 @@ export function TranslationTermsReview({
   language = 'en',
   languages,
   collapseVerified = false,
+  confirmRequest,
   onConfirm,
   onCancel,
 }: {
@@ -72,6 +73,13 @@ export function TranslationTermsReview({
   // rows of nothing-to-do would bury the handful that need the user's eyes. The
   // hidden rows are still submitted — folding is display only.
   collapseVerified?: boolean;
+  // Lets the SURROUNDING page's own primary action confirm this card, with whatever the
+  // officer has typed into it, instead of the card's button being the only way forward.
+  // /translate needs it because its भाषांतर करा is the one button on that page and an
+  // officer who has just corrected a spelling presses it, not a second submit lower down.
+  // A request COUNTER rather than a boolean, the DocumentIntake `readRequest` idiom: a
+  // still-true flag would re-confirm on the next render after a failed translation.
+  confirmRequest?: number | undefined;
   onConfirm: (confirmed: TranslationTermInput[]) => void | Promise<void>;
   onCancel?: () => void;
 }) {
@@ -156,6 +164,25 @@ export function TranslationTermsReview({
     }
     void onConfirm(confirmed);
   };
+
+  // Held in a ref so the effect below runs on the counter alone and still calls the CURRENT
+  // closure — one that can see the spellings typed since the card mounted.
+  const confirmRef = useRef(confirm);
+  useEffect(() => {
+    confirmRef.current = confirm;
+  });
+  const handledConfirmRequestRef = useRef(confirmRequest);
+  useEffect(() => {
+    if (
+      confirmRequest === undefined ||
+      confirmRequest === handledConfirmRequestRef.current
+    ) {
+      return;
+    }
+    handledConfirmRequestRef.current = confirmRequest;
+    if (busy) return;
+    confirmRef.current();
+  }, [busy, confirmRequest]);
 
   const title = showHindi && !showEnglish ? STR.namesReviewTitleHindi : STR.namesReviewTitle;
   const hint =

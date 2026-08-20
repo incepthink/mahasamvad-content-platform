@@ -94,9 +94,11 @@ export type VideoValidation = Readonly<{
 const VIDEO_VALIDATE_TIMEOUT_MS = 300_000;
 const VIDEO_STITCH_TIMEOUT_MS = 900_000;
 const VIDEO_VALIDATE_MAX_BUFFER = 16 * 1024 * 1024;
-// Social posts use a 160px lockup on a 1280px canvas (12.5%). Video uses 15%:
-// visibly larger, but still clear of the lower-third information overlay.
-const VIDEO_LOCKUP_WIDTH_RATIO = 0.15;
+// Social posts use a 160px lockup on a 1280px canvas (12.5%). Video is
+// deliberately smaller at 9%: it sits over footage rather than over a designed
+// poster, and 15% (then 12%) was reported as too large on the finished video.
+// Below this the Marathi wordmark under the emblem stops reading at 720p.
+const VIDEO_LOCKUP_WIDTH_RATIO = 0.09;
 const VIDEO_LOCKUP_MARGIN_RATIO = 0.008;
 const VIDEO_OUTRO_PATH = resolve(
   dirname(fileURLToPath(import.meta.url)),

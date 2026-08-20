@@ -58,6 +58,38 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 RUN PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=0 \
     pnpm --filter @dgipr/poster-renderer exec playwright install --with-deps chromium
 
+# yt-dlp, for YouTube/media links on /dlo, /transcribe and /chat. ElevenLabs Scribe used to
+# fetch those itself through `source_url`, which is why this image had no downloader; that
+# stopped working for every YouTube video in August 2026 (their fetch gets `upstream status
+# 400` from YouTube), so the bytes are now pulled here and handed to the STT provider as an
+# ordinary recording. See packages/content-engine/src/intake/youtube-audio.ts.
+#
+# The `_linux` builds are PyInstaller bundles carrying their own Python, so this needs no
+# python3 and no pip layer — one binary, one version to bump. ARCH-AWARE deliberately: the
+# EC2 host may be Graviton, and the amd64 binary would install cleanly and then fail with
+# `exec format error` at the first officer's link rather than at build time.
+#
+# THIS LAYER MUST STAY ABOVE `COPY . .` for the same reason the Chromium one does — it
+# needs no application source, and below the copy it would re-download on every build.
+#
+# Updating: yt-dlp is a moving target against a hostile extractor, so bump YTDLP_VERSION
+# whenever YouTube changes break it (releases: github.com/yt-dlp/yt-dlp/releases). Runtime
+# knobs — cookies, a proxy, extra extractor args — are env, not a rebuild.
+ARG YTDLP_VERSION=2026.07.04
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends ca-certificates curl; \
+    rm -rf /var/lib/apt/lists/*; \
+    case "$(dpkg --print-architecture)" in \
+      amd64) ytdlp_asset='yt-dlp_linux' ;; \
+      arm64) ytdlp_asset='yt-dlp_linux_aarch64' ;; \
+      *) echo "no yt-dlp build for $(dpkg --print-architecture)" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL -o /usr/local/bin/yt-dlp \
+      "https://github.com/yt-dlp/yt-dlp/releases/download/${YTDLP_VERSION}/${ytdlp_asset}"; \
+    chmod +x /usr/local/bin/yt-dlp; \
+    yt-dlp --version
+
 # Now the source, then build the api + its workspace deps in topological order
 # (NOT apps/web — that's Vercel's job).
 COPY . .

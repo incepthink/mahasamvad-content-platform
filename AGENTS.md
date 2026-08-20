@@ -3049,6 +3049,101 @@ Canva OAuth authentication and poster handoff are implemented in `apps/api/src/r
 
 ## Latest Implementation Milestone
 
+- **YouTube links are downloaded here now — ElevenLabs stopped being able to fetch them**
+  (2026-08-19, no migration, no n8n): every pasted link on `/dlo`, `/transcribe` and `/chat`
+  failed with `ElevenLabs STT failed (400): Failed to download the file from the provided URL
+  (upstream status 400)`, and the intake then reported `कोणत्याही ध्वनिमुद्रणातून मजकूर मिळाला
+  नाही`. Diagnosis first, and it mattered: `upstream status 400` is what ElevenLabs got back
+  from YouTube, not what we sent. Two live probes settled it before a line was written — an
+  ordinary public video fails identically to the reported livestream, and a plain hosted MP3
+  URL downloads and transcribes fine through the same `source_url` field. So the parameter
+  works and YouTube specifically is refusing them; it reproduces locally as readily as in
+  production, our IP playing no part in a fetch that happens on theirs. The 2026-08-01
+  milestone's central claim — "Scribe fetches YouTube, therefore this repo needs no
+  downloader" — is simply no longer true, and this is the change that replaces it.
+  - **The bytes must come to us, and there is no shortcut.** `yt-dlp -g` resolves a direct
+    googlevideo URL that Scribe could be handed instead, but it is IP-LOCKED (the requesting
+    address is signed into it), so ElevenLabs fetching it would 403. Whoever resolves the
+    link has to be whoever downloads it.
+  - **`intake/youtube-audio.ts` (new)** spawns yt-dlp into a temp directory and returns an
+    ordinary `AudioFileInput`. **`stt-provider.ts` resolves URL inputs there, before
+    dispatch**, which is the seam decision worth keeping: done at the provider boundary
+    rather than inside the ElevenLabs client, **Sarvam can now serve a YouTube link too**
+    (its Marathi refusal survives, reachable only under the rollback) and any provider added
+    later gets it free. Rollback is one env line, `YOUTUBE_AUDIO_SOURCE=provider`.
+  - **Three of the yt-dlp arguments are measured facts about YouTube, not preferences**, and
+    each was a failed download first. **Audio-only formats now require a GVS PO token**:
+    yt-dlp cheerfully SELECTS format 140 and then dies on `HTTP Error 403` without falling
+    back, so the selector tries audio-only (still right with cookies, and on other hosts) and
+    then the cheapest muxed stream, from which ffmpeg extracts the track —
+    `--audio-format best` keeps the source codec, so AAC is COPIED and an 11.3 MiB download
+    became a 3.3 MB m4a instantly. **The player client is pinned** (`web_safari`): yt-dlp's
+    own default prefers `android_vr`, whose URLs 403. **A JS runtime is required** to solve
+    YouTube's challenges at all, and only Deno is enabled by default — so `node` is enabled
+    explicitly, by absolute path, which needs nothing added to the image. All three are
+    env-overridable (`YTDLP_PLAYER_CLIENT`, `YTDLP_EXTRA_ARGS`) because they are facts about
+    YouTube this month; changing them must never need a code change on a day the platform is
+    already broken.
+  - **AMENDED 2026-08-19, same day: two of those three "measured facts" had already
+    reversed, and the reversal is the lesson.** The deployed selector and the pinned
+    `web_safari` client both stopped working, so every link failed. Measured again from
+    scratch: **pinning ANY single player client now returns `Only images are available for
+    download`** — web_safari, tv, ios, mweb, web_embedded and web each — while yt-dlp's own
+    `default` set resolves real formats, so `DEFAULT_PLAYER_CLIENT` is now `default`. And
+    **the PO-token gate has spread from the audio-only formats to ALL `https` formats**,
+    muxed 18 included; only the `m3u8_native` renditions (91–96) download. That interacts
+    badly with the fallback chain, which is the part worth not re-deriving: **yt-dlp falls
+    through `-f a/b/c` only when a format is UNAVAILABLE, never when it 403s mid-download**,
+    so naming `bestaudio` first fails every YouTube link rather than degrading — and
+    `--check-formats` does not rescue it either (its probe on 140 SUCCEEDS and the real
+    download still 403s). The selector therefore names HLS first, preferring the LC-AAC
+    360p rung over the smaller 144p one whose `mp4a.40.5` is 22 kHz HE-AAC, this being
+    Marathi speech on its way to an STT model; the old audio-only chain is kept BELOW it,
+    where a non-YouTube host reaches it by ordinary unavailability. `--concurrent-fragments
+    4` is added because an HLS rendition arrives as fragments (39 for 3½ minutes, so ~1,300
+    for a two-hour press conference). yt-dlp's `n`-challenge solver
+    (`--remote-components ejs:github`) is deliberately NOT enabled: it is needed only for
+    the gated https formats, and the HLS path was measured downloading cleanly without it,
+    so enabling it would add a runtime dependency on github.com and buy nothing.
+    **Local dev needs yt-dlp installed on the machine** (`pip install -U yt-dlp`) — the
+    Dockerfile layer only serves the deployed image, and a dev API answers a pasted link
+    with `yt-dlp सापडले नाही`. Verified 2026-08-19: 31/31 harness assertions, workspace
+    typecheck 7/7, eslint + prettier clean, and a live download returning a 3.3 MB m4a in
+    ~7 s. `YTDLP_VERSION=2026.07.04` is the version all of this was measured on.
+  - **The image installs the binary arch-aware** (`deploy/api.Dockerfile`, `YTDLP_VERSION`,
+    above `COPY . .` like the Chromium layer): the `_linux` builds are PyInstaller bundles
+    carrying their own Python, so there is no apt/pip layer — but the EC2 host may be
+    Graviton, and the amd64 asset would install cleanly and fail with `exec format error` at
+    the first officer's link rather than at build time. ffmpeg comes from `ffmpeg-static`,
+    added as a content-engine dependency and resolved `FFMPEG_PATH` → the bundled binary →
+    PATH (assemble.ts's precedent, one deployment setting serving both).
+  - **THE RISK THIS CANNOT REMOVE**, and the one thing to check on deploy: whether YouTube
+    refuses the SERVER's address, which is a different question from whether it refuses
+    ElevenLabs'. A datacentre IP is what its bot checks are aimed at. That failure is matched
+    by shape and reported with the two knobs that answer it (`YTDLP_COOKIES_FILE`,
+    `YTDLP_PROXY`) rather than as a bare non-zero exit. Verify from the box itself in 30
+    seconds: `docker run --rm python:3.12-slim sh -c 'pip install -q yt-dlp && yt-dlp -f
+    bestaudio --no-playlist -g "https://youtu.be/dQw4w9WgXcQ"'`.
+  - Also true and worth not re-deriving: a download failure is a per-input `{ error }`, so a
+    dead link never sinks an intake; an unknown `STT_PROVIDER` is refused BEFORE anything is
+    downloaded; and the 0031 transcript cache still does not apply to a link, because the
+    download happens BELOW the cache layer in both runners (a named follow-up, not a
+    regression — it never applied).
+  Verified 2026-08-19: workspace typecheck **7/7 green**, eslint clean on all touched files,
+  prettier clean on the new file (`content-engine/src/index.ts` reports a whole-file
+  complaint **confirmed already failing at HEAD** — do NOT `--write` it); 28 assertions in
+  `tsx src/intake/youtube-audio.ts --check` (argument building incl. all three measured
+  flags, the env overrides, and the naming/extension rules) and 11 in
+  `tsx src/intake/stt-provider.ts`; a live download through the module (3.3 MB m4a in 6.9 s);
+  and **the full seam end to end** — `transcribeAudio` with a URL input returned a 1,894-char
+  transcript while a dead link beside it came back as its own `{ error }`. **Left for a real
+  run**: the same on the production box, which is where the IP question is answered. Deploy
+  is `@dgipr/schemas` → `@dgipr/content-engine` dists → **rebuild the API image** (the
+  Dockerfile changed; a plain restart will not install yt-dlp). New env, all optional:
+  `YOUTUBE_AUDIO_SOURCE`, `YTDLP_PATH`, `YTDLP_PLAYER_CLIENT`, `YTDLP_COOKIES_FILE`,
+  `YTDLP_PROXY`, `YTDLP_EXTRA_ARGS`, `YOUTUBE_DOWNLOAD_MAX_BYTES`,
+  `YOUTUBE_DOWNLOAD_TIMEOUT_MS`.
+
 - **The fresh social poster is assigned an ARRANGEMENT, and the redo bars the previous one**
   (2026-08-14, no migration, no n8n): two complaints about the fully-AI social lane — every
   poster came out with the same object placement (imagery one side, text the other), and pressing

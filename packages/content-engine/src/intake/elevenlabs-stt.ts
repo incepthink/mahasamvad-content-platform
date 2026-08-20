@@ -31,14 +31,20 @@
 //   model that omits them) simply records nothing rather than inventing a
 //   duration — under-reporting beats a fabricated cost line.
 //
-// - IT TRANSCRIBES A URL WITHOUT DOWNLOADING IT. Scribe's `source_url` accepts
-//   "hosted video or audio files, YouTube video URLs, TikTok video URLs, and
-//   other video hosting services" and fetches the media on ElevenLabs' side, so
-//   an AudioUrlInput is a JSON body rather than a multipart upload and this repo
-//   needs no video downloader, no extra binary in the API image, and no exposure
-//   to YouTube's bot checks from a datacentre IP. It is the ONLY provider here
-//   that can serve one — Sarvam's batch API uploads bytes — which is why
-//   stt-provider.ts refuses URL inputs on the Sarvam path by name.
+// - IT CAN TRANSCRIBE A URL WITHOUT DOWNLOADING IT — but by default nothing asks
+//   it to any more. Scribe's `source_url` accepts "hosted video or audio files,
+//   YouTube video URLs, TikTok video URLs, and other video hosting services" and
+//   fetches the media on ElevenLabs' side; it travels as one more multipart field
+//   in place of `file`, everything else about the request being identical. That is
+//   what kept a video downloader out of this repo until 2026-08-19, when the
+//   YouTube half of it began failing for every video with `Failed to download the
+//   file from the provided URL (upstream status 400)` — YouTube's answer to THEM.
+//   stt-provider.ts now resolves a link to bytes with yt-dlp before dispatching
+//   (YOUTUBE_AUDIO_SOURCE, see youtube-audio.ts), so this branch is reached only
+//   under the `provider` rollback. It is still the ONLY provider here that can
+//   serve a URL at all — Sarvam's batch API uploads bytes — which is why
+//   stt-provider.ts refuses URL inputs on the Sarvam path by name in that mode.
+//   Hosted media URLs that are not YouTube still work here, verified.
 
 import { pathToFileURL } from 'node:url';
 import { audioMimeForFileName } from '@dgipr/schemas';

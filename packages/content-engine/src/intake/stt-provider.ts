@@ -25,6 +25,14 @@
 // ElevenLabs one — under TRANSCRIPT_CACHE_MODE=read a recording first
 // transcribed by the other provider is served from the cache. Reads are off by
 // default, which is what keeps this dormant; see transcript-cache-mode.ts.
+//
+// A URL SOURCE IS RESOLVED TO BYTES HERE, BEFORE DISPATCH (YOUTUBE_AUDIO_SOURCE,
+// default `download` — see youtube-audio.ts for why that had to change). This is
+// the right seam for it rather than the ElevenLabs client: done here, Sarvam can
+// serve a YouTube link too, and every provider added later gets it for free.
+// Under YOUTUBE_AUDIO_SOURCE=provider nothing is downloaded and the old
+// pass-the-link-along behaviour is byte-for-byte restored, which is also the only
+// mode in which the Sarvam refusal below is still reachable.
 
 import { pathToFileURL } from 'node:url';
 import { transcribeAudioFiles } from './sarvam-stt.js';
@@ -35,6 +43,7 @@ import {
   type AudioTranscription,
 } from './audio-input.js';
 import { transcribeAudioFilesViaElevenLabs } from './elevenlabs-stt.js';
+import { downloadUrlAudio, youTubeAudioSource } from './youtube-audio.js';
 
 const SUPPORTED_PROVIDERS = ['elevenlabs', 'sarvam'] as const;
 
@@ -61,23 +70,23 @@ export function sttKeyPresent(): boolean {
   return typeof key === 'string' && key.trim() !== '';
 }
 
-// Whether the configured provider can transcribe a URL it has to fetch itself (a YouTube
-// link). Only ElevenLabs can — Scribe's `source_url` — so a route or form can ask before
+// Whether a pasted link can be transcribed at all, so a route or form can ask before
 // offering the affordance rather than letting the officer discover it at the job.
+//
+// Two ways it can be true. With YOUTUBE_AUDIO_SOURCE=download (the default) the link is
+// resolved to bytes here, so EVERY provider can serve one — including Sarvam, which could
+// not before. Under `provider` it falls back to the original question: only ElevenLabs
+// takes a `source_url`.
 export function sttSupportsSourceUrl(): boolean {
-  return sttProviderName() !== 'sarvam';
+  return youTubeAudioSource() === 'download' || sttProviderName() !== 'sarvam';
 }
 
-// Transcribe every input. One entry per input, in input order.
-//
-// A URL input on the Sarvam path is a per-input FAILURE, not a throw: Sarvam's batch API
-// uploads bytes and there are none, but the intake's uploaded recordings are perfectly
-// transcribable and must still deliver. That is the same contract a corrupt file gets, and
-// it keeps STT_PROVIDER=sarvam a working rollback rather than a broken deployment.
-export async function transcribeAudio(
+// Dispatch to the configured backend. Everything reaching here has already been through
+// the URL resolution above, so on the download path `files` is all bytes.
+async function transcribeViaProvider(
+  provider: string,
   files: readonly AudioInput[],
 ): Promise<AudioTranscription[]> {
-  const provider = sttProviderName();
   switch (provider) {
     case 'sarvam': {
       const results = new Array<AudioTranscription>(files.length);
@@ -85,6 +94,7 @@ export async function transcribeAudio(
       const byteInputs: AudioFileInput[] = [];
       for (const [index, file] of files.entries()) {
         if (isAudioUrlInput(file)) {
+          // Only reachable under YOUTUBE_AUDIO_SOURCE=provider — see the header.
           results[index] = {
             error:
               'यूट्युब लिंकवरून मजकूर काढण्यासाठी ElevenLabs आवश्यक आहे. ' +
@@ -103,14 +113,64 @@ export async function transcribeAudio(
       }
       return results;
     }
-    case 'elevenlabs':
-      return transcribeAudioFilesViaElevenLabs(files);
     default:
-      throw new Error(
-        `Unknown STT_PROVIDER "${provider}". ` +
-          `Supported: ${SUPPORTED_PROVIDERS.join(', ')}.`,
-      );
+      return transcribeAudioFilesViaElevenLabs(files);
   }
+}
+
+// Transcribe every input. One entry per input, in input order.
+//
+// A link that cannot be turned into audio is a per-input FAILURE, not a throw — the same
+// contract a corrupt file gets — because the intake's other recordings are perfectly
+// transcribable and must still deliver. That is true of both ways it can fail: the
+// download itself (yt-dlp missing, the video private, YouTube refusing this server), and
+// a URL reaching the Sarvam path under YOUTUBE_AUDIO_SOURCE=provider, whose batch API
+// uploads bytes and has none. Keeping both as per-input errors is what keeps
+// STT_PROVIDER=sarvam a working rollback rather than a broken deployment.
+export async function transcribeAudio(
+  files: readonly AudioInput[],
+): Promise<AudioTranscription[]> {
+  const provider = sttProviderName();
+  // Validated BEFORE anything is downloaded: a misconfigured deployment must fail free.
+  if (!(SUPPORTED_PROVIDERS as readonly string[]).includes(provider)) {
+    throw new Error(
+      `Unknown STT_PROVIDER "${provider}". ` +
+        `Supported: ${SUPPORTED_PROVIDERS.join(', ')}.`,
+    );
+  }
+
+  const results = new Array<AudioTranscription>(files.length);
+  const positions: number[] = [];
+  const prepared: AudioInput[] = [];
+
+  for (const [index, file] of files.entries()) {
+    if (isAudioUrlInput(file) && youTubeAudioSource() === 'download') {
+      try {
+        // Sequentially, deliberately: these are whole press conferences, and a handful
+        // of parallel downloads is both a bandwidth spike and the shape of traffic
+        // YouTube rate-limits. The transcription that follows is the slow part anyway.
+        prepared.push(await downloadUrlAudio(file));
+        positions.push(index);
+      } catch (error) {
+        results[index] = {
+          error: `${file.name}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        };
+      }
+      continue;
+    }
+    positions.push(index);
+    prepared.push(file);
+  }
+
+  if (prepared.length > 0) {
+    const transcribed = await transcribeViaProvider(provider, prepared);
+    transcribed.forEach((result, position) => {
+      results[positions[position]!] = result;
+    });
+  }
+  return results;
 }
 
 // Free harness: asserts dispatch and which key each provider's gate names.
@@ -124,6 +184,7 @@ if (
     checks.push([label, ok]);
   };
   const original = process.env.STT_PROVIDER;
+  const originalSource = process.env.YOUTUBE_AUDIO_SOURCE;
 
   delete process.env.STT_PROVIDER;
   check('unset defaults to elevenlabs', sttProviderName() === 'elevenlabs');
@@ -140,11 +201,25 @@ if (
     'sarvam gate names SARVAM_API_KEY',
     sttProviderApiKeyEnv() === 'SARVAM_API_KEY',
   );
-  check('sarvam cannot transcribe a source URL', !sttSupportsSourceUrl());
+  // The default now resolves a link to bytes before dispatch, so a link is transcribable
+  // on EVERY provider — including the one whose API cannot fetch one.
+  delete process.env.YOUTUBE_AUDIO_SOURCE;
+  check(
+    'sarvam can transcribe a source URL once it is downloaded',
+    sttSupportsSourceUrl(),
+  );
+
+  // Under the rollback the original question comes back: only ElevenLabs takes one.
+  process.env.YOUTUBE_AUDIO_SOURCE = 'provider';
+  check(
+    'sarvam cannot transcribe a source URL under YOUTUBE_AUDIO_SOURCE=provider',
+    !sttSupportsSourceUrl(),
+  );
 
   // URL-only input on the sarvam path: every entry must come back as an error, IN ORDER,
   // and no Sarvam call may be made (there are no byte inputs to make one with) — so this
-  // runs free, with no key and no network.
+  // runs free, with no key and no network. Pinned to `provider` mode, which is the only
+  // one that still reaches the refusal; in `download` mode this would spawn yt-dlp.
   let sarvamUrlResults: AudioTranscription[] = [];
   void transcribeAudio([
     { name: 'one', sourceUrl: 'https://www.youtube.com/watch?v=aaaaaaaaaaa' },
@@ -153,7 +228,18 @@ if (
     sarvamUrlResults = results;
   });
 
+  // An unknown provider must be refused BEFORE any download is attempted, so the
+  // misconfiguration costs nothing. Asserted in `download` mode with a URL input: if the
+  // guard moved below the resolution loop, this would try to spawn yt-dlp.
+  delete process.env.YOUTUBE_AUDIO_SOURCE;
   process.env.STT_PROVIDER = 'nope';
+  let threwOnUrl = '';
+  void transcribeAudio([
+    { name: 'x', sourceUrl: 'https://www.youtube.com/watch?v=ccccccccccc' },
+  ]).catch((error: unknown) => {
+    threwOnUrl = error instanceof Error ? error.message : String(error);
+  });
+
   let threw = '';
   void transcribeAudio([{ name: 'a.mp3', data: Buffer.from('x') }]).catch(
     (error: unknown) => {
@@ -163,11 +249,17 @@ if (
 
   if (original === undefined) delete process.env.STT_PROVIDER;
   else process.env.STT_PROVIDER = original;
+  if (originalSource === undefined) delete process.env.YOUTUBE_AUDIO_SOURCE;
+  else process.env.YOUTUBE_AUDIO_SOURCE = originalSource;
 
   setTimeout(() => {
     check(
       'unknown provider names the supported list',
       threw.includes('elevenlabs, sarvam'),
+    );
+    check(
+      'an unknown provider is refused before a link is downloaded',
+      threwOnUrl.includes('elevenlabs, sarvam'),
     );
     check(
       'sarvam returns one entry per URL input, in order',

@@ -337,9 +337,13 @@ export function startDloIntakeJob(client: SupabaseClient, id: string): void {
           audioIndexes.map(async (index) => {
             const entry = entries[index]!;
             if (entry.kind === 'youtube') {
-              // Never downloaded here or anywhere: the transcriber fetches it. A 'youtube'
-              // entry always carries a sourceUrl (the create route sets both together), so
-              // the fallback is unreachable defence rather than a real case.
+              // Not downloaded HERE — the STT seam resolves a link to bytes with yt-dlp
+              // before dispatch (YOUTUBE_AUDIO_SOURCE, default `download`; ElevenLabs'
+              // own `source_url` fetching of YouTube broke on 2026-08-19). Below the
+              // cache layer deliberately, so a YouTube source is still always a cache
+              // miss: audio_transcript_cache is keyed on bytes we do not have at this
+              // point. A 'youtube' entry always carries a sourceUrl (the create route
+              // sets both together), so the fallback is unreachable defence.
               return { name: entry.name, sourceUrl: entry.sourceUrl ?? '' };
             }
             return {
