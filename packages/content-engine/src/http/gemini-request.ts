@@ -69,20 +69,32 @@ function createLimiter(concurrency: number): Limiter {
 // starts an operation or polls one and both answer fast. 'image' is Nano
 // Banana, where a single frame — especially one carrying an inline reference
 // image — routinely runs past two minutes and several can be in flight.
-export type GeminiLane = 'default' | 'image';
+// 'ocr' is document reading (intake/gemini-doc.ts). Its own lane because it is the slowest
+// call in the package by a wide margin — one request can carry hundreds of PDF pages and
+// transcribe every one of them — so it must neither be held to the image clock nor allowed to
+// fill the frame pool while a storyboard is rendering.
+export type GeminiLane = 'default' | 'image' | 'ocr';
 
 type LaneConfig = Readonly<{ concurrency: number; timeoutMs: number }>;
 
 function laneConfig(lane: GeminiLane): LaneConfig {
-  return lane === 'image'
-    ? {
+  switch (lane) {
+    case 'image':
+      return {
         concurrency: readInt('GEMINI_IMAGE_MAX_CONCURRENCY', 3),
         timeoutMs: readInt('GEMINI_IMAGE_TIMEOUT_MS', 300_000),
-      }
-    : {
+      };
+    case 'ocr':
+      return {
+        concurrency: readInt('GEMINI_OCR_MAX_CONCURRENCY', 2),
+        timeoutMs: readInt('GEMINI_OCR_TIMEOUT_MS', 900_000),
+      };
+    default:
+      return {
         concurrency: readInt('GEMINI_MAX_CONCURRENCY', 1),
         timeoutMs: readInt('GEMINI_REQUEST_TIMEOUT_MS', 120_000),
       };
+  }
 }
 
 // Built on first use, not at import time, so `--env-file` / dotenv have run.
@@ -158,8 +170,9 @@ export class GeminiTimeoutError extends Error {
     super(
       `Gemini ${label} request timed out after ${Math.round(timeoutMs / 1000)}s` +
         (attempts > 1 ? ` on each of ${attempts} attempts` : '') +
-        '. Raise GEMINI_IMAGE_TIMEOUT_MS (frames) or ' +
-        'GEMINI_REQUEST_TIMEOUT_MS (Veo) if this is normal for the model.',
+        '. Raise GEMINI_IMAGE_TIMEOUT_MS (frames), GEMINI_OCR_TIMEOUT_MS ' +
+        '(document reading) or GEMINI_REQUEST_TIMEOUT_MS (Veo) if this is ' +
+        'normal for the model.',
     );
     this.name = 'GeminiTimeoutError';
     this.timeoutMs = timeoutMs;

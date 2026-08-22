@@ -34,6 +34,11 @@ export { overlayArticleChrome } from './article-chrome.js';
 export {
   buildCanvaSocialPosterLayers,
   overlayTwitterChrome,
+  // The Government of Maharashtra emblem + Marathi wordmark as one raster.
+  // Exported so apps/api can serve it to the video review players, which lay
+  // it over an unbranded scene clip in CSS — the stitch owns the burned-in
+  // branding, so this stays the single source of the artwork.
+  renderGovernmentLockup,
   SOCIAL_ARTWORK_HEIGHT,
   SOCIAL_ARTWORK_SIZE,
   SOCIAL_POSTER_HEIGHT,
@@ -41,6 +46,7 @@ export {
 export type {
   CanvaPosterLayer,
   CanvaSocialPosterLayers,
+  GovernmentLockupRaster,
 } from './twitter-chrome.js';
 export { overlayCmoChrome, CMO_POSTER_SIZE } from './cmo-chrome.js';
 export {
@@ -112,14 +118,14 @@ export {
   cropToAspect,
   decodeAudioToWav,
   muxNarration,
-  overlayVideoLogo,
+  validateSceneClip,
   validateVideoOutput,
   wavDurationSeconds,
   resolveFfmpeg,
   type NarrationSegment,
+  type SceneClipCheckOptions,
   type SceneOverlay,
   type VideoAssemblyOptions,
-  type VideoLogoOptions,
   type VideoValidation,
 } from './video/assemble.js';
 // The burned-in Marathi key point: Chromium typesets it (the only correct

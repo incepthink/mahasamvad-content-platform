@@ -152,15 +152,18 @@ it are implemented and working end-to-end:
   `packages/poster-renderer/assets/video-outro.mp4` and is appended by
   `assembleSilentVideo` after every completed explainer video. It is a 2.18s
   1080x1920 asset: vertical output uses it natively; landscape output fits the
-  complete frame on white rather than cropping away contact information. Every
-  newly generated scene clip is post-processed by `overlayVideoLogo` before its
-  versioned Storage upload, so the per-scene review players carry the logo too.
+  complete frame on white rather than cropping away contact information. **SUPERSEDED
+  2026-08-21 — every newly generated scene clip WAS post-processed by
+  `overlayVideoLogo` before its versioned Storage upload, so the per-scene review
+  players carried the logo too. It is not any more; see the milestone at the end
+  of this file.**
   The final stitch re-stamps the same lockup over the generated timeline, which
   keeps it crisp after concatenation and also brands free restitches of older
   stored clips; the supplied outro is already fully branded and is not
   double-stamped. The lockup comes from the SAME `renderGovernmentLockup` used
-  by Twitter/Facebook chrome, but video targets 15% of frame width versus the
-  social canvas's 12.5% (20% larger proportionally), at the top-right.
+  by Twitter/Facebook chrome, at the top-right. **The 15%-of-frame-width figure
+  once stated here is stale**: the ratio has since moved to 9% and now lives in
+  `@dgipr/schemas` as `VIDEO_LOCKUP_WIDTH_RATIO`.
   **Amended 2026-08-15: video passes `{ background: 'transparent' }`** — nothing
   behind the marks at all (no white card, no panel, no halo), the emblem and
   wordmark compositing straight onto the footage, and the wordmark set in white
@@ -3049,6 +3052,223 @@ Canva OAuth authentication and poster handoff are implemented in `apps/api/src/r
 
 ## Latest Implementation Milestone
 
+- **/chat reads a PDF whole on Gemini, and MarkdownText finally renders a table**
+  (2026-08-22, no migration, no n8n): two separate reports, one screenshot. A chat answer
+  holding a storyboard TABLE printed as a screenful of literal `|` characters, and document
+  attachments were being read one paid call per page.
+  - **The renderer, not the model.** `MarkdownText` is the display path for the article, /dlo's
+    output step AND every /chat answer, and it knew headings, lists, quotes, rules and four
+    inline spans — no tables at all, so a pipe row fell through to the paragraph branch and was
+    printed verbatim. Walking the rest of what a general assistant actually emits found three
+    more of the same class: a fenced code block printed its own backticks and let a `#` inside
+    it become a heading; a nested list flattened, every sub-item becoming a sibling; and a
+    numbered list with blank lines between its items (a "loose" list) broke into one `<ol>` per
+    item, so a five-step answer rendered as five step ones. Plus `__bold__` and `~~struck~~`.
+    All fixed here, with `<pre>`, `<del>`, nested-list and table CSS to match.
+  - **The table parser is SHARED with `ExtractedText`** (`apps/web/lib/markdownTable.ts`).
+    That component has rendered document tables correctly for months; the same question was
+    simply never asked in the other renderer. One set of rules now decides what a table is —
+    ≥2 consecutive pipe-wrapped rows, a `| --- |` divider making a HEADER rather than making a
+    table (a headerless OCR grid is still a table), the widest row deciding the column count —
+    so a chat table and a document table can no longer disagree. A lone pipe-wrapped line is
+    still prose and, deliberately, still does not split the paragraph around it.
+  - **Free harness, because "look at the page" is exactly the check that does not get run:**
+    `npx tsx --tsconfig apps/web/tsconfig.check.json apps/web/lib/markdownRender.check.tsx`
+    renders the component to static markup and asserts on the tags — 47 cases, every one a
+    shape a real answer arrived in, including the reported Marathi storyboard. The extra
+    tsconfig exists because the app's own sets `jsx: preserve`, which leaves a standalone
+    runner with no JSX factory.
+  - **Gemini is a THIRD OCR backend and /chat is its only caller**
+    (`content-engine/src/intake/gemini-doc.ts`). It takes a whole PDF in ONE call — Google
+    documents 1,000 pages / 50 MB — where `openai-doc.ts` makes one call per page. Wired to
+    /chat alone because that is where a document is read once, whole, inside one turn with
+    nobody reviewing it page by page; the surfaces whose output gets published keep
+    `OCR_PROVIDER` (still Sarvam) untouched.
+  - **The browser names the SURFACE, never the provider.** `POST /api/documents` takes an
+    optional `surface` field (`DocumentUploadSurfaceSchema`, one value: `chat`) and the API maps
+    it through `CHAT_OCR_PROVIDER` — so what a paid read runs on stays a server decision, and
+    putting chat back on the shared default is one env line. It travels down as
+    `ExtractPdfOptions.ocrProvider`, a per-READ override of `OCR_PROVIDER`, and is stored on the
+    intake job so an OCR re-read uses the backend the first read did.
+  - **Page identity is exact by construction, and that is the part that had to be designed.**
+    The model is never asked what page it is looking at and never reports one: it is handed N
+    pages, told it has N, and must answer with N entries in order (structured output,
+    `{pages: string[]}`), so entry *i* is filed under `chunk.originalPages[i]`. When the count
+    does not match, nothing is guessed — the chunk is SPLIT IN HALF and both halves re-read,
+    down to a single page where one entry can only mean one thing. `halveChunk` remaps through
+    `originalPages`, which the harness asserts on a real PDF carrying a scattered `[3,7,8,11,12]`
+    selection.
+  - **THE BINDING LIMIT IS OUTPUT TOKENS, NOT THE 1,000-PAGE INPUT CEILING** — the thing not to
+    re-derive. A page of dense Marathi transcribes to ~800-1,500 tokens, so a few tens of pages
+    already fill one answer, and a truncated answer is the failure that hides.
+    `GEMINI_OCR_MAX_PAGES` defaults to **30**, and the halving above doubles as the recovery: a
+    truncation (`finishReason: MAX_TOKENS`) lowers the budget for the rest of the process.
+    Size is LEARNED the same way rather than declared — a size rejection lowers the byte budget
+    and re-reads in halves, so nothing here needs re-tuning when Google changes a limit.
+  - Bounded so a pathological document cannot multiply the bill: a chunk that FAILS is retried
+    in halves at most twice and then recorded as empty pages, where only a count MISMATCH
+    descends all the way. The API key is checked once at the top, so a misconfigured deployment
+    fails immediately instead of halving its way down the document first.
+  - The `document` subject joins `page`/`image` on the SHARED `ocrSystemPrompt`, so a chat
+    attachment is held to exactly the fidelity rules a /dlo scan is — one prompt with three
+    openings, not three prompts free to drift.
+  Verified 2026-08-22, free: workspace typecheck **7/7 green**, eslint clean on all 13 touched
+  files, prettier clean on every hunk of mine (the residual whole-file complaints are
+  pre-existing CRLF — confirmed per file against prettier's own output with CR stripped, zero
+  content diff, so do NOT `--write` them); the web production build green; and three harnesses —
+  47 renderer assertions, 36 in `tsx src/intake/gemini-doc.ts --check` (the answer parser's six
+  shapes, the request body, both learned-limit classifiers, and the page-identity remap), and 9
+  in `tsx src/intake/ocr-provider.ts`. Verified LIVE (fractions of a cent): a two-page PDF read
+  by `gemini-3.7-flash` in ONE call, both pages correctly numbered, with page 2's table coming
+  back as a Markdown table; and the routing proven end to end through the running API — the same
+  file uploaded WITH `surface=chat` returns Gemini Markdown while WITHOUT it returns Sarvam's
+  `<div class="page-body-container">` HTML, so no other surface moved. **Left for a real run**:
+  a genuinely scanned multi-page Marathi GR in /chat, to calibrate `GEMINI_OCR_MAX_PAGES`
+  against the `usageMetadata` line the client logs on every call. Deploy is
+  `@dgipr/schemas` → `@dgipr/content-engine` dists → API + web (ship together — `surface` is a
+  shared contract, though it is optional so a half-deploy just falls back to `OCR_PROVIDER`).
+  New env, all optional: `CHAT_OCR_PROVIDER`, `GEMINI_OCR_MODEL`, `GEMINI_OCR_MAX_PAGES`,
+  `GEMINI_OCR_MAX_OUTPUT_TOKENS`, `GEMINI_OCR_MAX_REQUEST_BYTES`, `GEMINI_OCR_MAX_CONCURRENCY`,
+  `GEMINI_OCR_TIMEOUT_MS`. **`GEMINI_API_KEY` is now needed by a deployment with no /video at
+  all**, unless chat is put back on sarvam/openai.
+
+- **A caption-only card, and the officer's OWN image prompt** (2026-08-22, migration 0045, no
+  n8n): two additions to क्रिएटिव्ह आणि सोशल (`apps/web/app/page.tsx`), independent of each other.
+  - **फक्त कॅप्शन** is a fifth card in काय तयार करायचे?. It renders NO poster — one
+    `generateSocialCaption` call, no classify, no master, no image spend — and is **entirely a web
+    change**: the API, the runner and the detail page have supported this lane all along
+    (`outputType: 'article'` on a social row, which means "renders no poster" on both lanes), it
+    was only this form that stopped offering it. It submits **`facebook`**, and the platform is a
+    real choice rather than a formality: `generateSocialCaption` branches on it, the twitter branch
+    carrying X's 280-character rule and the facebook branch the long multi-paragraph caption. This
+    lane is the long one — trimming a caption by hand is easier than expanding one. Selecting it
+    hides the template picker (not merely disables it: an unrendered `ReferencePicker` also stops
+    fetching a library nothing will use), the जसाच्या तसा मजकूर and कॅप्शनही तयार करा toggles, and
+    पोस्टरवरील मजकूर. It takes the SOCIAL busy gate, TasksProvider's one-social-task-at-a-time rule
+    being kept rather than carved out for a run that paints nothing.
+  - **AI प्रॉम्प्ट** (`generations.image_prompt`, 0045) is a box under the text box, क्रिएटिव्ह only.
+    Fill it and **the entire assembled poster prompt is skipped**: `buildCustomPosterPrompt` sends
+    the DGIPR designer line, the officer's brief verbatim, the poster's text verbatim, and the
+    reserved-zone blocks. No palette, no arrangement anchor, no reference-structure block, no
+    BRIGHT_LOOK_RULE — and no `generatePosterCopy` call, for the reason the two verbatim lanes
+    beside it skip theirs. The hint says REPLACES in as many words, because an officer who types
+    one extra instruction expecting it to be ADDED to the usual rules would be reading the box
+    exactly backwards.
+    **The reserved-zone blocks are the one exception and are not a design opinion**:
+    `overlayTwitterChrome` composites the badge and footer onto the render in code on this lane
+    like every other, so a prompt silent about them produces a poster whose own text is then
+    destroyed by them — the failure already shipped twice (cc283a63, 97b64542).
+    It does NOT change which RENDER path runs, deliberately: a pinned template still puts
+    `designMode` on onbrand/adaptive, so the pin is the edit canvas and the brief is its only
+    instruction; unpinned, the lane is fresh and the poster is generated from scratch. The officer
+    answers that by pinning or not pinning, exactly as today. `referenceChromeRule` on the pinned
+    branch, `paintNoChromeRule` on the fresh one — a master is a finished poster carrying real
+    branding, and a copied badge survives BESIDE the stamped one.
+    **Insert-only, on the row rather than as a job option**, the `style_reference` (0035) /
+    `instructions` (0041) precedent: `startPosterRegenerateJob` and the retry path both re-read
+    the row, so a prompt held only in the create request would be dropped by the first
+    पुन्हा तयार करा — which would then re-render with the built prompt and look like the feature
+    failing at random. Additive, nullable, and `insertGeneration` omits the column unless
+    something was typed, so an un-applied 0045 disables this one field instead of failing every
+    create (the 0028 principle). The schema AND the route both scope it to a social run that
+    renders a poster, so a prompt can never be stored on a row nothing will read.
+    Feedback re-renders are untouched — `buildFeedbackPrompt` edits the finished poster and is a
+    different prompt; a custom-prompt poster takes pixel/marker feedback exactly like any other.
+    Verified 2026-08-22, all free: workspace typecheck **7/7 green**, eslint clean on all nine
+    touched files, prettier clean on every hunk of mine (five files report whole-file complaints
+    that are pre-existing — confirmed per file against `git show HEAD:` with CRLF normalised, zero
+    content diff, so do NOT `--write` them); the prompt harness at **+11 assertions**, three of
+    which are DENY checks (no colour specification, no arrangement anchor, no creative-control
+    brief) — check those first if the platform's opinions ever leak back into this lane; and eight
+    offline schema-guard checks (caption-only accepted only with `generateCaption`, imagePrompt
+    refused on बॅनर, यूट्यूब and the caption lane, and over its 4,000-character cap).
+    **Left for a real run** (one image charge each): a क्रिएटिव्ह poster with a brief and no
+    template, the same with a template pinned, and one फक्त कॅप्शन run confirming no poster row and
+    a long-form caption. **Deploy: 0045 → `@dgipr/schemas` → `@dgipr/database` →
+    `@dgipr/content-engine` dists → API + web** (API and web ship together — `imagePrompt` and the
+    caption card's request shape are one contract). No n8n, no new env.
+
+- **PDF OCR now defaults to Sarvam Document AI Digitise and keeps structured HTML**
+  (2026-08-22, no migration, no n8n): `OCR_PROVIDER` now resolves to `sarvam` when unset;
+  `OCR_PROVIDER=openai` remains the explicit rollback. The Sarvam lane moved off the legacy
+  `documentIntelligence.createJob → upload → start` client to the current
+  `POST /doc-ai/v1/job/digitise` contract and submits each selected ≤10-page PDF chunk as
+  `language=mr-IN`, `output_format=html`, `content_type=printed`. The existing spend/page
+  identity rules are unchanged: only officer-selected pages are copied into a chunk, jobs run
+  sequentially, and every result is mapped back to the original PDF page number.
+  - **HTML is the page source, not a decorative parallel answer.** Page-level HTML entries are
+    preferred; a whole-document HTML file is split only when explicit page wrappers or
+    top-level separators produce the exact expected count. If Sarvam changes the wrapper shape,
+    `metadata/page_NNN.json` remains the authority and its ordered/layout-tagged blocks are
+    rebuilt as semantic HTML, including Markdown/HTML tables, rather than guessing page breaks.
+  - **The review UI never injects OCR HTML.** `ExtractedText` parses it with `DOMParser` and
+    rebuilds only an allow-list of reading elements as React nodes; scripts, styles, embeds,
+    forms, links and every source attribute are discarded. Product CSS owns headings,
+    paragraphs, lists, quotations and horizontally scrollable tables. Sarvam HTML pages open in
+    this formatted view, with the existing exact-source textarea one click away for correction;
+    old Markdown table jobs and the OpenAI rollback still render as before.
+  - HTML tag names are stripped only for deterministic language detection, so a short Marathi
+    table is not misclassified as English merely because `table/tbody/tr/td` add Latin letters.
+  - Deployment requires `SARVAM_API_KEY`. If the hosting environment already has an explicit
+    `OCR_PROVIDER=openai`, remove it or set it to `sarvam`; changing the code default cannot
+    override an explicit deployment value. Deploy `@dgipr/content-engine` dist, then API + web.
+  Verified free: workspace typecheck **7/7 green**; content-engine and web production builds
+  green; eslint clean on all touched TS/TSX files; mocked Document AI transport/ZIP harness
+  **4/4**, provider-default harness **5/5**, and the proofreading offline harness green
+  including both new HTML-language checks. The full
+  content-engine lint remains blocked by the unrelated pre-existing irregular whitespace in
+  `src/intake/text-file.ts`; web lint exits green with three unrelated analytics warnings.
+  **Left for a real run** (OCR spend): upload a two-page printed Marathi PDF with a heading and
+  table, confirm the live `/doc-ai/v1` ZIP matches one of the exact-count page shapes, and check
+  the review card visually at desktop and phone widths.
+
+- **The video lockup belongs to the STITCH alone — nothing is burned into a stored clip**
+  (2026-08-21, no migration, no n8n): an officer regenerated a video and reported that every
+  scene they had NOT changed came back carrying the old, larger logo. It was not a stitch bug
+  and the reused clips were not stale — the lockup was simply stamped **twice**, and one of the
+  two was permanent. `overlayVideoLogo` burned the lockup into each clip's pixels *before
+  upload* (so the per-scene review players would be branded), and `assembleSilentVideo`
+  re-stamps it on every generated segment at stitch time. So a stored clip froze whatever
+  `VIDEO_LOCKUP_WIDTH_RATIO` was in force the day it rendered; when that ratio moved
+  **0.15 → 0.09** in `a61e1fe`, `clipIsCurrent` correctly skipped re-rendering the old clips,
+  the stitch laid the new smaller lockup over the same top-right anchor, and a smaller stamp
+  cannot cover a larger one. Only the scenes actually re-animated came back clean, because
+  there the two stamps were the same size and lined up.
+  - **Clips are now stored EXACTLY as the provider returned them.** `overlayVideoLogo` is
+    replaced by `validateSceneClip` — all that is left of it is the pre-upload duration gate,
+    which is worth keeping where a truncated render can still be re-rendered. Branding is the
+    stitch's alone, which makes the lockup size a **stitch-time** decision: it takes effect on
+    every free restitch (क्लिप्स पुन्हा जोडून व्हिडिओ तयार करा) and can never double up.
+  - **The review player lays the same artwork over the raw clip in CSS**, so what the officer
+    reviews still matches the finished video. `VIDEO_LOCKUP_WIDTH_RATIO` /
+    `VIDEO_LOCKUP_MARGIN_RATIO` moved to **`@dgipr/schemas`** — both `assemble.ts` and
+    `apps/web` must place it identically and `apps/web` cannot import poster-renderer (the
+    `combineIntakeSources` move). The artwork itself comes from a new
+    `GET /api/video/lockup.png` (a 320px transparent render, memoized per process) rather than
+    a copy in `apps/web/public`, so `renderGovernmentLockup` stays the one source of it.
+  - **The one non-obvious line is `marginTop`, not `top`.** The stitch offsets the lockup by a
+    fraction of the frame WIDTH on both axes. In CSS a percentage `top` resolves against the
+    container's HEIGHT, which on 16:9 footage would drop it ~1.8x too far down; a percentage
+    MARGIN resolves against the width. Measured in a real browser at two viewport widths.
+  - Dropping the per-clip pass also removes a full extra libx264 generation from every rendered
+    scene — the clip is uploaded as decoded from the provider rather than transcoded once first.
+  - **The affected project cannot be repaired for free.** A logo already burned into a stored
+    clip is in the pixels; re-animating those scenes (one paid clip render each) is the only way
+    to clear them. Everything rendered from this deploy onward is clean.
+  Verified 2026-08-21, all free: workspace typecheck **7/7 green**, eslint clean on all seven
+  touched files, prettier clean on every hunk of mine (four files report whole-file complaints
+  that are pre-existing CRLF — confirmed per file against prettier's own output with ``
+  stripped, zero content diff, so do NOT `--write` them); `video:preview:assemble` green with
+  two new assertions (the pre-upload gate passes a good clip and rejects a truncated one), and a
+  frame extracted from its output confirming the stitch still stamps the generated scenes; a
+  live `GET /api/video/lockup.png` returning a 320x308 RGBA PNG in 2 ms on the second hit; and a
+  headless-Chromium measurement of the overlay at 900px and 390px viewports returning **exactly
+  0.09 / 0.008 / 0.008** for width, right margin and top margin, click-through intact. **Left
+  for a real run** (clip spend): one animate, confirming the per-scene preview is branded by the
+  overlay and the finished video carries exactly one lockup. Deploy is `@dgipr/schemas` →
+  `@dgipr/poster-renderer` dists → API + web (ship together — the review overlay and the
+  unbranded clips are one contract).
+
 - **YouTube links are downloaded here now — ElevenLabs stopped being able to fetch them**
   (2026-08-19, no migration, no n8n): every pasted link on `/dlo`, `/transcribe` and `/chat`
   failed with `ElevenLabs STT failed (400): Failed to download the file from the provided URL
@@ -3660,10 +3880,9 @@ Canva OAuth authentication and poster handoff are implemented in `apps/api/src/r
     front of the form would buy is the wait. It is metered like the PDF read (`document_ocr`).
     Empty text is a real answer ("this photograph contributed nothing"), reported as a callout,
     **never** a failed file.
-  - **Images always go through OpenAI, ignoring `OCR_PROVIDER`.** That flag is the PDF rollback:
-    it picks between two backends that both take a PDF, so honouring it here would mean a second
-    image path that runs only in a configuration nobody uses — i.e. the path that is broken on
-    the day it is finally needed.
+  - **Images always go through OpenAI, ignoring `OCR_PROVIDER`.** That flag selects the PDF
+    backend (now Sarvam by default); photographs still have exactly one OpenAI path by
+    construction, so changing the PDF default does not silently change image OCR.
   - **`sharp` normalises before the call, and NOT for accuracy** — that was measured: a 3000 px
     and a 1000 px render of the same page read equally well. It is there for EXIF auto-rotation
     (a phone held upright writes a landscape image plus "rotate me", and ignoring the tag means

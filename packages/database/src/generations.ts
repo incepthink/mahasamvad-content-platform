@@ -52,6 +52,12 @@ export type GenerationRow = Readonly<{
   // editorial headline. Null/empty = resolve it automatically. Updatable, so a poster whose
   // heading came out wrong can be corrected and re-rendered.
   posterHeading: string | null;
+  // The officer's OWN prompt for the image model on a social poster run (migration 0045).
+  // When set, the platform's assembled poster prompt is not used at all — see
+  // buildCustomPosterPrompt. Null/empty = build the prompt as usual. Insert-only: both
+  // startGenerationJob and startPosterRegenerateJob re-read the row, so a retry or a redo
+  // must reproduce the same prompt rather than quietly falling back to the built one.
+  imagePrompt: string | null;
   // Optional pin: the exact reference image the run was asked to use (null =
   // automatic rotation; the FK sets null if the image is later deleted).
   referenceImageId: string | null;
@@ -172,6 +178,7 @@ type GenerationDbRow = {
   template_brand: string | null;
   heading: string | null;
   poster_heading: string | null;
+  image_prompt: string | null;
   reference_image_id: string | null;
   reference_type_id: string | null;
   source_generation_id: string | null;
@@ -222,6 +229,9 @@ function fromDbRow(row: GenerationDbRow): GenerationRow {
     // ?? null: a pre-0029 database has no such column (undefined), which every reader
     // already treats as "resolve the heading automatically".
     posterHeading: row.poster_heading ?? null,
+    // ?? null: a pre-0045 database has no such column (undefined), which every reader already
+    // treats as "no officer prompt — build the poster prompt as usual".
+    imagePrompt: row.image_prompt ?? null,
     referenceImageId: row.reference_image_id,
     referenceTypeId: row.reference_type_id,
     sourceGenerationId: row.source_generation_id,
@@ -358,6 +368,10 @@ export async function insertGeneration(
     // GenerationPatch too) — the officer usually discovers the heading is wrong only after
     // seeing the poster, and fixes it from the detail page.
     posterHeading?: string | undefined;
+    // Insert-only (migration 0045): the officer's own image prompt. Deliberately NOT in
+    // GenerationPatch — a redo must render the poster the officer asked for, and rewriting
+    // the brief is a new run.
+    imagePrompt?: string | undefined;
     // Insert-only (not in GenerationPatch): a pin never changes after creation.
     referenceImageId?: string | undefined;
     referenceTypeId?: string | undefined;
@@ -413,6 +427,9 @@ export async function insertGeneration(
       // radius to the one feature that needs it — the same reasoning that keeps 0028's style
       // write in its own best-effort update.
       ...(input.posterHeading ? { poster_heading: input.posterHeading } : {}),
+      // Same omit-unless-typed treatment (migration 0045), so an un-applied 0045 costs this
+      // one field rather than every create.
+      ...(input.imagePrompt ? { image_prompt: input.imagePrompt } : {}),
       reference_image_id: input.referenceImageId ?? null,
       reference_type_id: input.referenceTypeId ?? null,
       source_generation_id: input.sourceGenerationId ?? null,

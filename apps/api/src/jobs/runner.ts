@@ -12,6 +12,7 @@ import {
   buildArticleFeedbackPrompt,
   buildArticlePosterPrompt,
   buildFeedbackPrompt,
+  buildCustomPosterPrompt,
   buildPosterPrompt,
   buildYoutubeThumbnailPrompt,
   buildYoutubeFeedbackPrompt,
@@ -1728,6 +1729,23 @@ async function renderAndStoreSocialPoster(
   // model. Same contract as the fixed-template lane below, minus the template.
   const isFreshVerbatim = isFresh && designMode === 'fresh_verbatim';
 
+  // THE OFFICER WROTE THE PROMPT (migration 0045). Everything this function assembles for the
+  // image model is then skipped — see buildCustomPosterPrompt for what is sent instead, and why
+  // the reserved-zone blocks are the one thing that still travels.
+  //
+  // It does NOT change which of the two RENDER paths runs, and that is deliberate: a pinned
+  // template still puts designMode on onbrand/adaptive, so the resolved reference IS that pin
+  // and the master is edited through the thin workflow with the officer's brief as its only
+  // instruction; with no pin the lane is fresh/fresh_verbatim and the poster is generated from
+  // scratch. The officer answers that question by pinning or not pinning, exactly as today.
+  //
+  // Read off the ROW rather than taken as a job option: startPosterRegenerateJob and the retry
+  // path both re-read the row, and a prompt held only in the create request would be silently
+  // dropped by the first पुन्हा तयार करा — which would then re-render with the built prompt and
+  // look like the feature failing at random.
+  const customPrompt =
+    brand === 'cmo' ? null : (row.imagePrompt?.trim() ?? '') || null;
+
   // 1. Resolve the poster type + the master — FOR THE TEMPLATE MODES ONLY.
   //
   //    A 'fresh' run now resolves NOTHING (2026-08-07). It used to resolve one anyway and use it
@@ -1801,7 +1819,12 @@ async function renderAndStoreSocialPoster(
   // copy would be hidden editorial work over text the officer wrote to be printed, and
   // generatePosterCopy condenses to 3-6 points, which is exactly the content loss this mode exists
   // to avoid. It also saves the call outright.
-  const usesVerbatimText = isSimpleTemplateEdit || isFreshVerbatim;
+  // customPrompt skips it for the third time over, and for the same reason the two lanes beside
+  // it do: generatePosterCopy would rewrite the officer's text into a structured headline +
+  // points, which is hidden editorial work over text they wrote to be printed — and on this lane
+  // they have opted out of the platform's opinions about the poster altogether.
+  const usesVerbatimText =
+    isSimpleTemplateEdit || isFreshVerbatim || customPrompt !== null;
   let copyResult: Awaited<ReturnType<typeof generatePosterCopy>> | null = null;
   if (!usesVerbatimText) {
     // 2. Scheme-name lock source: verified glossary scheme/org names present in the note.
@@ -1931,33 +1954,41 @@ async function renderAndStoreSocialPoster(
   }
 
   // 4. Image prompt (pure string assembly, no model call).
-  const prompt = buildPosterPrompt({
-    copy: copyResult?.copy ?? {},
-    // The officer's text, on both verbatim lanes — printed onto the chosen template
-    // (isSimpleTemplateEdit) or typeset onto a from-scratch design (isFreshVerbatim).
-    information: usesVerbatimText ? row.note : undefined,
-    // Only reaches the fixed-template branch, which is the one that must show every item —
-    // each of them exactly once. The shortfall is deliberately NOT passed any more: it used to
-    // tell the image model to repeat the reference's rows, and "repeat" is the wrong word to
-    // put anywhere near a prompt that must reproduce the officer's text unchanged. It still
-    // warns the officer through posterCapacityWarnings above.
-    itemCount: isSimpleTemplateEdit ? resolved.itemCount : undefined,
-    copyStyle:
-      copyResult?.copyStyle ?? resolved?.type.copyStyle ?? FRESH_COPY_STYLE,
-    designMode,
-    brand,
-    // Both empty on a fresh run. buildPosterPrompt only demands a master URL for the modes that
-    // EDIT one, and it omits the STRUCTURE INSPIRATION block entirely when there is no summary —
-    // so a fresh prompt now carries the assigned palette and composition and nothing borrowed.
-    masterUrl: resolved?.master.url,
-    layoutSummary: resolved?.master.layoutSpec?.layoutSummary,
-    hasPhoto: copyResult?.hasPhoto ?? false,
-    artDirection: artDirection ?? undefined,
-    assignedPalette,
-    assignedLayout,
-    // The only one of these four the prompt actually emits — see the assignment above.
-    assignedPlacement,
-  });
+  const prompt = customPrompt
+    ? buildCustomPosterPrompt({
+        imagePrompt: customPrompt,
+        information: row.note,
+        // A resolved reference on this lane can only be the officer's own pin (a fresh run
+        // resolves nothing at all), so this is exactly "is the model editing an image?".
+        editsReference: resolved !== null,
+      })
+    : buildPosterPrompt({
+        copy: copyResult?.copy ?? {},
+        // The officer's text, on both verbatim lanes — printed onto the chosen template
+        // (isSimpleTemplateEdit) or typeset onto a from-scratch design (isFreshVerbatim).
+        information: usesVerbatimText ? row.note : undefined,
+        // Only reaches the fixed-template branch, which is the one that must show every item —
+        // each of them exactly once. The shortfall is deliberately NOT passed any more: it used to
+        // tell the image model to repeat the reference's rows, and "repeat" is the wrong word to
+        // put anywhere near a prompt that must reproduce the officer's text unchanged. It still
+        // warns the officer through posterCapacityWarnings above.
+        itemCount: isSimpleTemplateEdit ? resolved.itemCount : undefined,
+        copyStyle:
+          copyResult?.copyStyle ?? resolved?.type.copyStyle ?? FRESH_COPY_STYLE,
+        designMode,
+        brand,
+        // Both empty on a fresh run. buildPosterPrompt only demands a master URL for the modes that
+        // EDIT one, and it omits the STRUCTURE INSPIRATION block entirely when there is no summary —
+        // so a fresh prompt now carries the assigned palette and composition and nothing borrowed.
+        masterUrl: resolved?.master.url,
+        layoutSummary: resolved?.master.layoutSpec?.layoutSummary,
+        hasPhoto: copyResult?.hasPhoto ?? false,
+        artDirection: artDirection ?? undefined,
+        assignedPalette,
+        assignedLayout,
+        // The only one of these four the prompt actually emits — see the assignment above.
+        assignedPlacement,
+      });
 
   // 5. Render. 'fresh' paints from scratch via the direct image call — no master, and no n8n;
   //    the template modes edit the chosen master through the thin workflow.

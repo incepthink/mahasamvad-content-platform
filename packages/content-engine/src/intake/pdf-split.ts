@@ -175,6 +175,9 @@ export async function splitPdfPagesBySize(
   data: Buffer,
   maxBytes: number,
   pageNumbers?: readonly number[],
+  // A SECOND ceiling, for a backend that also caps how many pages one request may carry
+  // (Gemini reads at most 1,000 pages per document). Omit it for a byte-only bound.
+  maxPages: number = Number.POSITIVE_INFINITY,
 ): Promise<PdfChunk[]> {
   const source = await load(data);
   const total = source.getPageCount();
@@ -187,7 +190,9 @@ export async function splitPdfPagesBySize(
   // The whole selection may well fit — the common case by far, since most uploads are a few
   // pages — and then there is nothing to estimate or verify.
   const whole = await copyGroup(source, selection);
-  if (whole.data.length <= maxBytes) return [whole];
+  if (whole.data.length <= maxBytes && selection.length <= maxPages) {
+    return [whole];
+  }
 
   // Overshoot the estimate deliberately: `verify` below splits anything too big, and a group
   // that comes back under budget costs one wasted serialization, while one that comes back
@@ -196,11 +201,19 @@ export async function splitPdfPagesBySize(
     1,
     Math.ceil(whole.data.length / selection.length),
   );
-  const estimate = Math.max(1, Math.floor(maxBytes / averageBytes));
+  const estimate = Math.max(
+    1,
+    Math.min(Math.floor(maxBytes / averageBytes), maxPages),
+  );
 
   const verify = async (group: readonly number[]): Promise<PdfChunk[]> => {
     const chunk = await copyGroup(source, group);
-    if (chunk.data.length <= maxBytes || group.length === 1) return [chunk];
+    if (
+      (chunk.data.length <= maxBytes && group.length <= maxPages) ||
+      group.length === 1
+    ) {
+      return [chunk];
+    }
     const middle = Math.floor(group.length / 2);
     return [
       ...(await verify(group.slice(0, middle))),

@@ -156,17 +156,31 @@ export function estimateTranslateCostUsd(characters: number): number {
 // Reading a scanned PDF's PIXELS, per page. Two providers, two billing shapes, which is why
 // this is a per-provider function rather than one constant:
 //
-//   openai (the default — see ocr-provider.ts) bills TOKENS against OPENAI_API_KEY, and
+//   openai (the rollback — see ocr-provider.ts) bills TOKENS against OPENAI_API_KEY, and
 //     openai-doc.ts already runs through chatComplete, so its cost is ALREADY in the text
 //     line. Returning 0 here is correct and not a gap: charging the page rate too would
 //     double-count it. The page count is still recorded, because "how many pages did the
 //     department have read" is the question the analytics card is asking.
 //
-//   sarvam bills per page against its own credits and has never appeared in any cost scope,
-//     so this rate is the only figure available for it.
+//   sarvam (the default) bills per page against its own credits and returns no token usage,
+//     so this configured page rate is the figure recorded in the OCR task scope.
 export const SARVAM_OCR_PRICE_PER_PAGE_USD = 0.008;
 
+//   gemini (what /chat's attachments are read with — see intake/gemini-doc.ts) bills TOKENS
+//     against GEMINI_API_KEY, and unlike the OpenAI lane it does NOT run through
+//     recordChatUsage — there is no Gemini text price table in this file to run it through.
+//     So its cost is a CONFIGURED per-page estimate, and it is exactly that: a page of
+//     Devanagari is ~258 input tokens plus whatever it transcribes to. The calibration signal
+//     is real and is logged — gemini-doc prints the returned `usageMetadata` on every call —
+//     so read a few of those lines against the invoice once and edit this number.
+export const GEMINI_OCR_PRICE_PER_PAGE_USD = 0.002;
+
 export function estimateOcrCostUsd(provider: string, pages: number): number {
-  if (provider !== 'sarvam') return 0;
-  return Math.max(pages, 0) * SARVAM_OCR_PRICE_PER_PAGE_USD;
+  const perPage =
+    provider === 'sarvam'
+      ? SARVAM_OCR_PRICE_PER_PAGE_USD
+      : provider === 'gemini'
+        ? GEMINI_OCR_PRICE_PER_PAGE_USD
+        : 0;
+  return Math.max(pages, 0) * perPage;
 }

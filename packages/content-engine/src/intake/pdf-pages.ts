@@ -9,8 +9,8 @@
 //                                   documents, which are routine in government material.
 //                                   Costs money per page and can misread. Which backend
 //                                   runs is OCR_PROVIDER's business, not this file's:
-//                                   openai-doc.ts (default, one call per page) or
-//                                   sarvam-doc.ts (≤10-page async jobs).
+//                                   sarvam-doc.ts (default, ≤10-page HTML Digitise jobs) or
+//                                   openai-doc.ts (one call per page).
 //
 // So: try the text layer, use it when it reads cleanly, and fall back to OCR otherwise.
 // The gate cannot be perfect — a PDF typeset in a legacy non-Unicode Marathi font extracts
@@ -22,8 +22,8 @@
 // text items with no structure — the x-coordinates that mark a table's columns are the only
 // clue and they are not in the string — so a table of figures comes out as one run-on line,
 // its numbers detached from their headings. Government material is full of such tables and
-// the whole product rests on reading them correctly. Both OCR backends return Markdown,
-// tables included.
+// the whole product rests on reading them correctly. Sarvam returns structured HTML; the
+// OpenAI rollback returns Markdown. Both preserve tables.
 //
 // A SECOND reason, which is why flipping this back to 'auto' is not the harmless saving it
 // looks like: the documents this product actually receives are routinely typeset in a legacy
@@ -53,10 +53,7 @@ import {
   type PdfTextSource,
 } from './pdf-shared.js';
 import { extractTextLayerPages, textLayerVerdict } from './pdf-text-layer.js';
-import {
-  extractPdfPagesViaProvider,
-  ocrProviderName,
-} from './ocr-provider.js';
+import { extractPdfPagesViaProvider, ocrProviderName } from './ocr-provider.js';
 import { countPdfPages } from './pdf-split.js';
 
 export type PdfExtraction = Readonly<{
@@ -129,7 +126,10 @@ export async function extractPdfPagesDetailed(
 
   // The default mode never looks at the text layer FIRST. `source: 'text-layer'` is still
   // honoured — it is an explicit caller/user override, not the policy default.
-  if (source === 'ocr' || (source === 'auto' && pdfExtractionMode() === 'ocr')) {
+  if (
+    source === 'ocr' ||
+    (source === 'auto' && pdfExtractionMode() === 'ocr')
+  ) {
     try {
       return {
         source: 'ocr',
@@ -144,7 +144,7 @@ export async function extractPdfPagesDetailed(
       // the tables and legacy-font reasons for preferring OCR are unchanged, and a genuinely
       // scanned document has no text layer to fall back to, so it still fails as before.
       console.warn(
-        `[pdf-pages] ${name}: ${ocrProviderName()} OCR returned no text — trying the PDF's own text layer before giving up.`,
+        `[pdf-pages] ${name}: ${ocrProviderName(options?.ocrProvider)} OCR returned no text — trying the PDF's own text layer before giving up.`,
       );
       const salvaged = await textLayerFallback(name, data, options?.pages);
       if (salvaged) {
@@ -189,7 +189,7 @@ export async function extractPdfPagesDetailed(
   }
 
   console.log(
-    `[pdf-pages] ${name}: text layer verdict '${verdict}' — falling back to ${ocrProviderName()} OCR${
+    `[pdf-pages] ${name}: text layer verdict '${verdict}' — falling back to ${ocrProviderName(options?.ocrProvider)} OCR${
       options?.pages ? ` for ${options.pages.length} selected page(s)` : ''
     }.`,
   );

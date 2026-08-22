@@ -23,6 +23,8 @@ import {
   VIDEO_SCENE_LIMIT,
   VIDEO_STYLE_MAX_CHARS,
   VIDEO_TOTAL_FIT_TOLERANCE,
+  VIDEO_LOCKUP_MARGIN_RATIO,
+  VIDEO_LOCKUP_WIDTH_RATIO,
   UPLOADED_NARRATION_VOICE,
   VIDEO_TOTAL_SECONDS,
   clipSecondsForNarration,
@@ -42,6 +44,8 @@ import {
   startVideoAnimation,
   startVideoStoryboard,
   uploadVideoSceneReferenceImage,
+  useStartFrameAsEndFrame,
+  API_URL,
 } from '../../../lib/api';
 import { useVideoProject } from '../../../lib/useVideoProject';
 import {
@@ -182,19 +186,52 @@ function WorkingCard({ detail }: { detail: VideoProjectDetail }) {
                     <p className="hint" style={{ marginBottom: 6 }}>
                       {STR.videoClipPreview}
                     </p>
-                    <video
-                      key={scene.clipUrl}
-                      controls
-                      muted
-                      preload="metadata"
-                      src={scene.clipUrl}
+                    {/* The stored clip is the provider's own footage, with no
+                        branding burned in — the government lockup belongs to
+                        the stitch alone, so that changing its size takes effect
+                        on a free restitch instead of being frozen into every
+                        paid clip. The preview therefore lays the same artwork
+                        over the player in CSS, at the same proportions the
+                        stitch uses, so what the officer reviews here matches
+                        the finished video. */}
+                    <div
                       style={{
-                        display: 'block',
+                        position: 'relative',
                         width: '100%',
                         maxWidth: 560,
-                        borderRadius: 8,
                       }}
-                    />
+                    >
+                      <video
+                        key={scene.clipUrl}
+                        controls
+                        muted
+                        preload="metadata"
+                        src={scene.clipUrl}
+                        style={{
+                          display: 'block',
+                          width: '100%',
+                          borderRadius: 8,
+                        }}
+                      />
+                      <img
+                        src={`${API_URL}/api/video/lockup.png`}
+                        alt=""
+                        aria-hidden
+                        style={{
+                          position: 'absolute',
+                          top: 0,
+                          right: `${VIDEO_LOCKUP_MARGIN_RATIO * 100}%`,
+                          // A percentage MARGIN resolves against the containing
+                          // block's width in CSS, which is what makes this the
+                          // same offset the stitch uses. `top` would not: that
+                          // percentage is of the HEIGHT, so on 16:9 footage it
+                          // would land the lockup ~1.8x too far down.
+                          marginTop: `${VIDEO_LOCKUP_MARGIN_RATIO * 100}%`,
+                          width: `${VIDEO_LOCKUP_WIDTH_RATIO * 100}%`,
+                          pointerEvents: 'none',
+                        }}
+                      />
+                    </div>
                   </div>
                 ) : null}
               </div>
@@ -232,6 +269,11 @@ export default function VideoProjectPage({
   >({});
   // Two-step confirm for the full animate (irreversible spend).
   const [animateArmed, setAnimateArmed] = useState(false);
+  // Scenes the officer ticked for a re-shoot whose clip is already current.
+  // ONLY those — a scene the animate is going to render anyway is never in
+  // here, so this list stays what it is sent as: an addition to the job's own
+  // stale set, never a replacement for it.
+  const [extraScenes, setExtraScenes] = useState<readonly number[]>([]);
   const lastStatus = useRef<VideoProjectDetail['status'] | null>(null);
 
   // Seed the drafts on each transition INTO a review gate ("per transition",
@@ -246,7 +288,10 @@ export default function VideoProjectPage({
       setDrafts(draftsFrom(detail.scenes));
       setStyleDraft(detail.style ?? '');
     }
-    if (detail.status !== 'storyboard_ready') setAnimateArmed(false);
+    if (detail.status !== 'storyboard_ready') {
+      setAnimateArmed(false);
+      setExtraScenes([]);
+    }
     lastStatus.current = detail.status;
   }, [detail]);
 
@@ -340,6 +385,23 @@ export default function VideoProjectPage({
         scene.stillUrl !== undefined &&
         (scene.endVisualBrief === undefined || scene.endStillUrl !== undefined),
     );
+  // The scenes the animate job will render whatever the officer ticks: one with
+  // no clip yet, and one whose clip is stale (animated from a frame, ending,
+  // window or motion brief that has since changed). `clipStale` is the API's
+  // report of the job's OWN test, so this list cannot claim a scene will be
+  // re-shot when the job would skip it, or the reverse.
+  const requiredScenes = detail.scenes
+    .map((scene, index) =>
+      scene.clipUrl === undefined || scene.clipStale === true ? index : -1,
+    )
+    .filter((index) => index >= 0);
+  // Ticks that still name a scene. A save clears them (see saveStoryboardScript)
+  // and a required scene is never held here, so this is normally just the list —
+  // the filters are what keep a stale index from reaching the route as a 400.
+  const extraSelected = extraScenes.filter(
+    (index) => index < detail.scenes.length && !requiredScenes.includes(index),
+  );
+
   // Gate 2 holds unsaved script edits. Until they are committed the redraw
   // routes (which act on STORED scenes) cannot reach an inserted card, and
   // animating would render the scene list as it was before the edit — so the
@@ -507,6 +569,11 @@ export default function VideoProjectPage({
         scenes: scriptPayload(drafts),
       });
       setDrafts(draftsFrom(updated.scenes));
+      // The ticks below the animate button are scene INDEXES, and a save may
+      // have inserted, removed or reordered scenes — so they no longer name the
+      // scenes they were put on. Dropped rather than remapped: an index that
+      // silently moved would buy the wrong clip.
+      setExtraScenes([]);
     });
 
   // Gate 1's re-plan. Sends the same split the save would, but the fields the
@@ -604,6 +671,26 @@ export default function VideoProjectPage({
   // there renders the DRAFT's end brief over the stored scene, so leaving it
   // behind would both keep a phantom end frame on screen and put the deleted
   // brief straight back on the next "बदल जतन करा".
+  // Free and instant: the scene's end frame becomes its own start frame, so the
+  // shot holds on that composition. The gate-2 draft is patched alongside the
+  // row for the same reason the delete does it — that card renders the DRAFT's
+  // end brief over the stored scene, so an unpatched draft would put the old
+  // (or empty) brief straight back on the next "बदल जतन करा".
+  const useStartAsEndFrame = (index: number, cardIndex: number) =>
+    act(async () => {
+      await useStartFrameAsEndFrame(id, index);
+      // The API sets the end brief to the STORED start brief (it is now the
+      // description of the frame standing at the end), so the draft is given
+      // the same string rather than the card's possibly-unsaved one — an
+      // unpatched draft would overwrite it with the old text on the next save,
+      // and a different string would report the card dirty for no edit.
+      const stored = detail.scenes[index];
+      patchDraft(cardIndex, {
+        endVisualBrief:
+          stored?.openingVisualBrief ?? stored?.visualBrief ?? '',
+      });
+    });
+
   const deleteEndFrame = (index: number, cardIndex: number) =>
     act(async () => {
       await deleteVideoSceneEndFrame(id, index);
@@ -858,6 +945,8 @@ export default function VideoProjectPage({
                         void redrawEndStill(draft.sourceIndex!, endBrief),
                       onDeleteEndFrame: () =>
                         void deleteEndFrame(draft.sourceIndex!, index),
+                      onUseStartAsEnd: () =>
+                        void useStartAsEndFrame(draft.sourceIndex!, index),
                       onMotionBriefSave: (motionBrief: string) =>
                         void saveMotionBrief(draft.sourceIndex!, motionBrief),
                     }
@@ -956,7 +1045,7 @@ export default function VideoProjectPage({
                     onClick={() =>
                       void act(async () => {
                         setAnimateArmed(false);
-                        await startVideoAnimation(id);
+                        await startVideoAnimation(id, extraSelected);
                       })
                     }
                   >
@@ -992,6 +1081,69 @@ export default function VideoProjectPage({
                 {STR.videoStillPending}
               </p>
             ) : null}
+            {/* Which scenes this spend buys. Every scene the job is going to
+                render is ticked and LOCKED: unticking one would rejoin a clip
+                animated from a frame the officer has already replaced — old
+                footage in a video they believe they just fixed — so the control
+                only ever adds. On a first run every scene is required, so the
+                rows are all locked and the hint says there is nothing to choose
+                — they are still listed, because that column of ticks is what
+                the officer is about to pay for. */}
+            <div className="reshoot">
+              <p className="reshoot-title">{STR.videoReshootTitle}</p>
+              <p className="hint">
+                {requiredScenes.length === detail.scenes.length
+                  ? STR.videoReshootAll
+                  : STR.videoReshootHint}
+              </p>
+              <ul className="reshoot-list">
+                {detail.scenes.map((scene, index) => {
+                  const required = requiredScenes.includes(index);
+                  const checked = required || extraSelected.includes(index);
+                  return (
+                    <li
+                      key={index}
+                      className={`reshoot-row${required ? ' is-locked' : ''}`}
+                    >
+                      <label className="reshoot-row-head">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={busy || required}
+                          onChange={(event) =>
+                            setExtraScenes((current) =>
+                              event.target.checked
+                                ? [...current, index]
+                                : current.filter((i) => i !== index),
+                            )
+                          }
+                        />
+                        <span className="reshoot-row-name">
+                          {`${STR.videoSceneLabel} ${index + 1}`}
+                        </span>
+                        {/* The scene's own line, so the officer can tell which
+                            one this is without counting cards above. */}
+                        <span className="reshoot-row-beat">
+                          {scene.beat ?? scene.narration}
+                        </span>
+                        <span className="reshoot-row-note">
+                          {required
+                            ? STR.videoReshootRequired
+                            : checked
+                              ? null
+                              : STR.videoReshootKeeping}
+                        </span>
+                      </label>
+                    </li>
+                  );
+                })}
+              </ul>
+              <p className="hint">
+                {STR.videoReshootSelected}:{' '}
+                {requiredScenes.length + extraSelected.length} /{' '}
+                {detail.scenes.length}
+              </p>
+            </div>
             {formError ? <p className="form-error">{formError}</p> : null}
           </section>
         </>
@@ -1008,6 +1160,7 @@ export default function VideoProjectPage({
           // The fix panel maps card position to scene index directly (it walks
           // detail.scenes, not the drafts), so the two indexes are the same one.
           onDeleteEndFrame={(index) => void deleteEndFrame(index, index)}
+          onUseStartAsEnd={(index) => void useStartAsEndFrame(index, index)}
           onSaveMotionBrief={(index, motionBrief) =>
             void saveMotionBrief(index, motionBrief)
           }

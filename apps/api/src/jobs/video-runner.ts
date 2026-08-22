@@ -47,8 +47,8 @@ import {
 import {
   assembleSilentVideo,
   muxNarration,
-  overlayVideoLogo,
   renderCaptionOverlay,
+  validateSceneClip,
   validateVideoOutput,
   wavDurationSeconds,
   type SceneOverlay,
@@ -1206,8 +1206,12 @@ async function renderSceneClip(
     // it into the prompt text. Either way the caller just supplies the list.
     negativePrompt: CLIP_NEGATIVE_PROMPT,
   });
-  const clip = await overlayVideoLogo(rawClip, {
-    aspectRatio: aspectOf(row),
+  // The clip is stored EXACTLY as the provider returned it — the government
+  // lockup is stamped by the stitch, never burned in here. See
+  // validateSceneClip's header: a burned-in lockup is permanent, so a stored
+  // clip would freeze the lockup size of the day it rendered and double up
+  // against the stitch's current one on every reuse.
+  await validateSceneClip(rawClip, {
     expectedDurationSeconds: scene.durationSeconds,
   });
 
@@ -1217,7 +1221,7 @@ async function renderSceneClip(
     (candidate) => [
       {
         path: clipStoragePath(row.id, index, candidate),
-        data: clip,
+        data: rawClip,
         contentType: 'video/mp4',
       },
     ],
@@ -1266,6 +1270,15 @@ function clipIsCurrent(scene: VideoSceneEntry): boolean {
     (scene.clipMotionBrief === undefined ||
       scene.clipMotionBrief === (scene.motionBrief ?? ''))
   );
+}
+
+// The one place anything outside this file may ask whether a scene's clip will
+// be re-rendered on the next animate. The detail payload's `clipStale` is
+// derived from it, so the checkboxes at gate 2 cannot disagree with what the
+// job below actually does — they used to, the payload having carried its own
+// inline copy of this test that omitted the window check.
+export function clipNeedsRender(scene: VideoSceneEntry): boolean {
+  return !clipIsCurrent(scene);
 }
 
 // True once every scene carries narration audio — i.e. the project has been
@@ -1461,15 +1474,24 @@ async function stitchAndPersist(
 // stitch. A scene's Veo failure STOPS the run — the remaining renders would
 // spend real money while the video already cannot stitch — but every clip that
 // finished before it is persisted, so the retry re-renders only what's missing.
-export function startVideoAnimateJob(client: SupabaseClient, id: string): void {
+//
+// `forcedScenes` are scenes the officer ticked at gate 2 whose clip is already
+// current — an extra re-shoot ON TOP OF the stale set, never a replacement for
+// it (see StartVideoAnimationRequestSchema for why it cannot subtract).
+export function startVideoAnimateJob(
+  client: SupabaseClient,
+  id: string,
+  forcedScenes: readonly number[] = [],
+): void {
   runVideoJob(client, id, 'video_clip_creation', async () => {
     const row = await requireProject(client, id);
     await updateVideoProject(client, id, { step: 'animate', error: null });
 
+    const forced = new Set(forcedScenes);
     const scenes = [...row.scenes];
     await ensureMotionDirection(client, id, row, scenes);
     for (const [index, scene] of scenes.entries()) {
-      if (clipIsCurrent(scene)) {
+      if (clipIsCurrent(scene) && !forced.has(index)) {
         if (scene.status !== 'done') {
           scenes[index] = { ...scene, status: 'done' };
           await updateVideoProject(client, id, { scenes });

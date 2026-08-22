@@ -9,11 +9,12 @@
 // exists to keep a nonsense request from reaching a paid OCR call.
 
 import type { FastifyInstance } from 'fastify';
-import { documentKindOf } from '@dgipr/content-engine';
+import { chatOcrProviderName, documentKindOf } from '@dgipr/content-engine';
 import type { SupabaseClient, UsageFeature } from '@dgipr/database';
 import {
   AnalyticsFeatureKeySchema,
   DOCUMENT_MAX_BYTES,
+  DocumentUploadSurfaceSchema,
   ExtractDocumentRequestSchema,
   ReextractDocumentRequestSchema,
 } from '@dgipr/schemas';
@@ -37,6 +38,11 @@ export function registerDocumentRoutes(
     // attributable to nobody. Optional: an older web build sends none and the read is
     // simply not attributed, which is better than guessing a card to put it on.
     let feature: UsageFeature | null = null;
+    // Which surface uploaded this, when that changes HOW the document is read. Only /chat
+    // sends one, and it selects the whole-document Gemini backend (see gemini-doc.ts). The
+    // browser names the SURFACE, never the provider: what a paid read runs on is a server
+    // decision, and an unrecognised value simply leaves the deployment's default in place.
+    let ocrProvider: string | null = null;
     try {
       // Per-request limits: the global multipart config is sized for small reference
       // images. DOCUMENT_MAX_BYTES is unlimited, so this override exists to LIFT that
@@ -52,6 +58,12 @@ export function registerDocumentRoutes(
           if (part.fieldname === 'feature') {
             const parsed = AnalyticsFeatureKeySchema.safeParse(part.value);
             if (parsed.success) feature = parsed.data;
+          }
+          if (part.fieldname === 'surface') {
+            const parsed = DocumentUploadSurfaceSchema.safeParse(part.value);
+            if (parsed.success && parsed.data === 'chat') {
+              ocrProvider = chatOcrProviderName();
+            }
           }
           continue;
         }
@@ -86,7 +98,14 @@ export function registerDocumentRoutes(
       // Probes only. Nothing reaches Sarvam until the user has picked pages at /extract.
       return reply
         .code(202)
-        .send(await startDocumentIntake(upload.name, upload.data, feature));
+        .send(
+          await startDocumentIntake(
+            upload.name,
+            upload.data,
+            feature,
+            ocrProvider,
+          ),
+        );
     } catch (error) {
       request.log.error(error, 'document probe failed');
       return reply.code(400).send({

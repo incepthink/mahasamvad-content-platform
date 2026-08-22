@@ -1028,6 +1028,21 @@ export async function deleteVideoSceneEndFrame(
   });
 }
 
+// One scene's END frame, taken from its own START frame. Free, synchronous and
+// instant: no image is generated, the scene is simply pointed at the frame it
+// already has, so the clip holds on that composition instead of ending
+// somewhere else. A clip already animated from a different ending is reported
+// stale rather than discarded, so re-animating it stays the officer's call.
+export async function useStartFrameAsEndFrame(
+  id: string,
+  index: number,
+): Promise<void> {
+  await requestJson(
+    `/api/video/projects/${id}/scenes/${index}/end-frame/from-start`,
+    { method: 'POST' },
+  );
+}
+
 // One scene's motion direction, hand-edited. Free and synchronous — it is an
 // input to the clip prompt only, so no frame is discarded; it applies to the
 // next animation of that scene.
@@ -1042,10 +1057,18 @@ export async function saveVideoSceneMotion(
   });
 }
 
-// THE spend call: Veo-animates every scene from its approved still. On a retry
-// after a partial failure only the missing scenes render again.
-export async function startVideoAnimation(id: string): Promise<void> {
-  await requestJson(`/api/video/projects/${id}/animate`, { method: 'POST' });
+// THE spend call: animates every scene whose clip is missing or outdated, from
+// its approved still. On a retry after a partial failure only those render
+// again. `scenes` names EXTRA scenes the officer chose to re-shoot even though
+// their clip is current — it only ever adds to that set, never narrows it.
+export async function startVideoAnimation(
+  id: string,
+  scenes: readonly number[] = [],
+): Promise<void> {
+  await requestJson(`/api/video/projects/${id}/animate`, {
+    method: 'POST',
+    body: JSON.stringify({ scenes }),
+  });
 }
 
 // Post-render fix: re-animate ONE scene and restitch; the previous video stays

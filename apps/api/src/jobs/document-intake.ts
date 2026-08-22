@@ -63,6 +63,12 @@ export type DocumentIntakeJob = {
   // Optional and NEVER inferred: an absent value records no service row, which is honest,
   // where guessing a feature would put one surface's spend on another's card.
   feature: UsageFeature | null;
+  // Which OCR backend this job's PDF is read with, overriding OCR_PROVIDER. Set from the
+  // declared upload SURFACE at create time and carried for the job's life, so a re-read
+  // (the "read it with OCR instead" override) uses the same backend the first read did —
+  // otherwise the same document could come back in two different shapes on one screen.
+  // null = the deployment's default, which is every surface except /chat.
+  ocrProvider: string | null;
   createdAt: string;
   touchedAt: number;
 };
@@ -166,6 +172,7 @@ export async function startDocumentIntake(
   fileName: string,
   data: Buffer,
   feature: UsageFeature | null = null,
+  ocrProvider: string | null = null,
 ): Promise<{
   id: string;
   kind: DocumentKind;
@@ -189,6 +196,7 @@ export async function startDocumentIntake(
     extractProgress: null,
     error: null,
     feature,
+    ocrProvider,
     createdAt: new Date().toISOString(),
     touchedAt: Date.now(),
   };
@@ -247,6 +255,9 @@ function runExtraction(
             source,
             pages,
             timeoutMs: OCR_TIMEOUT_MS,
+            // Undefined for every surface but /chat, which is what leaves the published-output
+            // surfaces on OCR_PROVIDER exactly as before.
+            ...(job.ocrProvider ? { ocrProvider: job.ocrProvider } : {}),
             // OCR runs one ≤10-page Sarvam job at a time, so a long scan is minutes of
             // spinner without this.
             onProgress: (pagesDone, pageCount) => {

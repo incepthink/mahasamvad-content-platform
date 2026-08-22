@@ -97,6 +97,7 @@ export function VideoSceneCard({
   onRedraw,
   onRedrawEnd,
   onDeleteEndFrame,
+  onUseStartAsEnd,
   onMotionBriefSave,
   onReanimate,
   onInsertAfter,
@@ -128,6 +129,11 @@ export function VideoSceneCard({
   // alone. Free — no frame is drawn — so it sits beside the redraw button
   // rather than behind the spend confirmations.
   onDeleteEndFrame?: (() => void) | undefined;
+  // Makes this scene's END frame its own START frame. Free and instant — no
+  // image is generated, so it sits inside the end-frame fold beside the render
+  // button rather than behind a spend confirmation. Offered only once a start
+  // frame exists, since it is the picture being reused.
+  onUseStartAsEnd?: (() => void) | undefined;
   // Saves the scene's motion direction. Free — it feeds the CLIP prompt only,
   // so no frame is discarded and the edit lands on the next animation.
   onMotionBriefSave?: ((motionBrief: string) => void) | undefined;
@@ -696,6 +702,29 @@ export function VideoSceneCard({
                   ? STR.videoRedrawEndStill
                   : STR.videoRenderEndStill}
             </button>
+            {/* The free answer to the same question, and the reason it sits
+                beside the render button rather than under it: the officer often
+                does not want a DIFFERENT ending, they want no change at all.
+                Offered with or without an existing end frame — with one it
+                replaces it, without one it is how an end frame is added for
+                nothing. Hidden while the delete confirm is armed, so that pair
+                of buttons stands alone. */}
+            {briefOpen === 'end' &&
+            onUseStartAsEnd &&
+            scene.stillUrl !== undefined &&
+            !deleteEndArmed ? (
+              <button
+                type="button"
+                className="btn btn-small"
+                disabled={busy}
+                onClick={() => {
+                  setBriefOpen(null);
+                  onUseStartAsEnd();
+                }}
+              >
+                {STR.videoUseStartAsEnd}
+              </button>
+            ) : null}
             {/* Beside the redraw, because this is the other answer to the same
                 question: the officer is looking at an end frame they do not
                 want. Free, so it is not held behind the spend confirmations —
@@ -736,6 +765,13 @@ export function VideoSceneCard({
               )
             ) : null}
           </div>
+          {briefOpen === 'end' &&
+          onUseStartAsEnd &&
+          scene.stillUrl !== undefined ? (
+            <p className="hint" style={{ marginTop: 8 }}>
+              {STR.videoUseStartAsEndHint}
+            </p>
+          ) : null}
           {briefOpen === 'end' && hasEndFrame && onDeleteEndFrame ? (
             <p className="hint" style={{ marginTop: 8 }}>
               {STR.videoDeleteEndStillHint}

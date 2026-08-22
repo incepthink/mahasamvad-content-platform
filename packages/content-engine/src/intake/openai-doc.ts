@@ -108,11 +108,16 @@ const PAGE_TIMEOUT_MS = Number.parseInt(
 // formatting second, because everything downstream — the glossary name lock, the designation
 // pass, the never-invent rule the article prompt rests on — treats this text as the source
 // document itself and cannot tell a helpful paraphrase from what was printed.
-// `subject` is what the model is looking at: a rendered PDF page, or a PHOTOGRAPH of one
-// (intake/image-ocr.ts, which shares this prompt so an officer's phone snap of a GR is held to
-// exactly the same fidelity rules as the same GR uploaded as a PDF). Only the opening two
-// lines and ONE fidelity bullet differ — everything about names, numerals, tables and format
-// is common, which is the reason this is a parameter rather than a second prompt free to drift.
+// `subject` is what the model is looking at, and there are three because three backends read
+// the same material in three shapes:
+//   'page'      one rendered PDF page, with its neighbours attached as context (this file).
+//   'image'     a PHOTOGRAPH of a page (intake/image-ocr.ts), so an officer's phone snap of a
+//               GR is held to exactly the same fidelity rules as the same GR uploaded as a PDF.
+//   'document'  the WHOLE document in one call, answering with one entry per page
+//               (intake/gemini-doc.ts, whose model takes up to 1,000 pages at once).
+// Only the opening lines and ONE fidelity bullet differ — everything about names, numerals,
+// tables and format is common, which is the reason this is a parameter rather than three
+// prompts free to drift apart.
 //
 // THE PROMPT DOES NOT ASK FOR MARATHI, AND MUST NOT. It used to open "…into Marathi text" and
 // close with "Transcribe this page as Marathi Markdown", which left an English or bilingual
@@ -124,7 +129,9 @@ const PAGE_TIMEOUT_MS = Number.parseInt(
 // language and script it is printed in — which is the same instruction Marathi always needed,
 // just stated without naming one language. Every Marathi-specific guarantee below (the legacy
 // non-Unicode font rule, the Devanagari numeral rules, [अस्पष्ट]) is untouched.
-export function ocrSystemPrompt(subject: 'page' | 'image' = 'page'): string {
+export function ocrSystemPrompt(
+  subject: 'page' | 'image' | 'document' = 'page',
+): string {
   return [
     'You transcribe pages of official Government of Maharashtra documents.',
     ...(subject === 'image'
@@ -132,18 +139,35 @@ export function ocrSystemPrompt(subject: 'page' | 'image' = 'page'): string {
           'You are given ONE image — a photograph, scan or screenshot of an official document,',
           'notice, letter, table or page. Return what it shows and nothing else.',
         ]
-      : [
-          'You are given a document and asked for ONE page of it. Return that page and',
-          'nothing else.',
-          '',
-          'THE OTHER PAGES ARE CONTEXT, NOT PART OF YOUR ANSWER. They are the same document,',
-          'so where the page you were asked for is smudged, faint, creased or obscured — by a',
-          'signature written over it, a scanner streak, a fold — the other pages very often',
-          'print the same name, designation, office, scheme name or term clearly. Use them for',
-          'that, and only that. Never transcribe them, never continue into them, and never',
-          'carry a fact from them onto this page: if something is on page 4 and not on the page',
-          'you were asked for, it does not belong in your answer.',
-        ]),
+      : subject === 'document'
+        ? [
+            'You are given a complete document and asked to transcribe ALL of it, one entry per',
+            'page, in the order the pages appear.',
+            '',
+            'ONE ENTRY PER PAGE, ALWAYS. You are told how many pages the document has and your',
+            'answer must have exactly that many entries. A page that is blank returns an EMPTY',
+            'entry — never skip it, never merge two pages into one entry, and never split one',
+            "page's content across two.",
+            '',
+            'THE OTHER PAGES ARE CONTEXT FOR READING, NOT CONTENT TO MOVE. They are the same',
+            'document, so where one page is smudged, faint, creased or obscured — by a signature',
+            'written over it, a scanner streak, a fold — another page very often prints the same',
+            'name, designation, office, scheme name or term clearly. Use them for that, and only',
+            'that. Each entry contains ONLY what is printed on its own page: never carry a fact',
+            'from page 4 onto page 2 because it would fit there.',
+          ]
+        : [
+            'You are given a document and asked for ONE page of it. Return that page and',
+            'nothing else.',
+            '',
+            'THE OTHER PAGES ARE CONTEXT, NOT PART OF YOUR ANSWER. They are the same document,',
+            'so where the page you were asked for is smudged, faint, creased or obscured — by a',
+            'signature written over it, a scanner streak, a fold — the other pages very often',
+            'print the same name, designation, office, scheme name or term clearly. Use them for',
+            'that, and only that. Never transcribe them, never continue into them, and never',
+            'carry a fact from them onto this page: if something is on page 4 and not on the page',
+            'you were asked for, it does not belong in your answer.',
+          ]),
     '',
     'FIDELITY — this is not a summary, not a rewrite and NEVER a translation:',
     `- Transcribe what is on the ${subject === 'image' ? 'image' : 'page'}. Never add, infer, complete or explain anything.`,

@@ -426,6 +426,15 @@ export function registerGenerationRoutes(
         isArticleCategory(body.category) && !body.providedArticle
           ? body.instructions
           : undefined,
+      // The officer's own image prompt (migration 0045) — social runs that actually render a
+      // poster. The schema already rejects it anywhere else with a message; this is the same
+      // rule applied to what gets STORED, so a future caller that slips past the schema still
+      // cannot leave a prompt on a row nothing will read. insertGeneration omits the column
+      // when absent, so an un-applied 0045 costs this field rather than every create.
+      imagePrompt:
+        isSocialCategory(body.category) && rendersPoster
+          ? body.imagePrompt
+          : undefined,
     });
     // Twitter/Facebook → external n8n social-post job; news/scheme → in-process
     // article pipeline. A social run is poster-only unless the caller asked for a

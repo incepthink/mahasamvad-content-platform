@@ -25,6 +25,7 @@ export function VideoResultView({
   onRedrawStill,
   onRedrawEndStill,
   onDeleteEndFrame,
+  onUseStartAsEnd,
   onSaveMotionBrief,
   onReanimateScene,
   onNarrate,
@@ -41,6 +42,9 @@ export function VideoResultView({
   // Drops one scene's end frame. Free; the scene's clip is then reported stale
   // and re-animating it stays the officer's call.
   onDeleteEndFrame: (index: number) => void;
+  // Points one scene's end frame at its own start frame. Free — nothing is
+  // rendered — so the shot holds instead of ending elsewhere.
+  onUseStartAsEnd: (index: number) => void;
   // Saves one scene's motion direction. Free and frame-preserving; it applies
   // when that scene is re-animated from the same panel.
   onSaveMotionBrief: (index: number, motionBrief: string) => void;
@@ -193,6 +197,7 @@ export function VideoResultView({
               onRedraw={(brief) => onRedrawStill(index, brief)}
               onRedrawEnd={(endBrief) => onRedrawEndStill(index, endBrief)}
               onDeleteEndFrame={() => onDeleteEndFrame(index)}
+              onUseStartAsEnd={() => onUseStartAsEnd(index)}
               onMotionBriefSave={(motionBrief) =>
                 onSaveMotionBrief(index, motionBrief)
               }

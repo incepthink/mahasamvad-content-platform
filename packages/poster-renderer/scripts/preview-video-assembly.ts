@@ -14,8 +14,8 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import {
   assembleSilentVideo,
-  overlayVideoLogo,
   resolveFfmpeg,
+  validateSceneClip,
 } from '../src/video/assemble.js';
 
 const execFileAsync = promisify(execFile);
@@ -64,10 +64,17 @@ async function main(): Promise<void> {
     makeStubClip('green', 2, '1920x1080'),
     makeStubClip('blue', 2),
   ]);
-  clips[0] = await overlayVideoLogo(clips[0]!, {
-    aspectRatio: '16:9',
+  // The pre-upload gate the runner applies to every rendered clip. Clips are
+  // stored unbranded — the stitch below is the only thing that stamps the
+  // lockup — so this only has to prove the duration check passes here and
+  // rejects a truncated render.
+  const checked = await validateSceneClip(clips[0]!, {
     expectedDurationSeconds: 2,
   });
+  assert.ok(
+    checked.durationSeconds >= 1.9,
+    `stub clip measured ${checked.durationSeconds}s`,
+  );
 
   console.log('Stitching…');
   const video = await assembleSilentVideo(clips, [], {
@@ -93,6 +100,11 @@ async function main(): Promise<void> {
     /failed validation/,
   );
   console.log('OK: a one-frame MP4 cannot pass as a completed 2s video.');
+  await assert.rejects(
+    () => validateSceneClip(oneFrame, { expectedDurationSeconds: 2 }),
+    /failed validation/,
+  );
+  console.log('OK: a truncated scene clip is rejected before it is uploaded.');
 }
 
 main().catch((error: unknown) => {

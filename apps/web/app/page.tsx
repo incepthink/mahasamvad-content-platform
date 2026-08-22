@@ -36,12 +36,15 @@ import {
   Clapperboard,
   ClipboardPaste,
   Image as ImageIcon,
+  MessageSquareText,
   MonitorPlay,
   Send,
   Sparkles,
   Type,
+  Wand2,
 } from 'lucide-react';
 import {
+  IMAGE_PROMPT_MAX_CHARS,
   POSTER_HEADING_MAX_CHARS,
   POSTER_TEXT_MIN_CHARS,
   UPLOAD_FILE_MAX_BYTES,
@@ -69,10 +72,13 @@ import { Disclosure } from '../components/Disclosure';
 // the shared CATEGORY_OPTIONS (reused by the detail page's next-step panel and /dlo) is
 // left untouched.
 //
-// Every value except 'video' IS a Category value, so the request needs no mapping table.
-// 'video' is a shortcut to /video, which runs its own two-gate flow and cannot be submitted
-// from here.
-type Format = Category | 'video';
+// Every value except 'video' and 'caption' IS a Category value, so the request needs
+// essentially no mapping table. 'video' is a shortcut to /video, which runs its own two-gate
+// flow and cannot be submitted from here. 'caption' is the ONE genuine pseudo-format: the
+// caption-only lane is not a category at all, it is a social run carrying outputType 'article'
+// (which means "renders no poster" on both lanes), so it submits as 'facebook' — see
+// submitCategory below for why that platform and not the other.
+type Format = Category | 'video' | 'caption';
 
 type FormatIcon = ComponentType<{
   size?: number;
@@ -103,6 +109,17 @@ const FORMATS = [
     name: STR.mediaFormatCreative,
     desc: STR.mediaFormatCreativeDesc,
   },
+  // The caption-only lane, beside the poster it is the alternative to. NOT the same thing as
+  // the कॅप्शनही तयार करा checkbox under क्रिएटिव्ह: that one adds a caption to a poster, this
+  // one produces a caption INSTEAD of a poster — one model call, no image spend, no template,
+  // no design question. The API, the runner and the detail page have supported it all along
+  // (outputType 'article' on a social row); it was only this form that stopped offering it.
+  {
+    value: 'caption',
+    icon: MessageSquareText,
+    name: STR.mediaFormatCaption,
+    desc: STR.mediaFormatCaptionDesc,
+  },
   {
     value: 'scheme',
     icon: ImageIcon,
@@ -124,7 +141,10 @@ const FORMATS = [
 
 // What the picker can actually leave selected. 'video' navigates away on click, so it is
 // never held in state.
-type SelectableFormat = Extract<Format, 'twitter' | 'scheme' | 'youtube'>;
+type SelectableFormat = Extract<
+  Format,
+  'twitter' | 'scheme' | 'youtube' | 'caption'
+>;
 
 // Where the upload card remembers its in-flight job across a refresh. The page also clears
 // it by hand after a submit (see clearDocument), so it is named once.
@@ -176,6 +196,14 @@ export default function NewGenerationPage() {
   // paid model call, and plenty of posts are published as an image. It can also be added
   // afterwards from the detail page, so off is a cheap default rather than a lossy one.
   const [wantCaption, setWantCaption] = useState(false);
+  // क्रिएटिव्ह only: the officer's OWN prompt for the image model (migration 0045). Blank (the
+  // default and the overwhelmingly common case) leaves the platform's built poster prompt in
+  // place; filled, it REPLACES it — the image model then receives the DGIPR designer line, this
+  // text, the poster's text and the reserved-zone rule, and nothing else the platform decided.
+  //
+  // Held across a format switch like contentSource, and simply not sent on a lane that ignores
+  // it — a brief written for a poster is still the brief if the officer flips away and back.
+  const [imagePrompt, setImagePrompt] = useState('');
   // पोस्टर runs only: the exact line to print on the poster. Blank (the default) leaves it to
   // the automatic named-subject resolution, which is what most runs want — this is the
   // override for when the officer already knows the poster must say a particular thing.
@@ -226,12 +254,23 @@ export default function NewGenerationPage() {
     })();
   }, []);
 
+  // The फक्त कॅप्शन lane. Tested FIRST and excluded from every flag below it, because it is a
+  // social run by category and would otherwise inherit the whole poster form — the template
+  // picker, the design question, the जसाच्या तसा मजकूर checkbox and the AI प्रॉम्प्ट box, none
+  // of which can affect a run that paints nothing.
+  const isCaption = category === 'caption';
+  // What actually goes on the wire. 'caption' is not a Category, and the platform it maps to is
+  // a real choice rather than a formality: generateSocialCaption branches on it, and the twitter
+  // branch carries X's 280-character rule while the facebook branch writes the long multi-
+  // paragraph caption. This lane is the long one — it is easier to cut a caption down by hand
+  // than to expand one — so it submits 'facebook'.
+  const submitCategory: Category = isCaption ? 'facebook' : category;
   // The क्रिएटिव्ह lane (submitted as 'twitter'). Still asked through isSocialCategory so a
   // ?format=facebook handoff, and any future second social card, behave identically.
-  const isSocial = isSocialCategory(category);
+  const isSocial = !isCaption && isSocialCategory(category);
   // The लेख पोस्टर lane. Asked positively rather than as !isSocial, which silently swept
   // यूट्यूब थंबनेल in with it — a thumbnail writes no article and locks no poster heading.
-  const isArticle = isArticleCategory(category);
+  const isArticle = !isCaption && isArticleCategory(category);
   // Has the officer explicitly chosen a template? This is the ONLY design question on the
   // क्रिएटिव्ह lane (2026-08-07): no template means a fully-AI poster, a template means that
   // template is followed. There is no separate "design mode" control any more.
@@ -269,7 +308,9 @@ export default function NewGenerationPage() {
   // SCOPED TO isSocial deliberately. contentSource is a क्रिएटिव्ह control and defaults to 'ai',
   // so an unscoped test would silently re-label the लेख पोस्टर and यूट्यूब थंबनेल boxes, whose
   // wording is not this tab's to change. Those two lanes never send a designMode at all.
-  const fromArticle = isSocial && !verbatimText;
+  // ...and TRUE on the caption lane unconditionally: the box there is source material by
+  // definition — the caption is written out of it and nothing in it is printed anywhere.
+  const fromArticle = (isSocial && !verbatimText) || isCaption;
 
   // What the folded "काय तयार करायचे?" row states, so collapsing it never hides the answer.
   // Found rather than mapped: FORMATS is the one list of formats this page offers, and a
@@ -279,7 +320,9 @@ export default function NewGenerationPage() {
   // Which library the template picker shows: twitter masters for the two social formats,
   // article masters for the लेख पोस्टर, youtube masters for the थंबनेल. विभाग is gone from this
   // form — a social post here is always the DGIPR brand.
-  const pickerCategory = referenceCategoryOf(category);
+  // ('caption' is not a Category and renders no poster, so the picker is not shown there at
+  // all; the substitution only keeps this expression total.)
+  const pickerCategory = referenceCategoryOf(submitCategory);
 
   // A pin is only meaningful for the format it was chosen under.
   useEffect(() => {
@@ -344,11 +387,19 @@ export default function NewGenerationPage() {
       setError(STR.posterHeadingTooLong);
       return;
     }
-    if (isSocial && hasActiveSocialTask) {
-      setError(STR.busyError);
+    if (isSocial && imagePrompt.trim().length > IMAGE_PROMPT_MAX_CHARS) {
+      setError(STR.imagePromptTooLong);
       return;
     }
-    if (!isSocial && hasActiveArticleTask) {
+    // Both social lanes take the social gate — a caption-only run is short and paints nothing,
+    // but TasksProvider deliberately keeps one social task at a time rather than carving out an
+    // exception for it.
+    if (isSocial || isCaption) {
+      if (hasActiveSocialTask) {
+        setError(STR.busyError);
+        return;
+      }
+    } else if (hasActiveArticleTask) {
       setError(STR.busyError);
       return;
     }
@@ -357,17 +408,17 @@ export default function NewGenerationPage() {
     try {
       const id = await createGeneration({
         note: combinedNote,
-        category,
-        // Every format on this page renders a poster. (The caption-only lane, which sent
-        // outputType 'article' on a social run, has been dropped from this form; the API,
-        // the runner and the detail page still support it.)
-        outputType: 'poster',
+        category: submitCategory,
+        // 'article' means "this run renders NO poster" on both lanes — the फक्त कॅप्शन card.
+        // Every other format here renders one.
+        outputType: isCaption ? 'article' : 'poster',
         // The लेख पोस्टर path uses the pasted article verbatim (skip generateArticle);
         // inert for social, whose caption is always written fresh.
         providedArticle: isArticle,
-        // Social only, and opt-in: the caption is a second paid call and can be added
-        // afterwards from the detail page.
-        generateCaption: isSocial ? wantCaption : undefined,
+        // Social only. Opt-in beside a poster (the checkbox); MANDATORY on the फक्त कॅप्शन
+        // lane, where the caption is the run's entire output — the API rejects a caption-only
+        // request that does not ask for one, since it would be a request for nothing at all.
+        generateCaption: isCaption ? true : isSocial ? wantCaption : undefined,
         // लेख पोस्टर only, and only when actually typed — an empty string would be a
         // meaningless "clear" on a run that has nothing to clear.
         posterHeading:
@@ -378,6 +429,11 @@ export default function NewGenerationPage() {
         // and the pin can never disagree, because one is computed from the other.
         designMode: isSocial ? designMode : undefined,
         templateBrand: isSocial ? 'dgipr' : undefined,
+        // The officer's own image prompt (migration 0045) — क्रिएटिव्ह only, and only when
+        // actually typed. Sent trimmed, because it is stored on the row and read back verbatim
+        // by every later render of this poster.
+        imagePrompt:
+          isSocial && imagePrompt.trim() ? imagePrompt.trim() : undefined,
         referenceImageId:
           reference?.kind === 'image' ? reference.id : undefined,
         referenceTypeId: reference?.kind === 'type' ? reference.id : undefined,
@@ -480,6 +536,44 @@ export default function NewGenerationPage() {
           </button>
         </div>
         {error ? <p className="form-error">{error}</p> : null}
+
+        {/* THE OFFICER'S OWN PROMPT (migration 0045), क्रिएटिव्ह only. Directly under the text
+            box because the two are sent together and mean nothing apart: this is the design
+            brief, that is the words to put on it.
+
+            IT REPLACES, IT DOES NOT ADD. Fill it and the platform's entire assembled poster
+            prompt is skipped — the image model gets the DGIPR designer line, this brief, the
+            text above, and the reserved-zone rule, which stays because the badge and footer are
+            composited in code afterwards and would otherwise land on top of the officer's own
+            poster. Nothing else: no palette, no arrangement anchor, no reference-structure
+            block, and no poster-copy call is made. The hint says so in as many words, because
+            an officer who types one extra instruction expecting it to be ADDED to the usual
+            rules would be reading this box exactly backwards.
+
+            The template picker below still works with it: pinned, the master is the edit canvas
+            and this is the only instruction sent with it; unpinned, the poster is generated from
+            scratch. That question is answered by pinning, exactly as it is today.
+
+            बॅनर, यूट्यूब थंबनेल and फक्त कॅप्शन do not show it — the first two build their image
+            prompts on lanes this does not touch, and the third paints nothing at all. */}
+        {isSocial ? (
+          <div className="option-field">
+            <label className="field-label" htmlFor="image-prompt">
+              <Wand2 size={18} className="label-icon" aria-hidden="true" />
+              {STR.imagePromptLabel}
+            </label>
+            <p className="hint">{STR.imagePromptHint}</p>
+            <textarea
+              id="image-prompt"
+              className="note-input"
+              maxLength={IMAGE_PROMPT_MAX_CHARS}
+              placeholder={STR.imagePromptPlaceholder}
+              value={imagePrompt}
+              disabled={submitting}
+              onChange={(e) => setImagePrompt(e.target.value)}
+            />
+          </div>
+        ) : null}
 
         {/* Two opt-ins about the text above, in the card that holds it. Both are क्रिएटिव्ह-only
             and both are OFF by default:
@@ -611,7 +705,7 @@ export default function NewGenerationPage() {
               // cursor would be worse.
               const busy =
                 !isLink &&
-                (isSocialCategory(option.value)
+                (option.value === 'caption' || isSocialCategory(option.value)
                   ? hasActiveSocialTask
                   : hasActiveArticleTask);
               return (
@@ -659,26 +753,33 @@ export default function NewGenerationPage() {
           ) : null}
           {/* The optional template pin, folded shut. In the same card as the format cards
             because it only qualifies the choice made there — and keyed by category so
-            switching format remounts it against the right library. */}
-          <div className="option-field option-field-flush">
-            <ReferencePicker
-              key={pickerCategory}
-              category={pickerCategory}
-              brand="dgipr"
-              variant="disclosure"
-              value={reference}
-              onChange={setReference}
-              {...(isSocial
-                ? {
-                    // On this lane an empty selection means NO template is used and the poster is
-                    // designed from scratch — the opposite of the default wording, which promises
-                    // the platform will pick one. लेख and यूट्यूब still auto-select, so they keep it.
-                    noneLabel: STR.refPickerDisclosureNoneSocial,
-                    noneHint: STR.refPickerDisclosureHintSocial,
-                  }
-                : {})}
-            />
-          </div>
+            switching format remounts it against the right library.
+
+            Not rendered on the फक्त कॅप्शन lane: that run renders no poster, so there is
+            nothing for a template to shape. The pin state is cleared by the effect on
+            [category] anyway, so switching away and back cannot leave a stale one behind. */}
+          {!isCaption ? (
+            <div className="option-field option-field-flush">
+              <ReferencePicker
+                key={pickerCategory}
+                category={pickerCategory}
+                brand="dgipr"
+                variant="disclosure"
+                value={reference}
+                onChange={setReference}
+                {...(isSocial
+                  ? {
+                      // On this lane an empty selection means NO template is used and the poster
+                      // is designed from scratch — the opposite of the default wording, which
+                      // promises the platform will pick one. लेख and यूट्यूब still auto-select,
+                      // so they keep it.
+                      noneLabel: STR.refPickerDisclosureNoneSocial,
+                      noneHint: STR.refPickerDisclosureHintSocial,
+                    }
+                  : {})}
+              />
+            </div>
+          ) : null}
         </Disclosure>
         {/* OUTSIDE the fold: a busy lane is the reason a submit will be refused, and a
             collapsed row would hide the explanation. */}

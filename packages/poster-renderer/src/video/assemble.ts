@@ -38,7 +38,11 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { createRequire } from 'node:module';
 import sharp from 'sharp';
-import { VIDEO_NARRATION_TEMPO_TOLERANCE } from '@dgipr/schemas';
+import {
+  VIDEO_LOCKUP_MARGIN_RATIO,
+  VIDEO_LOCKUP_WIDTH_RATIO,
+  VIDEO_NARRATION_TEMPO_TOLERANCE,
+} from '@dgipr/schemas';
 import { renderGovernmentLockup } from '../twitter-chrome.js';
 
 const execFileAsync = promisify(execFile);
@@ -94,12 +98,6 @@ export type VideoValidation = Readonly<{
 const VIDEO_VALIDATE_TIMEOUT_MS = 300_000;
 const VIDEO_STITCH_TIMEOUT_MS = 900_000;
 const VIDEO_VALIDATE_MAX_BUFFER = 16 * 1024 * 1024;
-// Social posts use a 160px lockup on a 1280px canvas (12.5%). Video is
-// deliberately smaller at 9%: it sits over footage rather than over a designed
-// poster, and 15% (then 12%) was reported as too large on the finished video.
-// Below this the Marathi wordmark under the emblem stops reading at 720p.
-const VIDEO_LOCKUP_WIDTH_RATIO = 0.09;
-const VIDEO_LOCKUP_MARGIN_RATIO = 0.008;
 const VIDEO_OUTRO_PATH = resolve(
   dirname(fileURLToPath(import.meta.url)),
   '../../assets/video-outro.mp4',
@@ -420,86 +418,41 @@ export async function validateVideoOutput(
   }
 }
 
-export type VideoLogoOptions = Readonly<{
-  aspectRatio?: '16:9' | '9:16';
+export type SceneClipCheckOptions = Readonly<{
   expectedDurationSeconds?: number;
 }>;
 
-// Burn the shared Government of Maharashtra lockup into one generated scene
-// clip before it is uploaded. Scene clips are exposed individually in the
-// review UI, so branding only the final stitch would leave those previews
-// unbranded. Audio, when a provider returns any, is preserved unchanged.
-export async function overlayVideoLogo(
+// Decode one freshly rendered scene clip and gate its duration BEFORE it is
+// uploaded, so a truncated provider render is caught where it can still be
+// re-rendered rather than at stitch time with the row already marked done.
+//
+// This is all that is left of the old overlayVideoLogo: the government lockup
+// is NOT burned into a stored clip any more. It used to be, so that the
+// per-scene review players were branded — but a burned-in lockup is permanent,
+// so every stored clip froze whatever VIDEO_LOCKUP_WIDTH_RATIO was in force the
+// day it rendered. A later ratio change then produced a visible double stamp on
+// every reused clip: assembleSilentVideo re-stamps at the CURRENT size over the
+// same top-right anchor, and a smaller new lockup cannot cover a larger old one.
+// Branding is now the stitch's alone, which makes the ratio a stitch-time
+// decision that takes effect on every (free) restitch and can never double up.
+// The review player lays the same lockup over the raw clip in CSS instead —
+// see VIDEO_LOCKUP_WIDTH_RATIO in @dgipr/schemas, which both sides read.
+export async function validateSceneClip(
   mp4: Buffer,
-  options: VideoLogoOptions = {},
-): Promise<Buffer> {
-  const dir = await mkdtemp(join(tmpdir(), 'dgipr-video-logo-'));
+  options: SceneClipCheckOptions = {},
+): Promise<VideoValidation> {
+  const dir = await mkdtemp(join(tmpdir(), 'dgipr-video-clip-'));
   try {
-    const inputPath = join(dir, 'input.mp4');
-    const logoPath = join(dir, 'logo.png');
-    const outputPath = join(dir, 'branded.mp4');
-    await writeFile(inputPath, mp4);
-
-    const inputValidation = options.expectedDurationSeconds
+    const path = join(dir, 'clip.mp4');
+    await writeFile(path, mp4);
+    return options.expectedDurationSeconds
       ? await assertStreamDuration(
-          inputPath,
+          path,
           options.expectedDurationSeconds,
           'Generated scene clip',
           'video',
         )
-      : await inspectStreamFile(inputPath, 'video');
-    const { width } = await firstClipDimensions(
-      inputPath,
-      options.aspectRatio ?? '16:9',
-    );
-    const lockup = await renderGovernmentLockup(
-      Math.round(width * VIDEO_LOCKUP_WIDTH_RATIO),
-      { background: 'transparent' },
-    );
-    await writeFile(logoPath, lockup.data);
-    const margin = Math.max(4, Math.round(width * VIDEO_LOCKUP_MARGIN_RATIO));
-
-    await runFfmpeg(
-      [
-        '-hide_banner',
-        '-loglevel',
-        'error',
-        '-i',
-        inputPath,
-        '-loop',
-        '1',
-        '-i',
-        logoPath,
-        '-filter_complex',
-        `[0:v:0][1:v:0]overlay=${width - lockup.width - margin}:${margin}:shortest=1[branded]`,
-        '-map',
-        '[branded]',
-        '-map',
-        '0:a?',
-        '-c:v',
-        'libx264',
-        '-preset',
-        'veryfast',
-        '-crf',
-        '18',
-        '-pix_fmt',
-        'yuv420p',
-        '-c:a',
-        'copy',
-        '-movflags',
-        '+faststart',
-        outputPath,
-      ],
-      'Scene clip branding',
-    );
-
-    await assertStreamDuration(
-      outputPath,
-      options.expectedDurationSeconds ?? inputValidation.durationSeconds,
-      'Branded scene clip',
-      'video',
-    );
-    return await readFile(outputPath);
+      : await inspectStreamFile(path, 'video');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

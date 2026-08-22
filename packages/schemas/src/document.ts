@@ -34,6 +34,16 @@ export const DOCUMENT_MAX_BYTES = Number.POSITIVE_INFINITY;
 
 // Which backend produced the page text. Shown to the user because it changes how hard the
 // review step has to work: OCR misreads names and amounts, a text layer is exact.
+// Which SURFACE an upload came from, when that changes how the document is read.
+//
+// Only 'chat' exists, and the field is optional, so every other surface says nothing and gets
+// the deployment's own OCR_PROVIDER. It names the surface rather than the backend on purpose:
+// the browser is not the right place to choose what a paid read runs on, and the server maps
+// chat → CHAT_OCR_PROVIDER (intake/ocr-provider.ts). Distinct from `feature`, which is the
+// analytics attribution and is a closed six-value list that chat is deliberately not in.
+export const DocumentUploadSurfaceSchema = z.enum(['chat']);
+export type DocumentUploadSurface = z.infer<typeof DocumentUploadSurfaceSchema>;
+
 export const PdfTextSourceSchema = z.enum(['text-layer', 'ocr']);
 export type PdfTextSourceValue = z.infer<typeof PdfTextSourceSchema>;
 

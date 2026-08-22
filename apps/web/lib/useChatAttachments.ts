@@ -96,9 +96,16 @@ function sleep(ms: number): Promise<void> {
 // consequence to know: sending a message with a 40-page scan attached OCRs 40 pages. The
 // surfaces whose output gets published (/dlo, /translate, /proofread, the media room) keep the
 // picker and its gate untouched.
+//
+// It also reads on its OWN OCR backend — see the `surface` field below.
 async function readDocument(file: File): Promise<string> {
   const form = new FormData();
   form.append('file', file, file.name);
+  // Declares the SURFACE, not the backend. The API maps chat → CHAT_OCR_PROVIDER, which reads
+  // a PDF whole in one Gemini call instead of page by page — right here, where the document is
+  // read once inside a turn and nobody reviews it page by page, and deliberately not on the
+  // surfaces whose output gets published. See intake/gemini-doc.ts.
+  form.append('surface', 'chat');
   const created = await createDocumentIntake(form);
   let extractRequested = false;
 

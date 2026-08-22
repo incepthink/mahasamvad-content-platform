@@ -467,7 +467,16 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   fails the whole clip after the full render wait ("an issue with the audio for your
   prompt"). If that error ever returns, check this flag first; assembly →
   `packages/poster-renderer/src/video/assemble.ts` (ffmpeg-static, `-an`
-  yuv420p+faststart, `FFMPEG_PATH`, `wavDurationSeconds`) — which now also **burns in
+  yuv420p+faststart, `FFMPEG_PATH`, `wavDurationSeconds`). **The government lockup is
+  stamped by the STITCH and by nothing else** (2026-08-21): a stored scene clip is the
+  provider's own bytes, unbranded, because a burned-in lockup is permanent and froze the
+  size of the day it rendered — which double-stamped every reused clip the moment
+  `VIDEO_LOCKUP_WIDTH_RATIO` changed. That ratio + `VIDEO_LOCKUP_MARGIN_RATIO` live in
+  `@dgipr/schemas` because the per-scene review player in `apps/web` places the same
+  artwork over the raw clip in CSS (served by `GET /api/video/lockup.png`; note it uses
+  `marginTop`, not `top` — only a percentage MARGIN resolves against the container's
+  WIDTH). `validateSceneClip` is what is left of `overlayVideoLogo`: the pre-upload
+  duration gate. The assembler also **burns in
   the on-screen Marathi key points**: `assembleSilentVideo(clips, overlays?)` chains a
   `scale2ref` + `overlay=0:0:enable='between(t,s,e)'` pair per scene into its EXISTING
   encode (one pass, not two; byte-for-byte the old behaviour when omitted), before
@@ -565,9 +574,14 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   `MultimodalChatMessage` (an image can arrive on ANY turn, which is what `chatCompleteVision`
   cannot express). **Attachments are reduced to TEXT before the turn is sent** — only images
   keep bytes — so reopening a chat re-extracts and re-transcribes nothing; documents go through
-  the shared `<DocumentIntake>` (so the OCR spend gate is intact) and recordings/YouTube links
+  the shared `/api/documents` service and recordings/YouTube links
   through the EXISTING `/api/transcriptions` job (so the 0031 cache applies, at the cost of a
-  chat recording also appearing in /transcribe's history). The turn route persists the USER
+  chat recording also appearing in /transcribe's history). **Its documents are read on their own
+  OCR backend**: the composer sends `surface: 'chat'` on the upload, the route maps that through
+  `CHAT_OCR_PROVIDER` (default **gemini**) and the whole PDF is read in ONE call
+  (`intake/gemini-doc.ts`) instead of one call per page. The browser names the SURFACE, never
+  the provider; every other surface keeps `OCR_PROVIDER`. /chat also has NO page picker — a
+  chat attachment is read whole on send, so the spend gate is the send itself. The turn route persists the USER
   message BEFORE anything can fail and stores a PARTIAL answer on failure, because those tokens
   are paid for. And the SSE route writes to `reply.raw`, which bypasses Fastify's reply
   pipeline — so the **CORS header is written by hand** (without it the browser rejects a stream
@@ -765,7 +779,12 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   pages, so a booklet that is scanned overall but typeset on the three pages wanted still
   costs nothing.
   `extractPdfPages` / `extractPdfPagesDetailed` / `probePdf` live in
-  `packages/content-engine/src/intake/pdf-pages.ts` and pick between TWO backends:
+  `packages/content-engine/src/intake/pdf-pages.ts`. Which model reads the pixels is
+  `ocr-provider.ts`'s business — `sarvam` (default), `openai`, or **`gemini`, which /chat alone
+  uses through `ExtractPdfOptions.ocrProvider` and which reads a whole PDF in ONE call
+  (`gemini-doc.ts`; its binding limit is OUTPUT TOKENS, not the 1,000-page input ceiling, hence
+  `GEMINI_OCR_MAX_PAGES` = 30 and the split-and-retry recovery)**. Above that, the policy picks
+  between TWO backends:
   the PDF's own **text layer** (`pdf-text-layer.ts`, pdf.js — instant, free, unlimited
   pages, exact characters) and **Sarvam OCR** (`sarvam-doc.ts` — pixels, minutes, credits,
   misreads names). Text layer first, OCR on a bad verdict. `textLayerVerdict` returns
@@ -822,6 +841,22 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   text. Harness: `tsx src/generation/resolve-poster-subject.ts` (free, validation half) or
   `--file=note.txt` for a live check (cents; always use `--file`, npx truncates multi-line argv
   on Windows).
+- **The officer can also write the social poster's PROMPT: `generations.image_prompt` (0045).**
+  "AI प्रॉम्प्ट" on क्रिएटिव्ह, under the text box. When set, `buildCustomPosterPrompt`
+  (`build-poster-prompt.ts`) replaces the whole assembled prompt with four things: the DGIPR
+  designer line, the brief verbatim, the poster's text verbatim, and the reserved-zone blocks —
+  which stay because `overlayTwitterChrome` stamps the badge and footer afterwards regardless, and
+  a prompt silent about them buries the officer's own text. No palette, no arrangement anchor, no
+  structure block, and NO `generatePosterCopy` call (`usesVerbatimText` in `runner.ts`). It does
+  not change which render path runs: a pinned template still means designMode onbrand/adaptive, so
+  the pin is the edit canvas (`referenceChromeRule`); unpinned means fresh (`paintNoChromeRule`).
+  Insert-only on the ROW, like `style_reference` — the regenerate and retry paths re-read it, so a
+  job option would be lost on the first redo. Schema AND route scope it to a social run that
+  renders a poster. Free harness: `tsx src/generation/build-poster-prompt.ts`.
+- **फक्त कॅप्शन is a card on the create form again (2026-08-22), and it needed no server change:**
+  it submits `category: 'facebook'` + `outputType: 'article'` + `generateCaption: true`, which is
+  the caption-only lane described above. `facebook` deliberately, for the long-form caption —
+  `generateSocialCaption` branches on the platform and the twitter branch carries X's 280 rule.
 - **The officer can override that text outright: `generations.poster_heading` (0029).** Typed on
   the media room (shown only for the पोस्टर output) or on `PosterPanel` after seeing the poster
   (`POST …/poster/regenerate { posterHeading }`, `''` clears it back to automatic). It wins over
@@ -1039,6 +1074,11 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   `apps/web/lib/useGenerationThread.ts` (lineage rail; 5s poll only while a member runs)
 - Usage analytics → `apps/web/app/analytics/page.tsx` + `analytics/[feature]/page.tsx` (see the
   analytics bullet above); sidebar entry `वापर विश्लेषण`, last in `NAV_LINKS`
+- Markdown display → `apps/web/components/MarkdownText.tsx` (the article, /dlo's output step
+  and every /chat answer: headings, nested lists, loose lists, tables, fenced code, inline
+  spans) over `apps/web/lib/markdownTable.ts`, whose pipe-table rules are SHARED with
+  `ExtractedText` so a chat table and a document table are recognised identically. Free harness:
+  `npx tsx --tsconfig apps/web/tsconfig.check.json apps/web/lib/markdownRender.check.tsx`
 - Marathi UI strings → `apps/web/lib/strings.ts`
 - UI components → `apps/web/components/*` (`ArticleView`, `PosterPanel`,
   `ProgressSteps`, `FeedbackBox`, `CopyEditForm`, `HistoryCard`, `StatusChip`,

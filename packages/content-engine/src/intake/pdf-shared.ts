@@ -39,6 +39,14 @@ export type ExtractPdfOptions = Readonly<{
   // page nobody should pay for. On the text-layer path (free) the document is read
   // whole and filtered, because reading it whole costs nothing.
   pages?: readonly number[] | undefined;
+  // Which OCR backend to read the PIXELS with, overriding OCR_PROVIDER for this one read.
+  // Undefined — the normal case — means the deployment's own default.
+  //
+  // It exists because /chat reads documents on a different backend from the surfaces whose
+  // output gets published: a chat attachment is read once, whole, inside one turn, where a
+  // published article's source is reviewed page by page. Set by the caller (the document
+  // intake service, from the declared upload surface), never by the browser.
+  ocrProvider?: string | undefined;
 }>;
 
 // Lines that start a Markdown block and must never be merged into the line above:

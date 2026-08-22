@@ -1,0 +1,13 @@
+{
+  // Harness-only. `tsconfig.json` sets `jsx: preserve` because Next compiles the app itself,
+  // which leaves a standalone runner (tsx/esbuild) with no JSX factory. The *.check.tsx
+  // harnesses render components to static markup outside Next, so they are run against this:
+  //
+  //   npx tsx --tsconfig apps/web/tsconfig.check.json apps/web/lib/markdownRender.check.tsx
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "composite": false,
+    "incremental": false
+  }
+}

@@ -175,9 +175,13 @@ export {
 // The PDF equivalent of the STT seam above: callers read PDFs through pdf-pages.ts and
 // never name a provider, but a route or job that has to report a missing key needs to know
 // WHICH key OCR_PROVIDER is asking for.
+// `chatOcrProviderName` is the one exception to "callers never name a provider": /chat's
+// document attachments are read on their own backend, and the API picks it from the declared
+// upload surface (routes/documents.ts) rather than from OCR_PROVIDER.
 export {
   extractPdfPagesViaProvider,
   ocrProviderName,
+  chatOcrProviderName,
   ocrProviderApiKeyEnv,
   ocrKeyPresent,
 } from './intake/ocr-provider.js';
@@ -426,9 +430,11 @@ export {
 } from './generation/generate-poster-copy.js';
 export {
   buildPosterPrompt,
+  buildCustomPosterPrompt,
   buildFeedbackPrompt,
   type DesignMode as PosterDesignMode,
   type BuildPosterPromptInput,
+  type BuildCustomPosterPromptInput,
   type BuildFeedbackPromptInput,
 } from './generation/build-poster-prompt.js';
 // The YouTube-thumbnail image prompts (migration 0042). The ट्विटर fixed-template prompt

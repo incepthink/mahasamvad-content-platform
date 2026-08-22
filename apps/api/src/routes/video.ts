@@ -27,6 +27,7 @@ import {
   NARRATION_AUDIO_EXTENSIONS,
   RegenerateStillRequestSchema,
   ReplanVideoScriptRequestSchema,
+  StartVideoAnimationRequestSchema,
   UPLOAD_FILE_MAX_BYTES,
   UPLOAD_FILE_MAX_MB,
   UpdateSceneMotionRequestSchema,
@@ -43,6 +44,7 @@ import {
 import {
   decodeAudioToWav,
   normalizeReferenceImage,
+  renderGovernmentLockup,
   wavDurationSeconds,
 } from '@dgipr/poster-renderer';
 import {
@@ -54,6 +56,7 @@ import {
   type DescribedVideoScene,
 } from '@dgipr/content-engine';
 import {
+  clipNeedsRender,
   isVideoJobRunning,
   startNarrationJob,
   startSceneReanimateJob,
@@ -66,6 +69,13 @@ import {
   narrationIsUploaded,
   type UploadedNarration,
 } from '../jobs/video-runner.js';
+
+// The lockup PNG served to the review players. Rendered wide enough that the
+// browser only ever scales it DOWN (the player is capped at 560px, so a 9%
+// lockup is ~50 CSS px, ~100 physical on a 2x screen); the actual on-screen
+// size is decided by VIDEO_LOCKUP_WIDTH_RATIO in CSS, not here.
+const LOCKUP_PREVIEW_WIDTH = 320;
+let lockupPng: Promise<Buffer> | null = null;
 
 // Clip rendering needs the configured provider's paid API key; without one the
 // animate gate must fail with a setup message BEFORE the row is flipped, not
@@ -552,14 +562,13 @@ function toDetail(
         ? { clipUrl: publicUrlIn(client, VIDEOS_BUCKET, scene.clipPath) }
         : {}),
       // A clip animated from an older frame (start OR end), from an end frame
-      // the officer has since DELETED, or from an older motion brief — than what
-      // is on screen; the fix panel's re-animate affordance keys off this.
-      ...(scene.clipPath !== undefined &&
-      ((scene.stillVersion !== undefined &&
-        scene.clipStillVersion !== scene.stillVersion) ||
-        scene.clipEndStillVersion !== scene.endStillVersion ||
-        (scene.clipMotionBrief !== undefined &&
-          scene.clipMotionBrief !== (scene.motionBrief ?? '')))
+      // the officer has since DELETED, from an older motion brief or at an older
+      // window — than what is on screen. The fix panel's re-animate affordance
+      // keys off this, and so does gate 2's re-shoot list, which is why it is
+      // now the animate job's OWN test rather than a second copy of it: an
+      // inline copy here had drifted (it omitted the window check), so a scene
+      // the job would re-render could show as current.
+      ...(scene.clipPath !== undefined && clipNeedsRender(scene)
         ? { clipStale: true }
         : {}),
       ...(scene.error !== undefined ? { error: scene.error } : {}),
@@ -678,6 +687,23 @@ export function registerVideoRoutes(
     }
     startVideoScriptJob(client, row.id, uploaded);
     return reply.code(202).send({ id: row.id });
+  });
+
+  // The Government of Maharashtra lockup as a transparent PNG, for the
+  // per-scene review players to lay over the raw clip in CSS. Scene clips are
+  // stored EXACTLY as the provider returned them (the stitch owns the burned-in
+  // branding — see validateSceneClip), so this route is what keeps those
+  // previews looking like the finished video. Served from the API rather than
+  // copied into apps/web/public so renderGovernmentLockup stays the one source
+  // of the artwork; rendered once per process, since it never varies.
+  app.get('/video/lockup.png', async (_request, reply) => {
+    lockupPng ??= renderGovernmentLockup(LOCKUP_PREVIEW_WIDTH, {
+      background: 'transparent',
+    }).then((raster) => raster.data);
+    return reply
+      .header('content-type', 'image/png')
+      .header('cache-control', 'public, max-age=86400')
+      .send(await lockupPng);
   });
 
   app.get('/video/projects', async () => {
@@ -1244,6 +1270,66 @@ export function registerVideoRoutes(
     },
   );
 
+  // One scene's END frame, taken from its OWN START frame — free, synchronous
+  // and instant: no image is generated, the row is simply pointed at the start
+  // frame's stored PNG as well. This is the officer's answer to "this shot
+  // should hold" (and to an end frame that keeps coming back wrong): the clip
+  // then interpolates between two identical frames, so the movement inside it
+  // is subtle instead of the scene ending somewhere else.
+  //
+  // It ALIASES the start frame's object rather than copying the bytes, because
+  // that is exactly what is being expressed and frame paths are immutable and
+  // versioned — nothing ever overwrites or deletes the one it points at. The
+  // end version is still bumped, so a clip already animated from a different
+  // ending is reported stale (clipIsCurrent) and the officer is offered a
+  // re-animate rather than the old ending being silently re-shipped.
+  //
+  // The end brief is set to the start brief for the same reason: it is the
+  // description of the frame now standing at the end, and it is what the clip
+  // prompt and any later redraw read. Note the ordinary consequence — redrawing
+  // the START frame afterwards renders a NEW end frame from that brief (a start
+  // redraw always refreshes the pair), so this button is pressed again if the
+  // hold is still wanted.
+  app.post<{ Params: { id: string; index: string } }>(
+    '/video/projects/:id/scenes/:index/end-frame/from-start',
+    async (request, reply) => {
+      const row = await getVideoProject(client, request.params.id);
+      if (!row) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'Video project not found.' } });
+      }
+      const index = Number(request.params.index);
+      const scene = Number.isInteger(index) ? row.scenes[index] : undefined;
+      if (!scene) {
+        return reply.code(404).send({ error: { message: 'Scene not found.' } });
+      }
+      if (
+        (row.status !== 'storyboard_ready' &&
+          row.status !== 'completed' &&
+          row.status !== 'failed') ||
+        isVideoJobRunning(row.id)
+      ) {
+        return reply.code(409).send({ error: { message: BUSY_MESSAGE } });
+      }
+      if (scene.stillPath === undefined) {
+        return reply.code(409).send({
+          error: { message: 'आधी प्रारंभ फ्रेम तयार व्हायला हवी.' },
+        });
+      }
+      const scenes = [...row.scenes];
+      scenes[index] = {
+        ...scene,
+        endVisualBrief: scene.openingVisualBrief ?? scene.visualBrief,
+        endStillPath: scene.stillPath,
+        endStillVersion: (scene.endStillVersion ?? 0) + 1,
+      };
+      await updateVideoProject(client, row.id, { scenes });
+      const updated = await getVideoProject(client, row.id);
+      return toDetail(client, updated!);
+    },
+  );
+
   // One scene's motion direction, hand-edited. Synchronous and free: the
   // motion brief is an input to the CLIP prompt only (buildClipMotionPrompt) —
   // no frame is rendered from it — so unlike a changed visual brief this does
@@ -1296,7 +1382,7 @@ export function registerVideoRoutes(
   // THE spend gate: animate every scene from its approved still. Guarded so it
   // can only fire from a fully-stilled storyboard, and resume-aware on retry
   // after a failure (scenes with current clips are skipped by the job).
-  app.post<{ Params: { id: string } }>(
+  app.post<{ Params: { id: string }; Body: unknown }>(
     '/video/projects/:id/animate',
     async (request, reply) => {
       const missingKey = clipProviderKeyMissing();
@@ -1344,12 +1430,31 @@ export function registerVideoRoutes(
           },
         });
       }
+      // Extra scenes the officer ticked whose clip is already current. Parsed
+      // leniently — an older client sends no body at all — but the indexes
+      // themselves are range-checked, since an out-of-range one would silently
+      // buy nothing and read as the tick having been ignored.
+      const parsed = StartVideoAnimationRequestSchema.safeParse(
+        request.body ?? {},
+      );
+      if (!parsed.success) {
+        return reply
+          .code(400)
+          .send({ error: { message: 'Invalid scene selection.' } });
+      }
+      const forced = parsed.data.scenes ?? [];
+      const outOfRange = forced.find((index) => index >= row.scenes.length);
+      if (outOfRange !== undefined) {
+        return reply
+          .code(400)
+          .send({ error: { message: `Scene ${outOfRange + 1} not found.` } });
+      }
       await updateVideoProject(client, row.id, {
         status: 'animating',
         step: 'animate',
         error: null,
       });
-      startVideoAnimateJob(client, row.id);
+      startVideoAnimateJob(client, row.id, forced);
       return reply.code(202).send({ id: row.id });
     },
   );

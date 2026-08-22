@@ -292,6 +292,20 @@ export const VIDEO_KEY_POINT_MAX_CHARS = 48;
 // (content-engine) and UpdateVideoScriptRequestSchema cannot drift.
 export const VIDEO_STYLE_MAX_CHARS = 1200;
 
+// Where the Government of Maharashtra lockup sits on a video frame, as
+// fractions of the frame WIDTH, so one number serves 720p, 1080p and 9:16
+// alike. It lives here rather than in poster-renderer because BOTH the stitch
+// (which burns it into the finished video) and the per-scene review player in
+// apps/web (which lays it over the raw clip in CSS) must place it identically,
+// and apps/web cannot import poster-renderer — the combineIntakeSources move.
+//
+// Social posts use a 160px lockup on a 1280px canvas (12.5%). Video is
+// deliberately smaller at 9%: it sits over footage rather than over a designed
+// poster, and 15% (then 12%) was reported as too large on the finished video.
+// Below this the Marathi wordmark under the emblem stops reading at 720p.
+export const VIDEO_LOCKUP_WIDTH_RATIO = 0.09;
+export const VIDEO_LOCKUP_MARGIN_RATIO = 0.008;
+
 // muxNarration only speeds a segment up past THIS much overrun; anything
 // smaller is absorbed by the trim and left at natural pace. Since durations
 // are DERIVED from the measured speech (clipSecondsForNarration ceils, so the
@@ -710,6 +724,23 @@ export const UpdateSceneMotionRequestSchema = z.object({
 });
 export type UpdateSceneMotionRequest = z.infer<
   typeof UpdateSceneMotionRequestSchema
+>;
+
+// Which scenes THE spend gate should animate. Omitted (the default, and every
+// pre-2026-08-21 client) means "the job decides" — it renders every scene whose
+// clip is not current and skips the rest, which is what it has always done.
+//
+// A supplied list is ADDITIVE, never subtractive: the job still renders every
+// stale scene, and these indexes are extra scenes the officer chose to re-shoot
+// even though their clip is current. It cannot mean "render only these", and
+// the web never offers that, because skipping a stale scene would concatenate a
+// clip animated from a frame the officer has already replaced — old footage in a
+// video they believe they just fixed.
+export const StartVideoAnimationRequestSchema = z.object({
+  scenes: z.array(z.number().int().min(0)).optional(),
+});
+export type StartVideoAnimationRequest = z.infer<
+  typeof StartVideoAnimationRequestSchema
 >;
 
 // ---------- deterministic timing + SRT ----------

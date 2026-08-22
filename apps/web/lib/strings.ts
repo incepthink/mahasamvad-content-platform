@@ -83,6 +83,11 @@ export const STR = {
   // with no consequence at this step.
   mediaFormatCreative: 'क्रिएटिव्ह',
   mediaFormatCreativeDesc: 'सोशल मीडियासाठी मराठी पोस्टर',
+  // The caption-only lane. It renders NO poster at all — one model call, no image spend —
+  // so it is a format of its own rather than the कॅप्शनही तयार करा checkbox, which adds a
+  // caption BESIDE a poster. Named फक्त कॅप्शन so the two can never read as the same thing.
+  mediaFormatCaption: 'फक्त कॅप्शन',
+  mediaFormatCaptionDesc: 'पोस्टरशिवाय, फक्त सोशल मीडिया कॅप्शन',
   mediaFormatArticlePoster: 'लेख पोस्टर',
   mediaFormatArticlePosterDesc: 'लेखासोबत प्रसिद्ध करण्यासाठीचे पोस्टर',
   mediaOutputVideo: 'व्हिडिओ',
@@ -592,6 +597,7 @@ export const STR = {
   docHasTable: 'तक्ता',
   docEditText: 'मजकूर दुरुस्त करा',
   docShowTable: 'तक्ता म्हणून पाहा',
+  docShowFormatted: 'मांडणीसह पाहा',
   docEdited: 'दुरुस्त केले',
   docLangMr: 'मराठी',
   docLangEn: 'English',
@@ -779,6 +785,17 @@ export const STR = {
     'मजकूर आणखी मोठा व वाचनीय करा',
     'मांडणी अधिक नीटनेटकी करा',
   ],
+
+  // The officer's OWN prompt for the image model (migration 0045), क्रिएटिव्ह only. The hint
+  // has one job: say plainly that filling this box REPLACES everything the platform would
+  // otherwise tell the image model, so an officer who types one extra instruction expecting it
+  // to be added on top of the usual design rules is not surprised by what comes back.
+  imagePromptLabel: 'AI प्रॉम्प्ट (ऐच्छिक)',
+  imagePromptHint:
+    'पोस्टर कसे दिसावे हे तुमच्याच शब्दांत लिहा. येथे काही लिहिल्यास मंचाच्या स्वतःच्या डिझाइन सूचना पूर्णपणे वगळल्या जातात — AI ला फक्त हीच सूचना, वरचा मजकूर आणि लोगो-फूटरची जागा राखण्याची अट एवढेच जाते. रिकामे ठेवल्यास मंच नेहमीप्रमाणे स्वतः पोस्टर ठरवते.',
+  imagePromptPlaceholder:
+    'उदा. गडद निळ्या पार्श्वभूमीवर शेतकऱ्याचे मोठे छायाचित्र, वर ठळक पांढऱ्या अक्षरांत शीर्षक…',
+  imagePromptTooLong: 'AI प्रॉम्प्ट खूप मोठा आहे — तो थोडक्यात लिहा.',
 
   // Caption toggle on the create form — a social post is poster-only unless asked
   // otherwise, so this is an opt-in shown once ट्विटर/फेसबुक is selected.
@@ -1435,6 +1452,12 @@ export const STR = {
   // belong to the primary button inside the fold — the one that actually spends.
   videoEditStartBrief: 'प्रारंभ फ्रेमचे वर्णन बदला',
   videoEditEndBrief: 'अंतिम फ्रेमचे वर्णन बदला',
+  // Free and instant, and therefore NOT behind the spend confirmation beside
+  // it: the start frame's own picture becomes the end frame, so the shot holds
+  // on that composition. No image is generated.
+  videoUseStartAsEnd: 'पहिली फ्रेमच वापरा',
+  videoUseStartAsEndHint:
+    'प्रारंभ फ्रेमचेच चित्र अंतिम फ्रेम म्हणून वापरले जाईल — नवीन चित्र तयार होणार नाही आणि याचा खर्च नाही. दृश्यातील हालचाल सौम्य राहते. या दृश्याचा व्हिडिओ आधीच तयार असेल तर तो पुन्हा तयार करावा लागेल.',
   videoAddEndFrame: 'अंतिम फ्रेम जोडा',
   videoInsertedSceneSaveFirst:
     'हे नवीन दृश्य अजून जतन झालेले नाही. खालील “बदल जतन करा” दाबल्यावर या दृश्याची चित्रे काढता येतील.',
@@ -1442,6 +1465,17 @@ export const STR = {
   videoEditBrief: 'वर्णन बदला',
   videoAnimate: 'व्हिडिओ तयार करा',
   videoAnimateEstimate: 'अंदाजे खर्च',
+  // The re-shoot list under the animate button. A scene whose clip is missing
+  // or outdated is ticked and LOCKED — untickable, because skipping it would
+  // rejoin footage the officer has already replaced. The rest are free to tick.
+  videoReshootTitle: 'कोणती दृश्ये पुन्हा तयार करायची?',
+  videoReshootHint:
+    'ज्या दृश्यांचा व्हिडिओ अजून तयार नाही किंवा जुन्या चित्रावरून तयार झाला आहे ती आपोआप निवडली आहेत — ती वगळता येत नाहीत. आणखी एखादे दृश्य पुन्हा तयार करायचे असल्यास त्यापुढील खूण करा. न निवडलेली दृश्ये आहेत तशीच वापरली जातील.',
+  videoReshootAll:
+    'सर्व दृश्ये नव्याने तयार होणार आहेत — या वेळी निवडण्यासारखे काही नाही.',
+  videoReshootRequired: 'आवश्यक',
+  videoReshootKeeping: 'आहे तसेच राहील',
+  videoReshootSelected: 'निवडलेली दृश्ये',
   videoAnimateConfirm: 'नक्की तयार करायचा? हा खर्च परत मिळत नाही.',
   videoAnimateConfirmYes: 'होय, व्हिडिओ तयार करा',
   videoAnimateCancel: 'रद्द करा',

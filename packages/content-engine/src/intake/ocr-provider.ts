@@ -14,42 +14,63 @@
 // whole file could not be read; the DLO caller records it against that file and the intake
 // survives.
 //
-// THE DEFAULT IS OPENAI. The officers were already uploading these PDFs to ChatGPT by hand
-// because it reads their documents — tables especially — better than what the platform
-// returned. OCR_PROVIDER=sarvam is the one-line rollback and sarvam-doc.ts is untouched.
+// THE DEFAULT IS SARVAM. It is the purpose-built document path: Digitise reads a printed PDF
+// as structured HTML, including headings and tables, so the officer can review the document
+// in the same shape the generation pipeline receives. OCR_PROVIDER=openai remains the
+// one-line rollback.
+//
+// A THIRD BACKEND, gemini-doc.ts, reads a whole PDF in ONE call (up to 1,000 pages / 50 MB).
+// It is not the deployment default and is not meant to be: it is what /chat's attachments are
+// read with, selected per read through ExtractPdfOptions.ocrProvider rather than by
+// OCR_PROVIDER, so the surfaces whose output gets published are unaffected by it.
 //
 // NOT A COST-FREE SWAP, and worth knowing before flipping it back and forth: Sarvam bills
-// per page against its own credits, OpenAI bills tokens against OPENAI_API_KEY and lands in
-// the generation's cost_usd (recordChatUsage), where Sarvam's document reads never appeared
-// at all. A document that used to read "free" in the cost breakdown now shows up in it.
+// per page against its own credits and is estimated in the OCR task bucket; OpenAI bills
+// tokens against OPENAI_API_KEY through recordChatUsage. The provider therefore changes both
+// the bill and how analytics attributes it.
 
 import { pathToFileURL } from 'node:url';
 import { recordOcrCost } from '../cost/cost-meter.js';
 import { extractPdfPagesViaOcr } from './sarvam-doc.js';
 import { extractPdfPagesViaOpenAI } from './openai-doc.js';
+import { extractPdfPagesViaGemini } from './gemini-doc.js';
 import { type ExtractPdfOptions, type PdfPage } from './pdf-shared.js';
 
-const SUPPORTED_PROVIDERS = ['openai', 'sarvam'] as const;
+const SUPPORTED_PROVIDERS = ['gemini', 'openai', 'sarvam'] as const;
 
-export function ocrProviderName(): string {
-  const raw = process.env.OCR_PROVIDER;
-  return raw && raw.trim() !== '' ? raw.trim().toLowerCase() : 'openai';
+// `override` is one read's own choice of backend, and the ONLY caller that passes one is the
+// document intake service on behalf of /chat — see ExtractPdfOptions.ocrProvider. Everything
+// else asks with no argument and gets the deployment's default.
+export function ocrProviderName(override?: string | undefined): string {
+  const raw = override ?? process.env.OCR_PROVIDER;
+  return raw && raw.trim() !== '' ? raw.trim().toLowerCase() : 'sarvam';
+}
+
+// Which backend /chat's document attachments are read with. Its own env var rather than a
+// hardcoded 'gemini' so a deployment can put chat back on the shared default in one line, and
+// so the browser never gets to name a provider: it declares the SURFACE and the server decides
+// what that surface reads with.
+export function chatOcrProviderName(): string {
+  const raw = process.env.CHAT_OCR_PROVIDER;
+  return raw && raw.trim() !== '' ? raw.trim().toLowerCase() : 'gemini';
 }
 
 // Which env var a caller must find for the configured provider, so a route or job can name
 // the RIGHT key rather than hardcoding SARVAM_API_KEY (the clipProviderApiKeyEnv precedent —
 // an OpenAI-OCR deployment may legitimately hold no Sarvam key at all).
-export function ocrProviderApiKeyEnv(): string {
-  switch (ocrProviderName()) {
+export function ocrProviderApiKeyEnv(override?: string | undefined): string {
+  switch (ocrProviderName(override)) {
     case 'sarvam':
       return 'SARVAM_API_KEY';
+    case 'gemini':
+      return 'GEMINI_API_KEY';
     default:
       return 'OPENAI_API_KEY';
   }
 }
 
-export function ocrKeyPresent(): boolean {
-  const key = process.env[ocrProviderApiKeyEnv()];
+export function ocrKeyPresent(override?: string | undefined): boolean {
+  const key = process.env[ocrProviderApiKeyEnv(override)];
   return typeof key === 'string' && key.trim() !== '';
 }
 
@@ -60,7 +81,7 @@ export async function extractPdfPagesViaProvider(
   data: Buffer,
   options?: ExtractPdfOptions,
 ): Promise<PdfPage[]> {
-  const provider = ocrProviderName();
+  const provider = ocrProviderName(options?.ocrProvider);
   // Metered HERE rather than inside either client, so a third provider is counted the day it
   // is added. The pages that come back are the pages that were actually read — an options
   // selection can be trimmed by the client, and the analytics card must report what was
@@ -74,6 +95,8 @@ export async function extractPdfPagesViaProvider(
       return extractPdfPagesViaOcr(name, data, options).then(meter);
     case 'openai':
       return extractPdfPagesViaOpenAI(name, data, options).then(meter);
+    case 'gemini':
+      return extractPdfPagesViaGemini(name, data, options).then(meter);
     default:
       throw new Error(
         `Unknown OCR_PROVIDER "${provider}". ` +
@@ -95,18 +118,36 @@ if (
   const original = process.env.OCR_PROVIDER;
 
   delete process.env.OCR_PROVIDER;
-  check('unset defaults to openai', ocrProviderName() === 'openai');
+  check('unset defaults to sarvam', ocrProviderName() === 'sarvam');
+  check(
+    'sarvam gate names SARVAM_API_KEY',
+    ocrProviderApiKeyEnv() === 'SARVAM_API_KEY',
+  );
+
+  process.env.OCR_PROVIDER = '  OpenAI  ';
+  check('trimmed + lowercased', ocrProviderName() === 'openai');
   check(
     'openai gate names OPENAI_API_KEY',
     ocrProviderApiKeyEnv() === 'OPENAI_API_KEY',
   );
 
-  process.env.OCR_PROVIDER = '  Sarvam  ';
-  check('trimmed + lowercased', ocrProviderName() === 'sarvam');
+  delete process.env.OCR_PROVIDER;
   check(
-    'sarvam gate names SARVAM_API_KEY',
-    ocrProviderApiKeyEnv() === 'SARVAM_API_KEY',
+    'an override beats the env default',
+    ocrProviderName('gemini') === 'gemini',
   );
+  check(
+    'the gemini gate names GEMINI_API_KEY',
+    ocrProviderApiKeyEnv('gemini') === 'GEMINI_API_KEY',
+  );
+  delete process.env.CHAT_OCR_PROVIDER;
+  check('chat reads on gemini by default', chatOcrProviderName() === 'gemini');
+  process.env.CHAT_OCR_PROVIDER = 'Sarvam';
+  check(
+    'and can be put back on the shared default in one line',
+    chatOcrProviderName() === 'sarvam',
+  );
+  delete process.env.CHAT_OCR_PROVIDER;
 
   process.env.OCR_PROVIDER = 'nope';
   let threw = '';
@@ -122,7 +163,7 @@ if (
   setTimeout(() => {
     check(
       'unknown provider names the supported list',
-      threw.includes('openai, sarvam'),
+      threw.includes('gemini, openai, sarvam'),
     );
     let failed = 0;
     for (const [label, ok] of checks) {

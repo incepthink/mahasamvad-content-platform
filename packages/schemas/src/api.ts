@@ -201,6 +201,12 @@ export function isSupportedTranslationPair(
 // web form so it can warn instead of eating a 400.
 export const POSTER_HEADING_MAX_CHARS = 120;
 
+// Hard ceiling on the officer's OWN image prompt ("AI Prompt", migration 0045). Generous —
+// this is a design brief in prose, not a headline — but bounded, because on this lane it is the
+// ONLY instruction the image model gets and a pasted document there would be a mis-submit
+// rather than a brief. Shared with the web form so it can warn instead of eating a 400.
+export const IMAGE_PROMPT_MAX_CHARS = 4000;
+
 // Category-appropriate article length, handed to the generator as a GUIDELINE. `target` is
 // what the prompt asks for; `min`/`max` bound the acceptable range. The prompt states
 // explicitly that a limited source must produce a shorter article and that the target may be
@@ -316,6 +322,14 @@ export const CreateGenerationRequestSchema = z
     // from the requested style category. Inert for social runs and for a pasted finished
     // article (providedArticle), neither of which generates prose.
     styleReference: z.string().trim().optional(),
+    // Social runs only: the officer's OWN prompt for the image model (migration 0045). When
+    // present it REPLACES the platform's assembled poster prompt entirely — the image model is
+    // sent the DGIPR designer persona line, this text verbatim, the poster's text verbatim and
+    // the reserved-zone block, and nothing else. No palette, no arrangement anchor, no
+    // reference-structure block, and no poster-copy call is made. A pinned template is still
+    // used as the edit canvas; with no pin the poster is generated from scratch.
+    // Absent/empty ⇒ today's built prompt.
+    imagePrompt: z.string().trim().max(IMAGE_PROMPT_MAX_CHARS).optional(),
     // Article runs only (news/scheme): the officer's trusted request for this article — writing
     // direction plus facts or corrections supplied directly here. Absent/empty ⇒ the article
     // the pipeline writes today.
@@ -333,6 +347,20 @@ export const CreateGenerationRequestSchema = z
           'Reference image and reference type pins are mutually exclusive.',
         path: ['referenceTypeId'],
       });
+    }
+    // The officer's own image prompt only has somewhere to go on a lane that renders a social
+    // poster. The article-poster and YouTube-thumbnail lanes build their prompts elsewhere, and
+    // a caption-only run paints nothing at all — accepting it there would store a prompt that
+    // silently never runs.
+    if (value.imagePrompt && value.imagePrompt.length > 0) {
+      if (!isSocialCategory(value.category) || value.outputType === 'article') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            'imagePrompt is only accepted on a social run that renders a poster.',
+          path: ['imagePrompt'],
+        });
+      }
     }
     // A social run with outputType 'article' is the कॅप्शन lane: no poster is rendered, so
     // the caption is the run's ONLY output. A request that also says generateCaption:false

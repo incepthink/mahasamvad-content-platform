@@ -1,8 +1,7 @@
-// Shared Sarvam SDK client for the DLO intake pipeline (batch speech-to-text +
-// document digitization). Unlike the chat path (sarvam-chat.ts, one OpenAI-
-// compatible POST kept SDK-free on purpose), the intake flows are multi-step
-// jobs — create → presigned uploads → start → poll → presigned downloads — so
-// the official SDK is worth the dependency here. Same key as the chat path.
+// Shared Sarvam key + legacy SDK client for batch speech-to-text and narration. Document
+// OCR now calls the newer /doc-ai/v1 Digitise REST contract directly (sarvam-doc.ts), because
+// the published JavaScript package still exposes the legacy documentIntelligence group.
+// Same key as the chat and translation paths.
 
 import { SarvamAIClient } from 'sarvamai';
 

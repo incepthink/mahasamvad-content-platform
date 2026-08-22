@@ -874,6 +874,75 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
   return lines.join('\n');
 }
 
+// --- The officer's OWN prompt (migration 0045) -------------------------------------------
+//
+// "AI Prompt" on the क्रिएटिव्ह form. When the officer fills it, EVERYTHING buildPosterPrompt
+// assembles above is skipped and the image model is sent four things and nothing else:
+//
+//   1. one line naming the client, so the model knows who this poster is for;
+//   2. the officer's brief, VERBATIM — it is not summarised, re-ordered or wrapped in
+//      instructions of ours, because the whole point of this lane is that the platform stops
+//      having opinions about the design;
+//   3. the poster's text, VERBATIM (no generatePosterCopy call is made on this lane — a
+//      structured rewrite would be exactly the hidden editorial work the officer opted out of);
+//   4. the reserved-zone blocks.
+//
+// (4) IS NOT NEGOTIABLE AND IS NOT A DESIGN OPINION. overlayTwitterChrome composites the
+// महाराष्ट्र शासन badge and the DGIPR footer onto the finished render in code, on this lane
+// exactly as on every other. A prompt that says nothing about them produces a poster whose own
+// text is then destroyed by them — the failure this repo has already shipped twice (generations
+// cc283a63 and 97b64542). So the geometry travels, and so does the rule that makes it win.
+//
+// Nothing else is added. No typography rule, no Devanagari-fidelity rule, no colour guidance,
+// no composition anchor: this lane's contract is "your brief is the brief". A poster that comes
+// back wrong for want of one of those is a brief to edit, not a rule for us to smuggle back in.
+export type BuildCustomPosterPromptInput = Readonly<{
+  // The officer's brief, exactly as typed.
+  imagePrompt: string;
+  // The text to put on the poster, exactly as typed (the create form's box).
+  information: string;
+  // Is a template pinned? Then the model is EDITING that image and must be told to erase the
+  // master's own chrome (referenceChromeRule) — it is a finished poster carrying real branding,
+  // and a copied badge survives BESIDE the stamped one. With no pin the poster is generated from
+  // scratch and the rule is the opposite one: do not invent a badge at all.
+  editsReference: boolean;
+}>;
+
+export function buildCustomPosterPrompt(
+  input: BuildCustomPosterPromptInput,
+): string {
+  const brief = input.imagePrompt.trim();
+  const information = input.information.trim();
+  if (!brief) {
+    throw new Error('buildCustomPosterPrompt: imagePrompt is empty.');
+  }
+
+  return [
+    'You are an expert poster designer working for DGIPR — the Directorate General of Information and Public Relations, Government of Maharashtra, India.',
+    ...(input.editsReference
+      ? [
+          '',
+          'You are editing the provided reference image. Follow the brief below.',
+        ]
+      : []),
+    '',
+    'BRIEF:',
+    brief,
+    ...(information ? ['', 'TEXT TO PUT ON THE POSTER:', information] : []),
+    '',
+    input.editsReference
+      ? referenceChromeRule(SOCIAL_CHROME)
+      : paintNoChromeRule(SOCIAL_CHROME),
+    '',
+    reservedZoneBlock(SOCIAL_ZONES, SOCIAL_FOOTER_NOTE),
+    '',
+    // WITHOUT allowStructuralReflow on either branch: that option licences departing from a
+    // REFERENCE's geometry, and on this lane the geometry is the officer's brief, not a
+    // library master's. Shrink-to-fit is the recovery here, as on the fresh lane.
+    fitToReserveRule(SOCIAL_ZONES),
+  ].join('\n');
+}
+
 export type BuildFeedbackPromptInput = Readonly<{
   imageFeedback: string;
   brand: TemplateBrand;
@@ -2094,6 +2163,75 @@ if (
     }
     if (!threw)
       failures.push('empty feedback with no clear boxes was accepted');
+
+    // --- the officer's own prompt (migration 0045) ---------------------------------------
+    //
+    // What these pin is the CONTRACT of the lane, not its wording: the brief and the text
+    // arrive verbatim, the reserved zones survive, and NOTHING the platform decides about the
+    // design comes along. The three deny-assertions are the important half — each names a
+    // block that, if it ever reappears here, means the lane has quietly stopped being "your
+    // brief is the brief".
+    const BRIEF =
+      'Big bold typography on a deep green ground, a single line drawing of a tractor.';
+    const TEXT = 'शेतकरी सन्मान योजना\n३१ ऑगस्ट २०२६ पर्यंत अर्ज करा';
+    const custom = buildCustomPosterPrompt({
+      imagePrompt: BRIEF,
+      information: TEXT,
+      editsReference: false,
+    });
+    if (!custom.includes(BRIEF))
+      failures.push('custom prompt did not carry the brief verbatim');
+    if (!custom.includes(TEXT))
+      failures.push('custom prompt did not carry the poster text verbatim');
+    if (
+      !custom.includes(
+        'Directorate General of Information and Public Relations',
+      )
+    )
+      failures.push('custom prompt did not name the client');
+    if (!custom.includes('RESERVED BADGE CORNER'))
+      failures.push('custom prompt lost the reserved-zone block');
+    if (!custom.includes('FIT THE CONTENT INSIDE THE USABLE AREA'))
+      failures.push('custom prompt lost the fit-to-reserve rule');
+    if (!custom.includes('PAINT NO BRANDING OF YOUR OWN'))
+      failures.push('custom fresh prompt lost the paint-no-chrome rule');
+    // The three that must NOT be here. A palette block, an arrangement anchor or the
+    // creative-control paragraph reaching this lane would mean the platform is briefing the
+    // model again over the officer's head.
+    if (custom.includes('COLOUR SPECIFICATION'))
+      failures.push('custom prompt carried a colour specification');
+    if (custom.includes('ARRANGEMENT'))
+      failures.push('custom prompt carried an arrangement anchor');
+    if (custom.includes('YOU HAVE FULL CREATIVE CONTROL'))
+      failures.push('custom prompt carried the fresh creative-control brief');
+
+    // With a pinned template the model is EDITING a finished poster, so it must be told to
+    // erase the master's own branding — a copied badge survives beside the stamped one.
+    const customEdit = buildCustomPosterPrompt({
+      imagePrompt: BRIEF,
+      information: TEXT,
+      editsReference: true,
+    });
+    if (!customEdit.includes('editing the provided reference image'))
+      failures.push(
+        'custom edit prompt did not say it is editing the reference',
+      );
+    if (customEdit.includes('PAINT NO BRANDING OF YOUR OWN'))
+      failures.push('custom edit prompt used the from-scratch chrome rule');
+    if (!customEdit.includes('BRIEF:'))
+      failures.push('custom edit prompt lost the brief heading');
+
+    let customThrew = false;
+    try {
+      buildCustomPosterPrompt({
+        imagePrompt: '   ',
+        information: TEXT,
+        editsReference: false,
+      });
+    } catch {
+      customThrew = true;
+    }
+    if (!customThrew) failures.push('empty custom prompt was accepted');
 
     if (failures.length > 0) {
       console.error(`\n${failures.length} FAILURE(S):`);

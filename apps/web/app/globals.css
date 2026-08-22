@@ -1097,6 +1097,17 @@ textarea.note-input {
   margin-top: 4px;
 }
 
+/* The AI प्रॉम्प्ट box. It borrows .note-input for its type size and focus ring but not that
+   rule's 260px composer height: this is a qualifier sitting under the main text box, and at
+   full height it would read as a second, equally important place to write. resize comes back
+   on (it is off only inside .note-field, where the grip would collide with the send button),
+   so a long brief can be opened up by hand. */
+.option-field textarea.note-input {
+  min-height: 110px;
+  margin-top: 10px;
+  resize: vertical;
+}
+
 /* The upload intake EMBEDDED in the caller's own card (`embedded` on DocumentIntake), for
    a surface where the file is a second source for the text box above it rather than a
    replacement for it. A rule and a gap instead of a nested card, which read as a separate
@@ -2022,6 +2033,69 @@ textarea.note-input {
   padding: 1px 5px;
   border-radius: 6px;
   background: var(--border);
+}
+
+/* Nested lists. The renderer builds a real tree now, so a sub-list is a <ul> inside its
+   parent's <li> and needs its own spacing rather than inheriting the block margin. */
+.markdown-body li > ul,
+.markdown-body li > ol {
+  margin: 0.4em 0 0;
+}
+
+.markdown-body del {
+  opacity: 0.7;
+}
+
+/* A fenced code block. A long unbreakable token scrolls inside its own box — the card must
+   never move sideways. */
+.markdown-body pre {
+  margin: 0 0 1.1em;
+  padding: 12px 14px;
+  border-radius: var(--r-md, 10px);
+  background: var(--surface, #f6f1e9);
+  border: 1px solid var(--border);
+  overflow-x: auto;
+}
+
+.markdown-body pre code {
+  display: block;
+  padding: 0;
+  background: none;
+  border-radius: 0;
+  white-space: pre;
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+/* Tables in generated text (a chat answer's storyboard, an article's figures). Same shape as
+   .extracted-table, which does this job for uploaded documents: a wide table scrolls INSIDE
+   its own box so the page body never scrolls sideways. */
+.markdown-table-wrap {
+  overflow-x: auto;
+  margin: 0 0 1.1em;
+}
+
+.markdown-table {
+  border-collapse: collapse;
+  /* Not width:100% — a two-column table stretched across a wide card reads as broken. It
+     grows to its content and the wrapper scrolls when that is wider than the card. */
+  min-width: 100%;
+  font-size: 0.95rem;
+}
+
+.markdown-table th,
+.markdown-table td {
+  border: 1px solid var(--border);
+  padding: 7px 11px;
+  text-align: start;
+  vertical-align: top;
+  line-height: 1.6;
+}
+
+.markdown-table th {
+  background: var(--ok-soft, #f2f7f2);
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 /* The draft while it is still being written (useArticleStream). Muted on purpose: this is
@@ -5379,6 +5453,92 @@ a.thread-node:hover {
   font-weight: 600;
 }
 
+/* Sarvam Digitise returns semantic HTML. Its own classes/styles are deliberately discarded
+   by ExtractedText; these product-owned rules give every allowed element a predictable,
+   readable review shape and keep wide tables inside the card. */
+.extracted-html {
+  overflow-x: auto;
+}
+
+.extracted-html h1,
+.extracted-html h2,
+.extracted-html h3,
+.extracted-html h4,
+.extracted-html h5,
+.extracted-html h6 {
+  margin: 16px 0 8px;
+  line-height: 1.35;
+}
+
+.extracted-html h1 {
+  font-size: 1.35rem;
+}
+
+.extracted-html h2 {
+  font-size: 1.2rem;
+}
+
+.extracted-html h3,
+.extracted-html h4,
+.extracted-html h5,
+.extracted-html h6 {
+  font-size: 1.05rem;
+}
+
+.extracted-html p,
+.extracted-html blockquote,
+.extracted-html ul,
+.extracted-html ol,
+.extracted-html pre,
+.extracted-html figure,
+.extracted-html header,
+.extracted-html footer {
+  margin: 0 0 12px;
+}
+
+.extracted-html table {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: max-content;
+  margin-bottom: 12px;
+  font-size: 0.95rem;
+}
+
+.extracted-html th,
+.extracted-html td {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.extracted-html th {
+  background: var(--ok-soft, #f2f7f2);
+  font-weight: 600;
+}
+
+.extracted-html blockquote {
+  border-left: 3px solid var(--border);
+  padding-left: 12px;
+  color: var(--muted);
+}
+
+.extracted-html pre {
+  overflow-x: auto;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--surface);
+  white-space: pre-wrap;
+}
+
+.extracted-html header,
+.extracted-html footer,
+.extracted-html small,
+.extracted-image-description {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
 /* ---------- page range selector (PageRangeSelector) ---------- */
 
 .page-range {
@@ -7143,4 +7303,81 @@ a.thread-node:hover {
     animation: none;
     opacity: 0.6;
   }
+}
+
+/* ---------- gate 2: which scenes the animate re-shoots (video/[id]) ----------
+   A checkbox per scene under व्हिडिओ तयार करा. A row the job is going to render
+   anyway is ticked and disabled — `is-locked` is what makes that read as "this
+   one is settled" rather than as a control that is broken. */
+
+.reshoot {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.reshoot-title {
+  margin: 0 0 4px;
+  font-weight: 600;
+}
+
+.reshoot-list {
+  list-style: none;
+  margin: 12px 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.reshoot-row {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fffdfa;
+  padding: 10px 14px;
+}
+
+.reshoot-row.is-locked {
+  background: var(--surface);
+}
+
+.reshoot-row-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.reshoot-row.is-locked .reshoot-row-head {
+  cursor: default;
+}
+
+.reshoot-row-head input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+}
+
+.reshoot-row-name {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* The scene's own line, truncated: it is here to identify the row, and a full
+   narration would push the state note off the end of a phone screen. */
+.reshoot-row-beat {
+  color: var(--muted);
+  font-size: 0.9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.reshoot-row-note {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.85rem;
+  white-space: nowrap;
 }

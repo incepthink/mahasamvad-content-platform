@@ -65,8 +65,17 @@ const TERM_TYPE_MR_LABELS: Record<TermType, string> = {
 // between the scripts, so only letters vote; an all-digit text defaults to 'mr'
 // (Marathi-first platform).
 export function detectProofreadLanguage(text: string): ProofreadLanguage {
-  const devanagari = (text.match(/[ऀ-ॿ]/g) ?? []).length;
-  const latin = (text.match(/[A-Za-z]/g) ?? []).length;
+  // Sarvam Document AI now supplies semantic HTML. Tag names are transport structure, not
+  // English content; counting `<table><tbody><tr><td>` would misbadge a short Marathi table
+  // as English. Strip tags only when the string visibly carries HTML, leaving ordinary text
+  // containing comparison signs untouched.
+  const visible = /<\/?(?:html|body|article|section|div|span|p|h[1-6]|table|thead|tbody|tfoot|tr|th|td|ul|ol|li|blockquote|pre|header|footer|br|hr)\b/i.test(
+    text,
+  )
+    ? text.replace(/<[^>]*>/g, ' ')
+    : text;
+  const devanagari = (visible.match(/[ऀ-ॿ]/g) ?? []).length;
+  const latin = (visible.match(/[A-Za-z]/g) ?? []).length;
   if (devanagari + latin === 0) return 'mr';
   return devanagari / (devanagari + latin) >= 0.3 ? 'mr' : 'en';
 }
@@ -686,6 +695,17 @@ function runOfflineChecks(): void {
     buildProofreadHighlights('  चुक  ', 'चूक', [err('चुक', 'चूक')])
       ?.map((mark) => mark.text)
       .join('') === 'चूक',
+  );
+
+  check(
+    'HTML tag names do not make Marathi OCR content look English',
+    detectProofreadLanguage(
+      '<table><tbody><tr><td>महाराष्ट्र शासन</td></tr></tbody></table>',
+    ) === 'mr',
+  );
+  check(
+    'English inside structured HTML still detects as English',
+    detectProofreadLanguage('<h1>Government of Maharashtra</h1>') === 'en',
   );
 
   console.log(failed === 0 ? '\nall checks passed' : `\n${failed} FAILED`);

@@ -1,11 +1,12 @@
-// Marathi PDF OCR via the Sarvam Document Digitization API — the SCANNED-document
-// backend. Born-digital PDFs are read locally from their text layer instead
-// (pdf-text-layer.ts); the choice between the two lives in pdf-pages.ts, which is what
-// callers use. This file is the OCR transport and nothing else.
+// Marathi PDF OCR via Sarvam Document AI's Digitise pipeline. The request deliberately uses
+// output_format=html and content_type=printed: government PDFs are typeset documents, and
+// structured HTML preserves their headings, paragraphs and tables for the officer's review.
+// pdf-pages.ts owns the policy around when this paid backend runs; this file is the transport
+// and output reassembly only.
 //
 // Local pdf-parse was rejected for this job for a reason that still holds: government
 // PDFs are routinely SCANNED, and a text-layer parser yields nothing there, while this
-// OCRs Devanagari across 23 languages. One async job per chunk: create → upload → start →
+// OCRs Devanagari across 23 languages. One async Digitise job per chunk: multipart submit →
 // poll → download.
 //
 // CHUNKING. Sarvam validates "Page/image count must not exceed 10" at job start and takes
@@ -16,47 +17,31 @@
 // minutes. A chunk failure fails the whole extraction — silently missing middle pages
 // would be far worse than an error naming the pages that could not be read.
 //
-// What the output ZIP actually contains (verified 2026-07-21 against a 3-page
-// document, because the whole page-selection feature rests on it):
+// The output ZIP contains the requested HTML plus metadata/page_NNN.json per page. Page
+// identity is recovered from per-page HTML files or explicit page wrappers when Sarvam emits
+// them; metadata is the final authority if a future HTML template changes its wrapper shape.
 //
-//   document.md              the WHOLE document as one Markdown file, its pages
-//                            separated by a bare `---` rule
+//   document.html            structured whole-document HTML (or per-page HTML entries)
 //   metadata/page_001.json   per page: page_num + blocks[] of { text,
 //   metadata/page_002.json   layout_tag, reading_order, coordinates }
 //   …
 //
-// So there is no per-page Markdown file to read, and page boundaries have to be
-// recovered. Splitting document.md on `---` keeps the Markdown (headings,
-// tables) and is tried first; the split is only TRUSTED when it produces exactly
-// as many parts as there are metadata pages, because a thematic break inside a
-// page would otherwise silently shift every page number after it. When the count
-// disagrees, the metadata blocks are the authority — they carry the real page
-// boundaries (and their own page_num), at the cost of Markdown structure.
-//
-// KEEPING THE MARKDOWN MATTERS MORE THAN IT USED TO. Since PDF_EXTRACTION_MODE defaulted to
-// 'ocr' (pdf-pages.ts) this is the only PDF backend, and it was made the only one because
-// government material is full of TABLES that must survive into the article prompt. So the
-// split is attempted twice — once permissively, then requiring a blank line before the rule
-// (a setext heading underline, `Heading` over `-----`, is the false positive that costs a
-// whole document its Markdown) — and the metadata fallback reads each block's `layout_tag`
-// so a table block is kept verbatim instead of being flattened into a paragraph.
+// The exact-count rule is non-negotiable: a guessed split could shift every original page
+// number after it. The metadata fallback keeps layout tags and turns them back into safe,
+// semantic HTML instead of flattening tables into prose.
 
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import AdmZip from 'adm-zip';
-import { createSarvamClient } from './sarvam-client.js';
+import { JSDOM } from 'jsdom';
+import { requireSarvamApiKey } from './sarvam-client.js';
 import {
   OCR_MAX_TOTAL_PAGES,
   SARVAM_DOC_MAX_PAGES,
   formatPageRanges,
   splitPdfPages,
 } from './pdf-split.js';
-import {
-  type ExtractPdfOptions,
-  type PdfPage,
-  unwrapSoftLineBreaks,
-} from './pdf-shared.js';
+import { type ExtractPdfOptions, type PdfPage } from './pdf-shared.js';
 
 // Ceiling on ONE job, i.e. at most 10 pages; default 10 min. Overridable per call.
 const DOC_TIMEOUT_MS = Number.parseInt(
@@ -82,6 +67,7 @@ type PageMetadata = {
     text?: unknown;
     reading_order?: unknown;
     layout_tag?: unknown;
+    tag?: unknown;
   }>;
 };
 
@@ -91,9 +77,19 @@ type PageMetadata = {
 // table is one whatever it is labelled. Getting this wrong in either direction is cheap:
 // a false positive keeps a paragraph's line breaks, a false negative loses a table's
 // columns exactly as the old code did for every block.
-function isTableBlock(block: { text?: unknown; layout_tag?: unknown }): boolean {
-  const tag =
-    typeof block.layout_tag === 'string' ? block.layout_tag.toLowerCase() : '';
+function blockTag(block: { layout_tag?: unknown; tag?: unknown }): string {
+  if (typeof block.tag === 'string') return block.tag.toLowerCase();
+  return typeof block.layout_tag === 'string'
+    ? block.layout_tag.toLowerCase()
+    : '';
+}
+
+function isTableBlock(block: {
+  text?: unknown;
+  layout_tag?: unknown;
+  tag?: unknown;
+}): boolean {
+  const tag = blockTag(block);
   if (tag.includes('table')) return true;
   const text = typeof block.text === 'string' ? block.text : '';
   if (/<\/?(table|tr|td|th)\b/i.test(text)) return true;
@@ -116,12 +112,71 @@ function metadataEntries(zip: AdmZip) {
     .sort((a, b) => pageOrderKey(a.entryName) - pageOrderKey(b.entryName));
 }
 
-// Rebuild a page's text from its OCR blocks, in reading order, and take the page's own
-// number with it. Loses the DOCUMENT-level Markdown (headings, the page's overall shape),
-// which is why this is the fallback rather than the primary path — but a block that is
-// itself a table keeps its own rows: its internal line breaks are the table, so they are
-// preserved verbatim rather than trimmed per line, and it is separated from its neighbours
-// by a blank line so no prose can be pulled into the first row.
+function escapeHtml(text: string): string {
+  return text
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function markdownTableHtml(text: string): string | null {
+  const rows = text
+    .split('\n')
+    .filter((line) => /^\s*\|.*\|\s*$/.test(line))
+    .map((line) =>
+      line
+        .trim()
+        .replace(/^\|/, '')
+        .replace(/\|$/, '')
+        .split('|')
+        .map((cell) => cell.trim()),
+    );
+  if (rows.length < 2) return null;
+  const divider = rows[1]?.every((cell) => /^:?-{2,}:?$/.test(cell));
+  const header = divider ? rows[0] : null;
+  const body = divider ? rows.slice(2) : rows;
+  const cells = (row: string[], tag: 'th' | 'td') =>
+    `<tr>${row.map((cell) => `<${tag}>${escapeHtml(cell)}</${tag}>`).join('')}</tr>`;
+  return `<table>${header ? `<thead>${cells(header, 'th')}</thead>` : ''}<tbody>${body
+    .map((row) => cells(row, 'td'))
+    .join('')}</tbody></table>`;
+}
+
+function metadataBlockHtml(block: {
+  text: string;
+  table: boolean;
+  tag: string;
+}): string {
+  // Sarvam may put ready-made HTML in a metadata block. Keep that structure; the web view
+  // renders through an element allow-list and never injects this string into the DOM.
+  if (
+    /<\/?(?:table|thead|tbody|tr|th|td|p|h[1-6]|ul|ol|li)\b/i.test(block.text)
+  ) {
+    return block.text;
+  }
+  if (block.table) {
+    return (
+      markdownTableHtml(block.text) ?? `<pre>${escapeHtml(block.text)}</pre>`
+    );
+  }
+
+  const content = escapeHtml(block.text).replaceAll('\n', '<br>');
+  if (block.tag.includes('headline') && !block.tag.includes('sub')) {
+    return `<h1>${content}</h1>`;
+  }
+  if (block.tag.includes('sub-headline')) return `<h2>${content}</h2>`;
+  if (block.tag.includes('section-title')) return `<h3>${content}</h3>`;
+  if (block.tag.includes('header')) return `<header>${content}</header>`;
+  if (block.tag.includes('footer')) return `<footer>${content}</footer>`;
+  if (block.tag.includes('footnote')) return `<small>${content}</small>`;
+  return `<p>${content}</p>`;
+}
+
+// Rebuild a page from its OCR blocks, in reading order, and take the page's own number with
+// it. This is the fallback when Sarvam's primary HTML cannot be split into the exact number
+// of pages. Layout tags still become semantic HTML, and tables stay tables.
 function pageFromMetadata(
   raw: string,
   fallbackPage: number,
@@ -136,12 +191,13 @@ function pageFromMetadata(
     .map((block, index) => ({
       text: typeof block.text === 'string' ? block.text.trim() : '',
       table: isTableBlock(block),
+      tag: blockTag(block),
       order:
         typeof block.reading_order === 'number' ? block.reading_order : index,
     }))
     .filter((block) => block.text.length > 0)
     .sort((a, b) => a.order - b.order);
-  const text = blocks.map((block) => block.text).join('\n\n');
+  const text = blocks.map(metadataBlockHtml).join('\n');
   return {
     hasTable: blocks.some((block) => block.table),
     page:
@@ -152,14 +208,58 @@ function pageFromMetadata(
   };
 }
 
+function bodyHtml(raw: string): string {
+  const document = new JSDOM(raw).window.document;
+  return document.body.innerHTML.trim() || raw.trim();
+}
+
+// Sarvam may return one HTML entry per page or one whole-document entry. A whole-document
+// split is accepted only when explicit page wrappers (or top-level HR separators) produce
+// exactly the page count reported by the job; otherwise metadata owns page identity.
+function splitWholeDocumentHtml(
+  raw: string,
+  expectedPages: number,
+): string[] | null {
+  if (expectedPages === 1) return [bodyHtml(raw)];
+  const document = new JSDOM(raw).window.document;
+  const selector =
+    '[data-page-number], [data-page-num], .page, [id^="page-"], [id^="page_"]';
+  const wrappers = [...document.querySelectorAll(selector)].filter(
+    (element) => !element.parentElement?.closest(selector),
+  );
+  if (wrappers.length === expectedPages) {
+    return wrappers.map((element) => element.outerHTML.trim());
+  }
+
+  const groups: globalThis.Node[][] = [[]];
+  for (const node of document.body.childNodes) {
+    if (node.nodeType === document.defaultView?.Node.ELEMENT_NODE) {
+      const element = node as globalThis.Element;
+      if (element.tagName.toLowerCase() === 'hr') {
+        groups.push([]);
+        continue;
+      }
+    }
+    groups[groups.length - 1]!.push(node);
+  }
+  if (groups.length === expectedPages) {
+    return groups.map((nodes) => {
+      const holder = document.createElement('div');
+      for (const node of nodes) holder.append(node.cloneNode(true));
+      return holder.innerHTML.trim();
+    });
+  }
+  return null;
+}
+
 // The chunk's pages, in order and numbered from 1 within the chunk (the caller offsets
 // them to the document's own numbering). See the file header for the ZIP layout this reads.
 //
 // Empty pages are KEPT. Dropping them and renumbering — which this used to do — shifts
 // every later page number, so one blank page in a 20-page document silently made "translate
 // pages 11-14" translate the wrong pages.
-function pagesFromOutputZip(zipPath: string, expectedPages: number): PdfPage[] {
-  const zip = new AdmZip(zipPath);
+function pagesFromOutputZip(data: Buffer, expectedPages: number): PdfPage[] {
+  const zip = new AdmZip(data);
   if (process.env.SARVAM_DOC_DEBUG) {
     console.log(
       `[sarvam-doc] output zip entries: ${zip
@@ -170,27 +270,26 @@ function pagesFromOutputZip(zipPath: string, expectedPages: number): PdfPage[] {
   }
 
   const metadata = metadataEntries(zip);
-  const markdown = zip
+  const htmlEntries = zip
     .getEntries()
-    .filter((entry) => !entry.isDirectory && entry.entryName.endsWith('.md'))
-    .map((entry) => entry.getData().toString('utf8'))
-    .join('\n\n');
-
-  // Preferred: split the Markdown on the page rule, but only when the number of parts
-  // agrees with a known page count (a stray `---` inside a page would otherwise renumber
-  // everything after it).
-  //
-  // Two candidate rules, tried in order. The permissive one is the original. The strict one
-  // additionally requires a BLANK line before the rule, which is what distinguishes a
-  // CommonMark thematic break from a setext heading underline — `शीर्षक` over `-----` is a
-  // heading, not a page boundary, and one of them in a document used to cost every page its
-  // Markdown (and therefore its tables) by pushing the whole read onto the metadata path.
+    .filter(
+      (entry) =>
+        !entry.isDirectory && entry.entryName.toLowerCase().endsWith('.html'),
+    )
+    .sort((a, b) => pageOrderKey(a.entryName) - pageOrderKey(b.entryName));
   const known = metadata.length > 0 ? metadata.length : expectedPages;
-  for (const rule of [/\n\s*-{3,}\s*\n/, /\n[ \t]*\n[ \t]*-{3,}[ \t]*\n/]) {
-    const parts = markdown
-      .split(rule)
-      .map((part) => unwrapSoftLineBreaks(part).trim());
-    if (parts.length === known && parts.some((part) => part.length > 0)) {
+  if (htmlEntries.length === known) {
+    return htmlEntries.map((entry, index) => ({
+      page: index + 1,
+      text: bodyHtml(entry.getData().toString('utf8')),
+    }));
+  }
+  if (htmlEntries.length === 1) {
+    const parts = splitWholeDocumentHtml(
+      htmlEntries[0]!.getData().toString('utf8'),
+      known,
+    );
+    if (parts && parts.some((part) => part.length > 0)) {
       return parts.map((text, index) => ({ page: index + 1, text }));
     }
   }
@@ -201,7 +300,7 @@ function pagesFromOutputZip(zipPath: string, expectedPages: number): PdfPage[] {
       pageFromMetadata(entry.getData().toString('utf8'), index + 1),
     );
     console.warn(
-      `[sarvam-doc] markdown page split did not match ${metadata.length} page(s); using page metadata instead.${
+      `[sarvam-doc] HTML page split did not match ${metadata.length} page(s); using page metadata instead.${
         pages.some((page) => page.hasTable)
           ? ' Some pages contain tables — check their columns survived.'
           : ''
@@ -210,9 +309,113 @@ function pagesFromOutputZip(zipPath: string, expectedPages: number): PdfPage[] {
     return pages.map(({ page, text }) => ({ page, text }));
   }
 
-  // Neither shape available: hand back whatever Markdown there was as one page.
-  const whole = markdown.trim();
-  return whole.length > 0 ? [{ page: 1, text: whole }] : [];
+  // Neither shape available: only a one-page result can be mapped without guessing.
+  const whole = htmlEntries
+    .map((entry) => bodyHtml(entry.getData().toString('utf8')))
+    .join('\n');
+  return expectedPages === 1 && whole.length > 0
+    ? [{ page: 1, text: whole }]
+    : [];
+}
+
+const TERMINAL_STATUSES = new Set([
+  'completed',
+  'partially_completed',
+  'failed',
+  'rejected',
+]);
+
+type DigitiseJob = { job_id?: unknown; status?: unknown };
+type DigitiseStatus = {
+  status?: unknown;
+  usage?: {
+    pages_total?: unknown;
+    pages_processed?: unknown;
+    pages_succeeded?: unknown;
+    pages_failed?: unknown;
+  };
+};
+type DownloadTarget = {
+  method?: unknown;
+  url?: unknown;
+  headers?: unknown;
+};
+
+const DOCUMENT_AI_BASE_URL = 'https://api.sarvam.ai/doc-ai/v1/job';
+
+async function fetchUntil(
+  input: string,
+  init: RequestInit,
+  deadline: number,
+): Promise<Response> {
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) throw new Error('Sarvam Document AI timed out.');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), remaining);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function sarvamJson<T>(
+  url: string,
+  init: RequestInit,
+  deadline: number,
+): Promise<T> {
+  const response = await fetchUntil(
+    url,
+    {
+      ...init,
+      headers: {
+        'api-subscription-key': requireSarvamApiKey(),
+        ...init.headers,
+      },
+    },
+    deadline,
+  );
+  const raw = await response.text();
+  if (!response.ok) {
+    throw new Error(
+      `Sarvam Document AI request failed: ${response.status} ${response.statusText} — ${raw.slice(0, 1_000)}`,
+    );
+  }
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    throw new Error(
+      `Sarvam Document AI returned invalid JSON (status ${response.status}).`,
+    );
+  }
+}
+
+async function waitForDigitise(jobId: string, deadline: number): Promise<void> {
+  while (true) {
+    const status = await sarvamJson<DigitiseStatus>(
+      `${DOCUMENT_AI_BASE_URL}/${encodeURIComponent(jobId)}/status`,
+      { method: 'GET' },
+      deadline,
+    );
+    const state =
+      typeof status.status === 'string' ? status.status.toLowerCase() : '';
+    if (TERMINAL_STATUSES.has(state)) {
+      if (state !== 'completed') {
+        const failed = status.usage?.pages_failed;
+        throw new Error(
+          `Sarvam Document AI ended with status ${state}${
+            typeof failed === 'number' ? ` (${failed} page(s) failed)` : ''
+          }.`,
+        );
+      }
+      return;
+    }
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw new Error('Sarvam Document AI timed out.');
+    await new Promise((resolve) =>
+      setTimeout(resolve, Math.min(DOC_POLL_MS, remaining)),
+    );
+  }
 }
 
 // One Sarvam job: at most SARVAM_DOC_MAX_PAGES pages, numbered 1..n within the chunk.
@@ -222,38 +425,62 @@ async function extractChunkPages(
   expectedPages: number,
   timeoutMs: number,
 ): Promise<PdfPage[]> {
-  const client = createSarvamClient();
-  const workDir = await mkdtemp(join(tmpdir(), 'sarvam-doc-'));
-  try {
-    // Sarvam's presigned upload requires a .pdf file name; the display name may
-    // be Devanagari, so upload under a fixed safe name.
-    const pdfPath = join(workDir, 'input.pdf');
-    await writeFile(pdfPath, data);
+  const deadline = Date.now() + timeoutMs;
+  const form = new FormData();
+  form.append(
+    'file',
+    new Blob([new Uint8Array(data)], { type: 'application/pdf' }),
+    'input.pdf',
+  );
+  form.append('language', 'mr-IN');
+  form.append('output_format', 'html');
+  form.append('content_type', 'printed');
 
-    const job = await client.documentIntelligence.createJob({
-      language: 'mr-IN',
-      outputFormat: 'md',
-      pollingIntervalMs: DOC_POLL_MS,
-      maxPollingAttempts: Math.max(1, Math.ceil(timeoutMs / DOC_POLL_MS)),
-    });
-    await job.uploadFile(pdfPath);
-    await job.start();
-    const status = await job.waitUntilComplete();
-
-    if (status.job_state === 'Failed') {
-      throw new Error(
-        `Sarvam document digitization failed for ${label}: ${
-          status.error_message ?? 'unknown error'
-        }`,
-      );
-    }
-
-    const zipPath = join(workDir, 'output.zip');
-    await job.downloadOutput(zipPath);
-    return pagesFromOutputZip(zipPath, expectedPages);
-  } finally {
-    await rm(workDir, { recursive: true, force: true }).catch(() => undefined);
+  const created = await sarvamJson<DigitiseJob>(
+    `${DOCUMENT_AI_BASE_URL}/digitise`,
+    { method: 'POST', body: form },
+    deadline,
+  );
+  if (typeof created.job_id !== 'string' || created.job_id.length === 0) {
+    throw new Error(`Sarvam Document AI returned no job id for ${label}.`);
   }
+  await waitForDigitise(created.job_id, deadline);
+
+  const target = await sarvamJson<DownloadTarget>(
+    `${DOCUMENT_AI_BASE_URL}/${encodeURIComponent(created.job_id)}/download-url`,
+    { method: 'GET' },
+    deadline,
+  );
+  if (typeof target.url !== 'string' || target.url.length === 0) {
+    throw new Error(
+      `Sarvam Document AI returned no download URL for ${label}.`,
+    );
+  }
+  const headers =
+    target.headers && typeof target.headers === 'object'
+      ? Object.fromEntries(
+          Object.entries(target.headers).filter(
+            (entry): entry is [string, string] => typeof entry[1] === 'string',
+          ),
+        )
+      : undefined;
+  const response = await fetchUntil(
+    target.url,
+    {
+      method: typeof target.method === 'string' ? target.method : 'GET',
+      ...(headers ? { headers } : {}),
+    },
+    deadline,
+  );
+  if (!response.ok) {
+    throw new Error(
+      `Sarvam Document AI output download failed for ${label}: ${response.status} ${response.statusText}.`,
+    );
+  }
+  return pagesFromOutputZip(
+    Buffer.from(await response.arrayBuffer()),
+    expectedPages,
+  );
 }
 
 // OCRs a PDF, splitting it into ≤10-page jobs as needed. Throws with a descriptive
@@ -323,4 +550,127 @@ export async function extractPdfPagesViaOcr(
     );
   }
   return pages;
+}
+
+// Free transport/output harness. It proves the exact Document AI form fields and verifies
+// that a ZIP of page-level HTML comes back as separately numbered pages without touching
+// Sarvam or spending credits.
+//   tsx src/intake/sarvam-doc.ts
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
+  const checks: Array<[string, boolean]> = [];
+  const check = (label: string, ok: boolean): void => {
+    checks.push([label, ok]);
+  };
+  const zip = new AdmZip();
+  zip.addFile('page_001.html', Buffer.from('<h1>पहिले पृष्ठ</h1><p>मजकूर</p>'));
+  zip.addFile(
+    'page_002.html',
+    Buffer.from('<h2>दुसरे पृष्ठ</h2><table><tr><td>१</td></tr></table>'),
+  );
+  const output = zip.toBuffer();
+  const metadataZip = new AdmZip();
+  metadataZip.addFile('document.html', Buffer.from('<p>unsplit document</p>'));
+  metadataZip.addFile(
+    'metadata/page_001.json',
+    Buffer.from(
+      JSON.stringify({
+        page_num: 1,
+        blocks: [{ text: 'शीर्षक', tag: 'headline', reading_order: 0 }],
+      }),
+    ),
+  );
+  metadataZip.addFile(
+    'metadata/page_002.json',
+    Buffer.from(
+      JSON.stringify({
+        page_num: 2,
+        blocks: [
+          {
+            text: '| नाव | संख्या |\n| --- | --- |\n| अ | १ |',
+            tag: 'table',
+            reading_order: 0,
+          },
+        ],
+      }),
+    ),
+  );
+  const metadataPages = pagesFromOutputZip(metadataZip.toBuffer(), 2);
+  check(
+    'metadata fallback rebuilds semantic HTML and tables',
+    metadataPages[0]?.text === '<h1>शीर्षक</h1>' &&
+      metadataPages[1]?.text.includes('<table>') === true,
+  );
+  const originalFetch = globalThis.fetch;
+  const originalKey = process.env.SARVAM_API_KEY;
+  let formOk = false;
+  let calls = 0;
+  process.env.SARVAM_API_KEY = 'test-key';
+  globalThis.fetch = (async (input, init) => {
+    calls += 1;
+    const url = String(input);
+    if (url.endsWith('/digitise')) {
+      const form = init?.body;
+      formOk =
+        form instanceof FormData &&
+        form.get('output_format') === 'html' &&
+        form.get('content_type') === 'printed' &&
+        form.get('language') === 'mr-IN' &&
+        form.get('file') instanceof Blob;
+      return new Response(
+        JSON.stringify({ job_id: 'job-1', status: 'pending' }),
+        {
+          status: 201,
+        },
+      );
+    }
+    if (url.endsWith('/job-1/status')) {
+      return new Response(JSON.stringify({ status: 'completed' }));
+    }
+    if (url.endsWith('/job-1/download-url')) {
+      return new Response(
+        JSON.stringify({
+          method: 'GET',
+          url: 'https://download.test/output.zip',
+        }),
+      );
+    }
+    if (url === 'https://download.test/output.zip') {
+      return new Response(new Uint8Array(output));
+    }
+    return new Response('unexpected URL', { status: 500 });
+  }) as typeof fetch;
+
+  extractChunkPages('check.pdf', Buffer.from('%PDF-check'), 2, 2_000)
+    .then((pages) => {
+      check('uses Digitise HTML printed form', formOk);
+      check('create + status + URL + download', calls === 4);
+      check(
+        'keeps two page-level HTML entries',
+        pages.length === 2 &&
+          pages[0]?.page === 1 &&
+          pages[0]?.text.includes('<h1>') === true &&
+          pages[1]?.page === 2 &&
+          pages[1]?.text.includes('<table>') === true,
+      );
+    })
+    .catch((error: unknown) => {
+      console.error(error);
+      check('transport completes', false);
+    })
+    .finally(() => {
+      globalThis.fetch = originalFetch;
+      if (originalKey === undefined) delete process.env.SARVAM_API_KEY;
+      else process.env.SARVAM_API_KEY = originalKey;
+
+      let failed = 0;
+      for (const [label, ok] of checks) {
+        console.log(`${ok ? 'ok  ' : 'FAIL'} ${label}`);
+        if (!ok) failed += 1;
+      }
+      console.log(`\n${checks.length - failed}/${checks.length} passed.`);
+      process.exitCode = failed > 0 ? 1 : 0;
+    });
 }
