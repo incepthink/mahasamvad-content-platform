@@ -23,7 +23,8 @@ const SELECTED_KEY = 'dgipr.transcribe.selected';
 
 export default function TranscribePage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const { detail, error } = useTranscription(selectedId);
+  const { detail, error, refresh: refreshDetail } =
+    useTranscription(selectedId);
   const { items, loading, error: listError, refresh } = useTranscriptionList();
 
   // Read post-hydration so the server and first client render agree.
@@ -69,6 +70,7 @@ export default function TranscribePage() {
         <TranscriptionResult
           detail={detail}
           error={error}
+          onRetry={() => void refreshDetail()}
           onClose={() => select(null)}
         />
       ) : null}
@@ -79,6 +81,7 @@ export default function TranscribePage() {
         error={listError}
         selectedId={selectedId}
         onOpen={select}
+        onRetry={() => void refresh()}
       />
     </main>
   );

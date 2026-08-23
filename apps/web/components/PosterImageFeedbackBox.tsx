@@ -18,10 +18,12 @@ import type {
   PosterImageFeedbackRequest,
 } from '@dgipr/schemas';
 import { STR } from '../lib/strings';
+import { errorMessage } from '../lib/errorMessage';
 import { ClearActionToggle, clearActionLabel } from './ClearActionToggle';
 // Marker notes and the overall note are written in Marathi on an InScript keyboard, which a
 // controlled box can overwrite half-formed. See ComposeSafeInput.
 import { ComposeSafeInput, ComposeSafeTextarea } from './ComposeSafeInput';
+import { ErrorNotice } from './ErrorNotice';
 import {
   CLEAR_LETTERS,
   type AnnotatorMode,
@@ -114,7 +116,7 @@ export function PosterImageFeedbackBox({
       await onSubmit(payload);
       setFeedback('');
     } catch (e) {
-      setError(e instanceof Error ? e.message : STR.genericError);
+      setError(errorMessage(e));
     } finally {
       setSending(false);
     }
@@ -301,7 +303,7 @@ export function PosterImageFeedbackBox({
             {sending ? STR.sendingFeedback : STR.sendFeedback}
           </button>
         </div>
-        {error ? <p className="form-error">{error}</p> : null}
+        {error ? <ErrorNotice message={error} /> : null}
       </div>
     </details>
   );

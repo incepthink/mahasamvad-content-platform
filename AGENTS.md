@@ -3087,6 +3087,89 @@ Canva OAuth authentication and poster handoff are implemented in `apps/api/src/r
 
 ## Latest Implementation Milestone
 
+- **Every failure now says something an officer can act on, and offers the button that
+  fixes it** (2026-08-24, no migration, no n8n): three reported problems, one cause.
+  Error text overflowed the card on a phone; errors read as developer output; and whether
+  a recoverable failure had a retry beside it depended on which screen you were on. All
+  three came from the same line, repeated 49 times —
+  `e instanceof Error ? e.message : STR.genericError` — which puts whatever the throw site
+  happened to carry straight on screen. In practice that is four different things and
+  three of them are unreadable: a route's Marathi sentence (the one good case);
+  `TypeError: Failed to fetch` (the API restarted); an internal English message naming a
+  column, a bucket path or a provider request id; and — the one that overflowed the
+  card — **a ZodError message, which is a pretty-printed JSON array of issue objects**
+  (401 characters for a two-field schema, measured; several thousand for a real request
+  body). `apps/api`'s error handler was sending that verbatim.
+  - **`apps/web/lib/errorMessage.ts` is the one normaliser**, and the rule is a WHITELIST,
+    never a blacklist: a message reaches an officer only when it looks written for one —
+    Devanagari, one line, under 240 characters, no code punctuation, and no unbreakable
+    40-character token (a URL or storage path, which has no break opportunity and so sets
+    the block's minimum width). Everything else becomes a canned Marathi sentence chosen
+    from the HTTP STATUS, which also decides `retryable`. A route's own Marathi 4xx still
+    wins; a 5xx message never does, being an internal failure by definition.
+  - **`components/ErrorNotice.tsx` replaces `<p className="form-error">{error}</p>`** at
+    all 57 failure sites. Handing it the CAUGHT VALUE is the intended use: the message and
+    the retry verdict are then both derived, so a screen cannot offer a button where
+    pressing it can only fail the identical way (a 400, a 404) — the inconsistency the
+    hand-written buttons had. The character COUNTERS that turn red past a limit
+    (`className={tooLong ? 'form-error' : 'hint'}`, the two narration ones) are
+    deliberately left as plain text: they are a field talking about text still being
+    typed, not a failure, and they need no alert role and no button.
+  - **The string ROUND TRIP is load-bearing.** A catch site stores `errorMessage(e)` and
+    the component that renders it much later has only a string, so `describeError`
+    recognises its own canned wording and recovers the kind. Without that every stored
+    message came back `unknown`/retryable — exactly the useless button the verdict exists
+    to prevent. Harness-asserted in both directions, including that each canned sentence
+    round-trips, so rewording one cannot silently break it.
+  - **`apps/api/src/index.ts` stops the blob at the source**: a ZodError is logged in full
+    (`request.log.warn` with `error.issues` — the only copy once the response stops
+    carrying it) and answered with a short Marathi sentence plus a stable machine
+    `code: 'invalid_request'`. A 5xx gets `internal_error` the same way. Routes that refuse
+    on purpose use `reply.code(4xx).send(...)` and return directly, so **none of them
+    reach this handler and none of their Marathi wording changed.** The `code` field is
+    additive; `readJsonResponse` reads `error.message` and ignores it.
+  - **Retry where a caller has something to call**: the generation detail page (its
+    `if (error && !detail)` branch was the worst state in the product — an API restart
+    under the 2.5 s poll left an officer on a bare English string with no way back to a run
+    that was untouched), the video project page, the /dlo workspace, the generation history
+    list, the /dlo and /transcribe lists, the transcript panel, the glossary list, the
+    template library, the chat rail, and both analytics pages (whose loose retry button
+    folded into the notice — two controls saying one thing was the same inconsistency).
+    Chat's ANSWER failure deliberately gets none: the user turn is already persisted and
+    paid for, so a resend would double it, and the composer below is the correct retry.
+  - **Stored errors are normalised too** (`storedErrorMessage`) — `generations.error`, a
+    failed intake file, a video scene, a chat attachment, the tasks panel. Those reach the
+    UI through a poll rather than a catch, so they never pass through the thrown-value
+    path, and a job stores whatever it caught.
+  - **Containment in the stylesheet is the second half, and it needed `min-width: 0`
+    beside `overflow-wrap`**: inside a flex or grid parent the automatic minimum size is
+    the content's, so the wrap rule alone still overflows there. That is what holds when a
+    long token gets through the normaliser.
+  - **There were no React error boundaries at all**, so an uncaught render error showed
+    Next's own screen — an English overlay in development and the bare "Application error:
+    a client-side exception has occurred" in production, with no way back. `app/error.tsx`,
+    `app/global-error.tsx` and `app/not-found.tsx` now answer in Marathi with two buttons.
+    The global one carries INLINE styles on purpose: it replaces the whole document, so it
+    gets neither `globals.css` nor the Mukta font, and a stylesheet reference there would
+    be a second thing that can fail at the moment everything else already has.
+  Verified 2026-08-24, all free: workspace typecheck green, eslint clean on every touched
+  file (the only 3 warnings are the pre-existing unused imports in
+  `analytics/[feature]/page.tsx`), prettier clean on every hunk of mine — 12 of the touched
+  files were **already failing prettier at HEAD**, confirmed per file against `git show
+  HEAD:`, so do NOT `--write` them; a new **127-assertion** harness
+  (`npx tsx --tsconfig apps/web/tsconfig.check.json apps/web/lib/errorMessage.check.ts`)
+  built from the real failing shapes; the production `next build` green; **27 browser
+  assertions** at 1360 and 390 (Marathi text carrying no JSON, a retry button at a 44px+
+  target, no horizontal overflow, no page errors, a Marathi 404, and an unbreakable token
+  injected into a live notice still not overflowing a 390px screen); and the API verified
+  LIVE — a malformed `POST /api/generations` now returns the short Marathi sentence with
+  `code: invalid_request` where it returned the 401-character blob, and a 500 returns
+  `internal_error` instead of the driver's text. Deploy is API + web; no migration, no
+  n8n, no new env. **Trap for the next agent: do not run `next build` in `apps/web` while
+  `next dev` is running** — it overwrites `.next` with a production build and the dev
+  server then throws `Cannot find module './vendor-chunks/...'` on every route until
+  `.next` is deleted and the process restarted.
+
 - **A caption-only run reads as a कॅप्शन, and no caption has a length limit**
   (2026-08-23, no migration, no n8n): the फक्त कॅप्शन lane shipped on 2026-08-22 reusing the
   social poster surface, so it inherited four things that are only true of a POSTER run.

@@ -15,6 +15,7 @@ import { isSocialCategory } from '@dgipr/schemas';
 import type { GenerationDetail } from '@dgipr/schemas';
 import { useTasks } from '../lib/TasksProvider';
 import { STATUS_LABELS, STEP_LABELS, STR } from '../lib/strings';
+import { storedErrorMessage } from '../lib/errorMessage';
 
 // One-line title: user heading → twitter poster headline → truncated source note.
 function taskTitle(task: GenerationDetail): string {
@@ -146,7 +147,10 @@ export function TasksMenu({ collapsed = false }: { collapsed?: boolean }) {
                               </span>
                               {failed ? (
                                 <span className="task-error">
-                                  {task.error ?? STR.failedHint}
+                                  {storedErrorMessage(
+                                    task.error,
+                                    STR.failedHint,
+                                  )}
                                 </span>
                               ) : null}
                             </span>

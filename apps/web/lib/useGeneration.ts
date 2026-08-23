@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { GenerationDetail } from '@dgipr/schemas';
 import { getGeneration } from './api';
+import { errorMessage } from './errorMessage';
 
 const POLL_INTERVAL_MS = 2500;
 
@@ -25,7 +26,7 @@ export function useGeneration(id: string): {
       setDetail(next);
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     }
   }, [id]);
 

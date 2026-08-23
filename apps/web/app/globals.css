@@ -1021,6 +1021,183 @@ textarea.note-input {
   padding: 12px 16px;
   margin: 16px 0 0;
   font-size: 0.95rem;
+  /* Containment, and it is load-bearing on a phone. An error message is the one
+     string on this site that nobody wrote by hand — it can arrive carrying a
+     storage path, a URL or a provider request id, none of which has a break
+     opportunity in it. Without `anywhere` such a token sets the block's minimum
+     width and pushes the whole card off a 390px screen. `min-width: 0` is the
+     other half: inside a flex or grid parent the automatic minimum size is the
+     content's, so the wrap rule alone would still overflow there.
+     lib/errorMessage.ts keeps most such strings off the screen in the first
+     place; this is what holds when one gets through. */
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  min-width: 0;
+}
+
+/* ---------- error notice (components/ErrorNotice.tsx) ---------- */
+
+/* The standard failure block: a mark, the sentence, and — when a retry could
+   actually work — the button. Same red vocabulary as .form-error, because the two
+   coexist during the migration and must not read as two different severities. */
+.error-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  color: var(--err);
+  background: var(--err-soft);
+  border: 1px solid rgba(160, 49, 35, 0.22);
+  border-inline-start: 4px solid var(--err);
+  border-radius: var(--r-sm);
+  padding: 14px 16px;
+  margin: 16px 0 0;
+  min-width: 0;
+}
+
+.error-notice-icon {
+  flex: 0 0 auto;
+  /* Optically aligned to the first line of text rather than to the box. */
+  margin-top: 2px;
+  color: var(--err);
+}
+
+.error-notice-body {
+  /* See .form-error: without this the text column refuses to shrink below its
+     longest token and the notice overflows its card. */
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.error-notice-text {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.error-notice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+/* The button sits on the tinted error ground, so it needs its own surface to stay
+   legible; it keeps .btn's 48px target rather than dropping to .btn-small, since
+   this is the control an officer most often has to find in a hurry. */
+.error-notice-actions .btn {
+  background: var(--card);
+  color: var(--err);
+  border-color: rgba(160, 49, 35, 0.35);
+}
+
+.error-notice-actions .btn:hover:not(:disabled) {
+  background: #fff;
+  border-color: var(--err);
+  color: var(--err);
+}
+
+.error-notice-actions .btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+}
+
+.error-notice-actions .btn .spinner {
+  border-color: rgba(160, 49, 35, 0.25);
+  border-top-color: var(--err);
+}
+
+/* ---------- crash + 404 (app/error.tsx, app/not-found.tsx) ---------- */
+
+/* A whole-page state rather than a notice inside a working screen, so it is centred and
+   speaks at page scale. It uses the neutral card rather than the red error ground on
+   purpose: this is "that did not open", not "your work failed", and dressing it in the
+   failure colour is what makes a recoverable page read as a lost one. */
+.crash-card {
+  max-width: 560px;
+  margin: 48px auto;
+  text-align: center;
+  padding: 32px 24px;
+}
+
+.crash-icon {
+  color: var(--muted);
+  margin-bottom: 12px;
+}
+
+.crash-title {
+  margin: 0 0 10px;
+  font-size: 1.4rem;
+}
+
+.crash-body {
+  margin: 0 0 24px;
+  color: var(--muted);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.crash-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: center;
+}
+
+/* On a phone the two buttons stack full width rather than sitting side by side at half
+   a thumb each. */
+@media (max-width: 560px) {
+  .crash-card {
+    margin: 24px auto;
+    padding: 24px 18px;
+  }
+
+  .crash-actions .btn {
+    flex: 1 1 100%;
+  }
+}
+
+/* The chat rail is a narrow column, so the notice drops its icon column and its
+   button shrinks — the same component, sized for the one place it has ~240px. */
+.error-notice.chat-rail-notice {
+  margin: 12px 10px;
+  padding: 10px 12px;
+  gap: 8px;
+  font-size: 0.9rem;
+}
+
+.error-notice.chat-rail-notice .error-notice-icon {
+  display: none;
+}
+
+.error-notice.chat-rail-notice .error-notice-text {
+  font-size: 0.9rem;
+}
+
+.error-notice.chat-rail-notice .btn {
+  min-height: 40px;
+  padding: 8px 14px;
+  font-size: 0.9rem;
+  width: 100%;
+}
+
+/* On a phone the notice takes the full width it is given and the actions become a
+   full-width row, so the retry target is the easiest thing on screen to hit. */
+@media (max-width: 560px) {
+  .error-notice {
+    padding: 12px 14px;
+    gap: 10px;
+  }
+
+  .error-notice-actions {
+    width: 100%;
+  }
+
+  .error-notice-actions .btn {
+    flex: 1 1 auto;
+  }
 }
 
 .form-success {
@@ -2879,9 +3056,9 @@ fieldset.copy-group legend {
 }
 
 /* Search + count row above the history grid (mirrors the glossary toolbar). */
-/* Search + sort + the three facet rows, as one block above the grid. It is a plain
-   stack rather than a fold: with 100 runs on the page, filters that have to be opened
-   before they can be seen are filters nobody uses. */
+/* Search + every facet as ONE wrapping row above the grid, each facet a dropdown. It is
+   a plain block rather than a fold: with 100 runs on the page, filters that have to be
+   opened before they can be seen are filters nobody uses. */
 .history-filters {
   margin-bottom: 20px;
   display: flex;
@@ -2907,94 +3084,22 @@ fieldset.copy-group legend {
   white-space: nowrap;
 }
 
-/* One facet = a label plus its row of pills. The label sits on the same line on a
-   desktop and wraps above the pills on a phone, which is what flex-wrap buys here. */
-.history-facet {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
 .history-facet-label {
   color: var(--muted);
   font-size: 0.9rem;
   font-weight: 600;
-  min-width: 56px;
 }
 
-.history-pills {
-  display: inline-flex;
-  gap: 4px;
-  flex-wrap: wrap;
-  padding: 4px;
-  /* 24px, not 999px: a one-row track is 48px tall, so this IS the stadium shape there —
-     and unlike 999px it still reads as a track once the pills wrap to two rows on a
-     phone, which .analytics-ranges never has to do. */
-  border-radius: 24px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-}
-
-/* Same segmented-pill treatment as .analytics-range: selection is carried by fill and
-   weight, never by colour alone (globals.css line 1). */
-.history-pill {
-  font: inherit;
-  font-weight: 600;
-  font-size: 0.9rem;
-  border-radius: 999px;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--muted);
-  padding: 6px 14px;
-  min-height: 40px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  transition:
-    background 0.15s ease,
-    color 0.15s ease;
-}
-
-.history-pill:hover:not(:disabled):not(.active) {
-  background: var(--card);
-  color: var(--text);
-}
-
-.history-pill.active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-  box-shadow: var(--shadow-sm);
-}
-
-.history-pill:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-/* The count is the same size as the label, just lighter — it is a hint about what the
-   pill would return, not a second thing to read. */
-.history-pill-count {
-  font-size: 0.8rem;
-  font-weight: 700;
-  opacity: 0.65;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .history-pill {
-    transition: none;
-  }
-}
-
-.history-sort {
+/* One facet = its label plus a native <select>. On a phone the pair wraps as a unit and
+   the menu opens as the platform's own full-height list, which is the whole reason the
+   control is native rather than a custom popover. */
+.history-select {
   display: inline-flex;
   align-items: center;
   gap: 8px;
 }
 
-.history-sort select {
+.history-select select {
   font: inherit;
   font-size: 0.95rem;
   color: inherit;
@@ -3003,9 +3108,17 @@ fieldset.copy-group legend {
   border-radius: var(--r-md);
   background: var(--card);
   cursor: pointer;
+  max-width: 100%;
 }
 
-.history-sort select:focus {
+/* An applied filter is marked by weight and a heavier border, never by colour alone
+   (globals.css line 1) — the chosen option's own text is the primary signal. */
+.history-select.is-active select {
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.history-select select:focus {
   outline: 3px solid var(--ring);
   outline-offset: 0;
   border-color: var(--accent);

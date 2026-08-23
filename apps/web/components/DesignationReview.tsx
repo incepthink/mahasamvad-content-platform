@@ -26,6 +26,7 @@ import { UserCog } from 'lucide-react';
 import type { KnownDesignation, PreparedName } from '@dgipr/schemas';
 import { CardTitle } from './CardTitle';
 import { STR } from '../lib/strings';
+import { ErrorNotice } from './ErrorNotice';
 
 // One editable row's current state, keyed by the person's Marathi name.
 export type DesignationEdit = Readonly<{
@@ -133,9 +134,7 @@ export function DesignationReview({
 
       {error ? (
         <div className="btn-row" style={{ marginTop: 12 }}>
-          <p className="form-error" style={{ marginRight: 12 }}>
-            {error}
-          </p>
+          <ErrorNotice message={error} />
           <button
             type="button"
             className="btn btn-small"
@@ -168,7 +167,7 @@ export function DesignationReview({
         </p>
       ) : null}
 
-      {verifyError ? <p className="form-error">{verifyError}</p> : null}
+      {verifyError ? <ErrorNotice message={verifyError} /> : null}
 
       {(names ?? []).map((term) => {
         const value = valueFor(term);

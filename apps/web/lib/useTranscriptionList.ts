@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { TranscriptionSummary } from '@dgipr/schemas';
 import { listTranscriptions } from './api';
+import { errorMessage } from './errorMessage';
 
 const POLL_INTERVAL_MS = 5000;
 
@@ -29,7 +30,7 @@ export function useTranscriptionList(): {
       setItems(await listTranscriptions());
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     }
   }, []);
 

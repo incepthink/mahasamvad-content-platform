@@ -15,6 +15,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { ChatThreadSummary } from '@dgipr/schemas';
 import { listChatThreads } from './api';
 import { readMyChatIds } from './chatDraft';
+import { errorMessage } from './errorMessage';
 
 // Held OUTSIDE the hook, because opening another chat re-mounts it: /chat and /chat/[id]
 // are separate pages, and two different [id]s re-mount too, so the state started at null
@@ -49,7 +50,7 @@ export function useChatThreadList(): {
       setMyIds(ids);
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     }
   }, []);
 

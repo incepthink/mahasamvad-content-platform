@@ -12,6 +12,7 @@ import { useState } from 'react';
 import type { ChatThreadSummary } from '@dgipr/schemas';
 import { MessageSquarePlus, Trash2, X } from 'lucide-react';
 import { STR } from '../lib/strings';
+import { ErrorNotice } from './ErrorNotice';
 
 function ThreadLink({
   thread,
@@ -57,6 +58,7 @@ export function ChatThreadRail({
   activeId,
   loading,
   error,
+  onRetry,
   open,
   onClose,
   onDelete,
@@ -69,6 +71,7 @@ export function ChatThreadRail({
   // Reported rather than folded into the empty state: "could not load" and "there are none"
   // are different facts, and showing the second when the first is true is a lie.
   error: string | null;
+  onRetry?: () => void;
   // Drawer state, used below the two-pane breakpoint only.
   open: boolean;
   onClose: () => void;
@@ -115,9 +118,12 @@ export function ChatThreadRail({
           </p>
         ) : null}
         {error !== null ? (
-          <p className="chat-rail-error" role="alert">
-            {STR.chatListFailed}
-          </p>
+          <ErrorNotice
+            className="chat-rail-notice"
+            message={error}
+            fallback={STR.chatListFailed}
+            onRetry={onRetry}
+          />
         ) : null}
         {!loading && error === null && empty ? (
           <p className="chat-rail-empty">{STR.chatNoThreads}</p>

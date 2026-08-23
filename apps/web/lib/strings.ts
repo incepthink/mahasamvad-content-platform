@@ -1303,6 +1303,62 @@ export const STR = {
   genericError: 'काहीतरी चुकले. कृपया पुन्हा प्रयत्न करा.',
   busyError: 'एक काम आधीच सुरू आहे. ते पूर्ण होईपर्यंत थांबा.',
 
+  // The canned sentences behind lib/errorMessage.ts. Every failure an officer can
+  // see resolves to one of these unless a route wrote a better Marathi sentence
+  // of its own. Rules for the wording, because these are read by people who will
+  // not read a second sentence: say what happened in plain words, never name a
+  // machine or a status code, never blame the officer, and — where a retry is
+  // what fixes it — end by pointing at the button rather than describing a cause.
+  errOffline:
+    'तुमचे इंटरनेट जोडलेले दिसत नाही. जोडणी तपासा आणि पुन्हा प्रयत्न करा.',
+  errUnreachable:
+    'सेवेशी संपर्क होऊ शकला नाही. थोडा वेळ थांबून पुन्हा प्रयत्न करा — तुमचे काम सुरक्षित आहे.',
+  errTimeout: 'उत्तर मिळण्यास खूप वेळ लागला. कृपया पुन्हा प्रयत्न करा.',
+  errBusy: 'एक काम आधीच सुरू आहे. ते पूर्ण झाल्यावर पुन्हा प्रयत्न करा.',
+  errNotFound: 'ही नोंद सापडली नाही. ती काढून टाकलेली असू शकते.',
+  errTooLarge: 'फाईल खूप मोठी आहे. कृपया लहान फाईल निवडा.',
+  errRateLimited:
+    'सध्या खूप कामे सुरू आहेत. थोडा वेळ थांबून पुन्हा प्रयत्न करा.',
+  errInvalid:
+    'पाठवलेली माहिती अपूर्ण किंवा चुकीची आहे. कृपया तपासून पुन्हा प्रयत्न करा.',
+  errServer: 'सेवेत तात्पुरती अडचण आली. कृपया पुन्हा प्रयत्न करा.',
+  // The label on every retry button this app renders. One string, so the gesture
+  // reads the same on all fifteen screens.
+  errRetry: 'पुन्हा प्रयत्न करा',
+  errDismiss: 'बंद करा',
+
+  // "This screen could not load its own contents." Named per screen rather than
+  // shared, because the sentence has to say WHAT is missing — an officer looking
+  // at a blank page needs to know whether their work is gone or the list simply
+  // did not arrive. Each one ends by saying the work is safe, since that is the
+  // question actually being asked.
+  genLoadFailed: 'हे काम उघडता आले नाही. तुमचे काम सुरक्षित आहे.',
+  genListLoadFailed: 'मागील कामांची यादी मिळाली नाही.',
+  videoLoadFailed: 'हा व्हिडिओ प्रकल्प उघडता आला नाही. तुमचे काम सुरक्षित आहे.',
+  videoListLoadFailed: 'व्हिडिओंची यादी मिळाली नाही.',
+  dloLoadFailed: 'हे काम उघडता आले नाही. तुमचे काम सुरक्षित आहे.',
+  transcribeLoadFailed: 'हे ध्वनिलेखन उघडता आले नाही.',
+  glossaryLoadFailed: 'शब्दकोश उघडता आला नाही.',
+  refsLoadFailed: 'टेम्पलेट यादी मिळाली नाही.',
+  analyticsLoadFailed: 'आकडेवारी मिळाली नाही.',
+  chatLoadFailedShort: 'ही चर्चा उघडता आली नाही.',
+
+  // The React error boundaries (app/error.tsx, app/global-error.tsx) and the 404 page.
+  // Before these existed an uncaught render error showed Next's own screen: English,
+  // technical, and in production the bare "Application error: a client-side exception
+  // has occurred" — with no way back into the product except the browser's Back button.
+  // The wording deliberately claims nothing about a cause: nobody knows what happened,
+  // and the two things worth saying are that the officer's work is on the server and
+  // that there are two buttons.
+  crashTitle: 'पान उघडताना अडचण आली',
+  crashBody:
+    'हे पान दाखवता आले नाही. तुमचे काम सुरक्षित आहे — ते या मंचावर जतन झालेले आहे. खालील बटणावर क्लिक करून पुन्हा प्रयत्न करा.',
+  crashRetry: 'पुन्हा प्रयत्न करा',
+  crashHome: 'मुख्यपृष्ठावर जा',
+  notFoundTitle: 'हे पान सापडले नाही',
+  notFoundBody:
+    'तुम्ही शोधत असलेले पान उपलब्ध नाही. ते काढून टाकलेले असू शकते किंवा पत्ता चुकीचा असू शकतो.',
+
   // Explainer videos (/video)
   navVideo: 'व्हिडिओ (Beta)',
   videoTitle: 'नवीन व्हिडिओ तयार करा',

@@ -17,6 +17,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AnalyticsRange, AnalyticsResponse } from '@dgipr/schemas';
 import { getAnalytics } from './api';
+import { errorMessage } from './errorMessage';
 
 // Long enough that moving between the six cards never refetches, short enough that a range
 // left open through a working session does not go stale unnoticed.
@@ -52,7 +53,7 @@ export function useAnalytics(range: AnalyticsRange) {
         // A failed background revalidation must not replace numbers already on screen with
         // an error banner — the cached window is still a true answer for its own period.
         if (ticket === latest.current && showSpinner) {
-          setError(cause instanceof Error ? cause.message : String(cause));
+          setError(errorMessage(cause));
         }
       } finally {
         if (ticket === latest.current && showSpinner) setLoading(false);

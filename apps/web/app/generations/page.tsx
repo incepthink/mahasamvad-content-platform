@@ -18,11 +18,13 @@ import {
   runFormatKey,
   type RunFormatKey,
 } from '../../lib/strings';
+import { errorMessage } from '../../lib/errorMessage';
 import {
   HistoryCard,
   HistoryEmpty,
   HistorySkeletonGrid,
 } from '../../components/HistoryCard';
+import { ErrorNotice } from '../../components/ErrorNotice';
 import { Pagination } from '../../components/Pagination';
 
 const PAGE_SIZE = 9;
@@ -150,7 +152,11 @@ type PillOption<T extends string> = {
   count: number;
 };
 
-function FacetRow<T extends string>({
+// Each facet is one native <select>, so the whole filter block is a single row of
+// dropdowns rather than three wrapping rows of pills. Native on purpose: it is the one
+// control that already opens as a full-height list on a phone, needs no focus trap, and
+// carries the count in its own option text.
+function FacetSelect<T extends string>({
   label,
   options,
   selected,
@@ -162,37 +168,29 @@ function FacetRow<T extends string>({
   onSelect: (next: T | null) => void;
 }) {
   return (
-    <div className="history-facet">
+    <label className={`history-select${selected ? ' is-active' : ''}`}>
       <span className="history-facet-label">{label}</span>
-      <div className="history-pills" role="group" aria-label={label}>
-        <button
-          type="button"
-          className={`history-pill${selected === null ? ' active' : ''}`}
-          aria-pressed={selected === null}
-          onClick={() => onSelect(null)}
-        >
-          {STR.historyFilterAll}
-        </button>
+      <select
+        value={selected ?? ''}
+        aria-label={label}
+        // '' is the "no filter" value, so an empty string can never be a facet key.
+        onChange={(e) => onSelect((e.target.value || null) as T | null)}
+      >
+        <option value="">{STR.historyFilterAll}</option>
         {options.map((option) => (
-          <button
+          <option
             key={option.key}
-            type="button"
-            className={`history-pill${selected === option.key ? ' active' : ''}`}
-            aria-pressed={selected === option.key}
-            // A pill that would return nothing under the other filters is kept
-            // visible but disabled: options appearing and vanishing under the
-            // cursor are worse than a greyed one that explains itself.
+            value={option.key}
+            // An option that would return nothing under the other filters is kept
+            // listed but disabled: entries appearing and vanishing between two opens
+            // of the same menu are worse than a greyed one that explains itself.
             disabled={option.count === 0 && selected !== option.key}
-            onClick={() =>
-              onSelect(selected === option.key ? null : option.key)
-            }
           >
-            {option.label}
-            <span className="history-pill-count">{option.count}</span>
-          </button>
+            {option.label} ({option.count})
+          </option>
         ))}
-      </div>
-    </div>
+      </select>
+    </label>
   );
 }
 
@@ -253,16 +251,23 @@ function HistoryPageBody() {
     [router],
   );
 
-  useEffect(() => {
-    listGenerations()
-      .then((rows) => {
-        setItems(rows);
-        setLoadedAt(new Date());
-      })
-      .catch((e) =>
-        setError(e instanceof Error ? e.message : STR.genericError),
-      );
+  // Extracted from the effect so the failure notice has something to call. The list is
+  // the officer's way back to every finished run, so "it did not load" with no button
+  // was a dead end that only a manual browser refresh got out of.
+  const load = useCallback(async () => {
+    setError(null);
+    try {
+      const rows = await listGenerations();
+      setItems(rows);
+      setLoadedAt(new Date());
+    } catch (e) {
+      setError(errorMessage(e, STR.genListLoadFailed));
+    }
   }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   // Debounce the search into the URL so filtering/paging doesn't thrash on each
   // keystroke. The current filters are read through a ref so this effect depends only
@@ -368,7 +373,13 @@ function HistoryPageBody() {
         </div>
       </header>
 
-      {error ? <p className="form-error">{error}</p> : null}
+      {error ? (
+        <ErrorNotice
+          message={error}
+          onRetry={() => void load()}
+          fallback={STR.genListLoadFailed}
+        />
+      ) : null}
 
       {items && items.length > 0 ? (
         <div className="history-filters">
@@ -380,10 +391,37 @@ function HistoryPageBody() {
               placeholder={STR.historySearchPlaceholder}
               onChange={(e) => setQuery(e.target.value)}
             />
-            <label className="history-sort">
+
+            {showFormatFacet ? (
+              <FacetSelect
+                label={STR.historyFilterFormat}
+                options={formatOptions}
+                selected={filters.format}
+                onSelect={(format) => setFilters({ ...filters, format })}
+              />
+            ) : null}
+
+            {showStatusFacet ? (
+              <FacetSelect
+                label={STR.historyFilterStatus}
+                options={statusOptions}
+                selected={filters.status}
+                onSelect={(status) => setFilters({ ...filters, status })}
+              />
+            ) : null}
+
+            <FacetSelect
+              label={STR.historyFilterDate}
+              options={dateOptions}
+              selected={filters.date}
+              onSelect={(date) => setFilters({ ...filters, date })}
+            />
+
+            <label className="history-select">
               <span className="history-facet-label">{STR.historySort}</span>
               <select
                 value={filters.sort}
+                aria-label={STR.historySort}
                 onChange={(e) =>
                   setFilters({ ...filters, sort: e.target.value as SortKey })
                 }
@@ -393,31 +431,6 @@ function HistoryPageBody() {
               </select>
             </label>
           </div>
-
-          {showFormatFacet ? (
-            <FacetRow
-              label={STR.historyFilterFormat}
-              options={formatOptions}
-              selected={filters.format}
-              onSelect={(format) => setFilters({ ...filters, format })}
-            />
-          ) : null}
-
-          {showStatusFacet ? (
-            <FacetRow
-              label={STR.historyFilterStatus}
-              options={statusOptions}
-              selected={filters.status}
-              onSelect={(status) => setFilters({ ...filters, status })}
-            />
-          ) : null}
-
-          <FacetRow
-            label={STR.historyFilterDate}
-            options={dateOptions}
-            selected={filters.date}
-            onSelect={(date) => setFilters({ ...filters, date })}
-          />
 
           <div className="history-result-row">
             <span className="history-count">

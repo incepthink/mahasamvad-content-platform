@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DloIntakeDetail } from '@dgipr/schemas';
 import { getDloIntake } from './api';
+import { errorMessage } from './errorMessage';
 
 const POLL_INTERVAL_MS = 2500;
 
@@ -51,7 +52,7 @@ export function useDloIntake(id: string | null): {
       }
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     }
   }, [id]);
 

@@ -50,8 +50,10 @@ import {
 } from '../lib/documentSelection';
 import { useDocumentIntake } from '../lib/useDocumentIntake';
 import { STR } from '../lib/strings';
+import { errorMessage, storedErrorMessage } from '../lib/errorMessage';
 import { CardTitle } from './CardTitle';
 import { DocumentPages } from './DocumentPages';
+import { ErrorNotice } from './ErrorNotice';
 
 const EXTENSIONS: Record<DocumentKind, string> = {
   pdf: '.pdf',
@@ -384,7 +386,7 @@ export function DocumentIntake({
       resetSelection();
       setJobId(created.id);
     } catch (e) {
-      setError(e instanceof Error ? e.message : STR.genericError);
+      setError(errorMessage(e));
     } finally {
       setUploading(false);
     }
@@ -407,7 +409,7 @@ export function DocumentIntake({
       await refresh();
     } catch (e) {
       setExtracting(false);
-      setError(e instanceof Error ? e.message : STR.genericError);
+      setError(errorMessage(e));
     }
   }, [jobId, refresh, selected]);
 
@@ -443,7 +445,7 @@ export function DocumentIntake({
       await refresh();
     } catch (e) {
       setExtracting(false);
-      setError(e instanceof Error ? e.message : STR.genericError);
+      setError(errorMessage(e));
     }
   };
 
@@ -461,7 +463,7 @@ export function DocumentIntake({
   if (gone && jobId) {
     return (
       <Shell className={shellClass}>
-        <p className="form-error">{STR.docGone}</p>
+        <ErrorNotice message={STR.docGone} />
         <div className="btn-row" style={{ marginTop: 12 }}>
           <button type="button" className="btn btn-primary" onClick={reset}>
             {STR.docUploadOther}
@@ -535,7 +537,7 @@ export function DocumentIntake({
         <div className="btn-row" style={{ marginTop: 12 }}>
           {fileButton}
         </div>
-        {error ? <p className="form-error">{error}</p> : null}
+        {error ? <ErrorNotice message={error} /> : null}
       </Shell>
     );
   }
@@ -567,7 +569,11 @@ export function DocumentIntake({
   if (detail.status === 'failed' && pages.length === 0) {
     return (
       <Shell className={shellClass}>
-        {detail.error ? <p className="form-error">{detail.error}</p> : null}
+        {detail.error ? (
+          <ErrorNotice
+            message={storedErrorMessage(detail.error, STR.genericError)}
+          />
+        ) : null}
         <div className="btn-row" style={{ marginTop: 12 }}>
           {fileButton}
           {callerAction}
@@ -637,7 +643,7 @@ export function DocumentIntake({
           )}
           {callerAction}
         </div>
-        {error ? <p className="form-error">{error}</p> : null}
+        {error ? <ErrorNotice message={error} /> : null}
       </Shell>
     );
   }
@@ -655,7 +661,9 @@ export function DocumentIntake({
       {/* A translation-style failure after some pages were read: the text is still usable,
           so say what went wrong and leave the controls alone. */}
       {detail.status === 'failed' && detail.error ? (
-        <p className="form-error">{detail.error}</p>
+        <ErrorNotice
+          message={storedErrorMessage(detail.error, STR.genericError)}
+        />
       ) : null}
 
       {/* Offered only while the document still has pages nobody has paid to read — on a
@@ -727,7 +735,7 @@ export function DocumentIntake({
       {text.trim().length === 0 ? (
         <p className="hint">{STR.docEmptySelection}</p>
       ) : null}
-      {error ? <p className="form-error">{error}</p> : null}
+      {error ? <ErrorNotice message={error} /> : null}
     </Shell>
   );
 }

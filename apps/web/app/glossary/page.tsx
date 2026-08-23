@@ -14,6 +14,8 @@ import {
   updateGlossaryTerm,
 } from '../../lib/api';
 import { STR, TERM_TYPE_LABELS } from '../../lib/strings';
+import { errorMessage } from '../../lib/errorMessage';
+import { ErrorNotice } from '../../components/ErrorNotice';
 
 const PAGE_SIZE = 20;
 const TERM_TYPES: TermType[] = [
@@ -28,7 +30,7 @@ const TERM_TYPES: TermType[] = [
 type StatusFilter = 'all' | 'unverified' | 'verified';
 
 function errText(error: unknown): string {
-  return error instanceof Error ? error.message : STR.genericError;
+  return errorMessage(error);
 }
 
 function AddTermFold({ onAdded }: { onAdded: () => void }) {
@@ -166,7 +168,7 @@ function AddTermFold({ onAdded }: { onAdded: () => void }) {
             {busy ? STR.glossaryAdding : STR.glossaryAdd}
           </button>
         </div>
-        {error ? <p className="form-error">{error}</p> : null}
+        {error ? <ErrorNotice message={error} /> : null}
       </div>
     </details>
   );
@@ -733,7 +735,13 @@ export default function GlossaryPage() {
       <AddTermFold onAdded={afterMutation} />
 
       <div className="card gl-card">
-        {error ? <p className="form-error">{error}</p> : null}
+        {error ? (
+          <ErrorNotice
+            message={error}
+            fallback={STR.glossaryLoadFailed}
+            onRetry={() => void refresh()}
+          />
+        ) : null}
 
         <GlossaryToolbar
           search={search}
@@ -748,7 +756,7 @@ export default function GlossaryPage() {
           total={total}
         />
 
-        {bulkError ? <p className="form-error">{bulkError}</p> : null}
+        {bulkError ? <ErrorNotice message={bulkError} /> : null}
 
         {selected.size > 0 ? (
           <BulkVerifyBar

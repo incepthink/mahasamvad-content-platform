@@ -7,11 +7,13 @@ import { useGenerationThread } from '../../../lib/useGenerationThread';
 import { retryGeneration } from '../../../lib/api';
 import { useTasks } from '../../../lib/TasksProvider';
 import { STR } from '../../../lib/strings';
+import { errorMessage, storedErrorMessage } from '../../../lib/errorMessage';
 import { GenerationThread } from '../../../components/GenerationThread';
 import { ProgressSteps } from '../../../components/ProgressSteps';
 import { TaskProgressBar } from '../../../components/TaskProgressBar';
 import { StatusChip } from '../../../components/StatusChip';
 import { ArticleView } from '../../../components/ArticleView';
+import { ErrorNotice } from '../../../components/ErrorNotice';
 import { FiveWOneHView } from '../../../components/FiveWOneHView';
 import { NextActions } from '../../../components/NextActions';
 import { PosterPanel } from '../../../components/PosterPanel';
@@ -29,7 +31,14 @@ const HARM_SUBJECT =
 
 function generationErrorForOfficer(error: string | null, note: string): string {
   if (!error) return STR.failedHint;
-  if (!error.includes('moderation_blocked')) return error;
+  // Everything that is NOT a recognised moderation refusal goes through the shared
+  // reader-test rather than straight to the screen. A job stores whatever it caught,
+  // which is a Marathi sentence when the job wrote one and a provider blob, a storage
+  // path or an English driver message when it did not — and this card is the officer's
+  // account of why their run produced nothing, so it must never be the second kind.
+  if (!error.includes('moderation_blocked')) {
+    return storedErrorMessage(error, STR.failedHint);
+  }
 
   if (/"moderation_stage"\s*:\s*"output"/.test(error)) {
     return CHILD_SUBJECT.test(note) && HARM_SUBJECT.test(note)
@@ -99,16 +108,24 @@ export default function GenerationDetailPage({
       }
       await refresh();
     } catch (e) {
-      setRetryError(e instanceof Error ? e.message : STR.genericError);
+      setRetryError(errorMessage(e));
     } finally {
       setRetrying(false);
     }
   };
 
+  // Nothing loaded. In practice this is almost always the API having restarted under
+  // the 2.5 s poll, which used to leave the officer on a bare English "Failed to fetch"
+  // with nothing to press and no way back to their run — the single worst error state in
+  // the product, since the run itself is untouched and one refresh recovers it.
   if (error && !detail) {
     return (
       <main className="page">
-        <p className="form-error">{error}</p>
+        <ErrorNotice
+          message={error}
+          onRetry={() => void refresh()}
+          fallback={STR.genLoadFailed}
+        />
       </main>
     );
   }
@@ -232,7 +249,7 @@ export default function GenerationDetailPage({
               {retrying ? STR.submitting : STR.retry}
             </button>
           </div>
-          {retryError ? <p className="form-error">{retryError}</p> : null}
+          {retryError ? <ErrorNotice message={retryError} /> : null}
           <p className="hint" style={{ marginTop: 12 }}>
             {STR.failedRetryHint} {STR.failedNewRunHint}
           </p>
@@ -244,12 +261,12 @@ export default function GenerationDetailPage({
           <h2>{STR.editFailedTitle}</h2>
           <p className="hint">{STR.editFailedHint}</p>
           {(detail.editFailure ?? detail.error) ? (
-            <p className="form-error">
-              {generationErrorForOfficer(
+            <ErrorNotice
+              message={generationErrorForOfficer(
                 detail.editFailure ?? detail.error,
                 detail.note,
               )}
-            </p>
+            />
           ) : null}
           <div className="btn-row" style={{ marginTop: 16, gap: 10 }}>
             <button
@@ -273,7 +290,7 @@ export default function GenerationDetailPage({
               {STR.dismiss}
             </button>
           </div>
-          {retryError ? <p className="form-error">{retryError}</p> : null}
+          {retryError ? <ErrorNotice message={retryError} /> : null}
         </section>
       )}
 

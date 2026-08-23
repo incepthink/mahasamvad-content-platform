@@ -33,7 +33,9 @@ import {
 import { proofreadText } from '../../lib/api';
 import { downloadBlob } from '../../lib/download';
 import { PROOFREAD_TYPE_LABELS, STR } from '../../lib/strings';
+import { errorMessage } from '../../lib/errorMessage';
 import { ComposeSafeTextarea } from '../../components/ComposeSafeInput';
+import { ErrorNotice } from '../../components/ErrorNotice';
 import {
   DocumentIntake,
   type DocumentIntakeStatus,
@@ -319,7 +321,7 @@ export default function ProofreadPage() {
     try {
       setResult(await proofreadText({ text: combinedText }));
     } catch (e) {
-      setError(e instanceof Error ? e.message : STR.proofreadError);
+      setError(errorMessage(e, STR.proofreadError));
     } finally {
       setChecking(false);
     }
@@ -498,7 +500,7 @@ export default function ProofreadPage() {
             </span>
           ) : null}
         </div>
-        {error ? <p className="form-error">{error}</p> : null}
+        {error ? <ErrorNotice message={error} /> : null}
       </section>
 
       {clean ? (
@@ -546,7 +548,7 @@ export default function ProofreadPage() {
         <section className="card">
           <h2>{STR.proofreadCorrectedTitle}</h2>
           {result.correctedText === null ? (
-            <p className="form-error">{STR.proofreadCorrectedUnavailable}</p>
+            <ErrorNotice message={STR.proofreadCorrectedUnavailable} />
           ) : (
             <>
               {correctedUnchanged ? (

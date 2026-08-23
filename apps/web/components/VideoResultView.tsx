@@ -12,6 +12,8 @@ import type { VideoProjectDetail } from '@dgipr/schemas';
 import { sceneTimings } from '@dgipr/schemas';
 import { STR } from '../lib/strings';
 import { VideoSceneCard } from './VideoSceneCard';
+import { ErrorNotice } from './ErrorNotice';
+import { storedErrorMessage } from '../lib/errorMessage';
 
 function formatClock(totalSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60);
@@ -78,7 +80,11 @@ export function VideoResultView({
                 : STR.videoAnimatingHint}
           </p>
         ) : null}
-        {detail.error ? <p className="form-error">{detail.error}</p> : null}
+        {detail.error ? (
+          <ErrorNotice
+            message={storedErrorMessage(detail.error, STR.genericError)}
+          />
+        ) : null}
         {detail.videoUrl ? (
           <video
             key={detail.videoUrl}

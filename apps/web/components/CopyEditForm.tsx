@@ -8,9 +8,11 @@
 import { useState } from 'react';
 import type { Copy } from '@dgipr/schemas';
 import { STR } from '../lib/strings';
+import { errorMessage } from '../lib/errorMessage';
 // Every field here is Marathi poster copy typed on an InScript keyboard, which a controlled
 // box can overwrite half-formed. See ComposeSafeInput.
 import { ComposeSafeInput, ComposeSafeTextarea } from './ComposeSafeInput';
+import { ErrorNotice } from './ErrorNotice';
 
 function TextField({
   label,
@@ -132,7 +134,7 @@ export function CopyEditForm({
       await onSave(draft);
       setSaved(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : STR.genericError);
+      setError(errorMessage(e));
     } finally {
       setSaving(false);
     }
@@ -330,7 +332,7 @@ export function CopyEditForm({
         </button>
       </div>
       {saved ? <p className="form-success">{STR.rerenderDone}</p> : null}
-      {error ? <p className="form-error">{error}</p> : null}
+      {error ? <ErrorNotice message={error} /> : null}
     </div>
   );
 }

@@ -27,6 +27,7 @@ import { AudioFilePicker } from './AudioFilePicker';
 import { TranscriptionSubmit } from './TranscriptionSubmit';
 import { YouTubeLinkInput } from './YouTubeLinkInput';
 import { STR } from '../lib/strings';
+import { errorMessage } from '../lib/errorMessage';
 
 export function TranscriptionForm({
   onStarted,
@@ -68,7 +69,7 @@ export function TranscriptionForm({
       setYoutube([]);
       onStarted(id);
     } catch (e) {
-      setError(e instanceof Error ? e.message : STR.genericError);
+      setError(errorMessage(e));
     } finally {
       setSubmitting(false);
     }

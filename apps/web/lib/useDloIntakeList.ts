@@ -15,6 +15,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DloIntakeSummary } from '@dgipr/schemas';
 import { listDloIntakes } from './api';
 import { pruneMyIntakeIds, readMyIntakeIds } from './dloDraft';
+import { errorMessage } from './errorMessage';
 
 const POLL_INTERVAL_MS = 5000;
 
@@ -45,7 +46,7 @@ export function useDloIntakeList(): {
       pruneMyIntakeIds(rows.map((row) => row.id));
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     }
   }, []);
 

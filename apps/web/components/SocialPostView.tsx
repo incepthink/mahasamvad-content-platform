@@ -35,6 +35,7 @@ import {
   updateCaption,
 } from '../lib/api';
 import { STR } from '../lib/strings';
+import { errorMessage } from '../lib/errorMessage';
 import { usePosterMarkers } from '../lib/usePosterMarkers';
 import { ClearActionToggle, clearActionLabel } from './ClearActionToggle';
 import { FacebookLogo } from './FacebookLogo';
@@ -49,6 +50,7 @@ import { CanvaLink } from './CanvaLink';
 // The caption, the marker notes and the change note are all written in Marathi on an InScript
 // keyboard, which a controlled box can overwrite half-formed. See ComposeSafeInput.
 import { ComposeSafeInput, ComposeSafeTextarea } from './ComposeSafeInput';
+import { ErrorNotice } from './ErrorNotice';
 
 type ChangeTab = 'caption' | 'poster';
 
@@ -181,9 +183,7 @@ export function SocialPostView({
       // settled, so no poll is running).
       await onChanged();
     } catch (error) {
-      setCaptionError(
-        error instanceof Error ? error.message : STR.genericError,
-      );
+      setCaptionError(errorMessage(error));
     } finally {
       setSavingCaption(false);
     }
@@ -199,9 +199,7 @@ export function SocialPostView({
       await generateCaption(detail.id);
       await onChanged();
     } catch (error) {
-      setCaptionError(
-        error instanceof Error ? error.message : STR.genericError,
-      );
+      setCaptionError(errorMessage(error));
     } finally {
       setStartingCaption(false);
     }
@@ -218,9 +216,7 @@ export function SocialPostView({
       // poll has stopped on this completed row).
       await onChanged();
     } catch (error) {
-      setPublishError(
-        error instanceof Error ? error.message : STR.genericError,
-      );
+      setPublishError(errorMessage(error));
     } finally {
       setPublishingPost(false);
     }
@@ -254,7 +250,7 @@ export function SocialPostView({
         setCaptionChange('');
         await onChanged();
       } catch (e) {
-        setChangeError(e instanceof Error ? e.message : STR.genericError);
+        setChangeError(errorMessage(e));
       } finally {
         setSendingChange(false);
       }
@@ -302,7 +298,7 @@ export function SocialPostView({
       onImageWorkStarted?.();
       await onChanged();
     } catch (e) {
-      setChangeError(e instanceof Error ? e.message : STR.genericError);
+      setChangeError(errorMessage(e));
     } finally {
       setSendingChange(false);
       setPending(false);
@@ -546,7 +542,7 @@ export function SocialPostView({
                 </div>
               </div>
             ) : null}
-            {publishError ? <p className="form-error">{publishError}</p> : null}
+            {publishError ? <ErrorNotice message={publishError} /> : null}
             {justPublishedUrl ? (
               <p className="form-success">
                 {STR.publishSuccess}{' '}
@@ -642,9 +638,9 @@ export function SocialPostView({
             {captionSaved ? (
               <p className="form-success">{STR.captionSaved}</p>
             ) : null}
-            {captionError ? <p className="form-error">{captionError}</p> : null}
+            {captionError ? <ErrorNotice message={captionError} /> : null}
             {detail.captionReviseError ? (
-              <p className="form-error">{detail.captionReviseError}</p>
+              <ErrorNotice message={detail.captionReviseError} />
             ) : null}
           </div>
 
@@ -775,7 +771,7 @@ export function SocialPostView({
               button for that case sits under the poster, and the fold below shows
               it instead when there is nothing annotated. */}
           {changeError && (markers.length > 0 || clearRegions.length > 0) ? (
-            <p className="form-error">{changeError}</p>
+            <ErrorNotice message={changeError} />
           ) : null}
 
           {/* One fold for both change requests. The pills only swap the view — each
@@ -881,7 +877,7 @@ export function SocialPostView({
                 {changeError &&
                 markers.length === 0 &&
                 clearRegions.length === 0 ? (
-                  <p className="form-error">{changeError}</p>
+                  <ErrorNotice message={changeError} />
                 ) : null}
               </div>
             </details>

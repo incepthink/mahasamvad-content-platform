@@ -41,6 +41,7 @@ import {
   unitLabel,
 } from '../../../lib/analytics';
 import { useAnalytics } from '../../../lib/useAnalytics';
+import { ErrorNotice } from '../../../components/ErrorNotice';
 import {
   analyticsCostRateNote,
   analyticsRateLine,
@@ -92,12 +93,12 @@ function FeaturePageBody() {
       </header>
 
       {error ? (
-        <div className="card">
-          <p className="form-error">{error}</p>
-          <button type="button" className="btn" onClick={() => void reload()}>
-            {STR.analyticsRetry}
-          </button>
-        </div>
+        <ErrorNotice
+          message={error}
+          fallback={STR.analyticsLoadFailed}
+          onRetry={() => void reload()}
+          retryLabel={STR.analyticsRetry}
+        />
       ) : null}
 
       {loading && !data ? (

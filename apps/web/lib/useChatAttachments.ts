@@ -35,6 +35,7 @@ import {
 } from './api';
 import { joinPageTexts, numberedPages } from './documentSelection';
 import { STR } from './strings';
+import { errorMessage } from './errorMessage';
 
 export type DraftAttachmentState =
   'pending' | 'preparing' | 'transcribing' | 'ready' | 'failed';
@@ -196,7 +197,7 @@ export function useChatAttachments(): {
     (key: string, e: unknown) => {
       patch(key, {
         state: 'failed',
-        error: e instanceof Error ? e.message : STR.chatAttachFailed,
+        error: errorMessage(e, STR.chatAttachFailed),
       });
     },
     [patch],

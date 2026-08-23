@@ -22,10 +22,12 @@ import type { Category, GenerationDetail } from '@dgipr/schemas';
 import { createGeneration, requestArticlePoster } from '../lib/api';
 import { useTasks } from '../lib/TasksProvider';
 import { STR } from '../lib/strings';
+import { errorMessage } from '../lib/errorMessage';
 import ReferencePicker, { type ReferenceSelection } from './ReferencePicker';
 // The edited note and heading are typed in Marathi on an InScript keyboard, which a
 // controlled box can overwrite half-formed. See ComposeSafeInput.
 import { ComposeSafeInput, ComposeSafeTextarea } from './ComposeSafeInput';
+import { ErrorNotice } from './ErrorNotice';
 
 // Every block reports a successful spawn so the page can refresh the thread
 // strip — essential for the social paths, which never navigate away.
@@ -80,7 +82,7 @@ function CreatePosterBlock({
       onImageWorkStarted?.();
       onPosterStarted?.();
     } catch (e) {
-      setError(e instanceof Error ? e.message : STR.genericError);
+      setError(errorMessage(e));
       setSubmitting(false);
     }
   };
@@ -110,7 +112,7 @@ function CreatePosterBlock({
             {submitting ? STR.submitting : STR.nextPosterCta}
           </button>
         </div>
-        {error ? <p className="form-error">{error}</p> : null}
+        {error ? <ErrorNotice message={error} /> : null}
       </div>
     </details>
   );
@@ -166,7 +168,7 @@ function EditNoteBlock({ detail, onSpawned }: BlockProps) {
         router.push(`/generations/${id}`);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : STR.genericError);
+      setError(errorMessage(e));
       setSubmitting(false);
     }
   };
@@ -206,7 +208,7 @@ function EditNoteBlock({ detail, onSpawned }: BlockProps) {
             {isSocial ? STR.socialBusyInfo : STR.articleBusyInfo}
           </p>
         ) : null}
-        {error ? <p className="form-error">{error}</p> : null}
+        {error ? <ErrorNotice message={error} /> : null}
       </div>
     </details>
   );

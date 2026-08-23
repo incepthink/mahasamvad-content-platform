@@ -17,7 +17,8 @@ import { useDloIntakeList } from '../../lib/useDloIntakeList';
 import { STR } from '../../lib/strings';
 
 export default function DloPage() {
-  const { mine, others, active, loading, error } = useDloIntakeList();
+  const { mine, others, active, loading, error, refresh } =
+    useDloIntakeList();
 
   return (
     // .dlo-page only reserves room at the foot of the page (and of the site footer below it)
@@ -39,6 +40,7 @@ export default function DloPage() {
         others={others}
         loading={loading}
         error={error}
+        onRetry={() => void refresh()}
       />
 
       <style jsx global>{`

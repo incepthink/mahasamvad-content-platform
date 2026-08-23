@@ -5,9 +5,11 @@
 
 import { useState } from 'react';
 import { STR } from '../lib/strings';
+import { errorMessage } from '../lib/errorMessage';
 // Feedback is written in Marathi on an InScript keyboard, which a controlled box can
 // overwrite half-formed. See ComposeSafeInput.
 import { ComposeSafeTextarea } from './ComposeSafeInput';
+import { ErrorNotice } from './ErrorNotice';
 
 export function FeedbackBox({
   title,
@@ -44,7 +46,7 @@ export function FeedbackBox({
       await onSubmit(feedback.trim());
       setFeedback('');
     } catch (e) {
-      setError(e instanceof Error ? e.message : STR.genericError);
+      setError(errorMessage(e));
     } finally {
       setSending(false);
     }
@@ -95,7 +97,7 @@ export function FeedbackBox({
             {sending ? STR.sendingFeedback : STR.sendFeedback}
           </button>
         </div>
-        {error ? <p className="form-error">{error}</p> : null}
+        {error ? <ErrorNotice message={error} /> : null}
       </div>
     </details>
   );

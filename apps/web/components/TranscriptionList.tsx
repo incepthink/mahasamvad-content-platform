@@ -9,6 +9,7 @@
 
 import type { TranscriptionSummary } from '@dgipr/schemas';
 import { formatDate, STR, TRANSCRIPTION_STATUS_LABELS } from '../lib/strings';
+import { ErrorNotice } from './ErrorNotice';
 
 function Row({
   item,
@@ -53,18 +54,24 @@ export function TranscriptionList({
   error,
   selectedId,
   onOpen,
+  onRetry,
 }: {
   items: readonly TranscriptionSummary[];
   loading: boolean;
   error: string | null;
   selectedId: string | null;
   onOpen: (id: string) => void;
+  onRetry?: () => void;
 }) {
   return (
     <section className="card">
       <h2>{STR.transcribeRecent}</h2>
       {error ? (
-        <p className="form-error">{STR.transcribeListLoadError}</p>
+        <ErrorNotice
+          message={error}
+          fallback={STR.transcribeListLoadError}
+          onRetry={onRetry}
+        />
       ) : null}
       {loading ? <p className="hint">{STR.transcribeListLoading}</p> : null}
       {!loading && !error && items.length === 0 ? (

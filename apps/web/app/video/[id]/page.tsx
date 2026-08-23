@@ -54,6 +54,8 @@ import {
   STR,
   VIDEO_STEP_LABELS,
 } from '../../../lib/strings';
+import { errorMessage, storedErrorMessage } from '../../../lib/errorMessage';
+import { ErrorNotice } from '../../../components/ErrorNotice';
 import { VideoSceneCard } from '../../../components/VideoSceneCard';
 import { VideoStatusChip } from '../../../components/VideoStatusChip';
 import { VideoResultView } from '../../../components/VideoResultView';
@@ -309,16 +311,23 @@ export default function VideoProjectPage({
       await action();
       await refresh();
     } catch (e) {
-      setFormError(e instanceof Error ? e.message : STR.genericError);
+      setFormError(errorMessage(e));
     } finally {
       setBusy(false);
     }
   };
 
+  // Same dead end the generation page had: a video project polls for minutes while
+  // clips render, so an API restart lands here more often than anywhere else — and the
+  // clips already paid for are all still on the row.
   if (error && !detail) {
     return (
       <main className="page">
-        <p className="form-error">{error}</p>
+        <ErrorNotice
+          message={error}
+          onRetry={() => void refresh()}
+          fallback={STR.videoLoadFailed}
+        />
       </main>
     );
   }
@@ -524,7 +533,7 @@ export default function VideoProjectPage({
     } catch (e) {
       setReferenceErrors((prev) => ({
         ...prev,
-        [uid]: e instanceof Error ? e.message : STR.genericError,
+        [uid]: errorMessage(e),
       }));
     } finally {
       setReferenceBusyUid((current) => (current === uid ? null : current));
@@ -905,7 +914,7 @@ export default function VideoProjectPage({
             <p className="hint" style={{ marginTop: 8 }}>
               {STR.videoToStoryboardHint}
             </p>
-            {formError ? <p className="form-error">{formError}</p> : null}
+            {formError ? <ErrorNotice message={formError} /> : null}
           </section>
         </>
       ) : null}
@@ -1194,7 +1203,7 @@ export default function VideoProjectPage({
                 {detail.scenes.length}
               </p>
             </div>
-            {formError ? <p className="form-error">{formError}</p> : null}
+            {formError ? <ErrorNotice message={formError} /> : null}
           </section>
         </>
       ) : null}
@@ -1228,7 +1237,11 @@ export default function VideoProjectPage({
       {detail.status === 'failed' ? (
         <section className="card">
           <h2>{STR.failedTitle}</h2>
-          {detail.error ? <p className="form-error">{detail.error}</p> : null}
+          {detail.error ? (
+            <ErrorNotice
+              message={storedErrorMessage(detail.error, STR.genericError)}
+            />
+          ) : null}
           <div className="btn-row" style={{ marginTop: 12 }}>
             {allClipsReady &&
             (detail.step === 'stitch' || detail.step === 'upload') ? (
@@ -1288,7 +1301,7 @@ export default function VideoProjectPage({
               {STR.videoBackToStoryboardHint}
             </p>
           ) : null}
-          {formError ? <p className="form-error">{formError}</p> : null}
+          {formError ? <ErrorNotice message={formError} /> : null}
         </section>
       ) : null}
 

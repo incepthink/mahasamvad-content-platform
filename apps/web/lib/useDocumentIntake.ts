@@ -19,6 +19,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DocumentDetail } from '@dgipr/schemas';
 import { getDocumentIntake } from './api';
+import { errorMessage } from './errorMessage';
 
 const POLL_INTERVAL_MS = 2500;
 
@@ -77,7 +78,7 @@ export function useDocumentIntake(id: string | null): {
           ? (e as { status?: number }).status
           : undefined;
       if (status === 404) setGone(true);
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     }
   }, [id]);
 

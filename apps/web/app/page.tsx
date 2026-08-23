@@ -56,6 +56,7 @@ import type { Category, DesignMode } from '@dgipr/schemas';
 import { createGeneration, getGeneration } from '../lib/api';
 import { useTasks } from '../lib/TasksProvider';
 import { STR } from '../lib/strings';
+import { errorMessage } from '../lib/errorMessage';
 import {
   DocumentIntake,
   type DocumentIntakeStatus,
@@ -65,6 +66,7 @@ import ReferencePicker, {
 } from '../components/ReferencePicker';
 import { SocialLogoStack } from '../components/SocialLogoStack';
 import { Disclosure } from '../components/Disclosure';
+import { ErrorNotice } from '../components/ErrorNotice';
 
 // ONE flat row of formats. The two-level पोस्टर/कॅप्शन picker it replaces asked a question
 // officers were not making a decision about — a caption is an ADD-ON to a social post, so
@@ -445,7 +447,7 @@ export default function NewGenerationPage() {
       addTask(id);
       router.push(`/generations/${id}`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : STR.genericError);
+      setError(errorMessage(e));
       setSubmitting(false);
     }
   };
@@ -499,7 +501,7 @@ export default function NewGenerationPage() {
         ) : prefill === 'applied' ? (
           <p className="form-success">{STR.prefillApplied}</p>
         ) : prefill === 'failed' ? (
-          <p className="form-error">{STR.prefillFailed}</p>
+          <ErrorNotice message={STR.prefillFailed} />
         ) : null}
         {/* The submit lives INSIDE the text box, bottom-right, the way a composer does.
             It used to be a full-width तयार करा bar in its own card ABOVE the form — put
@@ -535,7 +537,7 @@ export default function NewGenerationPage() {
             )}
           </button>
         </div>
-        {error ? <p className="form-error">{error}</p> : null}
+        {error ? <ErrorNotice message={error} /> : null}
 
         {/* THE OFFICER'S OWN PROMPT (migration 0045), क्रिएटिव्ह only. Directly under the text
             box because the two are sent together and mean nothing apart: this is the design

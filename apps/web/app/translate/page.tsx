@@ -71,12 +71,14 @@ import {
 import { prepareTextTranslation, translateText } from '../../lib/api';
 import { downloadBlob } from '../../lib/download';
 import { STR } from '../../lib/strings';
+import { errorMessage } from '../../lib/errorMessage';
 import {
   DocumentIntake,
   type DocumentIntakeStatus,
 } from '../../components/DocumentIntake';
 import { TranslationTermsReview } from '../../components/TranslationTermsReview';
 import { ComposeSafeTextarea } from '../../components/ComposeSafeInput';
+import { ErrorNotice } from '../../components/ErrorNotice';
 
 type TranslationResult = Readonly<{
   text: string;
@@ -285,7 +287,7 @@ export default function TranslatePage() {
       setPrep('idle');
       setPrepared(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : STR.genericError);
+      setError(errorMessage(e));
     } finally {
       setSubmitting(false);
     }
@@ -503,7 +505,7 @@ export default function TranslatePage() {
             </span>
           ) : null}
         </div>
-        {error ? <p className="form-error">{error}</p> : null}
+        {error ? <ErrorNotice message={error} /> : null}
       </section>
 
       {prep === 'review' && prepared ? (

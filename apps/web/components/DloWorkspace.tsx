@@ -84,6 +84,8 @@ import { MarkdownText } from './MarkdownText';
 import { ProgressSteps } from './ProgressSteps';
 import { StyleReferenceField } from './StyleReferenceField';
 import { DLO_INTAKE_STEP_LABELS, STR } from '../lib/strings';
+import { errorMessage, storedErrorMessage } from '../lib/errorMessage';
+import { ErrorNotice } from './ErrorNotice';
 
 type DloStep = 'processing' | 'review' | 'generating' | 'output';
 
@@ -203,7 +205,11 @@ function GenerationPhase({
       <section className="card">
         <CardTitle icon={TriangleAlert}>{STR.failedTitle}</CardTitle>
         <p className="hint">{STR.failedHint}</p>
-        {detail.error ? <p className="form-error">{detail.error}</p> : null}
+        {detail.error ? (
+          <ErrorNotice
+            message={storedErrorMessage(detail.error, STR.failedHint)}
+          />
+        ) : null}
         <div className="btn-row" style={{ marginTop: 14 }}>
           <Link className="btn" href={`/generations/${id}`}>
             {STR.dloViewDetail}
@@ -310,7 +316,7 @@ function DloArticleOutput({
     feedbackError ??
     detail?.articleReviseError ??
     (detail?.status === 'failed' && detail.step === 'revise_article'
-      ? detail.error
+      ? storedErrorMessage(detail.error, STR.genericError)
       : null) ??
     refreshError;
 
@@ -333,7 +339,7 @@ function DloArticleOutput({
       setFeedback('');
       await refresh();
     } catch (e) {
-      setFeedbackError(e instanceof Error ? e.message : STR.genericError);
+      setFeedbackError(errorMessage(e));
     } finally {
       setSending(false);
     }
@@ -439,7 +445,7 @@ function DloArticleOutput({
               </span>
             ) : null}
           </div>
-          {revisionError ? <p className="form-error">{revisionError}</p> : null}
+          {revisionError ? <ErrorNotice message={revisionError} /> : null}
         </div>
       </section>
 
@@ -837,7 +843,7 @@ export default function DloWorkspace({ intakeId }: { intakeId: string }) {
       await refresh();
     } catch (e) {
       setExtracting(false);
-      setError(e instanceof Error ? e.message : STR.genericError);
+      setError(errorMessage(e));
     }
   };
 
@@ -867,7 +873,7 @@ export default function DloWorkspace({ intakeId }: { intakeId: string }) {
       await refresh();
     } catch (e) {
       setReextractingIndex(null);
-      setError(e instanceof Error ? e.message : STR.genericError);
+      setError(errorMessage(e));
     }
   };
 
@@ -914,7 +920,7 @@ export default function DloWorkspace({ intakeId }: { intakeId: string }) {
       // right place to watch them.
       addTask(id);
     } catch (e) {
-      setError(e instanceof Error ? e.message : STR.genericError);
+      setError(errorMessage(e));
     } finally {
       setSubmitting(false);
     }
@@ -975,7 +981,9 @@ export default function DloWorkspace({ intakeId }: { intakeId: string }) {
               <CardTitle icon={TriangleAlert}>{STR.failedTitle}</CardTitle>
               <p className="hint">{STR.failedHint}</p>
               {intake.error ? (
-                <p className="form-error">{intake.error}</p>
+                <ErrorNotice
+                  message={storedErrorMessage(intake.error, STR.failedHint)}
+                />
               ) : null}
               <SourceStatusList intake={intake} />
               <div className="btn-row" style={{ marginTop: 14 }}>
@@ -998,8 +1006,15 @@ export default function DloWorkspace({ intakeId }: { intakeId: string }) {
                     : STR.dloProcessingTitle}
                 </p>
                 <p className="hint">{STR.dloProcessingHint}</p>
+                {/* An intake runs for minutes while Sarvam transcribes, so this is the
+                    screen an API restart most often lands on. The row is untouched and
+                    one refresh picks the work back up. */}
                 {intakeError ? (
-                  <p className="form-error">{intakeError}</p>
+                  <ErrorNotice
+                    message={intakeError}
+                    fallback={STR.dloLoadFailed}
+                    onRetry={() => void refresh()}
+                  />
                 ) : null}
               </div>
               {intake ? <SourceStatusList intake={intake} /> : null}
@@ -1069,7 +1084,9 @@ export default function DloWorkspace({ intakeId }: { intakeId: string }) {
                   {failedFiles.map((file, index) => (
                     <li key={`${file.name}-${index}`}>
                       {file.name}
-                      {file.error ? ` — ${file.error}` : ''}
+                      {file.error
+                        ? ` — ${storedErrorMessage(file.error, STR.genericError)}`
+                        : ''}
                     </li>
                   ))}
                 </ul>
@@ -1208,8 +1225,8 @@ export default function DloWorkspace({ intakeId }: { intakeId: string }) {
               {pendingSelection ? (
                 <p className="hint">{STR.dloReviewSelectionPending}</p>
               ) : null}
-              {saveError ? <p className="form-error">{saveError}</p> : null}
-              {error ? <p className="form-error">{error}</p> : null}
+              {saveError ? <ErrorNotice message={saveError} /> : null}
+              {error ? <ErrorNotice message={error} /> : null}
               {saving ? (
                 <span
                   className="translating-note"

@@ -106,6 +106,7 @@ export function ChatWorkspace({ threadId }: { threadId: string | null }) {
         activeId={chat.threadId}
         loading={list.loading}
         error={list.error}
+        onRetry={() => void list.refresh()}
         open={railOpen}
         onClose={() => setRailOpen(false)}
         onDelete={(id) => void onDelete(id)}

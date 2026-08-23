@@ -17,6 +17,7 @@ import { ChatComposer } from './ChatComposer';
 import { ChatMessageBubble } from './ChatMessageBubble';
 import { MarkdownText } from './MarkdownText';
 import { STR } from '../lib/strings';
+import { ErrorNotice } from './ErrorNotice';
 import type { DraftAttachment } from '../lib/useChatAttachments';
 
 // How close to the bottom still counts as "at the bottom". A few lines of slack, so a stray
@@ -149,9 +150,7 @@ export function ChatConversation({
           ) : null}
 
           {error !== null && !sending ? (
-            <p className="chat-note chat-note--error" role="alert">
-              {error}
-            </p>
+            <ErrorNotice message={error} fallback={STR.chatFailed} />
           ) : null}
         </div>
       </div>

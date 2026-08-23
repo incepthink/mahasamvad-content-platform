@@ -30,6 +30,7 @@ import {
 import { ComposeSafeTextarea, isComposingEvent } from './ComposeSafeInput';
 import { YouTubeLinkInput } from './YouTubeLinkInput';
 import { STR } from '../lib/strings';
+import { storedErrorMessage } from '../lib/errorMessage';
 import {
   CHAT_DOCUMENT_ACCEPT,
   type DraftAttachment,
@@ -44,7 +45,7 @@ const KIND_ICON = {
 
 function stateLabel(attachment: DraftAttachment): string {
   if (attachment.state === 'failed') {
-    return attachment.error ?? STR.chatAttachFailed;
+    return storedErrorMessage(attachment.error, STR.chatAttachFailed);
   }
   if (attachment.state === 'transcribing') return STR.chatAttachTranscribing;
   if (attachment.state === 'preparing') return STR.chatAttachPreparing;

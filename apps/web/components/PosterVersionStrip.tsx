@@ -19,6 +19,8 @@ import { useState } from 'react';
 import type { GenerationDetail } from '@dgipr/schemas';
 import { restorePosterVersion } from '../lib/api';
 import { STR, formatDate } from '../lib/strings';
+import { errorMessage } from '../lib/errorMessage';
+import { ErrorNotice } from './ErrorNotice';
 
 export function PosterVersionStrip({
   detail,
@@ -70,7 +72,7 @@ export function PosterVersionStrip({
       await restorePosterVersion(detail.id, version);
       await onChanged();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+      setError(errorMessage(caught));
     } finally {
       setRestoring(null);
       onRestoringChange?.(false);
@@ -114,7 +116,7 @@ export function PosterVersionStrip({
           );
         })}
       </div>
-      {error ? <p className="form-error">{error}</p> : null}
+      {error ? <ErrorNotice message={error} /> : null}
     </div>
   );
 }

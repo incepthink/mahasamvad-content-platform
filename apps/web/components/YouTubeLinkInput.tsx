@@ -44,6 +44,7 @@ import {
 import { probeYouTubeVideo } from '../lib/api';
 import { CardTitle } from './CardTitle';
 import { STR } from '../lib/strings';
+import { errorMessage } from '../lib/errorMessage';
 
 export function YouTubeLinkInput({
   videos,
@@ -106,7 +107,7 @@ export function YouTubeLinkInput({
       // Straight on to the next paste — an officer adding a link is usually adding several.
       input.current?.focus();
     } catch (error) {
-      setFieldError(error instanceof Error ? error.message : STR.genericError);
+      setFieldError(errorMessage(error));
     } finally {
       setProbing(false);
     }
@@ -210,7 +211,7 @@ export function YouTubeLinkInput({
       </div>
 
       {fieldError ? (
-        <p className="form-error" style={{ marginTop: 8 }}>
+        <p className="form-error" style={{ marginTop: 8 }} role="alert">
           {fieldError}
         </p>
       ) : null}

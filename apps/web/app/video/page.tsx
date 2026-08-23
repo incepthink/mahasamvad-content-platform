@@ -20,7 +20,9 @@ import {
 } from '@dgipr/schemas';
 import { createVideoProject, listVideoProjects } from '../../lib/api';
 import { formatDate, STR, videoReadyScriptEstimate } from '../../lib/strings';
+import { errorMessage } from '../../lib/errorMessage';
 import { VideoStatusChip } from '../../components/VideoStatusChip';
+import { ErrorNotice } from '../../components/ErrorNotice';
 
 const NOTE_MIN = 20;
 
@@ -193,7 +195,7 @@ export default function VideoPage() {
       );
       router.push(`/video/${id}`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : STR.genericError);
+      setError(errorMessage(e));
       setSubmitting(false);
     }
   };
@@ -286,7 +288,7 @@ export default function VideoPage() {
               </p>
             )}
             {scriptNotMarathi ? (
-              <p className="form-error">{STR.videoScriptMarathiOnly}</p>
+              <ErrorNotice message={STR.videoScriptMarathiOnly} />
             ) : null}
           </>
         ) : null}
@@ -380,7 +382,7 @@ export default function VideoPage() {
         <p className="hint" style={{ marginTop: 8 }}>
           {STR.videoCreateHint}
         </p>
-        {error ? <p className="form-error">{error}</p> : null}
+        {error ? <ErrorNotice message={error} /> : null}
       </section>
 
       {listedProjects.length > 0 ? (

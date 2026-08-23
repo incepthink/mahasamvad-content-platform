@@ -49,11 +49,47 @@ export async function createServer() {
     limits: { fileSize: 10_485_760, files: 1 },
   });
 
+  // The LAST-RESORT error path, and the only one an officer was never meant to read.
+  //
+  // Routes that refuse a request on purpose answer with `reply.code(4xx).send(...)` and
+  // their own Marathi sentence; those return directly and never arrive here. What lands
+  // here is the unplanned half — a schema rejection, a driver failure, a missing column,
+  // a provider timeout — and until now its raw `error.message` was sent to the browser
+  // and rendered verbatim. Two of those shapes were actively harmful on screen:
+  //
+  //   * `ZodError.message` is a JSON array of issue objects, pretty-printed. 401
+  //     characters for a two-field schema and several thousand for a real request body.
+  //     That is the blob that overflowed the card on a phone.
+  //   * an internal message names a column, a bucket path or a provider request id.
+  //
+  // So the wire now carries a short Marathi sentence plus a stable machine `code`, and
+  // the detail goes to the log, where it was always the only useful audience. The `code`
+  // is additive — `readJsonResponse` in apps/web reads `error.message` and ignores it —
+  // and exists so a future client can branch without matching on prose.
+  const FAILURE_TEXT = {
+    invalid_request:
+      'पाठवलेली माहिती अपूर्ण किंवा चुकीची आहे. कृपया तपासून पुन्हा प्रयत्न करा.',
+    internal_error: 'सेवेत तात्पुरती अडचण आली. कृपया पुन्हा प्रयत्न करा.',
+  } as const;
+
   app.setErrorHandler((error: unknown, request, reply) => {
     if (error instanceof ZodError) {
-      return reply.code(400).send({ error: { message: error.message } });
+      // Logged in full: the issue list is how a malformed client is diagnosed, and it is
+      // the only copy of it once the response stops carrying it.
+      request.log.warn(
+        { issues: error.issues, url: request.url },
+        'request failed schema validation',
+      );
+      return reply.code(400).send({
+        error: {
+          message: FAILURE_TEXT.invalid_request,
+          code: 'invalid_request',
+        },
+      });
     }
+
     request.log.error(error);
+
     const statusCode =
       typeof error === 'object' &&
       error !== null &&
@@ -62,9 +98,16 @@ export async function createServer() {
       error.statusCode >= 400
         ? error.statusCode
         : 500;
-    const message =
-      error instanceof Error ? error.message : 'Internal server error.';
-    return reply.code(statusCode).send({ error: { message } });
+
+    // A 4xx that reached the error handler rather than a route's own reply is Fastify's
+    // own (an unparseable body, a multipart file over the limit, an unsupported media
+    // type). Its message is English framework text, so it is replaced too — the STATUS is
+    // what the client acts on, and apps/web turns 413 into "फाईल खूप मोठी आहे" from the
+    // status alone.
+    const code = statusCode >= 500 ? 'internal_error' : 'invalid_request';
+    return reply
+      .code(statusCode)
+      .send({ error: { message: FAILURE_TEXT[code], code } });
   });
 
   app.get('/health', async () => ({

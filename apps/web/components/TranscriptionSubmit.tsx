@@ -9,6 +9,7 @@
 // of the form, not buried under the list of recordings.
 
 import { STR } from '../lib/strings';
+import { ErrorNotice } from './ErrorNotice';
 
 export function TranscriptionSubmit({
   onSubmit,
@@ -35,7 +36,7 @@ export function TranscriptionSubmit({
           {submitting ? STR.submitting : STR.transcribeSubmit}
         </button>
       </div>
-      {error ? <p className="form-error">{error}</p> : null}
+      {error ? <ErrorNotice message={error} /> : null}
     </section>
   );
 }

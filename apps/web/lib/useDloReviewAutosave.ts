@@ -31,6 +31,7 @@ import {
 import { saveDloReview } from './api';
 import { reviewWriterId } from './dloDraft';
 import { STR } from './strings';
+import { errorMessage } from './errorMessage';
 
 const DEBOUNCE_MS = 1200;
 
@@ -140,7 +141,7 @@ export function useDloReviewAutosave(
         }
         lastSeenWriterRef.current = reviewWriterId();
       } catch (e) {
-        setSaveError(e instanceof Error ? e.message : STR.dloReviewSaveFailed);
+        setSaveError(errorMessage(e, STR.dloReviewSaveFailed));
       } finally {
         setSaving(false);
       }

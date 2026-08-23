@@ -16,6 +16,8 @@ import type { TranscriptionDetail } from '@dgipr/schemas';
 import { downloadBlob } from '../lib/download';
 import { seedDraftNotes } from '../lib/dloDraft';
 import { STR, TRANSCRIPTION_STATUS_LABELS } from '../lib/strings';
+import { ErrorNotice } from './ErrorNotice';
+import { storedErrorMessage } from '../lib/errorMessage';
 
 function StatusChip({ status }: { status: TranscriptionDetail['status'] }) {
   const entry = TRANSCRIPTION_STATUS_LABELS[status] ?? {
@@ -29,10 +31,12 @@ export function TranscriptionResult({
   detail,
   error,
   onClose,
+  onRetry,
 }: {
   detail: TranscriptionDetail | null;
   error: string | null;
   onClose: () => void;
+  onRetry?: () => void;
 }) {
   const router = useRouter();
   const [copied, setCopied] = useState(false);
@@ -46,7 +50,11 @@ export function TranscriptionResult({
   if (error && !detail) {
     return (
       <section className="card">
-        <p className="form-error">{error}</p>
+        <ErrorNotice
+          message={error}
+          fallback={STR.transcribeLoadFailed}
+          onRetry={onRetry}
+        />
       </section>
     );
   }
@@ -103,9 +111,9 @@ export function TranscriptionResult({
       {/* The RUN's error — every recording failed, so there is no text at all. A single
           recording that failed among several is reported per file below instead. */}
       {detail.status === 'failed' && detail.error ? (
-        <p className="form-error" style={{ marginTop: 12 }}>
-          {detail.error}
-        </p>
+        <ErrorNotice
+          message={storedErrorMessage(detail.error, STR.genericError)}
+        />
       ) : null}
 
       {failed.length > 0 ? (
@@ -115,7 +123,9 @@ export function TranscriptionResult({
             {failed.map((file) => (
               <li key={file.name}>
                 {file.name}
-                {file.error ? ` — ${file.error}` : ''}
+                {file.error
+                  ? ` — ${storedErrorMessage(file.error, STR.genericError)}`
+                  : ''}
               </li>
             ))}
           </ul>

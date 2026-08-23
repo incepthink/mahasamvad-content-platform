@@ -31,6 +31,7 @@ import { AnalyticsTrendChart } from '../../components/AnalyticsTrendChart';
 import { ANALYTICS_FEATURE_LABELS } from '../../lib/analytics';
 import { useAnalytics } from '../../lib/useAnalytics';
 import { STR } from '../../lib/strings';
+import { ErrorNotice } from '../../components/ErrorNotice';
 
 function AnalyticsPageBody() {
   const router = useRouter();
@@ -67,12 +68,12 @@ function AnalyticsPageBody() {
       </header>
 
       {error ? (
-        <div className="card">
-          <p className="form-error">{error}</p>
-          <button type="button" className="btn" onClick={() => void reload()}>
-            {STR.analyticsRetry}
-          </button>
-        </div>
+        <ErrorNotice
+          message={error}
+          fallback={STR.analyticsLoadFailed}
+          onRetry={() => void reload()}
+          retryLabel={STR.analyticsRetry}
+        />
       ) : null}
 
       {loading && !data ? (

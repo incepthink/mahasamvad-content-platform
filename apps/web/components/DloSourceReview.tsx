@@ -42,6 +42,7 @@ import {
   sourceText,
 } from '../lib/dloReview';
 import { STR } from '../lib/strings';
+import { storedErrorMessage } from '../lib/errorMessage';
 // Uncontrolled by design: correcting a name or an amount in a transcript is exactly the
 // Marathi-typing path that lost characters under a controlled box. See ComposeSafeInput.
 import { ComposeSafeTextarea } from './ComposeSafeInput';
@@ -187,7 +188,7 @@ export function DloSourceReview({
 
             {file.status === 'failed' ? (
               <p className="form-error" style={{ marginTop: 10 }}>
-                {file.error ?? STR.dloReviewSourceFailed}
+                {storedErrorMessage(file.error, STR.dloReviewSourceFailed)}
               </p>
             ) : null}
 

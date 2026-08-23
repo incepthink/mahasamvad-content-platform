@@ -24,11 +24,13 @@ import {
   sendArticleFeedback,
 } from '../lib/api';
 import { STR } from '../lib/strings';
+import { errorMessage } from '../lib/errorMessage';
 import { downloadBlob } from '../lib/download';
 import { CrossFormatLinks } from './CrossFormatLinks';
 import { FeedbackBox } from './FeedbackBox';
 import { MarkdownText } from './MarkdownText';
 import { TranslationTermsReview } from './TranslationTermsReview';
+import { ErrorNotice } from './ErrorNotice';
 
 export function ArticleView({
   detail,
@@ -119,7 +121,7 @@ export function ArticleView({
       setPrepared(null);
       await onFeedbackSent();
     } catch (e) {
-      setTranslateError(e instanceof Error ? e.message : STR.genericError);
+      setTranslateError(errorMessage(e));
     } finally {
       setConfirming(false);
     }
@@ -369,7 +371,7 @@ export function ArticleView({
           buttons; for an existing one it lives inside that language's fold below. */}
       {!has(pendingLang) && !translating ? nameCheckBody : null}
 
-      {error ? <p className="form-error">{error}</p> : null}
+      {error ? <ErrorNotice message={error} /> : null}
 
       {(['en', 'hi'] as const).map((language) =>
         has(language) ? retranslateFold(language) : null,
@@ -405,7 +407,7 @@ export function ArticleView({
           />
         )}
         {detail.articleReviseError ? (
-          <p className="form-error">{detail.articleReviseError}</p>
+          <ErrorNotice message={detail.articleReviseError} />
         ) : null}
       </div>
     </section>

@@ -61,6 +61,8 @@ import { DocumentIntake, type DocumentSnapshot } from './DocumentIntake';
 import { StyleReferenceField } from './StyleReferenceField';
 import { YouTubeLinkInput } from './YouTubeLinkInput';
 import { STR } from '../lib/strings';
+import { errorMessage } from '../lib/errorMessage';
+import { ErrorNotice } from './ErrorNotice';
 
 // This picker takes recordings only; documents go through <DocumentIntake>. Which
 // containers count as a recording is @dgipr/schemas' AUDIO_FILE_* — the same list the API
@@ -327,7 +329,7 @@ export function DloIntakeForm() {
       rememberMyIntakeId(id);
       router.push(`/dlo/${id}`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : STR.genericError);
+      setError(errorMessage(e));
       setSubmitting(false);
     }
   };
@@ -493,7 +495,7 @@ export function DloIntakeForm() {
           presses a button whose refusal is scrolled off somewhere above. */}
       <div className="dlo-submitbar">
         <div className="dlo-submitbar-inner">
-          {error ? <p className="form-error">{error}</p> : null}
+          {error ? <ErrorNotice message={error} /> : null}
           <button
             type="button"
             className="btn btn-primary dlo-submit"

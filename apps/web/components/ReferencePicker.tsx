@@ -51,6 +51,8 @@ import {
   groupByBand,
 } from '../lib/referenceGroups';
 import { STR } from '../lib/strings';
+import { errorMessage } from '../lib/errorMessage';
+import { ErrorNotice } from './ErrorNotice';
 
 // A band opens on two rows' worth of thumbnails. Count-based rather than measured (the
 // library page measures its resolved grid tracks): this gallery sits inside a fold on a
@@ -281,7 +283,7 @@ export default function ReferencePicker({
       ]);
       setLibrary({ types, images });
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : STR.genericError);
+      setError(errorMessage(caught));
     } finally {
       setLoading(false);
     }
@@ -467,7 +469,7 @@ export default function ReferencePicker({
           {STR.refPickerLoading}
         </p>
       ) : error ? (
-        <p className="form-error">{error}</p>
+        <ErrorNotice message={error} />
       ) : groups.length === 0 ? (
         <p className="info-callout">{STR.refPickerEmpty}</p>
       ) : searching ? (

@@ -26,6 +26,7 @@ import type {
 import { createChatThread, getChatThread, sendChatMessage } from './api';
 import { rememberMyChatId } from './chatDraft';
 import { STR } from './strings';
+import { errorMessage } from './errorMessage';
 
 export type SendInput = Readonly<{
   content: string;
@@ -88,7 +89,7 @@ export function useChatThread(
         setMessages(detail.messages);
       } catch (e) {
         if (cancelled) return;
-        setError(e instanceof Error ? e.message : STR.chatLoadFailed);
+        setError(errorMessage(e, STR.chatLoadFailed));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -151,7 +152,7 @@ export function useChatThread(
           );
           setStreaming(null);
           setSending(false);
-          setError(e instanceof Error ? e.message : STR.chatFailed);
+          setError(errorMessage(e, STR.chatFailed));
           return;
         }
       }
@@ -199,7 +200,7 @@ export function useChatThread(
         // stores what it produced, so the complete answer is there on the next load — what is
         // on screen is simply where the reading stopped.
         if (!(e instanceof DOMException && e.name === 'AbortError')) {
-          failed = e instanceof Error ? e.message : STR.chatFailed;
+          failed = errorMessage(e, STR.chatFailed);
         }
       } finally {
         abort.current = null;

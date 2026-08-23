@@ -66,6 +66,8 @@ import {
   groupByBand,
 } from '../../lib/referenceGroups';
 import { STR } from '../../lib/strings';
+import { errorMessage } from '../../lib/errorMessage';
+import { ErrorNotice } from '../../components/ErrorNotice';
 
 const ACCEPTED_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 // A band opens on one row and grows by this many rows per press.
@@ -111,7 +113,7 @@ function writeLastGroup(category: ReferenceCategory, slug: string): void {
 }
 
 function errText(error: unknown): string {
-  return error instanceof Error ? error.message : STR.genericError;
+  return errorMessage(error);
 }
 
 // What the vision pass read off this master. Two fields here are consequential and
@@ -728,7 +730,13 @@ export default function ReferencesPage() {
         </div>
       </header>
 
-      {error ? <p className="form-error">{error}</p> : null}
+      {error ? (
+        <ErrorNotice
+          message={error}
+          fallback={STR.refsLoadFailed}
+          onRetry={() => void refresh()}
+        />
+      ) : null}
 
       {loaded && adding ? (
         <UploadPanel

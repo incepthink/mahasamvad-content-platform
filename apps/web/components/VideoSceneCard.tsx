@@ -18,6 +18,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { VideoScene } from '@dgipr/schemas';
+import { ErrorNotice } from './ErrorNotice';
+import { storedErrorMessage } from '../lib/errorMessage';
 import {
   IMAGE_FILE_ACCEPT,
   VIDEO_KEY_POINT_MAX_CHARS,
@@ -395,7 +397,7 @@ export function VideoSceneCard({
               </p>
             ) : null}
             {referenceImageError ? (
-              <p className="form-error">{referenceImageError}</p>
+              <ErrorNotice message={referenceImageError} />
             ) : null}
           </>
         ) : null}
@@ -467,11 +469,11 @@ export function VideoSceneCard({
           />
           {scene.narration.trim().length > VIDEO_NARRATION_MAX_CHARS ? (
             <p className="form-error">
-              {videoNarrationTooLong(
-                scene.narration.trim().length,
-                VIDEO_NARRATION_MAX_CHARS,
-              )}
-            </p>
+            {videoNarrationTooLong(
+              scene.narration.trim().length,
+              VIDEO_NARRATION_MAX_CHARS,
+            )}
+          </p>
           ) : null}
         </>
       ) : (
@@ -555,7 +557,11 @@ export function VideoSceneCard({
           />
         </div>
       ) : null}
-      {scene.error ? <p className="form-error">{scene.error}</p> : null}
+      {scene.error ? (
+        <ErrorNotice
+          message={storedErrorMessage(scene.error, STR.videoSceneFailed)}
+        />
+      ) : null}
 
       {/* Every button here is guarded on the handler that makes it work: a card
           with no stored scene behind it (a just-inserted one) gets the hint
