@@ -2879,12 +2879,21 @@ fieldset.copy-group legend {
 }
 
 /* Search + count row above the history grid (mirrors the glossary toolbar). */
+/* Search + sort + the three facet rows, as one block above the grid. It is a plain
+   stack rather than a fold: with 100 runs on the page, filters that have to be opened
+   before they can be seen are filters nobody uses. */
+.history-filters {
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .history-toolbar {
   display: flex;
   gap: 12px;
   align-items: center;
   flex-wrap: wrap;
-  margin-bottom: 20px;
 }
 
 .history-search {
@@ -2896,6 +2905,117 @@ fieldset.copy-group legend {
   color: var(--muted);
   font-size: 0.9rem;
   white-space: nowrap;
+}
+
+/* One facet = a label plus its row of pills. The label sits on the same line on a
+   desktop and wraps above the pills on a phone, which is what flex-wrap buys here. */
+.history-facet {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.history-facet-label {
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 600;
+  min-width: 56px;
+}
+
+.history-pills {
+  display: inline-flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  padding: 4px;
+  /* 24px, not 999px: a one-row track is 48px tall, so this IS the stadium shape there —
+     and unlike 999px it still reads as a track once the pills wrap to two rows on a
+     phone, which .analytics-ranges never has to do. */
+  border-radius: 24px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+/* Same segmented-pill treatment as .analytics-range: selection is carried by fill and
+   weight, never by colour alone (globals.css line 1). */
+.history-pill {
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.9rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  padding: 6px 14px;
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.history-pill:hover:not(:disabled):not(.active) {
+  background: var(--card);
+  color: var(--text);
+}
+
+.history-pill.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  box-shadow: var(--shadow-sm);
+}
+
+.history-pill:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* The count is the same size as the label, just lighter — it is a hint about what the
+   pill would return, not a second thing to read. */
+.history-pill-count {
+  font-size: 0.8rem;
+  font-weight: 700;
+  opacity: 0.65;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .history-pill {
+    transition: none;
+  }
+}
+
+.history-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.history-sort select {
+  font: inherit;
+  font-size: 0.95rem;
+  color: inherit;
+  padding: 10px 12px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--card);
+  cursor: pointer;
+}
+
+.history-sort select:focus {
+  outline: 3px solid var(--ring);
+  outline-offset: 0;
+  border-color: var(--accent);
+}
+
+.history-result-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 /* Skeleton shimmer (reuses the task-shimmer gradient/animation). */
@@ -7311,6 +7431,35 @@ a.thread-node:hover {
    A checkbox per scene under व्हिडिओ तयार करा. A row the job is going to render
    anyway is ticked and disabled — `is-locked` is what makes that read as "this
    one is settled" rather than as a control that is broken. */
+
+/* Gate 2's caption switch, sitting in the same .btn-row as the two navigation
+   buttons. It is given a bordered pill so it reads as a control of its own
+   rather than as a stray tick beside a button, and 44px of height so it is the
+   same size target as everything else on this page (globals.css line 1). */
+.video-captions-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.video-captions-toggle input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+}
+
+.video-captions-toggle:has(input:disabled) {
+  cursor: default;
+  opacity: 0.6;
+}
 
 .reshoot {
   margin-top: 16px;

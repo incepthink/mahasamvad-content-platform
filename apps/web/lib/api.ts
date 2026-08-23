@@ -1063,13 +1063,17 @@ export async function saveVideoSceneMotion(
 // its approved still. On a retry after a partial failure only those render
 // again. `scenes` names EXTRA scenes the officer chose to re-shoot even though
 // their clip is current — it only ever adds to that set, never narrows it.
+// `captions` is the officer's gate-2 choice about the burned-in Marathi key
+// points; the route stores it on the row, so every later stitch (a per-scene
+// re-animate, the free restitch) follows the same answer.
 export async function startVideoAnimation(
   id: string,
   scenes: readonly number[] = [],
+  captions = false,
 ): Promise<void> {
   await requestJson(`/api/video/projects/${id}/animate`, {
     method: 'POST',
-    body: JSON.stringify({ scenes }),
+    body: JSON.stringify({ scenes, captions }),
   });
 }
 

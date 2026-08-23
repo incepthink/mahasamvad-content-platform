@@ -573,6 +573,7 @@ function toDetail(
         : {}),
       ...(scene.error !== undefined ? { error: scene.error } : {}),
     })),
+    captionsEnabled: row.captionsEnabled,
     videoUrl: row.videoPath
       ? publicUrlIn(client, VIDEOS_BUCKET, row.videoPath)
       : null,
@@ -1448,6 +1449,25 @@ export function registerVideoRoutes(
         return reply
           .code(400)
           .send({ error: { message: `Scene ${outOfRange + 1} not found.` } });
+      }
+      // The caption choice is persisted BEFORE the flip and in its own
+      // best-effort update: the stitch reads it off the row (a per-scene
+      // re-animate and the free restitch carry no request body), and a
+      // database without 0047 must cost the toggle rather than the paid run.
+      if (
+        parsed.data.captions !== undefined &&
+        parsed.data.captions !== row.captionsEnabled
+      ) {
+        try {
+          await updateVideoProject(client, row.id, {
+            captionsEnabled: parsed.data.captions,
+          });
+        } catch (error) {
+          request.log.warn(
+            `[video] could not store the caption choice for ${row.id}: ` +
+              `${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
       }
       await updateVideoProject(client, row.id, {
         status: 'animating',

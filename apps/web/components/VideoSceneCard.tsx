@@ -173,6 +173,10 @@ export function VideoSceneCard({
   // reviewed and it sits next to the redraw button — so a misclick must not
   // take it.
   const [deleteEndArmed, setDeleteEndArmed] = useState(false);
+  // Two-step confirm for dropping the whole scene. At gate 2 the scene may
+  // already own paid frames and a clip, so a misclick here is expensive —
+  // unlike gate 1, where a scene is still only text.
+  const [removeArmed, setRemoveArmed] = useState(false);
   const storedStartBrief = scene.openingVisualBrief ?? scene.visualBrief;
   const storedEndBrief = scene.endVisualBrief ?? '';
   const [startDraft, setStartDraft] = useState(storedStartBrief);
@@ -784,16 +788,57 @@ export function VideoSceneCard({
           a gap: a new scene must carry words moved out of a neighbour, so
           inserting before scene 1 and taking its opening words is the same
           result as inserting after scene 1 and taking its closing ones. */}
-      {onInsertAfter ? (
+      {onInsertAfter || onRemove ? (
         <div className="btn-row" style={{ marginTop: 12 }}>
-          <button
-            type="button"
-            className="btn btn-small"
-            disabled={busy}
-            onClick={onInsertAfter}
-          >
-            {STR.videoInsertSceneAfter}
-          </button>
+          {onInsertAfter ? (
+            <button
+              type="button"
+              className="btn btn-small"
+              disabled={busy}
+              onClick={onInsertAfter}
+            >
+              {STR.videoInsertSceneAfter}
+            </button>
+          ) : null}
+          {/* Beside the insert, because the two are the same question about
+              this scene's place in the split. Two-step, unlike gate 1's remove:
+              here the scene may already carry frames and a clip that were paid
+              for. The removal itself only edits the draft list — it reaches the
+              stored scenes on the save below. */}
+          {onRemove ? (
+            removeArmed ? (
+              <>
+                <button
+                  type="button"
+                  className="btn btn-small btn-danger"
+                  disabled={busy}
+                  onClick={() => {
+                    setRemoveArmed(false);
+                    onRemove();
+                  }}
+                >
+                  {STR.videoRemoveSceneConfirm}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-small"
+                  disabled={busy}
+                  onClick={() => setRemoveArmed(false)}
+                >
+                  {STR.videoAnimateCancel}
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="btn btn-small"
+                disabled={busy}
+                onClick={() => setRemoveArmed(true)}
+              >
+                {STR.videoRemoveScene}
+              </button>
+            )
+          ) : null}
         </div>
       ) : null}
     </section>

@@ -137,6 +137,12 @@ export type VideoProjectRow = Readonly<{
   orientation: VideoOrientation;
   tier: VideoTier;
   scenes: readonly VideoSceneEntry[];
+  // Whether the on-screen Marathi key points are burned into the stitch
+  // (migration 0047). Chosen by the officer at gate 2 and stored on the row,
+  // because the stitch also runs on a per-scene re-animate and on the free
+  // restitch, neither of which carries the animate request's body. A database
+  // without 0047 reads as false.
+  captionsEnabled: boolean;
   title: string | null;
   style: string | null;
   referenceTitle: string | null;
@@ -162,6 +168,7 @@ type VideoProjectDbRow = {
   orientation: VideoOrientation;
   tier: VideoTier;
   scenes: VideoSceneEntry[] | null;
+  captions_enabled?: boolean | null;
   title: string | null;
   style: string | null;
   reference_title: string | null;
@@ -188,6 +195,7 @@ function fromDbRow(row: VideoProjectDbRow): VideoProjectRow {
     orientation: row.orientation,
     tier: row.tier,
     scenes: row.scenes ?? [],
+    captionsEnabled: row.captions_enabled ?? false,
     title: row.title,
     style: row.style,
     referenceTitle: row.reference_title,
@@ -240,6 +248,7 @@ export type VideoProjectPatch = Partial<
     | 'step'
     | 'error'
     | 'scenes'
+    | 'captionsEnabled'
     | 'title'
     | 'style'
     | 'referenceTitle'
@@ -260,6 +269,8 @@ export async function updateVideoProject(
   if (patch.step !== undefined) row.step = patch.step;
   if (patch.error !== undefined) row.error = patch.error;
   if (patch.scenes !== undefined) row.scenes = patch.scenes;
+  if (patch.captionsEnabled !== undefined)
+    row.captions_enabled = patch.captionsEnabled;
   if (patch.title !== undefined) row.title = patch.title;
   if (patch.style !== undefined) row.style = patch.style;
   if (patch.referenceTitle !== undefined)

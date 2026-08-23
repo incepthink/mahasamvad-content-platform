@@ -86,23 +86,120 @@ async function putObject(
   }
 }
 
-async function getObject(logicalBucket: string, path: string): Promise<Buffer> {
+// THE CLIENT'S requestTimeout DOES NOT COVER THE RESPONSE BODY, and that gap is
+// what turned a stalled download into a job that hung forever rather than
+// failing. GetObject resolves as soon as the HEADERS arrive; the SDK then clears
+// the socket timeout and hands back a stream the caller drains itself, so a
+// connection that goes silent mid-body is awaited indefinitely with no timer
+// armed on it. Observed 2026-08-23 on a video scene still: 1.12 MB read, then
+// two hours of nothing on a live socket, with the animate job's promise never
+// settling — which also pinned the id in video-runner's `running` set, so the
+// orphan reaper on the detail route correctly refused to rescue the row and the
+// officer's page spun forever.
+//
+// So the body gets the idle timeout the headers already had. Idle, not total:
+// a large video clip on a slow link makes steady progress and must never be cut
+// off — only a stream that has stopped delivering bytes is. Aborting through the
+// AbortController rather than just destroying the stream is what tears down the
+// underlying request, so the dead socket does not linger in the SDK's pool.
+const DEFAULT_DOWNLOAD_IDLE_TIMEOUT_MS = 60_000;
+const DEFAULT_DOWNLOAD_ATTEMPTS = 3;
+
+function readPositiveInt(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === '') return fallback;
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
+}
+
+class StalledDownloadError extends Error {}
+
+// Drain an S3 body, restarting the watchdog on every chunk that arrives.
+async function readBodyWithIdleTimeout(
+  body: AsyncIterable<Uint8Array>,
+  idleMs: number,
+  onStall: () => void,
+): Promise<Buffer> {
+  const chunks: Uint8Array[] = [];
+  let timer: NodeJS.Timeout | undefined;
+  let stalled = false;
+  const arm = (): void => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      stalled = true;
+      onStall();
+    }, idleMs);
+  };
   try {
-    const response = await getS3Client().send(
-      new GetObjectCommand({
-        Bucket: resolveBucket(logicalBucket),
-        Key: path,
-      }),
-    );
-    if (!response.Body) {
-      throw new Error('empty response body');
+    arm();
+    for await (const chunk of body) {
+      chunks.push(chunk);
+      arm();
     }
-    return Buffer.from(await response.Body.transformToByteArray());
   } catch (error) {
-    throw new Error(
-      `Failed to download ${logicalBucket}/${path}: ${describe(error)}`,
-    );
+    // The abort surfaces here as whatever the stream throws; report the real
+    // cause so a stall is not filed under a generic network error.
+    if (stalled) {
+      throw new StalledDownloadError(
+        `no data for ${Math.round(idleMs / 1000)}s after ` +
+          `${chunks.reduce((sum, c) => sum + c.byteLength, 0)} bytes`,
+      );
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
   }
+  if (stalled) {
+    throw new StalledDownloadError(`no data for ${Math.round(idleMs / 1000)}s`);
+  }
+  return Buffer.concat(chunks);
+}
+
+async function getObject(logicalBucket: string, path: string): Promise<Buffer> {
+  const idleMs = readPositiveInt(
+    'S3_DOWNLOAD_IDLE_TIMEOUT_MS',
+    DEFAULT_DOWNLOAD_IDLE_TIMEOUT_MS,
+  );
+  const attempts = readPositiveInt(
+    'S3_DOWNLOAD_ATTEMPTS',
+    DEFAULT_DOWNLOAD_ATTEMPTS,
+  );
+  let lastError: unknown;
+  // A download is free and a stall is transient, so retry it here rather than
+  // failing a job the officer would have to restart by hand. Bounded, and only
+  // a STALL retries — a real error (missing key, denied) is thrown at once.
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const controller = new AbortController();
+    try {
+      const response = await getS3Client().send(
+        new GetObjectCommand({
+          Bucket: resolveBucket(logicalBucket),
+          Key: path,
+        }),
+        { abortSignal: controller.signal },
+      );
+      if (!response.Body) {
+        throw new Error('empty response body');
+      }
+      return await readBodyWithIdleTimeout(
+        response.Body as unknown as AsyncIterable<Uint8Array>,
+        idleMs,
+        () => controller.abort(),
+      );
+    } catch (error) {
+      lastError = error;
+      if (!(error instanceof StalledDownloadError) || attempt === attempts) {
+        break;
+      }
+      console.warn(
+        `[storage] download of ${logicalBucket}/${path} stalled ` +
+          `(${error.message}); retrying (attempt ${attempt + 1}/${attempts})`,
+      );
+    }
+  }
+  throw new Error(
+    `Failed to download ${logicalBucket}/${path}: ${describe(lastError)}`,
+  );
 }
 
 // Generic variants of the PNG helpers below, for buckets/content types beyond

@@ -414,6 +414,10 @@ export const VideoProjectDetailSchema = z.object({
   referenceTitle: z.string().nullable(),
   referenceUrl: z.string().nullable(),
   scenes: z.array(VideoSceneSchema),
+  // Whether the on-screen Marathi key points are burned into the stitch
+  // (migration 0047). Defaulted so an older API payload — or a database
+  // without 0047 — parses as captions off rather than failing the poll.
+  captionsEnabled: z.boolean().default(false),
   videoUrl: z.string().nullable(),
   srtUrl: z.string().nullable(),
   // True when the current video carries Marathi TTS narration (every scene has
@@ -738,6 +742,10 @@ export type UpdateSceneMotionRequest = z.infer<
 // video they believe they just fixed.
 export const StartVideoAnimationRequestSchema = z.object({
   scenes: z.array(z.number().int().min(0)).optional(),
+  // The officer's caption choice, taken at gate 2 and persisted on the row
+  // before the animate flip. Optional so an older client — which sends only
+  // `scenes` — leaves whatever is stored alone rather than silently clearing it.
+  captions: z.boolean().optional(),
 });
 export type StartVideoAnimationRequest = z.infer<
   typeof StartVideoAnimationRequestSchema

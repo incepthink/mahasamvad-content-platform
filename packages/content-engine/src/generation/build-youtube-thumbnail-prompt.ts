@@ -169,6 +169,18 @@ export function buildYoutubeThumbnailPrompt(
   }
 
   return [
+    'Create one 1280×720 YouTube thumbnail using the attached minister’s photo.',
+    'Preserve the minister’s face and identity exactly; do not alter facial features.',
+    '',
+    'Display this Marathi information clearly:',
+    information,
+    '',
+    'Keep all faces and text outside the top-right 130×130 px logo area and above y=650, leaving the bottom 70 px for the footer.',
+    'Background design may continue through these areas.',
+    'Do not generate any logo or footer.',
+  ].join('\n');
+
+  return [
     'Using the given reference image, generate a YouTube video thumbnail for this information:',
     '',
     information,
@@ -478,8 +490,16 @@ if (
     'Preserve the original number of copies',
     'lost the exact-multiplicity guard',
   );
-  need(marked, 'do NOT add another copy anywhere else', 'lost the no-duplicate example');
-  need(marked, 'INFORMATION THAT MUST SURVIVE — 1 item(s)', 'lost the inventory');
+  need(
+    marked,
+    'do NOT add another copy anywhere else',
+    'lost the no-duplicate example',
+  );
+  need(
+    marked,
+    'INFORMATION THAT MUST SURVIVE — 1 item(s)',
+    'lost the inventory',
+  );
   need(marked, 'दि. २१ मे २०२६', 'inventory item did not reach the prompt');
   // THE regression this change exists to prevent.
   if (marked.includes('Keep the exact layout'))
@@ -495,7 +515,9 @@ if (
     'lost the parent-child preservation rule',
   );
   if (marked.includes('visibly rearranged poster is a CORRECT result'))
-    failures.push('displace round kept the over-broad visible-redesign instruction');
+    failures.push(
+      'displace round kept the over-broad visible-redesign instruction',
+    );
   if (marked.indexOf('SPACE TO FREE:') < marked.indexOf('RESERVED ZONES'))
     failures.push('clear rule precedes the reserved zones it refers to');
   if (!marked.trimEnd().endsWith('may remain anywhere on the poster.'))

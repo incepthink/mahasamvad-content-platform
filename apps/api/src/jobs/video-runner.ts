@@ -1318,6 +1318,12 @@ async function buildCaptionOverlays(
   row: VideoProjectRow,
   scenes: readonly VideoSceneEntry[],
 ): Promise<SceneOverlay[]> {
+  // The officer's project-wide choice (migration 0047), taken at gate 2 and
+  // OFF by default. Read here rather than at the call sites so every stitch —
+  // the full animate, a per-scene re-animate, the free restitch — honours it
+  // without carrying the flag through three signatures. A per-scene keyPoint
+  // is still the finer switch: an empty one gets no overlay either way.
+  if (!row.captionsEnabled) return [];
   const aspect = aspectOf(row);
   const timings = sceneTimings(
     scenes.map((scene) => ({ durationSeconds: scene.durationSeconds })),

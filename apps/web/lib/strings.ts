@@ -1045,6 +1045,22 @@ export const STR = {
   historySearchPlaceholder: 'मागील काम शोधा…',
   historyNoResults: 'शोधाशी जुळणारे काही सापडले नाही.',
   historyCount: 'एकूण',
+  // Filters. Each facet is a row of pills over the loaded runs; the counts beside
+  // them are cross-filtered (what you would get if you pressed that pill now).
+  historyFilterFormat: 'प्रकार',
+  historyFilterStatus: 'स्थिती',
+  historyFilterDate: 'कालावधी',
+  historyFilterAll: 'सर्व',
+  historyDateToday: 'आज',
+  historyDateWeek: '७ दिवसांत',
+  historyDateMonth: '३० दिवसांत',
+  // queued + running as one bucket: "still working on it" is one question for the officer.
+  historyStatusWorking: 'सुरू आहे',
+  historyClearFilters: 'फिल्टर काढा',
+  historySort: 'क्रम',
+  historySortNewest: 'नवीन आधी',
+  historySortOldest: 'जुने आधी',
+  historyFilterNoResults: 'या फिल्टरशी जुळणारे काही सापडले नाही.',
   paginationPrev: 'मागील',
   paginationNext: 'पुढील',
   open: 'उघडा',
@@ -1400,6 +1416,9 @@ export const STR = {
   videoAddScene: 'दृश्य जोडा',
   videoRemoveScene: 'हे दृश्य काढा',
   videoInsertSceneAfter: 'यानंतर नवीन दृश्य जोडा',
+  // Two-step, because at the storyboard gate this drops a scene whose frames
+  // (and possibly clip) have already been paid for — a misclick must not take it.
+  videoRemoveSceneConfirm: 'होय, हे दृश्य काढा',
   videoNarrationResplitHint:
     'या दृश्यावर कोणते वाक्य ऐकू यावे ते ठरवा. शेजारच्या दृश्यातून मजकूर कापून इथे चिकटवा — शब्द तेच राहिले तर आवाज पुन्हा तयार करावा लागत नाही; फक्त दृश्यांची वेळ आवाजाशी जुळवली जाते.',
   videoInsertedSceneHint:
@@ -1498,6 +1517,11 @@ export const STR = {
   videoBackToScript: 'संहितेकडे परत जा',
   videoBackToScriptHint:
     'निवेदनाची विभागणी, दृश्य-वर्णने, पडद्यावरील ओळी व शैली पुन्हा बदलता येतील. खर्च होत नाही आणि तयार झालेली चित्रे तशीच राहतात — ज्या दृश्याचे वर्णन बदलाल तेवढ्याच दृश्याचे चित्र पुन्हा काढावे लागेल.',
+  // Gate 2's caption switch. Off by default: the key points are burned into
+  // the footage permanently, so they are asked for rather than opted out of.
+  videoCaptionsToggle: 'पडद्यावरील ओळी व्हिडिओत दाखवा',
+  videoCaptionsHint:
+    'निवडल्यास प्रत्येक दृश्याची मराठी ओळ व्हिडिओवर कायमस्वरूपी छापली जाते. न निवडल्यास व्हिडिओत ओळी दिसत नाहीत; निवेदन व SRT फाईल मात्र तशीच राहते.',
 
   // Rendering + result
   videoAnimatingHint:
@@ -1927,13 +1951,31 @@ export function runFormatLabel(
   category: Category,
   outputType: OutputType,
 ): string {
+  return RUN_FORMAT_LABELS[runFormatKey(category, outputType)];
+}
+
+// What a run produced, as a single key — the history filter's facet values. It is the
+// category EXCEPT for a caption-only social run, which is its own thing (see the note on
+// runFormatLabel above). Split out from that function because the filter needs to label a
+// key it holds on its own, with no run in hand.
+export type RunFormatKey = Category | 'caption';
+
+export function runFormatKey(
+  category: Category,
+  outputType: OutputType,
+): RunFormatKey {
   // The category test is written out rather than taken from `isSocialCategory`: that is a
   // VALUE export, and importing one here would pull @dgipr/schemas (and zod) into every
   // bundle that reads a Marathi string. This file stays type-only imports.
   const social = category === 'twitter' || category === 'facebook';
-  if (social && outputType === 'article') return STR.captionLabel;
-  return CATEGORY_LABELS[category];
+  if (social && outputType === 'article') return 'caption';
+  return category;
 }
+
+export const RUN_FORMAT_LABELS: Record<RunFormatKey, string> = {
+  ...CATEGORY_LABELS,
+  caption: STR.captionLabel,
+};
 
 export const STATUS_LABELS: Record<GenerationStatus, string> = {
   queued: 'रांगेत',

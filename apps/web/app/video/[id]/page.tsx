@@ -274,6 +274,12 @@ export default function VideoProjectPage({
   // here, so this list stays what it is sent as: an addition to the job's own
   // stale set, never a replacement for it.
   const [extraScenes, setExtraScenes] = useState<readonly number[]>([]);
+  // Whether the burned-in Marathi key points go onto the footage. OFF by
+  // default (the row's own default), seeded from the project on each entry to
+  // gate 2 so a reopened storyboard shows the answer the last animate stored,
+  // and sent with the animate request, which persists it for every later
+  // stitch.
+  const [captionsOn, setCaptionsOn] = useState(false);
   const lastStatus = useRef<VideoProjectDetail['status'] | null>(null);
 
   // Seed the drafts on each transition INTO a review gate ("per transition",
@@ -287,6 +293,7 @@ export default function VideoProjectPage({
     if (atGate && lastStatus.current !== detail.status) {
       setDrafts(draftsFrom(detail.scenes));
       setStyleDraft(detail.style ?? '');
+      setCaptionsOn(detail.captionsEnabled);
     }
     if (detail.status !== 'storyboard_ready') {
       setAnimateArmed(false);
@@ -967,6 +974,20 @@ export default function VideoProjectPage({
                 onInsertAfter={
                   canAddScene ? () => insertSceneAfter(index) : undefined
                 }
+                // Offered here as well as at gate 1, because a scene inserted
+                // by mistake is most often noticed on the storyboard — and the
+                // only other way out was to go back to gate 1, which the
+                // storyboardDirty gate blocks until the mistake is saved. It
+                // drops the DRAFT only; the stored scene (and any frames it
+                // owns) goes when "बदल जतन करा" below is pressed.
+                onRemove={
+                  canRemoveScene
+                    ? () =>
+                        setDrafts((prev) =>
+                          prev ? prev.filter((_, i) => i !== index) : prev,
+                        )
+                    : undefined
+                }
               />
             );
           })}
@@ -1003,13 +1024,38 @@ export default function VideoProjectPage({
               >
                 {busy ? STR.submitting : STR.videoBackToScript}
               </button>
+              {/* Beside the two navigation buttons because it is answered while
+                  looking at the storyboard, but it spends nothing on its own —
+                  it travels with the animate confirm below and is stored there,
+                  so every later stitch of this project follows the same answer. */}
+              <label className="video-captions-toggle">
+                <input
+                  type="checkbox"
+                  checked={captionsOn}
+                  disabled={busy}
+                  onChange={(event) => setCaptionsOn(event.target.checked)}
+                />
+                <span>{STR.videoCaptionsToggle}</span>
+              </label>
             </div>
             <p className="hint" style={{ marginBottom: 12 }}>
               {STR.videoBackToScriptHint}
             </p>
+            <p className="hint" style={{ marginBottom: 12 }}>
+              {STR.videoCaptionsHint}
+            </p>
             {storyboardDirty ? (
               <p className="hint" style={{ marginBottom: 12 }}>
                 {STR.videoSaveStoryboardScriptHint}
+              </p>
+            ) : null}
+            {/* Same rule as gate 1: on a ready-script project the words are the
+                officer's final script, so a scene may only be dropped once its
+                निवेदन has been moved into a neighbour — the save route's
+                word-identity guard refuses the other case, in Marathi. */}
+            {detail.inputMode === 'script' && canRemoveScene ? (
+              <p className="hint" style={{ marginBottom: 12 }}>
+                {STR.videoRemoveSceneScriptHint}
               </p>
             ) : null}
             {/* A scene added (or re-briefed) at this gate has no frames yet, and
@@ -1045,7 +1091,11 @@ export default function VideoProjectPage({
                     onClick={() =>
                       void act(async () => {
                         setAnimateArmed(false);
-                        await startVideoAnimation(id, extraSelected);
+                        await startVideoAnimation(
+                          id,
+                          extraSelected,
+                          captionsOn,
+                        );
                       })
                     }
                   >
