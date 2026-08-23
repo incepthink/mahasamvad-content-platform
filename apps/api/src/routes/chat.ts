@@ -2,22 +2,29 @@
 // @dgipr/content-engine for the answer, stream it out. No prompt is assembled here and none is
 // assembled there — see chat/misc-chat.ts for why that is deliberate.
 //
-// Six routes: create/list/detail/delete a thread, send a turn (the only streaming route in
-// this API), and upload an image.
+// Seven routes: create/list/detail/delete a thread, send a turn (the only streaming route in
+// this API), and upload an image or a native PDF.
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
+  DLO_UPLOADS_BUCKET,
   POSTERS_BUCKET,
+  attachChatFile,
   deleteChatThread,
+  downloadFile,
+  getChatFile,
   getChatThread,
+  insertChatFile,
   insertChatMessage,
   insertChatThread,
   listChatMessages,
   listChatThreads,
   publicUrl,
   updateChatThread,
+  updateChatFileGeminiHandle,
   uploadFile,
   type ChatAttachmentEntry,
+  type ChatFileRow,
   type ChatMessageRow,
   type ChatThreadRow,
   type SupabaseClient,
@@ -43,6 +50,7 @@ import {
   runInCostScope,
   streamMiscChatReply,
   totalCostUsd,
+  uploadGeminiChatDocument,
   type MiscChatTurn,
 } from '@dgipr/content-engine';
 
@@ -54,6 +62,12 @@ function imagePathFor(name: string): string {
   const safe = name.replace(/[^a-zA-Z0-9._-]/g, '_') || 'image';
   const token = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   return `chat/${token}-${safe}`;
+}
+
+function documentPathFor(name: string): string {
+  const safe = name.replace(/[^a-zA-Z0-9._-]/g, '_') || 'document.pdf';
+  const token = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  return `chat-documents/${token}-${safe}`;
 }
 
 function toSummary(row: ChatThreadRow): ChatThreadSummary {
@@ -96,10 +110,12 @@ function toMessage(row: ChatMessageRow): ChatMessage {
 // Store only what each kind actually needs, and never trust the client for the rest. An
 // `imageUrl` is accepted ONLY if it points at our own public bucket: the field is otherwise a
 // standing invitation to make the model fetch an arbitrary URL on the caller's behalf.
-function toStoredAttachment(
+async function toStoredAttachment(
+  client: SupabaseClient,
+  threadId: string,
   attachment: ChatAttachment,
   imageUrlPrefix: string,
-): ChatAttachmentEntry | null {
+): Promise<ChatAttachmentEntry | null> {
   if (attachment.kind === 'image') {
     if (!attachment.imageUrl?.startsWith(imageUrlPrefix)) return null;
     return {
@@ -108,6 +124,19 @@ function toStoredAttachment(
       imageUrl: attachment.imageUrl,
     };
   }
+
+  if (attachment.kind === 'document' && attachment.documentId) {
+    const file = await attachChatFile(client, attachment.documentId, threadId);
+    if (!file) return null;
+    return {
+      kind: 'document',
+      name: file.displayName,
+      documentId: file.id,
+    };
+  }
+
+  // Old clients and non-PDF documents still use extracted text. Native PDFs deliberately
+  // carry no text: Gemini reads the stored Files API object directly.
   const text = attachment.text ?? '';
   if (text.trim() === '') return null;
   return {
@@ -121,10 +150,70 @@ function toStoredAttachment(
   };
 }
 
+const GEMINI_FILE_REFRESH_PAD_MS = 5 * 60_000;
+
+async function ensureGeminiFile(
+  client: SupabaseClient,
+  file: ChatFileRow,
+): Promise<ChatFileRow> {
+  const expiresAt = Date.parse(file.geminiExpiresAt);
+  if (
+    Number.isFinite(expiresAt) &&
+    expiresAt > Date.now() + GEMINI_FILE_REFRESH_PAD_MS
+  ) {
+    return file;
+  }
+
+  const data = await downloadFile(client, DLO_UPLOADS_BUCKET, file.storagePath);
+  const handle = await uploadGeminiChatDocument(file.displayName, data);
+  return updateChatFileGeminiHandle(client, file.id, {
+    geminiFileName: handle.name,
+    geminiFileUri: handle.uri,
+    geminiExpiresAt: handle.expiresAt,
+  });
+}
+
+async function documentUrisFor(
+  client: SupabaseClient,
+  threadId: string,
+  rows: readonly ChatMessageRow[],
+): Promise<ReadonlyMap<string, string>> {
+  const documentIds = new Set(
+    rows.flatMap((row) =>
+      row.attachments.flatMap((attachment) =>
+        attachment.documentId ? [attachment.documentId] : [],
+      ),
+    ),
+  );
+  const documentRows = await Promise.all(
+    [...documentIds].map(async (id) => {
+      const file = await getChatFile(client, id);
+      if (!file || file.threadId !== threadId) return null;
+      return ensureGeminiFile(client, file);
+    }),
+  );
+  return new Map(
+    documentRows
+      .filter((file): file is ChatFileRow => file !== null)
+      .map((file) => [file.id, file.geminiFileUri] as const),
+  );
+}
+
+function isMissingPreviousInteraction(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const status = 'status' in error ? error.status : undefined;
+  if (status === 404) return true;
+  const message = error instanceof Error ? error.message : '';
+  return status === 400 && /previous[_ ]interaction/i.test(message);
+}
+
 // A stored row as the model should see it. Note `content` and the attachments stay separate —
 // misc-chat.ts folds them together, because how a turn is presented to the model is its
 // business, not the route's.
-function toTurn(row: ChatMessageRow): MiscChatTurn {
+function toTurn(
+  row: ChatMessageRow,
+  documentUris: ReadonlyMap<string, string>,
+): MiscChatTurn {
   return {
     role: row.role,
     content: row.content,
@@ -133,6 +222,10 @@ function toTurn(row: ChatMessageRow): MiscChatTurn {
       name: attachment.name,
       imageUrl: attachment.imageUrl,
       text: attachment.text,
+      documentUri:
+        attachment.documentId !== undefined
+          ? documentUris.get(attachment.documentId)
+          : undefined,
     })),
   };
 }
@@ -224,9 +317,9 @@ export function registerChatRoutes(
           .code(404)
           .send({ error: { message: 'ही चॅट सापडली नाही.' } });
       }
-      // The messages go with it (0044's cascade). The uploaded images are deliberately left
-      // in storage: they are small, unreferenced once the rows are gone, and deleting objects
-      // on a user action is how a shared bucket loses something it should not have.
+      // The messages and chat_files rows go with it (0044/0046 cascades). Uploaded source
+      // objects are deliberately left in storage: deleting objects on a user action is how a
+      // shared bucket loses something it should not have.
       await deleteChatThread(client, thread.id);
       return reply.code(204).send();
     },
@@ -280,6 +373,66 @@ export function registerChatRoutes(
     return { name, imageUrl: publicUrl(client, path) };
   });
 
+  // A PDF starts preparing as soon as it is selected, before the officer presses Send. Keep
+  // one durable private copy because Gemini Files expire after 48 hours; a later chat turn can
+  // transparently recreate the provider handle without asking the officer to upload again.
+  app.post('/chat/attachments/document', async (request, reply) => {
+    const file = await request.file({
+      limits: { fileSize: UPLOAD_FILE_MAX_BYTES, files: 1 },
+    });
+    if (!file) {
+      return reply
+        .code(400)
+        .send({ error: { message: 'फाईल मिळाली नाही.' } });
+    }
+    const name = file.filename ?? '';
+    if (!name.toLowerCase().endsWith('.pdf')) {
+      return reply.code(400).send({
+        error: { message: 'या जलद दस्तऐवज मार्गावर फक्त PDF स्वीकारली जाते.' },
+      });
+    }
+
+    let data: Buffer;
+    try {
+      data = await file.toBuffer();
+    } catch (error) {
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        error.code === 'FST_REQ_FILE_TOO_LARGE'
+      ) {
+        return reply.code(413).send({
+          error: {
+            message: `PDF खूप मोठी आहे (कमाल ${UPLOAD_FILE_MAX_MB.toLocaleString('mr-IN')} MB).`,
+          },
+        });
+      }
+      throw error;
+    }
+
+    const storagePath = documentPathFor(name);
+    const [handle] = await Promise.all([
+      uploadGeminiChatDocument(name, data),
+      uploadFile(
+        client,
+        DLO_UPLOADS_BUCKET,
+        storagePath,
+        data,
+        'application/pdf',
+      ),
+    ]);
+    const row = await insertChatFile(client, {
+      displayName: name,
+      mimeType: 'application/pdf',
+      storagePath,
+      geminiFileName: handle.name,
+      geminiFileUri: handle.uri,
+      geminiExpiresAt: handle.expiresAt,
+    });
+    return reply.code(201).send({ documentId: row.id, name: row.displayName });
+  });
+
   // The turn. The ONLY streaming route in this API.
   app.post<{ Params: { id: string } }>(
     '/chat/threads/:id/messages',
@@ -294,9 +447,14 @@ export function registerChatRoutes(
       const body = SendChatMessageRequestSchema.parse(request.body);
       const content = body.content.trim();
       const submitted = body.attachments ?? [];
-      const attachments = submitted
-        .map((attachment) => toStoredAttachment(attachment, imageUrlPrefix))
-        .filter((entry): entry is ChatAttachmentEntry => entry !== null);
+      const resolvedAttachments = await Promise.all(
+        submitted.map((attachment) =>
+          toStoredAttachment(client, thread.id, attachment, imageUrlPrefix),
+        ),
+      );
+      const attachments = resolvedAttachments.filter(
+        (entry): entry is ChatAttachmentEntry => entry !== null,
+      );
 
       if (content === '' && attachments.length === 0) {
         return reply
@@ -339,8 +497,26 @@ export function registerChatRoutes(
       });
 
       const history = await listChatMessages(client, thread.id);
+      const previousMessage = history.at(-2);
+      const previousInteractionId =
+        previousMessage?.role === 'assistant'
+          ? previousMessage.interactionId
+          : null;
+      const recentHistory = history.slice(-CHAT_HISTORY_TURNS);
+      // A stored Gemini interaction already owns the earlier context. Only the new user turn
+      // and its files need provider handles; the complete recent transcript is retained solely
+      // as the stateless fallback for conversations created before this feature shipped.
+      const inputRows = previousInteractionId
+        ? recentHistory.slice(-1)
+        : recentHistory;
+      const documentUris = await documentUrisFor(
+        client,
+        thread.id,
+        inputRows,
+      );
       // Newest CHAT_HISTORY_TURNS, oldest first. A chat is unbounded; a request is not.
-      const turns = history.slice(-CHAT_HISTORY_TURNS).map(toTurn);
+      const turns = recentHistory
+        .map((row) => toTurn(row, documentUris));
 
       openEventStream(request, reply);
 
@@ -348,15 +524,44 @@ export function registerChatRoutes(
       let answer = '';
       let failure: string | null = null;
       let model: string | null = null;
+      let interactionId: string | null = null;
 
       try {
-        const result = await runInCostScope(accumulator, () =>
-          streamMiscChatReply(turns, (delta) => {
-            answer += delta;
-            sendEvent(reply, { type: 'delta', text: delta });
-          }),
-        );
+        const onDelta = (delta: string): void => {
+          answer += delta;
+          sendEvent(reply, { type: 'delta', text: delta });
+        };
+        const result = await runInCostScope(accumulator, async () => {
+          try {
+            return await streamMiscChatReply(
+              turns,
+              onDelta,
+              previousInteractionId ?? undefined,
+            );
+          } catch (error) {
+            if (
+              previousInteractionId === null ||
+              answer !== '' ||
+              !isMissingPreviousInteraction(error)
+            ) {
+              throw error;
+            }
+            // Stored interactions are retained for a finite period (and less time on free
+            // tier). Rebuild the recent request once, refreshing any expired Gemini Files,
+            // instead of making an old chat permanently unusable.
+            const fallbackUris = await documentUrisFor(
+              client,
+              thread.id,
+              recentHistory,
+            );
+            const fallbackTurns = recentHistory.map((row) =>
+              toTurn(row, fallbackUris),
+            );
+            return streamMiscChatReply(fallbackTurns, onDelta);
+          }
+        });
         model = result.model;
+        interactionId = result.interactionId;
       } catch (error) {
         failure = error instanceof Error ? error.message : String(error);
         request.log.error({ err: error }, 'chat reply failed');
@@ -373,6 +578,7 @@ export function registerChatRoutes(
           role: 'assistant',
           content: answer,
           ...(model !== null ? { model } : {}),
+          ...(interactionId !== null ? { interactionId } : {}),
           ...(costUsd > 0 ? { costUsd } : {}),
           ...(failure !== null ? { error: failure } : {}),
         });

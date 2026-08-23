@@ -1,9 +1,8 @@
 'use client';
 
-// The composer: the text box, the attachment tray, and the one rule that governs both —
-// ATTACH → SEND → PREPARE. Picking a file costs nothing; the reading, uploading and
-// transcribing all happen when पाठवा is pressed, and the box holds the officer's question
-// until that work is done and the turn has actually left.
+// The composer: the text box and attachment tray. Native PDFs begin preparing when picked so
+// that work overlaps typing; other files retain their send-time preparation. The box holds the
+// officer's question until every selected attachment is ready and the turn has actually left.
 //
 // EVERY attachment is a chip here, documents included: the document button opens the file
 // explorer directly, exactly like the image button, and the file is read whole. The page
@@ -88,10 +87,16 @@ export function ChatComposer({
   const documentInput = useRef<HTMLInputElement>(null);
   const audioInput = useRef<HTMLInputElement>(null);
 
-  // A file that has not been read yet still counts as something to send — reading it is what
-  // pressing पाठवा is for.
+  // A non-PDF file that has not been read yet still counts as something to send — reading it
+  // is what pressing पाठवा is for.
   const hasAttachments = attachments.some(
     (attachment) => attachment.state !== 'failed',
+  );
+  const nativePdfPreparing = attachments.some(
+    (attachment) =>
+      attachment.kind === 'document' &&
+      attachment.name.toLowerCase().endsWith('.pdf') &&
+      attachment.state === 'preparing',
   );
   const busy = sending || preparing;
   const canSend = !busy && (text.trim() !== '' || hasAttachments);
@@ -180,10 +185,9 @@ export function ChatComposer({
           onChange={setText}
           onKeyDown={onKeyDown}
           placeholder={STR.chatPlaceholder}
-          // Only while the attachments are being prepared: that text is already committed to
-          // the turn in flight. A streaming ANSWER leaves the box open, so the next question
-          // can be written while this one is being answered.
-          disabled={preparing}
+          // Selection-time PDF preparation deliberately overlaps typing. Send-time preparation
+          // locks the committed question; a streaming answer leaves the box open for the next.
+          disabled={preparing && !nativePdfPreparing}
           rows={1}
           maxLength={CHAT_MESSAGE_MAX_CHARS}
           aria-label={STR.chatPlaceholder}

@@ -1,57 +1,95 @@
 // The general assistant behind /chat.
 //
-// *** THERE IS NO SYSTEM PROMPT, AND THAT IS THE DESIGN. ***
+// This lane is deliberately prompt-free. It sends the officer's conversation and native
+// attachments to Gemini exactly as chat input; publication rules belong to the dedicated
+// article/proofread surfaces, not here.
 //
-// Every other model call in this repo opens with a page of DGIPR rules, because every other
-// call has one job and must do it the department's way. This one does not have a job. It is
-// the surface an officer reaches for when the question is not an article, a poster, a
-// translation or a proofread — and any house prompt we add here can only narrow what it is
-// able to help with. A Marathi-first instruction would make it answer an English question in
-// Marathi; a "you are a government communication assistant" persona would make it decline or
-// hedge on the ordinary work people actually bring to a chat box.
-//
-// So the request carries the conversation and nothing else. If this file ever grows a
-// SYSTEM_PROMPT constant, that is a product decision to take with the department, not a
-// tidy-up. The consequences are real and were accepted: this page does NOT inherit the
-// glossary's name spellings, the never-invent rules or the Marathi-first contract. Anything an
-// officer intends to publish should go through /dlo or /proofread, which do.
-//
-// What this module DOES own is the shape of the request: which turns are replayed, how an
-// attachment's text is folded into the turn that carried it, and the concurrency lane.
+// PDFs are NATIVE model input. They are uploaded once through Gemini Files and referenced by
+// URI here. Never route them through intake/gemini-doc.ts: that module's contract is exhaustive
+// page-by-page transcription, while this surface's contract is an immediate answer to the
+// officer's actual question.
 
 import {
-  chatCompleteStream,
-  type AnyChatMessage,
-  type ChatContentPart,
-} from '../generation/openai-chat.js';
+  FileState,
+  GoogleGenAI,
+  type File as GeminiFile,
+  type Interactions,
+} from '@google/genai';
+import { recordGeminiChatUsage } from '../cost/cost-meter.js';
 
-// The tier. terra is the authoring/judgement tier and the right default for open-ended work;
-// it is also what VISION_MODEL uses, which matters because a chat turn can carry photographs
-// and the model has to be able to read them. Env-overridable so a deployment can trade
-// quality for latency without touching any other caller (the VIDEO_CHAT_MODEL precedent).
 export const MISC_CHAT_MODEL =
-  process.env.OPENAI_MISC_CHAT_MODEL ?? 'gpt-5.6-terra';
+  process.env.GEMINI_CHAT_MODEL ?? 'gemini-3.7-flash';
 
-// Room for the ANSWER (chatCompleteStream adds the reasoning headroom on top). Generous
-// because "write me a two-page covering letter" is an ordinary request here, where the
-// pipeline's callers all produce something bounded.
-const MISC_CHAT_MAX_TOKENS = 8_192;
-
-// A conversational surface should feel responsive, and a chat answer is read as it arrives —
-// so deliberation is dialled DOWN from the repo-wide 'medium' default. The pipeline's callers
-// buy quality with latency because nobody is watching them; this one is being watched.
-// Env-overridable for a deployment that would rather wait.
-function miscChatReasoningEffort(): 'none' | 'low' | 'medium' | 'high' {
-  const raw =
-    process.env.OPENAI_MISC_CHAT_REASONING_EFFORT?.trim().toLowerCase();
-  return raw === 'none' || raw === 'low' || raw === 'medium' || raw === 'high'
-    ? raw
-    : 'low';
+function thinkingLevel(): 'low' | 'medium' | 'high' {
+  const raw = process.env.GEMINI_CHAT_THINKING_LEVEL?.trim().toLowerCase();
+  return raw === 'medium' || raw === 'high' ? raw : 'low';
 }
 
-// One stored turn, as the API hands it over. Structurally the persisted row minus the columns
-// the model has no use for — deliberately not importing @dgipr/database, which this package
-// does not depend on.
+let client: GoogleGenAI | null = null;
+function gemini(): GoogleGenAI {
+  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  if (!apiKey) {
+    throw new Error('Missing required environment variable GEMINI_API_KEY.');
+  }
+  client ??= new GoogleGenAI({ apiKey });
+  return client;
+}
+
+export type GeminiChatFileHandle = Readonly<{
+  name: string;
+  uri: string;
+  mimeType: 'application/pdf';
+  expiresAt: string;
+}>;
+
+const FILE_POLL_MS = 1_000;
+const FILE_POLL_MAX_TICKS = 600;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function requiredHandle(file: GeminiFile): GeminiChatFileHandle {
+  if (!file.name || !file.uri) {
+    throw new Error('Gemini accepted the PDF but returned no reusable file handle.');
+  }
+  return {
+    name: file.name,
+    uri: file.uri,
+    mimeType: 'application/pdf',
+    // The API normally supplies this. The conservative fallback refreshes before Google's
+    // documented 48-hour deletion even if an older response omitted it.
+    expiresAt:
+      file.expirationTime ?? new Date(Date.now() + 47 * 60 * 60_000).toISOString(),
+  };
+}
+
+// Upload and wait until Gemini can answer against the file. Called as soon as the officer
+// selects a PDF, so this work overlaps the time they spend typing their question.
+export async function uploadGeminiChatDocument(
+  displayName: string,
+  data: Buffer,
+): Promise<GeminiChatFileHandle> {
+  const blob = new Blob([new Uint8Array(data)], { type: 'application/pdf' });
+  let file = await gemini().files.upload({
+    file: blob,
+    config: { mimeType: 'application/pdf', displayName },
+  });
+
+  for (let tick = 0; tick < FILE_POLL_MAX_TICKS; tick += 1) {
+    if (file.state === FileState.ACTIVE || file.state === undefined) {
+      return requiredHandle(file);
+    }
+    if (file.state === FileState.FAILED) {
+      throw new Error(file.error?.message ?? 'Gemini could not prepare this PDF.');
+    }
+    if (!file.name) throw new Error('Gemini returned an unnamed PDF upload.');
+    await sleep(FILE_POLL_MS);
+    file = await gemini().files.get({ name: file.name });
+  }
+  throw new Error('Gemini did not finish preparing this PDF in time.');
+}
+
 export type MiscChatTurn = Readonly<{
   role: 'user' | 'assistant';
   content: string;
@@ -60,80 +98,89 @@ export type MiscChatTurn = Readonly<{
     name: string;
     imageUrl?: string | undefined;
     text?: string | undefined;
+    documentUri?: string | undefined;
   }>[];
 }>;
 
-// How an attached file's text is introduced. A delimiter, not a sentence: an instruction
-// ("the user has attached a file, please consider it") is a system prompt in disguise, and
-// the model does not need to be told what a labelled block of text is.
 function attachmentBlock(name: string, text: string): string {
   return `--- ${name} ---\n${text}`;
 }
 
-// Fold one stored turn into what the model receives.
-//
-// The typed text and the attachments' text are stored SEPARATELY (so the bubble can render
-// file chips instead of a wall of extracted text) and are joined only here. Text first: it is
-// what the officer actually asked, and burying the question under forty pages of a scanned GR
-// is how a model ends up answering the document instead of the question.
-function toRequestMessage(turn: MiscChatTurn): AnyChatMessage {
-  const attachments = turn.attachments ?? [];
-  const images = attachments.filter(
-    (attachment) => attachment.kind === 'image' && attachment.imageUrl,
-  );
-  const texts = attachments.filter(
-    (attachment) => attachment.kind !== 'image' && attachment.text,
-  );
-
-  const textBody = [
-    turn.content,
-    ...texts.map((attachment) =>
-      attachmentBlock(attachment.name, attachment.text ?? ''),
-    ),
-  ]
+function textOf(turn: MiscChatTurn, includeRole: boolean): string {
+  const extracted = (turn.attachments ?? [])
+    .filter((attachment) => attachment.text)
+    .map((attachment) => attachmentBlock(attachment.name, attachment.text ?? ''));
+  const body = [turn.content, ...extracted]
     .filter((part) => part.trim() !== '')
     .join('\n\n');
+  if (!includeRole) return body === '' ? ' ' : body;
+  const role = turn.role === 'user' ? 'User' : 'Assistant';
+  return `${role}:\n${body === '' ? ' ' : body}`;
+}
 
-  if (images.length === 0) {
-    return { role: turn.role, content: textBody };
+function interactionInput(
+  turns: readonly MiscChatTurn[],
+  continuing: boolean,
+): Interactions.Content[] {
+  const selected = continuing ? turns.slice(-1) : turns;
+  const input: Interactions.Content[] = [];
+  for (const turn of selected) {
+    input.push({ type: 'text', text: textOf(turn, !continuing) });
+    for (const attachment of turn.attachments ?? []) {
+      if (attachment.kind === 'image' && attachment.imageUrl) {
+        input.push({ type: 'image', uri: attachment.imageUrl });
+      } else if (attachment.kind === 'document' && attachment.documentUri) {
+        input.push({
+          type: 'document',
+          uri: attachment.documentUri,
+          mime_type: 'application/pdf',
+        });
+      }
+    }
   }
-
-  // A multimodal turn. The text part comes first for the same reason as above, and an image
-  // with no accompanying words still needs one — a content array of images alone gives the
-  // model nothing to answer.
-  const parts: ChatContentPart[] = [
-    { type: 'text', text: textBody === '' ? ' ' : textBody },
-    ...images.map((attachment): ChatContentPart => ({
-      type: 'image_url',
-      image_url: { url: attachment.imageUrl ?? '' },
-    })),
-  ];
-  return { role: turn.role, content: parts };
+  return input;
 }
 
 export type MiscChatReply = Readonly<{
   text: string;
   model: string;
+  interactionId: string;
 }>;
 
-// Stream one reply. `turns` is the whole conversation INCLUDING the new user turn, oldest
-// first; the caller has already trimmed it to the history window it wants to pay for.
-//
-// Throws whatever chatCompleteStream throws. The caller decides what to do with a partial
-// answer — see the turn route, which stores it rather than discarding paid tokens.
+// One native, stateful Gemini turn. The first call carries the recent transcript plus any
+// files; later calls carry only the new turn and continue from the provider interaction id.
 export async function streamMiscChatReply(
   turns: readonly MiscChatTurn[],
   onDelta: (chunk: string) => void,
+  previousInteractionId?: string | undefined,
 ): Promise<MiscChatReply> {
   const model = MISC_CHAT_MODEL;
-  const text = await chatCompleteStream(turns.map(toRequestMessage), {
-    onDelta,
+  const stream = await gemini().interactions.create({
     model,
-    maxTokens: MISC_CHAT_MAX_TOKENS,
-    reasoningEffort: miscChatReasoningEffort(),
-    // The whole point of the lane: this answer is being watched, so it must not queue behind
-    // an article generation — nor make one queue behind it.
-    lane: 'chat',
+    input: interactionInput(turns, previousInteractionId !== undefined),
+    stream: true,
+    store: true,
+    ...(previousInteractionId
+      ? { previous_interaction_id: previousInteractionId }
+      : {}),
+    generation_config: { thinking_level: thinkingLevel() },
   });
-  return { text, model };
+
+  let text = '';
+  let interactionId = '';
+  for await (const event of stream) {
+    if (event.event_type === 'interaction.created') {
+      interactionId = event.interaction.id ?? interactionId;
+    } else if (event.event_type === 'step.delta' && event.delta.type === 'text') {
+      text += event.delta.text;
+      onDelta(event.delta.text);
+    } else if (event.event_type === 'interaction.completed') {
+      interactionId = event.interaction.id ?? interactionId;
+      recordGeminiChatUsage(model, event.interaction.usage);
+    }
+  }
+  if (interactionId === '') {
+    throw new Error('Gemini finished without returning an interaction id.');
+  }
+  return { text, model, interactionId };
 }

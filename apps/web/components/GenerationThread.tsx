@@ -9,7 +9,7 @@
 import { Fragment } from 'react';
 import Link from 'next/link';
 import type { ThreadItem } from '@dgipr/schemas';
-import { CATEGORY_LABELS, formatDateShort, STR } from '../lib/strings';
+import { formatDateShort, runFormatLabel, STR } from '../lib/strings';
 import { StatusChip } from './StatusChip';
 
 function ThreadNode({
@@ -30,7 +30,7 @@ function ThreadNode({
       )}
       <div className="thread-node-info">
         <p className="thread-node-category">
-          {CATEGORY_LABELS[item.category]}
+          {runFormatLabel(item.category, item.outputType)}
           {isRoot ? (
             <span className="thread-badge">{STR.threadRootBadge}</span>
           ) : null}

@@ -18,6 +18,30 @@ import { PosterPanel } from '../../../components/PosterPanel';
 import { PosterSkeleton } from '../../../components/PosterSkeleton';
 import { SocialPostView } from '../../../components/SocialPostView';
 
+// The API persists the provider's complete failure so the server keeps the request id and
+// coarse moderation diagnostics. That blob is useful in logs, not to an officer. OpenAI says
+// `code` is the stable discriminator and `moderation_stage` is optional, so recognise the code
+// first and use the stage only to choose the most useful remediation. Every other failure keeps
+// its existing text until it has an equally reliable discriminator of its own.
+const CHILD_SUBJECT = /बालक|बाल हक्क|मुलगा|मुलगी|child|minor|girl|boy/i;
+const HARM_SUBJECT =
+  /शोषण|अत्याचार|लैंगिक|छळ|हिंसा|दुखापत|abuse|exploitation|sexual|violence|injur|assault/i;
+
+function generationErrorForOfficer(error: string | null, note: string): string {
+  if (!error) return STR.failedHint;
+  if (!error.includes('moderation_blocked')) return error;
+
+  if (/"moderation_stage"\s*:\s*"output"/.test(error)) {
+    return CHILD_SUBJECT.test(note) && HARM_SUBJECT.test(note)
+      ? STR.imageSafetyChildOutputError
+      : STR.imageSafetyOutputError;
+  }
+  if (/"moderation_stage"\s*:\s*"input"/.test(error)) {
+    return STR.imageSafetyInputError;
+  }
+  return STR.imageSafetyError;
+}
+
 export default function GenerationDetailPage({
   params,
 }: {
@@ -51,12 +75,14 @@ export default function GenerationDetailPage({
     addTask(id);
   }, [addTask, id]);
 
-  // Retry on THIS run: re-run the step that failed, or — when its inputs are no longer
-  // held (an API restart, or a row failed by an older build) — put the run back in working
-  // order so its poster, versions and edit controls are usable again. It deliberately does
-  // NOT start a new generation: that used to be this button's only behaviour, and it left
-  // every earlier revision of the failed run stranded behind a page that showed nothing.
-  // Starting afresh from the same note lives in पुढील पाऊल below, where it always has.
+  // Retry on THIS run, and one handler serves both failure cards. Three outcomes, decided
+  // by the API from the row rather than by the button: re-run the step that failed; or —
+  // when its inputs are no longer held (an API restart, or a row failed by an older build)
+  // — put the run back in working order so its poster, versions and edit controls are usable
+  // again; or, on a run that produced nothing at all, run it again from the row's own stored
+  // inputs. It deliberately never starts a NEW generation: that used to be this button's only
+  // behaviour, and it left every earlier revision of the failed run stranded behind a page
+  // that showed nothing. Starting afresh from an EDITED note lives in पुढील पाऊल below.
   const retry = async () => {
     if (!detail || retrying) return;
     setRetrying(true);
@@ -188,8 +214,28 @@ export default function GenerationDetailPage({
       {detail.status === 'failed' && !hasOutput && (
         <section className="card">
           <h2>{STR.failedTitle}</h2>
-          <p className="hint">{detail.error ?? STR.failedHint}</p>
-          <p className="hint">{STR.editFailedNewRunHint}</p>
+          <p className="hint">
+            {generationErrorForOfficer(detail.error, detail.note)}
+          </p>
+          {/* One button for EVERY failure of an initial run — a moderation refusal, a
+              provider outage, a timeout. None of them are told apart here and all of them
+              deserve the same answer, so the officer is never left reading an error with
+              nothing to press. It re-runs THIS row from its own stored inputs, so history
+              keeps one entry per note; changing the note is the fold below. */}
+          <div className="btn-row" style={{ marginTop: 16, gap: 10 }}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={retry}
+              disabled={retrying}
+            >
+              {retrying ? STR.submitting : STR.retry}
+            </button>
+          </div>
+          {retryError ? <p className="form-error">{retryError}</p> : null}
+          <p className="hint" style={{ marginTop: 12 }}>
+            {STR.failedRetryHint} {STR.failedNewRunHint}
+          </p>
         </section>
       )}
 
@@ -198,7 +244,12 @@ export default function GenerationDetailPage({
           <h2>{STR.editFailedTitle}</h2>
           <p className="hint">{STR.editFailedHint}</p>
           {(detail.editFailure ?? detail.error) ? (
-            <p className="form-error">{detail.editFailure ?? detail.error}</p>
+            <p className="form-error">
+              {generationErrorForOfficer(
+                detail.editFailure ?? detail.error,
+                detail.note,
+              )}
+            </p>
           ) : null}
           <div className="btn-row" style={{ marginTop: 16, gap: 10 }}>
             <button

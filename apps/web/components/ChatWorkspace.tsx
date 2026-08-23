@@ -40,9 +40,8 @@ export function ChatWorkspace({ threadId }: { threadId: string | null }) {
 
   const send = useCallback(
     async (content: string): Promise<boolean> => {
-      // Uploading, reading and transcribing happen HERE, not when the file was picked: an
-      // attachment the officer thought better of, or a chat abandoned before sending, costs
-      // nothing at all.
+      // Send-time work happens here. Native PDFs are already active in Gemini Files because
+      // their selection-time preparation overlaps the officer typing this question.
       const payload = await attachments.prepare();
       if (payload.length === 0 && content.trim() === '') {
         // Every attachment failed and there is no question to carry. The chips report why and

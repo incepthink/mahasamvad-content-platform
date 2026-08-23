@@ -124,7 +124,7 @@ export function ChatConversation({
           {streaming !== null ? (
             <article className="chat-turn chat-turn--assistant">
               {streaming === '' ? (
-                // Before the first token. gpt-5 thinks before it writes, so this window is
+                // Before the first token. Gemini may think before it writes, so this window is
                 // real and an empty pane would read as a failure.
                 <p className="chat-thinking">
                   <span className="chat-dots" aria-hidden="true">

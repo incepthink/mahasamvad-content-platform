@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import type { GenerationSummary } from '@dgipr/schemas';
-import { CATEGORY_LABELS, formatDate, STR } from '../lib/strings';
+import { formatDate, runFormatLabel, STR } from '../lib/strings';
 import { StatusChip } from './StatusChip';
 
 export function HistoryCard({ item }: { item: GenerationSummary }) {
@@ -17,7 +17,7 @@ export function HistoryCard({ item }: { item: GenerationSummary }) {
         // No poster: a brand-gradient banner keeps every card the same shape.
         <div className="history-media history-banner" aria-hidden>
           <span className="history-banner-label">
-            {CATEGORY_LABELS[item.category]}
+            {runFormatLabel(item.category, item.outputType)}
           </span>
         </div>
       )}

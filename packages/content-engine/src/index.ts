@@ -315,8 +315,10 @@ export {
 export {
   MISC_CHAT_MODEL,
   streamMiscChatReply,
+  uploadGeminiChatDocument,
   type MiscChatTurn,
   type MiscChatReply,
+  type GeminiChatFileHandle,
 } from './chat/misc-chat.js';
 
 // Cost metering — the runner opens a scope per job and reads the accumulator back.
@@ -326,6 +328,7 @@ export {
   runInCostTask,
   recordImageCost,
   recordGeminiImageCost,
+  recordGeminiChatUsage,
   recordVideoCost,
   recordTtsCost,
   recordSttCost,
@@ -345,6 +348,7 @@ export {
   estimateSttCostUsd,
   estimateOcrCostUsd,
   estimateTranslateCostUsd,
+  priceGeminiText,
   // The configured per-unit rates behind every estimated figure on /analytics. Exported so
   // the API can print them on the page rather than asking the reader to trust them.
   ELEVENLABS_STT_PRICE_PER_HOUR_USD,

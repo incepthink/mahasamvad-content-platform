@@ -56,6 +56,33 @@ export function priceText(
   );
 }
 
+// Gemini 3.7 Flash standard-tier introductory rates through 2026-12-31. Kept separate from
+// OpenAI's table because Google reports a different usage shape and prices cached context at
+// one tenth of ordinary input. Env overrides make the announced 2027 rate change deployable
+// without a source edit.
+function configuredRate(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+export function priceGeminiText(
+  inputTokens: number,
+  cachedTokens: number,
+  outputTokens: number,
+): number {
+  const inputRate = configuredRate('GEMINI_CHAT_INPUT_PER_1M_USD', 0.75);
+  const cachedRate = configuredRate('GEMINI_CHAT_CACHED_INPUT_PER_1M_USD', 0.075);
+  const outputRate = configuredRate('GEMINI_CHAT_OUTPUT_PER_1M_USD', 3.75);
+  const cached = Math.min(Math.max(cachedTokens, 0), inputTokens);
+  const uncached = Math.max(inputTokens - cached, 0);
+  return (
+    (uncached * inputRate + cached * cachedRate + Math.max(outputTokens, 0) * outputRate) /
+    1_000_000
+  );
+}
+
 // Image cost is a FIXED per-render tier price, not measured: the default poster
 // render happens inside n8n (no usage returned) and gpt-image pricing is effectively
 // a flat price per (size, quality) tier anyway. `kind` maps to the render sizes in use —

@@ -1651,23 +1651,19 @@ textarea.note-input {
   opacity: 0.65;
 }
 
+/* Holds the character count alone (the autosave hint was dropped — the box is
+   visibly live and the count is the only thing worth reading here). */
 .caption-meta {
   display: flex;
   gap: 12px;
   align-items: baseline;
-  justify-content: space-between;
+  justify-content: flex-end;
   flex-wrap: wrap;
   margin-top: 8px;
 }
 
-.caption-meta .hint {
-  margin: 0;
-  flex: 1;
-  min-width: 200px;
-}
-
-/* Plain character count of the caption. X's 280-character limit is enforced (and
-   explained) at publish time, not here. */
+/* Plain character count of the caption — informational only. No platform length
+   limit is enforced anywhere on a caption. */
 .caption-counter {
   font-size: 0.85rem;
   font-variant-numeric: tabular-nums;
@@ -2194,6 +2190,12 @@ details.fold[aria-disabled='true'] summary {
   grid-template-columns: minmax(0, 420px) minmax(0, 1fr);
   gap: 28px;
   align-items: start;
+}
+
+/* A कॅप्शन-only run renders nothing in the poster column, so the caption and its
+   "AI ला सूचना द्या" fold would otherwise be laid out inside the narrow 420px track. */
+.poster-layout.is-caption-only {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .poster-image {

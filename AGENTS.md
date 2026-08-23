@@ -19,6 +19,41 @@ The long-term product will:
 Scaffolding is done. The core generation pipeline and a first web product on top of
 it are implemented and working end-to-end:
 
+- **Native, stateful Gemini PDF chat replaces OCR-first chat intake** (2026-08-23,
+  migration 0046): `/chat` no longer waits for `intake/gemini-doc.ts` to transcribe a PDF
+  into page Markdown before it can answer. Selecting a PDF immediately calls
+  `POST /chat/attachments/document`; the API uploads the original concurrently to Gemini
+  Files and the existing private `dlo-uploads` source bucket, waits for the Gemini file to be
+  active, and returns only a `chat_files.id` to the browser. Send therefore carries a trusted
+  UUID, never a provider URI or client-supplied storage path. DOCX/TXT retain the former shared
+  document-intake route, and every publishing surface keeps its page picker/OCR contract.
+  - The answer is a native PDF request through `@google/genai`'s Interactions API using stable
+    `gemini-3.7-flash`, streaming text deltas with `thinking_level: low` by default. There is no
+    transcription prompt and no chat system prompt. `GEMINI_CHAT_MODEL` and
+    `GEMINI_CHAT_THINKING_LEVEL` are rollback/tuning seams.
+  - Successful assistant rows store `gemini_interaction_id`. A normal follow-up sends only the
+    new user turn with `previous_interaction_id`, so the server does not retransmit the 200-page
+    document or replay the conversation. Old conversations, and a turn after any failed
+    assistant response, fall back to the recent 40-message transcript. An interaction id that
+    has aged out is retried once statelessly on the provider's 400/404, before any delta was
+    emitted, refreshing only then any native PDF handles the fallback needs.
+  - Gemini Files expire after 48 hours but chats do not. Before a native PDF is needed, the API
+    refreshes an expiring handle from the durable private source object and updates `chat_files`;
+    `thread_id` is claimed atomically on first send so a document UUID cannot be attached to a
+    different chat. Deleting a thread cascades its rows; source objects follow the repository's
+    existing conservative no-delete storage stance.
+  - Gemini input/cached/output+thinking usage is recorded in the ambient cost meter. The
+    introductory 3.7 Flash rates are configurable through `GEMINI_CHAT_*_PER_1M_USD` because
+    Google's announced rates can change without a code deploy.
+  Deploy 0046, rebuild `@dgipr/database` → `@dgipr/schemas` → `@dgipr/content-engine`, then ship
+  API + web together. `GEMINI_API_KEY` is required; no n8n change. Verified free/offline:
+  workspace typecheck **7/7 green**, targeted ESLint clean on every touched TS file, and the
+  complete production build green. The repository-wide lint still stops on the pre-existing
+  irregular whitespace in `packages/content-engine/src/intake/text-file.ts:15`; unrelated
+  warnings remain in analytics/poster files. Left for a real paid run after migration 0046:
+  attach the 200-page PDF, ask one question, and confirm immediate streaming plus a stateful
+  follow-up without a second file upload.
+
 - **A scene can carry the officer's own reference picture** (2026-08-17, no migration): the
   only way to tell `/video` what a place, person or object actually looks like was to describe
   it in words, and a Marathi government explainer often turns on a specific building, office or
@@ -3052,6 +3087,50 @@ Canva OAuth authentication and poster handoff are implemented in `apps/api/src/r
 
 ## Latest Implementation Milestone
 
+- **A caption-only run reads as a कॅप्शन, and no caption has a length limit**
+  (2026-08-23, no migration, no n8n): the फक्त कॅप्शन lane shipped on 2026-08-22 reusing the
+  social poster surface, so it inherited four things that are only true of a POSTER run.
+  - **It was filed under a platform the officer never chose.** A caption-only run submits
+    `facebook` (that branch of `generateSocialCaption` writes the long-form caption), so
+    मागील काम banner-labelled it **फेसबुक** and the thread rail did the same. The label is now
+    `runFormatLabel(category, outputType)` in `apps/web/lib/strings.ts` — a social run that
+    renders no poster (`outputType === 'article'`, which means exactly that on both lanes)
+    reads **कॅप्शन**. One helper, both surfaces, so they cannot disagree; `CATEGORY_LABELS`
+    keeps its meaning as "which category was this filed under" and is no longer read directly
+    by either card.
+  - **The caption was laid out in the poster column.** `.poster-layout` is a
+    `420px | 1fr` grid and the poster branch renders `null` on a caption-only run — so the
+    caption `<div>` became the FIRST grid item and was typeset in the narrow track, which is
+    why the textarea and the AI ला सूचना द्या fold looked half-width. Fixed with
+    `.poster-layout.is-caption-only { grid-template-columns: minmax(0, 1fr); }` rather than by
+    reordering the JSX, since the poster branch has to stay first for a poster run.
+  - **The cross-format ट्विटर link is gone from this card.** It offered "make this for the
+    other platform", which on a caption is a paid re-write of the text already on screen —
+    the two platforms' captions are written the same way. The पुढील पाऊल fold below is still
+    the route to another format, so nothing is stranded; `CrossFormatLinks` is untouched and
+    still used by `ArticleView` and `PosterPanel`.
+  - **`captionAutosaveHint` is deleted.** `.caption-meta` therefore holds only the character
+    count and its `justify-content` moves `space-between` → `flex-end`; without that the
+    counter would have jumped to the left edge.
+  - **The 280-character publish guard is deleted** (`POST /generations/:id/publish`), along
+    with the `TWEET_MAX_LENGTH` / `tweetWeightedLength` imports in `routes/generations.ts` and
+    the "२८० अक्षरांपेक्षा लहान करा" example in `changeCaptionPlaceholder`. It refused, with a
+    422, a caption an officer had already reviewed and approved — for a rule the caption
+    writer no longer states (the prompt's twitter length clause went when the caption moved
+    out of n8n) and that only ever applied to one of the two platforms. **X's own API is the
+    authority now**: if it rejects an over-long tweet, that error surfaces as the route's 502
+    rather than as a pre-emptive refusal. `packages/schemas/src/tweet.ts` is deliberately
+    KEPT — unread by the API, it is the one place a weighted length is computed correctly if
+    an X-specific counter is ever wanted back.
+  Verified 2026-08-23, all free: workspace typecheck **7/7 green**; eslint clean on all five
+  touched source files; prettier clean on every hunk of mine (`HistoryCard.tsx`,
+  `GenerationThread.tsx` and `routes/generations.ts` report whole-file complaints that are
+  **pre-existing** — confirmed by running prettier over their HEAD blobs, which fail
+  identically, and by checking that none of prettier's diff lines touch my hunks — so do NOT
+  `--write` them). **Left for a real run**: opening a फक्त कॅप्शन run to confirm the full-width
+  caption box and fold, and that its history card reads कॅप्शन. Deploy is API + web; no
+  migration, no n8n, no new env.
+
 - **/chat reads a PDF whole on Gemini, and MarkdownText finally renders a table**
   (2026-08-22, no migration, no n8n): two separate reports, one screenshot. A chat answer
   holding a storyboard TABLE printed as a screenful of literal `|` characters, and document
@@ -3257,7 +3336,8 @@ Canva OAuth authentication and poster handoff are implemented in `apps/api/src/r
     to clear them. Everything rendered from this deploy onward is clean.
   Verified 2026-08-21, all free: workspace typecheck **7/7 green**, eslint clean on all seven
   touched files, prettier clean on every hunk of mine (four files report whole-file complaints
-  that are pre-existing CRLF — confirmed per file against prettier's own output with ``
+  that are pre-existing CRLF — confirmed per file against prettier's own output with `
+`
   stripped, zero content diff, so do NOT `--write` them); `video:preview:assemble` green with
   two new assertions (the pre-upload gate passes a good clip and rejects a truncated one), and a
   frame extracted from its output confirming the stitch still stamps the generated scenes; a

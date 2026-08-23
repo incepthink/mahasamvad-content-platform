@@ -592,8 +592,11 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
 - Direct social publishing (post a completed twitter/facebook run's poster +
   caption to the OFFICIAL accounts): synchronous `POST /api/generations/:id/publish`
   in `apps/api/src/routes/generations.ts` (platform = the row's category; guards:
-  in-flight set, running job, 280-char weighted tweet limit — reject, never
-  truncate; missing env creds → Marathi 503); platform calls →
+  in-flight set, running job, missing env creds → Marathi 503). **There is no caption
+  LENGTH guard any more** (2026-08-23): the 422 that refused a tweet over
+  `TWEET_MAX_LENGTH` is deleted, because the two platforms' captions are written the same
+  way and it was rejecting a caption the officer had already approved. X's own API is the
+  authority now, and its rejection surfaces as the route's 502. Platform calls →
   `packages/social-publisher/src/{twitter,facebook}.ts` (X = `twitter-api-v2`
   OAuth 1.0a + v2 media upload with poster bytes; FB = Graph API `/{page}/photos`
   with the public poster URL). Latest live-post URL persisted as
@@ -605,8 +608,8 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   and separable from the poster.** The engine is
   `packages/content-engine/src/generation/generate-caption.ts` (`generateSocialCaption`;
   the retired n8n `Build Caption Request` node's house style ported verbatim — 📍 place
-  line, inline hashtags only, `@MahaDGIPR` last, note as sole fact source — with X's 280
-  stated as a rule only for `twitter`). Three ways in, all on `SocialPostView`:
+  line, inline hashtags only, `@MahaDGIPR` last, note as sole fact source; the prompt no
+  longer states any length rule for `twitter`). Three ways in, all on `SocialPostView`:
   at creation (`generateCaption` on `POST /generations`, default **false**, toggle under
   the format cards); on demand for a poster-only run
   (`POST /api/generations/:id/caption/generate` → `startGenerateCaptionJob`, guarded on
@@ -628,10 +631,10 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   already `completed`: flipping it to running would replace the finished post with a
   progress bar, and the registry also lets a caption edit run beside a poster re-render.
   Revisions are logged as `caption` / `manual_caption` (migration 0023). The web shows a
-  plain `N अक्षरे` count, not an X-weighted `N / 280` counter (tried, dropped as noise);
-  X's limit lives in the publish-time 422 alone. `TWEET_MAX_LENGTH` +
-  `tweetWeightedLength` still live in `@dgipr/schemas` (`packages/schemas/src/tweet.ts`)
-  for the API — `apps/web` must not import `@dgipr/social-publisher` (twitter-api-v2).
+  plain `N अक्षरे` count and nothing else — no length is enforced anywhere on a caption
+  since 2026-08-23. `TWEET_MAX_LENGTH` + `tweetWeightedLength` still live in
+  `@dgipr/schemas` (`packages/schemas/src/tweet.ts`), now unread by the API, and stay
+  there because `apps/web` must not import `@dgipr/social-publisher` (twitter-api-v2).
 - **Person → designation (पदनाम) — the first time the name dictionary reaches the ARTICLE.**
   A recording says `देवेंद्र फडणवीस`; the published article must say `मुख्यमंत्री देवेंद्र फडणवीस`.
   Data: `glossary_terms.designation` (0032, person rows only, holds the MARATHI title) +

@@ -30,8 +30,8 @@ export const CHAT_MESSAGE_MAX_CHARS = 60_000;
 // better served by /dlo, which is built for it.
 export const CHAT_ATTACHMENT_TEXT_MAX_CHARS = 200_000;
 
-// Per turn. Images are the expensive ones (each is billed as input tokens on every subsequent
-// turn of the conversation, not just the one it was attached to).
+// Per turn. Native Gemini interaction state means earlier attachments are not retransmitted on
+// normal follow-ups; this remains a UI and request-complexity bound.
 export const CHAT_MAX_ATTACHMENTS = 10;
 
 // How many past turns are replayed to the model. A chat is unbounded but a request is not, and
@@ -50,7 +50,9 @@ export const ChatAttachmentSchema = z.object({
   // 'image' only. Set by POST /chat/attachments/image — never accepted from the client as an
   // arbitrary URL, which would let a request point the model at anything on the internet.
   imageUrl: z.string().url().optional(),
-  // Every non-image kind: the text this file was reduced to before the turn was sent.
+  // Native PDF only. This is our chat_files row, never a client-supplied Gemini URI.
+  documentId: z.string().uuid().optional(),
+  // Audio, YouTube and legacy non-PDF documents: extracted/transcribed text.
   text: z.string().max(CHAT_ATTACHMENT_TEXT_MAX_CHARS).optional(),
   chars: z.number().int().nonnegative().optional(),
   // 'youtube' only — the canonical watch URL, so the bubble can link the source.
@@ -109,6 +111,14 @@ export const ChatImageUploadResponseSchema = z.object({
 });
 export type ChatImageUploadResponse = z.infer<
   typeof ChatImageUploadResponseSchema
+>;
+
+export const ChatDocumentUploadResponseSchema = z.object({
+  documentId: z.string().uuid(),
+  name: z.string(),
+});
+export type ChatDocumentUploadResponse = z.infer<
+  typeof ChatDocumentUploadResponseSchema
 >;
 
 // ---------------------------------------------------------------------------

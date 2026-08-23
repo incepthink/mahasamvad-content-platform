@@ -37,7 +37,6 @@ import {
 import { STR } from '../lib/strings';
 import { usePosterMarkers } from '../lib/usePosterMarkers';
 import { ClearActionToggle, clearActionLabel } from './ClearActionToggle';
-import { CrossFormatLinks } from './CrossFormatLinks';
 import { FacebookLogo } from './FacebookLogo';
 import { XLogo } from './XLogo';
 import {
@@ -346,7 +345,13 @@ export function SocialPostView({
           </p>
         </div>
       ) : null}
-      <div className="poster-layout">
+      {/* A कॅप्शन run has no poster, so the left column is empty — without this the
+          caption would be laid out in the narrow poster column. */}
+      <div
+        className={
+          detail.posterUrl ? 'poster-layout' : 'poster-layout is-caption-only'
+        }
+      >
         {detail.posterUrl ? (
           <div>
             <div className="poster-frame">
@@ -560,16 +565,9 @@ export function SocialPostView({
           </div>
         ) : null}
         <div>
-          {/* A कॅप्शन-only run has no poster and therefore no icon row above, so the
-              cross-format links get one of their own here. */}
-          {!detail.posterUrl ? (
-            <div className="poster-icon-actions" style={{ marginTop: 0 }}>
-              <CrossFormatLinks
-                generationId={detail.id}
-                category={detail.category}
-              />
-            </div>
-          ) : null}
+          {/* No cross-format link row on a कॅप्शन-only run: the two platforms' captions
+              are written the same way, so "make this for ट्विटर" would only re-buy the
+              text already on screen. */}
           {/* The caption is a live textarea from the first render — no "बदल करा" step.
               A poster-only run gets an empty one plus the generate icon. */}
           <div className="caption-editor">
@@ -628,7 +626,6 @@ export function SocialPostView({
               )}
             </div>
             <div className="caption-meta">
-              <span className="hint">{STR.captionAutosaveHint}</span>
               <span className="caption-counter">
                 {captionLength} {STR.captionCounterLabel}
               </span>

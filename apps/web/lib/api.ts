@@ -74,11 +74,13 @@ import {
   type TranscriptionSummary,
   YouTubeVideoSchema,
   type YouTubeVideo,
+  ChatDocumentUploadResponseSchema,
   ChatImageUploadResponseSchema,
   ChatStreamEventSchema,
   ChatThreadDetailSchema,
   ChatThreadListSchema,
   CreateChatThreadResponseSchema,
+  type ChatDocumentUploadResponse,
   type ChatImageUploadResponse,
   type ChatStreamEvent,
   type ChatThreadDetail,
@@ -1151,6 +1153,22 @@ export async function uploadChatImage(
     body: form,
   });
   return ChatImageUploadResponseSchema.parse(await readJsonResponse(response));
+}
+
+// A native PDF, uploaded while the officer is still typing. The returned id names our durable
+// copy and its short-lived Gemini Files handle; no provider URI is exposed to the browser.
+export async function uploadChatDocument(
+  file: File,
+): Promise<ChatDocumentUploadResponse> {
+  const form = new FormData();
+  form.append('file', file);
+  const response = await fetch(`${API_URL}/api/chat/attachments/document`, {
+    method: 'POST',
+    body: form,
+  });
+  return ChatDocumentUploadResponseSchema.parse(
+    await readJsonResponse(response),
+  );
 }
 
 // Send a turn and read the answer as it is written.

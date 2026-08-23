@@ -50,7 +50,6 @@ import {
   PosterImageFeedbackRequestSchema,
   RegeneratePosterRequestSchema,
   RestorePosterVersionRequestSchema,
-  TWEET_MAX_LENGTH,
   TranslateGenerationRequestSchema,
   UpdateCaptionRequestSchema,
   UpdateCopyRequestSchema,
@@ -58,7 +57,6 @@ import {
   isSocialCategory,
   isYoutubeCategory,
   referenceCategoryOf,
-  tweetWeightedLength,
   type GenerationDetail,
   type GenerationStep,
   type GenerationSummary,
@@ -1136,7 +1134,7 @@ export function registerGenerationRoutes(
     },
   );
 
-  // Retry the edit that failed, on THIS row — never as a new generation. Two shapes, and the
+  // Retry what failed, on THIS row — never as a new generation. THREE shapes, and the
   // caller does not have to know which applies:
   //
   //   - This process still holds the failed job's arguments (the normal case): re-run that
@@ -1146,9 +1144,12 @@ export function registerGenerationRoutes(
   //     Then clear the failure and put the row back to `completed`, which is all such a row
   //     needs: its poster, every immutable version and its article were never touched. 200,
   //     and the officer re-sends whatever they wanted from the poster card.
+  //   - The run produced NOTHING at all (the initial render failed, whatever the cause): run
+  //     the SAME row again from its stored inputs. 202. See the branch below for why this is
+  //     the one shape that spends.
   //
   // The spend gate is the point of the split: recovery is a column write and costs nothing,
-  // and a re-run only happens where the failed step's own inputs are still known — this route
+  // and an EDIT is re-run only where the failed step's own inputs are still known — this route
   // never re-derives an edit, and never renders one nobody asked for.
   app.post<{ Params: { id: string } }>(
     '/generations/:id/retry',
@@ -1164,15 +1165,54 @@ export function registerGenerationRoutes(
           .code(409)
           .send({ error: { message: 'A job is already running.' } });
       }
-      // A run that never produced anything has nothing to go back to: retrying it means
-      // running it again from the note, which is a fresh generation, not this route.
+      // A run that produced NOTHING has no edit to go back to and nothing to recover, so
+      // retrying it means running it again from the row’s own stored inputs — note, category,
+      // output type, reference pin, poster heading, image prompt, style reference,
+      // instructions. Every job re-reads all of that from the row (which is why those columns
+      // are insert-only), so this reproduces the officer’s original request exactly. Same row:
+      // the note keeps ONE entry in history and the failed attempt is simply replaced, where a
+      // fresh generation from पुढील पाऊल leaves a dead row behind it.
+      //
+      // This is the one branch of this route that SPENDS, and deliberately so: the render
+      // failed, the officer is looking at the failure, and asking for it again is the only
+      // thing they can want. Every error reaches it — a moderation refusal, a provider 5xx, a
+      // timeout — because none of them are distinguishable here and all of them are worth
+      // one more attempt.
       if (!row.posterPath && !row.article) {
-        return reply.code(409).send({
-          error: {
-            message:
-              'या कामातून अद्याप काहीच तयार झालेले नाही; त्याच टिपणीवरून नवीन काम सुरू करा.',
-          },
+        if (row.status !== 'failed') {
+          return reply.code(409).send({
+            error: {
+              message:
+                'या कामातून अद्याप काहीच तयार झालेले नाही; ते पूर्ण होण्याची वाट पाहा.',
+            },
+          });
+        }
+        // Flipped BEFORE the 202 (the same stale-poll race as /poster/feedback): the client
+        // refreshes the instant this answers, and a row still reading `failed` would stop
+        // polling and sit on the failure card through the whole re-run.
+        await updateGeneration(client, row.id, {
+          status: 'queued',
+          step: null,
+          error: null,
         });
+        clearEditFailure(row.id);
+        if (isSocialCategory(row.category)) {
+          startSocialPostJob(client, row.id, {
+            // The caption preference is a job parameter, not a column, so it cannot be read
+            // back off a run that produced nothing. Caption-only (outputType ‘article’ on a
+            // social row = renders no poster) MUST have it or the re-run would produce nothing
+            // at all; a poster run gets the same `article !== null` inference every other
+            // re-run path uses, which on this row is false. A poster run that also wanted a
+            // caption gets one from the on-demand button, exactly as a poster-only run does.
+            generateCaption:
+              row.outputType === 'article' || row.article !== null,
+          });
+        } else if (isYoutubeCategory(row.category)) {
+          startYoutubeThumbnailJob(client, row.id);
+        } else {
+          startGenerationJob(client, row.id);
+        }
+        return reply.code(202).send({ retried: true });
       }
 
       if (retryFailedEdit(row.id)) {
@@ -1468,19 +1508,11 @@ export function registerGenerationRoutes(
           },
         });
       }
-      // Reject, never auto-truncate: silently shortening a Marathi caption and
-      // posting it to an official account irreversibly is worse than an error.
-      if (
-        platform === 'twitter' &&
-        tweetWeightedLength(row.article) > TWEET_MAX_LENGTH
-      ) {
-        return reply.code(422).send({
-          error: {
-            message:
-              'कॅप्शन X च्या २८० अक्षरांच्या मर्यादेपेक्षा मोठी आहे — फीडबॅक देऊन ती लहान करा आणि पुन्हा प्रयत्न करा.',
-          },
-        });
-      }
+      // No length gate on the caption. A twitter and a facebook caption are written the
+      // same way here, so holding one of them to X's 280 weighted characters refused a
+      // caption the officer had already approved, for a reason the product no longer has.
+      // X's own API is the authority if it ever rejects one; that error surfaces below.
+      // The weighted-length helpers stay in @dgipr/schemas for that day.
 
       publishing.add(row.id);
       try {

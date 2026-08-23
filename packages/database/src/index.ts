@@ -131,6 +131,7 @@ export {
 export {
   CHAT_THREADS_TABLE,
   CHAT_MESSAGES_TABLE,
+  CHAT_FILES_TABLE,
   insertChatThread,
   updateChatThread,
   getChatThread,
@@ -138,6 +139,10 @@ export {
   deleteChatThread,
   insertChatMessage,
   listChatMessages,
+  insertChatFile,
+  getChatFile,
+  attachChatFile,
+  updateChatFileGeminiHandle,
   type ChatRole,
   type ChatAttachmentKind,
   type ChatAttachmentEntry,
@@ -145,6 +150,8 @@ export {
   type ChatThreadPatch,
   type ChatMessageRow,
   type NewChatMessage,
+  type ChatFileRow,
+  type NewChatFile,
 } from './chat.js';
 export {
   USAGE_EVENTS_TABLE,

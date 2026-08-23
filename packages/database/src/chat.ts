@@ -13,12 +13,12 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 export const CHAT_THREADS_TABLE = 'chat_threads';
 export const CHAT_MESSAGES_TABLE = 'chat_messages';
+export const CHAT_FILES_TABLE = 'chat_files';
 
 export type ChatRole = 'user' | 'assistant';
 
-// What an attachment became by the time it was sent. Only 'image' keeps bytes (a public URL);
-// the other three are reduced to TEXT before the message is ever posted, which is what makes
-// reopening a chat free — nothing is re-extracted and nothing is re-transcribed.
+// What an attachment became by the time it was sent. Images keep a public URL; native PDFs
+// keep a trusted chat_files id; audio, YouTube and legacy documents keep extracted text.
 export type ChatAttachmentKind = 'image' | 'document' | 'audio' | 'youtube';
 
 export type ChatAttachmentEntry = Readonly<{
@@ -28,7 +28,10 @@ export type ChatAttachmentEntry = Readonly<{
   // 'image' only — the public object URL, which is both what the bubble renders and what the
   // model is given as an image_url part.
   imageUrl?: string;
-  // Every non-image kind — the extracted or transcribed text folded into the request.
+  // Native PDF only. Resolves server-side through chat_files; no provider URI is accepted
+  // from the browser or stored on the message itself.
+  documentId?: string;
+  // Audio, YouTube and legacy non-PDF documents — extracted/transcribed request text.
   text?: string;
   chars?: number;
   // 'youtube' only — the canonical watch URL, so the bubble can link the source.
@@ -44,7 +47,21 @@ export type ChatMessageRow = Readonly<{
   model: string | null;
   costUsd: number | null;
   error: string | null;
+  interactionId: string | null;
   createdAt: string;
+}>;
+
+export type ChatFileRow = Readonly<{
+  id: string;
+  threadId: string | null;
+  displayName: string;
+  mimeType: 'application/pdf';
+  storagePath: string;
+  geminiFileName: string;
+  geminiFileUri: string;
+  geminiExpiresAt: string;
+  createdAt: string;
+  updatedAt: string;
 }>;
 
 export type ChatThreadRow = Readonly<{
@@ -74,7 +91,21 @@ type ChatMessageDbRow = {
   model: string | null;
   cost_usd: number | string | null;
   error: string | null;
+  gemini_interaction_id: string | null;
   created_at: string;
+};
+
+type ChatFileDbRow = {
+  id: string;
+  thread_id: string | null;
+  display_name: string;
+  mime_type: 'application/pdf';
+  storage_path: string;
+  gemini_file_name: string;
+  gemini_file_uri: string;
+  gemini_expires_at: string;
+  created_at: string;
+  updated_at: string;
 };
 
 function threadFromDbRow(row: ChatThreadDbRow): ChatThreadRow {
@@ -100,7 +131,23 @@ function messageFromDbRow(row: ChatMessageDbRow): ChatMessageRow {
     // "0.004200" and sum as concatenation.
     costUsd: row.cost_usd === null ? null : Number(row.cost_usd),
     error: row.error,
+    interactionId: row.gemini_interaction_id,
     createdAt: row.created_at,
+  };
+}
+
+function fileFromDbRow(row: ChatFileDbRow): ChatFileRow {
+  return {
+    id: row.id,
+    threadId: row.thread_id,
+    displayName: row.display_name,
+    mimeType: row.mime_type,
+    storagePath: row.storage_path,
+    geminiFileName: row.gemini_file_name,
+    geminiFileUri: row.gemini_file_uri,
+    geminiExpiresAt: row.gemini_expires_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }
 
@@ -202,6 +249,7 @@ export type NewChatMessage = Readonly<{
   model?: string;
   costUsd?: number;
   error?: string;
+  interactionId?: string;
 }>;
 
 export async function insertChatMessage(
@@ -220,6 +268,9 @@ export async function insertChatMessage(
       ...(message.model !== undefined ? { model: message.model } : {}),
       ...(message.costUsd !== undefined ? { cost_usd: message.costUsd } : {}),
       ...(message.error !== undefined ? { error: message.error } : {}),
+      ...(message.interactionId !== undefined
+        ? { gemini_interaction_id: message.interactionId }
+        : {}),
     })
     .select()
     .single();
@@ -227,6 +278,93 @@ export async function insertChatMessage(
     throw new Error(`Failed to insert chat message: ${error.message}`);
   }
   return messageFromDbRow(data as unknown as ChatMessageDbRow);
+}
+
+export type NewChatFile = Readonly<{
+  displayName: string;
+  mimeType: 'application/pdf';
+  storagePath: string;
+  geminiFileName: string;
+  geminiFileUri: string;
+  geminiExpiresAt: string;
+}>;
+
+export async function insertChatFile(
+  client: SupabaseClient,
+  file: NewChatFile,
+): Promise<ChatFileRow> {
+  const { data, error } = await client
+    .from(CHAT_FILES_TABLE)
+    .insert({
+      display_name: file.displayName,
+      mime_type: file.mimeType,
+      storage_path: file.storagePath,
+      gemini_file_name: file.geminiFileName,
+      gemini_file_uri: file.geminiFileUri,
+      gemini_expires_at: file.geminiExpiresAt,
+    })
+    .select()
+    .single();
+  if (error) throw new Error(`Failed to insert chat file: ${error.message}`);
+  return fileFromDbRow(data as unknown as ChatFileDbRow);
+}
+
+export async function getChatFile(
+  client: SupabaseClient,
+  id: string,
+): Promise<ChatFileRow | null> {
+  const { data, error } = await client
+    .from(CHAT_FILES_TABLE)
+    .select()
+    .eq('id', id)
+    .maybeSingle();
+  if (error) throw new Error(`Failed to fetch chat file ${id}: ${error.message}`);
+  return data ? fileFromDbRow(data as unknown as ChatFileDbRow) : null;
+}
+
+export async function attachChatFile(
+  client: SupabaseClient,
+  id: string,
+  threadId: string,
+): Promise<ChatFileRow | null> {
+  const current = await getChatFile(client, id);
+  if (!current || (current.threadId !== null && current.threadId !== threadId)) {
+    return null;
+  }
+  if (current.threadId === threadId) return current;
+  const { data, error } = await client
+    .from(CHAT_FILES_TABLE)
+    .update({ thread_id: threadId, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .is('thread_id', null)
+    .select()
+    .maybeSingle();
+  if (error) throw new Error(`Failed to attach chat file ${id}: ${error.message}`);
+  return data ? fileFromDbRow(data as unknown as ChatFileDbRow) : null;
+}
+
+export async function updateChatFileGeminiHandle(
+  client: SupabaseClient,
+  id: string,
+  handle: Readonly<{
+    geminiFileName: string;
+    geminiFileUri: string;
+    geminiExpiresAt: string;
+  }>,
+): Promise<ChatFileRow> {
+  const { data, error } = await client
+    .from(CHAT_FILES_TABLE)
+    .update({
+      gemini_file_name: handle.geminiFileName,
+      gemini_file_uri: handle.geminiFileUri,
+      gemini_expires_at: handle.geminiExpiresAt,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw new Error(`Failed to refresh chat file ${id}: ${error.message}`);
+  return fileFromDbRow(data as unknown as ChatFileDbRow);
 }
 
 // A whole conversation, oldest first — both what the page renders and what the next request to

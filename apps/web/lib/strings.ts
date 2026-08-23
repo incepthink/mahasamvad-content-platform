@@ -7,6 +7,7 @@ import type {
   DloIntakeStep,
   GenerationStep,
   GenerationStatus,
+  OutputType,
   ProofreadIssueType,
   ReferenceCategory,
   TermType,
@@ -388,8 +389,7 @@ export const STR = {
     `तुम्ही सुमारे ${requested} मागितले होते; बातमी ${actual} झाली आहे. दिलेल्या माहितीत एवढाच आशय असल्याने लांबी वाढवण्यासाठी नवीन मजकूर तयार केलेला नाही. अधिक लांब बातमीसाठी टिपणीत आणखी माहिती द्या.`,
   lengthWarnLong: (requested: string, actual: string) =>
     `तुम्ही सुमारे ${requested} मागितले होते; बातमी ${actual} झाली आहे. आणखी कमी केल्यास महत्त्वाची माहिती वगळावी लागली असती.`,
-  lengthUnitChars: (count: number) =>
-    `${count.toLocaleString('mr-IN')} अक्षरे`,
+  lengthUnitChars: (count: number) => `${count.toLocaleString('mr-IN')} अक्षरे`,
   lengthUnitWords: (count: number) => `${count.toLocaleString('mr-IN')} शब्द`,
   // Shown on a social poster whose information held more items than any master template lays
   // out. The poster DOES carry every item — the design was stretched to fit — so this is a
@@ -477,7 +477,6 @@ export const STR = {
   // because the dictionary's Marathi column IS the spelling the output is held to.
   translateIntoMarathiNames:
     'नावे शब्दकोशातील मराठी स्पेलिंगप्रमाणे ठेवली जातील — त्यासाठी वेगळी तपासणी लागत नाही. एखादे नाव चुकीचे वाटल्यास नाव-शब्दकोशात दुरुस्त करा.',
-
 
   // Pre-translation name check (shown before every translation; the confirmed
   // spellings are locked into the English output and saved to the नाव-शब्दकोश.
@@ -665,6 +664,18 @@ export const STR = {
   stepDone: 'पूर्ण',
   failedTitle: 'काम अपूर्ण राहिले',
   failedHint: 'क्षमस्व, काहीतरी चुकले. पुन्हा प्रयत्न करून पहा.',
+  // Image API moderation errors otherwise expose the provider's raw JSON on the generation
+  // page. The stage is intentionally worded differently: an input block asks the officer to
+  // change the request, while an output block means the request was accepted but the candidate
+  // image was stopped. OpenAI's category is deliberately coarse, so never claim one exact cause.
+  imageSafetyInputError:
+    'प्रतिमेसाठी पाठवलेला मजकूर सुरक्षितता तपासणीत नाकारला गेला. “AI प्रॉम्प्ट”मधील संवेदनशील किंवा वास्तवदर्शी हानीचे वर्णन काढा आणि प्रतीकात्मक, अहिंसक दृश्य वापरून नवीन काम तयार करा.',
+  imageSafetyOutputError:
+    'AI ने तयार केलेली प्रतिमा सुरक्षितता तपासणीत नाकारली गेली. संवेदनशील विषयाचे वास्तवदर्शी किंवा हानी दाखवणारे दृश्य न मागता प्रतीकात्मक, अहिंसक दृश्य वापरून नवीन काम तयार करा.',
+  imageSafetyChildOutputError:
+    'AI ने तयार केलेली प्रतिमा सुरक्षितता तपासणीत नाकारली गेली. बालकाचे वास्तवदर्शी चित्र आणि शोषण, अत्याचार, हिंसा किंवा दुखापतीसारखा संवेदनशील विषय एकत्र आल्यास असे होऊ शकते. घटना, इजा किंवा त्रास न दाखवता संरक्षण, हेल्पलाईन किंवा मदतीचे प्रतीकात्मक व अहिंसक दृश्य वापरून नवीन काम तयार करा.',
+  imageSafetyError:
+    'AI प्रतिमा सुरक्षितता तपासणीत नाकारली गेली. “AI प्रॉम्प्ट”मधील संवेदनशील किंवा हानी दाखवणारे दृश्य बदला आणि प्रतीकात्मक, अहिंसक दृश्य वापरून नवीन काम तयार करा.',
   retry: 'पुन्हा प्रयत्न करा',
   // Shown when an EDIT failed but everything produced earlier is still here — a different
   // situation from a run that produced nothing, and it must not read like one.
@@ -674,10 +685,13 @@ export const STR = {
   editRetry: 'तीच सुधारणा पुन्हा करा',
   editRecover: 'काम पुन्हा वापरात आणा',
   dismiss: 'बंद करा',
-  // On a run that produced nothing there is nothing to recover, so the way forward is a
-  // fresh run — which is the पुढील पाऊल fold right below this card.
-  editFailedNewRunHint:
-    'या कामातून काहीच तयार झाले नाही. खाली “पुढील पाऊल” मध्ये याच टिपणीवरून नवीन काम सुरू करा.',
+  // On a run that produced nothing there is nothing to recover, so the way forward is to run
+  // it again — the button on that card — or, when something about the note itself needs to
+  // change, the पुढील पाऊल fold right below it.
+  failedRetryHint:
+    'याच टिपणीवरून व त्याच सेटिंग्जवरून हे काम पुन्हा चालवले जाईल.',
+  failedNewRunHint:
+    'टिपणीत बदल हवा असल्यास खाली “पुढील पाऊल” मध्ये टिपणी बदलून पुन्हा तयार करा.',
 
   // Results
   articleTitle: 'तयार झालेली बातमी',
@@ -825,7 +839,6 @@ export const STR = {
   captionCounterLabel: 'अक्षरे',
   // The caption box is always editable now, so the hand edit saves itself when focus
   // leaves the textarea — there is no "जतन करा" button to press.
-  captionAutosaveHint: 'कॅप्शन इथेच बदलता येते — बदल आपोआप जतन होतील.',
   captionSavingShort: 'जतन करत आहोत…',
   captionFeedbackTitle: 'कॅप्शनमध्ये बदल हवा आहे?',
   captionFeedbackHint:
@@ -856,7 +869,7 @@ export const STR = {
   changeTabCaption: 'कॅप्शन',
   changeTabPoster: 'पोस्टर',
   changeCaptionPlaceholder:
-    'कॅप्शनमध्ये काय बदलायचे ते लिहा — उदा. "२८० अक्षरांपेक्षा लहान करा"…',
+    'कॅप्शनमध्ये काय बदलायचे ते लिहा — उदा. "भाषा आणखी सोपी करा"…',
   changePosterPlaceholder:
     'पोस्टरमध्ये काय बदलायचे ते लिहा — उदा. "मजकूर आणखी मोठा करा"…',
 
@@ -1552,12 +1565,13 @@ export const STR = {
   chatAttachAudio: 'ध्वनिमुद्रण',
   chatAttachYouTube: 'यूट्युब लिंक',
   chatAttachRemove: 'काढून टाका',
-  // Nothing is uploaded, read or transcribed until the message is sent, so a picked file
-  // waits — and its chip says so rather than claiming to be ready.
+  // Non-PDF attachments wait for Send. Native PDFs instead use `preparing` while the selection-
+  // time Gemini Files upload runs.
   chatAttachPending: 'पाठवल्यावर वाचली जाईल',
-  chatAttachWorking: 'फाईल्स वाचून घेत आहोत… त्यानंतर संदेश पाठवला जाईल.',
+  chatAttachWorking: 'फाईल तयार करत आहोत…',
   chatAttachPreparing: 'तयार करत आहोत…',
-  chatAttachTranscribing: 'ध्वनिमुद्रण लिहून घेत आहोत… (काही मिनिटे लागू शकतात)',
+  chatAttachTranscribing:
+    'ध्वनिमुद्रण लिहून घेत आहोत… (काही मिनिटे लागू शकतात)',
   chatAttachReady: 'तयार',
   chatAttachFailed: 'ही फाईल वाचता आली नाही.',
   chatAttachEmpty: 'या फाईलमध्ये वाचण्यासारखा मजकूर मिळाला नाही.',
@@ -1904,6 +1918,22 @@ export const CATEGORY_LABELS: Record<Category, string> = {
   facebook: 'फेसबुक',
   youtube: 'यूट्यूब',
 };
+
+// What a run actually produced, for the history card and the thread rail. A social
+// run that renders no poster (outputType 'article') is a caption-only run, and its
+// caption is written the same way for either platform — so calling it "फेसबुक" names
+// a platform the officer never chose. Everything else is its category.
+export function runFormatLabel(
+  category: Category,
+  outputType: OutputType,
+): string {
+  // The category test is written out rather than taken from `isSocialCategory`: that is a
+  // VALUE export, and importing one here would pull @dgipr/schemas (and zod) into every
+  // bundle that reads a Marathi string. This file stays type-only imports.
+  const social = category === 'twitter' || category === 'facebook';
+  if (social && outputType === 'article') return STR.captionLabel;
+  return CATEGORY_LABELS[category];
+}
 
 export const STATUS_LABELS: Record<GenerationStatus, string> = {
   queued: 'रांगेत',

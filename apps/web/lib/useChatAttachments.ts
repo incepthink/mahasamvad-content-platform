@@ -3,17 +3,14 @@
 // The composer's attachment tray: everything between picking a file and having something the
 // turn can carry.
 //
-// The rule this hook exists to enforce is ATTACH → SEND → PREPARE. Picking a file costs
-// NOTHING: the File is held here and no upload, OCR or transcription happens until the officer
-// actually sends the message. That is deliberate — attaching a 40-page scan and then deleting
-// it, or opening the file picker to check a name, or abandoning the chat, used to buy an OCR
-// run and minutes of transcription for a question that was never asked. `prepare()` is the one
-// place that work happens, and it is called by the send path.
+// Images, recordings, DOCX and TXT keep the ATTACH → SEND → PREPARE rule: picking them costs
+// nothing, and `prepare()` does their work only after Send. PDFs are the deliberate exception.
+// They start a native Gemini Files upload as soon as they are selected, overlapping preparation
+// with the time the officer spends typing. No page-by-page OCR or transcription occurs.
 //
-// Where the work happens is deliberately NOT here:
-//   - documents go through the shared ephemeral document service (/api/documents), so /chat
-//     gets the same probe, the same text-layer-before-OCR policy and the same page identity
-//     as every other upload surface — but NOT its page picker (see readDocument below);
+// Where the remaining work happens:
+//   - PDFs go directly to the chat upload endpoint and Gemini Files;
+//   - DOCX/TXT still go through the shared ephemeral document service (/api/documents);
 //   - recordings and YouTube links go through the EXISTING /api/transcriptions job, which
 //     brings the 0031 content-addressed cache with it — a recording already transcribed on
 //     /transcribe comes back here instantly and free, and vice versa. The visible cost is that
@@ -33,6 +30,7 @@ import {
   extractDocumentIntakePages,
   getDocumentIntake,
   getTranscription,
+  uploadChatDocument,
   uploadChatImage,
 } from './api';
 import { joinPageTexts, numberedPages } from './documentSelection';
@@ -48,12 +46,12 @@ export type DraftAttachment = Readonly<{
   name: string;
   state: DraftAttachmentState;
   error?: string;
-  // Held until the turn is sent, then consumed by prepare(). Never leaves the browser before
-  // that, which is the whole point of the deferral.
+  // Non-PDF files are held until the turn is sent, then consumed by prepare().
   file?: File;
   video?: YouTubeVideo;
   // Present once ready.
   imageUrl?: string;
+  documentId?: string;
   text?: string;
   sourceUrl?: string;
   // The transcription run backing a recording or link, once one has been started.
@@ -84,27 +82,16 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// Upload one document and return its text.
+// Upload one legacy text document and return its text. PDFs never enter this function: their
+// native Gemini upload begins in addDocuments() and produces a documentId rather than text.
 //
-// **/chat reads the WHOLE document — there is no page picker here, and that is deliberate.**
-// Every other upload surface stops a scanned PDF at a page list, because OCR is billed per
-// page and the officer decides which pages are worth buying. A chat attachment is read once,
-// inside one turn, to answer one question: a spend-gate card in the composer was more
-// machinery than that question deserves, so the document button opens the file explorer
-// directly and the file becomes a chip beside the images and recordings. The spend is instead
-// gated by the SEND — nothing here runs until the officer has committed to asking. The
-// consequence to know: sending a message with a 40-page scan attached OCRs 40 pages. The
-// surfaces whose output gets published (/dlo, /translate, /proofread, the media room) keep the
-// picker and its gate untouched.
-//
-// It also reads on its OWN OCR backend — see the `surface` field below.
+// **DOCX/TXT reads the WHOLE document — there is no page picker here.** The publishing
+// surfaces (/dlo, /translate, /proofread, the media room) retain their page picker and OCR
+// gate; this native-PDF change is isolated to the general chat.
 async function readDocument(file: File): Promise<string> {
   const form = new FormData();
   form.append('file', file, file.name);
-  // Declares the SURFACE, not the backend. The API maps chat → CHAT_OCR_PROVIDER, which reads
-  // a PDF whole in one Gemini call instead of page by page — right here, where the document is
-  // read once inside a turn and nobody reviews it page by page, and deliberately not on the
-  // surfaces whose output gets published. See intake/gemini-doc.ts.
+  // Declares the surface for the shared non-PDF intake service.
   form.append('surface', 'chat');
   const created = await createDocumentIntake(form);
   let extractRequested = false;
@@ -165,6 +152,9 @@ function payloadOf(draft: DraftAttachment): ChatAttachment {
     kind: draft.kind,
     name: draft.name || STR.chatAttachedImage,
     ...(draft.imageUrl !== undefined ? { imageUrl: draft.imageUrl } : {}),
+    ...(draft.documentId !== undefined
+      ? { documentId: draft.documentId }
+      : {}),
     ...(draft.text !== undefined ? { text: draft.text } : {}),
     ...(draft.sourceUrl !== undefined ? { sourceUrl: draft.sourceUrl } : {}),
   };
@@ -172,8 +162,8 @@ function payloadOf(draft: DraftAttachment): ChatAttachment {
 
 export function useChatAttachments(): {
   attachments: DraftAttachment[];
-  // True only while a turn's attachments are actually being prepared — i.e. between the send
-  // press and the message leaving. It is the send button's gate.
+  // True while a selected PDF is becoming active or while send-time attachments are prepared.
+  // It is the send button's gate.
   preparing: boolean;
   full: boolean;
   addImages: (files: readonly File[]) => void;
@@ -188,7 +178,7 @@ export function useChatAttachments(): {
   prepare: () => Promise<ChatAttachment[]>;
 } {
   const [attachments, setAttachments] = useState<DraftAttachment[]>([]);
-  const [preparing, setPreparing] = useState(false);
+  const [preparingTurn, setPreparingTurn] = useState(false);
   // Guards against a second prepare starting before the first has released the button.
   const preparingRef = useRef(false);
   const attachmentsRef = useRef(attachments);
@@ -215,11 +205,15 @@ export function useChatAttachments(): {
   // How many more will fit. Picking several files at once is normal (a phone hands over five
   // photographs), so the excess is silently dropped rather than the whole pick refused.
   const add = useCallback((made: readonly DraftAttachment[]) => {
-    if (made.length === 0) return;
-    setAttachments((current) => [
-      ...current,
-      ...made.slice(0, Math.max(0, CHAT_MAX_ATTACHMENTS - current.length)),
-    ]);
+    if (made.length === 0) return [];
+    const accepted = made.slice(
+      0,
+      Math.max(0, CHAT_MAX_ATTACHMENTS - attachmentsRef.current.length),
+    );
+    if (accepted.length > 0) {
+      setAttachments((current) => [...current, ...accepted]);
+    }
+    return accepted;
   }, []);
 
   const addImages = useCallback(
@@ -241,19 +235,33 @@ export function useChatAttachments(): {
 
   const addDocuments = useCallback(
     (files: readonly File[]) => {
-      add(
+      const accepted = add(
         files
           .filter((file) => isDocumentFileName(file.name))
           .map((file) => ({
             key: makeKey(),
             kind: 'document' as const,
             name: file.name,
-            state: 'pending' as const,
+            state: file.name.toLowerCase().endsWith('.pdf')
+              ? ('preparing' as const)
+              : ('pending' as const),
             file,
           })),
       );
+
+      for (const draft of accepted) {
+        if (!draft.file?.name.toLowerCase().endsWith('.pdf')) continue;
+        void uploadChatDocument(draft.file)
+          .then((uploaded) => {
+            patch(draft.key, {
+              state: 'ready',
+              documentId: uploaded.documentId,
+            });
+          })
+          .catch((error: unknown) => fail(draft.key, error));
+      }
     },
-    [add],
+    [add, fail, patch],
   );
 
   const addAudio = useCallback(
@@ -301,7 +309,7 @@ export function useChatAttachments(): {
     if (drafts.length === 0) return [];
 
     preparingRef.current = true;
-    setPreparing(true);
+    setPreparingTurn(true);
     const done = new Map<string, ChatAttachment>();
 
     try {
@@ -401,13 +409,19 @@ export function useChatAttachments(): {
         .filter((entry): entry is ChatAttachment => entry !== undefined);
     } finally {
       preparingRef.current = false;
-      setPreparing(false);
+      setPreparingTurn(false);
     }
   }, [fail, patch]);
 
   return {
     attachments,
-    preparing,
+    preparing:
+      preparingTurn ||
+      attachments.some(
+        (attachment) =>
+          attachment.kind === 'document' &&
+          attachment.state === 'preparing',
+      ),
     full: attachments.length >= CHAT_MAX_ATTACHMENTS,
     addImages,
     addDocuments,
