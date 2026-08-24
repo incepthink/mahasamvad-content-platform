@@ -5149,6 +5149,15 @@ a.thread-node:hover {
    one above the other in the same form should read as siblings. What differs is only the
    thumbnail in place of an icon, and the input row in place of an upload button. */
 
+/* Turned off (YOUTUBE_INPUT_OFF in components/YouTubeLinkInput). Dimmed rather than removed
+   so the capability is visibly unavailable instead of silently gone. The controls inside are
+   already `disabled`; `pointer-events: none` covers the parts that are not form controls (the
+   video links), and `user-select` is left alone so the text can still be read. */
+.yt-card--off {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
 .yt-add {
   display: flex;
   gap: 10px;
@@ -7415,6 +7424,15 @@ a.thread-node:hover {
 .chat-tool:hover:not(:disabled) {
   color: var(--accent-dark);
   background: var(--accent-soft);
+}
+
+/* These are .btn-ghost without .btn, so `.btn:disabled` above never reaches them and a
+   disabled tool looked identical to a live one. --off is the YouTube tool, turned off with
+   the card it opens (YOUTUBE_INPUT_OFF in YouTubeLinkInput). */
+.chat-tool:disabled,
+.chat-tool--off {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* The one primary action on this screen, so it is filled rather than outlined —

@@ -224,11 +224,14 @@ export function ChatComposer({
           >
             <Mic size={20} aria-hidden="true" />
           </button>
+          {/* Disabled alongside the card it opens (YOUTUBE_INPUT_OFF in
+              YouTubeLinkInput) — a tool button that opens an inert panel is worse
+              than one that plainly cannot be pressed. */}
           <button
             type="button"
-            className="btn-ghost chat-tool"
+            className="btn-ghost chat-tool chat-tool--off"
             onClick={() => setShowYouTube((open) => !open)}
-            disabled={full}
+            disabled
             title={STR.chatAttachYouTube}
             aria-label={STR.chatAttachYouTube}
           >

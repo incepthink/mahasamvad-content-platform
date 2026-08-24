@@ -46,6 +46,14 @@ import { CardTitle } from './CardTitle';
 import { STR } from '../lib/strings';
 import { errorMessage } from '../lib/errorMessage';
 
+// TEMPORARILY TURNED OFF EVERYWHERE (UI only). The card still renders — an officer who has
+// used it should see that the capability exists and is unavailable, not find it silently
+// missing — but it is inert and dimmed. This is deliberately a module constant rather than a
+// prop passed at each call site: three surfaces render this card (/dlo, /transcribe, /chat)
+// and a per-caller flag is the kind that gets missed on the fourth. Nothing on the server
+// changed; flip this back to `false` to restore it.
+const YOUTUBE_INPUT_OFF = true;
+
 export function YouTubeLinkInput({
   videos,
   onChange,
@@ -75,12 +83,15 @@ export function YouTubeLinkInput({
   const attempted = useRef<string | null>(null);
 
   const atLimit = videos.length >= maxLinks;
+  // Every guard below reads this, never the prop: the kill switch has to win over a caller
+  // that passes `disabled={false}`.
+  const off = disabled || YOUTUBE_INPUT_OFF;
 
   const add = async (raw: string) => {
     const trimmed = raw.trim();
     // `disabled` is checked here, not only on the input: the field can be disabled by the
     // parent while a debounce started before it is still pending.
-    if (trimmed === '' || probing || atLimit || disabled) return;
+    if (trimmed === '' || probing || atLimit || off) return;
 
     const videoId = parseYouTubeVideoId(trimmed);
     if (videoId === null) {
@@ -125,16 +136,19 @@ export function YouTubeLinkInput({
   // video id while more characters are still coming; a paste skips the wait (onPaste below).
   useEffect(() => {
     const trimmed = url.trim();
-    if (trimmed === '' || probing || atLimit) return;
+    if (trimmed === '' || probing || atLimit || off) return;
     if (attempted.current === trimmed) return;
     if (parseYouTubeVideoId(trimmed) === null) return;
 
     const timer = setTimeout(() => void addRef.current(trimmed), 450);
     return () => clearTimeout(timer);
-  }, [atLimit, probing, url]);
+  }, [atLimit, off, probing, url]);
 
   return (
-    <section className="card">
+    <section
+      className={`card${off ? ' yt-card--off' : ''}`}
+      aria-disabled={off || undefined}
+    >
       {/* An <h2>, matching the recording picker above it and every other card heading — see
           AudioFilePicker for why .field-label on a <p> rendered unweighted. */}
       <CardTitle icon={CirclePlay}>{STR.ytTitle}</CardTitle>
@@ -156,7 +170,7 @@ export function YouTubeLinkInput({
             className="yt-url-input"
             placeholder={STR.ytPlaceholder}
             value={url}
-            disabled={disabled || atLimit}
+            disabled={off || atLimit}
             aria-label={STR.ytTitle}
             aria-invalid={fieldError !== null}
             onChange={(event) => {
@@ -198,6 +212,7 @@ export function YouTubeLinkInput({
               type="button"
               className="yt-clear"
               aria-label={STR.ytClear}
+              disabled={off}
               onClick={() => {
                 setUrl('');
                 setFieldError(null);
@@ -268,6 +283,7 @@ export function YouTubeLinkInput({
                 <button
                   type="button"
                   className="file-remove"
+                  disabled={off}
                   aria-label={`${STR.ytRemove}: ${video.title ?? video.url}`}
                   onClick={() =>
                     onChange(
