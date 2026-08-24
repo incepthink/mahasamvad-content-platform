@@ -6,21 +6,19 @@
 // with their sizes and removable one by one — so they render one component rather than two
 // lookalikes that drift apart. A card, a hint, one upload button, and the list underneath.
 //
-// Both file guards are decided by lib/filePicks, shared with the photograph picker and with
-// /dlo's combined sources card, and they run HERE rather than only on the server for the same
-// reason: a recording takes minutes to upload, so "wrong container" and "too big" have to be
-// said at the picker. The server still enforces the size (routes/transcriptions.ts) against
-// the same UPLOAD_FILE_MAX_BYTES, so this is the earlier of two answers, never the only one.
-// The size half is now stated by the CALLER, because only /transcribe still has a ceiling to
-// state: /dlo's intake route dropped its per-file cap, so its sources card passes none.
+// The container guard is decided by lib/filePicks, shared with the photograph picker and with
+// /dlo's combined sources card, and it runs HERE rather than only on the server because a
+// recording takes minutes to upload and "wrong container" has to be said at the picker.
+//
+// There is no SIZE guard, and that is the caller's answer to give (`maxBytes`), not this
+// component's: neither surface's route has a per-file ceiling any more — /dlo dropped its
+// cap first and /transcribe followed on 2026-08-24 — so a picker refusing a two-hour
+// recording the server would have accepted would cost the officer a source. Whichever answer
+// a surface gives must match its own route's.
 
 import { useRef, type ReactNode } from 'react';
 import { Mic, Music, X } from 'lucide-react';
-import {
-  AUDIO_FILE_ACCEPT,
-  UPLOAD_FILE_MAX_BYTES,
-  isAudioFileName,
-} from '@dgipr/schemas';
+import { AUDIO_FILE_ACCEPT, isAudioFileName } from '@dgipr/schemas';
 import { acceptFilePicks } from '../lib/filePicks';
 import { CardTitle } from './CardTitle';
 import { STR } from '../lib/strings';
@@ -70,6 +68,7 @@ export function AudioFilePicker({
   onChange,
   onError,
   maxFiles,
+  maxBytes,
   disabled = false,
   notice,
 }: {
@@ -85,6 +84,9 @@ export function AudioFilePicker({
   // beside the submit button with every other reason a run cannot start.
   onError: (message: string | null) => void;
   maxFiles?: number | undefined;
+  // The surface's own per-file ceiling, matching what its API route enforces. Omitted — the
+  // case today on both surfaces — means no size check.
+  maxBytes?: number | undefined;
   disabled?: boolean | undefined;
   // Anything the surface needs between the button and the list — /dlo uses it to ask for
   // recordings a reload could not keep.
@@ -104,10 +106,9 @@ export function AudioFilePicker({
       picked: Array.from(list),
       isAllowedName: isAudioFileName,
       typeError: STR.dloFileTypeError,
-      // /transcribe's own route (routes/transcriptions.ts) still caps a recording at this,
-      // so the picker says so first rather than after the upload. /dlo's sources card
-      // deliberately passes none — its intake route has no per-file ceiling.
-      maxBytes: UPLOAD_FILE_MAX_BYTES,
+      // Omitted = no size check, matching /transcribe's route. Pass one here only if this
+      // picker is ever mounted on a surface whose route caps a recording.
+      maxBytes,
     });
     onError(error);
     if (added === 0) return;

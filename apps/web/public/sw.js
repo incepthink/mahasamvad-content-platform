@@ -12,7 +12,6 @@ const SHARE_ACTION = '/share/audio';
 const SHARE_CACHE = 'dgipr-shared-audio-v1';
 const SHARE_PREFIX = '/__dgipr-shared-audio/';
 const MAX_FILES = 10;
-const MAX_FILE_BYTES = 50 * 1024 * 1024;
 const MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 self.addEventListener('install', () => self.skipWaiting());
@@ -34,14 +33,15 @@ async function receiveSharedAudio(request) {
       .getAll('recordings')
       .filter((value) => value instanceof File)
       .filter((file) => file.size > 0);
-    const files = shared
-      .filter((file) => file.size <= MAX_FILE_BYTES)
-      .slice(0, MAX_FILES);
+    // No per-file size ceiling, matching the recording API: /transcribe stopped capping an
+    // upload on 2026-08-24, and a share sheet dropping a two-hour recording the server would
+    // have accepted is a refusal the officer cannot act on. The count still bounds one share.
+    const files = shared.slice(0, MAX_FILES);
 
     if (files.length === 0) {
-      // A meeting recording over the per-file ceiling is the likeliest way to arrive here,
-      // and it needs its own answer: told only that the share "could not be opened", an
-      // officer re-shares the same too-large file indefinitely.
+      // 'too-large' is unreachable while nothing is filtered by size, and is kept only so a
+      // future ceiling has somewhere to land: told only that the share "could not be
+      // opened", an officer re-shares the same rejected file indefinitely.
       return redirectToTranscribe({
         share_error: shared.length > 0 ? 'too-large' : 'no-audio',
       });

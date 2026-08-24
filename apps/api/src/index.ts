@@ -39,9 +39,9 @@ export async function createServer() {
     methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'],
   });
 
-  // Multipart default. Every upload route now sets its OWN per-request limits — /dlo and
-  // /transcribe to UPLOAD_FILE_MAX_BYTES, /documents and /translate to their unlimited
-  // DOCUMENT_MAX_BYTES, /references to unlimited as well — so nothing reaches this 10 MiB
+  // Multipart default. Every upload route now sets its OWN per-request limits — /dlo,
+  // /transcribe, /documents, /translate and /references all unlimited per file, /chat and
+  // /video to UPLOAD_FILE_MAX_BYTES — so nothing reaches this 10 MiB
   // fallback today. It is kept as a conservative default for a future route that forgets to
   // state one: a small cap surfaces as a 413 the first time it is tested, where an unlimited
   // default would only surface as memory pressure in production.

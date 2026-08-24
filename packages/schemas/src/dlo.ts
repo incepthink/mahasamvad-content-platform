@@ -116,15 +116,16 @@ export type DloIntakeFile = z.infer<typeof DloIntakeFileSchema>;
 
 // ---------- how big one uploaded file may be ----------
 //
-// The ceiling for a single file on **/transcribe**. It is asked in two places and must be
-// answered identically in both — routes/transcriptions.ts enforces it, and the web picker
-// refuses an oversized recording BEFORE the upload starts, which on a meeting recording is
-// the difference between a refusal now and a refusal several minutes from now.
+// The ceiling for a single file on the routes that still HAVE one: /chat's image and PDF
+// attachments and /video's narration track and scene reference pictures.
 //
-// /dlo no longer uses it: its intake route accepts any size (routes/dlo.ts), matching the
-// shared document service and /references, because a two-hour recording and a photographed
-// booklet both pass 50 MB routinely and a refusal at the door is one the officer cannot act
-// on. So this is deliberately NOT a product-wide upload cap any more.
+// **No RECORDING route uses it any more.** /dlo dropped its per-file cap first and
+// /transcribe followed on 2026-08-24 (routes/transcriptions.ts), for the same reason and to
+// the same unlimited ceiling: a two-hour meeting recording and a photographed booklet both
+// pass 50 MB routinely, refusing them at the door is a failure the officer can do nothing
+// about, and the transcriber is nowhere near the bound (ElevenLabs Scribe accepts 5 GB per
+// upload). So this is deliberately NOT a product-wide upload cap, and adding it back to a
+// recording picker would refuse what that picker's own route accepts.
 //
 // `_MB` is stated rather than derived so the Marathi copy and the messages cannot disagree with
 // the number actually enforced.
