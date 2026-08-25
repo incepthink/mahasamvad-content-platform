@@ -4,9 +4,9 @@
 // file, is it small enough, and have I already got it — and they were answering it three
 // times over (the recording picker, the photograph picker, and /dlo's combined sources card).
 //
-// The SIZE half is now the caller's to state (`maxBytes`), because the surfaces no longer
-// agree on it: /transcribe still enforces UPLOAD_FILE_MAX_BYTES because its API route does,
-// while /dlo's intake route has no per-file ceiling at all. Whichever answer a surface gives
+// The SIZE half is the caller's to state (`maxBytes`), because the surfaces no longer agree
+// on it — as it happens no recording or document surface has a per-file ceiling left today
+// (/dlo and /transcribe both dropped theirs). Whichever answer a surface gives
 // must match its own route's — a picker refusing what the server would accept costs the
 // officer a source, and a picker accepting what the server refuses moves the refusal to the
 // end of a long upload. Omitted means no size check.

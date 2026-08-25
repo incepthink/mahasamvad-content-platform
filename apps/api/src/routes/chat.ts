@@ -34,8 +34,6 @@ import {
   CHAT_HISTORY_TURNS,
   CHAT_MAX_ATTACHMENTS,
   SendChatMessageRequestSchema,
-  UPLOAD_FILE_MAX_BYTES,
-  UPLOAD_FILE_MAX_MB,
   chatTitleFrom,
   imageMimeForFileName,
   isImageFileName,
@@ -53,6 +51,21 @@ import {
   uploadGeminiChatDocument,
   type MiscChatTurn,
 } from '@dgipr/content-engine';
+
+// No per-file ceiling on either attachment route (2026-08-24), matching /dlo, /transcribe,
+// /documents and /references: a photographed booklet and a full scanned GR both pass 50 MB
+// routinely, and refusing one at the door is a failure the officer can do nothing about.
+//
+// busboy treats Infinity as "unlimited", so these overrides now exist purely to LIFT the
+// global cap in index.ts. They must be STATED, not omitted: @fastify/multipart DEEP-merges
+// per-request limits into the global ones key by key, so a dropped key exposes the global
+// value rather than removing it (that mistake cost a production outage on 2026-08-17 — see
+// routes/dlo.ts). `files: 1` is the shape of these routes, not a limit: each uploads one
+// attachment, and the composer sends them one request at a time.
+//
+// What still bounds a turn is TEXT, not bytes — CHAT_MAX_ATTACHMENTS and
+// CHAT_ATTACHMENT_TEXT_MAX_CHARS below, which is what the model actually has to read.
+const ATTACHMENT_MAX_BYTES = Number.POSITIVE_INFINITY;
 
 // Storage object names must be ASCII-safe (the transcriptions precedent); a display name may
 // be entirely Devanagari. The random prefix is what keeps two photographs called `IMG_1.jpg`
@@ -330,7 +343,7 @@ export function registerChatRoutes(
   // already a URL and the turn is an ordinary JSON request.
   app.post('/chat/attachments/image', async (request, reply) => {
     const file = await request.file({
-      limits: { fileSize: UPLOAD_FILE_MAX_BYTES, files: 1 },
+      limits: { fileSize: ATTACHMENT_MAX_BYTES, files: 1 },
     });
     if (!file) {
       return reply.code(400).send({ error: { message: 'फाईल मिळाली नाही.' } });
@@ -351,11 +364,9 @@ export function registerChatRoutes(
         'code' in error &&
         error.code === 'FST_REQ_FILE_TOO_LARGE'
       ) {
-        return reply.code(413).send({
-          error: {
-            message: `चित्र खूप मोठे आहे (कमाल ${UPLOAD_FILE_MAX_MB.toLocaleString('mr-IN')} MB).`,
-          },
-        });
+        return reply
+          .code(413)
+          .send({ error: { message: 'चित्र खूप मोठे आहे.' } });
       }
       throw error;
     }
@@ -378,7 +389,7 @@ export function registerChatRoutes(
   // transparently recreate the provider handle without asking the officer to upload again.
   app.post('/chat/attachments/document', async (request, reply) => {
     const file = await request.file({
-      limits: { fileSize: UPLOAD_FILE_MAX_BYTES, files: 1 },
+      limits: { fileSize: ATTACHMENT_MAX_BYTES, files: 1 },
     });
     if (!file) {
       return reply
@@ -402,11 +413,9 @@ export function registerChatRoutes(
         'code' in error &&
         error.code === 'FST_REQ_FILE_TOO_LARGE'
       ) {
-        return reply.code(413).send({
-          error: {
-            message: `PDF खूप मोठी आहे (कमाल ${UPLOAD_FILE_MAX_MB.toLocaleString('mr-IN')} MB).`,
-          },
-        });
+        return reply
+          .code(413)
+          .send({ error: { message: 'PDF खूप मोठी आहे.' } });
       }
       throw error;
     }

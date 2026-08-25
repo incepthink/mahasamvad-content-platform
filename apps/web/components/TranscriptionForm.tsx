@@ -18,7 +18,6 @@ import { useEffect, useRef, useState } from 'react';
 import {
   isAudioFileName,
   TRANSCRIPTION_MAX_FILES,
-  UPLOAD_FILE_MAX_BYTES,
   type YouTubeVideo,
 } from '@dgipr/schemas';
 import { createTranscription } from '../lib/api';
@@ -111,11 +110,10 @@ export function TranscriptionForm({
     setError(null);
     void consumeSharedAudio(shareId!)
       .then((shared) => {
+        // Kind only — the route has no per-file size ceiling any more, so neither may this
+        // (a picker refusing what the server would accept costs the officer a recording).
         const accepted = shared
-          .filter(
-            (file) =>
-              isAudioFileName(file.name) && file.size <= UPLOAD_FILE_MAX_BYTES,
-          )
+          .filter((file) => isAudioFileName(file.name))
           .slice(0, TRANSCRIPTION_MAX_FILES);
         if (accepted.length === 0) {
           setSubmitting(false);

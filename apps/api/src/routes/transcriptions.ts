@@ -23,8 +23,6 @@ import {
   isAudioFileName,
   parseYouTubeVideoId,
   TRANSCRIPTION_MAX_FILES,
-  UPLOAD_FILE_MAX_BYTES,
-  UPLOAD_FILE_MAX_MB,
   YouTubeSourcesSchema,
   type TranscriptionDetail,
   type TranscriptionSummary,
@@ -36,10 +34,20 @@ import {
 } from '../jobs/transcription-runner.js';
 
 // Meeting recordings are big, so this route overrides the conservative global multipart
-// limits per request, exactly as /dlo/intakes does — and to the same shared ceiling, so one
-// recording is accepted or refused identically whichever surface it was picked on. No
-// `fieldSize` bump: this request carries no text fields.
-const MAX_FILE_BYTES = UPLOAD_FILE_MAX_BYTES;
+// limits per request, exactly as /dlo/intakes does — and, since 2026-08-24, to the same
+// unlimited ceiling: a two-hour recording passes 50 MB routinely, and refusing it at the
+// door is a failure the officer can do nothing about (the /dlo reasoning, which this route
+// was simply left behind by). The transcriber itself is nowhere near the bound — ElevenLabs
+// Scribe accepts 5 GB per upload — so the cap was only ever ours.
+//
+// busboy treats Infinity as "unlimited", so this override now exists purely to LIFT the
+// global cap in index.ts. It must be STATED, not omitted: @fastify/multipart DEEP-merges
+// these into the global limits key by key, so a dropped key exposes the global value rather
+// than removing it (that mistake cost a production outage on 2026-08-17 — see routes/dlo.ts).
+// `files` stays capped: toBuffer() holds every upload in process for the length of one
+// request, so the count is what keeps one submission bounded now that the size does not.
+// No `fieldSize` bump: this request carries no text fields.
+const MAX_FILE_BYTES = Number.POSITIVE_INFINITY;
 
 // Storage object names must be ASCII-safe; the index prefix keeps them unique (display
 // names may collide and may be entirely Devanagari). The `transcriptions/` prefix is what
@@ -158,18 +166,18 @@ export function registerTranscriptionRoutes(
       }
     } catch (error) {
       // @fastify/multipart raises FST_REQ_FILE_TOO_LARGE from toBuffer when a part exceeds
-      // the per-request fileSize limit above.
+      // the per-request fileSize limit above. That limit is now unlimited, so this branch is
+      // unreachable and is kept only so a future ceiling has somewhere to land — hence a
+      // message that names no number (the routes/dlo.ts precedent).
       if (
         typeof error === 'object' &&
         error !== null &&
         'code' in error &&
         error.code === 'FST_REQ_FILE_TOO_LARGE'
       ) {
-        return reply.code(413).send({
-          error: {
-            message: `फाईल खूप मोठी आहे (कमाल ${UPLOAD_FILE_MAX_MB.toLocaleString('mr-IN')} MB प्रति फाईल).`,
-          },
-        });
+        return reply
+          .code(413)
+          .send({ error: { message: 'फाईल खूप मोठी आहे.' } });
       }
       throw error;
     }

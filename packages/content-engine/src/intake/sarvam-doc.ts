@@ -6,7 +6,7 @@
 //
 // Local pdf-parse was rejected for this job for a reason that still holds: government
 // PDFs are routinely SCANNED, and a text-layer parser yields nothing there, while this
-// OCRs Devanagari across 23 languages. One async Digitise job per chunk: multipart submit →
+// OCRs Devanagari with no language hint (see the request builder — sending one fails the job). One async Digitise job per chunk: multipart submit →
 // poll → download.
 //
 // CHUNKING. Sarvam validates "Page/image count must not exceed 10" at job start and takes
@@ -222,8 +222,13 @@ function splitWholeDocumentHtml(
 ): string[] | null {
   if (expectedPages === 1) return [bodyHtml(raw)];
   const document = new JSDOM(raw).window.document;
+  // `.page-body-container` is the wrapper the live Digitise HTML template actually emits,
+  // one per page (measured 2026-08-24 on a 4-page scan). `.page` is an exact class-token
+  // match and does not cover it, so every real document was falling through to the metadata
+  // fallback — correct output, but it throws away Sarvam's own headline/section-title/table
+  // classes and warns on every run. The exact-count rule below still guards page identity.
   const selector =
-    '[data-page-number], [data-page-num], .page, [id^="page-"], [id^="page_"]';
+    '[data-page-number], [data-page-num], .page, .page-body-container, [id^="page-"], [id^="page_"]';
   const wrappers = [...document.querySelectorAll(selector)].filter(
     (element) => !element.parentElement?.closest(selector),
   );
@@ -401,11 +406,16 @@ async function waitForDigitise(jobId: string, deadline: number): Promise<void> {
       typeof status.status === 'string' ? status.status.toLowerCase() : '';
     if (TERMINAL_STATUSES.has(state)) {
       if (state !== 'completed') {
-        const failed = status.usage?.pages_failed;
+        // Report the job id and the WHOLE usage block, not just pages_failed. A rejected
+        // request fails with every counter at 0, so "0 page(s) failed" read as a bug in our
+        // own page splitting and cost a bisect to disprove; `pages_total: 0` says plainly
+        // that Sarvam never opened the document, and the id is what makes the job
+        // retrievable from their side.
+        const usage = status.usage
+          ? ` usage=${JSON.stringify(status.usage)}`
+          : '';
         throw new Error(
-          `Sarvam Document AI ended with status ${state}${
-            typeof failed === 'number' ? ` (${failed} page(s) failed)` : ''
-          }.`,
+          `Sarvam Document AI ended with status ${state} (job ${jobId}).${usage}`,
         );
       }
       return;
@@ -432,7 +442,17 @@ async function extractChunkPages(
     new Blob([new Uint8Array(data)], { type: 'application/pdf' }),
     'input.pdf',
   );
-  form.append('language', 'mr-IN');
+  // NO `language` FIELD, and that is a measured fact about the live API rather than an
+  // omission (2026-08-24). Sending `language=mr-IN` makes the job fail in ~4 seconds with
+  // `status: failed` and `pages_total: 0` — Sarvam never opens the PDF, so `pages_failed`
+  // is 0 too and the error says nothing. Bisected on one real 4-page scanned GR: with no
+  // language it completes 4/4; `output_format` and `content_type` are each fine on their
+  // own; `mr-IN`, `mr`, `hi-IN`, `auto` and `unknown` all fail instantly and only `en-IN`
+  // passes. Omitting it lets Sarvam detect the script, and the Marathi comes back correct
+  // (verified against that document's Devanagari headings, numerals and tables). Set
+  // SARVAM_DOC_LANGUAGE only if Sarvam fixes the code path.
+  const language = process.env.SARVAM_DOC_LANGUAGE?.trim();
+  if (language) form.append('language', language);
   form.append('output_format', 'html');
   form.append('content_type', 'printed');
 
@@ -617,7 +637,8 @@ if (
         form instanceof FormData &&
         form.get('output_format') === 'html' &&
         form.get('content_type') === 'printed' &&
-        form.get('language') === 'mr-IN' &&
+        // A language field is what fails the live job outright; it must not come back.
+        form.get('language') === null &&
         form.get('file') instanceof Blob;
       return new Response(
         JSON.stringify({ job_id: 'job-1', status: 'pending' }),

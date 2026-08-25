@@ -1263,7 +1263,7 @@ export const STR = {
   transcribeNewTitle: 'नवीन ध्वनिलेखन',
   transcribeUpload: 'ध्वनिफीत जोडा',
   transcribeHint:
-    'एकावेळी अनेक फाईल जोडता येतील (कमाल १० फाईल्स, प्रत्येकी ५० MB). मोबाईलवरील नेहमीचे ध्वनिफीत प्रकार चालतात.',
+    'एकावेळी अनेक फाईल जोडता येतील (कमाल १० फाईल्स). फाईलच्या आकाराची मर्यादा नाही — पूर्ण बैठकीचे ध्वनिमुद्रणही चालेल. मोबाईलवरील नेहमीचे ध्वनिफीत प्रकार चालतात.',
   transcribeSharedReadError:
     'मोबाईलवरून पाठवलेली ध्वनिफीत उघडता आली नाही. कृपया पुन्हा Share करून Newsroom निवडा.',
   transcribeFilesTitle: 'जोडलेली ध्वनिमुद्रणे',
@@ -1297,7 +1297,8 @@ export const STR = {
   // Errors
   // Said at the picker, before the upload starts — the whole point of checking the size in
   // the browser. The number must match UPLOAD_FILE_MAX_MB (@dgipr/schemas), which is what the
-  // API enforces.
+  // API enforces. No recording picker states a ceiling any more (/dlo and /transcribe have
+  // none); this is reached by the surfaces that still pass `maxBytes`.
   fileTooLargeError:
     'फाईल खूप मोठी आहे. प्रत्येक फाईल कमाल ५० MB असावी. कृपया लहान फाईल निवडा.',
   genericError: 'काहीतरी चुकले. कृपया पुन्हा प्रयत्न करा.',
