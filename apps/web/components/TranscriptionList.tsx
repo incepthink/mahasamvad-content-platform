@@ -10,6 +10,8 @@
 import type { TranscriptionSummary } from '@dgipr/schemas';
 import { formatDate, STR, TRANSCRIPTION_STATUS_LABELS } from '../lib/strings';
 import { ErrorNotice } from './ErrorNotice';
+import { FileName } from './FileName';
+import { FILE_TITLE_MAX_CHARS } from '../lib/fileName';
 
 function Row({
   item,
@@ -33,7 +35,8 @@ function Row({
         aria-current={active ? 'true' : undefined}
         onClick={onOpen}
       >
-        {item.title}
+        {/* A transcription is titled with its first recording's file name. */}
+        <FileName name={item.title} max={FILE_TITLE_MAX_CHARS} />
       </button>
       <span className="dlo-work-meta">
         {item.fileCount > 1

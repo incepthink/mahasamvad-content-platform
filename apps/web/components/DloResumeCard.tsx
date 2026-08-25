@@ -12,6 +12,8 @@ import Link from 'next/link';
 import type { DloIntakeSummary } from '@dgipr/schemas';
 import { DLO_INTAKE_STEP_LABELS, STR } from '../lib/strings';
 import { DloStatusChip } from './DloStatusChip';
+import { FileName } from './FileName';
+import { FILE_TITLE_MAX_CHARS } from '../lib/fileName';
 
 export function DloResumeCard({ intake }: { intake: DloIntakeSummary }) {
   return (
@@ -21,7 +23,9 @@ export function DloResumeCard({ intake }: { intake: DloIntakeSummary }) {
         <h2>{STR.dloResumeTitle}</h2>
         <DloStatusChip status={intake.status} />
       </div>
-      <p className="dlo-resume-title">{intake.title}</p>
+      <p className="dlo-resume-title">
+        <FileName name={intake.title} max={FILE_TITLE_MAX_CHARS} />
+      </p>
       <p className="hint">
         {intake.step
           ? DLO_INTAKE_STEP_LABELS[intake.step]

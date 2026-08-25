@@ -44,7 +44,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import { loadScaled } from './article-chrome.js';
-import { extendCanvasForFooter } from './footer-extension.js';
+import { joinFooterStrip, type FooterJoinSpec } from './footer-extension.js';
 
 const ASSETS_DIR = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -93,15 +93,16 @@ export const SOCIAL_ARTWORK_HEIGHT = 1504;
 /** The render size to request for DGIPR social artwork, e.g. for generateImage / n8n. */
 export const SOCIAL_ARTWORK_SIZE = `${ASSET_BASE_WIDTH}x${SOCIAL_ARTWORK_HEIGHT}`;
 
-/** How much canvas is added below the artwork. Taller than the band by design — see the header. */
-const FOOTER_STRIP_HEIGHT = SOCIAL_POSTER_HEIGHT - SOCIAL_ARTWORK_HEIGHT;
-
-// The two shapes overlayTwitterChrome has to tell apart, as height/width: fresh artwork, and a
-// finished poster coming back round through a feedback edit. Both are derived from the
-// constants above rather than from the runtime band height, so the finished poster is exactly
-// 4:5 whatever the footer asset measures.
-const DESIGN_ASPECT = SOCIAL_ARTWORK_HEIGHT / ASSET_BASE_WIDTH;
-const FINISHED_ASPECT = SOCIAL_POSTER_HEIGHT / ASSET_BASE_WIDTH;
+// The two shapes overlayTwitterChrome has to tell apart: fresh artwork, and a finished poster
+// coming back round through a feedback edit. Both are derived from the constants above rather
+// than from the runtime band height, so the finished poster is exactly 4:5 whatever the footer
+// asset measures. joinFooterStrip owns the decision and the strip arithmetic, shared verbatim
+// with the YouTube-thumbnail lane so the two cannot drift.
+const SOCIAL_FOOTER_JOIN: FooterJoinSpec = {
+  baseWidth: ASSET_BASE_WIDTH,
+  artworkHeight: SOCIAL_ARTWORK_HEIGHT,
+  finishedHeight: SOCIAL_POSTER_HEIGHT,
+};
 
 export type GovernmentLockupRaster = Readonly<{
   data: Buffer;
@@ -391,21 +392,13 @@ export async function overlayTwitterChrome(poster: Buffer): Promise<Buffer> {
     loadSocialFooter(meta.width),
   ]);
 
-  const aspect = meta.height / meta.width;
-  const alreadyExtended =
-    Math.abs(aspect - FINISHED_ASPECT) < Math.abs(aspect - DESIGN_ASPECT);
-
-  // The strip is the remainder that makes the finished poster exactly 4:5, never the band's own
-  // height — that is what closes the ~5px the divisible-by-16 artwork leaves over. The max() is
-  // a floor, not a policy: a band taller than the remainder would otherwise be cropped.
-  const strip = Math.max(
+  const joined = await joinFooterStrip(
+    poster,
+    SOCIAL_FOOTER_JOIN,
     footer.height,
-    Math.round(FOOTER_STRIP_HEIGHT * scale),
   );
-  const base = alreadyExtended
-    ? poster
-    : await extendCanvasForFooter(poster, strip);
-  const baseHeight = alreadyExtended ? meta.height : meta.height + strip;
+  const base = joined.base;
+  const baseHeight = joined.height;
 
   const margin = Math.round(LOCKUP_MARGIN * scale);
   return sharp(base)

@@ -5,9 +5,11 @@
   "scripts": {
     "test": "playwright test",
     "test:ocr": "playwright test --grep @ocr",
+    "test:canaries": "playwright test --grep @canary",
     "checkly:test": "checkly test",
     "checkly:deploy": "checkly deploy",
-    "checkly:trigger": "checkly trigger --tags production,ocr --location ap-southeast-1 --record --retries 0 --timeout 1200"
+    "checkly:trigger": "checkly trigger --tags production,ocr --location ap-southeast-1 --record --retries 0 --timeout 1200",
+    "checkly:trigger:canaries": "checkly trigger --tags production,canary --location ap-southeast-1 --record --retries 0 --timeout 600"
   },
   "dependencies": {
     "@playwright/test": "1.62.1"

@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import { ComposeSafeTextarea, isComposingEvent } from './ComposeSafeInput';
 import { YouTubeLinkInput } from './YouTubeLinkInput';
+import { FileName } from './FileName';
 import { STR } from '../lib/strings';
 import { storedErrorMessage } from '../lib/errorMessage';
 import {
@@ -156,9 +157,11 @@ export function ChatComposer({
                 className={`chat-tray-item is-${attachment.state}`}
               >
                 <Icon size={16} aria-hidden="true" />
-                <span className="chat-tray-name">
-                  {attachment.name || STR.chatAttachImage}
-                </span>
+                <FileName
+                  name={attachment.name || STR.chatAttachImage}
+                  className="chat-tray-name"
+                  max={28}
+                />
                 <span className="chat-tray-state">
                   {stateLabel(attachment)}
                 </span>

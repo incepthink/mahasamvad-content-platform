@@ -17,6 +17,7 @@ import { downloadBlob } from '../lib/download';
 import { seedDraftNotes } from '../lib/dloDraft';
 import { STR, TRANSCRIPTION_STATUS_LABELS } from '../lib/strings';
 import { ErrorNotice } from './ErrorNotice';
+import { FileName } from './FileName';
 import { storedErrorMessage } from '../lib/errorMessage';
 
 function StatusChip({ status }: { status: TranscriptionDetail['status'] }) {
@@ -122,7 +123,7 @@ export function TranscriptionResult({
           <ul>
             {failed.map((file) => (
               <li key={file.name}>
-                {file.name}
+                <FileName name={file.name} />
                 {file.error
                   ? ` — ${storedErrorMessage(file.error, STR.genericError)}`
                   : ''}
@@ -152,10 +153,10 @@ export function TranscriptionResult({
                         rel="noreferrer"
                       >
                         <CirclePlay size={14} aria-hidden="true" />
-                        {file.name}
+                        <FileName name={file.name} />
                       </a>
                     ) : (
-                      <span className="file-name">{file.name}</span>
+                      <FileName name={file.name} className="file-name" />
                     )}
                     <span className="file-size">
                       {(file.chars ?? 0).toLocaleString('mr-IN')}{' '}

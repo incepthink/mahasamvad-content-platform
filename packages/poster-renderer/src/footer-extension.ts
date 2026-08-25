@@ -178,3 +178,83 @@ export async function extendCanvasForFooter(
     .png()
     .toBuffer();
 }
+
+/**
+ * The canvas an appended-footer lane asks the image model for, and the canvas the officer
+ * receives. Both expressed at `baseWidth`, so a render that comes back at another width
+ * still scales correctly.
+ */
+export type FooterJoinSpec = Readonly<{
+  /** The width the two heights below are stated against. */
+  baseWidth: number;
+  /** What the IMAGE MODEL is asked for — the finished image minus the strip. */
+  artworkHeight: number;
+  /** What the officer receives, once the strip is joined on. */
+  finishedHeight: number;
+}>;
+
+export type FooterJoinResult = Readonly<{
+  /** The canvas to stamp the band (and any other chrome) onto. */
+  base: Buffer;
+  width: number;
+  /** The base's height — the caller's `top` for a bottom-flush band. */
+  height: number;
+  /** False when the input was already a finished image coming back through a feedback edit. */
+  extended: boolean;
+}>;
+
+/**
+ * Decide whether an image is fresh artwork or an already-finished image, and grow the canvas
+ * accordingly so a bottom-flush branding band lands on pixels the model never painted.
+ *
+ * Shared by every lane that appends its footer (social posters, YouTube thumbnails), so the
+ * two cannot drift apart on the one decision that decides whether a poster grows a strip on
+ * every feedback round or buries its own last line.
+ *
+ * IDEMPOTENCE IS BY ASPECT, never by a flag or an absolute height. A feedback round re-edits
+ * the image this function last produced, which already carries its strip; extending
+ * unconditionally would grow it by the strip every time. Aspect rather than height because
+ * the model is not contractually bound to answer at `baseWidth`, and everything else in these
+ * overlays already scales off the width it actually got.
+ *
+ * The strip is the REMAINDER that makes the finished image exactly its intended aspect, never
+ * the band's own height — that is what absorbs the few pixels a divisible-by-16 artwork height
+ * leaves over. `max(bandHeight, …)` is a floor rather than a policy: a band taller than the
+ * remainder would otherwise be cropped.
+ */
+export async function joinFooterStrip(
+  image: Buffer,
+  spec: FooterJoinSpec,
+  bandHeight: number,
+): Promise<FooterJoinResult> {
+  const meta = await sharp(image).metadata();
+  if (!meta.width || !meta.height) {
+    throw new Error('Could not read image dimensions for the footer join.');
+  }
+  const scale = meta.width / spec.baseWidth;
+  const aspect = meta.height / meta.width;
+  const designAspect = spec.artworkHeight / spec.baseWidth;
+  const finishedAspect = spec.finishedHeight / spec.baseWidth;
+  const alreadyExtended =
+    Math.abs(aspect - finishedAspect) < Math.abs(aspect - designAspect);
+
+  if (alreadyExtended) {
+    return {
+      base: image,
+      width: meta.width,
+      height: meta.height,
+      extended: false,
+    };
+  }
+
+  const strip = Math.max(
+    bandHeight,
+    Math.round((spec.finishedHeight - spec.artworkHeight) * scale),
+  );
+  return {
+    base: await extendCanvasForFooter(image, strip),
+    width: meta.width,
+    height: meta.height + strip,
+    extended: true,
+  };
+}

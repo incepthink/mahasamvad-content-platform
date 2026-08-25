@@ -86,6 +86,7 @@ import { StyleReferenceField } from './StyleReferenceField';
 import { DLO_INTAKE_STEP_LABELS, STR } from '../lib/strings';
 import { errorMessage, storedErrorMessage } from '../lib/errorMessage';
 import { ErrorNotice } from './ErrorNotice';
+import { FileName } from './FileName';
 
 type DloStep = 'processing' | 'review' | 'generating' | 'output';
 
@@ -113,7 +114,7 @@ function SourceStatusList({ intake }: { intake: DloIntakeDetail }) {
             ) : (
               <FileText size={20} aria-hidden="true" />
             )}
-            <span className="file-name">{file.name}</span>
+            <FileName name={file.name} className="file-name" />
             <span className="file-size">
               {file.status === 'done'
                 ? `${STR.dloFileStatusDone}${
@@ -1083,7 +1084,7 @@ export default function DloWorkspace({ intakeId }: { intakeId: string }) {
                 <ul>
                   {failedFiles.map((file, index) => (
                     <li key={`${file.name}-${index}`}>
-                      {file.name}
+                      <FileName name={file.name} />
                       {file.error
                         ? ` — ${storedErrorMessage(file.error, STR.genericError)}`
                         : ''}

@@ -1,4 +1,4 @@
-name: OCR production monitor
+name: Production monitors
 
 on:
   schedule:
@@ -11,10 +11,13 @@ on:
       mode:
         description: What should this manual run do?
         required: true
-        default: trigger-now
+        default: test-now-before-deploy
         type: choice
         options:
-          - trigger-now
+          - test-now-before-deploy
+          - test-provider-canaries-before-deploy
+          - trigger-deployed-now
+          - trigger-provider-canaries-now
           - first-deploy-at-09:00
           - deploy-update-no-run
 
@@ -22,18 +25,18 @@ permissions:
   contents: read
 
 concurrency:
-  group: ocr-production-monitor
+  group: production-monitors
   cancel-in-progress: false
 
 jobs:
-  deploy-checkly-ocr:
-    if: github.event_name == 'workflow_dispatch' && inputs.mode != 'trigger-now'
-    name: Deploy Checkly OCR suite
+  test-checkly-ocr:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'test-now-before-deploy'
+    name: Test OCR suite without deploying it
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     env:
       CHECKLY_API_KEY: ${{ secrets.CHECKLY_API_KEY }}
-      CHECKLY_ACCOUNT_ID: ${{ vars.CHECKLY_ACCOUNT_ID }}
+      CHECKLY_ACCOUNT_ID: ${{ vars.CHECKLY_ACCOUNT_ID || secrets.CHECKLY_ACCOUNT_ID }}
     steps:
       - name: Check out monitoring configuration
         uses: actions/checkout@v4
@@ -47,24 +50,66 @@ jobs:
         working-directory: monitoring
         run: npm install
 
-      - name: First deployment and 09:00 run
+      - name: Run and record the undeployed OCR suite
+        working-directory: monitoring
+        run: >-
+          npx checkly test
+          --tags production,ocr
+          --location ap-southeast-1
+          --record
+          --test-session-name "OCR pre-deploy verification"
+          --retries 0
+          --timeout 1200
+          --reporter github
+
+      - name: Add Checkly report to the job summary
+        if: always()
+        working-directory: monitoring
+        shell: bash
+        run: |
+          if [ -f checkly-github-report.md ]; then
+            cat checkly-github-report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  deploy-checkly-monitors:
+    if: github.event_name == 'workflow_dispatch' && (inputs.mode == 'first-deploy-at-09:00' || inputs.mode == 'deploy-update-no-run')
+    name: Deploy Checkly monitoring suites
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CHECKLY_API_KEY: ${{ secrets.CHECKLY_API_KEY }}
+      CHECKLY_ACCOUNT_ID: ${{ vars.CHECKLY_ACCOUNT_ID || secrets.CHECKLY_ACCOUNT_ID }}
+    steps:
+      - name: Check out monitoring configuration
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install monitoring dependencies
+        working-directory: monitoring
+        run: npm install
+
+      - name: First deployment and 09:00 runs
         if: inputs.mode == 'first-deploy-at-09:00'
         working-directory: monitoring
         run: npx checkly deploy --force
 
-      - name: Update configuration without an extra OCR run
+      - name: Update configuration without extra monitor runs
         if: inputs.mode == 'deploy-update-no-run'
         working-directory: monitoring
         run: npx checkly deploy --force --no-schedule-on-deploy
 
   trigger-checkly-ocr:
-    if: github.event_name == 'schedule' || inputs.mode == 'trigger-now'
+    if: github.event_name == 'schedule' || inputs.mode == 'trigger-deployed-now'
     name: Trigger deployed Checkly OCR suite
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
       CHECKLY_API_KEY: ${{ secrets.CHECKLY_API_KEY }}
-      CHECKLY_ACCOUNT_ID: ${{ vars.CHECKLY_ACCOUNT_ID }}
+      CHECKLY_ACCOUNT_ID: ${{ vars.CHECKLY_ACCOUNT_ID || secrets.CHECKLY_ACCOUNT_ID }}
     steps:
       - name: Check out monitoring configuration
         uses: actions/checkout@v4
@@ -83,6 +128,85 @@ jobs:
           --record
           --retries 0
           --timeout 1200
+          --reporter github
+
+      - name: Add Checkly report to the job summary
+        if: always()
+        working-directory: monitoring
+        shell: bash
+        run: |
+          if [ -f checkly-github-report.md ]; then
+            cat checkly-github-report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  test-provider-canaries:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'test-provider-canaries-before-deploy'
+    name: Test provider canaries without deploying them
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CHECKLY_API_KEY: ${{ secrets.CHECKLY_API_KEY }}
+      CHECKLY_ACCOUNT_ID: ${{ vars.CHECKLY_ACCOUNT_ID || secrets.CHECKLY_ACCOUNT_ID }}
+    steps:
+      - name: Check out monitoring configuration
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install monitoring dependencies
+        working-directory: monitoring
+        run: npm install
+
+      - name: Run and record the undeployed provider canaries
+        working-directory: monitoring
+        run: >-
+          npx checkly test
+          --tags production,canary
+          --location ap-southeast-1
+          --record
+          --test-session-name "External provider pre-deploy verification"
+          --retries 0
+          --timeout 600
+          --reporter github
+
+      - name: Add Checkly report to the job summary
+        if: always()
+        working-directory: monitoring
+        shell: bash
+        run: |
+          if [ -f checkly-github-report.md ]; then
+            cat checkly-github-report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  trigger-provider-canaries:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'trigger-provider-canaries-now'
+    name: Trigger deployed provider canaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CHECKLY_API_KEY: ${{ secrets.CHECKLY_API_KEY }}
+      CHECKLY_ACCOUNT_ID: ${{ vars.CHECKLY_ACCOUNT_ID || secrets.CHECKLY_ACCOUNT_ID }}
+    steps:
+      - name: Check out monitoring configuration
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Trigger the deployed provider canaries
+        working-directory: monitoring
+        run: >-
+          npx --yes checkly@8.22.0 trigger
+          --tags production,canary
+          --location ap-southeast-1
+          --record
+          --retries 0
+          --timeout 600
           --reporter github
 
       - name: Add Checkly report to the job summary

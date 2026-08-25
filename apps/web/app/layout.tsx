@@ -3,6 +3,7 @@ import './globals.css';
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
 import { Mukta } from 'next/font/google';
+import Script from 'next/script';
 import { STR } from '../lib/strings';
 import { TasksProvider } from '../lib/TasksProvider';
 import { AppSidebar } from '../components/AppSidebar';
@@ -64,6 +65,18 @@ export default function RootLayout({
   return (
     <html lang="mr" suppressHydrationWarning>
       <body className={devanagari.className} suppressHydrationWarning>
+        <Script
+          src="https://www.googletagmanager.com/gtag/js?id=G-QB1WJY706H"
+          strategy="afterInteractive"
+        />
+        <Script id="google-analytics" strategy="afterInteractive">
+          {`
+            window.dataLayer = window.dataLayer || [];
+            function gtag(){dataLayer.push(arguments);}
+            gtag('js', new Date());
+            gtag('config', 'G-QB1WJY706H');
+          `}
+        </Script>
         <PwaRegistration />
         <TasksProvider>
           <AppSidebar />

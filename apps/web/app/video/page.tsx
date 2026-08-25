@@ -23,6 +23,7 @@ import { formatDate, STR, videoReadyScriptEstimate } from '../../lib/strings';
 import { errorMessage } from '../../lib/errorMessage';
 import { VideoStatusChip } from '../../components/VideoStatusChip';
 import { ErrorNotice } from '../../components/ErrorNotice';
+import { FileName } from '../../components/FileName';
 
 const NOTE_MIN = 20;
 
@@ -310,7 +311,7 @@ export default function VideoPage() {
             />
             {narrationAudio ? (
               <div className="btn-row" style={{ marginTop: 8 }}>
-                <span className="hint">{narrationAudio.name}</span>
+                <FileName name={narrationAudio.name} className="hint" />
                 <button
                   type="button"
                   className="btn btn-secondary"

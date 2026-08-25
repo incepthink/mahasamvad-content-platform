@@ -26,6 +26,7 @@
 import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import { formatFileSize } from './AudioFilePicker';
+import { FileName } from './FileName';
 import { STR } from '../lib/strings';
 
 export function ImageThumbnailGrid({
@@ -67,9 +68,7 @@ export function ImageThumbnailGrid({
           >
             <X size={14} aria-hidden="true" />
           </button>
-          <span className="image-tile-name" title={file.name}>
-            {file.name}
-          </span>
+          <FileName name={file.name} className="image-tile-name" max={22} />
           <span className="image-tile-size">{formatFileSize(file.size)}</span>
         </li>
       ))}

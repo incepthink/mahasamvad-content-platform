@@ -1083,6 +1083,14 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   `ExtractedText` so a chat table and a document table are recognised identically. Free harness:
   `npx tsx --tsconfig apps/web/tsconfig.check.json apps/web/lib/markdownRender.check.tsx`
 - Marathi UI strings → `apps/web/lib/strings.ts`
+- **Any file name shown on screen goes through `apps/web/components/FileName`** (over
+  `lib/fileName.ts`): a phone photograph arrives as 50 unbreakable characters and used to
+  push a card off a mobile screen. It trims for display — middle-cut keeping the extension
+  for a file name, end-cut for prose — keeps the full name in a `title`, and never touches
+  an `alt` or `aria-label`. The CSS half is the backstop for a row narrower than even a
+  trimmed name (`.page-row-name`/`.file-name`: `flex: 1 1 auto` + **`overflow: hidden`**,
+  which is what lets a flex item shrink below its content — `min-width: 0` alone does not).
+  Free harness: `npx tsx --tsconfig apps/web/tsconfig.check.json apps/web/lib/fileName.check.ts`.
 - UI components → `apps/web/components/*` (`ArticleView`, `PosterPanel`,
   `ProgressSteps`, `FeedbackBox`, `CopyEditForm`, `HistoryCard`, `StatusChip`,
   `GenerationThread` — the runs-from-this-note rail above `NextActions`)

@@ -12,7 +12,8 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   retries: 0,
-  maxFailures: 1,
+  // A failed provider must not hide the health of the remaining providers.
+  maxFailures: 0,
   use: {
     baseURL: process.env.OCR_BASE_URL ?? 'https://dgipr.hashcase.tech',
     trace: 'retain-on-failure',

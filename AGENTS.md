@@ -3087,6 +3087,127 @@ Canva OAuth authentication and poster handoff are implemented in `apps/api/src/r
 
 ## Latest Implementation Milestone
 
+- **A file name is TRIMMED for display, everywhere** (2026-08-25, no migration, no n8n, web
+  only): an officer's phone photograph reached /dlo's review step named
+  `54254676-ae8d-4efc-a2ad-aca8b0bfa729-1_all_32002.jpg` — 52 characters with no space and no
+  other break opportunity — and pushed the whole card off the screen, taking the two buttons
+  above it with it. Two causes, one in each half of the fix, and the second is the one that
+  would have let it come back somewhere else.
+  - **Nothing shortened a name for display.** Twelve surfaces printed `file.name` whole: the
+    /dlo review card and its source list, both upload pickers, the photograph tiles, the
+    shared document intake's three hint lines, the transcription result, the /video narration
+    pick, the re-attach callouts, both chat attachment lists, and the work-list titles (an
+    intake or transcription with no heading is TITLED with its first file name — server-side,
+    `intakeTitle`/`transcriptionTitle`, uncapped, where a note excerpt is capped at 80).
+    `lib/fileName.ts` + `components/FileName` are now the one place that decides: over budget,
+    a name with a real extension is cut in the MIDDLE (`54254676-ae8d-4efc-a2ad-aca8b….jpg` —
+    still legible, and the extension is what says what the thing is), and anything else, being
+    prose rather than a file name, is cut at the END where a sentence reads naturally. The full
+    name stays in a `title`, added only when something was actually cut, and every `alt` and
+    `aria-label` keeps the FULL name — the trim is visual, never what a screen reader is told.
+    Devanagari is never cut mid-syllable: a trailing matra, anusvara or virama is stripped off
+    the cut, since a matra split from its consonant is exactly the damage the poster and PDF
+    paths exist to prevent.
+  - **A trim alone is not a fix, and this is the half to keep.** A name is rendered in three
+    kinds of container and only one of them can be solved in code: a flex row can always be
+    narrower than even a trimmed name, and an INLINE name (`<FileText /> report.pdf · 12 पाने`)
+    is one that `text-overflow` cannot touch at all. So `.page-row-name` and `.file-name` are
+    now `flex: 1 1 auto` + `overflow: hidden` + `text-overflow: ellipsis` — **`overflow: hidden`
+    is the load-bearing property, not `min-width: 0`**: it is what drops a flex item's automatic
+    minimum size to zero, and `min-width: 0` alone leaves the row unable to shrink below its
+    content (the same trap `.dlo-work-title` documented and `overflow-wrap: anywhere` escaped a
+    different way). The chips and the counters beside them take `flex: none`, so the name is the
+    only part of the row that gives. `.hint` and `.info-callout` get `overflow-wrap: break-word`
+    — `break-word`, not `anywhere`, because `anywhere` changes intrinsic sizing and several
+    hints sit inside flex rows.
+  Verified 2026-08-25, all free: `apps/web` typecheck green, eslint clean on all 16 touched
+  files, prettier clean on every hunk of mine (`DloWorkspace.tsx` and `DloIntakeForm.tsx` report
+  whole-file complaints that are **pre-existing** — confirmed by running prettier over their HEAD
+  blobs, which fail identically — so do NOT `--write` them); a new **116-assertion** harness
+  (`npx tsx --tsconfig apps/web/tsconfig.check.json apps/web/lib/fileName.check.ts`) covering the
+  reported name, identity under budget, every shape staying inside every budget, prose cut at the
+  end, and no trailing matra at any budget from 8 to 44; and three browser passes at 390 and 1360
+  against the live app — the reported intake's card (18/18: trimmed, extension kept, full name in
+  the tooltip, and a 300-character name injected into the live row still unable to widen the
+  page), both upload pickers driven with genuinely long-named files (16/16, including that the
+  name stays ONE line), the document intake's hint (10/10), and an overflow sweep of all eleven
+  index routes at both widths with no page errors. Deploy is web only.
+
+- **A YouTube thumbnail carries the face of the person its TEXT is about** (2026-08-25, no
+  migration, no n8n): a thumbnail announcing an event in the Chief Minister's presence shipped
+  with the face of a stranger — the man standing on the reference template. It was not the image
+  model ignoring us. `buildYoutubeThumbnailPrompt` opened with `Create one 1280x656 YouTube
+  thumbnail artwork using the attached minister's photo.` / `Preserve the minister's face and
+  identity exactly; do not alter facial features.`, and the ONLY image ever attached is the
+  template (`editImage(reference, …)` in runner.ts — no portrait is supplied anywhere in the
+  repo). So the model read the template's stock face as "the minister's photo" and was told in
+  as many words never to change it. It obeyed.
+  Three things had to be true at once for that to survive:
+  - **The rule that would have caught it had never run.** `PEOPLE_RULE` ("depict the person the
+    supplied information names") sat in a body made unreachable by an early `return` — at HEAD,
+    literally dead code after it; in the working tree, a second exported function nothing
+    called. The completeness rule, text fidelity, the structure-only rule, the content firewall,
+    the artefact filter and the chrome rule were all dead with it, so the lane had been running
+    on a four-line prompt.
+  - **The firewall named every kind of placeholder except the largest one.** `CONTENT_FIREWALL`
+    covered words, numerals, dates, URLs, logos, emblems and QR codes; it never said the
+    template's PERSON was placeholder. `person, face, portrait` is now in that list, and its
+    absence is the whole reason the rule that makes a template's phone number placeholder did
+    not make the template's face placeholder.
+  - **Nothing resolved who the thumbnail is about.** The lane read the note only to pick a
+    template by capacity.
+  The fix names the person instead of inheriting them, and the reference goes back to supplying
+  what every other rule already says it supplies — geometry and style:
+  - **`generation/resolve-thumbnail-people.ts`** (new): ONE poster-copy-tier call per render
+    nominates whose photograph the thumbnail should carry, ranked, at most
+    `THUMBNAIL_MAX_PEOPLE` (2). **The guarantee is deterministic, not instructed** — the
+    resolve-poster-subject.ts doctrine — so `validateThumbnailPeople` requires every name to be
+    accountable outside the model before it reaches a paid render. Two ways in: VERBATIM in the
+    note (Marathi inflects by SUFFIX, so a substring test on the nominative form is
+    inflection-tolerant for free — फडणवीस matches फडणवीसांनी), or, when the note names only the
+    OFFICE, from the VERIFIED GLOSSARY's designation → holder map (0032), and **only when it
+    maps to exactly one holder**: Maharashtra has two उपमुख्यमंत्री, and guessing which is on the
+    thumbnail is the very error being removed. The prompt tells the model in as many words NOT
+    to supply a name from its own knowledge for an office-only mention. Returns `[]` on any
+    failure and never throws — **no face is the correct failure for a government product; a
+    wrong face is not.**
+  - **`peopleRule()`** replaces the constant. It names the person, asks for their real likeness,
+    and — the half that has to be there — **disowns the reference's own face in the same breath**
+    (`THE PERSON IN THE REFERENCE IMAGE IS NOT THIS PERSON` … `Their POSITION, SCALE and cut-out
+    treatment are what you inherit; their IDENTITY is not`). Without that second sentence,
+    `STRUCTURE ONLY` has just called the reference authoritative and the model keeps the face it
+    can see — the same failure the chrome rule fixes for the badge. An EMPTY list is a real
+    answer (a scheme, a deadline, an advisory): the model is told to remove the reference's
+    person and explicitly `Never invent an official`.
+  - The runner resolves people between reference selection and the prompt, passing
+    `mapDesignationsToPersons` for the office-only case; the map failing (or an un-applied 0032)
+    costs an office resolution, never the render.
+  **THE ONE THING NOT PROVEN, and it is the crux**: whether gpt-image renders a *recognisable*
+  देवेंद्र फडणवीस from his name alone. These models are unreliable at, and sometimes refuse,
+  specific real public figures. If the likeness is poor the fix is to ATTACH a portrait —
+  `editImage` already takes several buffers (canvas first, context after), so it is a one-line
+  call-site change plus somewhere to keep the photographs (a nullable `photo_path` on the
+  person's glossary row, or a per-run upload on the थंबनेल form, the
+  `POST /video/projects/:id/reference-image` shape). `peopleRule()` is where that would branch.
+  Verified 2026-08-25: workspace typecheck **7/7 green**, eslint clean on all four touched files,
+  prettier clean on everything of mine (`build-youtube-thumbnail-prompt.ts` and
+  `content-engine/src/index.ts` report whole-file complaints that are **pre-existing** —
+  confirmed by running prettier over their HEAD blobs, which fail identically, and by checking
+  prettier's diff no longer touches any of my lines — so do NOT `--write` them); 16 offline
+  resolver assertions (`tsx src/generation/resolve-thumbnail-people.ts` — inflection, honorific
+  stripping, an invented official refused, an unsupported designation dropped while the name
+  survives, the single-holder office resolved, the ambiguous one resolving to nobody, the cap
+  and de-duplication) and the prompt harness extended with the naming, the disowning, the
+  firewall's person clause, the person-free branch and **deny checks on the three exact strings
+  that caused the bug** (`attached minister`, `Preserve the minister`, `do not alter facial
+  features`) — check those first if a stranger's face ever returns. Verified LIVE (cents): the
+  exact failing note resolves to `मुख्यमंत्री देवेंद्र फडणवीस (note)`; a scheme/deadline note
+  resolves to **nobody**; and `मुख्यमंत्री यांच्या हस्ते…` resolves through the dictionary
+  (`glossary-office`), not from model knowledge. **Left for a real run** (one image charge): a
+  thumbnail on that note, to judge the likeness. Deploy is `@dgipr/content-engine` dist → API;
+  no migration, no n8n, no web change, no new env.
+
+
 - **Every failure now says something an officer can act on, and offers the button that
   fixes it** (2026-08-24, no migration, no n8n): three reported problems, one cause.
   Error text overflowed the card on a phone; errors read as developer output; and whether

@@ -47,6 +47,7 @@ import { storedErrorMessage } from '../lib/errorMessage';
 // Marathi-typing path that lost characters under a controlled box. See ComposeSafeInput.
 import { ComposeSafeTextarea } from './ComposeSafeInput';
 import { DocumentPages } from './DocumentPages';
+import { FileName } from './FileName';
 
 function marathiNumber(value: number): string {
   return value.toLocaleString('mr-IN');
@@ -323,7 +324,9 @@ function SourceHead({
         onChange={onToggle}
       />
       {icon}
-      <span className="page-row-name">{label}</span>
+      {/* Trimmed: an officer's phone photograph arrives as 45 unbreakable characters,
+          which used to push this whole card off a mobile screen. */}
+      <FileName name={label} className="page-row-name" />
       {kindLabel ? <span className="chip chip-queued">{kindLabel}</span> : null}
       {extraChip ? <span className="chip chip-queued">{extraChip}</span> : null}
       {!included ? (

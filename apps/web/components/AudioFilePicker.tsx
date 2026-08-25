@@ -21,6 +21,7 @@ import { Mic, Music, X } from 'lucide-react';
 import { AUDIO_FILE_ACCEPT, isAudioFileName } from '@dgipr/schemas';
 import { acceptFilePicks } from '../lib/filePicks';
 import { CardTitle } from './CardTitle';
+import { FileName } from './FileName';
 import { STR } from '../lib/strings';
 
 export function formatFileSize(bytes: number): string {
@@ -43,7 +44,7 @@ export function AudioFileList({
       {files.map((file, index) => (
         <li key={`${file.name}-${file.size}`} className="file-row">
           <Music size={20} aria-hidden="true" />
-          <span className="file-name">{file.name}</span>
+          <FileName name={file.name} className="file-name" />
           <span className="file-size">{formatFileSize(file.size)}</span>
           <button
             type="button"

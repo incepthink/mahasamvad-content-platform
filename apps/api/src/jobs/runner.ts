@@ -43,6 +43,7 @@ import {
   placementById,
   posterCopyItemCount,
   resolvePosterSubject,
+  resolveThumbnailPeople,
   toStyleHistory,
   recordImageCost,
   resolveCmoReference,
@@ -76,6 +77,7 @@ import {
   buildCmoCirclePhotoPrompt,
   CMO_POSTER_SIZE,
   SOCIAL_ARTWORK_SIZE,
+  YOUTUBE_ARTWORK_SIZE,
   editImage,
   fitToYoutubeThumbnail,
   overlayYoutubeChrome,
@@ -100,6 +102,7 @@ import {
   uploadPng,
   downloadPng,
   upsertGlossaryTerm,
+  mapDesignationsToPersons,
   type GenerationCostIncrement,
   type GenerationRow,
   type SupabaseClient,
@@ -2246,22 +2249,54 @@ async function renderAndStoreYoutubeThumbnail(
     posterCapacityWarnings.delete(id);
   }
 
-  // 2. Prompt (pure string assembly, no model call). The officer's note IS the content.
+  // 2. WHOSE FACE. One cheap text call, and it guards the paid image call below.
+  //
+  //    The templates in the library are finished posters carrying a cut-out portrait of
+  //    whichever official THAT post was about. Nothing used to tell the model who the NEW
+  //    thumbnail is about, and the prompt went further — it called the attached template "the
+  //    attached minister's photo" and said to preserve that face exactly — so a thumbnail
+  //    about the Chief Minister shipped with a stranger's face. The identity now comes from
+  //    the officer's own text and the reference supplies only the arrangement.
+  //
+  //    The verified dictionary is passed in so a note naming only the OFFICE
+  //    ("मुख्यमंत्र्यांच्या हस्ते") still resolves to a person — the same designation → holder
+  //    map prepareDesignations uses (migration 0032). Best-effort: the map failing (or an
+  //    un-applied 0032) costs an office-only resolution, never the render.
+  const officeHolders = await mapDesignationsToPersons(client).catch(
+    (error: unknown) => {
+      console.warn(`[job ${id}] designation map unavailable:`, error);
+      return new Map<string, string[]>();
+    },
+  );
+  //    Never throws — no face is the correct failure here, a wrong face is not.
+  const people = await resolveThumbnailPeople({
+    information: row.note,
+    officeHolders,
+  });
+
+  // 3. Prompt (pure string assembly, no model call). The officer's note IS the content.
   const prompt = buildYoutubeThumbnailPrompt({
     information: row.note,
     itemCount: resolved.itemCount,
     slotShortfall: resolved.shortfall,
+    people,
   });
 
-  // 3. Render: edit the chosen reference. The reference is fetched here rather than handed to
+  // 4. Render: edit the chosen reference. The reference is fetched here rather than handed to
   //    a workflow as a URL, so the only thing that can fail is a fetch we control.
+  //    The size asked for is the ARTWORK, not the finished thumbnail: the department band is
+  //    joined onto a strip BELOW it (overlayYoutubeChrome), so nothing the model paints can be
+  //    covered by branding. Sending '1280x720' here is what buried the officer's own text.
   await updateGeneration(client, id, { step: 'image' });
   const reference = await fetchReferencePng(resolved.master.url);
-  const edited = await editImage(reference, prompt, { size: '1280x720' });
+  const edited = await editImage(reference, prompt, {
+    size: YOUTUBE_ARTWORK_SIZE,
+  });
   recordImageCost('youtube', imageQuality());
 
-  // 4. Fit + chrome. fitToYoutubeThumbnail is normally a no-op; it exists so a model that
-  //    answers in another aspect cannot put the footer band at the wrong height silently.
+  // 5. Fit + chrome. fitToYoutubeThumbnail is normally a no-op; it exists so a model that
+  //    answers in another aspect cannot be mistaken for the OTHER canonical shape by the
+  //    footer join, putting the band at the wrong height silently.
   const thumbnailPng = await overlayYoutubeChrome(
     await fitToYoutubeThumbnail(edited),
   );
@@ -3093,7 +3128,10 @@ export function startPosterImageFeedbackJob(
       });
       // The input is the poster ALREADY carrying the chrome (or the marked-up copy of it),
       // and the chrome is re-stamped after the edit — which is what keeps it crisp through
-      // repeated rounds, exactly as the two poster lanes do.
+      // repeated rounds, exactly as the two poster lanes do. So this asks for the FINISHED
+      // 1280x720 frame, not the artwork canvas an initial render is asked for:
+      // overlayYoutubeChrome recognises it by aspect and re-stamps the band in place rather
+      // than joining a second strip on.
       const current = await fetchReferencePng(inputUrl);
       const edited = await editImage(current, prompt, { size: '1280x720' });
       recordImageCost('youtube', imageQuality());

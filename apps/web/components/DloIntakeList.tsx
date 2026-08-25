@@ -26,6 +26,8 @@ import { ErrorNotice } from './ErrorNotice';
 import { Disclosure } from './Disclosure';
 import { DloStatusChip } from './DloStatusChip';
 import { Pagination } from './Pagination';
+import { FileName } from './FileName';
+import { FILE_TITLE_MAX_CHARS } from '../lib/fileName';
 
 // Enough that a day's work is one page, small enough that the folded-open list does not
 // become the page again.
@@ -35,8 +37,10 @@ function IntakeRow({ intake }: { intake: DloIntakeSummary }) {
   return (
     <li className="dlo-work-row">
       <DloStatusChip status={intake.status} />
+      {/* An intake with no heading and no notes is titled with its first file name,
+          which can be far longer than this row. */}
       <Link className="dlo-work-title" href={`/dlo/${intake.id}`}>
-        {intake.title}
+        <FileName name={intake.title} max={FILE_TITLE_MAX_CHARS} />
       </Link>
       <span className="dlo-work-meta">
         {intake.sourceCount.toLocaleString('mr-IN')} {STR.dloSourceCountSuffix}

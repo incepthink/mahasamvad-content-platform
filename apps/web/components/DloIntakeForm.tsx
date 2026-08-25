@@ -63,6 +63,7 @@ import { YouTubeLinkInput } from './YouTubeLinkInput';
 import { STR } from '../lib/strings';
 import { errorMessage } from '../lib/errorMessage';
 import { ErrorNotice } from './ErrorNotice';
+import { FileName } from './FileName';
 
 // This picker takes recordings only; documents go through <DocumentIntake>. Which
 // containers count as a recording is @dgipr/schemas' AUDIO_FILE_* — the same list the API
@@ -384,7 +385,9 @@ export function DloIntakeForm() {
               <p>{STR.dloDraftAudioLost}</p>
               <ul>
                 {lostAudioNames.map((name) => (
-                  <li key={name}>{name}</li>
+                  <li key={name}>
+                    <FileName name={name} />
+                  </li>
                 ))}
               </ul>
             </div>
@@ -396,7 +399,9 @@ export function DloIntakeForm() {
               <p>{STR.dloDraftImagesLost}</p>
               <ul>
                 {lostImageNames.map((name) => (
-                  <li key={name}>{name}</li>
+                  <li key={name}>
+                    <FileName name={name} />
+                  </li>
                 ))}
               </ul>
             </div>

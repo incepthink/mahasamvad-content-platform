@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { MarkdownText } from './MarkdownText';
 import { STR } from '../lib/strings';
+import { FileName } from './FileName';
 
 const KIND_ICON = {
   image: ImageIcon,
@@ -65,7 +66,11 @@ function AttachmentChips({
             className="chat-chip"
           >
             <Icon size={15} aria-hidden="true" />
-            <span className="chat-chip-name">{attachment.name}</span>
+            <FileName
+              name={attachment.name}
+              className="chat-chip-name"
+              max={28}
+            />
             {attachment.chars !== undefined ? (
               <span className="chat-chip-meta">
                 {attachment.chars.toLocaleString('mr-IN')} अक्षरे

@@ -54,6 +54,8 @@ export {
   fitToYoutubeThumbnail,
   YOUTUBE_THUMBNAIL_WIDTH,
   YOUTUBE_THUMBNAIL_HEIGHT,
+  YOUTUBE_ARTWORK_HEIGHT,
+  YOUTUBE_ARTWORK_SIZE,
 } from './youtube-chrome.js';
 export {
   annotateFeedbackRegions,

@@ -554,6 +554,13 @@ export {
   type SubjectKind,
 } from './generation/resolve-poster-subject.js';
 
+export {
+  resolveThumbnailPeople,
+  validateThumbnailPeople,
+  THUMBNAIL_MAX_PEOPLE,
+  type ThumbnailPerson,
+} from './generation/resolve-thumbnail-people.js';
+
 export type ContentChunk = Readonly<{
   id: string; // `${articleId}-${chunkIndex}`
   articleId: number;

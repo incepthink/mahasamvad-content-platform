@@ -54,6 +54,7 @@ import { errorMessage, storedErrorMessage } from '../lib/errorMessage';
 import { CardTitle } from './CardTitle';
 import { DocumentPages } from './DocumentPages';
 import { ErrorNotice } from './ErrorNotice';
+import { FileName } from './FileName';
 
 const EXTENSIONS: Record<DocumentKind, string> = {
   pdf: '.pdf',
@@ -558,7 +559,8 @@ export function DocumentIntake({
           ) : null}
           {detail ? (
             <p className="hint">
-              <FileText size={16} aria-hidden="true" /> {detail.fileName}
+              <FileText size={16} aria-hidden="true" />{' '}
+              <FileName name={detail.fileName} />
             </p>
           ) : null}
         </div>
@@ -594,8 +596,9 @@ export function DocumentIntake({
           {reselecting ? STR.docChangeSelectionHint : STR.docSelectHint}
         </p>
         <p className="hint" style={{ marginTop: 8 }}>
-          <FileText size={16} aria-hidden="true" /> {detail.fileName} ·{' '}
-          {STR.docSelectTotal} {marathiNumber(detail.pageCount ?? 0)}
+          <FileText size={16} aria-hidden="true" />{' '}
+          <FileName name={detail.fileName} /> · {STR.docSelectTotal}{' '}
+          {marathiNumber(detail.pageCount ?? 0)}
         </p>
 
         <DocumentPages
@@ -655,7 +658,8 @@ export function DocumentIntake({
       </CardTitle>
       <p className="hint">{STR.docReviewHint}</p>
       <p className="hint" style={{ marginTop: 8 }}>
-        <FileText size={16} aria-hidden="true" /> {detail.fileName}
+        <FileText size={16} aria-hidden="true" />{' '}
+        <FileName name={detail.fileName} />
       </p>
 
       {/* A translation-style failure after some pages were read: the text is still usable,

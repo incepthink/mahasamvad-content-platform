@@ -21,8 +21,11 @@
 //     whose free harness (`poster:preview:chrome:youtube`) ASSERTS the stamped chrome
 //     fits inside exactly these numbers.
 //   - a PEOPLE rule. These thumbnails conventionally carry a cut-out portrait of the
-//     official the video is about; the reference supplies that arrangement, and the model
-//     is told to introduce a person ONLY where the supplied information names one.
+//     official the video is about. WHO that is comes from the officer's text
+//     (resolve-thumbnail-people.ts) and is named in the prompt; the reference supplies only
+//     WHERE and HOW the portrait sits. Until 2026-08-25 the identity was inherited from the
+//     reference's own pixels, which is how a thumbnail about the Chief Minister shipped with
+//     a stranger's face — see peopleRule() and buildYoutubeThumbnailPrompt below.
 //
 // KNOWN TRADE, stated so nobody "fixes" it by accident: on this path gpt-image paints the
 // Devanagari, which opts out of the repo's poster doctrine (paint no text; typeset it with
@@ -44,11 +47,33 @@ import {
   type ReservedZoneGeometry,
   type StampedChrome,
 } from './reserved-zone-rule.js';
+import type { ThumbnailPerson } from './resolve-thumbnail-people.js';
 
-/** The canvas every thumbnail prompt, render and chrome overlay on this lane assumes. */
+/**
+ * The FINISHED thumbnail the officer receives, and the canvas a pixel-feedback round
+ * re-edits: 1280x720, a true 16:9.
+ */
 export const YOUTUBE_THUMBNAIL_DIMENSIONS = {
   width: 1280,
   height: 720,
+} as const;
+
+/**
+ * The canvas an INITIAL render is asked for.
+ *
+ * The department strip is no longer pasted OVER the artwork — it is stamped onto a 64px strip
+ * joined BELOW it (poster-renderer's footer-extension.ts), so the model paints 656 rows and is
+ * never handed the band's height to give back. That is the whole fix for a thumbnail shipping
+ * with its own information under the footer: the reserve was a request an image model with no
+ * ruler kept losing against "fill the frame", and the height now comes out of the REQUEST.
+ *
+ * Keep in sync with YOUTUBE_ARTWORK_HEIGHT in poster-renderer/src/youtube-chrome.ts. It must
+ * stay divisible by 16 — gpt-image-2 rejects anything else — which is why it is 656 and not
+ * 720 - 52.
+ */
+export const YOUTUBE_ARTWORK_DIMENSIONS = {
+  width: 1280,
+  height: 656,
 } as const;
 
 // Keep in sync with poster-renderer/src/youtube-chrome.ts. The harness there measures the
@@ -56,16 +81,29 @@ export const YOUTUBE_THUMBNAIL_DIMENSIONS = {
 // shipping as a headline sitting behind the footer band.
 const RESERVED_LOCKUP_WIDTH = 130;
 const RESERVED_LOCKUP_HEIGHT = 130;
-const RESERVED_FOOTER_HEIGHT = 70;
+// What the band actually occupies: yt-footer.png measured at 1280 wide. On the INITIAL prompt
+// it is quoted only so the model knows how much branding arrives BELOW its artwork; it is a
+// genuine reserve on the FEEDBACK lane, where the band really is re-stamped over a finished
+// frame. It was 70 while the band was an overlay — a deliberate 18px of slack that bought
+// nothing, since the rule protecting it was the thing being ignored.
+const RESERVED_FOOTER_HEIGHT = 52;
+// The typographic cushion at the bottom edge, matching the social lane's 16px. NOT a background
+// reserve: the design must run off the bottom edge in whatever colours it uses, or the finished
+// thumbnail comes back letterboxed above its own footer — the failure a real poster (97b64542)
+// shipped when this margin was phrased as a plain-background void. See reserved-zone-rule.ts.
+const FOOTER_APPENDED_MARGIN = 16;
 
 // The same shape the poster lane uses, so the two cannot drift apart on a rule that was
-// already copied verbatim between them once. See reserved-zone-rule.ts.
+// already copied verbatim between them once. `height` is the ARTWORK the model paints, never
+// the 720-tall frame the officer receives — exactly as SOCIAL_ZONES.height is 1504 and not
+// 1600. See reserved-zone-rule.ts.
 const THUMBNAIL_ZONES: ReservedZoneGeometry = {
-  width: YOUTUBE_THUMBNAIL_DIMENSIONS.width,
-  height: YOUTUBE_THUMBNAIL_DIMENSIONS.height,
+  width: YOUTUBE_ARTWORK_DIMENSIONS.width,
+  height: YOUTUBE_ARTWORK_DIMENSIONS.height,
   lockupWidth: RESERVED_LOCKUP_WIDTH,
   lockupHeight: RESERVED_LOCKUP_HEIGHT,
   footerHeight: RESERVED_FOOTER_HEIGHT,
+  footerAppendedMargin: FOOTER_APPENDED_MARGIN,
 };
 
 export type BuildYoutubeThumbnailPromptInput = Readonly<{
@@ -80,6 +118,11 @@ export type BuildYoutubeThumbnailPromptInput = Readonly<{
   // told to extend the reference's item pattern — explicitly, because its default response
   // to too much content is to drop some.
   slotShortfall?: { needed: number; available: number } | undefined;
+  // Whose photograph the thumbnail should carry, most important first, as resolved from the
+  // officer's own text by resolve-thumbnail-people.ts. Empty or absent means NOBODY — which
+  // is a real answer (a scheme, a deadline, an advisory), not a missing value, and produces a
+  // portrait-free thumbnail rather than an invented official.
+  people?: readonly ThumbnailPerson[] | undefined;
 }>;
 
 // --- the blocks carried over verbatim from the onbrand poster prompt -------------------
@@ -88,13 +131,18 @@ const TEXT_FIDELITY =
   'REPRODUCE THE MARATHI TEXT EXACTLY. Copy every word character for character from the supplied information: every Devanagari letter, every matra and vowel sign, every conjunct (जोडाक्षर), every anusvara and every numeral, exactly as written and in the same order. Do not re-spell, re-word, translate, transliterate, correct, abbreviate, or "improve" any word. Do not drop or reposition a matra. Do not break a conjunct into separate letters. Marathi words rendered with a misplaced or missing matra are wrong even if they look plausible — re-read each word against the supplied text before finishing.';
 
 const STRUCTURE_ONLY =
-  'Use the provided reference image as the AUTHORITATIVE VISUAL STRUCTURE for the thumbnail. Preserve its overall composition, section placement, proportions, content distribution, imagery zones, visual balance, and density while replacing its information. STRUCTURE means only geometry and visual hierarchy—not the meaning, factual content, or element type of any reference slot. Do not redesign the structure, compress everything onto one side, or leave large blank or unused areas. Fill the usable canvas as efficiently as the reference image does — the USABLE CANVAS is the area above the reserved bottom strip and outside the reserved top-right corner, never the full height of the frame.';
+  'Use the provided reference image as the AUTHORITATIVE VISUAL STRUCTURE for the thumbnail. Preserve its overall composition, section placement, proportions, content distribution, imagery zones, visual balance, and density while replacing its information. STRUCTURE means only geometry and visual hierarchy—not the meaning, factual content, or element type of any reference slot. Do not redesign the structure, compress everything onto one side, or leave large blank or unused areas. Fill the usable canvas as efficiently as the reference image does — the USABLE CANVAS is the area above the bottom margin described at the end of these instructions and outside the reserved top-right corner.';
 
 const COLOUR_FREE =
   "The reference image controls STRUCTURE ONLY, not colour. Choose the thumbnail's colour palette freely and creatively; ensure strong contrast and easy readability for every Marathi word and Devanagari numeral, including when the frame is viewed small.";
 
+// NOTE — "person, face, portrait" was added to this list on 2026-08-25 and is load-bearing.
+// The firewall named every KIND of placeholder the reference carries except the one occupying
+// the largest area of it: the official in the photograph. So the rule that makes a template's
+// phone number placeholder did not make the template's FACE placeholder, and the face was the
+// thing being wrongly reproduced. See peopleRule() below, which states the positive half.
 const CONTENT_FIREWALL =
-  'REFERENCE-CONTENT FIREWALL: treat every word, numeral, date, year, URL, domain, app name, contact detail, identifier, logo, emblem, QR code, barcode, and factual claim visible in the reference image as unrelated placeholder content. Copy NONE of it. Every textual, numeric, coded, or factual element in the output must be directly supported by the supplied information. Never invent or infer a missing date, link, QR code, identifier, or fact merely to fill a reference slot. If the supplied information has no matching content for a reference element, KEEP the successful reference layout and its surrounding spacing, but make that slot visually neutral using the thumbnail’s background/design treatment, or fill it only with other source-supported content or relevant non-informational imagery. Do not reflow or redesign the overall composition just because a reference slot is unsupported.';
+  'REFERENCE-CONTENT FIREWALL: treat every word, numeral, date, year, URL, domain, app name, contact detail, identifier, logo, emblem, QR code, barcode, person, face, portrait, and factual claim visible in the reference image as unrelated placeholder content. Copy NONE of it. Every textual, numeric, coded, or factual element in the output must be directly supported by the supplied information. Never invent or infer a missing date, link, QR code, identifier, or fact merely to fill a reference slot. If the supplied information has no matching content for a reference element, KEEP the successful reference layout and its surrounding spacing, but make that slot visually neutral using the thumbnail’s background/design treatment, or fill it only with other source-supported content or relevant non-informational imagery. Do not reflow or redesign the overall composition just because a reference slot is unsupported.';
 
 const ARTEFACT_FILTER =
   'DOCUMENT-ARTIFACT FILTER: never put source-document production metadata on the thumbnail—page numbers, वृत्त. क्र., issue/report/file/document numbers, running headers or footers, filenames, scan marks, OCR artifacts, or similar administrative labels are not thumbnail information, even if they appear in the supplied text.';
@@ -105,19 +153,63 @@ const ARTEFACT_FILTER =
 // wide in a list. Stated as a legibility test rather than a word count, because the
 // information's own length varies and a count would either truncate it or pad it.
 const THUMBNAIL_FORM = [
-  `THIS IS A YOUTUBE THUMBNAIL, NOT A POSTER. One single ${YOUTUBE_THUMBNAIL_DIMENSIONS.width} x ${YOUTUBE_THUMBNAIL_DIMENSIONS.height} landscape 16:9 frame, read at a glance on a small phone tile.`,
+  // The size named here is the ARTWORK, not the finished thumbnail: the footer band is joined
+  // on below afterwards. Saying "16:9" would be false of this canvas and is deliberately gone —
+  // the poster lane dropped its own "4:5" for the same reason when its footer was appended.
+  `THIS IS A YOUTUBE THUMBNAIL, NOT A POSTER. One single ${YOUTUBE_ARTWORK_DIMENSIONS.width} x ${YOUTUBE_ARTWORK_DIMENSIONS.height} landscape frame, read at a glance on a small phone tile once the official footer band is joined on below it.`,
   'Set the text with THUMBNAIL WEIGHT: one dominant Marathi headline as the largest element by far, with any remaining supplied details (date, time, venue, a short supporting line) set clearly smaller beneath or beside it. Every word must still be readable when the whole frame is shrunk to 320 pixels wide — if a line would not survive that, it is set too small or there is too much of it competing. Never fill the frame with paragraphs or with running body text.',
 ].join('\n');
 
 const DESIGN_SUITS_MESSAGE =
   'MAKE THE DESIGN SUIT THE MESSAGE. Judge from the supplied information what kind of video this is — a live broadcast, an inauguration or लोकार्पण, a scheme launch, an announcement, a review meeting, an interview — and make the finished thumbnail read unmistakably as that through its colour choice, imagery and emphasis. Take this from the INFORMATION, never from whatever the reference image happens to be about: the reference’s own topic is unrelated placeholder content.';
 
-// People. The convention these thumbnails follow is a cut-out portrait of the official the
-// video concerns, so the arrangement is inherited from the reference — but a person is
-// introduced only where the information names one, or the model will invent an official
-// for a thumbnail that is about a department, a scheme or a deadline.
-const PEOPLE_RULE =
-  'PEOPLE: if the reference image places a cut-out portrait of a person, keep that arrangement — same side, same scale, same cut-out treatment against the background — and depict the person the supplied information names, dressed and presented as a senior Maharashtra government figure would be. Introduce a person ONLY where the supplied information names one; where it names nobody, use that area for the thumbnail’s own design treatment or supported imagery instead of inventing an official. Never place a face, a person or a portrait inside the reserved zones below.';
+// People.
+//
+// These thumbnails conventionally carry a cut-out portrait of the official the video is
+// about. Until now the prompt inherited that face from the REFERENCE — it called the template
+// "the attached minister's photo" and said to preserve it exactly — so a thumbnail about the
+// Chief Minister shipped with the face of whoever happened to stand on the template. The
+// reference is a finished poster from an unrelated post; its person is placeholder in exactly
+// the sense every word and logo on it is placeholder.
+//
+// So WHO is now named explicitly, resolved from the officer's own text
+// (resolve-thumbnail-people.ts), and the reference supplies only WHERE and HOW the portrait
+// sits. Two rules, and both halves matter:
+//   - name the person and ask for their real likeness;
+//   - say in the same breath that the reference's own person must GO, because STRUCTURE ONLY
+//     above has just called that image authoritative and the model will otherwise keep the
+//     face it can see. That is the same failure the chrome rule fixes for the badge.
+// Empty list = nobody, which is a real answer for a scheme/deadline/advisory thumbnail. The
+// model is told to leave the area to the design rather than invent an official.
+function peopleRule(people: readonly ThumbnailPerson[]): string {
+  if (people.length === 0) {
+    return 'PEOPLE: this thumbnail is NOT about any one person. Do not place a portrait, a face, a cut-out figure or a photograph of a person on it. If the reference image shows a person, that person belongs to an unrelated earlier post — REMOVE them completely and use that area for the thumbnail’s own design treatment, or for imagery the supplied information actually supports. Never invent an official, a politician or a spokesperson to fill the space.';
+  }
+
+  const described = people
+    .map((person) =>
+      person.designation.length > 0
+        ? `${person.name} (${person.designation}, Government of Maharashtra)`
+        : `${person.name} (Government of Maharashtra)`,
+    )
+    .join(' and ');
+
+  const principal = people[0] as ThumbnailPerson;
+
+  return [
+    `PEOPLE — WHOSE FACE THIS THUMBNAIL CARRIES: ${described}. ${
+      people.length === 1
+        ? 'This is the ONLY person who may appear on the thumbnail.'
+        : `These are the ONLY people who may appear, with ${principal.name} the larger and more prominent of the two.`
+    }`,
+    // The whole point of the change, and it has to outrank STRUCTURE ONLY explicitly.
+    'THE PERSON IN THE REFERENCE IMAGE IS NOT THIS PERSON. Whoever appears in the reference belongs to an unrelated earlier post and is placeholder content exactly like its words and logos. Remove them completely — do not keep, trace, age, restyle or partially reuse their face, hair, build or clothing. Their POSITION, SCALE and cut-out treatment are what you inherit; their IDENTITY is not.',
+    `Render a photorealistic cut-out portrait of ${principal.name} as they actually look — an accurate, recognisable likeness of this specific real public figure, in the formal dress a senior Maharashtra government figure wears, lit and cut out to sit cleanly against the thumbnail's background.`,
+    'Place the portrait where the reference places its own — same side of the frame, same rough scale, same treatment against the background — so the composition still works.',
+    'Do not add any other person, face, crowd or silhouette beyond the one(s) named above.',
+    'Never place a face, a person or a portrait inside the reserved zones below.',
+  ].join('\n');
+}
 
 // What youtube-chrome.ts stamps, described as the model sees it — on the reference template it
 // is editing (initial) and on the finished thumbnail it is editing (feedback). The sixth block
@@ -135,8 +227,19 @@ const RESERVED_ZONES = reservedZoneBlock(
 );
 
 /**
- * The initial thumbnail prompt: edit the chosen reference template into a finished
- * 1280x720 frame carrying the officer's information.
+ * The initial thumbnail prompt: edit the chosen reference template into the officer's
+ * 1280x656 ARTWORK, which the API then joins the footer band below to make a finished
+ * 1280x720 thumbnail.
+ *
+ * HISTORY — until 2026-08-25 this function returned a four-line prompt and the body below was
+ * unreachable after an early `return`, so none of the blocks the poster lane proved out (the
+ * completeness rule, text fidelity, structure-only, the content firewall, the artefact filter,
+ * the chrome rule, the people rule) had ever actually run on this lane. That short prompt also
+ * opened by calling the attached reference "the attached minister's photo" and instructing the
+ * model to preserve that face exactly — while the only image ever attached is the TEMPLATE.
+ * That single sentence is why a thumbnail about the Chief Minister shipped with a stranger's
+ * face: the model was doing as it was told. Both are gone; whose face the thumbnail carries is
+ * now stated explicitly by peopleRule() from names resolved out of the officer's own text.
  */
 export function buildYoutubeThumbnailPrompt(
   input: BuildYoutubeThumbnailPromptInput,
@@ -169,18 +272,6 @@ export function buildYoutubeThumbnailPrompt(
   }
 
   return [
-    'Create one 1280×720 YouTube thumbnail using the attached minister’s photo.',
-    'Preserve the minister’s face and identity exactly; do not alter facial features.',
-    '',
-    'Display this Marathi information clearly:',
-    information,
-    '',
-    'Keep all faces and text outside the top-right 130×130 px logo area and above y=650, leaving the bottom 70 px for the footer.',
-    'Background design may continue through these areas.',
-    'Do not generate any logo or footer.',
-  ].join('\n');
-
-  return [
     'Using the given reference image, generate a YouTube video thumbnail for this information:',
     '',
     information,
@@ -191,7 +282,7 @@ export function buildYoutubeThumbnailPrompt(
     DESIGN_SUITS_MESSAGE,
     STRUCTURE_ONLY,
     COLOUR_FREE,
-    PEOPLE_RULE,
+    peopleRule(input.people ?? []),
     CONTENT_FIREWALL,
     ARTEFACT_FILTER,
     // "Do not add a logo. Do not add a footer." was the whole of this rule and did not hold on
@@ -307,7 +398,20 @@ if (
     'स्थळ : सह्याद्री राज्य अतिथीगृह, मुंबई',
   ].join('\n');
 
+  // The person resolve-thumbnail-people.ts would return for that text.
+  const CM: ThumbnailPerson = {
+    name: 'देवेंद्र फडणवीस',
+    designation: 'मुख्यमंत्री',
+    source: 'note',
+  };
+
   const prompt = buildYoutubeThumbnailPrompt({
+    information: INFORMATION,
+    itemCount: 5,
+    people: [CM],
+  });
+  // The same text with nobody at its centre — a scheme/deadline thumbnail.
+  const facelessPrompt = buildYoutubeThumbnailPrompt({
     information: INFORMATION,
     itemCount: 5,
   });
@@ -334,7 +438,7 @@ if (
     'MAKE THE DESIGN SUIT THE MESSAGE',
     'lost the design/message rule',
   );
-  need(prompt, 'PEOPLE:', 'lost the people rule');
+  need(prompt, 'PEOPLE — WHOSE FACE', 'lost the people rule');
   need(
     prompt,
     'THIS IS A YOUTUBE THUMBNAIL, NOT A POSTER',
@@ -366,9 +470,27 @@ if (
   // The reserved-zone numbers are the contract with youtube-chrome.ts. Assert the literal
   // values rather than the interpolation, so editing one constant without the other fails.
   need(prompt, 'top-right 130 x 130 pixels', 'reserved lockup zone drifted');
-  need(prompt, 'bottom 70 pixels', 'reserved footer zone drifted');
-  need(prompt, '1280 x 720 output', 'canvas size drifted');
-  need(prompt, 'y=650', 'content bottom drifted');
+  // "above the reserved bottom strip" was true while the band was an overlay and is false now:
+  // the design runs off the bottom edge and only text stops short. The social lane's onbrand
+  // prompt asserts the same sentence for the same reason.
+  need(
+    prompt,
+    'the USABLE CANVAS is the area above the bottom margin',
+    'the usable canvas still describes a reserved bottom strip',
+  );
+  // The ARTWORK canvas, not the 720-tall frame the officer receives: the footer band is joined
+  // on below it. Asking the model for 720 is precisely what buried the officer's own text.
+  need(prompt, '1280 x 656 output', 'artwork canvas drifted');
+  need(prompt, 'y=640', 'content bottom drifted');
+  // The bottom is a JOIN now, so the old cover-zone wording must be GONE: left in place it asks
+  // for a void the band no longer occupies, and the thumbnail comes back letterboxed above its
+  // own footer.
+  for (const gone of ['bottom 70 pixels', 'bottom 52 pixels']) {
+    if (prompt.includes(gone))
+      failures.push(
+        `the bottom is still described as a cover zone ("${gone}")`,
+      );
+  }
 
   // The two clauses that made the poster path drop the officer's own points must NOT be here.
   if (/select only (the|its) most important/i.test(prompt))
@@ -378,7 +500,10 @@ if (
 
   // Order matters: the model weights late blocks most, so the reserved zones — the one rule
   // whose violation cannot be repaired afterwards — sit near the end.
-  if (prompt.indexOf('RESERVED BRANDING ZONES') < prompt.indexOf('PEOPLE:'))
+  if (
+    prompt.indexOf('RESERVED BADGE CORNER') <
+    prompt.indexOf('PEOPLE — WHOSE FACE')
+  )
     failures.push('reserved zones no longer follow the content rules');
 
   // The zone must be kept clear of CONTENT, not cut out of the artwork — a social poster came
@@ -393,6 +518,94 @@ if (
       );
   }
 
+  // --- the geometry contract with poster-renderer ----------------------------------------
+  //
+  // The bottom is a JOIN: the band is stamped on a strip added below the artwork, so a bottom
+  // RESERVE would letterbox the thumbnail above its own footer, and asking for the finished
+  // 720-tall frame would bury the officer's own text under the band. Both shapes are denied.
+  need(
+    prompt,
+    'THE BOTTOM EDGE IS A JOIN, NOT A COVER ZONE',
+    'the prompt still treats the bottom as a cover zone',
+  );
+  for (const gone of ['1280x720', '1280×720', 'y=650', 'bottom 70 px']) {
+    if (prompt.includes(gone))
+      failures.push(
+        `the prompt still quotes the pre-append geometry ("${gone}")`,
+      );
+  }
+
+  // --- WHOSE FACE: the reported bug ------------------------------------------------------
+  //
+  // A thumbnail about the Chief Minister shipped carrying the face of the person who happened
+  // to be on the reference template, because the prompt called that template "the attached
+  // minister's photo" and said to preserve the face exactly — while the template is the ONLY
+  // image ever attached. These assertions pin both halves of the fix: the person is named, and
+  // the reference's own person is explicitly disowned.
+  need(
+    prompt,
+    'देवेंद्र फडणवीस',
+    'the resolved person is not named in the prompt',
+  );
+  need(
+    prompt,
+    'मुख्यमंत्री',
+    'the resolved designation is not given as an identity hint',
+  );
+  need(
+    prompt,
+    'THE PERSON IN THE REFERENCE IMAGE IS NOT THIS PERSON',
+    'the prompt no longer disowns the reference’s own face',
+  );
+  need(
+    prompt,
+    'recognisable likeness of this specific real public figure',
+    'the prompt no longer asks for the named person’s real likeness',
+  );
+  need(
+    prompt,
+    'person, face, portrait',
+    'the content firewall no longer treats the reference’s person as placeholder',
+  );
+  // The exact sentences that caused the bug. If either comes back, so does the wrong face.
+  for (const gone of [
+    'attached minister',
+    'Preserve the minister',
+    'do not alter facial features',
+  ]) {
+    if (prompt.includes(gone))
+      failures.push(`the prompt re-inherits the reference’s face ("${gone}")`);
+  }
+  // The portrait must be placed where the reference places one — that is the only thing the
+  // reference still supplies about the person — without inheriting who they are.
+  need(
+    prompt,
+    'their IDENTITY is not',
+    'the prompt no longer separates the reference’s arrangement from its identity',
+  );
+
+  // --- nobody named: a scheme/deadline thumbnail -----------------------------------------
+  //
+  // An empty list is a real answer, not a missing value. The model must be told to remove the
+  // reference's person and NOT to invent a replacement — inventing an official is exactly the
+  // failure mode a "there should be a face here" template invites.
+  need(
+    facelessPrompt,
+    'NOT about any one person',
+    'a person-free thumbnail does not say so',
+  );
+  need(
+    facelessPrompt,
+    'Never invent an official',
+    'a person-free thumbnail may still invent an official',
+  );
+  // NOTE: not a search for the name itself — the officer's own INFORMATION names him, and it
+  // is reproduced verbatim by design. What must be absent is the block that DIRECTS a portrait.
+  if (facelessPrompt.includes('WHOSE FACE THIS THUMBNAIL CARRIES'))
+    failures.push('a person-free prompt still directs a portrait');
+  if (facelessPrompt.includes('recognisable likeness'))
+    failures.push('a person-free prompt still asks for a portrait');
+
   let threw = false;
   try {
     buildYoutubeThumbnailPrompt({ information: '   ' });
@@ -400,6 +613,15 @@ if (
     threw = true;
   }
   if (!threw) failures.push('empty information was accepted');
+
+  let threwDetailed = false;
+  try {
+    buildYoutubeThumbnailPrompt({ information: '   ' });
+  } catch {
+    threwDetailed = true;
+  }
+  if (!threwDetailed)
+    failures.push('empty information was accepted by the detailed builder');
 
   // Shortfall wording appears only when a shortfall was reported.
   const shortfallPrompt = buildYoutubeThumbnailPrompt({
