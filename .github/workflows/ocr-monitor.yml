@@ -1,0 +1,95 @@
+name: OCR production monitor
+
+on:
+  schedule:
+    # India has no daylight-saving change: 09:30 UTC = 15:00 IST.
+    - cron: '30 9 * * *'
+    # 15:30 UTC = 21:00 IST. The 09:00 IST run is Checkly's native daily run.
+    - cron: '30 15 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: What should this manual run do?
+        required: true
+        default: trigger-now
+        type: choice
+        options:
+          - trigger-now
+          - first-deploy-at-09:00
+          - deploy-update-no-run
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ocr-production-monitor
+  cancel-in-progress: false
+
+jobs:
+  deploy-checkly-ocr:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode != 'trigger-now'
+    name: Deploy Checkly OCR suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CHECKLY_API_KEY: ${{ secrets.CHECKLY_API_KEY }}
+      CHECKLY_ACCOUNT_ID: ${{ vars.CHECKLY_ACCOUNT_ID }}
+    steps:
+      - name: Check out monitoring configuration
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install monitoring dependencies
+        working-directory: monitoring
+        run: npm install
+
+      - name: First deployment and 09:00 run
+        if: inputs.mode == 'first-deploy-at-09:00'
+        working-directory: monitoring
+        run: npx checkly deploy --force
+
+      - name: Update configuration without an extra OCR run
+        if: inputs.mode == 'deploy-update-no-run'
+        working-directory: monitoring
+        run: npx checkly deploy --force --no-schedule-on-deploy
+
+  trigger-checkly-ocr:
+    if: github.event_name == 'schedule' || inputs.mode == 'trigger-now'
+    name: Trigger deployed Checkly OCR suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CHECKLY_API_KEY: ${{ secrets.CHECKLY_API_KEY }}
+      CHECKLY_ACCOUNT_ID: ${{ vars.CHECKLY_ACCOUNT_ID }}
+    steps:
+      - name: Check out monitoring configuration
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Trigger the deployed OCR check
+        working-directory: monitoring
+        run: >-
+          npx --yes checkly@8.22.0 trigger
+          --tags production,ocr
+          --location ap-southeast-1
+          --record
+          --retries 0
+          --timeout 1200
+          --reporter github
+
+      - name: Add Checkly report to the job summary
+        if: always()
+        working-directory: monitoring
+        shell: bash
+        run: |
+          if [ -f checkly-github-report.md ]; then
+            cat checkly-github-report.md >> "$GITHUB_STEP_SUMMARY"
+          fi

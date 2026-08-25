@@ -1,0 +1,6 @@
+node_modules/
+.npm-cache/
+playwright-report/
+test-results/
+checkly-github-report.md
+.env

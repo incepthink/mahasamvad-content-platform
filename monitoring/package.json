@@ -1,0 +1,18 @@
+{
+  "name": "dgipr-checkly-monitoring",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "test:ocr": "playwright test --grep @ocr",
+    "checkly:test": "checkly test",
+    "checkly:deploy": "checkly deploy",
+    "checkly:trigger": "checkly trigger --tags production,ocr --location ap-southeast-1 --record --retries 0 --timeout 1200"
+  },
+  "dependencies": {
+    "@playwright/test": "1.62.1"
+  },
+  "devDependencies": {
+    "checkly": "8.22.0"
+  }
+}
