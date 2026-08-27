@@ -10,11 +10,13 @@
 // never-invent rule the article prompt rests on — treats this text as the source document
 // itself and cannot tell a helpful paraphrase from what was printed.
 //
-// IMAGES ALWAYS GO THROUGH OPENAI, whatever OCR_PROVIDER says. That flag is the PDF
-// rollback (ocr-provider.ts): it chooses between two backends that both take a PDF, and
-// Sarvam's document job wants a .pdf upload, so honouring it here would mean a second image
-// path — one that runs only in a configuration nobody uses today, and would therefore be
-// broken on the day it was finally needed. One backend, one prompt, one thing to verify.
+// THIS IS NO LONGER THE DEFAULT (2026-08-27). It used to be the only image backend, on the
+// reasoning that OCR_PROVIDER chooses between two backends that both take a PDF while
+// Sarvam's document job wants a .pdf upload — which turned out to be false: Digitise takes an
+// image directly. So images now honour OCR_PROVIDER exactly as pages do (ocr-provider.ts),
+// Sarvam reads them by default, and this file is the OCR_PROVIDER=openai rollback. Keep it
+// working: it is the only image path with a PROMPT, and therefore the only one whose fidelity
+// rules can be changed at all.
 //
 // NO PAGES, SO NO SPEND GATE. A PDF stops at a page picker because OCR is billed per page
 // and the officer decides which are worth it; an image IS one page, so there is nothing to
@@ -22,9 +24,8 @@
 // itself, in its extract phase, rather than the input step doing it.
 
 import { readFile } from 'node:fs/promises';
-import { basename, extname } from 'node:path';
+import { basename } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import sharp from 'sharp';
 import { openAiFetch } from '../http/openai-request.js';
 import { recordChatUsage, type ChatUsage } from '../cost/cost-meter.js';
 import {
@@ -32,6 +33,7 @@ import {
   ocrSystemPrompt,
   unwrapWholeAnswerFence,
 } from './openai-doc.js';
+import { imageOcrMimeForFileName, normaliseImageForOcr } from './image-prep.js';
 
 const CHAT_URL = 'https://api.openai.com/v1/chat/completions';
 
@@ -55,20 +57,6 @@ const IMAGE_TIMEOUT_MS = Number.parseInt(
 // nothing, and the knob remains only so the next person can re-measure without a code change.
 const IMAGE_REASONING_EFFORT = process.env.OPENAI_OCR_REASONING_EFFORT?.trim();
 
-// What the model can be handed. Kept in step with IMAGE_MIME_BY_EXTENSION in @dgipr/schemas,
-// which is what the web picker offers and the API stores under — this is the last of the
-// three and exists so a file that reached the job cannot fail with an opaque API error.
-const MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.png': 'image/png',
-  '.webp': 'image/webp',
-};
-
-export function imageOcrMimeForFileName(fileName: string): string | null {
-  return MIME_BY_EXTENSION[extname(fileName).toLowerCase()] ?? null;
-}
-
 type ChatResponse = {
   choices: Array<{
     message: { content: string | null };
@@ -77,70 +65,17 @@ type ChatResponse = {
   usage?: ChatUsage;
 };
 
-// ---------- normalising the photograph before it is sent ----------
-//
-// NOT an accuracy fix, and worth saying so: a 3000 px render of the calibration page and a
-// 1000 px one read equally well (and made the same digit mistakes), so nobody should expect
-// this to move quality. It is here for two other reasons.
-//
-// The API downscales a `detail: high` image anyway — fit inside 2048x2048, then the SHORTEST
-// side to 768 — so doing it here throws away nothing the model would have seen, while making
-// what it receives the same shape whatever camera the officer used, and bounding a request
-// body that for a raw 12-megapixel PNG would otherwise be tens of megabytes.
-//
-// The SECOND reason is EXIF orientation, and it is the one that would otherwise look like a
-// model failure: a phone held upright writes a landscape image plus a "rotate me" tag, and a
-// reader that ignores the tag sees the page on its side. `sharp().rotate()` with no argument
-// applies it — and sharp drops metadata on output, so it cannot then be applied twice.
+// How much of the photograph the model is shown. OpenAI's own two steps: fit inside
+// 2048x2048, then the SHORTEST side to 768 — it downscales a `detail: high` image that way
+// itself, so doing it here throws away nothing it would have seen. Sarvam is given a
+// different bound for a reason; see sarvam-image.ts.
 const OCR_LONG_EDGE = 2048;
 const OCR_SHORT_EDGE = 768;
-
-async function normaliseForOcr(
-  name: string,
-  data: Buffer,
-): Promise<Readonly<{ data: Buffer; mimeType: string }>> {
-  try {
-    const image = sharp(data).rotate();
-    const { width, height } = await image.metadata();
-    if (!width || !height) throw new Error('unreadable image dimensions');
-
-    // OpenAI's own two steps, in order, and never an enlargement — upscaling a small scan
-    // invents no detail and only makes the request bigger.
-    const longEdge = Math.max(width, height);
-    const firstScale = Math.min(1, OCR_LONG_EDGE / longEdge);
-    const shortEdge = Math.min(width, height) * firstScale;
-    const scale = firstScale * Math.min(1, OCR_SHORT_EDGE / shortEdge);
-
-    const resized =
-      scale < 1
-        ? image.resize({
-            width: Math.round(width * scale),
-            height: Math.round(height * scale),
-            fit: 'inside',
-          })
-        : image;
-    // JPEG rather than the original container: a photograph is a photograph, and q92 is what
-    // the video path already sends frames at. It also bounds the base64 body, which for a raw
-    // 12-megapixel PNG would be tens of megabytes.
-    return {
-      data: await resized.jpeg({ quality: 92 }).toBuffer(),
-      mimeType: 'image/jpeg',
-    };
-  } catch (error) {
-    // Never fail a source over the preparation step: the API can read the original bytes, so
-    // the worst case here is the unnormalised behaviour rather than a lost photograph.
-    console.warn(
-      `[image-ocr] ${name}: could not normalise, sending as-is:`,
-      error,
-    );
-    return { data, mimeType: imageOcrMimeForFileName(name) ?? 'image/jpeg' };
-  }
-}
 
 // Reads one image. Returns the transcribed Markdown, which is empty when the picture carries
 // no readable text — that is a real answer ("this photograph contributed nothing"), not a
 // failure, and the caller reports it as such rather than failing the source.
-export async function extractImageText(
+export async function extractImageTextViaOpenAI(
   name: string,
   data: Buffer,
   options?: Readonly<{ timeoutMs?: number }>,
@@ -155,7 +90,10 @@ export async function extractImageText(
   if (!imageOcrMimeForFileName(name)) {
     throw new Error(`${name}: फक्त JPG, PNG आणि WEBP प्रतिमा वाचता येतात.`);
   }
-  const prepared = await normaliseForOcr(name, data);
+  const prepared = await normaliseImageForOcr(name, data, {
+    longEdge: OCR_LONG_EDGE,
+    shortEdge: OCR_SHORT_EDGE,
+  });
 
   const response = await openAiFetch(CHAT_URL, {
     label: 'image page',
@@ -210,6 +148,9 @@ export async function extractImageText(
 // Read a real photograph and see what comes back — the loop for the prompt above:
 //
 //   tsx --env-file=../../.env src/intake/image-ocr.ts <photo.jpg>
+//
+// This reads on OpenAI whatever OCR_PROVIDER says — it is the OpenAI client's own loop. For
+// what a /dlo photograph actually gets, run the seam's default: sarvam-image.ts.
 if (
   process.argv[1] &&
   import.meta.url === pathToFileURL(process.argv[1]).href
@@ -224,7 +165,7 @@ if (
     readFile(file)
       .then(async (data) => {
         const started = Date.now();
-        const text = await extractImageText(basename(file), data);
+        const text = await extractImageTextViaOpenAI(basename(file), data);
         console.log(
           `${basename(file)} (${(data.length / 1024 / 1024).toFixed(1)} MB) — ${
             text.length

@@ -24,7 +24,7 @@
 import {
   createCostAccumulator,
   extractDocxText,
-  extractImageText,
+  extractImageTextViaProvider,
   extractPdfPagesDetailed,
   probePdf,
   runInCostScope,
@@ -291,7 +291,9 @@ async function extractImageEntry(
   const data = await downloadEntry(client, entry);
   const cost = createCostAccumulator();
   const text = await runInCostScope(cost, () =>
-    runInCostTask('document_ocr', () => extractImageText(entry.name, data)),
+    runInCostTask('document_ocr', () =>
+      extractImageTextViaProvider(entry.name, data),
+    ),
   );
   recordTasksFromCost(client, 'article', cost);
   return { ...entry, status: 'done', chars: text.length, text };

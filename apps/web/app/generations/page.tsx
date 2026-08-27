@@ -203,16 +203,16 @@ function HistoryPageBody() {
   // One clock for the whole view, taken when the list lands, so two date pills evaluated
   // milliseconds apart can never disagree about where "आज" starts.
   const [loadedAt, setLoadedAt] = useState<Date>(() => new Date());
-  const [page, setPage] = useState(1);
 
   // Read the facets off the URL through primitives, so `filters` keeps a stable identity
-  // across re-renders that changed nothing — the debounce and the page reset below both
-  // depend on it not churning.
+  // across re-renders that changed nothing — the debounce below depends on it not
+  // churning.
   const rawQuery = params.get('q') ?? '';
   const rawFormat = params.get('format');
   const rawStatus = params.get('status');
   const rawDate = params.get('date');
   const rawSort = params.get('sort');
+  const rawPage = params.get('page');
 
   const filters: Filters = useMemo(
     () => ({
@@ -232,23 +232,45 @@ function HistoryPageBody() {
     [rawQuery, rawFormat, rawStatus, rawDate, rawSort],
   );
 
+  // The page number lives in the URL beside the facets, for the same reason they do:
+  // opening a run and pressing Back is a full remount, so a page held in component state
+  // would land the officer back on page 1 of a list they had paged three deep into.
+  const requestedPage = Math.max(1, Number.parseInt(rawPage ?? '', 10) || 1);
+
+  // The current view, read by callbacks that must not be re-armed when it changes.
+  const filtersRef = useRef(filters);
+  filtersRef.current = filters;
+
   // The text box stays local state so typing is never a render behind the URL.
   const [query, setQuery] = useState(rawQuery);
 
-  const setFilters = useCallback(
-    (next: Filters) => {
+  const applyView = useCallback(
+    (next: Filters, nextPage: number) => {
       const search = new URLSearchParams();
       if (next.query) search.set('q', next.query);
       if (next.format) search.set('format', next.format);
       if (next.status) search.set('status', next.status);
       if (next.date) search.set('date', next.date);
       if (next.sort !== 'newest') search.set('sort', next.sort);
+      if (nextPage > 1) search.set('page', String(nextPage));
       const qs = search.toString();
       // replace, not push: narrowing one list is refining a single view, and it must not
       // take a press of Back per pill to leave the page (the /analytics range precedent).
       router.replace(qs ? `/generations?${qs}` : '/generations');
     },
     [router],
+  );
+
+  // Any facet change returns to page 1 — the old page number describes a list that no
+  // longer exists. This is what the removed reset effect used to guarantee.
+  const setFilters = useCallback(
+    (next: Filters) => applyView(next, 1),
+    [applyView],
+  );
+
+  const setPage = useCallback(
+    (next: number) => applyView(filtersRef.current, next),
+    [applyView],
   );
 
   // Extracted from the effect so the failure notice has something to call. The list is
@@ -272,8 +294,6 @@ function HistoryPageBody() {
   // Debounce the search into the URL so filtering/paging doesn't thrash on each
   // keystroke. The current filters are read through a ref so this effect depends only
   // on the typed string — re-arming the timer on every render would never let it fire.
-  const filtersRef = useRef(filters);
-  filtersRef.current = filters;
   useEffect(() => {
     const normalized = query.trim().toLowerCase();
     if (normalized === filtersRef.current.query) return;
@@ -340,14 +360,11 @@ function HistoryPageBody() {
     }));
   }, [items, filters, loadedAt]);
 
-  // A shrinking result set (a new filter) must not leave `page` out of range. Keyed on a
-  // string rather than the object so a stray re-render can never reset the page.
-  const filterKey = `${filters.query}|${filters.format}|${filters.status}|${filters.date}|${filters.sort}`;
+  // A shrinking result set (a stale link, or a list that lost rows since it was paged)
+  // must not leave the requested page out of range. Clamped for display rather than
+  // rewritten, so an out-of-range URL costs no second navigation.
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  useEffect(() => {
-    setPage(1);
-  }, [filterKey]);
-  const safePage = Math.min(page, pageCount);
+  const safePage = Math.min(requestedPage, pageCount);
   const visible = filtered.slice(
     (safePage - 1) * PAGE_SIZE,
     safePage * PAGE_SIZE,

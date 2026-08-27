@@ -1,7 +1,9 @@
-// Provider seam for reading a PDF's PIXELS, mirroring stt-provider.ts (speech),
-// narration-provider.ts (TTS), clip-provider.ts (clips) and frame-provider.ts (frames).
-// pdf-pages.ts owns the policy — text layer vs paid read — and asks this module for "the
-// text of these pages"; OCR_PROVIDER trades the backend in an .env edit.
+// Provider seam for reading PIXELS — a PDF's pages, or a photograph of a document — mirroring
+// stt-provider.ts (speech), narration-provider.ts (TTS), clip-provider.ts (clips) and
+// frame-provider.ts (frames). pdf-pages.ts owns the policy for a PDF (text layer vs paid
+// read) and asks this module for "the text of these pages"; a photograph has no such policy,
+// being one page with nothing to pick, so the /dlo job asks for its text directly.
+// OCR_PROVIDER trades the backend for both in an .env edit.
 //
 // Deliberately thin, like its four siblings: per-provider quirks live inside each client
 // (Sarvam's ≤10-page async jobs with their upload/poll/download/ZIP-reassembly dance,
@@ -14,10 +16,12 @@
 // whole file could not be read; the DLO caller records it against that file and the intake
 // survives.
 //
-// THE DEFAULT IS SARVAM. It is the purpose-built document path: Digitise reads a printed PDF
-// as structured HTML, including headings and tables, so the officer can review the document
-// in the same shape the generation pipeline receives. OCR_PROVIDER=openai remains the
-// one-line rollback.
+// THE DEFAULT IS SARVAM, for pages and photographs alike. It is the purpose-built document
+// path: Digitise reads a printed PDF as structured HTML, including headings and tables, so
+// the officer can review the document in the same shape the generation pipeline receives, and
+// it takes a photograph as the same job (sarvam-image.ts, which asks for Markdown instead —
+// see its header for why the two output formats differ). OCR_PROVIDER=openai remains the
+// one-line rollback for both.
 //
 // A THIRD BACKEND, gemini-doc.ts, reads a whole PDF in ONE call (up to 1,000 pages / 50 MB).
 // It is not the deployment default and is not meant to be: it is what /chat's attachments are
@@ -32,11 +36,17 @@
 import { pathToFileURL } from 'node:url';
 import { recordOcrCost } from '../cost/cost-meter.js';
 import { extractPdfPagesViaOcr } from './sarvam-doc.js';
+import { extractImageTextViaSarvam } from './sarvam-image.js';
 import { extractPdfPagesViaOpenAI } from './openai-doc.js';
+import { extractImageTextViaOpenAI } from './image-ocr.js';
 import { extractPdfPagesViaGemini } from './gemini-doc.js';
 import { type ExtractPdfOptions, type PdfPage } from './pdf-shared.js';
 
 const SUPPORTED_PROVIDERS = ['gemini', 'openai', 'sarvam'] as const;
+
+// A photograph has two backends, not three: gemini-doc.ts reads a PDF in one call and no
+// image path was built on it, so naming it here would be a promise this module cannot keep.
+const SUPPORTED_IMAGE_PROVIDERS = ['openai', 'sarvam'] as const;
 
 // `override` is one read's own choice of backend, and the ONLY caller that passes one is the
 // document intake service on behalf of /chat — see ExtractPdfOptions.ocrProvider. Everything
@@ -53,6 +63,51 @@ export function ocrProviderName(override?: string | undefined): string {
 export function chatOcrProviderName(): string {
   const raw = process.env.CHAT_OCR_PROVIDER;
   return raw && raw.trim() !== '' ? raw.trim().toLowerCase() : 'gemini';
+}
+
+// Which backend a PHOTOGRAPH is read with. It follows OCR_PROVIDER, because since 2026-08-27
+// both backends take an image and there is no reason for a deployment's document OCR and its
+// photograph OCR to be different products. IMAGE_OCR_PROVIDER overrides it for the one case
+// that cannot follow — an OCR_PROVIDER=gemini deployment, which has no image path — and is
+// the way to keep photographs on OpenAI while pages move to Sarvam, or the reverse.
+export function imageOcrProviderName(): string {
+  const raw = process.env.IMAGE_OCR_PROVIDER ?? process.env.OCR_PROVIDER;
+  return raw && raw.trim() !== '' ? raw.trim().toLowerCase() : 'sarvam';
+}
+
+export function imageOcrProviderApiKeyEnv(): string {
+  return imageOcrProviderName() === 'openai'
+    ? 'OPENAI_API_KEY'
+    : 'SARVAM_API_KEY';
+}
+
+// Read a photograph of a document. Returns Markdown, EMPTY when the picture carries no
+// readable text — a real answer, which the /dlo job reports as a callout beside the picture
+// rather than failing the source.
+export async function extractImageTextViaProvider(
+  name: string,
+  data: Buffer,
+  options?: Readonly<{ timeoutMs?: number }>,
+): Promise<string> {
+  const provider = imageOcrProviderName();
+  // Metered HERE, like the page seam, so a third image backend is counted the day it is
+  // added. One photograph is one page — that is the whole reason it needs no page picker.
+  const meter = (text: string): string => {
+    recordOcrCost(provider, 1);
+    return text;
+  };
+  switch (provider) {
+    case 'sarvam':
+      return extractImageTextViaSarvam(name, data, options).then(meter);
+    case 'openai':
+      return extractImageTextViaOpenAI(name, data, options).then(meter);
+    default:
+      throw new Error(
+        `Unknown image OCR provider "${provider}". ` +
+          `Supported: ${SUPPORTED_IMAGE_PROVIDERS.join(', ')}. ` +
+          `Set IMAGE_OCR_PROVIDER if OCR_PROVIDER names a backend with no image path.`,
+      );
+  }
 }
 
 // Which env var a caller must find for the configured provider, so a route or job can name
@@ -149,6 +204,37 @@ if (
   );
   delete process.env.CHAT_OCR_PROVIDER;
 
+  delete process.env.OCR_PROVIDER;
+  delete process.env.IMAGE_OCR_PROVIDER;
+  check(
+    'images read on sarvam by default',
+    imageOcrProviderName() === 'sarvam',
+  );
+  check(
+    'and their gate names SARVAM_API_KEY',
+    imageOcrProviderApiKeyEnv() === 'SARVAM_API_KEY',
+  );
+  process.env.OCR_PROVIDER = 'openai';
+  check(
+    'images follow OCR_PROVIDER',
+    imageOcrProviderName() === 'openai' &&
+      imageOcrProviderApiKeyEnv() === 'OPENAI_API_KEY',
+  );
+  process.env.IMAGE_OCR_PROVIDER = '  Sarvam  ';
+  check(
+    'IMAGE_OCR_PROVIDER overrides it, trimmed + lowercased',
+    imageOcrProviderName() === 'sarvam',
+  );
+  delete process.env.IMAGE_OCR_PROVIDER;
+
+  process.env.OCR_PROVIDER = 'gemini';
+  let imageThrew = '';
+  void extractImageTextViaProvider('a.jpg', Buffer.from('x')).catch(
+    (error: unknown) => {
+      imageThrew = error instanceof Error ? error.message : String(error);
+    },
+  );
+
   process.env.OCR_PROVIDER = 'nope';
   let threw = '';
   void extractPdfPagesViaProvider('a.pdf', Buffer.from('x')).catch(
@@ -159,11 +245,17 @@ if (
 
   if (original === undefined) delete process.env.OCR_PROVIDER;
   else process.env.OCR_PROVIDER = original;
+  delete process.env.IMAGE_OCR_PROVIDER;
 
   setTimeout(() => {
     check(
       'unknown provider names the supported list',
       threw.includes('gemini, openai, sarvam'),
+    );
+    check(
+      'a backend with no image path names the two that have one, and the escape hatch',
+      imageThrew.includes('openai, sarvam') &&
+        imageThrew.includes('IMAGE_OCR_PROVIDER'),
     );
     let failed = 0;
     for (const [label, ok] of checks) {

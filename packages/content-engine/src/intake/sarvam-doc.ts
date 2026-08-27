@@ -428,23 +428,26 @@ async function waitForDigitise(jobId: string, deadline: number): Promise<void> {
   }
 }
 
-// One Sarvam job: at most SARVAM_DOC_MAX_PAGES pages, numbered 1..n within the chunk.
-async function extractChunkPages(
+// ONE Digitise job, end to end: multipart submit → poll → download the output ZIP. Exported
+// because a photograph of a document is the same job with a different file and a different
+// output format (sarvam-image.ts) — the endpoint takes an image as readily as a PDF, which is
+// what its own "Page/image count must not exceed 10" error has always said. Everything
+// specific to what came back stays with the caller; this returns the raw ZIP.
+export async function runDigitiseJob(
   label: string,
-  data: Buffer,
-  expectedPages: number,
-  timeoutMs: number,
-): Promise<PdfPage[]> {
-  const deadline = Date.now() + timeoutMs;
+  file: Readonly<{ data: Buffer; mimeType: string; fileName: string }>,
+  options: Readonly<{ outputFormat: 'html' | 'md'; timeoutMs: number }>,
+): Promise<Buffer> {
+  const deadline = Date.now() + options.timeoutMs;
   const form = new FormData();
   form.append(
     'file',
-    new Blob([new Uint8Array(data)], { type: 'application/pdf' }),
-    'input.pdf',
+    new Blob([new Uint8Array(file.data)], { type: file.mimeType }),
+    file.fileName,
   );
   // NO `language` FIELD, and that is a measured fact about the live API rather than an
   // omission (2026-08-24). Sending `language=mr-IN` makes the job fail in ~4 seconds with
-  // `status: failed` and `pages_total: 0` — Sarvam never opens the PDF, so `pages_failed`
+  // `status: failed` and `pages_total: 0` — Sarvam never opens the file, so `pages_failed`
   // is 0 too and the error says nothing. Bisected on one real 4-page scanned GR: with no
   // language it completes 4/4; `output_format` and `content_type` are each fine on their
   // own; `mr-IN`, `mr`, `hi-IN`, `auto` and `unknown` all fail instantly and only `en-IN`
@@ -453,7 +456,7 @@ async function extractChunkPages(
   // SARVAM_DOC_LANGUAGE only if Sarvam fixes the code path.
   const language = process.env.SARVAM_DOC_LANGUAGE?.trim();
   if (language) form.append('language', language);
-  form.append('output_format', 'html');
+  form.append('output_format', options.outputFormat);
   form.append('content_type', 'printed');
 
   const created = await sarvamJson<DigitiseJob>(
@@ -497,10 +500,22 @@ async function extractChunkPages(
       `Sarvam Document AI output download failed for ${label}: ${response.status} ${response.statusText}.`,
     );
   }
-  return pagesFromOutputZip(
-    Buffer.from(await response.arrayBuffer()),
-    expectedPages,
+  return Buffer.from(await response.arrayBuffer());
+}
+
+// One PDF chunk: at most SARVAM_DOC_MAX_PAGES pages, numbered 1..n within the chunk.
+async function extractChunkPages(
+  label: string,
+  data: Buffer,
+  expectedPages: number,
+  timeoutMs: number,
+): Promise<PdfPage[]> {
+  const zip = await runDigitiseJob(
+    label,
+    { data, mimeType: 'application/pdf', fileName: 'input.pdf' },
+    { outputFormat: 'html', timeoutMs },
   );
+  return pagesFromOutputZip(zip, expectedPages);
 }
 
 // OCRs a PDF, splitting it into ≤10-page jobs as needed. Throws with a descriptive

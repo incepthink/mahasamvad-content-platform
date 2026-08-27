@@ -193,21 +193,31 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
     are read by the JOB's extract phase, not at the input step: a document stops there because
     OCR is billed per page and the officer picks which pages are worth it, and an image is one
     page with nothing to pick. Stored in `text` like a DOCX, so review/assembly/lineage needed
-    no changes. **Images always go through OpenAI, ignoring `OCR_PROVIDER`** — that flag picks
-    between two backends that both take a PDF. `sharp` normalises before the call: EXIF
-    auto-rotate (a sideways phone photo would otherwise be read sideways) plus OpenAI's own
-    downscale, done here so the request is deterministic and bounded — **not** an accuracy
-    fix, measured. Empty text is a real answer, not a failure. Web →
+    no changes. **Images follow `OCR_PROVIDER` and read on Sarvam by default**
+    (2026-08-27) — Digitise takes an image as the same job it takes a PDF, asking for
+    `output_format=md` rather than html because this transcript is edited in a plain textarea
+    and travels VERBATIM into the article's source note. `image-ocr.ts` is now the
+    `OCR_PROVIDER=openai` rollback and the only image path with a PROMPT;
+    `IMAGE_OCR_PROVIDER` splits the two and is REQUIRED under `OCR_PROVIDER=gemini`, which has
+    no image path. `image-prep.ts` normalises before either call:
+    EXIF auto-rotate (a sideways phone photo would otherwise be read sideways) plus a
+    per-backend size bound, done there so the request is deterministic and bounded — **not**
+    an accuracy fix, measured. The bounds differ on purpose: OpenAI gets its own 2048/768
+    tiling rule, Sarvam a 3000px long edge and NO short-edge squeeze, since it reads the
+    pixels itself and 768 would drop the matras before its OCR ever saw them. Empty text is a real answer, not a failure. Web →
     `components/ImageFilePicker.tsx` (thumbnail grid, below the YouTube card) and, at review,
     the photograph BESIDE its editable transcript (`.image-review`) served by
     `GET /dlo/intakes/:id/files/:index/image` — a proxy because `dlo-uploads` is private, and
-    gated on `canPreview`. **Known and measured: Devanagari DIGITS are unreliable** — a
+    gated on `canPreview`. **Devanagari DIGITS are why the backend moved.** On the OpenAI path a
     calibration page returned perfect prose and tables while `₹२`→`३२`, `६५.५`→`६६.५`,
-    `९८०`→`१८०`. The deployed PDF path makes the SAME errors on the same page, so this is a
-    property of the OCR model, not of images; `reasoning_effort: high` was tried and did not
-    help (knob kept as `OPENAI_OCR_REASONING_EFFORT`, default unset). The officer's review step
-    is the only guard, which is exactly why the image sits beside its text. Free-ish harness:
-    `tsx --env-file=../../.env src/intake/image-ocr.ts <photo.jpg>`.
+    `९८०`→`१८०`, and `reasoning_effort: high` did not help (knob kept as
+    `OPENAI_OCR_REASONING_EFFORT`, default unset); it reproduced on a clean RENDERED page,
+    which that path read as `७०० कोटी` for `५०० कोटी` in 33s where Sarvam read it correctly in
+    11s. The officer's review step
+    is the only guard, which is exactly why the image sits beside its text. Harnesses: `tsx src/intake/sarvam-image.ts` (free — the form
+    fields, the ZIP reader and its metadata fallback), `tsx --env-file=../../.env
+    src/intake/sarvam-image.ts <photo.jpg>` (one page of Sarvam credit), and the same
+    invocation on `image-ocr.ts` for the OpenAI rollback.
   Sarvam/extraction logic → `packages/content-engine/src/intake/*`
   (`sarvam-stt.ts`, `sarvam-doc.ts`, `docx.ts`; official `sarvamai`
   SDK, key `SARVAM_API_KEY`); rows/bucket → `packages/database/src/dlo-intakes.ts`
@@ -783,7 +793,9 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   costs nothing.
   `extractPdfPages` / `extractPdfPagesDetailed` / `probePdf` live in
   `packages/content-engine/src/intake/pdf-pages.ts`. Which model reads the pixels is
-  `ocr-provider.ts`'s business — `sarvam` (default), `openai`, or **`gemini`, which /chat alone
+  `ocr-provider.ts`'s business — which since 2026-08-27 is the seam for a PHOTOGRAPH too
+  (`extractImageTextViaProvider` / `imageOcrProviderName`) — `sarvam` (default), `openai`, or
+  **`gemini`, which /chat alone
   uses through `ExtractPdfOptions.ocrProvider` and which reads a whole PDF in ONE call
   (`gemini-doc.ts`; its binding limit is OUTPUT TOKENS, not the 1,000-page input ceiling, hence
   `GEMINI_OCR_MAX_PAGES` = 30 and the split-and-retry recovery)**. Above that, the policy picks

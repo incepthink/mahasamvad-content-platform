@@ -3081,6 +3081,73 @@ Canva OAuth authentication and poster handoff are implemented in `apps/api/src/r
 
 ## Latest Implementation Milestone
 
+- **A photograph of a document is read by Sarvam, not OpenAI** (2026-08-27, no migration, no
+  n8n, API only): /dlo's प्रतिमा card was the last paid read still pinned to one backend. The
+  pin rested on a claim in `image-ocr.ts`'s own header — that `OCR_PROVIDER` "chooses between
+  two backends that both take a PDF", so honouring it for an image would mean a second image
+  path — and that claim is false. **Sarvam Document AI's Digitise endpoint takes an image
+  directly**, which its own long-standing validation error ("Page/image count must not exceed
+  10") has always said; confirmed live before a line was written, a JPEG of a Marathi page
+  returning `pages_succeeded: 1`. So nothing wraps the picture in a one-page PDF and no page
+  identity has to be restored — an image IS one page, which is also why it needs no page picker.
+  - **The reason to move is the one this file already documented as unfixable.** The OpenAI path
+    was known to misread Devanagari numerals (`₹२`→`३२`, `६५.५`→`६६.५`, `९८०`→`१८०` on a
+    calibration page, with `reasoning_effort: high` measured as no help). That reproduced on a
+    CLEAN, digitally-rendered Marathi page in this session: OpenAI returned **`७०० कोटी` for
+    `५०० कोटी`** in 33.4s, while Sarvam read the same file correctly in 11.1s with every other
+    figure (`३१ ऑगस्ट २०२६`, `२ कोटी`, `दि. २५`) intact. On a government article a misread
+    amount is not a style defect — the note is the pipeline's sole factual authority and the
+    never-invent rule cannot protect a number that arrived wrong.
+  - **`output_format=md`, not the PDF path's `html`, and that is the load-bearing difference.**
+    A document's pages are reviewed through `ExtractedText`, which parses that HTML; a
+    photograph's transcript is edited in a plain textarea and then travels VERBATIM into the
+    article's source note through `combineIntakeSources`, so HTML there would put markup in
+    front of the officer and into the prompt. Markdown is byte-shape-identical to what the
+    OpenAI path returned, which is why the review card, the assembly, the lineage, the glossary
+    lock and the article prompt needed **no changes at all**. The live API accepts `html`, `md`
+    or `json` and rejects anything else with `OUTPUT_FORMAT_INVALID`, so that is the whole list.
+  - **What is genuinely given up: the PROMPT.** `ocrSystemPrompt('image')` told the model to
+    transcribe rather than summarise and to keep numerals in the script they were printed in;
+    Sarvam is a document pipeline and takes no instructions. That is the same trade every
+    scanned PDF has taken since Sarvam became the OCR default, and the officer's review step —
+    the photograph shown beside its editable transcript — is the guard either way. `image-ocr.ts`
+    survives as the `OCR_PROVIDER=openai` rollback and is the only image path whose fidelity
+    rules can be changed at all, so it must be kept working.
+  - **Structure.** The Digitise dance (submit → poll → download ZIP) is factored out of
+    `sarvam-doc.ts` as `runDigitiseJob`; `sarvam-image.ts` is the image client, and its ZIP
+    reader prefers the `.md` entry and falls back to the page **metadata blocks in reading
+    order** — that is where the OCR text actually lives, and losing a whole photograph to a
+    changed output template would be far worse than losing its heading levels. `image-prep.ts`
+    now holds what both clients share: EXIF auto-rotate (a phone held upright writes a
+    landscape image plus a "rotate me" tag — ignore it and the page is read sideways) and a
+    **per-backend** size bound. The bounds differ on purpose: OpenAI keeps its own 2048/768
+    tiling rule, Sarvam gets a 3000px long edge and NO short-edge squeeze, because 768 is
+    OpenAI's tiling number and would throw the matras away before a document OCR that reads
+    the pixels itself ever saw them. Normalisation still NEVER fails a source.
+  - **Images now follow `OCR_PROVIDER`**, since both backends take one — a deployment's
+    document OCR and its photograph OCR have no reason to be different products.
+    `IMAGE_OCR_PROVIDER` splits them and is REQUIRED under `OCR_PROVIDER=gemini`, which has no
+    image path: a photograph then fails naming that variable rather than silently picking a
+    backend nobody chose. Metered in the seam (`recordOcrCost(provider, 1)`) like the page
+    path, so the analytics OCR bucket counts a photograph the day a third backend is added.
+  Verified 2026-08-27: workspace typecheck **7/7 green**; eslint clean on all seven touched
+  files; prettier clean on every hunk of mine (`image-ocr.ts`, `ocr-provider.ts` and
+  `dlo-runner.ts` report whole-file complaints that are **pre-existing CRLF** — confirmed per
+  file against their HEAD blobs, which fail identically, and against prettier's own diff with
+  CR stripped, so do NOT `--write` them); three harnesses green — `sarvam-image.ts` 7/7 (form
+  fields incl. `md`/no-language, the ZIP reader, the metadata fallback, the Marathi refusal
+  before any call), `ocr-provider.ts` 14/14 (the image default, following `OCR_PROVIDER`, the
+  override, and gemini naming the escape hatch) and `sarvam-doc.ts` 4/4 unchanged after the
+  transport was factored out; an offline check of the normaliser (an EXIF-tagged sideways
+  2246x1588 page coming back upright at 1588x2246, 6000x4000 bounded to 3000x2000, 800x600 not
+  upscaled); and **live reads**: the rendered Marathi page above, plus that same page stored
+  sideways with an EXIF tag, which came back upright and correct in 11.1s. **Left for a real
+  run**: a genuine officer's phone photograph — angled, shadowed, uneven light — through /dlo,
+  which is the case a rendered page cannot stand in for. Deploy is `@dgipr/content-engine` dist
+  → API; no migration, no n8n, no web change. New env, both optional: `IMAGE_OCR_PROVIDER`,
+  `SARVAM_IMAGE_LONG_EDGE`. **`SARVAM_API_KEY` is now what /dlo's photographs need**, and a
+  deployment that had images working on OpenAI alone will fail them without it.
+
 - **A file name is TRIMMED for display, everywhere** (2026-08-25, no migration, no n8n, web
   only): an officer's phone photograph reached /dlo's review step named
   `54254676-ae8d-4efc-a2ad-aca8b0bfa729-1_all_32002.jpg` — 52 characters with no space and no

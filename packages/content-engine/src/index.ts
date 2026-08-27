@@ -194,7 +194,7 @@ export { countPdfPages, OCR_MAX_TOTAL_PAGES } from './intake/pdf-split.js';
 export { extractDocxText } from './intake/docx.js';
 // A photograph of a document. Deliberately NOT behind ocr-provider.ts: that seam picks
 // between two PDF backends, and images always go through OpenAI — see image-ocr.ts.
-export { extractImageText } from './intake/image-ocr.js';
+export { extractImageTextViaProvider } from './intake/ocr-provider.js';
 export { extractTextFile } from './intake/text-file.js';
 // The kind-agnostic entry point every upload surface should use: probe for free, then
 // read only what the user selected. Wraps the PDF policy above rather than replacing it.
