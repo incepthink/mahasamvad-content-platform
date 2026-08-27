@@ -310,15 +310,20 @@ export {
   type ShortenNarrationOptions,
 } from './video/shorten-narration.js';
 
-// The general assistant at /chat. Deliberately prompt-free — see the module header before
-// adding anything to the request.
+// The general assistant at /chat. Native PDFs go directly through OpenAI Files + Responses;
+// publication-specific rules continue to belong to their dedicated surfaces.
 export {
   MISC_CHAT_MODEL,
+  MISC_CHAT_PDF_MAX_BYTES,
+  MISC_CHAT_SYSTEM_INSTRUCTION,
+  buildOpenAiResponseInput,
   streamMiscChatReply,
-  uploadGeminiChatDocument,
+  textFromOpenAiResponse,
+  uploadOpenAiChatDocument,
   type MiscChatTurn,
   type MiscChatReply,
-  type GeminiChatFileHandle,
+  type MiscChatLifecycleEvent,
+  type OpenAiChatFileHandle,
 } from './chat/misc-chat.js';
 
 // Cost metering — the runner opens a scope per job and reads the accumulator back.
@@ -328,7 +333,6 @@ export {
   runInCostTask,
   recordImageCost,
   recordGeminiImageCost,
-  recordGeminiChatUsage,
   recordVideoCost,
   recordTtsCost,
   recordSttCost,
@@ -348,7 +352,6 @@ export {
   estimateSttCostUsd,
   estimateOcrCostUsd,
   estimateTranslateCostUsd,
-  priceGeminiText,
   // The configured per-unit rates behind every estimated figure on /analytics. Exported so
   // the API can print them on the page rather than asking the reader to trust them.
   ELEVENLABS_STT_PRICE_PER_HOUR_USD,

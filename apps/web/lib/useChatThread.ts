@@ -9,7 +9,14 @@
 //    saved — nothing on screen can claim to be persisted before it is — and the scroll
 //    handling only ever has one growing element to follow.
 //
-// 2. THE HOOK OWNS THREAD CREATION. A brand-new chat has no id until its first message, and
+// 2. THE TURN GOES ON SCREEN BEFORE THE ATTACHMENTS ARE FINISHED. `send` takes a `prepare`
+//    thunk rather than a finished attachment list, and calls it AFTER the officer's message
+//    is in the conversation and the box has cleared. That is what lets someone pick a large
+//    PDF and immediately ask a question about it instead of waiting in front of a disabled
+//    Send button. The chips shown meanwhile are `preview` — kinds and names, the only things
+//    known before the files are read — and are replaced by the real ones once they are.
+//
+// 3. THE HOOK OWNS THREAD CREATION. A brand-new chat has no id until its first message, and
 //    the obvious arrangement (create the thread, hand the id back, let the page re-key this
 //    hook) loses the turn: the reload effect would fire for the new id and replace the
 //    optimistic user message with the empty list the server still has. So `send` creates the
@@ -30,8 +37,32 @@ import { errorMessage } from './errorMessage';
 
 export type SendInput = Readonly<{
   content: string;
-  attachments: readonly ChatAttachment[];
+  // What to show under the officer's own turn straight away. A file still being read has no
+  // size and no URL yet, so these carry a kind and a name and nothing else.
+  preview: readonly ChatAttachment[];
+  // Finishes the attachments and returns what the turn should carry. Called once, after the
+  // message is on screen — see the header. Resolving to an empty list when nothing was typed
+  // means every attachment failed, and the turn is rolled back rather than sent empty.
+  prepare: () => Promise<readonly ChatAttachment[]>;
 }>;
+
+// What a chip may show. The extracted text is dropped here, exactly as the API drops it from
+// its own responses: a chip shows a name and a size, never the text.
+function chipsFor(
+  attachments: readonly ChatAttachment[],
+): ChatMessage['attachments'] {
+  return attachments.map((attachment) => ({
+    kind: attachment.kind,
+    name: attachment.name,
+    ...(attachment.imageUrl !== undefined
+      ? { imageUrl: attachment.imageUrl }
+      : {}),
+    ...(attachment.text !== undefined ? { chars: attachment.text.length } : {}),
+    ...(attachment.sourceUrl !== undefined
+      ? { sourceUrl: attachment.sourceUrl }
+      : {}),
+  }));
+}
 
 export function useChatThread(
   initialThreadId: string | null,
@@ -114,19 +145,7 @@ export function useChatThread(
         content: input.content,
         // The extracted text is dropped here, exactly as the API drops it from its own
         // responses: a chip shows a name and a size, never the text.
-        attachments: input.attachments.map((attachment) => ({
-          kind: attachment.kind,
-          name: attachment.name,
-          ...(attachment.imageUrl !== undefined
-            ? { imageUrl: attachment.imageUrl }
-            : {}),
-          ...(attachment.text !== undefined
-            ? { chars: attachment.text.length }
-            : {}),
-          ...(attachment.sourceUrl !== undefined
-            ? { sourceUrl: attachment.sourceUrl }
-            : {}),
-        })),
+        attachments: chipsFor(input.preview),
         model: null,
         costUsd: null,
         error: null,
@@ -157,19 +176,65 @@ export function useChatThread(
         }
       }
 
+      // Created BEFORE the attachments are finished, so थांबवा can end a turn that is still
+      // reading a file rather than only one the model is already answering.
       const controller = new AbortController();
       abort.current = controller;
       let answer = '';
       let failed: string | null = null;
+
+      // The wait moved here from in front of the Send button — see the header. The officer's
+      // question is already on screen while this runs.
+      let attachments: readonly ChatAttachment[];
+      try {
+        attachments = await input.prepare();
+      } catch (e) {
+        attachments = [];
+        console.warn('[chat] attachment preparation failed', e);
+      }
+
+      if (controller.signal.aborted) {
+        // थांबवा was pressed while the files were being read. Nothing was sent, so the turn
+        // comes off the screen instead of sitting there with no answer under it.
+        setMessages((current) =>
+          current.filter((message) => message.id !== provisionalId),
+        );
+        setStreaming(null);
+        setSending(false);
+        abort.current = null;
+        return;
+      }
+
+      if (attachments.length === 0 && input.content.trim() === '') {
+        // Every attachment failed and there is nothing else to ask. The chips kept their own
+        // messages, so the failure is already explained where it happened.
+        setMessages((current) =>
+          current.filter((message) => message.id !== provisionalId),
+        );
+        setStreaming(null);
+        setSending(false);
+        abort.current = null;
+        setError(STR.chatAttachFailed);
+        return;
+      }
+
+      // The chips were kinds and names; now they can say how big the file turned out to be
+      // and show the image that was uploaded.
+      const settled = chipsFor(attachments);
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === provisionalId
+            ? { ...message, attachments: settled }
+            : message,
+        ),
+      );
 
       try {
         await sendChatMessage(
           target,
           {
             content: input.content,
-            attachments: input.attachments.map((attachment) => ({
-              ...attachment,
-            })),
+            attachments: attachments.map((attachment) => ({ ...attachment })),
           },
           (event) => {
             if (event.type === 'delta') {

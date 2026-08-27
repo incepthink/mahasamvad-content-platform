@@ -1210,6 +1210,7 @@ export async function sendChatMessage(
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  let terminalEventSeen = false;
   try {
     for (;;) {
       const { done, value } = await reader.read();
@@ -1233,10 +1234,24 @@ export async function sendChatMessage(
           );
           // An unrecognised frame is skipped rather than thrown: a future event type must not
           // break a client mid-answer.
-          if (parsed.success) onEvent(parsed.data);
+          if (parsed.success) {
+            if (parsed.data.type === 'done' || parsed.data.type === 'error') {
+              terminalEventSeen = true;
+            }
+            onEvent(parsed.data);
+          }
         }
         separator = buffer.indexOf('\n\n');
       }
+    }
+    // A transport EOF is not a successful answer. The API must explicitly commit the turn
+    // with `done`, or explicitly report `error`; otherwise a proxy/provider disconnect would
+    // make the hook promote whatever fragment happened to arrive into an ordinary message.
+    if (!terminalEventSeen) {
+      throw new ApiRequestError(
+        'चॅटचे उत्तर पूर्ण होण्यापूर्वी संपर्क तुटला.',
+        502,
+      );
     }
   } finally {
     await reader.cancel().catch(() => undefined);

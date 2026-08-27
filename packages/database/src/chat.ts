@@ -47,7 +47,7 @@ export type ChatMessageRow = Readonly<{
   model: string | null;
   costUsd: number | null;
   error: string | null;
-  interactionId: string | null;
+  responseId: string | null;
   createdAt: string;
 }>;
 
@@ -57,9 +57,8 @@ export type ChatFileRow = Readonly<{
   displayName: string;
   mimeType: 'application/pdf';
   storagePath: string;
-  geminiFileName: string;
-  geminiFileUri: string;
-  geminiExpiresAt: string;
+  openAiFileId: string | null;
+  bytes: number | null;
   createdAt: string;
   updatedAt: string;
 }>;
@@ -91,7 +90,7 @@ type ChatMessageDbRow = {
   model: string | null;
   cost_usd: number | string | null;
   error: string | null;
-  gemini_interaction_id: string | null;
+  openai_response_id: string | null;
   created_at: string;
 };
 
@@ -101,9 +100,8 @@ type ChatFileDbRow = {
   display_name: string;
   mime_type: 'application/pdf';
   storage_path: string;
-  gemini_file_name: string;
-  gemini_file_uri: string;
-  gemini_expires_at: string;
+  openai_file_id: string | null;
+  byte_size: number | string | null;
   created_at: string;
   updated_at: string;
 };
@@ -131,7 +129,7 @@ function messageFromDbRow(row: ChatMessageDbRow): ChatMessageRow {
     // "0.004200" and sum as concatenation.
     costUsd: row.cost_usd === null ? null : Number(row.cost_usd),
     error: row.error,
-    interactionId: row.gemini_interaction_id,
+    responseId: row.openai_response_id,
     createdAt: row.created_at,
   };
 }
@@ -143,9 +141,8 @@ function fileFromDbRow(row: ChatFileDbRow): ChatFileRow {
     displayName: row.display_name,
     mimeType: row.mime_type,
     storagePath: row.storage_path,
-    geminiFileName: row.gemini_file_name,
-    geminiFileUri: row.gemini_file_uri,
-    geminiExpiresAt: row.gemini_expires_at,
+    openAiFileId: row.openai_file_id,
+    bytes: row.byte_size === null ? null : Number(row.byte_size),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -249,7 +246,7 @@ export type NewChatMessage = Readonly<{
   model?: string;
   costUsd?: number;
   error?: string;
-  interactionId?: string;
+  responseId?: string;
 }>;
 
 export async function insertChatMessage(
@@ -268,8 +265,8 @@ export async function insertChatMessage(
       ...(message.model !== undefined ? { model: message.model } : {}),
       ...(message.costUsd !== undefined ? { cost_usd: message.costUsd } : {}),
       ...(message.error !== undefined ? { error: message.error } : {}),
-      ...(message.interactionId !== undefined
-        ? { gemini_interaction_id: message.interactionId }
+      ...(message.responseId !== undefined
+        ? { openai_response_id: message.responseId }
         : {}),
     })
     .select()
@@ -284,9 +281,8 @@ export type NewChatFile = Readonly<{
   displayName: string;
   mimeType: 'application/pdf';
   storagePath: string;
-  geminiFileName: string;
-  geminiFileUri: string;
-  geminiExpiresAt: string;
+  openAiFileId: string;
+  bytes: number;
 }>;
 
 export async function insertChatFile(
@@ -299,9 +295,8 @@ export async function insertChatFile(
       display_name: file.displayName,
       mime_type: file.mimeType,
       storage_path: file.storagePath,
-      gemini_file_name: file.geminiFileName,
-      gemini_file_uri: file.geminiFileUri,
-      gemini_expires_at: file.geminiExpiresAt,
+      openai_file_id: file.openAiFileId,
+      byte_size: file.bytes,
     })
     .select()
     .single();
@@ -318,7 +313,8 @@ export async function getChatFile(
     .select()
     .eq('id', id)
     .maybeSingle();
-  if (error) throw new Error(`Failed to fetch chat file ${id}: ${error.message}`);
+  if (error)
+    throw new Error(`Failed to fetch chat file ${id}: ${error.message}`);
   return data ? fileFromDbRow(data as unknown as ChatFileDbRow) : null;
 }
 
@@ -328,7 +324,10 @@ export async function attachChatFile(
   threadId: string,
 ): Promise<ChatFileRow | null> {
   const current = await getChatFile(client, id);
-  if (!current || (current.threadId !== null && current.threadId !== threadId)) {
+  if (
+    !current ||
+    (current.threadId !== null && current.threadId !== threadId)
+  ) {
     return null;
   }
   if (current.threadId === threadId) return current;
@@ -339,31 +338,31 @@ export async function attachChatFile(
     .is('thread_id', null)
     .select()
     .maybeSingle();
-  if (error) throw new Error(`Failed to attach chat file ${id}: ${error.message}`);
+  if (error)
+    throw new Error(`Failed to attach chat file ${id}: ${error.message}`);
   return data ? fileFromDbRow(data as unknown as ChatFileDbRow) : null;
 }
 
-export async function updateChatFileGeminiHandle(
+export async function updateChatFileOpenAiHandle(
   client: SupabaseClient,
   id: string,
   handle: Readonly<{
-    geminiFileName: string;
-    geminiFileUri: string;
-    geminiExpiresAt: string;
+    openAiFileId: string;
+    bytes: number;
   }>,
 ): Promise<ChatFileRow> {
   const { data, error } = await client
     .from(CHAT_FILES_TABLE)
     .update({
-      gemini_file_name: handle.geminiFileName,
-      gemini_file_uri: handle.geminiFileUri,
-      gemini_expires_at: handle.geminiExpiresAt,
+      openai_file_id: handle.openAiFileId,
+      byte_size: handle.bytes,
       updated_at: new Date().toISOString(),
     })
     .eq('id', id)
     .select()
     .single();
-  if (error) throw new Error(`Failed to refresh chat file ${id}: ${error.message}`);
+  if (error)
+    throw new Error(`Failed to update chat file ${id}: ${error.message}`);
   return fileFromDbRow(data as unknown as ChatFileDbRow);
 }
 

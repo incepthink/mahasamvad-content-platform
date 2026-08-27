@@ -1,6 +1,6 @@
 // The general assistant at /chat. Thin handlers, per AGENTS.md: persist the turn, ask
-// @dgipr/content-engine for the answer, stream it out. No prompt is assembled here and none is
-// assembled there — see chat/misc-chat.ts for why that is deliberate.
+// @dgipr/content-engine for the answer, stream it out. The route assembles no prompt; the
+// content engine owns the one general-purpose chat instruction and OpenAI provider input.
 //
 // Seven routes: create/list/detail/delete a thread, send a turn (the only streaming route in
 // this API), and upload an image or a native PDF.
@@ -21,7 +21,7 @@ import {
   listChatThreads,
   publicUrl,
   updateChatThread,
-  updateChatFileGeminiHandle,
+  updateChatFileOpenAiHandle,
   uploadFile,
   type ChatAttachmentEntry,
   type ChatFileRow,
@@ -45,26 +45,18 @@ import {
 } from '@dgipr/schemas';
 import {
   createCostAccumulator,
+  MISC_CHAT_PDF_MAX_BYTES,
   runInCostScope,
   streamMiscChatReply,
   totalCostUsd,
-  uploadGeminiChatDocument,
+  uploadOpenAiChatDocument,
+  type MiscChatLifecycleEvent,
   type MiscChatTurn,
 } from '@dgipr/content-engine';
 
-// No per-file ceiling on either attachment route (2026-08-24), matching /dlo, /transcribe,
-// /documents and /references: a photographed booklet and a full scanned GR both pass 50 MB
-// routinely, and refusing one at the door is a failure the officer can do nothing about.
-//
-// busboy treats Infinity as "unlimited", so these overrides now exist purely to LIFT the
-// global cap in index.ts. They must be STATED, not omitted: @fastify/multipart DEEP-merges
-// per-request limits into the global ones key by key, so a dropped key exposes the global
-// value rather than removing it (that mistake cost a production outage on 2026-08-17 — see
-// routes/dlo.ts). `files: 1` is the shape of these routes, not a limit: each uploads one
-// attachment, and the composer sends them one request at a time.
-//
-// What still bounds a turn is TEXT, not bytes — CHAT_MAX_ATTACHMENTS and
-// CHAT_ATTACHMENT_TEXT_MAX_CHARS below, which is what the model actually has to read.
+// Images retain the repository's unlimited upload posture. Direct PDF chat is different:
+// OpenAI Responses documents a hard 50 MB combined file-input limit, so that route refuses
+// a file the provider cannot answer against. Publishing intake keeps its chunk/OCR contract.
 const ATTACHMENT_MAX_BYTES = Number.POSITIVE_INFINITY;
 
 // Storage object names must be ASCII-safe (the transcriptions precedent); a display name may
@@ -149,7 +141,7 @@ async function toStoredAttachment(
   }
 
   // Old clients and non-PDF documents still use extracted text. Native PDFs deliberately
-  // carry no text: Gemini reads the stored Files API object directly.
+  // carry no text: OpenAI reads the stored Files API object directly.
   const text = attachment.text ?? '';
   if (text.trim() === '') return null;
   return {
@@ -163,30 +155,23 @@ async function toStoredAttachment(
   };
 }
 
-const GEMINI_FILE_REFRESH_PAD_MS = 5 * 60_000;
-
-async function ensureGeminiFile(
+async function ensureOpenAiFile(
   client: SupabaseClient,
   file: ChatFileRow,
 ): Promise<ChatFileRow> {
-  const expiresAt = Date.parse(file.geminiExpiresAt);
-  if (
-    Number.isFinite(expiresAt) &&
-    expiresAt > Date.now() + GEMINI_FILE_REFRESH_PAD_MS
-  ) {
-    return file;
-  }
+  if (file.openAiFileId !== null) return file;
 
+  // Gemini-era rows have only the durable private copy. Upgrade them lazily so an old chat
+  // remains usable without asking the officer to upload its PDF again.
   const data = await downloadFile(client, DLO_UPLOADS_BUCKET, file.storagePath);
-  const handle = await uploadGeminiChatDocument(file.displayName, data);
-  return updateChatFileGeminiHandle(client, file.id, {
-    geminiFileName: handle.name,
-    geminiFileUri: handle.uri,
-    geminiExpiresAt: handle.expiresAt,
+  const handle = await uploadOpenAiChatDocument(file.displayName, data);
+  return updateChatFileOpenAiHandle(client, file.id, {
+    openAiFileId: handle.id,
+    bytes: handle.bytes,
   });
 }
 
-async function documentUrisFor(
+async function documentFileIdsFor(
   client: SupabaseClient,
   threadId: string,
   rows: readonly ChatMessageRow[],
@@ -202,22 +187,25 @@ async function documentUrisFor(
     [...documentIds].map(async (id) => {
       const file = await getChatFile(client, id);
       if (!file || file.threadId !== threadId) return null;
-      return ensureGeminiFile(client, file);
+      return ensureOpenAiFile(client, file);
     }),
   );
   return new Map(
     documentRows
       .filter((file): file is ChatFileRow => file !== null)
-      .map((file) => [file.id, file.geminiFileUri] as const),
+      .filter((file) => file.openAiFileId !== null)
+      .map((file) => [file.id, file.openAiFileId as string] as const),
   );
 }
 
-function isMissingPreviousInteraction(error: unknown): boolean {
-  if (typeof error !== 'object' || error === null) return false;
-  const status = 'status' in error ? error.status : undefined;
-  if (status === 404) return true;
-  const message = error instanceof Error ? error.message : '';
-  return status === 400 && /previous[_ ]interaction/i.test(message);
+function isMissingPreviousResponse(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    /OpenAI chat response request failed: (?:400|404)\b/.test(message) &&
+    /previous_response_id|response.+(?:not found|does not exist|expired)/i.test(
+      message,
+    )
+  );
 }
 
 // A stored row as the model should see it. Note `content` and the attachments stay separate —
@@ -225,7 +213,7 @@ function isMissingPreviousInteraction(error: unknown): boolean {
 // business, not the route's.
 function toTurn(
   row: ChatMessageRow,
-  documentUris: ReadonlyMap<string, string>,
+  documentFileIds: ReadonlyMap<string, string>,
 ): MiscChatTurn {
   return {
     role: row.role,
@@ -235,9 +223,9 @@ function toTurn(
       name: attachment.name,
       imageUrl: attachment.imageUrl,
       text: attachment.text,
-      documentUri:
+      documentFileId:
         attachment.documentId !== undefined
-          ? documentUris.get(attachment.documentId)
+          ? documentFileIds.get(attachment.documentId)
           : undefined,
     })),
   };
@@ -384,17 +372,14 @@ export function registerChatRoutes(
     return { name, imageUrl: publicUrl(client, path) };
   });
 
-  // A PDF starts preparing as soon as it is selected, before the officer presses Send. Keep
-  // one durable private copy because Gemini Files expire after 48 hours; a later chat turn can
-  // transparently recreate the provider handle without asking the officer to upload again.
+  // A PDF uploads to OpenAI as soon as it is selected, before the officer presses Send. The
+  // durable private copy remains the fallback source for legacy rows and provider migration.
   app.post('/chat/attachments/document', async (request, reply) => {
     const file = await request.file({
-      limits: { fileSize: ATTACHMENT_MAX_BYTES, files: 1 },
+      limits: { fileSize: MISC_CHAT_PDF_MAX_BYTES, files: 1 },
     });
     if (!file) {
-      return reply
-        .code(400)
-        .send({ error: { message: 'फाईल मिळाली नाही.' } });
+      return reply.code(400).send({ error: { message: 'फाईल मिळाली नाही.' } });
     }
     const name = file.filename ?? '';
     if (!name.toLowerCase().endsWith('.pdf')) {
@@ -413,16 +398,19 @@ export function registerChatRoutes(
         'code' in error &&
         error.code === 'FST_REQ_FILE_TOO_LARGE'
       ) {
-        return reply
-          .code(413)
-          .send({ error: { message: 'PDF खूप मोठी आहे.' } });
+        return reply.code(413).send({
+          error: {
+            message:
+              'OpenAI च्या थेट PDF चॅटसाठी PDF ५० MB पेक्षा मोठी असू शकत नाही.',
+          },
+        });
       }
       throw error;
     }
 
     const storagePath = documentPathFor(name);
     const [handle] = await Promise.all([
-      uploadGeminiChatDocument(name, data),
+      uploadOpenAiChatDocument(name, data),
       uploadFile(
         client,
         DLO_UPLOADS_BUCKET,
@@ -435,9 +423,8 @@ export function registerChatRoutes(
       displayName: name,
       mimeType: 'application/pdf',
       storagePath,
-      geminiFileName: handle.name,
-      geminiFileUri: handle.uri,
-      geminiExpiresAt: handle.expiresAt,
+      openAiFileId: handle.id,
+      bytes: handle.bytes,
     });
     return reply.code(201).send({ documentId: row.id, name: row.displayName });
   });
@@ -507,25 +494,24 @@ export function registerChatRoutes(
 
       const history = await listChatMessages(client, thread.id);
       const previousMessage = history.at(-2);
-      const previousInteractionId =
+      const previousResponseId =
         previousMessage?.role === 'assistant'
-          ? previousMessage.interactionId
+          ? previousMessage.responseId
           : null;
       const recentHistory = history.slice(-CHAT_HISTORY_TURNS);
-      // A stored Gemini interaction already owns the earlier context. Only the new user turn
+      // A stored OpenAI response already owns the earlier context. Only the new user turn
       // and its files need provider handles; the complete recent transcript is retained solely
-      // as the stateless fallback for conversations created before this feature shipped.
-      const inputRows = previousInteractionId
+      // as the stateless fallback for old conversations or an expired provider response.
+      const inputRows = previousResponseId
         ? recentHistory.slice(-1)
         : recentHistory;
-      const documentUris = await documentUrisFor(
+      const documentFileIds = await documentFileIdsFor(
         client,
         thread.id,
         inputRows,
       );
       // Newest CHAT_HISTORY_TURNS, oldest first. A chat is unbounded; a request is not.
-      const turns = recentHistory
-        .map((row) => toTurn(row, documentUris));
+      const turns = recentHistory.map((row) => toTurn(row, documentFileIds));
 
       openEventStream(request, reply);
 
@@ -533,52 +519,66 @@ export function registerChatRoutes(
       let answer = '';
       let failure: string | null = null;
       let model: string | null = null;
-      let interactionId: string | null = null;
+      let responseId: string | null = null;
 
       try {
         const onDelta = (delta: string): void => {
           answer += delta;
           sendEvent(reply, { type: 'delta', text: delta });
         };
+        const onLifecycle = (event: MiscChatLifecycleEvent): void => {
+          request.log.info(
+            { threadId: thread.id, openAiChat: event },
+            `OpenAI chat ${event.phase}`,
+          );
+        };
         const result = await runInCostScope(accumulator, async () => {
           try {
             return await streamMiscChatReply(
               turns,
               onDelta,
-              previousInteractionId ?? undefined,
+              previousResponseId ?? undefined,
+              onLifecycle,
             );
           } catch (error) {
             if (
-              previousInteractionId === null ||
+              previousResponseId === null ||
               answer !== '' ||
-              !isMissingPreviousInteraction(error)
+              !isMissingPreviousResponse(error)
             ) {
               throw error;
             }
-            // Stored interactions are retained for a finite period (and less time on free
-            // tier). Rebuild the recent request once, refreshing any expired Gemini Files,
-            // instead of making an old chat permanently unusable.
-            const fallbackUris = await documentUrisFor(
+            // A stored response may be deleted or age out. Rebuild the bounded conversation
+            // once from our own rows and durable OpenAI Files instead of breaking the chat.
+            const fallbackFileIds = await documentFileIdsFor(
               client,
               thread.id,
               recentHistory,
             );
             const fallbackTurns = recentHistory.map((row) =>
-              toTurn(row, fallbackUris),
+              toTurn(row, fallbackFileIds),
             );
-            return streamMiscChatReply(fallbackTurns, onDelta);
+            return streamMiscChatReply(
+              fallbackTurns,
+              onDelta,
+              undefined,
+              onLifecycle,
+            );
           }
         });
         model = result.model;
-        interactionId = result.interactionId;
+        responseId = result.responseId;
       } catch (error) {
         failure = error instanceof Error ? error.message : String(error);
         request.log.error({ err: error }, 'chat reply failed');
       }
 
-      // Whatever arrived is stored, even on failure: those tokens are paid for, and this repo
-      // does not discard paid work. A turn that produced nothing at all still records the
-      // error, so the conversation shows what happened instead of a gap.
+      // The answer streams, so `answer` holds whatever reached the browser. A failed turn
+      // therefore stores that fragment ALONGSIDE its error rather than an empty string: those
+      // tokens are paid for and the officer watched them arrive, so discarding them would be
+      // the surprising behaviour. The error column is what marks the row incomplete, and the
+      // response id is only written on a clean finish — so a broken turn can never become the
+      // `previous_response_id` a follow-up chains onto.
       const costUsd = totalCostUsd(accumulator);
       let assistantRow: ChatMessageRow | null = null;
       try {
@@ -587,7 +587,7 @@ export function registerChatRoutes(
           role: 'assistant',
           content: answer,
           ...(model !== null ? { model } : {}),
-          ...(interactionId !== null ? { interactionId } : {}),
+          ...(responseId !== null ? { responseId } : {}),
           ...(costUsd > 0 ? { costUsd } : {}),
           ...(failure !== null ? { error: failure } : {}),
         });

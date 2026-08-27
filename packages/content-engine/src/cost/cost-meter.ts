@@ -16,7 +16,6 @@ import {
   estimateTtsCostUsd,
   estimateVideoCostUsd,
   priceText,
-  priceGeminiText,
   type ImageKind,
   type ImageQuality,
   type VideoTier,
@@ -191,34 +190,6 @@ export function recordChatUsage(
   bumpTaskUsage('text', 'openai', model, 1, 1, costUsd, false);
 }
 
-export type GeminiChatUsage = Readonly<{
-  total_input_tokens?: number | undefined;
-  total_cached_tokens?: number | undefined;
-  total_output_tokens?: number | undefined;
-  total_thought_tokens?: number | undefined;
-}>;
-
-export function recordGeminiChatUsage(
-  model: string,
-  usage: GeminiChatUsage | undefined,
-): void {
-  const context = storage.getStore();
-  if (!context) return;
-  const acc = context.accumulator;
-  const input = usage?.total_input_tokens ?? 0;
-  const cached = usage?.total_cached_tokens ?? 0;
-  // Google's output price includes thinking tokens, which are reported separately.
-  const output =
-    (usage?.total_output_tokens ?? 0) + (usage?.total_thought_tokens ?? 0);
-  acc.chatCalls += 1;
-  acc.inputTokens += input;
-  acc.cachedInputTokens += cached;
-  acc.outputTokens += output;
-  const costUsd = priceGeminiText(input, cached, output);
-  acc.textCostUsd += costUsd;
-  bumpTaskUsage('text', 'gemini', model, 1, 1, costUsd, false);
-}
-
 // Shape of the `usage` object OpenAI returns on an embeddings call.
 export type EmbeddingUsage = Readonly<{ prompt_tokens?: number }>;
 
@@ -371,13 +342,5 @@ export function recordTranslateCost(
   const costUsd = estimateTranslateCostUsd(characters);
   acc.translateChars += characters;
   acc.translateCostUsd += costUsd;
-  bumpTaskUsage(
-    'translate',
-    'sarvam',
-    model,
-    1,
-    characters,
-    costUsd,
-    true,
-  );
+  bumpTaskUsage('translate', 'sarvam', model, 1, characters, costUsd, true);
 }

@@ -5,8 +5,20 @@
 //
 // Images, recordings, DOCX and TXT keep the ATTACH → SEND → PREPARE rule: picking them costs
 // nothing, and `prepare()` does their work only after Send. PDFs are the deliberate exception.
-// They start a native Gemini Files upload as soon as they are selected, overlapping preparation
+// They start a native OpenAI Files upload as soon as they are selected, overlapping preparation
 // with the time the officer spends typing. No page-by-page OCR or transcription occurs.
+//
+// **PRESSING SEND NEVER WAITS FOR ANY OF IT.** `prepare()` is called after the turn is already
+// on screen, so an officer who picks a 30 MB PDF and immediately types a question is not held
+// in front of a disabled button. Two consequences are load-bearing here:
+//
+//   - a selection-time upload that is still running is AWAITED at the top of `prepare()`. It
+//     is neither 'pending' nor 'ready' at that moment, so without the wait the document would
+//     be silently dropped from the very turn it was attached to;
+//   - `prepare()` CONSUMES what it carried — it removes those chips itself, rather than the
+//     caller clearing the tray up front. A failure keeps its chip and its message, which is
+//     the only place the officer would ever see it, and an attachment picked while the turn
+//     was being prepared is not in the snapshot and so survives untouched.
 //
 // Where the remaining work happens:
 //   - PDFs go directly to the chat upload endpoint and Gemini Files;
@@ -164,7 +176,8 @@ function payloadOf(draft: DraftAttachment): ChatAttachment {
 export function useChatAttachments(): {
   attachments: DraftAttachment[];
   // True while a selected PDF is becoming active or while send-time attachments are prepared.
-  // It is the send button's gate.
+  // It drives the composer's "फाईल तयार करत आहोत…" line and NOTHING else — in particular it is
+  // no longer the send button's gate, which is the whole point of the header above.
   preparing: boolean;
   full: boolean;
   addImages: (files: readonly File[]) => void;
@@ -172,10 +185,14 @@ export function useChatAttachments(): {
   addAudio: (files: readonly File[]) => void;
   addYouTube: (video: YouTubeVideo) => void;
   remove: (key: string) => void;
-  clear: () => void;
-  // Do the work — upload the images, read the documents, transcribe the recordings and links —
-  // and return what the turn should carry, in the order they were picked. A failed attachment
-  // is reported on its chip and simply not carried, so one bad file cannot trap a message.
+  // The chips to put under the officer's turn the moment it is sent: kinds and names only,
+  // because nothing has been read yet. Exactly what `prepare()` is about to work on, since
+  // both read the same ref in the same tick.
+  preview: () => ChatAttachment[];
+  // Do the work — wait for any selection-time upload, upload the images, read the documents,
+  // transcribe the recordings and links — and return what the turn should carry, in the order
+  // they were picked. Carried attachments are removed from the tray; a failed one is reported
+  // on its chip and simply not carried, so one bad file cannot trap a message.
   prepare: () => Promise<ChatAttachment[]>;
 } {
   const [attachments, setAttachments] = useState<DraftAttachment[]>([]);
@@ -184,6 +201,9 @@ export function useChatAttachments(): {
   const preparingRef = useRef(false);
   const attachmentsRef = useRef(attachments);
   attachmentsRef.current = attachments;
+  // Selection-time uploads still in flight, by draft key. Never rejects — each entry owns its
+  // own catch — so awaiting one can only mean "this file has settled, ready or failed".
+  const inflight = useRef(new Map<string, Promise<void>>());
 
   const patch = useCallback((key: string, next: Partial<DraftAttachment>) => {
     setAttachments((current) =>
@@ -252,14 +272,20 @@ export function useChatAttachments(): {
 
       for (const draft of accepted) {
         if (!draft.file?.name.toLowerCase().endsWith('.pdf')) continue;
-        void uploadChatDocument(draft.file)
+        const upload = uploadChatDocument(draft.file)
           .then((uploaded) => {
             patch(draft.key, {
               state: 'ready',
               documentId: uploaded.documentId,
             });
           })
-          .catch((error: unknown) => fail(draft.key, error));
+          .catch((error: unknown) => fail(draft.key, error))
+          // Registered so a turn sent mid-upload waits for THIS file rather than leaving
+          // without it; removed once settled so the map cannot grow across a long chat.
+          .finally(() => {
+            inflight.current.delete(draft.key);
+          });
+        inflight.current.set(draft.key, upload);
       }
     },
     [add, fail, patch],
@@ -302,20 +328,53 @@ export function useChatAttachments(): {
     );
   }, []);
 
-  const clear = useCallback(() => setAttachments([]), []);
+  // No `clear`: `prepare()` consumes what it carried, so there is no moment at which the
+  // caller should be dropping the tray wholesale — doing so would take a failed chip's
+  // message with it, and a chip is the only place that message is shown.
+  const preview = useCallback(
+    (): ChatAttachment[] =>
+      attachmentsRef.current
+        .filter((attachment) => attachment.state !== 'failed')
+        .map((attachment) => ({
+          kind: attachment.kind,
+          name: attachment.name || STR.chatAttachedImage,
+          // A link is the one attachment whose identity is known before any work is done.
+          ...(attachment.sourceUrl !== undefined
+            ? { sourceUrl: attachment.sourceUrl }
+            : {}),
+        })),
+    [],
+  );
 
   const prepare = useCallback(async (): Promise<ChatAttachment[]> => {
     if (preparingRef.current) return [];
-    const drafts = attachmentsRef.current;
-    if (drafts.length === 0) return [];
+    const snapshot = attachmentsRef.current;
+    if (snapshot.length === 0) return [];
+    const mine = new Set(snapshot.map((attachment) => attachment.key));
 
     preparingRef.current = true;
     setPreparingTurn(true);
     const done = new Map<string, ChatAttachment>();
 
     try {
+      // 0. A PDF picked moments ago may still be uploading — Send does not wait for it, so
+      //    the wait is here. Until it settles the draft is neither 'pending' nor 'ready', and
+      //    every branch below would skip it: the document would go missing from the very turn
+      //    it was attached to.
+      await Promise.all(
+        [...inflight.current]
+          .filter(([key]) => mine.has(key))
+          .map(([, settled]) => settled),
+      );
+      // Re-read after the wait: the states above are stale, and an upload that just landed
+      // wrote its documentId through `patch`.
+      const drafts = attachmentsRef.current.filter((attachment) =>
+        mine.has(attachment.key),
+      );
+
       // A draft already carrying its result is one that survived an earlier prepare whose
-      // siblings failed. Re-reading it would be a second charge for the same bytes.
+      // siblings failed, or a PDF whose upload finished while the officer typed. Re-reading
+      // it would be a second charge for the same bytes.
       for (const draft of drafts) {
         if (draft.state === 'ready') done.set(draft.key, payloadOf(draft));
       }
@@ -411,6 +470,12 @@ export function useChatAttachments(): {
     } finally {
       preparingRef.current = false;
       setPreparingTurn(false);
+      // Consume what the turn carried. Done here rather than by the caller clearing the tray
+      // up front, so a failure keeps its chip and its message, and anything attached while
+      // this ran is not in `done` and so survives.
+      setAttachments((current) =>
+        current.filter((attachment) => !done.has(attachment.key)),
+      );
     }
   }, [fail, patch]);
 
@@ -429,7 +494,7 @@ export function useChatAttachments(): {
     addAudio,
     addYouTube,
     remove,
-    clear,
+    preview,
     prepare,
   };
 }

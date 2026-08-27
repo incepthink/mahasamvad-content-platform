@@ -19,40 +19,34 @@ The long-term product will:
 Scaffolding is done. The core generation pipeline and a first web product on top of
 it are implemented and working end-to-end:
 
-- **Native, stateful Gemini PDF chat replaces OCR-first chat intake** (2026-08-23,
-  migration 0046): `/chat` no longer waits for `intake/gemini-doc.ts` to transcribe a PDF
-  into page Markdown before it can answer. Selecting a PDF immediately calls
-  `POST /chat/attachments/document`; the API uploads the original concurrently to Gemini
-  Files and the existing private `dlo-uploads` source bucket, waits for the Gemini file to be
-  active, and returns only a `chat_files.id` to the browser. Send therefore carries a trusted
-  UUID, never a provider URI or client-supplied storage path. DOCX/TXT retain the former shared
-  document-intake route, and every publishing surface keeps its page picker/OCR contract.
-  - The answer is a native PDF request through `@google/genai`'s Interactions API using stable
-    `gemini-3.7-flash`, streaming text deltas with `thinking_level: low` by default. There is no
-    transcription prompt and no chat system prompt. `GEMINI_CHAT_MODEL` and
-    `GEMINI_CHAT_THINKING_LEVEL` are rollback/tuning seams.
-  - Successful assistant rows store `gemini_interaction_id`. A normal follow-up sends only the
-    new user turn with `previous_interaction_id`, so the server does not retransmit the 200-page
-    document or replay the conversation. Old conversations, and a turn after any failed
-    assistant response, fall back to the recent 40-message transcript. An interaction id that
-    has aged out is retried once statelessly on the provider's 400/404, before any delta was
-    emitted, refreshing only then any native PDF handles the fallback needs.
-  - Gemini Files expire after 48 hours but chats do not. Before a native PDF is needed, the API
-    refreshes an expiring handle from the durable private source object and updates `chat_files`;
-    `thread_id` is claimed atomically on first send so a document UUID cannot be attached to a
-    different chat. Deleting a thread cascades its rows; source objects follow the repository's
-    existing conservative no-delete storage stance.
-  - Gemini input/cached/output+thinking usage is recorded in the ambient cost meter. The
-    introductory 3.7 Flash rates are configurable through `GEMINI_CHAT_*_PER_1M_USD` because
-    Google's announced rates can change without a code deploy.
-  Deploy 0046, rebuild `@dgipr/database` → `@dgipr/schemas` → `@dgipr/content-engine`, then ship
-  API + web together. `GEMINI_API_KEY` is required; no n8n change. Verified free/offline:
-  workspace typecheck **7/7 green**, targeted ESLint clean on every touched TS file, and the
-  complete production build green. The repository-wide lint still stops on the pre-existing
-  irregular whitespace in `packages/content-engine/src/intake/text-file.ts:15`; unrelated
-  warnings remain in analytics/poster files. Left for a real paid run after migration 0046:
-  attach the 200-page PDF, ask one question, and confirm immediate streaming plus a stateful
-  follow-up without a second file upload.
+- **OpenAI Responses replaces Gemini for native PDF chat** (2026-08-27, migration 0048;
+  supersedes the 0046 Gemini runtime): the old Gemini Interactions path was conclusively the
+  failure point — 3.7, 3.6 and 3.5 Flash-Lite all created interactions but produced no complete
+  answer before stalls/EOFs. `/chat` now uses OpenAI for ordinary text, images and original PDFs.
+  - Selecting a PDF uploads it once, concurrently, to OpenAI Files (`purpose=user_data`) and
+    the existing private `dlo-uploads` source bucket. Send carries only the trusted
+    `chat_files.id`; the browser never supplies an OpenAI file id or storage path. OpenAI's
+    Responses file-input limit is enforced at 50 MB. DOCX/TXT and every publishing surface keep
+    their former extracted-text/page-picker/OCR contracts — only general chat bypasses OCR.
+  - `OPENAI_MISC_CHAT_MODEL` defaults to the quality-first `gpt-5.6-terra`. The Responses call
+    sends a broad, language-matching general-assistant instruction, low reasoning, native image
+    and `input_file` content, and commits text only after status `completed`. The browser still
+    requires terminal `done`/`error`, so incomplete provider work cannot appear successful.
+  - Successful assistant rows store `openai_response_id`; a follow-up sends only the new turn
+    with `previous_response_id`. If that state has expired or disappeared, the API retries once
+    with the recent 40-message transcript and the saved OpenAI file ids. Existing Gemini-era
+    PDF rows lazily upload their durable source to OpenAI on first use and fill
+    `openai_file_id`, so old chats require no manual re-upload.
+  - 0048 leaves the old Gemini columns nullable for rolling-deploy compatibility and adds
+    `openai_file_id`, `byte_size`, and `openai_response_id`. OpenAI usage feeds the existing
+    text cost meter. Deploy 0048, rebuild `@dgipr/database` → `@dgipr/schemas` →
+    `@dgipr/content-engine`, then ship API + web together. `/chat` requires `OPENAI_API_KEY`;
+    Gemini remains configured only for unrelated OCR/image/video providers that select it.
+  Verified with the live API: a 733 KB Marathi PDF uploaded through OpenAI Files, returned its
+  exact visible heading through `gpt-5.6-terra`, and a second request answered from
+  `previous_response_id` without the PDF; the canary file was then deleted. The no-network chat
+  harness is **4/4 green**, workspace typecheck is **7/7 green**, targeted ESLint is clean, and
+  the complete production build is green (only the pre-existing analytics unused warnings).
 
 - **A scene can carry the officer's own reference picture** (2026-08-17, no migration): the
   only way to tell `/video` what a place, person or object actually looks like was to describe

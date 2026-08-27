@@ -198,7 +198,11 @@ export type OpenAiRequest = Readonly<{
   // Used in log lines and in the thrown message: `OpenAI <label> request failed: ...`.
   label: string;
   apiKey: string;
-  body: unknown;
+  // JSON for ordinary API calls, or multipart form data for Files uploads. Exactly one is
+  // supplied. FormData owns its boundary header, so the transport must not set content-type
+  // for that branch.
+  body?: unknown;
+  formData?: FormData;
   // Which concurrency lane this call queues in. Omitted = 'default', so every existing
   // caller is unchanged. See OpenAiLane above.
   lane?: OpenAiLane | undefined;
@@ -215,8 +219,20 @@ export type OpenAiRequest = Readonly<{
 // polish-article.ts — behaves exactly as before.
 export async function openAiFetch(
   url: string,
-  { label, apiKey, body, lane, timeoutMs: timeoutOverride }: OpenAiRequest,
+  {
+    label,
+    apiKey,
+    body,
+    formData,
+    lane,
+    timeoutMs: timeoutOverride,
+  }: OpenAiRequest,
 ): Promise<Response> {
+  if ((body === undefined) === (formData === undefined)) {
+    throw new Error(
+      `OpenAI ${label} request must supply exactly one of body or formData.`,
+    );
+  }
   const attempts = readInt('OPENAI_MAX_RETRIES', 5) + 1;
   // Serialized calls queue behind one another, so a hung request would stall the whole
   // pipeline rather than just itself. The timeout is the release valve. 5 minutes, not the
@@ -234,11 +250,14 @@ export async function openAiFetch(
       try {
         response = await fetch(url, {
           method: 'POST',
-          headers: {
-            authorization: `Bearer ${apiKey}`,
-            'content-type': 'application/json',
-          },
-          body: JSON.stringify(body),
+          headers:
+            formData !== undefined
+              ? { authorization: `Bearer ${apiKey}` }
+              : {
+                  authorization: `Bearer ${apiKey}`,
+                  'content-type': 'application/json',
+                },
+          body: formData ?? JSON.stringify(body),
           signal: AbortSignal.timeout(timeoutMs),
         });
       } catch (error) {

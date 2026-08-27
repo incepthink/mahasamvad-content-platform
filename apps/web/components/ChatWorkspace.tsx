@@ -40,22 +40,19 @@ export function ChatWorkspace({ threadId }: { threadId: string | null }) {
 
   const send = useCallback(
     async (content: string): Promise<boolean> => {
-      // Send-time work happens here. Native PDFs are already active in Gemini Files because
-      // their selection-time preparation overlaps the officer typing this question.
-      const payload = await attachments.prepare();
-      if (payload.length === 0 && content.trim() === '') {
-        // Every attachment failed and there is no question to carry. The chips report why and
-        // stay put, so the officer can remove them or try again.
-        return false;
-      }
-      // The tray is cleared as the turn leaves, exactly as the box is: the attachments now
-      // belong to the message on screen, and leaving them behind would silently re-send the
-      // same document with the next question.
-      attachments.clear();
-      void chat.send({ content, attachments: payload }).then(() => {
-        // The rail's title and ordering only exist once the turn has landed.
-        void list.refresh();
-      });
+      // Nothing is awaited here on purpose. The turn is committed now — box cleared, question
+      // on screen — and `prepare` runs inside it, so picking a large PDF and asking about it
+      // in the same breath no longer means waiting for the upload before Send will even fire.
+      // The tray empties itself as each attachment is carried (see useChatAttachments), which
+      // is also what leaves a failed one behind with its message.
+      const preview = attachments.preview();
+      if (preview.length === 0 && content.trim() === '') return false;
+      void chat
+        .send({ content, preview, prepare: attachments.prepare })
+        .then(() => {
+          // The rail's title and ordering only exist once the turn has landed.
+          void list.refresh();
+        });
       return true;
     },
     [attachments, chat, list],

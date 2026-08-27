@@ -30,7 +30,7 @@ export const CHAT_MESSAGE_MAX_CHARS = 60_000;
 // better served by /dlo, which is built for it.
 export const CHAT_ATTACHMENT_TEXT_MAX_CHARS = 200_000;
 
-// Per turn. Native Gemini interaction state means earlier attachments are not retransmitted on
+// Per turn. Native OpenAI response state means earlier attachments are not retransmitted on
 // normal follow-ups; this remains a UI and request-complexity bound.
 export const CHAT_MAX_ATTACHMENTS = 10;
 
@@ -50,7 +50,7 @@ export const ChatAttachmentSchema = z.object({
   // 'image' only. Set by POST /chat/attachments/image — never accepted from the client as an
   // arbitrary URL, which would let a request point the model at anything on the internet.
   imageUrl: z.string().url().optional(),
-  // Native PDF only. This is our chat_files row, never a client-supplied Gemini URI.
+  // Native PDF only. This is our chat_files row, never a client-supplied provider id.
   documentId: z.string().uuid().optional(),
   // Audio, YouTube and legacy non-PDF documents: extracted/transcribed text.
   text: z.string().max(CHAT_ATTACHMENT_TEXT_MAX_CHARS).optional(),

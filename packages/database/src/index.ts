@@ -142,7 +142,7 @@ export {
   insertChatFile,
   getChatFile,
   attachChatFile,
-  updateChatFileGeminiHandle,
+  updateChatFileOpenAiHandle,
   type ChatRole,
   type ChatAttachmentKind,
   type ChatAttachmentEntry,

@@ -1,8 +1,14 @@
 'use client';
 
 // The composer: the text box and attachment tray. Native PDFs begin preparing when picked so
-// that work overlaps typing; other files retain their send-time preparation. The box holds the
-// officer's question until every selected attachment is ready and the turn has actually left.
+// that work overlaps typing; other files retain their send-time preparation.
+//
+// **NOTHING HERE WAITS FOR AN ATTACHMENT.** `preparing` reports what the tray is doing and
+// nothing more — it is not a gate on the box or on the button. A file still uploading is
+// waited for inside the sent turn (useChatThread), so pressing पाठवा with a 30 MB PDF halfway
+// up is a normal send: the box clears, the question appears, and the answer follows when the
+// file lands. `sending` is the only thing that swaps the button, exactly as it does for an
+// answer already streaming.
 //
 // EVERY attachment is a chip here, documents included: the document button opens the file
 // explorer directly, exactly like the image button, and the file is read whole. The page
@@ -94,23 +100,17 @@ export function ChatComposer({
   const hasAttachments = attachments.some(
     (attachment) => attachment.state !== 'failed',
   );
-  const nativePdfPreparing = attachments.some(
-    (attachment) =>
-      attachment.kind === 'document' &&
-      attachment.name.toLowerCase().endsWith('.pdf') &&
-      attachment.state === 'preparing',
-  );
-  const busy = sending || preparing;
-  const canSend = !busy && (text.trim() !== '' || hasAttachments);
+  const canSend = !sending && (text.trim() !== '' || hasAttachments);
 
   const submit = () => {
-    if (busy) return;
+    if (sending) return;
     if (text.trim() === '' && !hasAttachments) return;
     setError(null);
     setShowYouTube(false);
     void onSend(text).then((sent) => {
-      // Cleared only once the turn is on its way. Preparing the attachments can take minutes,
-      // and a box emptied at the click would leave the officer's question nowhere on screen.
+      // Cleared only once the turn is on its way. False means there was nothing to send —
+      // every attachment had already failed and no question was typed — and a box emptied
+      // then would leave the officer's words nowhere.
       if (sent) setText('');
     });
   };
@@ -189,9 +189,8 @@ export function ChatComposer({
           onChange={setText}
           onKeyDown={onKeyDown}
           placeholder={STR.chatPlaceholder}
-          // Selection-time PDF preparation deliberately overlaps typing. Send-time preparation
-          // locks the committed question; a streaming answer leaves the box open for the next.
-          disabled={preparing && !nativePdfPreparing}
+          // Never disabled. Attachment work happens beside the box, and a streaming answer
+          // leaves it open for the next question — so there is nothing left to lock it for.
           rows={1}
           maxLength={CHAT_MESSAGE_MAX_CHARS}
           aria-label={STR.chatPlaceholder}
@@ -260,7 +259,7 @@ export function ChatComposer({
               className="btn chat-send"
               onClick={submit}
               disabled={!canSend}
-              title={preparing ? STR.chatAttachWorking : STR.chatSend}
+              title={STR.chatSend}
               aria-label={STR.chatSend}
             >
               <Send size={18} aria-hidden="true" />
