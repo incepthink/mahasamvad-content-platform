@@ -578,7 +578,31 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
       ? verbatim
       : buildFreshChange(copyStyle, copy);
     return [
-      'Make a digipr poster',
+      `**Create a highly creative and professional official poster for DGIPR — Directorate General of Information and Public Relations, Government of Maharashtra, India.**
+
+Carefully study the supplied information first and understand **what the communication is mainly trying to convey** — for example, achievement, growth, comparison, milestones, beneficiaries, process, geographical spread, impact, progress, rankings, or multiple supporting statistics.
+
+Based on that understanding, **choose the most suitable infographic composition for this specific content. You have complete creative freedom to decide how the information should be visually structured.**
+
+The infographic format should be selected according to the relationships within the information. For example, the design may use a hierarchy, timeline, progression, central achievement with supporting statistics, comparison layout, radial composition, connected nodes, flow diagram, map-based structure, layered data visualization, modular statistic panels, tree-like structure, or another appropriate infographic format.
+
+**These are only possible formats, not layout instructions. Do not automatically use any particular example mentioned above. Select whichever visual structure communicates the supplied information most clearly and powerfully.**
+
+Avoid simply placing every statistic into identical boxes or circles unless that is genuinely the strongest solution. The layout should reflect the importance and relationship of each piece of information.
+
+Establish a clear visual hierarchy:
+
+- &#x20;identify the **main message or achievement** and make it the visual focus;&#x20;
+- &#x20;group related supporting information together;&#x20;
+- &#x20;give important statistics greater prominence;&#x20;
+- &#x20;use imagery, icons, illustrations, diagrams, shapes, typography and data visualization where they improve understanding;&#x20;
+- &#x20;integrate all elements into one cohesive composition rather than making them feel like separate unrelated cards.&#x20;
+
+The finished design should feel like a **premium government infographic campaign**, not a generic social-media template. It should be authoritative, optimistic, modern, visually engaging, easy to scan and appropriate for the Government of Maharashtra.
+
+Use the supplied Marathi text and numerical information accurately. **Do not invent, remove, reinterpret or alter factual information.**
+
+Most importantly: **the content should determine the infographic structure. Do not force the information into a predetermined layout.**`,
       '',
       'POSTER CONTENT:',
       '',
@@ -1413,7 +1437,9 @@ if (
           'No quantity of content is ever a reason to cross into either reserved zone.',
         )
     )
-      failures.push('the fresh_verbatim prompt does not end on the chrome fit rule');
+      failures.push(
+        'the fresh_verbatim prompt does not end on the chrome fit rule',
+      );
     for (const retired of [
       'Do not draw any government logo',
       'FINAL VERIFICATION',

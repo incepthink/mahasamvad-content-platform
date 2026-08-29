@@ -4,6 +4,7 @@ import multipart from '@fastify/multipart';
 import { fileURLToPath } from 'node:url';
 import { ZodError } from 'zod';
 import { createServiceRoleClient } from '@dgipr/database';
+import { isAllowedOrigin } from './cors-origins.js';
 import { registerAnalyticsRoutes } from './routes/analytics.js';
 import { registerCanvaRoutes } from './routes/canva.js';
 import { registerChatRoutes } from './routes/chat.js';
@@ -33,10 +34,14 @@ export async function createServer() {
     bodyLimit: 67_108_864,
   });
 
+  // A callback rather than the list itself, because CORS_ORIGIN entries may be wildcard
+  // patterns (see cors-origins.ts - Vercel gives every deployment a fresh hostname). A
+  // request carrying no Origin header is not a browser request and is left alone; a
+  // disallowed one simply gets no CORS header, which is the array form's behaviour too.
   await app.register(cors, {
-    origin: (
-      process.env.CORS_ORIGIN ?? 'http://localhost:3000,http://127.0.0.1:3000'
-    ).split(','),
+    origin: (origin, cb) => {
+      cb(null, origin === undefined || isAllowedOrigin(origin));
+    },
     methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'],
   });
 

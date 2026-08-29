@@ -92,8 +92,11 @@ and `posters/references/master-*.png` are already uploaded. Just confirm:
    N8N_BASIC_AUTH_PASSWORD=a-strong-password
    EOF
    ```
-   Set `CORS_ORIGIN` in `.env.prod` to `https://newsroom.indicex.xyz` (you can add
-   the `https://<app>.vercel.app` URL too until the custom domain is live in Phase D).
+   Set `CORS_ORIGIN` in `.env.prod` to `https://newsroom.indicex.xyz`. An entry may be a
+   pattern containing `*` (one hostname label — it matches no dot, so it cannot widen past
+   its own domain), which is how the Vercel URLs are covered without editing this value
+   per deployment:
+   `https://newsroom.indicex.xyz,https://mahasamvad-content-platform-web-*.vercel.app`.
    The repository-root `.env` is for local development only and is excluded from
    the Docker image. Video storyboards therefore require `GEMINI_API_KEY` in
    `deploy/.env.prod` (or `OPENAI_API_KEY` with `VIDEO_IMAGE_PROVIDER=openai`).
@@ -198,8 +201,15 @@ current API sends; pushing them ahead of an API deploy breaks both paths.
 3. Deploy, then add the **custom domain `newsroom.indicex.xyz`** to the Vercel
    project (Settings → Domains) and create the CNAME/A record Vercel shows you.
 4. **Back to the API**: set `CORS_ORIGIN` in `deploy/.env.prod` to
-   `https://newsroom.indicex.xyz` (add the `https://<app>.vercel.app` URL too if you
-   want the raw Vercel URL to work), then `docker compose up -d` again to pick it up.
+   `https://newsroom.indicex.xyz,https://mahasamvad-content-platform-web-*.vercel.app`,
+   then `docker compose up -d` again to pick it up. The wildcard entry covers the
+   production Vercel URL **and** every branch preview
+   (`https://mahasamvad-content-platform-web-git-staging-hashcase.vercel.app` and the
+   per-push hostnames beside it), which is what keeps a preview from failing in the
+   browser while the API answers perfectly. A preview also needs its own
+   `NEXT_PUBLIC_API_URL` in Vercel: that variable is inlined at BUILD time, so it must be
+   set for the **Preview** environment as well as Production, and the preview must be
+   redeployed after adding it.
 
 ---
 

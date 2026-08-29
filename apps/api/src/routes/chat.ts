@@ -53,6 +53,7 @@ import {
   type MiscChatLifecycleEvent,
   type MiscChatTurn,
 } from '@dgipr/content-engine';
+import { isAllowedOrigin } from '../cors-origins.js';
 
 // Images retain the repository's unlimited upload posture. Direct PDF chat is different:
 // OpenAI Responses documents a hard 50 MB combined file-input limit, so that route refuses
@@ -245,9 +246,6 @@ function toTurn(
 //      whole response and deliver it in one lump — which streams fine locally and arrives all
 //      at once in production, the worst place to discover it.
 function openEventStream(request: FastifyRequest, reply: FastifyReply): void {
-  const allowed = (
-    process.env.CORS_ORIGIN ?? 'http://localhost:3000,http://127.0.0.1:3000'
-  ).split(',');
   const origin = request.headers.origin;
   const headers: Record<string, string> = {
     'content-type': 'text/event-stream; charset=utf-8',
@@ -255,7 +253,7 @@ function openEventStream(request: FastifyRequest, reply: FastifyReply): void {
     connection: 'keep-alive',
     'x-accel-buffering': 'no',
   };
-  if (origin !== undefined && allowed.includes(origin)) {
+  if (origin !== undefined && isAllowedOrigin(origin)) {
     headers['access-control-allow-origin'] = origin;
     headers.vary = 'Origin';
   }
