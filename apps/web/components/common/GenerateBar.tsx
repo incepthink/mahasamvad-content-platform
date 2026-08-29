@@ -31,6 +31,7 @@ export function GenerateBar({
   canSubmit,
   onSubmit,
   error,
+  note = null,
   socialBusy = false,
   articleBusy = false,
 }: {
@@ -39,8 +40,13 @@ export function GenerateBar({
   canSubmit: boolean;
   onSubmit: () => void;
   error: string | null;
+  // One line of reassurance about the press that is already running — /translate's
+  // "a long text can take a minute or two", which the button's own label has no room
+  // for. Rendered where the busy notices are, so everything about why the officer is
+  // waiting is in one place.
+  note?: string | null | undefined;
   // Why a submit would be refused right now, stated beside the button. Only the media
-  // room has lanes that can be busy; /dlo omits both.
+  // room has lanes that can be busy; /dlo and /translate omit both.
   socialBusy?: boolean | undefined;
   articleBusy?: boolean | undefined;
 }) {
@@ -66,6 +72,15 @@ export function GenerateBar({
         {articleBusy ? (
           <p className="text-muted-foreground m-0 text-center text-sm">
             {STR.articleBusyInfo}
+          </p>
+        ) : null}
+
+        {note ? (
+          <p
+            className="text-muted-foreground m-0 text-center text-sm"
+            aria-live="polite"
+          >
+            {note}
           </p>
         ) : null}
 

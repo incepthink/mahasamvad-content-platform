@@ -8,10 +8,10 @@
 // This page is DELIBERATELY thin. Every rule about what a lane sends, hides or refuses
 // lives in `components/media-room/useCreateForm.ts`; the four blocks below are markup:
 //
-//   NoteComposer   — the text, the file behind [+], the format, the two Creative opt-ins
+//   NoteComposer   — the text, the file behind [+], the format, the two Creative
+//                    opt-ins, and the submit that acts on them
 //   ImagePromptBox — the officer's own image brief (Creative only, migration 0045)
 //   TemplateSelect — the optional template pin (every lane that renders a poster)
-//   GenerateBar    — the one action, pinned to the foot of the viewport
 //
 // On the Creative lane the officer answers TWO INDEPENDENT questions and `designMode` is
 // DERIVED from the pair rather than stored — which is what makes it impossible for the
@@ -32,7 +32,8 @@
 // Banner and YouTube ignore designMode entirely.
 
 import { STR } from '../lib/strings';
-import { GenerateBar } from '../components/common/GenerateBar';
+import { CREATIVE_DOODLES } from '../lib/doodleMarks';
+import { PageBackdrop } from '../components/common/PageBackdrop';
 import { ImagePromptBox } from '../components/media-room/ImagePromptBox';
 import { NoteComposer } from '../components/media-room/NoteComposer';
 import { TemplateSelect } from '../components/media-room/TemplateSelect';
@@ -42,10 +43,14 @@ export default function NewGenerationPage() {
   const form = useCreateForm();
 
   return (
-    // .mr-create-page reserves room at the foot of the page — and of the site footer
-    // below it — for the pinned action bar, which is out of flow and would otherwise sit
-    // over the last block and over the credit line.
-    <main className="page mr-create-page">
+    // No foot clearance: the submit is in the composer card (see NoteComposer), so
+    // nothing is pinned over the last block or over the credit line any more.
+    <main className="page">
+      {/* Wallpaper for this lane: what an officer makes here is a picture. The
+          marks are decorative only, and the vocabulary lives beside the other lanes'
+          in lib/doodleMarks.ts — see components/common/PageBackdrop.tsx. */}
+      <PageBackdrop marks={CREATIVE_DOODLES} seed={19} />
+
       <header className="page-head">
         <div className="page-head-text">
           <h1 className="page-title">{STR.mediaRoomTitle}</h1>
@@ -69,16 +74,6 @@ export default function NewGenerationPage() {
           />
         ) : null}
       </div>
-
-      <GenerateBar
-        label={form.submitLabel}
-        busy={form.submitBusy}
-        canSubmit={form.canSubmit}
-        onSubmit={() => void form.startSubmit()}
-        error={form.error}
-        socialBusy={form.hasActiveSocialTask}
-        articleBusy={form.hasActiveArticleTask}
-      />
     </main>
   );
 }

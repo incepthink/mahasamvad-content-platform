@@ -5,9 +5,13 @@
  * one card: the text, the file behind [+], which format, and the two Creative
  * opt-ins.
  *
- * It carries no submit. The one action is pinned to the foot of the viewport
- * (`GenerateBar`), because this form is several blocks long and a button under all
- * of it is off screen for most of the time spent here.
+ * THE SUBMIT LIVES IN THIS CARD, at the end of the tool row beside the two Creative
+ * opt-ins. It used to be `GenerateBar`, pinned to the foot of the viewport, on the
+ * reasoning that a button under a several-block form is off screen. Here it sits with
+ * the controls it acts on instead — everything compulsory is in this one card, and the
+ * blocks below it (the image brief, the template pin) are optional. Every complaint the
+ * form can raise is rendered directly under it, so a refusal is never scrolled away from
+ * the button that caused it.
  *
  * The [+] button sits in the tool row beside the format control and opens the shared
  * document intake INSIDE this card rather than as a card of its own: the file is a
@@ -241,7 +245,47 @@ export function NoteComposer({ form }: { form: Form }) {
             />
           </>
         ) : null}
+
+        {/* The page's one action, pushed to the end of the same row. `ml-auto` is what
+            keeps it at the right edge on a wide card and lets it wrap onto its own line
+            with the rest when the row runs out of width. Enabled, it carries the slow
+            warm sheen (`mr-submit-flow`, globals.css) — the only moving thing on the
+            page, so "there is something to press now" reads without a label; disabled it
+            is quiet and still. The condition is the form's, unchanged. */}
+        <button
+          type="button"
+          onClick={() => void form.startSubmit()}
+          disabled={form.submitBusy || !form.canSubmit}
+          className={cn(
+            'text-primary-foreground ml-auto inline-flex h-9 shrink-0 items-center rounded-md px-5 text-sm font-bold transition-[filter]',
+            'focus-visible:ring-ring/50 outline-none focus-visible:ring-[3px]',
+            'disabled:cursor-not-allowed disabled:opacity-60',
+            form.submitBusy || !form.canSubmit
+              ? 'bg-primary'
+              : 'mr-submit-flow hover:saturate-110 hover:brightness-105',
+          )}
+        >
+          {form.submitLabel}
+        </button>
       </div>
+
+      {/* Why a press would be refused, stated under the button rather than beside the
+          field that caused it — the officer presses here, so the answer belongs here. */}
+      {form.hasActiveSocialTask ? (
+        <p className="text-muted-foreground mt-2 text-sm">
+          {STR.socialBusyInfo}
+        </p>
+      ) : null}
+      {form.hasActiveArticleTask ? (
+        <p className="text-muted-foreground mt-2 text-sm">
+          {STR.articleBusyInfo}
+        </p>
+      ) : null}
+      {form.error ? (
+        <div className="mt-3">
+          <ErrorNotice message={form.error} />
+        </div>
+      ) : null}
 
       {/* What a Banner SAYS is part of choosing what to make, so it sits with the format
           control rather than in a card of its own. Social posters do not have it — their

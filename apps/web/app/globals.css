@@ -204,22 +204,11 @@
 }
 
 /* ---------------------------------------------------------------------------
-   Create form (app/page.tsx) — the two things Tailwind utilities cannot express
-   inline: clearance for the pinned action bar, and the bar's own sheen.
+   Create form (app/page.tsx) — the submit's sheen, the one thing about it that
+   Tailwind utilities cannot express inline. The foot clearance that used to live
+   here went with the pinned action bar: the submit is now in the composer card
+   (components/media-room/NoteComposer.tsx) and nothing is out of flow.
    --------------------------------------------------------------------------- */
-
-/* Room at the foot of the page — and of the site footer below it — for the pinned
-   bar, which is out of flow and would otherwise sit over the last block and over
-   the credit line. Written as .page.mr-create-page so the narrow-screen `.page`
-   rule in dgipr.css (which resets the shorthand to a 60px foot) cannot take the
-   clearance away. */
-.page.mr-create-page {
-  padding-bottom: 150px;
-}
-
-.mr-create-page + .site-footer {
-  padding-bottom: 118px;
-}
 
 /* Enabled, the submit carries a slow warm sheen travelling across it — the only
    moving thing on the page, so "there is something to press now" reads without a

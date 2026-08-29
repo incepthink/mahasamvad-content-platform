@@ -30,6 +30,9 @@
  *   link         fetched by the transcriber, not by us. Its own panel, because it is a
  *                field to paste into rather than a file to attach.
  *
+ * THE SUBMIT IS IN THIS CARD, at the end of the tool row — see the button below for why
+ * it is no longer pinned to the foot of the viewport.
+ *
  * The composer owns no state except whether the link panel is open — every list belongs to
  * `useDloIntakeForm`, which will submit it. This only decides which picks are allowed to
  * join them, through `lib/filePicks`, shared with the standalone recording picker on
@@ -45,12 +48,13 @@ import {
   isAudioFileName,
   isImageFileName,
 } from '@dgipr/schemas';
-import { formatFileSize } from '@/components/AudioFilePicker';
+import { formatFileSize } from '@/lib/fileSize';
 import {
   AttachmentStrip,
   type AttachmentItem,
 } from '@/components/common/AttachmentStrip';
 import { ComposerToolbarButton } from '@/components/common/ComposerToolbarButton';
+import { ErrorNotice } from '@/components/ErrorNotice';
 import {
   DOCUMENT_FILE_ACCEPT,
   isDocumentFileName,
@@ -62,6 +66,7 @@ import {
   YOUTUBE_INPUT_OFF,
 } from '@/components/YouTubeLinkInput';
 import { acceptFilePicks } from '@/lib/filePicks';
+import { cn } from '@/lib/utils';
 import { useFilePreviews } from '@/lib/useFilePreviews';
 import { STR } from '@/lib/strings';
 import { DloLostFilesNotice } from './DloLostFilesNotice';
@@ -223,13 +228,46 @@ export function DloComposer({ form }: { form: DloIntakeFormState }) {
             onClick={() => setLinkOpen((open) => !open)}
           />
 
-          {/* A meeting's worth of typed notes is long enough that "how much have I
-              written?" is a real question; an empty box does not need the answer. */}
-          {form.notes.length > 0 ? (
-            <span className="text-muted-foreground ms-auto text-sm">
-              {form.notes.length.toLocaleString('mr-IN')} {STR.dloCharsSuffix}
-            </span>
-          ) : null}
+          {/* The count and the page's one action, held together and pushed to the end of
+              the same row — so they wrap onto a line of their own rather than the button
+              being stranded under a lone tool button on a narrow card. */}
+          <div className="ms-auto flex items-center gap-3">
+            {/* A meeting's worth of typed notes is long enough that "how much have I
+                written?" is a real question; an empty box does not need the answer. */}
+            {form.notes.length > 0 ? (
+              <span className="text-muted-foreground text-sm">
+                {form.notes.length.toLocaleString('mr-IN')} {STR.dloCharsSuffix}
+              </span>
+            ) : null}
+
+            {/* THE SUBMIT LIVES IN THIS CARD, at the end of the tool row, exactly as it
+                does on Creative and Social (components/media-room/NoteComposer). It used
+                to be `GenerateBar`, pinned to the foot of the viewport, on the reasoning
+                that a button under a several-block form is off screen — but everything
+                compulsory is in this one card and the box below it is optional, so the
+                button now sits with the controls it acts on.
+
+                The condition is unchanged: DISABLED until at least one source exists, so
+                "nothing was supplied" is a dead button rather than an error after a press.
+                Enabled it carries the slow warm sheen (`mr-submit-flow`, globals.css) —
+                the only moving thing on the page, so "there is something to press now"
+                reads without a label; disabled it is quiet and still. */}
+            <button
+              type="button"
+              onClick={() => void form.submit()}
+              disabled={form.submitting || !form.hasInput}
+              className={cn(
+                'text-primary-foreground inline-flex h-9 shrink-0 items-center rounded-md px-5 text-sm font-bold transition-[filter]',
+                'focus-visible:ring-ring/50 outline-none focus-visible:ring-[3px]',
+                'disabled:cursor-not-allowed disabled:opacity-60',
+                form.submitting || !form.hasInput
+                  ? 'bg-primary'
+                  : 'mr-submit-flow hover:saturate-110 hover:brightness-105',
+              )}
+            >
+              {form.submitting ? STR.submitting : STR.dloSubmit}
+            </button>
+          </div>
 
           <input
             ref={audioInput}
@@ -266,6 +304,17 @@ export function DloComposer({ form }: { form: DloIntakeFormState }) {
             }}
           />
         </div>
+
+        {/* Every complaint the form can raise — a refused file, a bad link, an empty
+            submit — is rendered directly under the row, which is where both the pick
+            buttons and the submit are. It used to be in the pinned bar; with the button
+            in the card, a message left down there would be a refusal the officer never
+            sees. */}
+        {form.error ? (
+          <div className="mt-3">
+            <ErrorNotice message={form.error} />
+          </div>
+        ) : null}
 
         {/* Directly under the buttons that produced them, so "attach" and "attached" are
             one place on the screen. */}

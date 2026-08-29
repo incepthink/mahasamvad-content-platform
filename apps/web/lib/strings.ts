@@ -52,8 +52,7 @@ export const STR = {
   articlePasteLabel: 'पोस्टरवर जो मजकूर हवा आहे तो येथे लिहा',
   articlePasteHint:
     'क्रिएटिव्ह व यूट्यूब थंबनेलसाठी येथे लिहिलेला सर्व मजकूर पोस्टरवर छापला जातो — म्हणून फक्त जेवढे पोस्टरवर हवे तेवढेच लिहा. बॅनरसाठी मात्र या मजकुरातील मुख्य नाव / शीर्षक शोधून तेच बॅनरवर येते. खालून फाईलमधूनही मजकूर घेता येईल — दोन्ही एकत्रही करता येईल.',
-  articlePastePlaceholder:
-    'उदा. पोस्टरवर हवे असलेले मुद्दे, नावे, तारखा व आकडे येथे लिहा…',
+  articlePastePlaceholder: 'उदा. मुद्दे, नावे, तारखा, आकडे…',
   // Where the poster's WORDS come from — independent of who DESIGNS it (the template picker).
   // This was a pair of tabs above the text box ("लेखातून मजकूर तयार करा" / "जसाच्या तसा मजकूर")
   // asking a question with a strong default: almost every run wants the copy written out of the
@@ -71,8 +70,8 @@ export const STR = {
   // there would be false.
   articleSourceLabel: 'तयार लेख येथे चिकटवा',
   articleSourceHint:
-    'संपूर्ण लेख येथे चिकटवा — त्यातील मुख्य मुद्दे, नावे, तारखा व आकडे निवडून पोस्टरचा मजकूर तयार केला जातो. खालून फाईलमधूनही मजकूर घेता येईल — दोन्ही एकत्रही करता येईल.',
-  articleSourcePlaceholder: 'उदा. तयार झालेला मराठी लेख येथे चिकटवा…',
+    'यातील मुख्य मुद्द्यांतून पोस्टरचा मजकूर तयार होतो. फाईलमधूनही घेता येईल.',
+  articleSourcePlaceholder: 'उदा. तयार मराठी लेख…',
   // ONE flat row of formats — यूट्यूब थंबनेल / ट्विटर / फेसबुक / लेख पोस्टर / व्हिडिओ.
   // Deliberately NOT the categoryTwitter/categoryFacebook pair, whose descriptions promise
   // "पोस्टर + कॅप्शन": the caption is now an opt-in checkbox under those two cards.
@@ -195,20 +194,20 @@ export const STR = {
   dloNotesLabel: 'बैठकीतील टिपणी येथे लिहा',
   dloNotesHint:
     'बैठकीत जे ऐकले, ठरले किंवा आठवते ते सर्व येथे लिहा — मुद्दे, निर्णय, घोषणा, आकडेवारी.',
-  dloNotesPlaceholder:
-    'उदा. आजच्या बैठकीत मा. मंत्री महोदयांनी… असे जाहीर केले; योजनेसाठी … कोटी रुपयांची तरतूद…',
+  dloNotesPlaceholder: 'उदा. निर्णय, घोषणा, आकडेवारी…',
 
   // /dlo's ONE source input (components/dlo/DloComposer). The typed note and every file
   // used to be three cards — a notes box, an attach card and a YouTube card — which the
   // officer scrolled through even when they were using one of them. They ask a single
   // question ("what is this news made of?"), so they are one box with a row of tools.
   //
-  // The hint keeps the one difference that is real, because it decides when a credit is
-  // spent: a recording, a photograph and a link are read during प्रक्रिया, while a
-  // document is read here and now and a scanned PDF stops to ask which pages are worth
-  // reading first.
+  // The hint is a SUBTITLE, so it is kept short enough to read as one — a paragraph under
+  // a one-line heading inverts the hierarchy and is scrolled past rather than read. It
+  // says the two things a first-time officer cannot work out from the controls (type, or
+  // attach — either alone is enough); what each kind of source costs and where it can be
+  // corrected is said on the step that does it, not here.
   dloComposerHint:
-    'बैठकीत जे ऐकले, ठरले किंवा आठवते ते इथे लिहा, आणि ध्वनिमुद्रण, कागदपत्रांचे फोटो किंवा PDF / DOCX / TXT फाईल खालच्या बटणांनी जोडा — यांपैकी काहीही एक पुरे. ध्वनिमुद्रण, प्रतिमा आणि कागदपत्रांमधील मजकूर प्रक्रियेदरम्यान वाचला जाईल आणि तपासणी टप्प्यावर दुरुस्त करता येईल.',
+    'बैठकीत जे ऐकले व ठरले ते लिहा. ध्वनिमुद्रण, फोटो, फाईल किंवा लिंकही जोडता येईल — यापैकी काहीही एक पुरे.',
   dloComposerNoteAria: 'बैठकीतील टिपणी',
   dloRemoveAudio: 'ध्वनिफीत काढा',
 
@@ -217,10 +216,11 @@ export const STR = {
   // before they had seen a single line of the article. All three remain on the तपासणी step,
   // where they are answered against a note that actually exists.
   dloAiPromptLabel: 'AI साठी सूचना (ऐच्छिक)',
+  // Short for the same reason as dloComposerHint, and shorter still because the label
+  // already says (ऐच्छिक): a long paragraph on an optional box reads as a form to fill in.
   dloAiPromptHint:
-    'बातमी कशी हवी ते तुमच्या शब्दांत लिहा — शीर्षक किंवा रोख, कशावर भर द्यायचा, काय वगळायचे, भाषा कशी हवी. येथे दिलेली माहिती अधिकृत मानली जाईल. रिकामे ठेवले तरी चालेल; तपासणी टप्प्यावर हे पुन्हा बदलता येईल.',
-  dloAiPromptPlaceholder:
-    'उदा. शीर्षक — कर्जमुक्तीमुळे ग्रामीण अर्थव्यवस्थेला नवी ऊर्जा; ५० कोटींच्या निधीवर भर द्या; समिती सदस्यांची यादी टाळा; भाषा सोपी ठेवा.',
+    'बातमी कशी हवी ते तुमच्या शब्दांत लिहा — शीर्षक, कशावर भर, भाषा.',
+  dloAiPromptPlaceholder: 'उदा. ५० कोटींच्या निधीवर भर द्या; भाषा सोपी ठेवा…',
   // All three file sources are attached from ONE card (components/DloSourcesCard) — the
   // question "what do you want to add?" is the same for each, and three cards asking it made
   // the officer scroll past two they were not using. The hint carries the difference that is
@@ -470,15 +470,18 @@ export const STR = {
   // Standalone translation (mr→en, mr→hi, en→mr, hi→mr)
   translatePageTitle: 'भाषांतर (Translation)',
   translatePageIntro:
-    'मराठी मजकुराचे इंग्रजी किंवा हिंदी भाषांतर, आणि इंग्रजी किंवा हिंदी मजकुराचे मराठी भाषांतर. नावे व पदनाम शब्दकोशाप्रमाणे जशीच्या तशी राहतात.',
+    'मराठी, इंग्रजी व हिंदी यांच्यात भाषांतर. नावे व पदनाम शब्दकोशाप्रमाणे जशीच्या तशी राहतात.',
   translateInputLabel: 'मजकूर येथे लिहा किंवा चिकटवा',
   // The label above adapts to the direction; these three name the source language in it.
   translateInputLabelMarathi: 'मराठी मजकूर येथे लिहा किंवा चिकटवा',
   translateInputLabelEnglish: 'इंग्रजी मजकूर येथे लिहा किंवा चिकटवा',
   translateInputLabelHindi: 'हिंदी मजकूर येथे लिहा किंवा चिकटवा',
-  translateInputHint:
-    'या मजकुराचे थेट भाषांतर केले जाईल. हा मजकूर जतन केला जाणार नाही.',
-  translateInputPlaceholder: 'भाषांतरासाठी मजकूर येथे लिहा…',
+  // Kept SHORT for the same reason as articleSourceHint and dloComposerHint: this is a
+  // subtitle under a one-line label, and a paragraph there inverts the hierarchy and is
+  // scrolled past rather than read. It says the two things the controls cannot — nothing
+  // is stored, and a file is a source too.
+  translateInputHint: 'हा मजकूर जतन केला जात नाही. फाईलमधूनही घेता येईल.',
+  translateInputPlaceholder: 'उदा. बातमी, टिपणी किंवा लेख…',
   translateAction: 'भाषांतर करा',
   translateMayTakeTime: 'मोठ्या मजकुराला एक-दोन मिनिटे लागू शकतात.',
   translateOverLimit: 'मजकूर १०,००० अक्षरांपेक्षा जास्त आहे.',
@@ -855,9 +858,8 @@ export const STR = {
   // to be added on top of the usual design rules is not surprised by what comes back.
   imagePromptLabel: 'AI प्रॉम्प्ट (ऐच्छिक)',
   imagePromptHint:
-    'पोस्टर कसे दिसावे हे तुमच्याच शब्दांत लिहा. येथे काही लिहिल्यास मंचाच्या स्वतःच्या डिझाइन सूचना पूर्णपणे वगळल्या जातात — AI ला फक्त हीच सूचना, वरचा मजकूर आणि लोगो-फूटरची जागा राखण्याची अट एवढेच जाते. रिकामे ठेवल्यास मंच नेहमीप्रमाणे स्वतः पोस्टर ठरवते.',
-  imagePromptPlaceholder:
-    'उदा. गडद निळ्या पार्श्वभूमीवर शेतकऱ्याचे मोठे छायाचित्र, वर ठळक पांढऱ्या अक्षरांत शीर्षक…',
+    'पोस्टर कसे दिसावे ते तुमच्याच शब्दांत लिहा. लिहिल्यास मंचाच्या डिझाइन सूचना पूर्णपणे वगळल्या जातात.',
+  imagePromptPlaceholder: 'उदा. गडद निळ्या पार्श्वभूमीवर शेतकऱ्याचे छायाचित्र…',
   imagePromptTooLong: 'AI प्रॉम्प्ट खूप मोठा आहे — तो थोडक्यात लिहा.',
 
   // Caption toggle on the create form — a social post is poster-only unless asked
@@ -1305,14 +1307,24 @@ export const STR = {
     'रिकामे ठेवल्यास कोणतेही टेम्पलेट वापरले जाणार नाही — रंग, मांडणी व रचना AI स्वतः ठरवते. टेम्पलेट निवडल्यासच पोस्टर त्या टेम्पलेटनुसार तयार होते.',
 
   // Transcription (/transcribe). A recording in, Marathi text out — nothing is generated,
-  // rewritten or summarised here, which the intro says plainly so nobody expects an article.
+  // rewritten or summarised here, which is what जसेच्या तसे in the intro is carrying: an
+  // officer must not arrive expecting an article.
+  //
+  // THE SUB-LINES ARE SHORT ON PURPOSE, and shorter than the headings would suggest is
+  // safe. ध्वनिलेखन is one word and नवीन ध्वनिलेखन is two; a three-sentence
+  // paragraph under either reads as something to get past rather than as a subtitle. What
+  // was dropped from the intro (the file is archived, the YouTube video is not) and from
+  // the hint (which containers are accepted) is answered where it is asked instead — by
+  // the picker's own `accept`, and by the errors below.
   transcribeTitle: 'ध्वनिलेखन',
   transcribeIntro:
-    'ध्वनिमुद्रण जोडा किंवा यूट्युब लिंक द्या — त्याचा मराठी मजकूर याच पानावर मिळेल. मजकूर जसाच्या तसा उतरवला जातो; त्यात कोणताही बदल, सारांश किंवा भर घातली जात नाही. जोडलेली फाईल जतन केली जाते; यूट्युब व्हिडिओ मात्र डाउनलोड किंवा जतन केला जात नाही.',
+    'ध्वनिमुद्रण जोडा — त्यातील बोलणे जसेच्या तसे मराठीत उतरवून मिळेल.',
   transcribeNewTitle: 'नवीन ध्वनिलेखन',
   transcribeUpload: 'ध्वनिफीत जोडा',
-  transcribeHint:
-    'एकावेळी अनेक फाईल जोडता येतील (कमाल १० फाईल्स). फाईलच्या आकाराची मर्यादा नाही — पूर्ण बैठकीचे ध्वनिमुद्रणही चालेल. मोबाईलवरील नेहमीचे ध्वनिफीत प्रकार चालतात.',
+  // The second line inside the composer's drop target. Dragging is the SECOND way in — the
+  // whole area is clickable — so this reads as an alternative, never as the instruction.
+  transcribeDropHint: 'किंवा इथे ओढा',
+  transcribeHint: 'कमाल १० फाईल्स. आकाराच्या मर्यादेची अट नाही.',
   transcribeSharedReadError:
     'मोबाईलवरून पाठवलेली ध्वनिफीत उघडता आली नाही. कृपया पुन्हा Share करून Newsroom निवडा.',
   transcribeFilesTitle: 'जोडलेली ध्वनिमुद्रणे',
@@ -1334,6 +1346,9 @@ export const STR = {
   transcribeListLoading: 'यादी लोड होत आहे…',
   transcribeListLoadError: 'मागील ध्वनिलेखनांची यादी मिळाली नाही.',
   transcribeFileCountSuffix: 'ध्वनिमुद्रणे',
+  // The past-work list is folded shut by default, so its head has to state the answer it is
+  // hiding — how many RUNS there are, which is not the same count as the recordings above.
+  transcribeRunCountSuffix: 'ध्वनिलेखने',
   transcribeOpen: 'उघडा',
   transcribeClose: 'बंद करा',
   transcribeDownloadName: 'ध्वनिलेखन',

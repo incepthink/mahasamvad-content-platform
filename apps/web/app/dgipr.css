@@ -68,12 +68,16 @@
   box-sizing: border-box;
 }
 
-html,
-body {
-  margin: 0;
-  min-height: 100vh;
-  /* Fixed attachment so the canvas does not re-gradient as a long page scrolls —
-     on /glossary and /references that shift was visible. */
+/* The canvas gradient is declared on <html> ALONE, never on <body>, and that is
+   load-bearing rather than tidiness: a root-element background paints as the canvas,
+   underneath everything including negative-z-index layers, while a <body> background
+   is an ordinary box background that would paint OVER them. .page-backdrop (further
+   down) is exactly such a layer, so putting `background` back on <body> would make
+   every page's icon wallpaper silently disappear.
+
+   Fixed attachment so the canvas does not re-gradient as a long page scrolls — on
+   /glossary and /references that shift was visible. */
+html {
   background: var(--bg);
   background-image: linear-gradient(
     180deg,
@@ -81,6 +85,12 @@ body {
     var(--bg-accent) 100%
   );
   background-attachment: fixed;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100vh;
   color: var(--text);
   font-size: 18px;
   line-height: 1.65;
@@ -360,6 +370,13 @@ a {
     --sidebar-w: 0px;
   }
 
+  /* Half the marks, taken checkerboard-wise so the field thins evenly rather than
+     emptying one side. The grid is laid out in percentages, so at 390px the full
+     count reads as clutter instead of wallpaper. */
+  .page-backdrop [data-thin='1'] {
+    display: none;
+  }
+
   .mobile-topbar {
     display: flex;
     position: sticky;
@@ -533,11 +550,58 @@ a {
   flex: 1 0 auto;
 }
 
+/* ---------- page backdrop ----------
+   The hand-drawn doodle wallpaper behind a route (components/common/PageBackdrop.tsx,
+   which sketches the marks with rough.js). It is decoration and must read as
+   decoration: every card on top of it is opaque white, so the marks show only in the
+   gutters and behind the page head, and the opacity below is set so a mark never
+   competes with running Devanagari.
+
+   THE OPACITY IS SPLIT IN TWO ON PURPOSE. This layer sets the ceiling; the component
+   then gives each mark its own fraction of it, which is what stops a hundred marks at
+   one value reading as flat printed texture. Raise the ceiling here, never per mark.
+
+   It spans the CONTENT COLUMN, not the window — --sidebar-w (set on body, near the
+   top of this file) is what keeps it clear of the left rail in both its widths, the
+   same idiom .dlo-submitbar uses.
+
+   z-index: -1 puts it above the canvas gradient (declared on <html>, see the top of
+   this file) and below every in-flow element, so a page does not have to lift its own
+   blocks out of the way. pointer-events: none so it never eats a click. */
+.page-backdrop {
+  position: fixed;
+  inset-block: 0;
+  inset-inline: var(--sidebar-w, 0) 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  color: var(--accent);
+  opacity: 0.18;
+}
+
+.page-backdrop-mark {
+  position: absolute;
+  display: block;
+  line-height: 0;
+}
+
+/* Wallpaper is the one thing on the page that carries no meaning at all, so a reader
+   who has asked for less motion and less visual noise gets a plain canvas. */
+@media (prefers-reduced-motion: reduce) {
+  .page-backdrop {
+    display: none;
+  }
+}
+
 /* ---------- page header ----------
-   Every index route opens with this block: an accent rule, the Marathi title,
-   an optional one-line subtitle, and optional right-aligned actions. It is the
-   only thing that makes ten separately-built pages read as one product, so a
-   new page must use it rather than a bare <h1>. */
+   Every index route opens with this block: the Marathi title, an optional
+   one-line subtitle, and optional right-aligned actions, over a hairline. It is
+   the only thing that makes ten separately-built pages read as one product, so a
+   new page must use it rather than a bare <h1>.
+
+   It carried a 5px accent rule down its left edge (a ::before, so it hugged the
+   text and stopped short of the bottom border). Removed 2026-08-30 — the title
+   sits flush left now, in line with the cards below it. */
 
 .page-head {
   display: flex;
@@ -546,20 +610,9 @@ a {
   gap: 20px 24px;
   flex-wrap: wrap;
   margin: 0 0 28px;
-  padding: 0 0 20px 18px;
+  padding: 0 0 20px;
   position: relative;
   border-bottom: 1px solid var(--border);
-}
-
-/* The rule is a pseudo-element rather than a border-left so it hugs the text
-   block only and does not run down past the bottom border. */
-.page-head::before {
-  content: '';
-  position: absolute;
-  inset: 4px auto 24px 0;
-  width: 5px;
-  border-radius: 999px;
-  background: linear-gradient(180deg, var(--accent), var(--accent-dark));
 }
 
 .page-head-text {
@@ -5463,7 +5516,10 @@ a.thread-node:hover {
 /* Room at the foot of the page — and of the site footer below it — for the pinned bar, which
    is out of flow and would otherwise sit over the last card and over the credit line. Written
    as .page.dlo-page so the narrow-screen `.page` rule further down this file (which resets the
-   shorthand to a 60px foot) cannot take the clearance away. */
+   shorthand to a 60px foot) cannot take the clearance away.
+   The DLO WORKSPACE's review step is the last thing on this selector. /transcribe, /translate
+   and the /dlo intake form are NOT here any more — each moved its submit into the composer
+   card, so none of them has a pinned bar to clear. */
 .page.dlo-page {
   padding-bottom: 150px;
 }
@@ -5980,10 +6036,6 @@ a.thread-node:hover {
     gap: 16px;
     margin-bottom: 22px;
     padding-bottom: 16px;
-  }
-
-  .page-head::before {
-    bottom: 20px;
   }
 
   .page-title {
