@@ -598,6 +598,8 @@ Establish a clear visual hierarchy:
 - &#x20;use imagery, icons, illustrations, diagrams, shapes, typography and data visualization where they improve understanding;&#x20;
 - &#x20;integrate all elements into one cohesive composition rather than making them feel like separate unrelated cards.&#x20;
 
+**Prioritize readability throughout the poster. All text must have a comfortably readable font size and should never appear too small. Every headline, statistic, label, and supporting line must be easy for the viewer to read at a glance. If needed, adjust the layout, spacing, grouping, or infographic structure so that the content fits clearly without shrinking the text excessively.**
+
 The finished design should feel like a **premium government infographic campaign**, not a generic social-media template. It should be authoritative, optimistic, modern, visually engaging, easy to scan and appropriate for the Government of Maharashtra.
 
 Use the supplied Marathi text and numerical information accurately. **Do not invent, remove, reinterpret or alter factual information.**
