@@ -111,6 +111,16 @@ export const DloIntakeFileSchema = z.object({
   sourceUrl: z.string().optional(),
   sourceAuthor: z.string().optional(),
   sourceThumbnailUrl: z.string().optional(),
+  // THE NEW LANE ONLY (/new-dlo): this source's handle on OpenAI, uploaded once when the
+  // officer attached it. The article call carries this id as an `input_file` part instead of
+  // being handed text somebody transcribed first, which is the whole of what makes that lane
+  // immediate — see intake/openai-source-files.ts.
+  //
+  // Additive on a jsonb column, so NO MIGRATION: a file entry without it is an ordinary
+  // old-lane source and every existing reader ignores it. Which is also the fallback — an
+  // intake whose upload failed still has its bytes in the private bucket and can be read the
+  // old way.
+  openaiFileId: z.string().optional(),
 });
 export type DloIntakeFile = z.infer<typeof DloIntakeFileSchema>;
 

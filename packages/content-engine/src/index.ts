@@ -23,6 +23,20 @@ export {
   type SimpleArticlePhase,
   type StyleReferenceMeta,
 } from './generation/generate-article-simple.js';
+// The new /dlo lane: the officer's documents go to the article call as `input_file` parts,
+// with no page-by-page transcription stage in front of it. Same prompt, same deterministic
+// guarantees, same result shape as generateArticleSimple above — only the source transport
+// differs. See generate-article-from-sources.ts for what that trade gives up.
+export {
+  generateArticleFromSources,
+  type SourceArticleOptions,
+} from './generation/generate-article-from-sources.js';
+export { extractNameContextFromSources } from './generation/extract-name-context.js';
+export {
+  uploadSourceFile,
+  deleteSourceFile,
+  type SourceFileRef,
+} from './intake/openai-source-files.js';
 export {
   selectStyleReference,
   styleReferenceMinSimilarity,
@@ -427,6 +441,13 @@ export {
   type PosterTypeOption,
   type PosterClassification,
 } from './generation/classify-poster-type.js';
+export {
+  extractPosterPoints,
+  formatPosterSource,
+  POSTER_POINT_LIMIT,
+  type ExtractPosterPointsInput,
+  type PosterSource,
+} from './generation/extract-poster-points.js';
 export {
   generatePosterCopy,
   posterCopyItemCount,

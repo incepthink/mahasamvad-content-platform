@@ -29,9 +29,16 @@
 // which is exactly the whole-document read; a 400-page scan becomes several, and each page
 // still gets its neighbourhood rather than nothing.
 //
-// Chunks are read ONE AT A TIME and their bytes are encoded once and shared by that chunk's
-// page calls. Both of those are memory decisions, not style: at 400 pages the alternative
-// holds every chunk's buffer AND a base64 copy per in-flight call, on a box that has
+// UPLOADED ONCE, REFERENCED BY ID. Each chunk is sent to the Files API and its page calls
+// carry only the returned `file_id` as an `input_file` part (Responses API). It used to be
+// inlined as base64 on every single page call, so a 30-page chunk pushed the whole document
+// over the wire thirty times and inflated it by 4/3 doing so. The id transport removes both
+// costs, and removing the inflation is what lets a file as large as the API accepts be read
+// in one chunk. The uploaded file is DELETED as soon as the chunk is read — best-effort, in
+// a `finally`, because the pages are paid for by then and cleanup may never fail a read.
+//
+// Chunks are still read ONE AT A TIME, which remains a memory decision rather than a style
+// one: at 400 pages the alternative holds every chunk's buffer at once, on a box that has
 // already been OOM-killed once (see the video-stitch milestone in AGENTS.md).
 //
 // Within a chunk the calls run concurrently in their own lane (`lane: 'ocr'` →
@@ -63,7 +70,8 @@ import { recordChatUsage, type ChatUsage } from '../cost/cost-meter.js';
 import { splitPdfPagesBySize } from './pdf-split.js';
 import { type ExtractPdfOptions, type PdfPage } from './pdf-shared.js';
 
-const CHAT_URL = 'https://api.openai.com/v1/chat/completions';
+const FILES_URL = 'https://api.openai.com/v1/files';
+const RESPONSES_URL = 'https://api.openai.com/v1/responses';
 
 // Must be a model that accepts file input. Defaults to the vision tier, which is what every
 // other pixel-reading call in this repo runs on.
@@ -87,17 +95,19 @@ export const OCR_MODEL = process.env.OPENAI_OCR_MODEL ?? 'gpt-5.6-terra';
 // not deliberation. Reasoning effort cannot make obscured pixels clearer.
 const OCR_REASONING_EFFORT = process.env.OPENAI_OCR_REASONING_EFFORT?.trim();
 
-// The biggest request we will build, which is what bounds a context chunk.
+// The biggest FILE we will hand the model, which is what bounds a context chunk.
 //
-// Budgeted against the RAW PDF, so the base64 the transport actually sends is ~4/3 of it —
-// that inflation is why this is not simply the API's request cap. The remaining margin
-// covers the JSON envelope and the prompt, both small beside a scan.
+// This is OpenAI's own per-file ceiling: "each file must be under 50 MB". It is budgeted
+// against the RAW PDF because that is now exactly what travels — the chunk is uploaded to
+// the Files API and the model call carries only its id. It used to be budgeted at 3/4 of
+// this, because the PDF was inlined as base64 and inflated by 4/3 on the way out; dropping
+// that inflation is what lets a document as large as the API accepts be read in ONE chunk
+// instead of two. The remaining margin is slack against the ceiling being exclusive.
 const OCR_MAX_REQUEST_BYTES = Number.parseInt(
   process.env.OPENAI_OCR_MAX_REQUEST_BYTES ?? `${50 * 1024 * 1024}`,
   10,
 );
-const CHUNK_MAX_BYTES =
-  Math.floor((OCR_MAX_REQUEST_BYTES * 3) / 4) - 256 * 1024;
+const CHUNK_MAX_BYTES = OCR_MAX_REQUEST_BYTES - 256 * 1024;
 
 const PAGE_TIMEOUT_MS = Number.parseInt(
   process.env.OPENAI_OCR_TIMEOUT_MS ?? `${5 * 60_000}`,
@@ -230,13 +240,140 @@ export function ocrSystemPrompt(
 
 const SYSTEM_PROMPT = ocrSystemPrompt('page');
 
-type ChatResponse = {
-  choices: Array<{
-    message: { content: string | null };
-    finish_reason?: string;
-  }>;
-  usage?: ChatUsage;
-};
+// The Responses API's answer shape. Deliberately declared here rather than imported from
+// chat/misc-chat.ts: that module is a conversation transport with its own streaming, storage
+// and continuation concerns, and coupling a document read to it would make every change there
+// a change to OCR. The two are the same three fields' worth of overlap, not a shared concern.
+type ResponsesUsage = Readonly<{
+  input_tokens?: number;
+  output_tokens?: number;
+  input_tokens_details?: Readonly<{ cached_tokens?: number }>;
+}>;
+
+type ResponsesBody = Readonly<{
+  model?: string;
+  status?: string;
+  output?: readonly Readonly<{
+    content?: readonly Readonly<{
+      type?: string;
+      text?: string;
+      refusal?: string;
+    }>[];
+  }>[];
+  error?: Readonly<{ message?: string }> | null;
+  incomplete_details?: Readonly<{ reason?: string }> | null;
+  usage?: ResponsesUsage;
+}>;
+
+// Responses reports `input_tokens`/`output_tokens` where Chat Completions reported
+// `prompt_tokens`/`completion_tokens`. The cost meter speaks the latter, so the mapping
+// happens here — the same translation chat/misc-chat.ts makes for the same reason.
+function recordResponsesUsage(body: ResponsesBody): void {
+  const usage = body.usage;
+  const cached = usage?.input_tokens_details?.cached_tokens;
+  const mapped: ChatUsage | undefined = usage
+    ? {
+        ...(usage.input_tokens !== undefined
+          ? { prompt_tokens: usage.input_tokens }
+          : {}),
+        ...(usage.output_tokens !== undefined
+          ? { completion_tokens: usage.output_tokens }
+          : {}),
+        ...(cached !== undefined
+          ? { prompt_tokens_details: { cached_tokens: cached } }
+          : {}),
+      }
+    : undefined;
+  recordChatUsage(body.model ?? OCR_MODEL, mapped);
+}
+
+function textFromResponsesBody(body: ResponsesBody): string {
+  return (body.output ?? [])
+    .flatMap((item) => item.content ?? [])
+    .map((part) =>
+      part.type === 'output_text'
+        ? (part.text ?? '')
+        : part.type === 'refusal'
+          ? (part.refusal ?? '')
+          : '',
+    )
+    .join('');
+}
+
+type UploadedFileResponse = Readonly<{ id?: unknown }>;
+
+// Uploads one context chunk and returns the id the page calls reference.
+//
+// ONE UPLOAD PER CHUNK, NOT PER PAGE. This is the whole point of the file-id transport: a
+// 30-page chunk used to send the entire document's base64 thirty times over, once per page
+// call. Now the bytes cross the wire once and each page call carries a short id, which is
+// what makes a large scan bounded by the model's own time rather than by our upstream.
+//
+// `purpose: 'user_data'` is the documented purpose for model inputs — the same one /chat's
+// attachment upload uses.
+async function uploadChunkFile(
+  label: string,
+  data: Buffer,
+  timeoutMs: number,
+): Promise<string> {
+  const formData = new FormData();
+  formData.append('purpose', 'user_data');
+  formData.append(
+    'file',
+    new Blob([new Uint8Array(data)], { type: 'application/pdf' }),
+    // A plain ASCII name keeps the multipart body predictable; it is never shown to anyone.
+    'document.pdf',
+  );
+  const response = await openAiFetch(FILES_URL, {
+    label: `pdf upload (${label})`,
+    apiKey: requireApiKey(),
+    lane: 'ocr',
+    timeoutMs,
+    formData,
+  });
+  const uploaded = (await response.json()) as UploadedFileResponse;
+  if (typeof uploaded.id !== 'string' || uploaded.id === '') {
+    throw new Error(
+      `${label}: OpenAI accepted the PDF but returned no reusable file id.`,
+    );
+  }
+  return uploaded.id;
+}
+
+// Best-effort cleanup, and it must stay best-effort: the pages are already read and paid for
+// by the time this runs, so a failed delete may never turn a good read into a failed one. It
+// bypasses openAiFetch deliberately — that transport is POST-only, and its retry ladder is
+// sized for calls whose failure costs money, which this one's does not. What an undeleted
+// file costs is org storage, so the failure is logged loudly enough to notice a leak.
+async function deleteUploadedFile(fileId: string): Promise<void> {
+  try {
+    const response = await fetch(`${FILES_URL}/${fileId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${requireApiKey()}` },
+    });
+    if (!response.ok) {
+      console.warn(
+        `[openai-doc] could not delete uploaded file ${fileId} (HTTP ${response.status}); it will count against org storage.`,
+      );
+    }
+  } catch (error) {
+    console.warn(
+      `[openai-doc] could not delete uploaded file ${fileId}:`,
+      error,
+    );
+  }
+}
+
+function requireApiKey(): string {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) {
+    throw new Error(
+      'Missing required environment variable OPENAI_API_KEY. ' +
+        'Copy .env.example to .env and fill it in.',
+    );
+  }
+  return key;
+}
 
 // Strip a fence the model wrapped the whole page in despite being told not to. Only when it
 // encloses the ENTIRE answer — a fenced block inside the page is the page's own content.
@@ -253,36 +390,31 @@ export function unwrapWholeAnswerFence(text: string): string {
 // caller's job (chunk.originalPages[position - 1]) and is deliberately never asked of the
 // model: a model-reported page number is a number that can disagree with us.
 //
-// `fileData` is the chunk's base64 data URI, built once per chunk and shared by all of its
-// page calls — at 400 pages, encoding it per call is how this runs the box out of memory.
+// `fileId` is the chunk's uploaded file, created once per chunk and shared by all of its
+// page calls — see uploadChunkFile.
 async function readPageOfChunk(
   label: string,
-  fileData: string,
+  fileId: string,
   position: number,
   chunkPageCount: number,
   timeoutMs: number,
 ): Promise<string> {
-  const key = process.env.OPENAI_API_KEY;
-  if (!key) {
-    throw new Error(
-      'Missing required environment variable OPENAI_API_KEY. ' +
-        'Copy .env.example to .env and fill it in.',
-    );
-  }
-
-  const response = await openAiFetch(CHAT_URL, {
+  const response = await openAiFetch(RESPONSES_URL, {
     label: 'pdf page',
-    apiKey: key,
+    apiKey: requireApiKey(),
     lane: 'ocr',
     timeoutMs,
     body: {
       model: OCR_MODEL,
-      // No max_completion_tokens — see the constant block above.
+      instructions: SYSTEM_PROMPT,
+      // No max_output_tokens — see the constant block above.
       ...(OCR_REASONING_EFFORT
-        ? { reasoning_effort: OCR_REASONING_EFFORT }
+        ? { reasoning: { effort: OCR_REASONING_EFFORT } }
         : {}),
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
+      // Nothing here is ever continued from, so there is no reason to leave a stored
+      // response behind for every page of every scan.
+      store: false,
+      input: [
         {
           role: 'user',
           content: [
@@ -290,16 +422,11 @@ async function readPageOfChunk(
               // The file part comes FIRST and is byte-identical across every call for this
               // chunk, so the shared prefix is cache-eligible; only the short instruction
               // below differs per page. Keep that order if you touch this.
-              type: 'file',
-              file: {
-                // A Devanagari display name is legal here, but a plain ASCII one keeps the
-                // request body predictable and the name is never shown to anyone.
-                filename: 'document.pdf',
-                file_data: fileData,
-              },
+              type: 'input_file',
+              file_id: fileId,
             },
             {
-              type: 'text',
+              type: 'input_text',
               // Says Markdown, never a language: the system prompt's rule is that the page's own
               // language and script come back unchanged, and naming one here would override it.
               text:
@@ -315,18 +442,24 @@ async function readPageOfChunk(
     },
   });
 
-  const body = (await response.json()) as ChatResponse;
-  recordChatUsage(OCR_MODEL, body.usage);
+  const body = (await response.json()) as ResponsesBody;
+  recordResponsesUsage(body);
 
-  const finish = body.choices[0]?.finish_reason;
-  if (finish === 'length') {
-    // No ceiling is sent any more, so this now means the MODEL's own cap was reached —
-    // a real signal rather than our budget having been set too small.
+  // A response that never reached `completed` may still carry the text it managed to emit,
+  // so the partial page is kept and the reason is logged rather than thrown away. The one
+  // case worth naming is `max_output_tokens`: no ceiling is sent, so that means the MODEL's
+  // own cap was reached — a real signal rather than our budget having been set too small.
+  if (body.status !== 'completed') {
     console.warn(
-      `[openai-doc] ${label}: hit the model's output limit (finish_reason: length) — its tail may be missing.`,
+      `[openai-doc] ${label}: response did not complete (${
+        body.error?.message ??
+        body.incomplete_details?.reason ??
+        body.status ??
+        'unknown status'
+      }) — its tail may be missing.`,
     );
   }
-  return unwrapWholeAnswerFence(body.choices[0]?.message.content ?? '').trim();
+  return unwrapWholeAnswerFence(textFromResponsesBody(body)).trim();
 }
 
 // Reads a PDF page by page through OpenAI. Same contract as extractPdfPagesViaOcr in
@@ -365,48 +498,83 @@ export async function extractPdfPagesViaOpenAI(
   // every page is dispatched together and the 'ocr' lane bounds how many are really in
   // flight.
   for (const chunk of chunks) {
-    const fileData = `data:application/pdf;base64,${chunk.data.toString('base64')}`;
     const chunkPageCount = chunk.originalPages.length;
 
-    const read = await Promise.all(
-      chunk.originalPages.map(async (pageNumber, index): Promise<PdfPage> => {
-        const label = `${name} (पृष्ठ ${pageNumber})`;
-        // `index + 1` is this page's POSITION IN THE CHUNK, which is the only page number the
-        // model is ever shown; `pageNumber` is its real one and is what the answer is filed
-        // under. Keeping those two apart is what makes page identity exact by construction.
-        let page: PdfPage;
-        try {
-          const text = await readPageOfChunk(
-            label,
-            fileData,
-            index + 1,
-            chunkPageCount,
-            timeoutMs,
-          );
-          page = { page: pageNumber, text };
-        } catch (error) {
-          // One page, not the document. See the header.
-          failures.push(pageNumber);
-          console.warn(`[openai-doc] ${label} could not be read:`, error);
-          page = { page: pageNumber, text: '' };
-        }
+    // An UPLOAD failure costs this chunk, not the document. It is the one failure here that
+    // is not per-page — every page of the chunk reads through the same file — so it is
+    // recorded exactly as a page failure is, and the other chunks still deliver. Throwing
+    // would lose pages that are about to be read successfully.
+    let fileId: string;
+    try {
+      fileId = await uploadChunkFile(name, chunk.data, timeoutMs);
+    } catch (error) {
+      failures.push(...chunk.originalPages);
+      console.warn(
+        `[openai-doc] ${name}: could not upload the chunk holding page(s) ${chunk.originalPages.join(', ')}:`,
+        error,
+      );
+      for (const pageNumber of chunk.originalPages) {
+        const page: PdfPage = { page: pageNumber, text: '' };
+        pages.push(page);
         pagesDone += 1;
         options?.onProgress?.(pagesDone, pageCount);
-        // Reported HERE, as this page lands, not after the chunk resolves — a chunk can hold
-        // fifty pages, and waiting for all of them is exactly the spinner this callback
-        // exists to remove. Advisory only, and never allowed to cost a page that has already
-        // been read and paid for: a caller persisting these for a live UI must not be able to
-        // sink the read.
         try {
           options?.onPage?.(page);
-        } catch (error) {
-          console.warn(`[openai-doc] ${name}: onPage callback threw:`, error);
+        } catch (callbackError) {
+          console.warn(
+            `[openai-doc] ${name}: onPage callback threw:`,
+            callbackError,
+          );
         }
-        return page;
-      }),
-    );
+      }
+      continue;
+    }
 
-    pages.push(...read);
+    try {
+      const read = await Promise.all(
+        chunk.originalPages.map(async (pageNumber, index): Promise<PdfPage> => {
+          const label = `${name} (पृष्ठ ${pageNumber})`;
+          // `index + 1` is this page's POSITION IN THE CHUNK, which is the only page number the
+          // model is ever shown; `pageNumber` is its real one and is what the answer is filed
+          // under. Keeping those two apart is what makes page identity exact by construction.
+          let page: PdfPage;
+          try {
+            const text = await readPageOfChunk(
+              label,
+              fileId,
+              index + 1,
+              chunkPageCount,
+              timeoutMs,
+            );
+            page = { page: pageNumber, text };
+          } catch (error) {
+            // One page, not the document. See the header.
+            failures.push(pageNumber);
+            console.warn(`[openai-doc] ${label} could not be read:`, error);
+            page = { page: pageNumber, text: '' };
+          }
+          pagesDone += 1;
+          options?.onProgress?.(pagesDone, pageCount);
+          // Reported HERE, as this page lands, not after the chunk resolves — a chunk can hold
+          // fifty pages, and waiting for all of them is exactly the spinner this callback
+          // exists to remove. Advisory only, and never allowed to cost a page that has already
+          // been read and paid for: a caller persisting these for a live UI must not be able to
+          // sink the read.
+          try {
+            options?.onPage?.(page);
+          } catch (error) {
+            console.warn(`[openai-doc] ${name}: onPage callback threw:`, error);
+          }
+          return page;
+        }),
+      );
+
+      pages.push(...read);
+    } finally {
+      // The chunk's pages are read and paid for by now, so cleanup can never be allowed to
+      // fail the extraction — deleteUploadedFile swallows its own errors.
+      await deleteUploadedFile(fileId);
+    }
   }
 
   pages.sort((a, b) => a.page - b.page);

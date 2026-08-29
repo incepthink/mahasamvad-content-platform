@@ -540,7 +540,15 @@ export function startDloIntakeJob(client: SupabaseClient, id: string): void {
     const awaitingSelection = entries.some(
       (entry) => entry.status === 'needs-selection',
     );
-    if (!combined && !awaitingSelection) {
+    // A NEW-LANE source (/new-dlo) is a file the article model reads for itself, so it
+    // contributes no text here and never will — see intake/openai-source-files.ts. That is
+    // not "nothing survived"; it is the entire point of that lane. Without this an intake of
+    // one scan and no typed note would fail at the last step with a message telling the
+    // officer to check files that are perfectly fine.
+    const readByModel = entries.some(
+      (entry) => entry.status === 'done' && entry.openaiFileId,
+    );
+    if (!combined && !awaitingSelection && !readByModel) {
       throw new Error(
         'कोणत्याही फाईलमधून मजकूर मिळाला नाही. कृपया फाईल्स तपासून पुन्हा प्रयत्न करा.',
       );

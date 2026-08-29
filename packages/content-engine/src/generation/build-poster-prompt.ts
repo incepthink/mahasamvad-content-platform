@@ -156,14 +156,8 @@ export type BuildPosterPromptInput = Readonly<{
   artDirection?: ArtDirection | undefined;
   assignedPalette?: PosterPalette | undefined;
   assignedLayout?: PosterLayout | undefined;
-  // NOT one of the three retired above, and the distinction is the whole point (2026-08-14).
-  // Those were a SPECIFICATION — exact hexes, a treatment, and an archetype that named what went
-  // in every zone. This is one sentence about where the visual weight sits and how the canvas is
-  // divided, and it exists because handing the arrangement over entirely did not produce varied
-  // arrangements: it produced the image model's two default shapes, run after run. See
-  // poster-placements.ts for why an anchor is not an archetype, and why it can be stated firmly
-  // (it is filtered against the content before it is ever assigned). Absent = no block, so every
-  // caller that does not supply one gets a byte-identical prompt.
+  // Retained on the shared caller contract because the selected arrangement is still recorded as
+  // style metadata. The officer's replacement prompt deliberately does not send it to the model.
   assignedPlacement?: PosterPlacement | undefined;
 }>;
 
@@ -184,46 +178,6 @@ export type BuildPosterPromptInput = Readonly<{
 // whole point is that it is not negotiable.
 const BRIGHT_LOOK_RULE =
   'MAKE IT BRIGHT, VIVID AND EYE-CATCHING. This poster is published on social media and read on a phone, so it must look light, fresh and inviting at a glance. Build it on a LIGHT, luminous ground — white, off-white, or a light clean tint of the chosen colour — covering most of the poster, and carry the design with clear, saturated, confident colour in the panels, bands, headings, figures, icons and accents. Dark tones are for small blocks, headings and accents only. Do NOT make the poster dark, black, charcoal, near-black, slate, night-mode, muted, dull, washed-out, greyscale, monochrome or moody, and do NOT let a black or very dark panel occupy a large part of the canvas or serve as the main background. Any photograph must be bright, colourful and naturally lit — never desaturated, greyscale, darkened or overlaid with a dark scrim. A dark, drab or low-energy poster is a failed poster even when every other rule is followed.';
-
-// THE ARRANGEMENT BLOCK (2026-08-14) — the one design decision the fresh lane makes for the
-// model, and the only structural instruction it receives.
-//
-// It exists because the 2026-08-10 hand-over solved the wrong half of the problem. Handing the
-// design over raised the craft, which is what the officer reported; it did not vary the
-// ARRANGEMENT, because an image model handed a headline, a list and a scene brief has two habits
-// and no reason to leave them. The brief already NAMES both habits as failure modes, and that is
-// a negative — which is precisely the thing NO_TEXT_RULE had to be rewritten to stop being. "Do
-// not default to those two shapes" gives the model nothing to do instead, so it does them.
-//
-// FOUR PROPERTIES, each answering an objection this block would otherwise deserve:
-//
-//   1. IT SAYS WHY. The arrangement is not presented as taste but as the reason it exists — that
-//      consecutive posters from one department must not come out the same shape. A model given a
-//      constraint with a stated purpose honours it far better than one given a bare rule.
-//   2. IT CONSTRAINS PLACEMENT AND NOTHING ELSE, and lists what it is NOT taking, because the
-//      surrounding brief has just spent four paragraphs handing those decisions over. Without the
-//      hand-back sentence this reads as the specification returning, and the model quite
-//      reasonably starts waiting to be told the rest.
-//   3. IT IS OUTRANKED BY EXACTLY THREE THINGS, named. Not "unless it doesn't work" — a model
-//      takes an open-ended exit every time, which would put us straight back at the default. The
-//      three are the ones that are not taste anywhere in this file: all the content shown, every
-//      word readable, the branding zones clear. This is the same ranked-carve-out shape the
-//      fixed-template lane already uses ("content completeness, readability and reserved-zone
-//      safety OUTRANK the reference's exact widths").
-//   4. THE FALLBACK IS CLOSED. The carve-out's obvious abuse is to invoke it and land back on a
-//      band over rows, so the two default shapes are named again as what the retreat may NOT be.
-//
-// The anchor itself is only ever assigned to content that can carry it (poster-placements.ts
-// filters on imagery and item count before the pick), which is what earns the firm wording.
-function arrangementBlock(placement: PosterPlacement): string {
-  return [
-    `ARRANGEMENT FOR THIS POSTER — one decision, and only this one, has been made for you, so that consecutive posters from this department do not all come out in the same shape: ${placement.instruction}`,
-    '',
-    'Everything else remains entirely yours: the colours, whether there is imagery at all and in what medium, the illustration style, the typography, the texture, the graphic devices, and every proportion within that arrangement. Design a genuinely well-composed poster AROUND this arrangement — do not simply drop the content into it.',
-    '',
-    'Three things outrank it, and only these three: showing every piece of the supplied Marathi content, keeping every word comfortably readable, and keeping the reserved branding zones clear. If the content truly cannot sit in this arrangement, bend it only as far as those three require — and even then, do not retreat to a coloured band above a list of rows, or to a canvas split down the middle with a picture on one side and text on the other.',
-  ].join('\n');
-}
 
 // RETIRED (2026-08-07): CHROME_ZONE_GEOMETRY (280x270 / 130px) and its prose twin
 // CHROME_ZONES. Both are gone and must not come back — SOCIAL_ZONES below is now the single
@@ -452,23 +406,6 @@ function buildFreshChange(copyStyle: string, c: PosterCopy): string {
   return out.join('\n');
 }
 
-// HOW THE FACTS RELATE IS PART OF THE CONTENT, AND THE ARRANGEMENT IS THE MODEL'S.
-//
-// The complaint this answers: every fresh poster lays its information out as a column of rows,
-// one under another, each with a numeral or an icon — regardless of whether the facts are a
-// sequence, a comparison, a breakdown or four unrelated announcements. Two causes, and the
-// labels above were only one of them; this is the other. Nothing in the brief had ever said
-// that the ARRANGEMENT OF THE INFORMATION was a decision at all. The composition paragraph
-// hands over where the visual weight sits (and poster-placements.ts narrows exactly that one
-// axis) — neither says anything about how a set of facts is organised on the page.
-//
-// Written positively and without a required vocabulary, on purpose. Naming a list of permitted
-// structures would rebuild the retired archetype library one level up, and banning the row stack
-// would be a negative — both mistakes this file has made before. The row stack stays explicitly
-// valid; what it stops being is automatic.
-const INFORMATION_DISPLAY_RULE =
-  'HOW THE INFORMATION IS ARRANGED IS YOURS TO DECIDE. What you have been given is a set of facts, and the relationship between them is part of the content: some information is a sequence, some is a comparison, some is one whole broken into its parts, some is a set of figures, some is a single statement that needs nothing beside it. Read what THESE particular facts are to each other, and let that decide how they are shown. A column of rows one under another, each tagged with a numeral or an icon, is ONE valid answer among many — it is not the default, and it is not what a set of points automatically becomes. Steps or stages, a before-and-after, a side-by-side comparison, a breakdown, a grouping, figures given real size and weight, a branching or radiating arrangement, a path, a map, or one dominant statement with everything else set small are all equally open to you, as is any treatment you judge better that is not named here. Nothing in that list is required and nothing is forbidden: choose a treatment because THIS information asked for it, not because it is the safe shape. You may also treat different pieces differently — a figure set as a figure, the line beside it set as a sentence. Whatever you choose, every piece of the Marathi text must still appear in full and stay easy to read.';
-
 // Keep the reserved-zone numbers in sync with packages/poster-renderer/src/cmo-geometry.ts.
 const CMO_ZONES =
   'RESERVED ZONES — official CMO branding AND the photograph are stamped onto the finished poster afterwards by software, so keep them clear: (1) the TOP HEADER BAND — the full-width blue leader lockup with the three leaders and the महाराष्ट्र शासन emblem — occupies the TOP ~19% of the poster height; place NO headline, text, figures, faces or logos inside that band, and START the headline BELOW it. (2) the full-width BOTTOM ~8% strip (the footer and social-handle band); place nothing there. (3) the UPPER-RIGHT PHOTO CIRCLE — the round photo window in the upper-right area — is filled with a photograph by software afterwards; leave it a QUIET, PLAIN background (a soft solid colour or a gentle continuation of the design), place NO text, faces, subjects or important content inside it, and do NOT draw any circle, ring, border or outline there. The left-column headline and the body points must NOT overlap that circle. FINAL CHECK before finishing: nothing important may sit inside the top ~19% header band, the bottom ~8% footer strip, or the upper-right photo circle.';
@@ -631,202 +568,28 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
   }
 
   if (isFreshDesign(designMode)) {
-    // Where the poster's words come from. 'fresh' typesets the copy generatePosterCopy wrote out
-    // of the note; 'fresh_verbatim' typesets the officer's own text and no copy call was made at
-    // all, so `copy` is empty and `change` would render a block of "HEADLINE: undefined" labels.
     const verbatim = (input.information ?? '').trim();
     const isVerbatim = designMode === 'fresh_verbatim' && verbatim.length > 0;
-
-    // NAME THE CLIENT, STATE WHAT CANNOT MOVE, THEN GET OUT OF THE WAY (2026-08-10).
-    //
-    // Everything that used to sit between those two things is gone: an assigned hex palette, a
-    // COLOUR MANDATE, an art director's treatment, an assigned composition archetype, the
-    // selected master's structure summary, a "clean, trustworthy, well-organised" house
-    // aesthetic, and a `copyStyle` label telling the model which of six shapes to build. It was
-    // a specification for a poster, not a brief for a designer, and the renders read exactly
-    // like that — correct, legible, and interchangeable. The two libraries feeding it were the
-    // giveaway: eleven composition archetypes that were ALL "a flat colour rectangle plus rows
-    // of text" (two of them literally "photograph down one side, text down the other"), and
-    // eighteen palettes that were all "light ground plus one colour block", because the ground
-    // was a product decision rather than a design choice. No amount of rotation between those
-    // makes an interesting poster; it only makes a differently-arranged boring one.
-    //
-    // WHAT STAYS IS THE SET OF THINGS THAT ARE NOT TASTE:
-    //   - the Marathi must come out character-exact (a displaced matra is a different word);
-    //   - the branding zones must survive, because the badge and footer are composited in code
-    //     afterwards and a poster that ignores them ships with its own text destroyed;
-    //   - the canvas is portrait and carries one poster. Deliberately not called "4:5" any
-    //     more: the FINISHED poster is 4:5, but the canvas the model paints is the artwork
-    //     above the joined-on branding band (SOCIAL_ZONES), which is slightly shorter.
-    // Every other decision — composition, colour, imagery, illustration, texture, type — is the
-    // model's, and the brief says so in as many words.
-    //
-    // ONE DELIBERATE EXCEPTION to "no colour guidance", and it is the opposite of a restriction.
-    // gpt-image has a very strong "Indian government Marathi poster -> saffron on cream" prior.
-    // Measured on eight consecutive live posters BEFORE the palette rotation existed: 5/8 warm
-    // cream grounds, 5/8 orange-or-red dominants. Silence does not read as freedom to a prior
-    // that strong — it reads as permission to default. So the brief names the two defaults and
-    // asks for something other than them, without saying what that something is.
-    const freshLines: string[] = [
-      "You are an award-winning poster designer working for DGIPR — the Directorate General of Information and Public Relations, Government of Maharashtra, India. This poster goes out on the department's official social media and will be read on a phone by ordinary Maharashtra citizens.",
+    // `fresh` typesets the curated copy; `fresh_verbatim` typesets the officer's unchanged text.
+    // The officer deliberately owns the whole creative brief for these from-scratch modes. Keep
+    // the generated/typed copy as a clearly labelled data block, then add only the shared rules
+    // that protect the header badge and appended footer applied by software.
+    const posterContent = isVerbatim
+      ? verbatim
+      : buildFreshChange(copyStyle, copy);
+    return [
+      'Make a digipr poster',
       '',
-      'Design a single, complete portrait poster for the Marathi content below. Design it from scratch, as an original piece of work.',
+      'POSTER CONTENT:',
       '',
-      // TWO FAILURE MODES, BOTH NAMED (the second added 2026-08-14). Removing the assigned
-      // COMPOSITION archetype did not make the lane varied — it made it default, and an image
-      // model handed a headline, a bullet list and a scene brief has exactly two habits. One is
-      // the band-over-rows stack this sentence already named. The other, reported from live
-      // output, is the canvas halved with a photograph down one side and the text down the
-      // other — which is, not coincidentally, what two of the eleven retired archetypes
-      // (`photo_column`, `left_rail`) used to ask for outright. Naming only one of the two left
-      // the model a second safe shape to fall into, and it did, run after run.
-      //
-      // NEITHER SHAPE IS BANNED, and the wording has to keep saying so: a photo panel beside a
-      // text panel is a perfectly good poster, and the department has published plenty. The
-      // defect is arriving there by default rather than by decision. This is deliberately the
-      // same "do NOT default to X or Y — those are the tired defaults" shape the colour
-      // paragraph below already uses against the saffron-on-cream prior, for the same reason:
-      // a prohibition would narrow the lane, and narrowing it is what produced the sameness in
-      // the first place.
-      'YOU HAVE FULL CREATIVE CONTROL, AND YOU SHOULD USE IT. The composition, the colour palette, the imagery, the illustration style, any photography, the texture and material, the typographic scale and hierarchy, the graphic devices — all of it is yours to decide, and you should decide it boldly. Build the poster around whatever serves THIS message: an illustration, a photograph, hand-drawn artwork, a symbolic graphic, a textured or patterned ground, a large colour field, a strong piece of typography. Give it one clear visual idea and a real focal point, with confident contrast between the largest element and the smallest. Craft, depth and personality are wanted here. Do NOT fall into a safe, template-shaped layout — neither a coloured rectangle above a list of rows, nor a canvas divided down the middle with a photograph filling one side and a column of text on the other. Those two are what gets produced when the composition is not really being decided, and between them they are the failure mode. Neither shape is forbidden — but reaching for one by habit, rather than because this particular message asked for it, is exactly what makes every poster look like the last one. Decide the arrangement from THIS content, and let it be asymmetric, layered, full-bleed, diagonal, off-grid, built around one dominant image, or carried on type alone. A citizen scrolling past should stop because the poster is genuinely good to look at.',
-      '',
-      // READABILITY rides on the colour paragraph rather than becoming a rule of its own — it is
-      // a consideration, and a separate block would give it weight the officer did not ask for.
-      // The last sentence is load-bearing in the OTHER direction: BRIGHT_LOOK_RULE used to ban
-      // dark grounds outright on the fixed-template lane, and without saying so plainly this
-      // reads as the same ban rebuilt out of "contrast". Dark posters are allowed here.
-      'Choose the colours yourself, freely, from the meaning and the mood of the content. Do NOT default to the saffron-orange-and-cream "government paper" look, and do NOT default to a generic government navy-blue-and-white — those are the tired defaults and this poster should not look like either unless the content genuinely calls for it. Light or dark, deep or high-key, vivid or restrained, duotone, gradient or flat are all open to you. Just keep readability in mind: every Marathi word should stay easy to read against whatever sits immediately behind it, so where text falls on a photograph, a gradient or a busy pattern, give it a calmer area, a panel, or more weight. Dark, deep and saturated posters are entirely welcome — this is about the contrast between text and its own background, not about making the poster lighter.',
-      '',
-      // TYPOGRAPHY. The fresh lane said nothing about type at all, which is why every poster came
-      // back set in one face — 'Use Nirmala UI for all text' is the onbrand lane's rule, not this
-      // one. Kept to a single paragraph deliberately: this brief works by handing decisions over,
-      // and a page of typographic instruction would be the specification creeping back in.
-      //
-      // The named families are a CHARACTER hint and say so — gpt-image loads no font files, so a
-      // name steers letterform style or it does nothing. Mukta leads the list on evidence rather
-      // than taste: it is this repo's own MARATHI_FONT_FAMILY (poster-renderer/src/assets.ts),
-      // adopted 2026-07-28 after Noto Sans Devanagari was found to break the C+र conjunct.
-      //
-      // The last sentence is the escape hatch, the same shape as the photo rule's. This lane
-      // already accepts image-model Devanagari, so more typefaces means more chances at a
-      // detached matra; correctness has to outrank the style choice explicitly.
-      'TYPOGRAPHY IS PART OF THE DESIGN — do not set the whole poster in one font. Pair a Devanagari display face with real character for the headline against a cleaner, quieter Devanagari face for the body and points, and let weight, size and letterspacing do work too; two families, three at the most. Aim for the character of well-made Devanagari families such as Kamal, Mukta, Hind, Baloo 2, Tiro Devanagari Marathi, Rozha One, Khand, Teko, Martel or Yatra One — those name the letterforms to aim for, not files to load. Correctness outranks style: every conjunct (जोडाक्षर), matra and anusvara must stay correctly formed and attached to its consonant, so if a decorative face would break one, set that text in a cleaner face instead.',
-      '',
-      'It is an official government communication, so it must be accurate and legible. It does not have to be plain.',
-      '',
-      // The slot labels in `change` name each piece of text's ROLE. Left unqualified beside a
-      // brief this open they read as a layout spec ("BULLET POINTS (in the body list zone)"),
-      // which is half of where the row-stack habit came from.
-      // TWO SHAPES OF CONTENT, ONE BRIEF. The design half above is identical either way — the
-      // officer chose "design it freely" separately from "use my words as they are", and the two
-      // questions are independent (see DesignModeSchema's table).
-      ...(isVerbatim
-        ? [
-            // No slot labels here, and that is the whole difference: there is no copy object, so
-            // nothing names a HEADLINE or a BULLET. The model reads the officer's text and decides
-            // for itself what is the headline, what is a list, what deserves emphasis — which is
-            // the freedom this lane exists for. What it may NOT do is change the words.
-            "CONTENT TO TYPESET — the officer's own Marathi text, below. This is not source material to summarise, shorten or rewrite: it IS the poster's content, word for word. Read it, decide yourself what is the headline, what belongs in a list, what deserves emphasis and what shape the whole thing takes — then set that text, unchanged. Render it crisply. No English body text.",
-            '',
-            verbatim,
-            '',
-            REPRODUCE_EXACTLY_RULE,
-            SHOW_ALL_RULE,
-            USE_EACH_ITEM_ONCE_RULE,
-            // The fresh counterpart of the fixed-template lane's empty-space rule. Same defect it
-            // guards against (surplus canvas filled by showing an item twice), different escape:
-            // with no reference density to match, a short note should simply become a more
-            // spacious poster.
-            'LEAVING SPACE EMPTY IS CORRECT. If the supplied text is short, design a genuinely spacious poster — larger type, more generous margins, a bigger focal image or graphic device. Never repeat an item, never invent extra wording, and never split one item into several to fill the canvas. Well-composed empty space is always better than a repeated or invented line.',
-            DOCUMENT_ARTIFACT_RULE,
-          ]
-        : [
-            'CONTENT TO TYPESET — reproduce this Marathi text EXACTLY as written, character for character: every letter, every matra and vowel sign, every conjunct (जोडाक्षर), every anusvara, every Devanagari numeral. Do not re-spell, re-word, translate, transliterate, abbreviate, correct or add to it, and do not drop a line because the composition feels tight. Render it crisply. No English body text. The labels below name what each piece of text IS — they do not tell you where to put it, how large to set it, or what shape to give it; those are your decisions.',
-            '',
-            // buildFreshChange, NOT the `change` the template lanes use: role-only labels, no
-            // numbering, and an unsupplied field omitted rather than printed as an empty slot.
-            // The sentence immediately above promises exactly that, and `change` contradicted it
-            // in its own first label.
-            buildFreshChange(copyStyle, copy),
-          ]),
-      '',
-      // The arrangement of the INFORMATION — distinct from the arrangement of the CANVAS, which
-      // is what the composition paragraph above and the placement anchor below both address.
-      // Emitted on both fresh shapes: the verbatim branch already tells the model to decide what
-      // is a headline and what is a list, and this is the same permission carried through to how
-      // those pieces then relate on the page.
-      INFORMATION_DISPLAY_RULE,
-    ];
-    if (sceneBrief) {
-      freshLines.push(
-        '',
-        // Was "BACKGROUND / HERO IMAGERY", i.e. a photograph in a rectangle behind the type, and
-        // its else-branch banned illustration outright ("Do NOT include any photograph, portrait
-        // or pictorial illustration") — so imagery was a binary with no middle, and the middle is
-        // exactly where good public-information posters live.
-        `SUBJECT MATTER — what this poster is about, if you want imagery: ${sceneBrief}`,
-        'Treat that as subject, never as a specification. Render it as a photograph, an illustration, line art, a flat-vector scene, a symbolic graphic, a repeated motif, a textured ground — or leave it out entirely and carry the poster on typography and colour alone. Whichever you choose, imagery must never obscure, crowd or compete with the Marathi text.',
-      );
-    } else {
-      freshLines.push(
-        '',
-        'No specific subject imagery is supplied. Carry the poster however you judge best — typography and colour alone, an abstract or geometric treatment, a symbolic graphic, a motif, or original illustration suited to the message. Nothing here restricts you to text on a plain ground.',
-      );
-    }
-    // PHOTOGRAPHS MUST BE PHOTOGRAPHS. Emitted unconditionally, because the choice of medium is
-    // the model's now and neither branch above knows which way it went.
-    //
-    // SCOPED TO PHOTOGRAPHY ON PURPOSE. A blanket "make it realistic" would cancel the
-    // illustration freedom the block above just opened — line art, flat-vector scenes and
-    // motifs are legitimate outcomes and several of the department's best posters are exactly
-    // that. This rule says only that if the model reaches for a PHOTOGRAPH, it must not deliver
-    // the 3D-render/CGI/AI-composite look that image models drift to when nothing forbids it:
-    // waxy skin, plastic surfaces, impossible lighting, invented faces with too-even features.
-    //
-    // The vocabulary is deliberately the house wording already used by
-    // poster-renderer/src/build-scene-prompt.ts ("real, natural daylight; authentic skin, fabric
-    // and material textures; realistic depth of field"), so a photograph reads the same whether
-    // it was painted into a fresh poster or generated separately as a scene.
-    freshLines.push(
-      '',
-      'PHOTOGRAPHS MUST LOOK LIKE REAL PHOTOGRAPHS. This rule applies only where you actually choose to use photography — illustration, line art, flat-vector artwork, symbolic graphics, motifs and texture are all still fully open to you, and this does not push you toward photography or away from those. But any photographic element on this poster must read as a genuine photograph taken with a camera: real people with natural faces, skin and expressions, authentic skin, hair, fabric and material textures, real natural or ambient light with believable shadows and reflections, realistic depth of field, and true-to-life colour. Do NOT produce a 3D render, CGI, a video-game or animated-film look, a plastic or waxy digital-human look, an airbrushed stock-photo composite, an obviously AI-generated face, or a photo-illustration hybrid that is half painting and half photograph. People, clothing, vehicles, buildings, streets and interiors must be recognisably Maharashtra, India. If a convincing photograph is not achievable for this subject, use illustration or a graphic treatment instead — a clearly stylised illustration is a good poster, but a photograph that looks fake is not.',
-    );
-    // THE ARRANGEMENT, second to last — after every block that hands a decision over, and before
-    // the chrome blocks, which must stay last. The position is deliberate: these models weight
-    // the end of a prompt most, and this is the one structural instruction the lane gives. Above
-    // it sit the paragraphs saying the composition is the model's to decide; this narrows exactly
-    // one axis of that and says so in its own first sentence, so the two are not in conflict.
-    //
-    // Absent on any caller that supplies no placement, which keeps every existing prompt shape
-    // byte-identical (the harness asserts that).
-    if (input.assignedPlacement) {
-      freshLines.push('', arrangementBlock(input.assignedPlacement));
-    }
-    // The chrome blocks, LAST and in the fixed-template path's order — that path is the one
-    // whose posters come back with the branding sitting correctly, and these three blocks are
-    // the whole of the difference. Nothing about the STAMP differs between the two modes:
-    // both render through overlayTwitterChrome, so the badge and footer bytes are already
-    // identical. What differed was only what the prompt reserved for them.
-    //
-    //   1. paintNoChromeRule — do not invent a badge; a painted one survives BESIDE the real
-    //      one. Fresh had the prohibition without the consequence, and no word against the
-    //      placeholder BOX that was actually showing up in the corner.
-    //   2. reservedZoneBlock — the real 180x170 / 120px reserve, as a proportion the model can
-    //      see, with SOCIAL_FOOTER_NOTE naming the footer's navy pill so its last line does not
-    //      go under it, and the explicit ban on painting a patch/panel/boundary in either zone.
-    //   3. fitToReserveRule — the priority, the consequence and the shrink-headline-first
-    //      action. WITHOUT allowStructuralReflow, unlike the fixed-template path: that option
-    //      exists to licence departing from a reference's geometry, and a from-scratch render
-    //      has no reference geometry to depart from. Shrink-to-fit is the whole recovery here.
-    freshLines.push(
+      posterContent,
       '',
       paintNoChromeRule(SOCIAL_CHROME),
       '',
       reservedZoneBlock(SOCIAL_ZONES, SOCIAL_FOOTER_NOTE),
       '',
       fitToReserveRule(SOCIAL_ZONES),
-    );
-    return freshLines.join('\n');
+    ].join('\n');
   }
 
   const layoutRule =
@@ -1080,10 +843,7 @@ if (
   void Promise.all([
     import('./poster-palettes.js'),
     import('./poster-layouts.js'),
-    // The arrangement rotation, for section 4d(h) below. Loaded here with the other two so the
-    // callback can stay one scope rather than nesting a second dynamic import inside itself.
-    import('./poster-placements.js'),
-  ]).then(([{ pickPalette }, { pickLayout }, { POSTER_PLACEMENTS, pickPlacement }]) => {
+  ]).then(([{ pickPalette }, { pickLayout }]) => {
     for (const seed of ['run-alpha', 'run-beta']) {
       const palette = pickPalette(seed);
       const layout = pickLayout(seed, {
@@ -1148,116 +908,39 @@ if (
             `${seed}: the retired design specification is back in the fresh prompt ("${retired}")`,
           );
       }
-      // 3. WHO IT IS FOR is the one thing the brief must say, since it is now carrying the whole
-      //    weight of "make it appropriate" that the specification used to carry.
+      // The replacement prompt is intentionally tiny. The only instruction before the runtime
+      // content is the officer's sentence; everything after it protects stamped chrome.
       for (const needle of [
-        'DGIPR',
-        'Government of Maharashtra',
-        'YOU HAVE FULL CREATIVE CONTROL',
-      ]) {
-        if (!prompt.includes(needle))
-          failures.push(`${seed}: the fresh brief lost "${needle}"`);
-      }
-      // 4. BOTH FAILURE MODES, NAMED. These prompts respond far better to a described defect
-      //    than to an abstraction — the same finding as reserved-zone-rule.ts's "DO NOT CUT A
-      //    HOLE". The defects here are the two posters the eleven retired archetypes produced
-      //    between them: the band-over-rows stack, and the side-by-side photo/text split
-      //    (`photo_column`, `left_rail`). Naming only the first left the model a second safe
-      //    shape to default into, which is what it did on live runs until 2026-08-14. If
-      //    posters ever go back to one arrangement, check whether one of these was dropped.
-      for (const needle of [
-        'coloured rectangle above a list of rows',
-        'photograph filling one side and a column of text on the other',
-      ])
-        if (!prompt.includes(needle))
-          failures.push(
-            `${seed}: the fresh brief no longer names the template-shaped layout "${needle}" as a failure mode`,
-          );
-      // …and the escape hatch beside them. Both shapes are legitimate posters; the defect is
-      // defaulting to one. A future edit that hardens either into a prohibition would narrow
-      // this lane again, which is the thing that caused the sameness to begin with.
-      if (!prompt.includes('Neither shape is forbidden'))
-        failures.push(
-          `${seed}: the fresh brief now BANS the two default layouts instead of naming them as defaults`,
-        );
-      // 5. THE ANTI-DEFAULT. Not a colour restriction — the opposite. gpt-image's "Indian
-      //    government Marathi poster -> saffron on cream" prior measured 5/8 warm cream grounds
-      //    across eight consecutive live posters before the rotation existed, and silence reads
-      //    to that prior as permission. Removing the spec WITHOUT this is how the lane regresses
-      //    to one colourway; it is the single most likely thing to be "cleaned up" by mistake.
-      for (const needle of [
-        'saffron-orange-and-cream',
-        'navy-blue-and-white',
+        'Make a digipr poster',
+        'POSTER CONTENT:',
+        'PAINT NO BRANDING OF YOUR OWN',
+        'RESERVED BADGE CORNER',
+        'THE BOTTOM EDGE IS A JOIN, NOT A COVER ZONE',
+        'FIT THE CONTENT INSIDE THE USABLE AREA',
       ]) {
         if (!prompt.includes(needle))
           failures.push(
-            `${seed}: the fresh brief no longer names the "${needle}" default it has to push away from`,
+            `${seed}: the replacement fresh prompt lost "${needle}"`,
           );
       }
-      // 6. TEXT FIDELITY IS NOT TASTE and survives the hand-over intact.
-      for (const needle of [
-        'reproduce this Marathi text EXACTLY',
-        'जोडाक्षर',
-        'No English body text',
+      for (const retired of [
+        'You are an exceptional Marathi social-media poster designer',
+        'HIGHEST PRIORITY — PERFECT MARATHI TEXT IS NON-NEGOTIABLE',
+        'Reproduce the supplied Marathi text character for character',
+        'You are free to use your creativity',
+        'Create one highly creative, original portrait poster',
+        'VISUAL COMMUNICATION',
+        'CREATIVE DIRECTION',
+        'TYPOGRAPHY',
+        'IMAGERY',
+        'BRANDING AND SAFE AREAS',
+        'FINAL VERIFICATION',
       ]) {
-        if (!prompt.includes(needle))
+        if (prompt.includes(retired))
           failures.push(
-            `${seed}: the fresh brief lost the text rule "${needle}"`,
+            `${seed}: the replacement fresh prompt still contains retired direction "${retired}"`,
           );
       }
-      // 7. IMAGERY IS NO LONGER A BINARY. It was: a photograph in a rectangle, or an outright
-      //    ban on "any photograph, portrait or pictorial illustration" — so the middle ground
-      //    that good public-information posters live in (line art, flat-vector scenes, motifs)
-      //    was unreachable by construction.
-      if (!prompt.includes('an illustration, line art'))
-        failures.push(
-          `${seed}: the fresh brief does not offer illustration as an option`,
-        );
-      if (
-        prompt.includes(
-          'Do NOT include any photograph, portrait or pictorial illustration',
-        )
-      )
-        failures.push(
-          `${seed}: the illustration ban is back — imagery is a binary again`,
-        );
-      // 8. PHOTOGRAPHS MUST BE PHOTOGRAPHS — and the rule must stay SCOPED. An unscoped
-      //    "make it realistic" would quietly undo assertion 7 above by ruling out the
-      //    illustration the brief has just offered, so the scoping clause is asserted too.
-      for (const needle of [
-        'PHOTOGRAPHS MUST LOOK LIKE REAL PHOTOGRAPHS',
-        'authentic skin, hair, fabric and material textures',
-        'realistic depth of field',
-        'This rule applies only where you actually choose to use photography',
-        'a clearly stylised illustration is a good poster',
-      ]) {
-        if (!prompt.includes(needle))
-          failures.push(`${seed}: the photo-realism rule lost "${needle}"`);
-      }
-      // 9. TYPOGRAPHY. Only the three things that would actually regress: that more than one
-      //    face is asked for at all, that the named families survive as a character hint, and
-      //    that conjunct correctness still outranks the style choice on a lane where the image
-      //    model is the one rendering Devanagari.
-      for (const needle of [
-        'do not set the whole poster in one font',
-        'Kamal, Mukta, Hind',
-        'Correctness outranks style',
-      ]) {
-        if (!prompt.includes(needle))
-          failures.push(`${seed}: the typography rule lost "${needle}"`);
-      }
-      // 10. READABILITY must not become a brightness ban. BRIGHT_LOOK_RULE is the fixed-template
-      //     lane's, it bans dark grounds outright, and "keep it readable" is exactly the sentence
-      //     someone would later rebuild it from — which would re-close the palette this lane just
-      //     opened. Assert the permission, and deny the rule itself.
-      if (
-        !prompt.includes(
-          'Dark, deep and saturated posters are entirely welcome',
-        )
-      )
-        failures.push(
-          `${seed}: the readability clause no longer states that dark posters are allowed`,
-        );
       if (prompt.includes('MAKE IT BRIGHT'))
         failures.push(
           `${seed}: the brightness ban is back on the fresh lane, which chooses its own colours`,
@@ -1464,13 +1147,9 @@ if (
         "fixed-template prompt tells the model to repeat the reference's rows/cards again",
       );
 
-    // 4c. THE FULLY-AI ('fresh') BRANCH. Two reported defects on real posters — an oversized
-    //     white box in the top-right corner, and a footer covering the last line of text — and
-    //     both were the prompt, not the stamp: fresh and fixed-template render through the SAME
-    //     overlayTwitterChrome. Fresh quoted a retired 280x270 / 130px reserve (three times the
-    //     badge's real area), described the badge it was reserving for, called the two-part
-    //     footer one strip, and buried the whole thing mid-prompt. It now emits the same three
-    //     blocks as the fixed-template path. If either defect returns, check these FIRST.
+    // 4c. THE COMPACT FULLY-AI ('fresh') BRANCH. Branding still lands in code, but this lane
+    //     states only the geometry and actions the model needs instead of importing the long
+    //     template-edit recovery history into a from-scratch brief.
     const freshPrompt = buildPosterPrompt({
       copy: COPY,
       copyStyle: 'info_bullets',
@@ -1479,109 +1158,48 @@ if (
       masterUrl: '',
       hasPhoto: true,
     });
-    if (!freshPrompt.trimEnd().endsWith('cross into either reserved zone.'))
-      failures.push('the fresh prompt does not end on the fit rule');
-    // (a) ONE geometry across the whole file, and it is the real one.
-    for (const needle of [
-      'top-right 180 x 170 pixels',
-      '1280 x 1504 output',
-      'y=1488',
-      'DESIGN ALL THE WAY DOWN TO THE VERY BOTTOM EDGE',
+    for (const retired of [
+      'top-right 180 x 170 pixel badge area',
+      'Do not draw any government logo',
+      'Do not finish the poster until',
+      'Photography, illustration, diagrams',
+      'Optional visual subject:',
     ]) {
-      if (!freshPrompt.includes(needle))
-        failures.push(`the fresh prompt lost "${needle}"`);
-    }
-    // The brightness rule is deliberately fixed-template ONLY: on this lane the palette rotation
-    // assigns exact hexes, and a second voice telling the model to brighten them would licence
-    // departing from a specification whose whole point is that it is not negotiable.
-    if (freshPrompt.includes('MAKE IT BRIGHT'))
-      failures.push(
-        'the fresh prompt carries the brightness rule, which competes with its assigned hex palette',
-      );
-    for (const retired of ['280 x 270', 'bottom 130 pixels', '280x270']) {
       if (freshPrompt.includes(retired))
         failures.push(
-          `the fresh prompt still quotes the retired reserve "${retired}" — it is 3x the stamped badge and is what left a box in the corner`,
+          `the replacement fresh prompt retained old direction "${retired}"`,
         );
     }
-    // (b) The footer is APPENDED on this lane, so the prompt must not present it as an
-    //     overlay. The navy-pill note and the "band pasted over the bottom" consequence were
-    //     both written for a footer that could bury a line; neither is true any more, and a
-    //     threat the model's own render disproves teaches it that this prompt's threats are
-    //     negotiable. It must also not ask for the ~120px void the band no longer occupies,
-    //     which would letterboard the poster above its own footer.
+    for (const chromeRule of [
+      'PAINT NO BRANDING OF YOUR OWN',
+      'top-right 180 x 170 pixels',
+      'y=1488',
+      'footer band is attached directly BELOW this image',
+      'No quantity of content is ever a reason to cross into either reserved zone.',
+    ]) {
+      if (!freshPrompt.includes(chromeRule))
+        failures.push(`the fresh prompt lost chrome rule "${chromeRule}"`);
+    }
+    if (freshPrompt.includes('MAKE IT BRIGHT'))
+      failures.push(
+        'the fresh prompt carries the fixed-template brightness rule',
+      );
     for (const retired of [
+      '280 x 270',
+      'bottom 130 pixels',
       'navy-blue ministry title pill',
       'pastes an OPAQUE full-width band',
       'bottom 120 pixels',
+      'STRUCTURE INSPIRATION',
+      'SMART REFLOW WHEN CONTENT DOES NOT FIT',
     ]) {
       if (freshPrompt.includes(retired))
         failures.push(
-          `the fresh prompt still treats the footer as an overlay ("${retired}") — it is appended below the artwork by overlayTwitterChrome`,
+          `the compact fresh prompt restored retired wording "${retired}"`,
         );
     }
-    if (
-      !freshPrompt.includes(
-        'do not leave a large empty gap above the bottom edge',
-      )
-    )
-      failures.push(
-        'the fresh prompt does not ask for the full canvas height, so posters will letterbox above the appended footer',
-      );
-    // (c) The corner BOX. The old wording described the badge being reserved for and only
-    //     softly discouraged leaving the zone plain; this names the artefact outright.
-    if (!freshPrompt.includes('blank or differently-coloured rectangle, patch'))
-      failures.push(
-        'the fresh prompt does not forbid painting a box/panel in the reserved zones',
-      );
-    // (c2) …and the other half of the same problem: the corner must not be cut OUT of the
-    //      artwork either. A real ठरलेले टेम्पलेट render stopped its header panel short of
-    //      the badge and left a pale notch — see reserved-zone-rule.ts.
-    for (const needle of [
-      'DO NOT CUT A HOLE IN IT',
-      'continue through unbroken',
-    ]) {
-      if (!freshPrompt.includes(needle))
-        failures.push(
-          `the fresh prompt does not require the background to continue under the badge ("${needle}")`,
-        );
-    }
-    if (/white rounded-square[^.]*badge\) /.test(freshPrompt))
-      failures.push(
-        'the fresh prompt describes the badge inside its zone geometry, which invites painting one',
-      );
-    // (d) The duplicate consequence — the reason the model prefers an empty corner over a
-    //     plausible painted badge. Fresh had the prohibition without it.
-    if (!freshPrompt.includes('survives BESIDE the real branding'))
-      failures.push(
-        'the fresh prompt states the no-branding rule without its consequence',
-      );
-    // (e) Structural reflow is the fixed-template path's licence to depart from a REFERENCE's
-    //     geometry. A from-scratch render has none, so fresh takes the strict shrink-to-fit.
-    if (freshPrompt.includes('SMART REFLOW WHEN CONTENT DOES NOT FIT'))
-      failures.push(
-        'the fresh prompt carries the reference-geometry reflow licence, which it has no reference for',
-      );
-    if (!freshPrompt.includes('Shrink the HEADLINE first'))
-      failures.push('the fresh prompt lost the shrink-to-fit recovery action');
-    // (f) REFERENCE-FREE. As of 2026-08-07 the runner resolves no master for a fresh run, so
-    //     the prompt must stand up with no masterUrl and no layoutSummary and must borrow no
-    //     structure from anywhere: the assigned COMPOSITION is the whole structural
-    //     instruction. `freshPrompt` above is already built that way — this asserts it is a
-    //     supported shape rather than an accident, since the fixed-template branch still
-    //     throws without a master.
-    if (!freshPrompt.includes('Design it from scratch'))
-      failures.push(
-        'the reference-free fresh prompt no longer says the poster is designed from scratch',
-      );
-    if (freshPrompt.includes('STRUCTURE INSPIRATION'))
-      failures.push(
-        'the fresh prompt emitted a STRUCTURE INSPIRATION block with no master to take one from',
-      );
 
-    // (g) A run whose copy carries NO scene_brief must still be told it may use imagery. This
-    //     was the else-branch that banned illustration outright, so a text-only note could only
-    //     ever come back as type on a flat ground — the other half of "they all look the same".
+    // A scene brief is no longer a hidden fifth instruction in the officer's replacement prompt.
     const freshNoSubject = buildPosterPrompt({
       copy: { ...COPY, scene_brief: '' } as unknown as PosterCopy,
       copyStyle: 'info_bullets',
@@ -1590,23 +1208,9 @@ if (
       masterUrl: '',
       hasPhoto: false,
     });
-    if (
-      !freshNoSubject.includes(
-        'Nothing here restricts you to text on a plain ground',
-      )
-    )
+    if (freshNoSubject.includes('Optional visual subject:'))
       failures.push(
-        'a fresh run with no subject imagery is not told it may still use illustration or texture',
-      );
-    if (/TEXT-ONLY/.test(freshNoSubject))
-      failures.push(
-        'the fresh no-imagery branch restored the TEXT-ONLY lock, which banned illustration',
-      );
-    // The photo-realism rule is emitted unconditionally: with no scene_brief the model may still
-    // reach for photography, and neither imagery branch knows which way it went.
-    if (!freshNoSubject.includes('PHOTOGRAPHS MUST LOOK LIKE REAL PHOTOGRAPHS'))
-      failures.push(
-        'a fresh run with no subject imagery does not carry the photo-realism rule',
+        'a fresh run with no scene brief emitted an empty optional-subject slot',
       );
 
     // (i) THE INFORMATION IS NOT PRE-SHAPED INTO ROWS (2026-08-18). Two independent causes of
@@ -1703,7 +1307,7 @@ if (
       if (!freshSparse.includes('HEADLINE:'))
         failures.push('a headline-only run lost its headline label');
 
-      // The permission itself, on BOTH fresh shapes.
+      // Both from-scratch content shapes receive the same one-line replacement prompt.
       const freshVerbatim = buildPosterPrompt({
         copy: {} as unknown as PosterCopy,
         copyStyle: 'generic',
@@ -1717,153 +1321,22 @@ if (
         ['fresh', freshInfo],
         ['fresh_verbatim', freshVerbatim],
       ] as const) {
-        if (!prompt.includes('HOW THE INFORMATION IS ARRANGED IS YOURS TO DECIDE'))
-          failures.push(`the ${name} prompt lost the information-display rule`);
+        if (!prompt.startsWith('Make a digipr poster\n'))
+          failures.push(`the ${name} prompt lost the one-line replacement`);
+        for (const retired of [
+          'You are free to use your creativity',
+          'Transform the information into a visual story',
+        ]) {
+          if (prompt.includes(retired))
+            failures.push(`the ${name} prompt retained "${retired}"`);
+        }
       }
-      // It hands the decision over rather than prescribing a structure — otherwise it has
-      // become the retired archetype library one level up.
       if (
-        !freshInfo.includes('is ONE valid answer among many') ||
-        !freshInfo.includes('Nothing in that list is required and nothing is forbidden')
+        onbrandLabels.includes('Transform the information into a visual story')
       )
-        failures.push(
-          'the information-display rule stopped handing the decision over — it now reads as a prescription or a ban',
-        );
-      // ...and it must not reach a lane that is editing a master's fixed geometry.
-      if (onbrandLabels.includes('HOW THE INFORMATION IS ARRANGED IS YOURS TO DECIDE'))
         failures.push(
           'the information-display rule reached a template lane, where the reference decides the arrangement',
         );
-    }
-
-    // (h) THE ARRANGEMENT BLOCK (2026-08-14). Everything else in section 4d asserts that a
-    //     design specification does NOT reach the model; this one asserts that one sentence of
-    //     PLACEMENT does, and the difference between the two is the thing a future reader has to
-    //     get right. The retired spec named what went in every zone, in a prompt that had already
-    //     handed the composition over — this narrows one axis and says so. It is here because
-    //     handing arrangement over produced gpt-image's two default shapes run after run, which
-    //     naming them as failure modes (above) did not fix: a negative gives a model nothing to
-    //     execute.
-    {
-      const ANCHORS = POSTER_PLACEMENTS;
-      const anchor = pickPlacement('harness-arrangement', {
-        hasImagery: true,
-        itemCount: 3,
-      });
-      const arranged = buildPosterPrompt({
-        copy: COPY,
-        copyStyle: 'info_bullets',
-        designMode: 'fresh',
-        brand: 'dgipr',
-        masterUrl: '',
-        hasPhoto: true,
-        assignedPlacement: anchor,
-      });
-
-      // 1. The assigned anchor's own words reach the model. Unlike layout.instruction, which
-      //    section 4d asserts must NOT appear.
-      if (!arranged.includes(anchor.instruction))
-        failures.push(
-          "the assigned arrangement's instruction did not reach the fresh prompt",
-        );
-      if (!arranged.includes('ARRANGEMENT FOR THIS POSTER'))
-        failures.push('the fresh prompt lost the arrangement heading');
-
-      // 2. IT MUST HAND EVERYTHING ELSE BACK. Without this sentence the block reads as the
-      //    specification returning, and the model starts waiting to be told the colours and the
-      //    medium too — which is exactly the poster this lane was rebuilt to stop producing.
-      if (!arranged.includes('Everything else remains entirely yours'))
-        failures.push(
-          'the arrangement block no longer hands the other decisions back — it reads as a spec',
-        );
-      if (!arranged.includes('YOU HAVE FULL CREATIVE CONTROL'))
-        failures.push(
-          'the arrangement block displaced the creative-control paragraph it has to sit under',
-        );
-
-      // 3. THE CARVE-OUT IS RANKED AND CLOSED. Exactly three things outrank the arrangement, and
-      //    the retreat may not be to either default shape — an open-ended "unless it doesn't
-      //    work" is an exit a model takes every time, straight back to a band over rows.
-      if (!arranged.includes('Three things outrank it, and only these three'))
-        failures.push(
-          'the arrangement is no longer ranked against completeness/readability/reserved zones',
-        );
-      if (!arranged.includes('do not retreat to a coloured band above a list of rows'))
-        failures.push(
-          "the arrangement block's escape hatch no longer closes the two default shapes",
-        );
-
-      // 4. POSITION. Second to last: after every hand-over paragraph, before the chrome blocks,
-      //    which must stay last on every lane (the fit rule is the final word).
-      if (!arranged.trimEnd().endsWith('cross into either reserved zone.'))
-        failures.push(
-          'the arrangement block displaced the chrome blocks from the end of the prompt',
-        );
-      const atArrangement = arranged.indexOf('ARRANGEMENT FOR THIS POSTER');
-      for (const [label, needle] of [
-        ['the creative-control brief', 'YOU HAVE FULL CREATIVE CONTROL'],
-        ['the content', 'CONTENT TO TYPESET'],
-        ['the photo-realism rule', 'PHOTOGRAPHS MUST LOOK LIKE REAL PHOTOGRAPHS'],
-      ] as const) {
-        if (arranged.indexOf(needle) > atArrangement)
-          failures.push(`the arrangement block was emitted before ${label}`);
-      }
-      if (arranged.indexOf('RESERVED') < atArrangement)
-        failures.push('the arrangement block was emitted after the reserved zones');
-
-      // 5. ADDITIVE. A caller that supplies no anchor gets the prompt it got before this existed,
-      //    byte for byte — the template lanes, the article lane and every existing test above
-      //    depend on that.
-      if (
-        freshPrompt !==
-        buildPosterPrompt({
-          copy: COPY,
-          copyStyle: 'info_bullets',
-          designMode: 'fresh',
-          brand: 'dgipr',
-          masterUrl: '',
-          hasPhoto: true,
-        })
-      )
-        failures.push(
-          'the fresh prompt is no longer byte-identical without an assigned arrangement',
-        );
-
-      // 6. THE ANCHOR VARIES THE PROMPT. The reload button's whole mechanism is that a different
-      //    anchor produces a different instruction — if two anchors ever rendered the same block,
-      //    a redo would be a re-roll of nothing.
-      const rendered = new Set(
-        ANCHORS.map((p) =>
-          buildPosterPrompt({
-            copy: COPY,
-            copyStyle: 'info_bullets',
-            designMode: 'fresh',
-            brand: 'dgipr',
-            masterUrl: '',
-            hasPhoto: true,
-            assignedPlacement: p,
-          }),
-        ),
-      );
-      if (rendered.size !== ANCHORS.length)
-        failures.push(
-          `${ANCHORS.length} anchors produced only ${rendered.size} distinct prompts`,
-        );
-
-      // 7. It reaches the VERBATIM lane too — that lane makes no copy call, so it has fewer
-      //    structural cues than any other and needs the anchor most.
-      const verbatimArranged = buildPosterPrompt({
-        copy: {},
-        information: 'ही एक चाचणी सूचना आहे.',
-        copyStyle: 'info_bullets',
-        designMode: 'fresh_verbatim',
-        brand: 'dgipr',
-        masterUrl: '',
-        hasPhoto: false,
-        assignedPlacement: anchor,
-      });
-      if (!verbatimArranged.includes(anchor.instruction))
-        failures.push('the fresh_verbatim lane did not receive its arrangement');
     }
 
     // 4e. THE FULLY-AI VERBATIM ('fresh_verbatim') BRANCH — the officer's own words on a poster
@@ -1892,31 +1365,14 @@ if (
         "the fresh_verbatim prompt does not carry the officer's text verbatim",
       );
     for (const needle of [
-      'REPRODUCE THE MARATHI TEXT EXACTLY',
-      'SHOW ALL OF THE INFORMATION',
-      'USE EACH ITEM EXACTLY ONCE',
-      'LEAVING SPACE EMPTY IS CORRECT',
-      'DOCUMENT-ARTIFACT FILTER',
+      'Make a digipr poster',
+      'POSTER CONTENT:',
+      'PAINT NO BRANDING OF YOUR OWN',
+      'RESERVED BADGE CORNER',
+      'THE BOTTOM EDGE IS A JOIN, NOT A COVER ZONE',
     ]) {
       if (!freshVerbatim.includes(needle))
         failures.push(`the fresh_verbatim prompt lost "${needle}"`);
-    }
-    // (b) It is still the FRESH brief: the design half is identical to plain fresh, or this is
-    //     just the template lane without a template. If a poster on this mode ever comes back
-    //     looking like a coloured rectangle over rows of text, check these.
-    for (const needle of [
-      'YOU HAVE FULL CREATIVE CONTROL',
-      'Design it from scratch',
-      'coloured rectangle above a list of rows',
-      'saffron-orange-and-cream',
-      'do not set the whole poster in one font',
-      'PHOTOGRAPHS MUST LOOK LIKE REAL PHOTOGRAPHS',
-      'Nothing here restricts you to text on a plain ground',
-    ]) {
-      if (!freshVerbatim.includes(needle))
-        failures.push(
-          `the fresh_verbatim prompt is not the fresh brief any more — lost "${needle}"`,
-        );
     }
     // (c) NO REFERENCE ANYWHERE. This mode resolves no master (isFresh in the runner), so nothing
     //     may talk about one — a reference clause with no reference attached is an instruction the
@@ -1943,13 +1399,34 @@ if (
       failures.push(
         'the fresh_verbatim prompt carries copy slot labels, which pre-decide the layout it hands over',
       );
-    // (e) The chrome/zone blocks are the fresh lane's, unchanged, and still last.
-    if (!freshVerbatim.trimEnd().endsWith('cross into either reserved zone.'))
-      failures.push('the fresh_verbatim prompt does not end on the fit rule');
-    if (!freshVerbatim.includes('survives BESIDE the real branding'))
+    if (
+      freshVerbatim.indexOf(VERBATIM_NOTE) >
+      freshVerbatim.indexOf('PAINT NO BRANDING OF YOUR OWN')
+    )
       failures.push(
-        'the fresh_verbatim prompt lost the painted-badge consequence',
+        'the fresh_verbatim officer text does not precede the chrome rules',
       );
+    if (
+      !freshVerbatim
+        .trimEnd()
+        .endsWith(
+          'No quantity of content is ever a reason to cross into either reserved zone.',
+        )
+    )
+      failures.push('the fresh_verbatim prompt does not end on the chrome fit rule');
+    for (const retired of [
+      'Do not draw any government logo',
+      'FINAL VERIFICATION',
+      'Transform the information into a visual story',
+      'PERFECT MARATHI TEXT IS NON-NEGOTIABLE',
+      'character for character',
+      'You are free to use your creativity',
+    ]) {
+      if (freshVerbatim.includes(retired))
+        failures.push(
+          `the fresh_verbatim prompt retained old direction "${retired}"`,
+        );
+    }
     // (f) PLAIN FRESH MUST BE BYTE-FOR-BYTE UNCHANGED. The verbatim path is additive; if adding it
     //     moved a single character of the existing brief, that is a regression on the default lane.
     if (

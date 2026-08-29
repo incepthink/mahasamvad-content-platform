@@ -9,7 +9,8 @@ import { TasksProvider } from '../lib/TasksProvider';
 import { AppSidebar } from '../components/AppSidebar';
 import { InstallAppPrompt } from '../components/InstallAppPrompt';
 import { PwaRegistration } from '../components/PwaRegistration';
-import HashcaseLogo from '../public/hashcase-text.svg';
+
+import RouteAwareLayout from '../components/navigation/RouteAwareLayout';
 
 // Same family the poster renderer typesets with, so the UI shapes Devanagari
 // conjuncts exactly like the output it previews.
@@ -27,6 +28,9 @@ const devanagari = Mukta({
   subsets: ['devanagari', 'latin'],
   weight: ['400', '600', '700'],
   display: 'swap',
+  // Exposed as a CSS variable as well as a class so Tailwind's `font-sans`
+  // (mapped to it in app/globals.css) shapes Devanagari like the rest of the UI.
+  variable: '--font-devanagari',
 });
 
 export const metadata: Metadata = {
@@ -64,7 +68,10 @@ export default function RootLayout({
   // keys + wrapped text nodes on the pages React mutates heavily.
   return (
     <html lang="mr" suppressHydrationWarning>
-      <body className={devanagari.className} suppressHydrationWarning>
+      <body
+        className={`${devanagari.className} ${devanagari.variable}`}
+        suppressHydrationWarning
+      >
         <Script
           src="https://www.googletagmanager.com/gtag/js?id=G-QB1WJY706H"
           strategy="afterInteractive"
@@ -78,29 +85,7 @@ export default function RootLayout({
           `}
         </Script>
         <PwaRegistration />
-        <TasksProvider>
-          <AppSidebar />
-          <div className="app-main">
-            <InstallAppPrompt />
-            {/* /dlo used to be mounted here permanently and hidden with CSS, so that
-                navigating away did not destroy an in-flight intake. It no longer needs to be:
-                each intake now lives at /dlo/[id] with the row as its state of record, which
-                survives a reload and a closed tab as well as a tab switch — and, unlike the
-                single mounted instance, lets several officers work at once. */}
-            {children}
-            <footer className="site-footer">
-              <a
-                href="https://hashcase.tech"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="powered-by"
-              >
-                <span>{STR.poweredBy}</span>
-                <HashcaseLogo className="powered-logo" />
-              </a>
-            </footer>
-          </div>
-        </TasksProvider>
+        <RouteAwareLayout>{children}</RouteAwareLayout>
       </body>
     </html>
   );

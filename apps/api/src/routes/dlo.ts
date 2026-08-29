@@ -50,6 +50,7 @@ import {
   startDloFileReextractionJob,
   startDloIntakeJob,
 } from '../jobs/dlo-runner.js';
+import { uploadSourceFile } from '@dgipr/content-engine';
 import { getDocumentIntakeJob } from '../jobs/document-intake.js';
 import { startGenerationJob } from '../jobs/runner.js';
 import { rememberDesignations } from '../jobs/designation-writeback.js';
@@ -103,6 +104,10 @@ const KIND_BY_EXTENSION: Record<string, UploadedFileKind> = {
   ),
   '.pdf': 'pdf',
   '.docx': 'docx',
+  // Accepted since this lane stopped transcribing documents: a .txt goes to the article
+  // model as a file like every other document, so there is nothing left for the intake to
+  // do with it that would justify refusing it at the door.
+  '.txt': 'txt',
 };
 
 // Fallback per kind. Recordings and photographs are stored under their OWN container's type
@@ -120,6 +125,21 @@ function kindOf(fileName: string): UploadedFileKind | null {
   const dot = fileName.lastIndexOf('.');
   if (dot === -1) return null;
   return KIND_BY_EXTENSION[fileName.slice(dot).toLowerCase()] ?? null;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+// The file's own container type where the extension names one — a .png stored as image/jpeg
+// would be served back mislabelled, and OpenAI infers how to parse an upload from what it is
+// told it is.
+function contentTypeFor(name: string, kind: UploadedFileKind): string {
+  return (
+    audioMimeForFileName(name) ??
+    imageMimeForFileName(name) ??
+    CONTENT_TYPE_BY_KIND[kind]
+  );
 }
 
 // Storage object names must be ASCII-safe; the index prefix keeps them unique
@@ -321,7 +341,7 @@ export function registerDloRoutes(
           return reply.code(400).send({
             error: {
               message:
-                'फक्त ध्वनिमुद्रण (MP3, AAC, M4A), प्रतिमा (JPG, PNG, WEBP), PDF आणि DOCX फाईल्स स्वीकारल्या जातात.',
+                'फक्त ध्वनिमुद्रण (MP3, AAC, M4A), प्रतिमा (JPG, PNG, WEBP), PDF, DOCX आणि TXT फाईल्स स्वीकारल्या जातात.',
             },
           });
         }
@@ -381,18 +401,56 @@ export function registerDloRoutes(
         DLO_UPLOADS_BUCKET,
         storagePath,
         upload.data,
-        // The file's own container type where the extension names one — a .png stored as
-        // image/jpeg would be served back to the review card mislabelled.
-        audioMimeForFileName(upload.name) ??
-          imageMimeForFileName(upload.name) ??
-          CONTENT_TYPE_BY_KIND[upload.kind],
+        contentTypeFor(upload.name, upload.kind),
       );
-      entries.push({
-        name: upload.name,
-        storagePath,
-        kind: upload.kind,
-        status: 'pending',
-      });
+
+      // A RECORDING is the only source this lane still transcribes. It waits `pending` for
+      // the intake job's transcribe phase, with its content-addressed cache (0031) and its
+      // per-file failure handling — nothing about audio changed.
+      if (upload.kind === 'audio') {
+        entries.push({
+          name: upload.name,
+          storagePath,
+          kind: upload.kind,
+          status: 'pending',
+        });
+        continue;
+      }
+
+      // EVERYTHING ELSE is read by the article model itself. The file is uploaded to OpenAI
+      // here, at attach time, and the article call carries its id as an `input_file` (or
+      // `input_image`) part — so a PDF is never probed, never page-selected and never OCR'd,
+      // which is what removes the whole प्रक्रिया → review detour from this lane. See
+      // intake/openai-source-files.ts.
+      //
+      // 'done' with no text is the shape the lane rests on: the intake job skips a done
+      // entry, and `rebuildCombinedText` contributes nothing for it, which the combine step
+      // already understands (it checks for `openaiFileId` before deciding nothing survived).
+      try {
+        const fileId = await uploadSourceFile(
+          upload.data,
+          upload.name,
+          contentTypeFor(upload.name, upload.kind),
+        );
+        entries.push({
+          name: upload.name,
+          storagePath,
+          kind: upload.kind,
+          status: 'done',
+          openaiFileId: fileId,
+        });
+      } catch (error) {
+        // The archive above succeeded, so the officer's source is safe — but nothing will
+        // read it. Failing the FILE and saying so beats an article that silently omits a
+        // whole document.
+        entries.push({
+          name: upload.name,
+          storagePath,
+          kind: upload.kind,
+          status: 'failed',
+          error: `ही फाईल वाचनासाठी पाठवता आली नाही: ${errorMessage(error)}`,
+        });
+      }
     }
 
     // Then the YouTube links, beside the recordings because that is what they are — the

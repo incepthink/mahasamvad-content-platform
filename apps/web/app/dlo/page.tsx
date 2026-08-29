@@ -10,7 +10,7 @@
 // resuming is served first, but the form stays on the same screen so the person starting a
 // second piece of work never has to navigate away to reach it.
 
-import { DloIntakeForm } from '../../components/DloIntakeForm';
+import { DloIntakeForm } from '../../components/dlo/DloIntakeForm';
 import { DloIntakeList } from '../../components/DloIntakeList';
 import { DloResumeCard } from '../../components/DloResumeCard';
 import { useDloIntakeList } from '../../lib/useDloIntakeList';

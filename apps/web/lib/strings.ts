@@ -197,6 +197,30 @@ export const STR = {
     'बैठकीत जे ऐकले, ठरले किंवा आठवते ते सर्व येथे लिहा — मुद्दे, निर्णय, घोषणा, आकडेवारी.',
   dloNotesPlaceholder:
     'उदा. आजच्या बैठकीत मा. मंत्री महोदयांनी… असे जाहीर केले; योजनेसाठी … कोटी रुपयांची तरतूद…',
+
+  // /dlo's ONE source input (components/dlo/DloComposer). The typed note and every file
+  // used to be three cards — a notes box, an attach card and a YouTube card — which the
+  // officer scrolled through even when they were using one of them. They ask a single
+  // question ("what is this news made of?"), so they are one box with a row of tools.
+  //
+  // The hint keeps the one difference that is real, because it decides when a credit is
+  // spent: a recording, a photograph and a link are read during प्रक्रिया, while a
+  // document is read here and now and a scanned PDF stops to ask which pages are worth
+  // reading first.
+  dloComposerHint:
+    'बैठकीत जे ऐकले, ठरले किंवा आठवते ते इथे लिहा, आणि ध्वनिमुद्रण, कागदपत्रांचे फोटो किंवा PDF / DOCX / TXT फाईल खालच्या बटणांनी जोडा — यांपैकी काहीही एक पुरे. ध्वनिमुद्रण, प्रतिमा आणि कागदपत्रांमधील मजकूर प्रक्रियेदरम्यान वाचला जाईल आणि तपासणी टप्प्यावर दुरुस्त करता येईल.',
+  dloComposerNoteAria: 'बैठकीतील टिपणी',
+  dloRemoveAudio: 'ध्वनिफीत काढा',
+
+  // /dlo's ONE direction box (components/dlo/DloAiPromptBox). It replaces three separate
+  // cards — शीर्षक, तुमची विनंती and नमुना बातमी — which asked the officer three questions
+  // before they had seen a single line of the article. All three remain on the तपासणी step,
+  // where they are answered against a note that actually exists.
+  dloAiPromptLabel: 'AI साठी सूचना (ऐच्छिक)',
+  dloAiPromptHint:
+    'बातमी कशी हवी ते तुमच्या शब्दांत लिहा — शीर्षक किंवा रोख, कशावर भर द्यायचा, काय वगळायचे, भाषा कशी हवी. येथे दिलेली माहिती अधिकृत मानली जाईल. रिकामे ठेवले तरी चालेल; तपासणी टप्प्यावर हे पुन्हा बदलता येईल.',
+  dloAiPromptPlaceholder:
+    'उदा. शीर्षक — कर्जमुक्तीमुळे ग्रामीण अर्थव्यवस्थेला नवी ऊर्जा; ५० कोटींच्या निधीवर भर द्या; समिती सदस्यांची यादी टाळा; भाषा सोपी ठेवा.',
   // All three file sources are attached from ONE card (components/DloSourcesCard) — the
   // question "what do you want to add?" is the same for each, and three cards asking it made
   // the officer scroll past two they were not using. The hint carries the difference that is
@@ -205,7 +229,7 @@ export const STR = {
   // before a single credit is spent.
   dloAttachTitle: 'स्रोत जोडा',
   dloAttachHint:
-    'बैठकीचे ध्वनिमुद्रण, कागदपत्रांचे फोटो आणि PDF / DOCX / TXT फाईल — एकावेळी अनेक जोडता येतील, फाईलच्या आकाराची मर्यादा नाही. ध्वनिमुद्रण व प्रतिमांमधील मजकूर प्रक्रियेदरम्यान वाचला जाईल; स्कॅन केलेल्या PDF मधून कोणती पृष्ठे वाचायची ते तुम्ही येथेच निवडाल.',
+    'बैठकीचे ध्वनिमुद्रण, कागदपत्रांचे फोटो आणि PDF / DOCX / TXT फाईल — एकावेळी अनेक जोडता येतील, फाईलच्या आकाराची मर्यादा नाही. ध्वनिमुद्रण, प्रतिमा आणि कागदपत्रांमधील मजकूर प्रक्रियेदरम्यान वाचला जाईल आणि तपासणी टप्प्यावर दुरुस्त करता येईल.',
 
   // UNUSED since the three cards became one: /dlo's recording control no longer titles
   // itself, and /transcribe passes its own copy (transcribeNewTitle / transcribeHint).
@@ -226,16 +250,12 @@ export const STR = {
   dloImageTypeError: 'कृपया प्रतिमा फाईल निवडा (JPG, PNG किंवा WEBP).',
   dloDocsTitle: 'कागदपत्रे (PDF / DOCX / TXT)',
   dloDocsHint:
-    'शासन निर्णय, टिपणी किंवा इतर कागदपत्रे. प्रत्येक फाईल येथेच वाचली जाते — स्कॅन केलेल्या PDF मधून कोणती पृष्ठे वाचायची ते तुम्ही निवडाल.',
-  // One document block's own heading, inside the sources card.
-  dloDocsCardTitle: 'कागदपत्र',
-  dloDocsIntakeHint:
-    'PDF, DOCX किंवा TXT फाईल निवडा — आकाराची मर्यादा नाही. स्कॅन केलेली PDF देखील चालते. फाईल या बैठकीसोबत जतन केली जाईल.',
-  // Two different controls. The first is the worded button in the attach row, shown only
-  // while there is no document block yet; the second is the + under the blocks, where it is
-  // the icon's title + aria-label rather than visible text.
+    'शासन निर्णय, टिपणी किंवा इतर कागदपत्रे. संपूर्ण फाईल प्रक्रियेदरम्यान वाचली जाते — पृष्ठे निवडण्याची गरज नाही.',
+  // The composer's document tool, carried as the icon's title + aria-label. There is no
+  // second control any more: the block that used to sit under the composer with its own
+  // file button and its own [+] went with the page picker, so this button opens the file
+  // dialog itself and everything attached is a card in the strip.
   dloDocsUpload: 'कागदपत्र जोडा',
-  dloDocsAdd: 'आणखी कागदपत्र जोडा',
   dloRemoveFile: 'फाईल काढा',
 
   // YouTube links as a source, shared by /dlo and /transcribe (components/YouTubeLinkInput).
@@ -445,6 +465,7 @@ export const STR = {
   // typed text beside it. Name the files rather than pretending nothing was lost.
   dloDraftAudioLost: 'ही ध्वनिमुद्रणे पुन्हा जोडा —',
   dloDraftImagesLost: 'या प्रतिमा पुन्हा जोडा —',
+  dloDraftDocumentsLost: 'ही कागदपत्रे पुन्हा जोडा —',
 
   // Standalone translation (mr→en, mr→hi, en→mr, hi→mr)
   translatePageTitle: 'भाषांतर (Translation)',
@@ -519,6 +540,28 @@ export const STR = {
   retranslateFold: 'नावे सुधारून पुन्हा इंग्रजी भाषांतर करा',
   retranslateFoldHindi: 'नावे सुधारून पुन्हा हिंदी भाषांतर करा',
 
+  // ---- The attachment strip (components/common/AttachmentStrip) -------------
+  // One row of file cards under a composer's tool buttons, on both create surfaces.
+  // Every attached source reads the same way there — a recording, a photograph and a
+  // document differ only in their icon and in what their second line says — so the
+  // wording lives here once rather than in each caller.
+  attachmentReading: 'वाचत आहोत…',
+  // A scanned PDF waiting for its page selection — the media room, which still asks. It is
+  // not a failure and not a wait: nothing is read until the officer says which pages are
+  // worth reading.
+  attachmentNeedsPages: 'पृष्ठे निवडायची आहेत',
+  // The same state on /dlo, which does NOT ask: the scan is handed over unread and the
+  // intake job reads it whole during प्रक्रिया, so the card reports what will happen rather
+  // than a decision nobody is being offered.
+  attachmentWillRead: 'प्रक्रियेदरम्यान वाचली जाईल',
+  attachmentFailed: 'वाचता आले नाही',
+  attachmentReady: 'तयार',
+  // Opens (or folds away) the document's own block under the strip, where its pages are
+  // listed and corrected. Carried as title + aria-label on the card.
+  attachmentOpen: 'तपशील उघडा',
+  attachmentClose: 'तपशील बंद करा',
+  attachmentPagesSuffix: 'पृष्ठे',
+
   // ---------- shared document upload (<DocumentIntake> / <DocumentPages>) ----------
   //
   // Used by every surface that takes a PDF/DOCX/TXT. Wording is deliberately
@@ -544,6 +587,12 @@ export const STR = {
   // showing it would mean running the very OCR being approved — so the choice is by page
   // number alone.
   docSelectTitle: 'कोणती पृष्ठे वाचायची?',
+  // Shown INSTEAD of docSelectTitle on a surface that reads the whole document (/dlo). It
+  // states what will happen rather than asking a question, because there is no longer a
+  // per-page decision to make — the file goes to the model entire.
+  docWholeReadTitle: 'फाईल जोडली आहे',
+  docWholeReadHint:
+    'संपूर्ण फाईल प्रक्रियेदरम्यान वाचली जाईल — पृष्ठे निवडण्याची गरज नाही. वाचलेला मजकूर तपासणी टप्प्यावर दुरुस्त करता येईल.',
   docSelectHint:
     'PDF मधील प्रत्येक पृष्ठ OCR ने वाचले जाते — त्यामुळे तक्ते जसेच्या तसे राहतात. फक्त निवडलेलीच पृष्ठे वाचली जातील, म्हणून नको असलेली पृष्ठे आताच वगळा.',
   docSelectTotal: 'एकूण पृष्ठे',

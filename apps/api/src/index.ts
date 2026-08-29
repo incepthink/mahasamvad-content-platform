@@ -8,6 +8,7 @@ import { registerAnalyticsRoutes } from './routes/analytics.js';
 import { registerCanvaRoutes } from './routes/canva.js';
 import { registerChatRoutes } from './routes/chat.js';
 import { registerDloRoutes } from './routes/dlo.js';
+import { registerNewDloRoutes } from './routes/new-dlo.js';
 import { registerDocumentRoutes } from './routes/documents.js';
 import { registerGenerationRoutes } from './routes/generations.js';
 import { registerGlossaryRoutes } from './routes/glossary.js';
@@ -131,6 +132,7 @@ export async function createServer() {
       registerDesignationRoutes(instance, client);
       registerReferenceRoutes(instance, client);
       registerDloRoutes(instance, client);
+      registerNewDloRoutes(instance, client);
       registerTranscriptionRoutes(instance, client);
       registerVideoRoutes(instance, client);
       // The general assistant. The only route in this API that streams its response.

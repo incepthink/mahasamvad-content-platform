@@ -24,6 +24,8 @@ import {
   applyDesignations,
   generateArticle,
   generateArticleSimple,
+  generateArticleFromSources,
+  type SimpleGenerateArticleOptions,
   currentArticleDateline,
   ensureArticleDateline,
   type ArticleNameEntry,
@@ -42,6 +44,7 @@ import {
   pickPlacement,
   placementById,
   posterCopyItemCount,
+  extractPosterPoints,
   resolvePosterSubject,
   resolveThumbnailPeople,
   toStyleHistory,
@@ -127,6 +130,7 @@ import {
   type TranslationTermInput,
 } from '@dgipr/schemas';
 import { recordTasksFromCost } from './service-usage.js';
+import { sourceFilesForGeneration } from './source-files.js';
 import { listKnownDesignations } from './translation-terms.js';
 
 const running = new Set<string>();
@@ -801,7 +805,21 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
     const result =
       mode === 'simple'
         ? await (async () => {
-            const simple = await generateArticleSimple(row.note, {
+            // The new /dlo lane's sources, if this run has any: documents and photographs
+            // the article call reads for itself. Empty for every other run, and the two
+            // generators take the same options and return the same shape — so this is the
+            // only line that differs between the lanes, and everything below (the dateline,
+            // the warnings, the style-reference write, posters, translation) is shared.
+            const sourceFiles = await sourceFilesForGeneration(client, row);
+            const writeArticle =
+              sourceFiles.length > 0
+                ? (note: string, options: SimpleGenerateArticleOptions) =>
+                    generateArticleFromSources(note, {
+                      ...options,
+                      files: sourceFiles,
+                    })
+                : generateArticleSimple;
+            const simple = await writeArticle(row.note, {
               ...shared,
               // Tier 1 of the style-reference hierarchy (migration 0035). Read off the ROW, so
               // a retry reproduces the same reference rather than silently re-styling.
@@ -1574,6 +1592,11 @@ async function resolveSocialReference(
   id: string,
   row: GenerationRow,
   brand: TemplateBrand,
+  // The text this reference is being chosen FOR. On the AI-copy lanes it is the CURATED poster
+  // content (extract-poster-points.ts), not the raw note — the whole point of curating before
+  // resolving is that capacity is matched to what the poster will actually carry. Defaults to
+  // the note, which is what every verbatim lane passes and what this always used to read.
+  information: string,
 ): Promise<ResolvedReference> {
   // NO per-design-mode options, and there is nothing left to add one for. This function is now
   // only ever called for a mode that renders INTO the reference it returns, so every caller
@@ -1588,12 +1611,12 @@ async function resolveSocialReference(
       client,
       row.referenceTypeId,
       id,
-      row.note,
+      information,
     );
     if (pinned) return pinned;
   }
   if (brand === 'cmo') {
-    return resolveCmoReference(client, id, row.note);
+    return resolveCmoReference(client, id, information);
   }
 
   // Ordinary run, information-first: compare the raw note against every enabled master of the
@@ -1609,7 +1632,7 @@ async function resolveSocialReference(
       client,
       brand,
       id,
-      row.note,
+      information,
       recentMasters(recencyKey),
     );
     rememberMaster(recencyKey, resolved.master.id, resolved.poolSize ?? 1);
@@ -1620,7 +1643,7 @@ async function resolveSocialReference(
   // (which excludes CMO), then select the best-fit master within the chosen type.
   const types = await listSocialTypes(client, 'dgipr');
   const classification = await classifyPosterType(
-    row.note,
+    information,
     types.map((t) => ({ slug: t.slug, description: t.description })),
   );
   const type =
@@ -1635,7 +1658,7 @@ async function resolveSocialReference(
       wantsPhoto: classification.wantsPhoto,
     },
     id,
-    row.note,
+    information,
     recentMasters(recencyKey),
   );
   rememberMaster(recencyKey, master.id, type.images.length);
@@ -1749,7 +1772,7 @@ async function renderAndStoreSocialPoster(
   const customPrompt =
     brand === 'cmo' ? null : (row.imagePrompt?.trim() ?? '') || null;
 
-  // 1. Resolve the poster type + the master — FOR THE TEMPLATE MODES ONLY.
+  // ABOUT THE REFERENCE RESOLUTION BELOW (step 1) — FOR THE TEMPLATE MODES ONLY.
   //
   //    A 'fresh' run now resolves NOTHING (2026-08-07). It used to resolve one anyway and use it
   //    "headlessly": no pixels reached the image model, but the picked master still decided the
@@ -1773,9 +1796,81 @@ async function renderAndStoreSocialPoster(
   //    brand forces the type and skips selection; otherwise the note is compared against the
   //    whole enabled library, capacity-first, by ONE process for every template mode.
   await updateGeneration(client, id, { step: 'classify' });
+
+  // 0. WHAT GOES ON THE POSTER — decided BEFORE the template is chosen.
+  //
+  //    Which lane this run is on has to be known here rather than after resolution, because the
+  //    curation has to happen first; it is derivable already, since `resolved` is non-null for
+  //    exactly the modes that are not fresh.
+  //
+  //    The fixed-template mode ("ठरलेले टेम्पलेट") deliberately gives the image model only the
+  //    unchanged reference image and the officer's information, with two chrome exclusions. It
+  //    therefore skips poster-copy generation entirely: generated structured copy would be
+  //    hidden editorial work — and, worse, generatePosterCopy condenses the information to the
+  //    master's slot count, which is exactly the content loss that path must not have.
+  //
+  //    BOTH social categories take that branch. It was 'twitter'-only, which silently gave a
+  //    Facebook run the copy pipeline instead — the same ठरलेले टेम्पलेट choice producing a
+  //    different poster depending on the platform. isSocialCategory is the repo's standing rule
+  //    for exactly this class of bug.
+  const isSimpleTemplateEdit =
+    !isFresh &&
+    isSocialCategory(row.category) &&
+    brand === 'dgipr' &&
+    designMode === 'onbrand';
+  // 'fresh_verbatim' skips the copy call for the SAME reason, one lane over: generated
+  // structured copy would be hidden editorial work over text the officer wrote to be printed.
+  // customPrompt skips it for the third time over — on that lane they have opted out of the
+  // platform's opinions about the poster altogether.
+  const usesVerbatimText =
+    isSimpleTemplateEdit || isFreshVerbatim || customPrompt !== null;
+
+  //    On every OTHER lane — fresh, adaptive and CMO, i.e. exactly where जसाच्या तसा मजकूर is
+  //    unticked — the officer's whole input now goes to one editorial call that decides what
+  //    belongs on a poster at all, and everything downstream works from THAT instead of the raw
+  //    note. Before this, nothing in the lane ever asked the question: the point count fell out
+  //    of analyzeInformationShape counting every sentence, enforceSourceStructure then finding a
+  //    master big enough to hold all of them, and generatePosterCopy being pinned to that
+  //    master's slot count — so a ten-sentence press note deterministically became a ten-row
+  //    poster nobody can read.
+  //
+  //    It runs BEFORE resolveSocialReference and not inside the copy step, and that ordering is
+  //    the load-bearing part: curate afterwards and the template has already been chosen for ten
+  //    items, leaving the image model to invent filler for the empty rows — the exact failure
+  //    enforceSourceStructure exists to prevent.
+  //
+  //    Best-effort: any failure returns the raw note, so the worst case is the behaviour that
+  //    shipped yesterday. Kept under the 'classify' step rather than given one of its own, so
+  //    the officer's progress list still runs classify → copy → image in order.
+  //
+  //    NOTE ON THE OFFICER'S BRIEF: `customPrompt` is wired through as context (labelled, and
+  //    explicitly not a source of facts — see extract-poster-points.ts), but a run carrying an
+  //    AI प्रॉम्प्ट is verbatim by definition of `usesVerbatimText` above, so today it is always
+  //    null here. Letting that lane curate its content while the brief governs its design is one
+  //    line — dropping `customPrompt !== null` from `usesVerbatimText`.
+  const posterSource = usesVerbatimText
+    ? null
+    : await extractPosterPoints({
+        note: row.note,
+        officerPrompt: customPrompt ?? undefined,
+      });
+  const posterNote = posterSource?.curated ? posterSource.text : row.note;
+  if (posterSource) {
+    console.log(
+      `[job ${id}] poster content: ${JSON.stringify({
+        curated: posterSource.curated,
+        points: posterSource.points.length,
+        headline: posterSource.headline,
+        leftOut: posterSource.leftOut,
+      })}`,
+    );
+  }
+
+  // 1. Resolve the poster type + the master, from the CURATED content on an AI-copy lane and
+  //    from the officer's own text on a verbatim one.
   const resolved = isFresh
     ? null
-    : await resolveSocialReference(client, id, row, brand);
+    : await resolveSocialReference(client, id, row, brand, posterNote);
 
   console.log(
     `[job ${id}] social poster reference: ${JSON.stringify(
@@ -1801,50 +1896,29 @@ async function renderAndStoreSocialPoster(
     posterCapacityWarnings.delete(id);
   }
 
-  // The fixed-template mode ("ठरलेले टेम्पलेट") deliberately gives the image model only the
-  // unchanged reference image and the officer's information, with two chrome exclusions. It
-  // therefore skips poster-copy generation entirely: generated structured copy would be hidden
-  // editorial work — and, worse, generatePosterCopy condenses the information to the master's
-  // slot count, which is exactly the content loss this path must not have. Adaptive, fresh and
-  // CMO runs keep the established copy pipeline.
-  //
-  // BOTH social categories take this branch. It was 'twitter'-only, which silently gave a
-  // Facebook run the copy pipeline instead — the same ठरलेले टेम्पलेट choice producing a
-  // different poster depending on the platform. isSocialCategory is the repo's standing rule
-  // for exactly this class of bug; the two lanes are meant to be indistinguishable here, and
-  // merging the two UI options later is now purely a web change.
-  const isSimpleTemplateEdit =
-    resolved !== null &&
-    isSocialCategory(row.category) &&
-    brand === 'dgipr' &&
-    designMode === 'onbrand';
-  // 'fresh_verbatim' skips the copy call for the SAME reason, one lane over: generated structured
-  // copy would be hidden editorial work over text the officer wrote to be printed, and
-  // generatePosterCopy condenses to 3-6 points, which is exactly the content loss this mode exists
-  // to avoid. It also saves the call outright.
-  // customPrompt skips it for the third time over, and for the same reason the two lanes beside
-  // it do: generatePosterCopy would rewrite the officer's text into a structured headline +
-  // points, which is hidden editorial work over text they wrote to be printed — and on this lane
-  // they have opted out of the platform's opinions about the poster altogether.
-  const usesVerbatimText =
-    isSimpleTemplateEdit || isFreshVerbatim || customPrompt !== null;
   let copyResult: Awaited<ReturnType<typeof generatePosterCopy>> | null = null;
   if (!usesVerbatimText) {
-    // 2. Scheme-name lock source: verified glossary scheme/org names present in the note.
-    //    These must survive in the copy in full (lock-scheme-names). Free — a substring
-    //    match over the small verified set, no model call.
-    const glossaryTerms = await findGlossaryTermsInText(client, row.note);
+    // 2. Scheme-name lock source: verified glossary scheme/org names present in the CURATED
+    //    content. These must survive in the copy in full (lock-scheme-names). Free — a
+    //    substring match over the small verified set, no model call. Read off the curated text
+    //    rather than the whole note on purpose: a scheme named only in a paragraph the poster
+    //    is not carrying is not a name the copy has to preserve, and demanding it would push
+    //    the copy back toward the material that was just deselected.
+    const glossaryTerms = await findGlossaryTermsInText(client, posterNote);
     const lockedSchemeNames = glossaryTerms
       .filter((t) => t.termType === 'scheme' || t.termType === 'org')
       .map((t) => t.marathi);
 
-    // 3. Copy (gpt-5.6-luna, metered inside this job's cost scope).
+    // 3. Copy (gpt-5.6-luna, metered inside this job's cost scope), written from the CURATED
+    //    content rather than the raw note — so the master's slot pin below is now a pin to a
+    //    number of points a poster can actually carry, and `contentLed`'s no-ceiling rule on
+    //    the fresh lane has already-selected material to work from.
     //    On a fresh run there is no resolved type, so the copy runs on the 'generic' registry
     //    (headline + 3-6 supporting points) with a null layoutSpec — no slot pin, no operator
     //    type description steering the tone toward a template's purpose.
     await updateGeneration(client, id, { step: 'copy' });
     copyResult = await generatePosterCopy({
-      note: row.note,
+      note: posterNote,
       postType: resolved?.type.slug ?? FRESH_COPY_STYLE,
       copyStyle: resolved?.type.copyStyle ?? FRESH_COPY_STYLE,
       description: resolved?.type.description,
@@ -1975,7 +2049,9 @@ async function renderAndStoreSocialPoster(
         // tell the image model to repeat the reference's rows, and "repeat" is the wrong word to
         // put anywhere near a prompt that must reproduce the officer's text unchanged. It still
         // warns the officer through posterCapacityWarnings above.
-        itemCount: isSimpleTemplateEdit ? resolved.itemCount : undefined,
+        // `isSimpleTemplateEdit` implies a resolved reference (it requires !isFresh), but that
+        // is now derived before resolution so the optional chain is what tells the compiler.
+        itemCount: isSimpleTemplateEdit ? resolved?.itemCount : undefined,
         copyStyle:
           copyResult?.copyStyle ?? resolved?.type.copyStyle ?? FRESH_COPY_STYLE,
         designMode,

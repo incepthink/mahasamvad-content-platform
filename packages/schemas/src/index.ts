@@ -31,6 +31,11 @@ export * from './youtube.js';
 // DLO intake API schemas (file transcription/extraction → reviewed note).
 export * from './dlo.js';
 
+// The new /dlo lane (/new-dlo): documents go to the article model as files, so its
+// requests carry no assembled text. Exported AFTER dlo.js, whose category and designation
+// shapes it reuses rather than redeclaring.
+export * from './new-dlo.js';
+
 // Standalone transcription API schemas (/transcribe: recordings → Marathi text). Exported
 // after dlo.js, whose AUDIO_FILE_* container rules it deliberately reuses rather than
 // redefining.

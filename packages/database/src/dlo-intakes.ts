@@ -86,6 +86,12 @@ export type DloIntakeFileEntry = Readonly<{
   // private or unlisted video), which never blocks the source.
   sourceAuthor?: string;
   sourceThumbnailUrl?: string;
+  // ---------- the new /dlo lane (/new-dlo) ----------
+  // This source handle on OpenAI, uploaded once when the officer attached it. The article
+  // call carries it as an input_file part instead of being handed text somebody transcribed
+  // first. Additive on a jsonb column, so no migration: an entry without it is an ordinary
+  // old-lane source and every existing reader ignores it.
+  openaiFileId?: string;
 }>;
 
 export type DloIntakeRow = Readonly<{
