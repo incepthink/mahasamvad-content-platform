@@ -12,6 +12,7 @@ import {
   attachChatFile,
   deleteChatThread,
   downloadFile,
+  downloadFileRange,
   getChatFile,
   getChatThread,
   insertChatFile,
@@ -19,10 +20,13 @@ import {
   insertChatThread,
   listChatMessages,
   listChatThreads,
+  markChatFileIndexed,
   publicUrl,
+  removeObjectsIn,
   updateChatThread,
   updateChatFileOpenAiHandle,
   uploadFile,
+  uploadStream,
   type ChatAttachmentEntry,
   type ChatFileRow,
   type ChatMessageRow,
@@ -44,7 +48,11 @@ import {
   type ChatThreadSummary,
 } from '@dgipr/schemas';
 import {
+  attachChatDocument,
+  awaitChatDocumentIndexed,
+  createChatVectorStore,
   createCostAccumulator,
+  deleteChatVectorStore,
   MISC_CHAT_PDF_MAX_BYTES,
   runInCostScope,
   streamMiscChatReply,
@@ -52,12 +60,13 @@ import {
   uploadOpenAiChatDocument,
   type MiscChatLifecycleEvent,
   type MiscChatTurn,
+  type OpenAiChatFileHandle,
 } from '@dgipr/content-engine';
 import { isAllowedOrigin } from '../cors-origins.js';
 
-// Images retain the repository's unlimited upload posture. Direct PDF chat is different:
-// OpenAI Responses documents a hard 50 MB combined file-input limit, so that route refuses
-// a file the provider cannot answer against. Publishing intake keeps its chunk/OCR contract.
+// Images retain the repository's unlimited upload posture. A chat PDF is bounded by the
+// backend that reads it — OpenAI File Search accepts 512 MB per file — so the route refuses
+// only what the provider itself would. Publishing intake keeps its chunk/OCR contract.
 const ATTACHMENT_MAX_BYTES = Number.POSITIVE_INFINITY;
 
 // Storage object names must be ASCII-safe (the transcriptions precedent); a display name may
@@ -156,6 +165,25 @@ async function toStoredAttachment(
   };
 }
 
+// A stored PDF, read out of the private bucket one slice at a time. This is what keeps a
+// 512 MB document from ever being assembled in this process — the 2026-08-30 recording rule
+// applied to the one upload path that still buffered.
+function storedChunkReader(
+  client: SupabaseClient,
+  storagePath: string,
+): (start: number, endExclusive: number) => Promise<Buffer> {
+  // S3 ranges are inclusive; the engine speaks the half-open convention. Converted here, at
+  // the storage boundary, and nowhere else.
+  return (start, endExclusive) =>
+    downloadFileRange(
+      client,
+      DLO_UPLOADS_BUCKET,
+      storagePath,
+      start,
+      endExclusive - 1,
+    );
+}
+
 async function ensureOpenAiFile(
   client: SupabaseClient,
   file: ChatFileRow,
@@ -163,40 +191,137 @@ async function ensureOpenAiFile(
   if (file.openAiFileId !== null) return file;
 
   // Gemini-era rows have only the durable private copy. Upgrade them lazily so an old chat
-  // remains usable without asking the officer to upload its PDF again.
+  // remains usable without asking the officer to upload its PDF again. Read whole rather than
+  // in parts: every row that can reach this branch predates File Search and is therefore
+  // inside the 50 MB ceiling that was in force when it was accepted.
   const data = await downloadFile(client, DLO_UPLOADS_BUCKET, file.storagePath);
-  const handle = await uploadOpenAiChatDocument(file.displayName, data);
+  const handle = await uploadOpenAiChatDocument(
+    file.displayName,
+    data.length,
+    async (start, endExclusive) => data.subarray(start, endExclusive),
+  );
   return updateChatFileOpenAiHandle(client, file.id, {
     openAiFileId: handle.id,
     bytes: handle.bytes,
   });
 }
 
-async function documentFileIdsFor(
+// Index one file into the thread's store, re-uploading it first if OpenAI refuses to ATTACH
+// it.
+//
+// THE REFUSAL THIS EXISTS FOR IS THE 0048 MIGRATION. Files uploaded before this change carry
+// `purpose: 'user_data'`, which the Responses file-input path required and which File Search
+// rejects outright — so every PDF in every chat that predates this deploy would otherwise be
+// permanently unreadable. The durable object is still in the private bucket, so the recovery
+// is simply to upload it again under the right purpose.
+//
+// ONLY the attach is retried, which is why file-search.ts splits attaching from waiting. A
+// failure past the attach is about the document itself or about time, and re-sending half a
+// gigabyte to meet it would spend the officer's bandwidth to reproduce the same error.
+async function indexIntoStore(
   client: SupabaseClient,
-  threadId: string,
+  vectorStoreId: string,
+  file: ChatFileRow,
+): Promise<ChatFileRow> {
+  if (file.vectorStoreId === vectorStoreId) return file;
+  const fileId = file.openAiFileId;
+  if (fileId === null) return file;
+
+  let current = file;
+  try {
+    await attachChatDocument(vectorStoreId, fileId);
+  } catch (error) {
+    console.warn(
+      `[chat] re-uploading ${file.id} for file search: ${String(error)}`,
+    );
+    const bytes =
+      file.bytes ??
+      (await downloadFile(client, DLO_UPLOADS_BUCKET, file.storagePath)).length;
+    const handle = await uploadOpenAiChatDocument(
+      file.displayName,
+      bytes,
+      storedChunkReader(client, file.storagePath),
+    );
+    current = await updateChatFileOpenAiHandle(client, file.id, {
+      openAiFileId: handle.id,
+      bytes: handle.bytes,
+    });
+    await attachChatDocument(vectorStoreId, handle.id);
+  }
+
+  await awaitChatDocumentIndexed(vectorStoreId, current.openAiFileId as string);
+  await markChatFileIndexed(client, current.id, vectorStoreId);
+  return { ...current, vectorStoreId };
+}
+
+// The thread's File Search store, created on the first turn that carries a document.
+//
+// Re-read immediately before creating, so two turns racing in the same thread are very
+// unlikely to mint two stores. Not a lock — there is no row to lock and a chat has one person
+// typing into it — and the cost of losing that race is one empty vector store, not a wrong
+// answer.
+async function ensureThreadVectorStore(
+  client: SupabaseClient,
+  thread: ChatThreadRow,
+): Promise<string> {
+  if (thread.vectorStoreId !== null) return thread.vectorStoreId;
+  const fresh = await getChatThread(client, thread.id);
+  if (fresh?.vectorStoreId) return fresh.vectorStoreId;
+  const vectorStoreId = await createChatVectorStore(`chat-${thread.id}`);
+  await updateChatThread(client, thread.id, { vectorStoreId });
+  return vectorStoreId;
+}
+
+type ThreadDocuments = Readonly<{
+  // Passed to the model as the file_search tool's one store. Null when the thread has never
+  // carried a document, which offers no tool at all.
+  vectorStoreId: string | null;
+  // chat_files id -> OpenAI file id, for documents that are searchable RIGHT NOW. Only these
+  // are named to the model: a file listed but not indexed is one the model would search for
+  // and fail to find, which is worse than not mentioning it at all.
+  searchable: ReadonlyMap<string, string>;
+}>;
+
+// Make every document in these rows searchable, creating the store if this is the first one.
+//
+// Called with the WHOLE recent transcript rather than only the new turn, deliberately: a
+// follow-up question can be about a PDF attached three turns ago, and the tool reaches it
+// only because it is in the same store. After the first time this is nearly free — a file
+// already carrying this store's id is skipped without a request.
+async function prepareThreadDocuments(
+  client: SupabaseClient,
+  thread: ChatThreadRow,
   rows: readonly ChatMessageRow[],
-): Promise<ReadonlyMap<string, string>> {
-  const documentIds = new Set(
-    rows.flatMap((row) =>
-      row.attachments.flatMap((attachment) =>
-        attachment.documentId ? [attachment.documentId] : [],
+): Promise<ThreadDocuments> {
+  const documentIds = [
+    ...new Set(
+      rows.flatMap((row) =>
+        row.attachments.flatMap((attachment) =>
+          attachment.documentId ? [attachment.documentId] : [],
+        ),
       ),
     ),
-  );
-  const documentRows = await Promise.all(
-    [...documentIds].map(async (id) => {
-      const file = await getChatFile(client, id);
-      if (!file || file.threadId !== threadId) return null;
-      return ensureOpenAiFile(client, file);
-    }),
-  );
-  return new Map(
-    documentRows
-      .filter((file): file is ChatFileRow => file !== null)
-      .filter((file) => file.openAiFileId !== null)
-      .map((file) => [file.id, file.openAiFileId as string] as const),
-  );
+  ];
+  if (documentIds.length === 0) {
+    // No documents in view, but an earlier turn may still have put one in the store — keep
+    // offering the tool so "what did that PDF say about X?" works with nothing attached.
+    return { vectorStoreId: thread.vectorStoreId, searchable: new Map() };
+  }
+
+  const vectorStoreId = await ensureThreadVectorStore(client, thread);
+  const searchable = new Map<string, string>();
+  // Serial: indexing is a poll loop against OpenAI, and running several at once would put
+  // this request's slowest document behind the others rather than beside them.
+  for (const id of documentIds) {
+    const row = await getChatFile(client, id);
+    if (!row || row.threadId !== thread.id) continue;
+    const uploaded = await ensureOpenAiFile(client, row);
+    const indexed = await indexIntoStore(client, vectorStoreId, uploaded);
+    if (indexed.vectorStoreId === vectorStoreId && indexed.openAiFileId) {
+      searchable.set(indexed.id, indexed.openAiFileId);
+    }
+  }
+  return { vectorStoreId, searchable };
 }
 
 function isMissingPreviousResponse(error: unknown): boolean {
@@ -211,7 +336,8 @@ function isMissingPreviousResponse(error: unknown): boolean {
 
 // A stored row as the model should see it. Note `content` and the attachments stay separate —
 // misc-chat.ts folds them together, because how a turn is presented to the model is its
-// business, not the route's.
+// business, not the route's. A document's `documentFileId` is now a PRESENCE marker: its
+// bytes reach the model through file search, and this is what says the file is in the index.
 function toTurn(
   row: ChatMessageRow,
   documentFileIds: ReadonlyMap<string, string>,
@@ -319,6 +445,22 @@ export function registerChatRoutes(
       // The messages and chat_files rows go with it (0044/0046 cascades). Uploaded source
       // objects are deliberately left in storage: deleting objects on a user action is how a
       // shared bucket loses something it should not have.
+      //
+      // The VECTOR STORE is the exception, and the difference is billing, not principle: a
+      // stored object costs a fraction of a cent a month and might still be wanted, while a
+      // vector store is charged per gigabyte per day for an index nothing can reach any more.
+      // Best-effort and FIRST, so a provider outage costs an orphaned index rather than a
+      // thread the officer asked to delete and which is still sitting in their rail.
+      if (thread.vectorStoreId !== null) {
+        try {
+          await deleteChatVectorStore(thread.vectorStoreId);
+        } catch (error) {
+          request.log.warn(
+            { err: error, threadId: thread.id },
+            'chat vector store could not be deleted',
+          );
+        }
+      }
       await deleteChatThread(client, thread.id);
       return reply.code(204).send();
     },
@@ -370,8 +512,18 @@ export function registerChatRoutes(
     return { name, imageUrl: publicUrl(client, path) };
   });
 
-  // A PDF uploads to OpenAI as soon as it is selected, before the officer presses Send. The
-  // durable private copy remains the fallback source for legacy rows and provider migration.
+  // A PDF is staged as soon as it is selected, before the officer presses Send, so the slow
+  // part overlaps with the time they spend typing.
+  //
+  // TWO HOPS, AND NEITHER HOLDS THE FILE. The part streams from the wire straight into the
+  // private bucket, and the bucket then feeds OpenAI one range at a time. Until this change
+  // the route did `await file.toBuffer()` and posted the result — fine at the old 50 MB
+  // ceiling, and ~1 GB of resident memory at File Search's 512 MB one, which is precisely
+  // how a 239.6 MB recording OOM-killed this container on 2026-08-30.
+  //
+  // The durable private copy is not a convenience here either: it is what `ensureOpenAiFile`
+  // re-uploads from for a legacy row, and what `indexIntoStore` re-uploads from when OpenAI
+  // refuses a file uploaded under the old `user_data` purpose.
   app.post('/chat/attachments/document', async (request, reply) => {
     const file = await request.file({
       limits: { fileSize: MISC_CHAT_PDF_MAX_BYTES, files: 1 },
@@ -386,37 +538,80 @@ export function registerChatRoutes(
       });
     }
 
-    let data: Buffer;
+    const storagePath = documentPathFor(name);
+    // Anything already written for a row that may still never exist. The transcriptions
+    // precedent: an abandoned object is invisible to the product and nothing comes back for it.
+    const discardStaged = async (): Promise<void> => {
+      try {
+        await removeObjectsIn(client, DLO_UPLOADS_BUCKET, [storagePath]);
+      } catch (error) {
+        request.log.warn(
+          { err: error, storagePath },
+          'chat document could not be discarded',
+        );
+      }
+    };
+
+    let bytes: number;
     try {
-      data = await file.toBuffer();
+      bytes = await uploadStream(
+        client,
+        DLO_UPLOADS_BUCKET,
+        storagePath,
+        file.file,
+        'application/pdf',
+      );
     } catch (error) {
+      await discardStaged();
+      // Reached by a browser that vanished mid-upload as well as by the size limit above.
+      // The MESSAGE is checked as well as the code because uploadStream wraps whatever
+      // failed the pipe in its own Error, which carries the text but not the property.
       if (
-        typeof error === 'object' &&
-        error !== null &&
-        'code' in error &&
-        error.code === 'FST_REQ_FILE_TOO_LARGE'
+        (typeof error === 'object' &&
+          error !== null &&
+          'code' in error &&
+          error.code === 'FST_REQ_FILE_TOO_LARGE') ||
+        (error instanceof Error &&
+          error.message.includes('FST_REQ_FILE_TOO_LARGE'))
       ) {
         return reply.code(413).send({
-          error: {
-            message:
-              'OpenAI च्या थेट PDF चॅटसाठी PDF ५० MB पेक्षा मोठी असू शकत नाही.',
-          },
+          error: { message: 'PDF ५१२ MB पेक्षा मोठी असू शकत नाही.' },
         });
       }
       throw error;
     }
 
-    const storagePath = documentPathFor(name);
-    const [handle] = await Promise.all([
-      uploadOpenAiChatDocument(name, data),
-      uploadFile(
-        client,
-        DLO_UPLOADS_BUCKET,
-        storagePath,
-        data,
-        'application/pdf',
-      ),
-    ]);
+    // busboy TRUNCATES a part that hits the size limit rather than erroring, so without this
+    // an over-long PDF would be stored and indexed as if it were the whole document — and the
+    // officer would get confident answers from a document missing its second half.
+    if (file.file.truncated) {
+      await discardStaged();
+      return reply.code(413).send({
+        error: { message: 'PDF ५१२ MB पेक्षा मोठी असू शकत नाही.' },
+      });
+    }
+    if (bytes === 0) {
+      await discardStaged();
+      return reply
+        .code(400)
+        .send({ error: { message: 'ही फाईल रिकामी आहे.' } });
+    }
+
+    let handle: OpenAiChatFileHandle;
+    try {
+      handle = await uploadOpenAiChatDocument(
+        name,
+        bytes,
+        storedChunkReader(client, storagePath),
+      );
+    } catch (error) {
+      await discardStaged();
+      throw error;
+    }
+
+    // The row is inserted LAST, so a rejected or abandoned upload leaves no attachment the
+    // composer could offer. The vector store is not touched here: the file joins the thread's
+    // index at send time, which is the first moment there is a thread to index it into.
     const row = await insertChatFile(client, {
       displayName: name,
       mimeType: 'application/pdf',
@@ -496,20 +691,11 @@ export function registerChatRoutes(
         previousMessage?.role === 'assistant'
           ? previousMessage.responseId
           : null;
-      const recentHistory = history.slice(-CHAT_HISTORY_TURNS);
-      // A stored OpenAI response already owns the earlier context. Only the new user turn
-      // and its files need provider handles; the complete recent transcript is retained solely
-      // as the stateless fallback for old conversations or an expired provider response.
-      const inputRows = previousResponseId
-        ? recentHistory.slice(-1)
-        : recentHistory;
-      const documentFileIds = await documentFileIdsFor(
-        client,
-        thread.id,
-        inputRows,
-      );
       // Newest CHAT_HISTORY_TURNS, oldest first. A chat is unbounded; a request is not.
-      const turns = recentHistory.map((row) => toTurn(row, documentFileIds));
+      // A stored OpenAI response already owns the earlier context, so misc-chat.ts sends only
+      // the newest turn when it is continuing one; the whole slice is kept here because it is
+      // also the stateless fallback for an old conversation or an expired response.
+      const recentHistory = history.slice(-CHAT_HISTORY_TURNS);
 
       openEventStream(request, reply);
 
@@ -531,13 +717,32 @@ export function registerChatRoutes(
           );
         };
         const result = await runInCostScope(accumulator, async () => {
+          // Indexing runs HERE — after the stream is open and inside the cost scope — rather
+          // than before the 200. Chunking a large scan is minutes of provider work, and doing
+          // it above would hold a plain HTTP request open with nothing to show for it; here a
+          // failure takes the same path a model failure does, so the officer gets a message
+          // and the turn they typed is already stored.
+          const documents = await prepareThreadDocuments(
+            client,
+            thread,
+            recentHistory,
+          );
+          const turns = recentHistory.map((row) =>
+            toTurn(row, documents.searchable),
+          );
+          const request_ = {
+            turns,
+            onDelta,
+            onLifecycle,
+            ...(documents.vectorStoreId !== null
+              ? { vectorStoreId: documents.vectorStoreId }
+              : {}),
+          };
           try {
-            return await streamMiscChatReply(
-              turns,
-              onDelta,
-              previousResponseId ?? undefined,
-              onLifecycle,
-            );
+            return await streamMiscChatReply({
+              ...request_,
+              ...(previousResponseId !== null ? { previousResponseId } : {}),
+            });
           } catch (error) {
             if (
               previousResponseId === null ||
@@ -547,21 +752,10 @@ export function registerChatRoutes(
               throw error;
             }
             // A stored response may be deleted or age out. Rebuild the bounded conversation
-            // once from our own rows and durable OpenAI Files instead of breaking the chat.
-            const fallbackFileIds = await documentFileIdsFor(
-              client,
-              thread.id,
-              recentHistory,
-            );
-            const fallbackTurns = recentHistory.map((row) =>
-              toTurn(row, fallbackFileIds),
-            );
-            return streamMiscChatReply(
-              fallbackTurns,
-              onDelta,
-              undefined,
-              onLifecycle,
-            );
+            // once from our own rows and the thread's own index instead of breaking the chat.
+            // The same `turns` serve both: misc-chat.ts is what decides that a continuation
+            // sends only the newest one, and this call is not a continuation.
+            return streamMiscChatReply(request_);
           }
         });
         model = result.model;

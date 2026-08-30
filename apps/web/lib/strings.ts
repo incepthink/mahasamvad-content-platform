@@ -51,7 +51,7 @@ export const STR = {
   // label that changes below the fold (the format cards sit under this card, not above it).
   articlePasteLabel: 'पोस्टरवर जो मजकूर हवा आहे तो येथे लिहा',
   articlePasteHint:
-    'क्रिएटिव्ह व यूट्यूब थंबनेलसाठी येथे लिहिलेला सर्व मजकूर पोस्टरवर छापला जातो — म्हणून फक्त जेवढे पोस्टरवर हवे तेवढेच लिहा. बॅनरसाठी मात्र या मजकुरातील मुख्य नाव / शीर्षक शोधून तेच बॅनरवर येते. खालून फाईलमधूनही मजकूर घेता येईल — दोन्ही एकत्रही करता येईल.',
+    'क्रिएटिव्ह/थंबनेलवर सर्व मजकूर येतो; बॅनरवर फक्त मुख्य शीर्षक. मजकुरासोबत फाईलही जोडू शकता.',
   articlePastePlaceholder: 'उदा. मुद्दे, नावे, तारखा, आकडे…',
   // Where the poster's WORDS come from — independent of who DESIGNS it (the template picker).
   // This was a pair of tabs above the text box ("लेखातून मजकूर तयार करा" / "जसाच्या तसा मजकूर")
@@ -1719,8 +1719,9 @@ export const STR = {
   chatAttachAudio: 'ध्वनिमुद्रण',
   chatAttachYouTube: 'यूट्युब लिंक',
   chatAttachRemove: 'काढून टाका',
-  // Non-PDF attachments wait for Send. Native PDFs instead use `preparing` while the selection-
-  // time Gemini Files upload runs.
+  // Non-PDF attachments wait for Send. A PDF instead uses `preparing` while the selection-time
+  // upload to OpenAI runs, which for a large scan is a real transfer — it is staged the moment
+  // it is picked precisely so that transfer overlaps with the officer's typing.
   chatAttachPending: 'पाठवल्यावर वाचली जाईल',
   chatAttachWorking: 'फाईल तयार करत आहोत…',
   chatAttachPreparing: 'तयार करत आहोत…',

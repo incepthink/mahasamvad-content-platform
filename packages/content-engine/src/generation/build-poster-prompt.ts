@@ -571,50 +571,38 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
     const verbatim = (input.information ?? '').trim();
     const isVerbatim = designMode === 'fresh_verbatim' && verbatim.length > 0;
     // `fresh` typesets the curated copy; `fresh_verbatim` typesets the officer's unchanged text.
-    // The officer deliberately owns the whole creative brief for these from-scratch modes. Keep
-    // the generated/typed copy as a clearly labelled data block, then add only the shared rules
-    // that protect the header badge and appended footer applied by software.
+    // Keep the generated/typed copy as a clearly labelled data block inside one compact brief.
+    // The image model had begun losing late instructions in the former ~1,000-word prompt, whose
+    // content-led layout, chrome and safe-area rules repeated the same ideas several times. This
+    // version states each contract once and spends the saved attention on character-perfect
+    // Marathi and Devanagari numerals.
     const posterContent = isVerbatim
       ? verbatim
       : buildFreshChange(copyStyle, copy);
     return [
-      `**Create a highly creative and professional official poster for DGIPR — Directorate General of Information and Public Relations, Government of Maharashtra, India.**
+      `Create a premium 1280 × 1504 portrait social-media poster for DGIPR, Government of Maharashtra.
 
-Carefully study the supplied information first and understand **what the communication is mainly trying to convey** — for example, achievement, growth, comparison, milestones, beneficiaries, process, geographical spread, impact, progress, rankings, or multiple supporting statistics.
+Let the supplied content determine the composition. Make the main message the visual focus, group related facts, and use typography, imagery, icons, diagrams or data visualisation only where they improve understanding. Avoid a generic stack of identical cards. The result should feel official, modern, optimistic and easy to scan on a phone.
 
-Based on that understanding, **choose the most suitable infographic composition for this specific content. You have complete creative freedom to decide how the information should be visually structured.**
+TEXT ACCURACY IS MANDATORY:
+- Reproduce every Marathi word exactly as supplied, character for character.
+- Preserve every letter, मात्रा, जोडाक्षर and अनुस्वार in its correct position.
+- Never rewrite, autocorrect, shorten or approximate a word.
+- For example, “देशातील सर्वोत्तम” must remain exactly “देशातील सर्वोत्तम”; forms such as “देशतील सर्वोत्ततम” are incorrect.
+- Use only Devanagari numerals: ० १ २ ३ ४ ५ ६ ७ ८ ९. Never use 0 1 2 3 4 5 6 7 8 9.
+- Before finishing, compare every rendered word and number with the supplied content and correct all differences.
 
-The infographic format should be selected according to the relationships within the information. For example, the design may use a hierarchy, timeline, progression, central achievement with supporting statistics, comparison layout, radial composition, connected nodes, flow diagram, map-based structure, layered data visualization, modular statistic panels, tree-like structure, or another appropriate infographic format.
-
-**These are only possible formats, not layout instructions. Do not automatically use any particular example mentioned above. Select whichever visual structure communicates the supplied information most clearly and powerfully.**
-
-Avoid simply placing every statistic into identical boxes or circles unless that is genuinely the strongest solution. The layout should reflect the importance and relationship of each piece of information.
-
-Establish a clear visual hierarchy:
-
-- &#x20;identify the **main message or achievement** and make it the visual focus;&#x20;
-- &#x20;group related supporting information together;&#x20;
-- &#x20;give important statistics greater prominence;&#x20;
-- &#x20;use imagery, icons, illustrations, diagrams, shapes, typography and data visualization where they improve understanding;&#x20;
-- &#x20;integrate all elements into one cohesive composition rather than making them feel like separate unrelated cards.&#x20;
-
-**Prioritize readability throughout the poster. All text must have a comfortably readable font size and should never appear too small. Every headline, statistic, label, and supporting line must be easy for the viewer to read at a glance. If needed, adjust the layout, spacing, grouping, or infographic structure so that the content fits clearly without shrinking the text excessively.**
-
-The finished design should feel like a **premium government infographic campaign**, not a generic social-media template. It should be authoritative, optimistic, modern, visually engaging, easy to scan and appropriate for the Government of Maharashtra.
-
-Use the supplied Marathi text and numerical information accurately. **Do not invent, remove, reinterpret or alter factual information.**
-
-Most importantly: **the content should determine the infographic structure. Do not force the information into a predetermined layout.**`,
+Do not invent, omit, reinterpret or duplicate information. Keep every line comfortably readable; reflow the layout or reduce the headline before making body text too small.`,
       '',
       'POSTER CONTENT:',
       '',
       posterContent,
       '',
-      paintNoChromeRule(SOCIAL_CHROME),
+      'Official branding is added later by software. Do not paint any logo, emblem, government wordmark, department name, footer, social handle, website or QR code.',
       '',
-      reservedZoneBlock(SOCIAL_ZONES, SOCIAL_FOOTER_NOTE),
+      'Keep meaningful content—including text, icons, faces and focal subjects—out of the top-right 180 × 170 pixels. Continue the surrounding background, colour, panel, gradient or photograph naturally through that area; do not leave a blank patch or placeholder.',
       '',
-      fitToReserveRule(SOCIAL_ZONES),
+      'The footer is attached below the image and covers nothing. Extend the design to the bottom edge, but keep all text and icons above y=1488. Reflow or shrink content until everything fits.',
     ].join('\n');
   }
 
@@ -934,15 +922,18 @@ if (
             `${seed}: the retired design specification is back in the fresh prompt ("${retired}")`,
           );
       }
-      // The replacement prompt is intentionally tiny. The only instruction before the runtime
-      // content is the officer's sentence; everything after it protects stamped chrome.
+      // The replacement prompt is intentionally compact: one content-led design paragraph, one
+      // text-fidelity block, the runtime content, and three short chrome/fit rules.
       for (const needle of [
-        'Make a digipr poster',
+        'Create a premium 1280 × 1504 portrait social-media poster for DGIPR',
+        'TEXT ACCURACY IS MANDATORY',
+        '“देशातील सर्वोत्तम” must remain exactly “देशातील सर्वोत्तम”',
+        'Use only Devanagari numerals: ० १ २ ३ ४ ५ ६ ७ ८ ९',
         'POSTER CONTENT:',
-        'PAINT NO BRANDING OF YOUR OWN',
-        'RESERVED BADGE CORNER',
-        'THE BOTTOM EDGE IS A JOIN, NOT A COVER ZONE',
-        'FIT THE CONTENT INSIDE THE USABLE AREA',
+        'Official branding is added later by software',
+        'top-right 180 × 170 pixels',
+        'footer is attached below the image and covers nothing',
+        'all text and icons above y=1488',
       ]) {
         if (!prompt.includes(needle))
           failures.push(
@@ -1197,11 +1188,11 @@ if (
         );
     }
     for (const chromeRule of [
-      'PAINT NO BRANDING OF YOUR OWN',
-      'top-right 180 x 170 pixels',
+      'Official branding is added later by software',
+      'top-right 180 × 170 pixels',
       'y=1488',
-      'footer band is attached directly BELOW this image',
-      'No quantity of content is ever a reason to cross into either reserved zone.',
+      'footer is attached below the image and covers nothing',
+      'Continue the surrounding background',
     ]) {
       if (!freshPrompt.includes(chromeRule))
         failures.push(`the fresh prompt lost chrome rule "${chromeRule}"`);
@@ -1224,6 +1215,10 @@ if (
           `the compact fresh prompt restored retired wording "${retired}"`,
         );
     }
+    if (freshPrompt.length > 3_500)
+      failures.push(
+        `the compact fresh prompt grew beyond 3,500 characters (${freshPrompt.length})`,
+      );
 
     // A scene brief is no longer a hidden fifth instruction in the officer's replacement prompt.
     const freshNoSubject = buildPosterPrompt({
@@ -1333,7 +1328,7 @@ if (
       if (!freshSparse.includes('HEADLINE:'))
         failures.push('a headline-only run lost its headline label');
 
-      // Both from-scratch content shapes receive the same one-line replacement prompt.
+      // Both from-scratch content shapes receive the same compact replacement prompt.
       const freshVerbatim = buildPosterPrompt({
         copy: {} as unknown as PosterCopy,
         copyStyle: 'generic',
@@ -1347,8 +1342,12 @@ if (
         ['fresh', freshInfo],
         ['fresh_verbatim', freshVerbatim],
       ] as const) {
-        if (!prompt.startsWith('Make a digipr poster\n'))
-          failures.push(`the ${name} prompt lost the one-line replacement`);
+        if (
+          !prompt.startsWith(
+            'Create a premium 1280 × 1504 portrait social-media poster for DGIPR',
+          )
+        )
+          failures.push(`the ${name} prompt lost the compact replacement`);
         for (const retired of [
           'You are free to use your creativity',
           'Transform the information into a visual story',
@@ -1391,11 +1390,13 @@ if (
         "the fresh_verbatim prompt does not carry the officer's text verbatim",
       );
     for (const needle of [
-      'Make a digipr poster',
+      'Create a premium 1280 × 1504 portrait social-media poster for DGIPR',
+      'TEXT ACCURACY IS MANDATORY',
+      'Use only Devanagari numerals: ० १ २ ३ ४ ५ ६ ७ ८ ९',
       'POSTER CONTENT:',
-      'PAINT NO BRANDING OF YOUR OWN',
-      'RESERVED BADGE CORNER',
-      'THE BOTTOM EDGE IS A JOIN, NOT A COVER ZONE',
+      'Official branding is added later by software',
+      'top-right 180 × 170 pixels',
+      'footer is attached below the image and covers nothing',
     ]) {
       if (!freshVerbatim.includes(needle))
         failures.push(`the fresh_verbatim prompt lost "${needle}"`);
@@ -1427,7 +1428,7 @@ if (
       );
     if (
       freshVerbatim.indexOf(VERBATIM_NOTE) >
-      freshVerbatim.indexOf('PAINT NO BRANDING OF YOUR OWN')
+      freshVerbatim.indexOf('Official branding is added later by software')
     )
       failures.push(
         'the fresh_verbatim officer text does not precede the chrome rules',
@@ -1435,9 +1436,7 @@ if (
     if (
       !freshVerbatim
         .trimEnd()
-        .endsWith(
-          'No quantity of content is ever a reason to cross into either reserved zone.',
-        )
+        .endsWith('Reflow or shrink content until everything fits.')
     )
       failures.push(
         'the fresh_verbatim prompt does not end on the chrome fit rule',
@@ -1447,7 +1446,6 @@ if (
       'FINAL VERIFICATION',
       'Transform the information into a visual story',
       'PERFECT MARATHI TEXT IS NON-NEGOTIABLE',
-      'character for character',
       'You are free to use your creativity',
     ]) {
       if (freshVerbatim.includes(retired))

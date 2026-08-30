@@ -603,12 +603,30 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   keep bytes — so reopening a chat re-extracts and re-transcribes nothing; documents go through
   the shared `/api/documents` service and recordings/YouTube links
   through the EXISTING `/api/transcriptions` job (so the 0031 cache applies, at the cost of a
-  chat recording also appearing in /transcribe's history). **Its documents are read on their own
-  OCR backend**: the composer sends `surface: 'chat'` on the upload, the route maps that through
-  `CHAT_OCR_PROVIDER` (default **gemini**) and the whole PDF is read in ONE call
-  (`intake/gemini-doc.ts`) instead of one call per page. The browser names the SURFACE, never
-  the provider; every other surface keeps `OCR_PROVIDER`. /chat also has NO page picker — a
-  chat attachment is read whole on send, so the spend gate is the send itself. The turn route persists the USER
+  chat recording also appearing in /transcribe's history). **A PDF is not OCR'd at all — it is read
+  through OpenAI FILE SEARCH** (`chat/file-search.ts`, migration 0049), which is what makes the
+  per-file ceiling **512 MB** rather than the 50 MB the Responses `input_file` path allowed.
+  Four things to know before touching it. **One vector store per THREAD**
+  (`chat_threads.vector_store_id`), never per file: the `file_search` tool takes a
+  `vector_store_ids` ARRAY but searches only the first id, so a per-file store would silently
+  hide a chat's other documents; `chat_files.vector_store_id` records what has finished indexing,
+  which is what keeps a follow-up free. **The model is told which documents it can search**
+  (`searchableDocumentsLine`, a second `input_text` part) and only for ones indexed right now —
+  it can no longer see them, and naming an unindexed file makes it report the officer's document
+  as empty. **Nothing holds the document**: the part streams to the private bucket
+  (`uploadStream`) and the bucket feeds OpenAI's Uploads API in <=64 MB parts via
+  `downloadFileRange`, so peak memory is one part whatever the length — `await file.toBuffer()`
+  here would be ~1 GB and the 2026-08-30 OOM all over again. And **pre-0048 files carry
+  `purpose: 'user_data'`, which File Search rejects**, so an attach refusal re-uploads from
+  storage under `purpose: 'assistants'`; that is why `attachChatDocument` and
+  `awaitChatDocumentIndexed` are separate — only the attach is worth retrying. Indexing runs
+  INSIDE the SSE stream so a minutes-long chunking failure takes the model-failure path, and the
+  store is deleted with the thread (billed per GB/day, unlike a stored object).
+  DOCX/TXT still go through the shared intake on their own OCR backend: the composer sends
+  `surface: 'chat'`, the route maps it through `CHAT_OCR_PROVIDER` (default **gemini**) and the
+  whole file is read in ONE call (`intake/gemini-doc.ts`). The browser names the SURFACE, never
+  the provider; every other surface keeps `OCR_PROVIDER`. /chat has NO page picker — a chat
+  attachment is read whole on send, so the spend gate is the send itself. The turn route persists the USER
   message BEFORE anything can fail and stores a PARTIAL answer on failure, because those tokens
   are paid for. And the SSE route writes to `reply.raw`, which bypasses Fastify's reply
   pipeline — so the **CORS header is written by hand** (without it the browser rejects a stream

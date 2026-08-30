@@ -26,8 +26,6 @@ import {
   generateArticleSimple,
   generateArticleFromSources,
   type SimpleGenerateArticleOptions,
-  currentArticleDateline,
-  ensureArticleDateline,
   type ArticleNameEntry,
   generateCopy,
   generatePosterCopy,
@@ -799,8 +797,6 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
       designations,
       knownDesignations,
     } as const;
-    const dateline = currentArticleDateline(shared.category);
-
     // /dlo's post-name-review prompt is an explicit product contract, not an experiment behind
     // ARTICLE_GENERATION_MODE. Keep it on the single-call path even when another article surface
     // opts back into the legacy full pipeline.
@@ -837,11 +833,6 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
               // The verified dictionary rows this note actually mentions. Read by both prompt
               // variants: neither spells out name rules, both are handed the spellings.
               names: await articleNameDictionary(client, row.note),
-              // Every DGIPR news copy starts with the configured publication place and today's
-              // India-local date. The model receives it for flow; ensureArticleDateline below
-              // enforces it deterministically on the final text.
-              location: dateline?.location,
-              date: dateline?.date,
               onProgress: progress,
               // Publish the draft as it is written, so the officer reads it appearing rather
               // than watching a progress bar for minutes. Display only — the authoritative
@@ -886,7 +877,11 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
               styleReferenceMeta: null,
             };
           })();
-    const finalArticle = ensureArticleDateline(result.article, shared.category);
+    // Keep the model's article structure intact. In particular, do not inject a generated
+    // `मुंबई, दि. … :` prefix: when the model writes a subheading before the lead, prefixing
+    // the first post-headline line turns that subheading into a malformed dateline. A location
+    // lead that is supported by the source (for example `मुंबई :`) remains untouched.
+    const finalArticle = result.article;
 
     // The article is final; anything still watching should stop here rather than hold a
     // connection open through the 1-2 minute poster render. Sending the AUTHORITATIVE text as
@@ -2679,10 +2674,7 @@ export function startArticleFeedbackJob(
     );
     designationWarnings.set(id, [...revised.designationIssues]);
     lengthWarnings.set(id, revised.lengthWarning);
-    const revisedArticle = ensureArticleDateline(
-      revised.article,
-      articleCategoryOf(row.category),
-    );
+    const revisedArticle = revised.article;
 
     await updateGeneration(client, id, {
       article: revisedArticle,
@@ -2748,10 +2740,7 @@ export function startConcurrentArticleFeedbackJob(
           );
           designationWarnings.set(id, [...revised.designationIssues]);
           lengthWarnings.set(id, revised.lengthWarning);
-          const revisedArticle = ensureArticleDateline(
-            revised.article,
-            articleCategoryOf(row.category),
-          );
+          const revisedArticle = revised.article;
 
           await updateGeneration(client, id, {
             article: revisedArticle,

@@ -640,15 +640,6 @@ export default function TranslatePage() {
               </p>
             ) : null}
 
-            {/* Said with the target that causes it and beside the button it changes: an
-                officer used to a two-step submit should know the step is missing on
-                purpose and where the spelling comes from. */}
-            {!reviewsNames ? (
-              <p className="text-muted-foreground mt-3 text-sm">
-                {STR.translateIntoMarathiNames}
-              </p>
-            ) : null}
-
             {/* Directly under the button that produced it, so "attach" and "attached" are
                 one place on the screen. */}
             <AttachmentStrip

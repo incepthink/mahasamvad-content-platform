@@ -76,6 +76,7 @@ export {
   publicUrlIn,
   downloadPng,
   downloadFile,
+  downloadFileRange,
   removeObjects,
   removeObjectsIn,
 } from './storage.js';
@@ -145,6 +146,7 @@ export {
   getChatFile,
   attachChatFile,
   updateChatFileOpenAiHandle,
+  markChatFileIndexed,
   type ChatRole,
   type ChatAttachmentKind,
   type ChatAttachmentEntry,

@@ -307,7 +307,11 @@ async function readBodyWithIdleTimeout(
   return Buffer.concat(chunks);
 }
 
-async function getObject(logicalBucket: string, path: string): Promise<Buffer> {
+async function getObject(
+  logicalBucket: string,
+  path: string,
+  range?: Readonly<{ start: number; endInclusive: number }>,
+): Promise<Buffer> {
   const idleMs = readPositiveInt(
     'S3_DOWNLOAD_IDLE_TIMEOUT_MS',
     DEFAULT_DOWNLOAD_IDLE_TIMEOUT_MS,
@@ -327,6 +331,12 @@ async function getObject(logicalBucket: string, path: string): Promise<Buffer> {
         new GetObjectCommand({
           Bucket: resolveBucket(logicalBucket),
           Key: path,
+          // S3 ranges are INCLUSIVE at both ends, unlike every slice() in this codebase.
+          // GetObject then answers 206 with a ContentLength covering just the range, which
+          // is what keeps the preallocation below sized to the part and not to the object.
+          ...(range
+            ? { Range: `bytes=${range.start}-${range.endInclusive}` }
+            : {}),
         }),
         { abortSignal: controller.signal },
       );
@@ -373,6 +383,29 @@ export async function downloadFile(
   path: string,
 ): Promise<Buffer> {
   return getObject(bucket, path);
+}
+
+// ONE SLICE of a stored object, so a caller can forward a large file somewhere else without
+// ever holding it whole. Added for /chat's File Search uploads: OpenAI's Uploads API takes a
+// 512 MB PDF in <=64 MB parts, and buffering the document to feed it would reintroduce the
+// exact memory failure the 2026-08-30 streaming work removed from the recording paths.
+//
+// `end` is INCLUSIVE, matching S3's own range semantics rather than JavaScript's — converted
+// once, here, instead of at every call site. A range reaching past the end of the object is
+// not an error: S3 returns what exists, so the last part simply comes back short.
+export async function downloadFileRange(
+  _client: SupabaseClient,
+  bucket: string,
+  path: string,
+  start: number,
+  endInclusive: number,
+): Promise<Buffer> {
+  if (!Number.isInteger(start) || start < 0 || endInclusive < start) {
+    throw new Error(
+      `Invalid range for ${bucket}/${path}: ${start}-${endInclusive}.`,
+    );
+  }
+  return getObject(bucket, path, { start, endInclusive });
 }
 
 // Versioned poster/scene paths must never be overwritten (public bucket is

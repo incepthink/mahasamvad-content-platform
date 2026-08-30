@@ -207,10 +207,12 @@ it are implemented and working end-to-end:
   harnesses in both 16:9 and 9:16; renderer lint/typecheck/build and API
   typecheck green. Deploy API after rebuilding `@dgipr/poster-renderer`; no n8n.
 - **News dateline, portfolio attribution and meeting-shaped style retrieval** (2026-07-29,
-  migration 0039): every generated `news` article now receives `मुंबई, दि. <आजचा दिवस> :`
-  (location configurable through `ARTICLE_NEWS_DATELINE_LOCATION`) at the start of its body;
-  the day is calculated in `Asia/Kolkata`, rendered in Devanagari, supplied to the simple prompt
-  and deterministically restored after initial generation and article feedback. DLO designation
+  migration 0039; **dateline portion superseded 2026-08-30**): the automatic
+  `मुंबई, दि. <आजचा दिवस> :` insertion has been removed from initial generation and article
+  feedback. It was prefixing a model-written subheading (for example `### आठ मजली…`) because
+  that subheading was the first line after the headline. Source-supported body leads such as
+  `मुंबई : मलबार हिल…` remain untouched, and `ARTICLE_NEWS_DATELINE_LOCATION` is retired.
+  DLO designation
   preparation normalizes the real code-mixed STT form `हायर अँड टेक्निकल एज्यु…` to the
   verified `उच्च व तंत्रशिक्षण मंत्री` portfolio, so the current holder still comes dynamically
   from the glossary (for the observed run: `चंद्रकांत पाटील`), while a one-word person row found
@@ -3080,6 +3082,89 @@ Canva OAuth authentication and poster handoff are implemented in `apps/api/src/r
 2. `AGENTS.md` must be updated whenever a major architectural decision or implementation milestone changes.
 
 ## Latest Implementation Milestone
+
+- **A chat document is read through FILE SEARCH, so the ceiling is 512 MB and not 50 MB**
+  (2026-08-30, migration 0049, no n8n): /chat handed each PDF to the Responses API as an
+  `input_file` part, which puts the whole document in the request — and OpenAI caps that path
+  at **50 MB of file input per request**, which is where `MISC_CHAT_PDF_MAX_BYTES` came from.
+  Officers attach compendiums, scanned booklets and consolidated GRs well past that, and a
+  refusal at the door is a failure they can do nothing about. **File Search is a different
+  product with different limits — 512 MB per file, 5,000,000 tokens per file, 10,000 files per
+  vector store** — so the document half moved onto it (`content-engine/src/chat/file-search.ts`)
+  and the request half stopped carrying documents at all.
+  - **WHAT IS GIVEN UP, and it is not a bug to be fixed later.** `input_file` put the ENTIRE
+    document in the model's context; File Search is retrieval, so the model sees the passages
+    it asked for. "Summarise this whole booklet" is answered from retrieved chunks rather than
+    from every page, and "what is the exact heading on page 1" is a search away rather than a
+    read away. That is the trade the size limit buys. `CHAT_FILE_SEARCH_MAX_RESULTS` (20) is
+    the dial — every passage is billed as input tokens, so it is a cost knob, not a quality
+    one.
+  - **ONE VECTOR STORE PER THREAD, and the reason is a documented-but-untrue array.** The
+    `file_search` tool takes `vector_store_ids` as a LIST and the API accepts several, but only
+    the FIRST is actually searched. A per-file store would therefore make a chat with three
+    PDFs silently lose two of them. `chat_threads.vector_store_id` (0049) is created lazily on
+    the first document turn; `chat_files.vector_store_id` records the store a file has finished
+    indexing into, which is what makes a follow-up about the same PDF free — attaching is
+    idempotent, but chunking and embedding are billed each time.
+  - **The model is TOLD which documents it can search, because it can no longer see them.**
+    `searchableDocumentsLine` emits a second `input_text` part naming them, and only for
+    documents that are indexed RIGHT NOW — naming one that is still building would have the
+    model search it, find nothing, and report the officer's file as empty. The system
+    instruction gained a paragraph saying attachments are not shown in full and must be
+    searched. Without either half the answer is "I cannot see an attachment" about a PDF
+    sitting in the model's own index.
+  - **NOTHING HOLDS THE DOCUMENT.** The route used `await file.toBuffer()` — fine at 50 MB,
+    ~1 GB of resident memory at 512 MB, which is exactly how a 239.6 MB recording OOM-killed
+    this container earlier the same day. The part now streams from the wire into the private
+    bucket (`uploadStream`), and the bucket feeds OpenAI through the **Uploads API** in
+    <=64 MB parts read with a new `downloadFileRange` — so peak memory is ONE part
+    (`OPENAI_UPLOAD_PART_BYTES`, 32 MB) whatever the document's length. `planUploadParts` is
+    pulled out of that loop precisely because both ways it can be wrong are silent: a gap
+    loses a stretch of the document and the officer gets confident answers from what is left,
+    and an overlap makes Complete reject a byte count the parts do not add up to. Below the
+    part size a single `POST /v1/files` is still used.
+  - **The 0048 migration hazard is handled, and it would otherwise have been total.** Files
+    uploaded before this change carry `purpose: 'user_data'`, which File Search **rejects** —
+    so every PDF in every existing chat would have become permanently unreadable. The durable
+    private object is still there, so an attach refusal re-uploads from storage under
+    `purpose: 'assistants'` and attaches again. `attachChatDocument` and
+    `awaitChatDocumentIndexed` are SPLIT for this: only the attach is retried, because a
+    failure past it is about the document or about time and re-sending half a gigabyte would
+    spend the officer's bandwidth to reproduce the same error.
+  - **Indexing runs inside the SSE stream**, after the 200 and inside the cost scope, not
+    before it. Chunking a large scan is minutes of provider work; doing it above would hold a
+    plain HTTP request open with nothing to show, while here a failure takes the same path a
+    model failure does — the officer gets a message and the turn they typed is already stored.
+  - **The vector store is deleted with the thread**, which is the one place /chat departs from
+    the standing "leave uploaded objects alone" rule. The difference is billing, not principle:
+    a stored object costs a fraction of a cent a month and might still be wanted, a vector
+    store is charged per gigabyte per day for an index nothing can reach. Best-effort and
+    FIRST, so a provider outage costs an orphaned index rather than a thread the officer asked
+    to delete and which is still in their rail. Deliberately no `expires_after` — an expiring
+    store would leave a chat pointing at an index that no longer exists.
+  - `openAiFetch` gained `method` (GET/DELETE, no body) because a vector store's lifecycle is
+    not expressible as POSTs; both still want the retry ladder and the lane accounting, which
+    is why they route through the shared transport rather than a bare fetch.
+  Verified 2026-08-30, all free: workspace typecheck **7/7 green**; eslint clean on every
+  touched file; prettier clean on every hunk of mine (`content-engine/src/index.ts`,
+  `database/src/storage.ts`, `web/lib/strings.ts` and `web/lib/useChatAttachments.ts` report
+  whole-file complaints that are **pre-existing CRLF or pre-existing lines** — confirmed per
+  file by diffing prettier's own output against the CR-stripped content, so do NOT `--write`
+  them); and the chat harnesses at **15/15** (`pnpm --filter @dgipr/content-engine chat:test`),
+  including the new `file-search.test.ts` — the 512 MB constant, the part-size clamp at the
+  API's 64 MB, exact part coverage with no gap or overlap across six shapes, and both size
+  guards firing BEFORE anything is read — and, in `misc-chat.test.ts`, a **deny** assertion
+  that a document never comes back as an `input_file` part, which is the exact thing that
+  capped this surface at 50 MB. **Left for a real run** (0049 applied + OpenAI spend): one
+  large PDF end to end — upload, index, ask, and a follow-up question reaching it from a later
+  turn — plus one PRE-0048-era chat proving the re-upload recovery, and a thread deletion
+  confirming the store goes with it. **Deploy: 0049 → `@dgipr/database` →
+  `@dgipr/content-engine` dists → API + web** (ship together — the raised limit and the
+  composer's expectations are one contract). No n8n. New env, all optional:
+  `OPENAI_UPLOAD_PART_BYTES`, `OPENAI_UPLOAD_TIMEOUT_MS`, `CHAT_VECTOR_STORE_TIMEOUT_MS`,
+  `CHAT_VECTOR_STORE_POLL_INTERVAL_MS`, `CHAT_FILE_SEARCH_MAX_RESULTS`.
+  `OPENAI_MISC_CHAT_PDF_DETAIL` is retired — there is no page-image detail to set when the
+  model never receives the pages.
 
 - **A recording is STREAMED to storage, never assembled in the API** (2026-08-30, no migration,
   no n8n): an officer's 239.6 MB meeting recording failed on `/transcribe` with

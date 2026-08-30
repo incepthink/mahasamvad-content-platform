@@ -1,14 +1,20 @@
 // The general assistant behind /chat.
 //
-// This is intentionally separate from the publication intake pipeline. A PDF is uploaded
-// once to OpenAI Files and supplied directly to the Responses API; it is never transcribed
-// page by page before the officer can ask a question. Successful response ids form the chat
-// chain, so a follow-up sends only the new turn instead of the document and full transcript.
+// This is intentionally separate from the publication intake pipeline. A PDF is uploaded once
+// to OpenAI and read through the FILE SEARCH tool; it is never transcribed page by page
+// before the officer can ask a question. Successful response ids form the chat chain, so a
+// follow-up sends only the new turn instead of the document and the full transcript.
+//
+// The document half — uploading, the thread's vector store, indexing — lives in
+// file-search.ts, whose header explains why it replaced the Responses file-input path and
+// what that trade costs. What matters HERE is the consequence for the request: a document is
+// no longer a `content` part at all. The model is TOLD which documents are attached and
+// given a `file_search` tool over the thread's store, so an attachment it is never asked
+// about costs nothing, and one it is asked about is retrieved rather than re-sent.
 
 import { recordChatUsage } from '../cost/cost-meter.js';
 import { openAiFetch } from '../http/openai-request.js';
 
-const FILES_URL = 'https://api.openai.com/v1/files';
 const RESPONSES_URL = 'https://api.openai.com/v1/responses';
 
 // The top text tier, deliberately. Every other surface here runs on `terra` because a
@@ -20,13 +26,11 @@ const RESPONSES_URL = 'https://api.openai.com/v1/responses';
 export const MISC_CHAT_MODEL =
   process.env.OPENAI_MISC_CHAT_MODEL ?? 'gpt-5.6-sol';
 
-// OpenAI's file upload endpoint accepts larger objects, but one Responses request accepts at
-// most 50 MB of file input in total. Enforce the binding limit before paying for an upload.
-export const MISC_CHAT_PDF_MAX_BYTES = 50 * 1024 * 1024;
-
 export const MISC_CHAT_SYSTEM_INSTRUCTION = `Act as a polished, general-purpose AI chat assistant embedded in Mahasamvad.
 
 Give the user the broad, natural conversational help they would expect from a leading consumer AI chat application. Answer the request directly, be clear and useful, and adapt the depth and format to the task. Match the language the user is using unless they ask for another language. Treat supplied documents and images as context for the user's request.
+
+Attached documents are not shown to you in full. A line listing their file names means those documents are in your file search index: use the file_search tool to read them before answering anything that depends on their contents, search again with different wording if the first result is thin, and say plainly when the document does not contain what was asked for. Images and transcribed text are supplied directly and need no search.
 
 Do not force requests into a DGIPR article, poster, translation, or other publishing workflow. Do not claim that this is a consumer application, and do not claim access to account data, live web information, or tools that are not actually present in this conversation. Be transparent about uncertainty and never invent facts from an attachment you cannot read.`;
 
@@ -44,11 +48,6 @@ function reasoningEffort(): 'none' | 'low' | 'medium' | 'high' {
   return raw === 'none' || raw === 'medium' || raw === 'high' ? raw : 'low';
 }
 
-function pdfDetail(): 'auto' | 'low' | 'high' {
-  const raw = process.env.OPENAI_MISC_CHAT_PDF_DETAIL?.trim().toLowerCase();
-  return raw === 'low' || raw === 'high' ? raw : 'auto';
-}
-
 function responseTimeoutMs(): number {
   const configured = Number(process.env.OPENAI_MISC_CHAT_TIMEOUT_MS);
   return Number.isFinite(configured) && configured >= 1_000
@@ -56,62 +55,21 @@ function responseTimeoutMs(): number {
     : 300_000;
 }
 
+// How many retrieved passages the model may pull per search. The default is OpenAI's, which
+// is tuned for short factual lookups; a chat about a 400-page compendium wants more of the
+// document in view. Every passage is billed as input tokens, so this is the cost dial.
+function fileSearchMaxResults(): number {
+  const configured = Number(process.env.CHAT_FILE_SEARCH_MAX_RESULTS);
+  return Number.isFinite(configured) && configured >= 1
+    ? Math.min(50, Math.floor(configured))
+    : 20;
+}
+
 function maxOutputTokens(): number {
   const configured = Number(process.env.OPENAI_MISC_CHAT_MAX_OUTPUT_TOKENS);
   return Number.isFinite(configured) && configured >= 1_024
     ? Math.floor(configured)
     : 16_384;
-}
-
-export type OpenAiChatFileHandle = Readonly<{
-  id: string;
-  bytes: number;
-}>;
-
-type OpenAiFileResponse = Readonly<{
-  id?: unknown;
-  bytes?: unknown;
-}>;
-
-// Called when the PDF is selected, concurrently with durable private-storage upload. The
-// Files API's `user_data` purpose is the documented choice for model inputs.
-export async function uploadOpenAiChatDocument(
-  displayName: string,
-  data: Buffer,
-): Promise<OpenAiChatFileHandle> {
-  if (data.length > MISC_CHAT_PDF_MAX_BYTES) {
-    throw new Error(
-      `OpenAI direct PDF input is limited to 50 MB; ${displayName} is larger.`,
-    );
-  }
-
-  const formData = new FormData();
-  formData.append('purpose', 'user_data');
-  formData.append(
-    'file',
-    new Blob([new Uint8Array(data)], { type: 'application/pdf' }),
-    displayName,
-  );
-  const response = await openAiFetch(FILES_URL, {
-    label: 'chat file upload',
-    apiKey: apiKey(),
-    formData,
-    lane: 'chat',
-    timeoutMs: responseTimeoutMs(),
-  });
-  const uploaded = (await response.json()) as OpenAiFileResponse;
-  if (typeof uploaded.id !== 'string' || uploaded.id === '') {
-    throw new Error(
-      'OpenAI accepted the PDF but returned no reusable file id.',
-    );
-  }
-  return {
-    id: uploaded.id,
-    bytes:
-      typeof uploaded.bytes === 'number' && Number.isFinite(uploaded.bytes)
-        ? uploaded.bytes
-        : data.length,
-  };
 }
 
 export type MiscChatTurn = Readonly<{
@@ -142,17 +100,30 @@ function textOf(turn: MiscChatTurn): string {
   return body === '' ? ' ' : body;
 }
 
+// The one thing a document contributes to the message now that it is not a content part: its
+// NAME. Without this the model has a file_search tool and no idea there is anything in it —
+// it would answer "I cannot see an attachment" about a document sitting in its own index. A
+// separate part rather than appended prose, so it reads as metadata rather than as something
+// the officer typed.
+export function searchableDocumentsLine(turn: MiscChatTurn): string | null {
+  const names = (turn.attachments ?? [])
+    .filter(
+      (attachment) =>
+        attachment.kind === 'document' &&
+        attachment.documentFileId !== undefined,
+    )
+    .map((attachment) => attachment.name);
+  return names.length === 0
+    ? null
+    : `Attached documents, searchable with the file_search tool: ${names.join(', ')}`;
+}
+
 type OpenAiInputPart =
   | Readonly<{ type: 'input_text'; text: string }>
   | Readonly<{
       type: 'input_image';
       image_url: string;
       detail: 'auto';
-    }>
-  | Readonly<{
-      type: 'input_file';
-      file_id: string;
-      detail: 'auto' | 'low' | 'high';
     }>;
 
 type OpenAiInputMessage = Readonly<{
@@ -168,18 +139,16 @@ function toResponseInput(turn: MiscChatTurn): OpenAiInputMessage {
   }
 
   const parts: OpenAiInputPart[] = [{ type: 'input_text', text: textOf(turn) }];
+  const documents = searchableDocumentsLine(turn);
+  if (documents !== null) {
+    parts.push({ type: 'input_text', text: documents });
+  }
   for (const attachment of turn.attachments ?? []) {
     if (attachment.kind === 'image' && attachment.imageUrl) {
       parts.push({
         type: 'input_image',
         image_url: attachment.imageUrl,
         detail: 'auto',
-      });
-    } else if (attachment.kind === 'document' && attachment.documentFileId) {
-      parts.push({
-        type: 'input_file',
-        file_id: attachment.documentFileId,
-        detail: pdfDetail(),
       });
     }
   }
@@ -265,11 +234,32 @@ export type MiscChatLifecycleEvent = Readonly<{
 // still the authority on the text: if a delta frame is dropped, the tail is emitted before the
 // turn settles, so what the browser saw is exactly what is persisted.
 
+// Exported for the no-network test: which tool a turn is given is the whole of this change,
+// and a request that quietly stopped carrying it would look exactly like a model that had
+// stopped reading attachments.
+export function fileSearchTools(
+  vectorStoreId: string | undefined,
+): readonly Record<string, unknown>[] {
+  return vectorStoreId === undefined
+    ? []
+    : [
+        {
+          type: 'file_search',
+          // ONE id. The field is an array and the API accepts several, but only the first is
+          // actually searched — see file-search.ts. The thread's own store is that one id.
+          vector_store_ids: [vectorStoreId],
+          max_num_results: fileSearchMaxResults(),
+        },
+      ];
+}
+
 function requestBody(
   turns: readonly MiscChatTurn[],
   previousResponseId: string | undefined,
+  vectorStoreId: string | undefined,
   stream: boolean,
 ): Record<string, unknown> {
+  const tools = fileSearchTools(vectorStoreId);
   return {
     model: MISC_CHAT_MODEL,
     instructions: MISC_CHAT_SYSTEM_INSTRUCTION,
@@ -277,6 +267,10 @@ function requestBody(
     store: true,
     max_output_tokens: maxOutputTokens(),
     reasoning: { effort: reasoningEffort() },
+    // Tools do NOT carry over on a `previous_response_id` continuation, so this is sent on
+    // every turn of a thread that has documents — not only on the turn that attached one.
+    // That is also what lets a follow-up question reach a PDF from three turns ago.
+    ...(tools.length > 0 ? { tools, tool_choice: 'auto' } : {}),
     ...(stream ? { stream: true } : {}),
     ...(previousResponseId ? { previous_response_id: previousResponseId } : {}),
   };
@@ -291,6 +285,7 @@ function requestBody(
 function requestMiscChat(
   turns: readonly MiscChatTurn[],
   previousResponseId: string | undefined,
+  vectorStoreId: string | undefined,
   stream: boolean,
 ): Promise<Response> {
   return openAiFetch(RESPONSES_URL, {
@@ -298,7 +293,7 @@ function requestMiscChat(
     apiKey: apiKey(),
     lane: 'chat',
     timeoutMs: responseTimeoutMs(),
-    body: requestBody(turns, previousResponseId, stream),
+    body: requestBody(turns, previousResponseId, vectorStoreId, stream),
   });
 }
 
@@ -427,12 +422,25 @@ export async function readResponseStream(
   return final;
 }
 
-export async function streamMiscChatReply(
-  turns: readonly MiscChatTurn[],
-  onDelta: (chunk: string) => void,
-  previousResponseId?: string | undefined,
-  onLifecycle?: ((event: MiscChatLifecycleEvent) => void) | undefined,
-): Promise<MiscChatReply> {
+// An options object rather than four positional arguments: `vectorStoreId` and
+// `previousResponseId` are both optional strings, and a caller that transposed them would
+// compile cleanly and search nothing.
+export type MiscChatRequest = Readonly<{
+  turns: readonly MiscChatTurn[];
+  onDelta: (chunk: string) => void;
+  previousResponseId?: string | undefined;
+  // The thread's File Search store, when it has documents. Absent = no tool is offered.
+  vectorStoreId?: string | undefined;
+  onLifecycle?: ((event: MiscChatLifecycleEvent) => void) | undefined;
+}>;
+
+export async function streamMiscChatReply({
+  turns,
+  onDelta,
+  previousResponseId,
+  vectorStoreId,
+  onLifecycle,
+}: MiscChatRequest): Promise<MiscChatReply> {
   const startedAt = Date.now();
   const model = MISC_CHAT_MODEL;
   onLifecycle?.({
@@ -453,13 +461,23 @@ export async function streamMiscChatReply(
     console.warn(
       `[openai] chat stream unavailable (${String(reason)}); falling back to a non-streaming call`,
     );
-    const response = await requestMiscChat(turns, previousResponseId, false);
+    const response = await requestMiscChat(
+      turns,
+      previousResponseId,
+      vectorStoreId,
+      false,
+    );
     return (await response.json()) as OpenAiResponseBody;
   };
 
   let result: OpenAiResponseBody;
   try {
-    const response = await requestMiscChat(turns, previousResponseId, true);
+    const response = await requestMiscChat(
+      turns,
+      previousResponseId,
+      vectorStoreId,
+      true,
+    );
     const body = response.body;
     if (!body) throw new Error('response carried no body');
     const streamedResult = await readResponseStream(body, onDelta, onText);

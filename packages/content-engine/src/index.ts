@@ -324,21 +324,33 @@ export {
   type ShortenNarrationOptions,
 } from './video/shorten-narration.js';
 
-// The general assistant at /chat. Native PDFs go directly through OpenAI Files + Responses;
+// The general assistant at /chat. Documents go through OpenAI File Search rather than
+// Responses file input, which is what lifts the size ceiling from 50 MB to 512 MB;
 // publication-specific rules continue to belong to their dedicated surfaces.
 export {
   MISC_CHAT_MODEL,
-  MISC_CHAT_PDF_MAX_BYTES,
   MISC_CHAT_SYSTEM_INSTRUCTION,
   buildOpenAiResponseInput,
+  fileSearchTools,
+  searchableDocumentsLine,
   streamMiscChatReply,
   textFromOpenAiResponse,
-  uploadOpenAiChatDocument,
   type MiscChatTurn,
+  type MiscChatRequest,
   type MiscChatReply,
   type MiscChatLifecycleEvent,
-  type OpenAiChatFileHandle,
 } from './chat/misc-chat.js';
+export {
+  MISC_CHAT_PDF_MAX_BYTES,
+  attachChatDocument,
+  awaitChatDocumentIndexed,
+  createChatVectorStore,
+  deleteChatVectorStore,
+  uploadOpenAiChatDocument,
+  uploadPartBytes,
+  type ChunkReader,
+  type OpenAiChatFileHandle,
+} from './chat/file-search.js';
 
 // Cost metering — the runner opens a scope per job and reads the accumulator back.
 export {
