@@ -97,6 +97,11 @@ and `posters/references/master-*.png` are already uploaded. Just confirm:
    its own domain), which is how the Vercel URLs are covered without editing this value
    per deployment:
    `https://newsroom.indicex.xyz,https://mahasamvad-content-platform-web-*.vercel.app`.
+   Every OTHER front end that calls this API needs its own entry here as well —
+   `https://staging.hashcase.tech` is one such origin. An origin missing from this
+   list is not refused by the API; it simply gets no `access-control-allow-origin`
+   header back, which the browser reports as "No 'Access-Control-Allow-Origin'
+   header is present on the requested resource" while the request itself succeeded.
    The repository-root `.env` is for local development only and is excluded from
    the Docker image. Video storyboards therefore require `GEMINI_API_KEY` in
    `deploy/.env.prod` (or `OPENAI_API_KEY` with `VIDEO_IMAGE_PROVIDER=openai`).
@@ -201,7 +206,7 @@ current API sends; pushing them ahead of an API deploy breaks both paths.
 3. Deploy, then add the **custom domain `newsroom.indicex.xyz`** to the Vercel
    project (Settings → Domains) and create the CNAME/A record Vercel shows you.
 4. **Back to the API**: set `CORS_ORIGIN` in `deploy/.env.prod` to
-   `https://newsroom.indicex.xyz,https://mahasamvad-content-platform-web-*.vercel.app`,
+   `https://newsroom.indicex.xyz,https://mahasamvad-content-platform-web-*.vercel.app,https://staging.hashcase.tech`,
    then `docker compose up -d` again to pick it up. The wildcard entry covers the
    production Vercel URL **and** every branch preview
    (`https://mahasamvad-content-platform-web-git-staging-hashcase.vercel.app` and the

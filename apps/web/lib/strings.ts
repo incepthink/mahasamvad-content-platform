@@ -344,6 +344,8 @@ export const STR = {
   designationsTitle: 'व्यक्ती व पदनाम तपासा',
   designationsHint:
     'बातमीत या व्यक्तींचा पहिला उल्लेख "पदनाम + नाव" असा होईल (उदा. मुख्यमंत्री देवेंद्र फडणवीस). पदनाम रिकामे ठेवल्यास फक्त नाव येईल. इंग्रजी व हिंदी भाषांतरातही हेच पदनाम वापरले जाईल.',
+  designationsCompactHint:
+    'पहिला उल्लेख: पदनाम + नाव. पदनाम रिकामे असल्यास फक्त नाव.',
   designationsLoading: 'व्यक्तींची नावे तपासत आहोत…',
   designationsEmpty:
     'या मजकुरात कोणत्याही व्यक्तीचे नाव आढळले नाही. पुढे जा — पदनामाची गरज नाही.',
@@ -667,12 +669,22 @@ export const STR = {
   proofreadPageTitle: 'मुद्रितशोधन (Proof Read)',
   proofreadPageIntro:
     'मजकुरातील व्याकरण, शुद्धलेखन, विरामचिन्हे, नावे आणि महासंवाद-शैली तपासा. फक्त खात्रीशीर चुका दाखवल्या जातात.',
-  proofreadInputLabel: 'मराठी किंवा इंग्रजी मजकूर येथे चिकटवा',
+  proofreadInputLabel: 'तपासायचा मजकूर येथे चिकटवा',
+  // Kept SHORT for the same reason as translateInputHint and articleSourceHint: this is a
+  // subtitle under a one-line label, and a paragraph there inverts the hierarchy and is
+  // scrolled past rather than read. WHAT is checked is the page-head's job
+  // (proofreadPageIntro) and the results say it again; this line carries only the two
+  // things the controls themselves cannot — which languages, and that nothing is stored.
   proofreadInputHint:
-    'व्याकरण, शुद्धलेखन, विरामचिन्हे, नावांची पडताळणी आणि महासंवाद-शैली तपासली जाईल. फक्त खात्रीशीर चुका दाखवल्या जातात. हा मजकूर जतन केला जाणार नाही.',
-  proofreadInputPlaceholder: 'तपासणीसाठी मजकूर येथे चिकटवा…',
+    'मराठी किंवा इंग्रजी. हा मजकूर जतन केला जात नाही; फाईलमधूनही घेता येईल.',
+  proofreadInputPlaceholder: 'उदा. बातमी, टिपणी किंवा लेख…',
   proofreadAction: 'तपासणी करा',
-  proofreadChecking: 'तपासणी सुरू आहे… यास एक-दोन मिनिटे लागू शकतात.',
+  // Split in two, the `translating` / `translateMayTakeTime` pair: the first is the
+  // SUBMIT'S OWN LABEL while a check runs, so it has to be short enough to sit in a
+  // button in the composer's tool row; the second is the line under it, which is the
+  // only place the wait can honestly be described.
+  proofreadChecking: 'तपासणी सुरू आहे…',
+  proofreadMayTakeTime: 'मोठ्या मजकुराला एक-दोन मिनिटे लागू शकतात.',
   proofreadOverLimit: 'मजकूर १०,००० अक्षरांपेक्षा जास्त आहे.',
   proofreadError: 'तपासणी अयशस्वी झाली. कृपया पुन्हा प्रयत्न करा.',
   proofreadIssuesTitle: 'आढळलेल्या चुका',
@@ -1350,13 +1362,10 @@ export const STR = {
   // hiding — how many RUNS there are, which is not the same count as the recordings above.
   transcribeRunCountSuffix: 'ध्वनिलेखने',
   transcribeOpen: 'उघडा',
-  transcribeClose: 'बंद करा',
   transcribeDownloadName: 'ध्वनिलेखन',
   // Carries this transcript to /dlo as the note of a new intake. Named for what the officer
   // gets at the end of that flow, not for what the button does to the text.
   transcribeToArticle: 'बातमी तयार करा',
-  transcribeToArticleHint:
-    'हा मजकूर लेखाच्या टिपणीत जाईल. तिथे तो तपासून व दुरुस्त करून बातमी तयार करता येईल.',
 
   // Errors
   // Said at the picker, before the upload starts — the whole point of checking the size in

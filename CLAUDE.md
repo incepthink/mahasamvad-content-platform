@@ -272,6 +272,23 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
   verbatim"; correcting text before it becomes an article is /dlo's review step.
   Audio container rules are NOT redefined here: `AUDIO_FILE_ACCEPT`/`audioMimeForFileName`
   come from `schemas/src/dlo.ts`, so the picker can never offer a file the API refuses.
+  - **NO RECORDING IS EVER HELD WHOLE IN THE API** (2026-08-30). Every upload route streams
+    each audio part straight to S3 with `uploadStream` (`@dgipr/database/storage.ts`,
+    `@aws-sdk/lib-storage`) instead of `part.toBuffer()`, so peak memory is ~16 MiB per file
+    whatever its length — a 239.6 MB recording used to cost ~500 MB and OOM-killed the
+    container mid-upload, losing the officer's meeting. Two consequences to keep: the ROW ID
+    IS MINTED BY THE ROUTE (`insertTranscription`/`insertDloIntake` take an optional `id`),
+    because a storage key must exist before the first byte while the row must not exist until
+    every part is accepted — every early return calls `discardStaged()`; and each entry
+    records `bytes`, which the JOB reads to transcribe in groups bounded by
+    `STT_BATCH_MAX_BYTES` (`apps/api/src/jobs/audio-batches.ts`) rather than downloading a
+    whole run at once. A recording larger than the budget is never refused — it gets a group
+    to itself. Free harness: `npx tsx apps/api/src/jobs/audio-batches.ts` (run it from
+    `packages/content-engine`, which has tsx). Live, against the real bucket:
+    `pnpm --filter @dgipr/database storage:check-upload -- --mb=240` — run it after any change
+    to bucket or IAM policy, since multipart upload needs Create/UploadPart/Complete/**Abort**
+    and a policy granting only `s3:PutObject` passes every other upload in the product while
+    failing every recording.
 - **YouTube links as a source (both /dlo and /transcribe) — yt-dlp since 2026-08-19.**
   This bullet used to read "no downloader, by design": ElevenLabs Scribe takes a
   **`source_url`** and fetched the media itself (its docs name YouTube explicitly;

@@ -74,16 +74,20 @@ export default function TranscribePage() {
         </div>
       </header>
 
-      <TranscriptionForm onStarted={start} busy={busy} />
+      {/* The input and its output use the same compact card system. Keeping them in one
+          stack supplies the standard 20px rhythm even though neither card uses the old
+          `.card + .card` margin rule. */}
+      <div className="flex flex-col gap-5">
+        <TranscriptionForm onStarted={start} busy={busy} />
 
-      {selectedId ? (
-        <TranscriptionResult
-          detail={detail}
-          error={error}
-          onRetry={() => void refreshDetail()}
-          onClose={() => select(null)}
-        />
-      ) : null}
+        {selectedId ? (
+          <TranscriptionResult
+            detail={detail}
+            error={error}
+            onRetry={() => void refreshDetail()}
+          />
+        ) : null}
+      </div>
 
       <TranscriptionList
         items={items}

@@ -71,11 +71,13 @@ export {
   VIDEOS_BUCKET,
   uploadPng,
   uploadFile,
+  uploadStream,
   publicUrl,
   publicUrlIn,
   downloadPng,
   downloadFile,
   removeObjects,
+  removeObjectsIn,
 } from './storage.js';
 export {
   VIDEO_PROJECTS_TABLE,

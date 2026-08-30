@@ -66,10 +66,10 @@ import {
   YOUTUBE_INPUT_OFF,
 } from '@/components/YouTubeLinkInput';
 import { acceptFilePicks } from '@/lib/filePicks';
-import { cn } from '@/lib/utils';
 import { useFilePreviews } from '@/lib/useFilePreviews';
 import { STR } from '@/lib/strings';
 import { DloLostFilesNotice } from './DloLostFilesNotice';
+import { DloSubmitButton } from './DloSubmitButton';
 import type { DloIntakeFormState } from './useDloIntakeForm';
 
 const YOUTUBE_PANEL_ID = 'dlo-youtube-panel';
@@ -252,21 +252,12 @@ export function DloComposer({ form }: { form: DloIntakeFormState }) {
                 Enabled it carries the slow warm sheen (`mr-submit-flow`, globals.css) —
                 the only moving thing on the page, so "there is something to press now"
                 reads without a label; disabled it is quiet and still. */}
-            <button
-              type="button"
+            <DloSubmitButton
+              label={STR.dloSubmit}
+              submitting={form.submitting}
+              disabled={!form.hasInput}
               onClick={() => void form.submit()}
-              disabled={form.submitting || !form.hasInput}
-              className={cn(
-                'text-primary-foreground inline-flex h-9 shrink-0 items-center rounded-md px-5 text-sm font-bold transition-[filter]',
-                'focus-visible:ring-ring/50 outline-none focus-visible:ring-[3px]',
-                'disabled:cursor-not-allowed disabled:opacity-60',
-                form.submitting || !form.hasInput
-                  ? 'bg-primary'
-                  : 'mr-submit-flow hover:saturate-110 hover:brightness-105',
-              )}
-            >
-              {form.submitting ? STR.submitting : STR.dloSubmit}
-            </button>
+            />
           </div>
 
           <input

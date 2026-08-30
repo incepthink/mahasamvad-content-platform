@@ -30,14 +30,26 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { FileText, Image as ImageIcon, Loader2, Music } from 'lucide-react';
+import {
+  ArrowLeft,
+  FileText,
+  Image as ImageIcon,
+  Loader2,
+  Music,
+  Paperclip,
+} from 'lucide-react';
 import type { DloIntakeFile } from '@dgipr/schemas';
 
-import { AiInstructionsField } from '@/components/AiInstructionsField';
+import { CardTitle } from '@/components/CardTitle';
 import { DesignationReview } from '@/components/DesignationReview';
 import { ErrorNotice } from '@/components/ErrorNotice';
 import { FileName } from '@/components/FileName';
-import { StyleReferenceField } from '@/components/StyleReferenceField';
+import { FormCard } from '@/components/common/FormCard';
+import { PageBackdrop } from '@/components/common/PageBackdrop';
+import { PromptInput } from '@/components/common/PromptInput';
+import { DloAiPromptBox } from '@/components/dlo/DloAiPromptBox';
+import { DloSubmitButton } from '@/components/dlo/DloSubmitButton';
+import { NEWS_DOODLES } from '@/lib/doodleMarks';
 import { errorMessage, storedErrorMessage } from '@/lib/errorMessage';
 import { generateFromNewDloIntake, prepareNewDloNames } from '@/lib/newDlo';
 import { STR } from '@/lib/strings';
@@ -52,6 +64,47 @@ const KIND_ICON = {
   docx: FileText,
   txt: FileText,
 } as const;
+
+type GenerateOrigin = 'sources' | 'designations';
+
+function WorkspaceBackLink({ href }: { href: string }) {
+  return (
+    <Link href={href} className="back-link">
+      <ArrowLeft size={18} aria-hidden="true" />
+      मागे
+    </Link>
+  );
+}
+
+function GenerateAction({
+  error,
+  submitting,
+  disabled,
+  divided = true,
+  onClick,
+}: {
+  error: string | null;
+  submitting: boolean;
+  disabled: boolean;
+  divided?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <div
+      className={`mt-4 flex flex-col gap-3 pt-4${divided ? ' border-t' : ''}`}
+    >
+      {error ? <ErrorNotice message={error} /> : null}
+      <div className="flex justify-end">
+        <DloSubmitButton
+          label={STR.dloGenerate}
+          submitting={submitting}
+          disabled={disabled}
+          onClick={onClick}
+        />
+      </div>
+    </div>
+  );
+}
 
 /**
  * One row per attached source — never per page.
@@ -90,27 +143,27 @@ export type DloFileWorkspaceProps = Readonly<{
   intakeId: string;
   /** Where "start over" goes — each lane's own entry point, never the other's. */
   startOverHref: string;
-  /**
-   * Whether to offer a published article as the STYLE model for this run. /dlo's intake form
-   * stopped asking for one, so for that lane the question belongs on this screen; /new-dlo
-   * has never asked it, and adding it there would be a new question rather than a moved one.
-   */
-  showStyleReference?: boolean;
+  /** Use the same single direction box as /dlo's intake form. */
+  unifiedInstructions?: boolean;
+  /** Carry /dlo's news-doodle wallpaper onto its review workspace. */
+  showBackdrop?: boolean;
 }>;
 
 export function DloFileWorkspace({
   intakeId,
   startOverHref,
-  showStyleReference = false,
+  unifiedInstructions = false,
+  showBackdrop = false,
 }: DloFileWorkspaceProps) {
   const router = useRouter();
   const { intake, loading, error, refresh } = useNewDloIntake(intakeId);
 
   const [heading, setHeading] = useState('');
   const [instructions, setInstructions] = useState('');
-  const [styleReference, setStyleReference] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitOrigin, setSubmitOrigin] = useState<GenerateOrigin | null>(null);
+  const submittingRef = useRef(false);
 
   const fetchNames = useCallback(
     () => prepareNewDloNames(intakeId),
@@ -130,9 +183,6 @@ export function DloFileWorkspace({
     if (intake.reviewState.instructions) {
       setInstructions(intake.reviewState.instructions);
     }
-    if (intake.reviewState.styleReference) {
-      setStyleReference(intake.reviewState.styleReference);
-    }
   }, [intake?.reviewState]);
 
   // The name lookup is PAID, so it fires exactly once, on the first poll that reports the
@@ -146,17 +196,18 @@ export function DloFileWorkspace({
     void designations.run();
   }, [intake?.status, designations]);
 
-  const generate = async () => {
-    if (submitting) return;
+  const generate = async (origin: GenerateOrigin) => {
+    // There are two visible copies of this action. State disables both on the next render;
+    // the ref also closes the same-tick gap so two rapid clicks cannot start two generations.
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setSubmitting(true);
+    setSubmitOrigin(origin);
     setSubmitError(null);
     try {
       const generationId = await generateFromNewDloIntake(intakeId, {
         ...(heading.trim() ? { heading: heading.trim() } : {}),
         ...(instructions.trim() ? { instructions: instructions.trim() } : {}),
-        ...(showStyleReference && styleReference.trim()
-          ? { styleReference: styleReference.trim() }
-          : {}),
         designations: designations.collect(),
       });
       // The ordinary generation detail page: an article from this lane is an ordinary row, so
@@ -164,6 +215,7 @@ export function DloFileWorkspace({
       router.push(`/generations/${generationId}`);
     } catch (caught) {
       setSubmitError(errorMessage(caught));
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };
@@ -171,6 +223,8 @@ export function DloFileWorkspace({
   if (loading && !intake) {
     return (
       <main className="page">
+        {showBackdrop ? <PageBackdrop marks={NEWS_DOODLES} seed={31} /> : null}
+        <WorkspaceBackLink href={startOverHref} />
         <p className="translating-note">
           <span className="spinner" aria-hidden="true" />
           उघडत आहे…
@@ -182,6 +236,8 @@ export function DloFileWorkspace({
   if (error && !intake) {
     return (
       <main className="page">
+        {showBackdrop ? <PageBackdrop marks={NEWS_DOODLES} seed={31} /> : null}
+        <WorkspaceBackLink href={startOverHref} />
         <ErrorNotice message={error} onRetry={() => void refresh()} />
       </main>
     );
@@ -194,6 +250,9 @@ export function DloFileWorkspace({
 
   return (
     <main className="page">
+      {showBackdrop ? <PageBackdrop marks={NEWS_DOODLES} seed={31} /> : null}
+      <WorkspaceBackLink href={startOverHref} />
+
       <header className="page-head">
         <div className="page-head-text">
           <h1 className="page-title">{intake.heading || 'नवीन काम'}</h1>
@@ -205,108 +264,113 @@ export function DloFileWorkspace({
         </div>
       </header>
 
-      {intake.status === 'failed' ? (
-        <section className="card">
-          <ErrorNotice
-            message={storedErrorMessage(intake.error, STR.genericError)}
-          />
-          <div className="btn-row" style={{ marginTop: 12 }}>
-            <Link className="btn btn-small" href={startOverHref}>
-              पुन्हा सुरुवात करा
-            </Link>
-          </div>
-        </section>
-      ) : null}
-
-      {intake.files.length > 0 ? (
-        <section className="card">
-          <h2 className="card-title">जोडलेले स्रोत</h2>
-          <ul className="mt-2 list-none p-0">
-            {intake.files.map((file, index) => (
-              <SourceRow key={`${file.name}-${index}`} file={file} />
-            ))}
-          </ul>
-          {failedFiles.length > 0 ? (
-            <p className="hint" style={{ marginTop: 10 }}>
-              वरील फाईल्स वाचता आल्या नाहीत. त्या वगळून लेख तयार होईल.
-            </p>
-          ) : null}
-        </section>
-      ) : null}
-
-      {ready ? (
-        <>
-          <DesignationReview
-            names={designations.names}
-            known={designations.known}
-            edits={designations.edits}
-            extras={designations.extras}
-            loading={designations.loading}
-            error={designations.error}
-            busy={submitting}
-            onEditDesignation={designations.editDesignation}
-            onToggleRemember={designations.toggleRemember}
-            onToggleAccepted={designations.toggleAccepted}
-            onChangeExtra={designations.changeExtra}
-            onAddExtra={designations.addExtra}
-            onRegenerate={() => void designations.run()}
-            onVerify={(marathi) => void designations.verify(marathi)}
-            verifying={designations.verifying}
-            verifyError={designations.verifyError}
-          />
-
-          {/* All optional, and the first two outrank the specification when filled in — the
-              same contract they carry on the old lane, reached through the same prompt
-              blocks. */}
-          <section className="card">
-            <label className="field-label" htmlFor="dlo-file-heading">
-              {STR.headingLabel}
-            </label>
-            <p className="hint">{STR.headingHint}</p>
-            <input
-              id="dlo-file-heading"
-              type="text"
-              placeholder={STR.headingPlaceholder}
-              value={heading}
-              onChange={(event) => setHeading(event.target.value)}
-              style={{ marginTop: 10 }}
+      <div className="flex flex-col gap-5">
+        {intake.status === 'failed' ? (
+          <FormCard>
+            <ErrorNotice
+              message={storedErrorMessage(intake.error, STR.genericError)}
             />
-          </section>
-
-          <AiInstructionsField
-            value={instructions}
-            onChange={setInstructions}
-          />
-
-          {showStyleReference ? (
-            <StyleReferenceField
-              value={styleReference}
-              onChange={setStyleReference}
-            />
-          ) : null}
-
-          <div className="dlo-submitbar">
-            <div className="dlo-submitbar-inner">
-              {submitError ? <ErrorNotice message={submitError} /> : null}
-              <button
-                type="button"
-                className="btn btn-primary dlo-submit"
-                disabled={submitting || designations.loading}
-                onClick={() => void generate()}
-              >
-                {submitting ? STR.submitting : STR.dloGenerate}
-              </button>
+            <div className="btn-row" style={{ marginTop: 12 }}>
+              <Link className="btn btn-small" href={startOverHref}>
+                पुन्हा सुरुवात करा
+              </Link>
             </div>
-          </div>
-        </>
-      ) : intake.status !== 'failed' ? (
-        <section className="card">
-          <p className="translating-note">
-            <span className="spinner" aria-hidden="true" />
-            प्रक्रिया सुरू आहे…
-          </p>
-        </section>
-      ) : null}
+          </FormCard>
+        ) : null}
+
+        {intake.files.length > 0 ? (
+          <FormCard>
+            <CardTitle icon={Paperclip}>जोडलेले स्रोत</CardTitle>
+            <ul className="mt-2 list-none p-0">
+              {intake.files.map((file, index) => (
+                <SourceRow key={`${file.name}-${index}`} file={file} />
+              ))}
+            </ul>
+            {failedFiles.length > 0 ? (
+              <p className="hint" style={{ marginTop: 10 }}>
+                वरील फाईल्स वाचता आल्या नाहीत. त्या वगळून लेख तयार होईल.
+              </p>
+            ) : null}
+            {ready ? (
+              <GenerateAction
+                error={submitOrigin === 'sources' ? submitError : null}
+                submitting={submitting}
+                disabled={designations.loading}
+                divided={!unifiedInstructions}
+                onClick={() => void generate('sources')}
+              />
+            ) : null}
+          </FormCard>
+        ) : null}
+
+        {ready ? (
+          <>
+            <DesignationReview
+              names={designations.names}
+              known={designations.known}
+              edits={designations.edits}
+              extras={designations.extras}
+              loading={designations.loading}
+              error={designations.error}
+              busy={submitting}
+              onEditDesignation={designations.editDesignation}
+              onToggleRemember={designations.toggleRemember}
+              onToggleAccepted={designations.toggleAccepted}
+              onChangeExtra={designations.changeExtra}
+              onAddExtra={designations.addExtra}
+              onRegenerate={() => void designations.run()}
+              onVerify={(marathi) => void designations.verify(marathi)}
+              verifying={designations.verifying}
+              verifyError={designations.verifyError}
+              hint={
+                unifiedInstructions
+                  ? STR.designationsCompactHint
+                  : STR.designationsHint
+              }
+              showRememberHint={!unifiedInstructions}
+              footer={
+                <GenerateAction
+                  error={submitOrigin === 'designations' ? submitError : null}
+                  submitting={submitting}
+                  disabled={designations.loading}
+                  divided={!unifiedInstructions}
+                  onClick={() => void generate('designations')}
+                />
+              }
+            />
+
+            {!unifiedInstructions ? (
+              <FormCard
+                htmlFor="dlo-file-heading"
+                label={STR.headingLabel}
+                hint={STR.headingHint}
+              >
+                <PromptInput
+                  id="dlo-file-heading"
+                  placeholder={STR.headingPlaceholder}
+                  value={heading}
+                  onChange={setHeading}
+                  disabled={submitting}
+                  className="mt-3"
+                />
+              </FormCard>
+            ) : null}
+
+            <DloAiPromptBox
+              value={instructions}
+              onChange={setInstructions}
+              disabled={submitting}
+            />
+          </>
+        ) : intake.status !== 'failed' ? (
+          <FormCard>
+            <p className="translating-note">
+              <span className="spinner" aria-hidden="true" />
+              प्रक्रिया सुरू आहे…
+            </p>
+          </FormCard>
+        ) : null}
+      </div>
     </main>
   );
 }

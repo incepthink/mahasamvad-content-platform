@@ -3081,6 +3081,72 @@ Canva OAuth authentication and poster handoff are implemented in `apps/api/src/r
 
 ## Latest Implementation Milestone
 
+- **A recording is STREAMED to storage, never assembled in the API** (2026-08-30, no migration,
+  no n8n): an officer's 239.6 MB meeting recording failed on `/transcribe` with
+  `सेवेशी संपर्क होऊ शकला नाही` and was lost. Small files had always worked, which is exactly why
+  it survived so long. **The 406 `the request is not multipart` in the API log was not that
+  upload** — reproduced against production, that error is what a POST with NO body and no
+  content-type produces (Fastify's `handle-request.js:47`, the "Request has no body to parse"
+  branch), and a proper multipart POST to the same URL answers correctly. It cannot be what the
+  officer saw either: `errorMessage.ts` maps a 406 to
+  `पाठवलेली माहिती अपूर्ण किंवा चुकीची आहे`, while the banner in the screenshot is
+  `errUnreachable`, which only a browser-level network failure or a 502/503/504 produces. The
+  connection died mid-transfer; the log line is a bodyless probe against a public unauthenticated
+  endpoint. **Read the log for the shape of the request, not for the nearest red line.**
+  The cause was ours and it was memory. Every upload route read each part with
+  `part.toBuffer()`: the whole file resident, briefly twice while busboy's chunks are
+  concatenated, then held again for a single-shot `PutObject` — ~500 MB for one recording on a
+  `t3.small`/`medium` that also runs n8n, PostgREST and Chromium. The container was OOM-killed
+  while the officer watched the progress bar. Corroborating: the pasted log's `reqId` is
+  **`req-3`**, and Fastify's counter restarts at 1 per process, so the API was three requests
+  old — it had just come back up.
+  - **`uploadStream` (`@dgipr/database/storage.ts`, `@aws-sdk/lib-storage`) is the fix.** Parts
+    are forwarded to S3 as they arrive and are never all resident: peak is
+    `S3_UPLOAD_PART_BYTES x S3_UPLOAD_CONCURRENCY`, ~16 MiB, **whatever the file's length**.
+    Measured end to end through the real busboy seam: a 240 MB multipart POST moved RSS 82 →
+    115 MiB and returned an exact byte count, against 108 MiB for a 24 MiB upload — the memory
+    no longer tracks the file size at all. `pipeline` is what propagates a vanished browser into
+    the upload so a truncated object can never be COMPLETED as if whole, and
+    `leavePartsOnError: false` aborts the multipart upload so a dead request cannot leave parts
+    S3 keeps billing for.
+  - **The row id is now minted by the ROUTE**, not the database (`insertTranscription` /
+    `insertDloIntake` take an optional `id`). A storage key has to exist before the first byte
+    does, while the row must still not be inserted until every part has been accepted — a
+    rejected upload must not leave a run in the history list. Every early return now discards
+    what it staged (`removeObjectsIn`, the new bucket-aware sibling of `removeObjects`).
+  - **`bytes` is recorded on each file entry** (jsonb, additive, no migration) as the part is
+    counted through. It is a memory bound, not a display figure — see the next point.
+  - **The JOB was the bigger half of the same bug and is fixed too.** Both transcribe phases
+    downloaded EVERY recording up front with one `Promise.all`: ten two-hour recordings is
+    gigabytes resident, and a file that now uploads successfully still has to be transcribable.
+    They process **groups bounded by total bytes** (`jobs/audio-batches.ts`,
+    `STT_BATCH_MAX_BYTES`, default 256 MiB), downloading sequentially within a group and
+    persisting results per group. **A recording larger than the whole budget is never refused —
+    it gets a group to itself.** Grouping rather than one-at-a-time is deliberate: Sarvam
+    transcribes a group in ONE batch job.
+  - Two more copies removed on the way to the provider: `getObject` now preallocates from
+    GetObject's own `ContentLength` (the `Buffer.concat` at the end held the object twice), and
+    `elevenlabs-stt.ts`'s `new Uint8Array(file.data)` became a zero-copy view — a Node Buffer is
+    already a Uint8Array; what TypeScript objected to was only its `SharedArrayBuffer`-possible
+    backing store.
+  - **`/new-dlo` got the identical treatment** even though it is not the live lane, because it
+    is the same code shape with the same hazard.
+  Verified 2026-08-30, mostly free: workspace typecheck **7/7 green**; eslint clean on all 12
+  touched files; prettier clean on every hunk of mine (six files report whole-file complaints
+  that are **pre-existing** — confirmed by running prettier over their HEAD blobs, which fail
+  identically — so do NOT `--write` them); 13 offline assertions on the batching
+  (`npx tsx apps/api/src/jobs/audio-batches.ts`, run from `packages/content-engine`, which has
+  tsx); and LIVE against the real private bucket — `storage:check-upload` at 24 MiB and 240 MiB
+  with byte-identical round trips, a 240 MB multipart POST through actual `@fastify/multipart`,
+  a client killed mid-upload leaving the server standing, and an explicit permission probe
+  confirming Create/UploadPart/Complete/**Abort**MultipartUpload and DeleteObjects all work for
+  the `dgipr-api` IAM user (only `s3:ListBucketMultipartUploads` is denied, which nothing needs).
+  **Left for a real run** (the local API cannot reach the database — RDS has no public IP and
+  PostgREST is internal-only): one genuine large recording through `/transcribe` on the
+  deployed box, end to end into a transcript. Deploy is `@dgipr/database` →
+  `@dgipr/content-engine` dists → API. New env, all optional: `S3_UPLOAD_PART_BYTES`,
+  `S3_UPLOAD_CONCURRENCY`, `STT_BATCH_MAX_BYTES`.
+
 - **A photograph of a document is read by Sarvam, not OpenAI** (2026-08-27, no migration, no
   n8n, API only): /dlo's प्रतिमा card was the last paid read still pinned to one backend. The
   pin rested on a claim in `image-ocr.ts`'s own header — that `OCR_PROVIDER` "chooses between

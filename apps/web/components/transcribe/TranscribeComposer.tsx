@@ -178,17 +178,7 @@ export function TranscribeComposer({
           onClick={() => setLinkOpen((open) => !open)}
         />
 
-        {/* The count and the action travel together at the right edge, in one group
-            rather than on two competing auto margins — two of those split the free space
-            between them and would leave the count stranded mid-row. */}
         <div className="ms-auto flex items-center gap-2">
-          {files.length > 0 ? (
-            <span className="text-muted-foreground text-sm">
-              {files.length.toLocaleString('mr-IN')}{' '}
-              {STR.transcribeFileCountSuffix}
-            </span>
-          ) : null}
-
           {/* The page's one action, at the end of the row that feeds it. Enabled, it
               carries the slow warm sheen (`mr-submit-flow`, globals.css) — the only
               moving thing on the page, so "there is something to press now" reads

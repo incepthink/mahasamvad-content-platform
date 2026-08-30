@@ -21,12 +21,10 @@
 // variable and across a reload only their names survive, and the form asks for them back
 // by name.
 //
-// THE HEADING AND THE STYLE REFERENCE ARE NOT ASKED FOR HERE any more. They were two of
-// the three cards the single AI-prompt box replaced, and both are still on the तपासणी
-// step (DloFileWorkspace), where they are answered against sources that exist rather than
-// ones the officer has not seen yet. Nothing is lost; the questions simply moved to where
-// they can be answered — and both are carried over through the intake's saved review state,
-// so anything typed here still arrives there.
+// THE HEADING AND THE STYLE REFERENCE ARE NOT SEPARATE QUESTIONS any more. They were two of
+// the three cards the single AI-prompt box replaced; the same box is shown again on the
+// तपासणी step (DloFileWorkspace), seeded from the intake's saved review state so anything
+// typed here still arrives there.
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';

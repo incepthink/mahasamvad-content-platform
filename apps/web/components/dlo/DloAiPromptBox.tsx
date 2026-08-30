@@ -11,12 +11,10 @@
  * request written three ways ("make it about X", "lead with Y", "read like this"), so they
  * are one free-text box, and the run stores it as `generations.instructions` (0041).
  *
- * NOTHING IS LOST BY REMOVING THEM HERE. All three still stand on the workspace this run
- * opens into (DloFileWorkspace), which is where they can actually be answered: by then the
- * sources are attached and the recordings transcribed, so a heading and a style exemplar
- * are judgements about material that exists rather than guesses about material that does
- * not. What IS typed here is carried over to that screen through the intake's saved review
- * state, so the officer never answers the same question twice.
+ * The SAME box is reused on /dlo's workspace (DloFileWorkspace). What is typed here is
+ * carried over through the intake's saved review state, so the officer sees one question in
+ * one familiar shape instead of heading, instructions and style-example cards appearing
+ * after upload.
  *
  * The counter appears only once something is typed, and only warns near the ceiling — a
  * live "0 / 2,000" on an optional box reads as a form to fill in rather than an offer.

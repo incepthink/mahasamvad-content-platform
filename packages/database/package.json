@@ -16,10 +16,12 @@
     "lint": "eslint src --ext .ts",
     "format": "prettier src --write",
     "format:check": "prettier src --check",
-    "storage:migrate": "tsx --env-file=../../.env src/scripts/migrate-storage-to-s3.ts"
+    "storage:migrate": "tsx --env-file=../../.env src/scripts/migrate-storage-to-s3.ts",
+    "storage:check-upload": "tsx --env-file=../../.env src/scripts/check-upload-stream.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1106.0",
+    "@aws-sdk/lib-storage": "^3.1106.0",
     "@supabase/supabase-js": "^2.110.0"
   },
   "devDependencies": {

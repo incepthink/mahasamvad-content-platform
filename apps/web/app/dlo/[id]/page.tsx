@@ -10,8 +10,9 @@
 // transcript to review. The old page-by-page workspace is still in the tree
 // (components/DloWorkspace.tsx) and is what to restore if that lane is ever wanted back.
 //
-// The one difference from /new-dlo is the style reference: this lane's intake form stopped
-// asking for one, so the question is offered here instead of being lost.
+// The one difference from /new-dlo is the direction UI: this lane keeps the same single
+// "AI साठी सूचना" box on both screens instead of splitting heading, instructions and a style
+// sample into three separate questions after upload.
 
 import { use } from 'react';
 import { DloFileWorkspace } from '../../../components/DloFileWorkspace';
@@ -23,6 +24,11 @@ export default function DloIntakePage({
 }) {
   const { id } = use(params);
   return (
-    <DloFileWorkspace intakeId={id} startOverHref="/dlo" showStyleReference />
+    <DloFileWorkspace
+      intakeId={id}
+      startOverHref="/dlo"
+      unifiedInstructions
+      showBackdrop
+    />
   );
 }

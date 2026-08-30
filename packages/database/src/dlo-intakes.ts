@@ -52,6 +52,11 @@ export type DloIntakeFileEntry = Readonly<{
   storagePath?: string | undefined;
   kind: DloIntakeFileKind;
   status: DloIntakeFileStatus;
+  // How large the archived original is, counted as it was streamed to storage. Written for
+  // every recording uploaded since 2026-08-30 and absent on older rows and on documents. The
+  // transcribe phase uses it to decide how many recordings it may hold in memory at once, so
+  // an unknown size is treated as "big".
+  bytes?: number;
   chars?: number;
   error?: string;
   // Audio/DOCX carry their whole text; PDFs carry `pages` instead. A PDF's `pages`
@@ -168,9 +173,14 @@ export type DloIntakeSummaryRow = Readonly<{
   updatedAt: string;
 }>;
 
+// `id` is optional and exists for the same reason as insertTranscription's: the create
+// routes stream each recording straight to storage as it arrives, and a storage key has to
+// exist before the first byte is written, while the row must not. Omitted, the database's own
+// default supplies one exactly as before.
 export async function insertDloIntake(
   client: SupabaseClient,
   input: Readonly<{
+    id?: string;
     notes: string;
     category: DloIntakeCategory;
     heading?: string | undefined;
@@ -180,6 +190,7 @@ export async function insertDloIntake(
   const { data, error } = await client
     .from(DLO_INTAKES_TABLE)
     .insert({
+      ...(input.id !== undefined ? { id: input.id } : {}),
       notes: input.notes,
       category: input.category,
       heading: input.heading ?? null,

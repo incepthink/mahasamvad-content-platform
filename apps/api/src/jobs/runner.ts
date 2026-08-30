@@ -801,7 +801,11 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
     } as const;
     const dateline = currentArticleDateline(shared.category);
 
-    const mode = articleGenerationMode();
+    // /dlo's post-name-review prompt is an explicit product contract, not an experiment behind
+    // ARTICLE_GENERATION_MODE. Keep it on the single-call path even when another article surface
+    // opts back into the legacy full pipeline.
+    const dloArticle = Boolean(row.dloIntakeId);
+    const mode = dloArticle ? 'simple' : articleGenerationMode();
     const result =
       mode === 'simple'
         ? await (async () => {
@@ -821,6 +825,7 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
                 : generateArticleSimple;
             const simple = await writeArticle(row.note, {
               ...shared,
+              promptMode: dloArticle ? 'dlo' : 'default',
               // Tier 1 of the style-reference hierarchy (migration 0035). Read off the ROW, so
               // a retry reproduces the same reference rather than silently re-styling.
               styleReference: row.styleReference,

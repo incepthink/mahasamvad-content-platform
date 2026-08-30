@@ -25,6 +25,7 @@ import { recordChatUsage, type ChatUsage } from '../cost/cost-meter.js';
 import { openAiFetch } from '../http/openai-request.js';
 import type { ChatMessage } from './openai-chat.js';
 import type { SourceFileRef } from '../intake/openai-source-files.js';
+import { DLO_SOURCE_FILES_MARKER } from './dlo-article-prompt.js';
 
 const RESPONSES_URL = 'https://api.openai.com/v1/responses';
 
@@ -144,17 +145,40 @@ export function buildSourcesRequest(options: {
     .map((message) => message.content)
     .join('\n\n');
 
-  const turns = options.messages.filter((message) => message.role !== 'system');
-  const input: InputMessage[] = turns.map((message) => ({
-    role: message.role === 'assistant' ? 'assistant' : 'user',
-    content: [{ type: 'input_text', text: message.content }],
-  }));
-
-  // The files ride on the LAST user turn, immediately after the prompt that describes what to
-  // do with them. Where there is no user turn at all (a prompt that is entirely system), they
-  // become one — a request with files and no input would be rejected.
   const fileParts = filePartsFor(options.files);
-  if (fileParts.length > 0) {
+  let filesPlacedAtMarker = false;
+  const turns = options.messages.filter((message) => message.role !== 'system');
+  const input: InputMessage[] = turns.map((message) => {
+    const markerAt = message.content.indexOf(DLO_SOURCE_FILES_MARKER);
+    if (markerAt === -1) {
+      return {
+        role: message.role === 'assistant' ? 'assistant' : 'user',
+        content: [{ type: 'input_text', text: message.content }],
+      };
+    }
+    if (markerAt !== message.content.lastIndexOf(DLO_SOURCE_FILES_MARKER)) {
+      throw new Error('DLO source-file marker may appear only once.');
+    }
+
+    const before = message.content.slice(0, markerAt);
+    const after = message.content.slice(
+      markerAt + DLO_SOURCE_FILES_MARKER.length,
+    );
+    filesPlacedAtMarker = fileParts.length > 0;
+    return {
+      role: message.role === 'assistant' ? 'assistant' : 'user',
+      content: [
+        ...(before ? [{ type: 'input_text' as const, text: before }] : []),
+        ...fileParts,
+        ...(after ? [{ type: 'input_text' as const, text: after }] : []),
+      ],
+    };
+  });
+
+  // Ordinary source prompts carry no placement marker, so preserve their established contract:
+  // files ride on the last user turn. A marker is used only by /dlo, where the officer-approved
+  // prompt places the attachments inside SOURCE INFORMATION before the reviewed-name fields.
+  if (fileParts.length > 0 && !filesPlacedAtMarker) {
     const lastUser = [...input].reverse().find((turn) => turn.role === 'user');
     if (lastUser) {
       const index = input.indexOf(lastUser);

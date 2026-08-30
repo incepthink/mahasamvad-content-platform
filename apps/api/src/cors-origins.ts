@@ -96,6 +96,21 @@ if (process.argv[1]?.endsWith('cors-origins.ts')) {
       'https://newsroom.indicex.xyz',
       true,
     ],
+    // A second front end on its own domain. Nothing about it is Vercel-shaped, so it is
+    // an EXACT entry added to the live CORS_ORIGIN - a wildcard would only widen the
+    // rule past the one hostname the operator actually meant.
+    [
+      'https://newsroom.indicex.xyz,https://staging.hashcase.tech',
+      'https://staging.hashcase.tech',
+      true,
+    ],
+    [
+      'https://newsroom.indicex.xyz,https://staging.hashcase.tech',
+      'https://staging.hashcase.tech.evil.example',
+      false,
+    ],
+    ['https://staging.hashcase.tech', 'http://staging.hashcase.tech', false],
+    ['https://staging.hashcase.tech', 'https://hashcase.tech', false],
     // A wildcard is one label, so it cannot widen past its own domain.
     ['https://*.vercel.app', 'https://foo.vercel.app', true],
     ['https://*.vercel.app', 'https://foo.bar.vercel.app', false],

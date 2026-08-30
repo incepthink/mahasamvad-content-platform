@@ -57,6 +57,10 @@ import {
 } from './generate-article-simple.js';
 import type { SourceFileRef } from '../intake/openai-source-files.js';
 import { respondWithSources } from './responses-with-sources.js';
+import {
+  DLO_ARTICLE_PROMPT_VERSION,
+  buildDloArticleMessages,
+} from './dlo-article-prompt.js';
 
 export type SourceArticleOptions = SimpleGenerateArticleOptions &
   Readonly<{
@@ -111,12 +115,13 @@ export async function generateArticleFromSources(
   const selectedFacts = options?.includeFacts ?? [];
   const statements = options?.statements ?? [];
   const designations = options?.designations ?? [];
+  const dloPrompt = options?.promptMode === 'dlo';
 
-  // References stay behind the same flag as the text lane. The embedding is taken from
-  // whatever text the intake has: a run whose sources are entirely files has nothing to match
-  // on, so retrieval correctly finds nothing rather than matching on an empty string.
+  // References stay behind the same flag as the text lane for ordinary source articles. The
+  // /dlo prompt is complete as approved and never carries one. The embedding is taken from
+  // whatever text the intake has: a run whose sources are entirely files has nothing to match.
   const referencesEnabled =
-    articleStyleReferencesEnabled() && note.trim().length > 0;
+    !dloPrompt && articleStyleReferencesEnabled() && note.trim().length > 0;
   let styleReference = NO_STYLE_REFERENCE;
   if (referencesEnabled) {
     onProgress('retrieve');
@@ -131,24 +136,32 @@ export async function generateArticleFromSources(
 
   onProgress('draft');
   const variant = articlePromptVariant();
-  const messages = buildArticleMessagesForReferenceMode(
-    {
-      category,
-      sourceInformation: sourceInformationBlock(note, files),
-      styleReferences: styleReference.articles,
-      editorialDirection: options?.heading,
-      officerInstructions: options?.instructions ?? undefined,
-      designations,
-      statements,
-      includeFacts: selectedFacts,
-      excludeFacts: options?.excludeFacts,
-      names: options?.names,
-      location: options?.location,
-      date: options?.date,
-    },
-    variant,
-    referencesEnabled,
-  );
+  const messages = dloPrompt
+    ? buildDloArticleMessages({
+        sourceInformation: note,
+        designations,
+        heading: options?.heading,
+        officerInstructions: options?.instructions,
+        attachedSourceFiles: files.length > 0,
+      })
+    : buildArticleMessagesForReferenceMode(
+        {
+          category,
+          sourceInformation: sourceInformationBlock(note, files),
+          styleReferences: styleReference.articles,
+          editorialDirection: options?.heading,
+          officerInstructions: options?.instructions ?? undefined,
+          designations,
+          statements,
+          includeFacts: selectedFacts,
+          excludeFacts: options?.excludeFacts,
+          names: options?.names,
+          location: options?.location,
+          date: options?.date,
+        },
+        variant,
+        referencesEnabled,
+      );
 
   const raw = await respondWithSources({
     label: 'article from sources',
@@ -169,19 +182,20 @@ export async function generateArticleFromSources(
     );
   }
 
-  // The officer named a length: measure it and buy ONE rewrite on a miss. It runs on the TEXT
-  // we have rather than on the files — the rewrite is an editing pass over the finished
-  // article, not a re-read of the sources, so re-attaching them would only pay to send them
-  // again.
-  const fit = await fitArticleToLength(
-    body,
-    options?.instructions?.trim()
-      ? `${note}\n\n=== OFFICER REQUEST ===\n${options.instructions.trim()}`
-      : note,
-    parseLengthRequest(options?.instructions) ??
-      parseLengthRequest(options?.heading),
-    category,
-  );
+  // Ordinary source articles measure a requested length and buy ONE rewrite on a miss. /dlo
+  // uses only its approved prompt, so a second rewriting prompt must not silently replace its
+  // answer. The ordinary rewrite runs on the text rather than re-attaching paid source files.
+  const fit = dloPrompt
+    ? { article: body, warning: null }
+    : await fitArticleToLength(
+        body,
+        options?.instructions?.trim()
+          ? `${note}\n\n=== OFFICER REQUEST ===\n${options.instructions.trim()}`
+          : note,
+        parseLengthRequest(options?.instructions) ??
+          parseLengthRequest(options?.heading),
+        category,
+      );
 
   const designationResult = applyDesignations(fit.article, designations, {
     ...(options?.knownDesignations
@@ -202,11 +216,13 @@ export async function generateArticleFromSources(
   const fiveWOneH =
     selectedFacts.length > 0 ? fiveWOneHFromPointers(selectedFacts) : null;
 
-  const promptVersion = referencesEnabled
-    ? variant === 'minimal'
-      ? MINIMAL_ARTICLE_PROMPT_VERSION
-      : SIMPLE_ARTICLE_PROMPT_VERSION
-    : `${variant}-${NO_REFERENCE_ARTICLE_PROMPT_VERSION}`;
+  const promptVersion = dloPrompt
+    ? DLO_ARTICLE_PROMPT_VERSION
+    : referencesEnabled
+      ? variant === 'minimal'
+        ? MINIMAL_ARTICLE_PROMPT_VERSION
+        : SIMPLE_ARTICLE_PROMPT_VERSION
+      : `${variant}-${NO_REFERENCE_ARTICLE_PROMPT_VERSION}`;
 
   console.log(
     `[source-article] ${category} | model=${ARTICLE_MODEL} effort=${articleReasoningEffort()} | ` +

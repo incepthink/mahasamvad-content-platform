@@ -19,6 +19,8 @@ import { NextActions } from '../../../components/NextActions';
 import { PosterPanel } from '../../../components/PosterPanel';
 import { PosterSkeleton } from '../../../components/PosterSkeleton';
 import { SocialPostView } from '../../../components/SocialPostView';
+import { PageBackdrop } from '../../../components/common/PageBackdrop';
+import { CREATIVE_DOODLES, NEWS_DOODLES } from '../../../lib/doodleMarks';
 
 // The API persists the provider's complete failure so the server keeps the request id and
 // coarse moderation diagnostics. That blob is useful in logs, not to an officer. OpenAI says
@@ -190,8 +192,19 @@ export default function GenerationDetailPage({
   const editFailed =
     !!detail.editFailure || (detail.status === 'failed' && hasOutput);
 
+  // Keep the result visually connected to the lane that created it. Article-only
+  // news/scheme work continues DLO's newspaper wallpaper; every poster, thumbnail
+  // and social/caption result continues the Creative lane's image-making wallpaper.
+  const isDloArticle =
+    isArticleCategory(detail.category) && detail.outputType === 'article';
+
   return (
     <main className="page">
+      <PageBackdrop
+        marks={isDloArticle ? NEWS_DOODLES : CREATIVE_DOODLES}
+        seed={isDloArticle ? 31 : 19}
+      />
+
       <div
         className="btn-row"
         style={{ justifyContent: 'space-between', marginBottom: 20 }}

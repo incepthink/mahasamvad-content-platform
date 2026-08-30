@@ -166,6 +166,48 @@ const SETS = {
     'hash',
     'clock',
   ],
+  PROOFREAD_DOODLES: [
+    'spell-check',
+    'check-check',
+    'circle-check',
+    'badge-check',
+    'pencil-line',
+    'pen-line',
+    'eraser',
+    'highlighter',
+    'search',
+    'text-search',
+    'scan-text',
+    'book-open',
+    'book-a',
+    'letter-text',
+    'type',
+    'quote',
+    'text-quote',
+    'list-checks',
+    'clipboard-check',
+    'file-check',
+    'file-text',
+    'notebook-pen',
+    'signature',
+    'stamp',
+    'ruler',
+    'glasses',
+    'case-sensitive',
+    'whole-word',
+    'a-arrow-up',
+    'triangle-alert',
+    'circle-alert',
+    'sparkles',
+    'bookmark',
+    'feather',
+    'library',
+    'scroll-text',
+    'replace',
+    'underline',
+    'strikethrough',
+    'pilcrow',
+  ],
 };
 
 // One line per set, saying what the page it dresses is ABOUT — the whole point of a
@@ -179,6 +221,8 @@ const LABELS = {
     '/** भाषांतर: what an officer brings to that page is one language, and takes away another. */',
   TRANSCRIBE_DOODLES:
     '/** ध्वनिलेखन: what an officer brings to that page is a recording. */',
+  PROOFREAD_DOODLES:
+    '/** मुद्रितशोधन: what an officer brings to that page is a draft to be corrected. */',
 };
 
 const DIR = 'node_modules/lucide-react/dist/esm/icons';
