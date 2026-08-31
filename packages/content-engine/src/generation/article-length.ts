@@ -24,9 +24,16 @@ import type { LengthWarning } from '@dgipr/schemas';
 import { buildSystemPrompt, type ArticleCategory } from './category-prompt.js';
 import {
   ARTICLE_BODY_MAX_TOKENS,
+  ARTICLE_MODEL,
+  articleReasoningEffort,
   chatComplete,
   type ChatMessage,
 } from './openai-chat.js';
+import type { SourceFileRef } from '../intake/openai-source-files.js';
+import {
+  respondWithSources,
+  sourceInformationBlock,
+} from './responses-with-sources.js';
 
 export type { LengthWarning };
 export type LengthUnit = LengthWarning['unit'];
@@ -240,6 +247,14 @@ export async function fitArticleToLength(
   source: string,
   request: LengthRequest | null,
   category: ArticleCategory,
+  // The officer's uploaded documents, on the source-file lane. They MUST be attached to this
+  // rewrite as well as to the call that wrote the article: `buildFitMessages` states that
+  // SOURCE is the only fact source and CURRENT_ARTICLE is not, and on that lane `source` is
+  // the typed note alone -- often empty. Handed those two rules over a source it cannot see,
+  // the model does exactly what it is told and deletes the facts it cannot verify; and because
+  // a gutted article measures SHORTER, a shrink request would then accept the damage as
+  // "closer to the ask". Empty for the text lane, which keeps its chatComplete call unchanged.
+  files: readonly SourceFileRef[] = [],
 ): Promise<LengthFitResult> {
   if (!request) return { article, warning: null };
 
@@ -253,11 +268,25 @@ export async function fitArticleToLength(
 
   let fitted = article;
   try {
+    const messages = buildFitMessages(
+      article,
+      // With files attached, SOURCE names them as well as carrying whatever text there is.
+      files.length > 0 ? sourceInformationBlock(source, files) : source,
+      request,
+      verdict,
+      category,
+    );
     const rewritten = (
-      await chatComplete(
-        buildFitMessages(article, source, request, verdict, category),
-        { maxTokens: ARTICLE_BODY_MAX_TOKENS },
-      )
+      files.length > 0
+        ? await respondWithSources({
+            label: 'article length fit from sources',
+            messages,
+            files,
+            model: ARTICLE_MODEL,
+            maxOutputTokens: ARTICLE_BODY_MAX_TOKENS,
+            reasoningEffort: articleReasoningEffort(),
+          })
+        : await chatComplete(messages, { maxTokens: ARTICLE_BODY_MAX_TOKENS })
     ).trim();
     // Closer to the ask than what it replaced, or it is thrown away.
     const gap = (text: string): number =>

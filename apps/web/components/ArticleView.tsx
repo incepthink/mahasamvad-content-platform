@@ -11,18 +11,34 @@
 // spelling noticed late is fixed right here, not on /glossary).
 
 import { useState } from 'react';
+import {
+  ChevronLeft,
+  ChevronRight,
+  CirclePlay,
+  ExternalLink,
+  FileText,
+  Image as ImageIcon,
+  Music,
+} from 'lucide-react';
 import type {
+  ArticleVersionText,
   GenerationDetail,
+  GenerationSourceFile,
   PrepareTranslationResponse,
   TranslationLanguage,
   TranslationTermInput,
 } from '@dgipr/schemas';
 import {
   articlePdfDownloadUrl,
+  generationSourceFileUrl,
+  getArticleVersions,
+  getGenerationSourceFiles,
   prepareGenerationTranslation,
   requestTranslation,
+  restoreArticleVersion,
   sendArticleFeedback,
 } from '../lib/api';
+import { FileName } from './FileName';
 import { STR } from '../lib/strings';
 import { errorMessage } from '../lib/errorMessage';
 import { downloadBlob } from '../lib/download';
@@ -31,6 +47,17 @@ import { FeedbackBox } from './FeedbackBox';
 import { MarkdownText } from './MarkdownText';
 import { TranslationTermsReview } from './TranslationTermsReview';
 import { ErrorNotice } from './ErrorNotice';
+
+// How each kind of source is drawn inside the note fold. The icon is the only kind marker:
+// the file name already carries its extension, so a label chip beside it said it twice.
+const SOURCE_ICON: Record<GenerationSourceFile['kind'], React.ReactNode> = {
+  audio: <Music size={18} />,
+  youtube: <CirclePlay size={18} />,
+  image: <ImageIcon size={18} />,
+  pdf: <FileText size={18} />,
+  docx: <FileText size={18} />,
+  txt: <FileText size={18} />,
+};
 
 export function ArticleView({
   detail,
@@ -55,6 +82,108 @@ export function ArticleView({
   >(null);
   const [confirming, setConfirming] = useState(false);
   const [translateError, setTranslateError] = useState<string | null>(null);
+  // The intake's own uploads, loaded the first time the note fold is opened rather than with
+  // the run: they come off the intake's `files` jsonb, which carries every transcript and
+  // OCR'd page, and the detail poll behind this page runs every 2.5 s. A run with nothing
+  // behind it (the media room reads its document through the ephemeral service and archives
+  // nothing) simply answers with an empty list and the fold shows the note alone.
+  const [sourceFiles, setSourceFiles] = useState<GenerationSourceFile[] | null>(
+    null,
+  );
+  const [sourcesLoading, setSourcesLoading] = useState(false);
+  const [sourcesError, setSourcesError] = useState<string | null>(null);
+
+  const loadSourceFiles = async () => {
+    if (sourceFiles !== null || sourcesLoading) return;
+    setSourcesLoading(true);
+    setSourcesError(null);
+    try {
+      setSourceFiles(await getGenerationSourceFiles(detail.id));
+    } catch (e) {
+      setSourcesError(errorMessage(e));
+    } finally {
+      setSourcesLoading(false);
+    }
+  };
+
+  // ---- article version history ----
+  //
+  // A feedback round overwrites the article, so before this the previous wording was simply
+  // gone. `detail.articleVersions` is metadata only (the payload is polled every 2.5 s), and
+  // it is what decides whether the arrows are drawn at all; the TEXT is fetched once, the
+  // first time the officer moves.
+  //
+  // `viewing` is the version being LOOKED at, null meaning "whatever is on the row". Looking
+  // is not restoring: an older wording is read in place and nothing changes until
+  // "ही आवृत्ती पुन्हा वापरा" is pressed. That split is the whole point of the control — an
+  // officer who has just been burned by one feedback round should be able to see what they
+  // had without buying another change.
+  const versions = detail.articleVersions;
+  const [viewing, setViewing] = useState<number | null>(null);
+  // Cached WITH the version count it was fetched at. The snapshots themselves are immutable,
+  // but a feedback round appends one — and a cache that outlived that round would answer a
+  // request for the new version with `undefined`, which reads on screen as an arrow that does
+  // nothing. Comparing counts re-fetches exactly when there is something new to fetch.
+  const [versionTexts, setVersionTexts] = useState<{
+    count: number;
+    items: ArticleVersionText[];
+  } | null>(null);
+  const [versionsLoading, setVersionsLoading] = useState(false);
+  const [versionError, setVersionError] = useState<string | null>(null);
+  const [restoring, setRestoring] = useState(false);
+
+  const currentVersion =
+    versions.find((version) => version.current)?.version ?? versions.length;
+  // What the arrows are currently pointed at. Falls back to the row's own version, so the
+  // first press moves one step from where the officer is actually reading.
+  const shownVersion = viewing ?? currentVersion;
+
+  // Fetched once and kept: the texts are immutable snapshots, and a new one only ever
+  // arrives with a new revision — which replaces `detail` and resets this view anyway.
+  const loadVersionTexts = async (): Promise<ArticleVersionText[] | null> => {
+    if (versionTexts && versionTexts.count === versions.length) {
+      return versionTexts.items;
+    }
+    setVersionsLoading(true);
+    setVersionError(null);
+    try {
+      const loaded = await getArticleVersions(detail.id);
+      setVersionTexts({ count: loaded.length, items: loaded });
+      return loaded;
+    } catch (e) {
+      setVersionError(errorMessage(e));
+      return null;
+    } finally {
+      setVersionsLoading(false);
+    }
+  };
+
+  const goToVersion = async (version: number) => {
+    if (version < 1 || version > versions.length) return;
+    const loaded = await loadVersionTexts();
+    if (!loaded) return;
+    setVersionError(null);
+    setViewing(version);
+  };
+
+  const restoreViewedVersion = async () => {
+    if (viewing === null) return;
+    setRestoring(true);
+    setVersionError(null);
+    try {
+      await restoreArticleVersion(detail.id, viewing);
+      // Back to "showing the row", and the refresh below brings the row's new article and a
+      // version list whose `current` marker has moved. Cleared BEFORE the refresh so the body
+      // never shows a stale snapshot over fresh metadata.
+      setViewing(null);
+      setVersionTexts(null);
+      await onFeedbackSent();
+    } catch (e) {
+      setVersionError(errorMessage(e));
+    } finally {
+      setRestoring(false);
+    }
+  };
 
   const marathi = detail.article ?? '';
   // Stored translations, keyed the same way as the toggle. A language is "available"
@@ -66,7 +195,25 @@ export function ArticleView({
   const has = (language: TranslationLanguage) =>
     (translations[language]?.length ?? 0) > 0;
   const shownLang = lang !== 'mr' && has(lang) ? lang : 'mr';
-  const shown = shownLang === 'mr' ? marathi : (translations[shownLang] ?? '');
+  // What the arrows are pointed at, and whether that is something other than the row. Both
+  // need `shownLang`, which is why they sit here rather than beside the state above.
+  const shownMeta =
+    versions.find((version) => version.version === shownVersion) ?? null;
+  const viewedText =
+    viewing === null
+      ? null
+      : (versionTexts?.items.find((version) => version.version === viewing)
+          ?.article ?? null);
+  // PREVIEWING: the body is showing a wording the run is not currently using. Everything that
+  // ACTS on the article is stood down while this is true — see the render — because acting on
+  // the row while reading something else is the one thing this control could get wrong.
+  const viewingOlder =
+    shownLang === 'mr' && viewedText !== null && !(shownMeta?.current ?? false);
+  const shown = viewingOlder
+    ? viewedText
+    : shownLang === 'mr'
+      ? marathi
+      : (translations[shownLang] ?? '');
 
   // The translate job runs beside whatever else is in flight and reports itself on
   // the detail payload rather than through status/step, so this stays accurate while
@@ -292,6 +439,83 @@ export function ArticleView({
         </div>
       ) : null}
 
+      {/* The version arrows. Marathi only: the English and Hindi columns are translations of
+          whatever is on the row right now, so stepping back through Marathi wordings while
+          reading one of them would show a version marker over text it does not describe.
+          Hidden entirely below two versions — one wording is not a history. */}
+      {shownLang === 'mr' && versions.length > 1 ? (
+        <div
+          className="article-versions"
+          role="group"
+          aria-label={STR.articleVersionsLabel}
+        >
+          <button
+            type="button"
+            className="btn btn-small btn-icon"
+            aria-label={STR.articleVersionPrev}
+            title={STR.articleVersionPrev}
+            disabled={shownVersion <= 1 || versionsLoading || restoring}
+            onClick={() => void goToVersion(shownVersion - 1)}
+          >
+            <ChevronLeft size={20} aria-hidden="true" />
+          </button>
+          <div className="article-versions-label">
+            <span className="article-versions-count">
+              {STR.articleVersionOf(shownVersion, versions.length)}
+            </span>
+            {/* What this wording IS: the run's first article, the one in use, or the
+                instruction that produced it. */}
+            <span className="hint">
+              {versionsLoading
+                ? STR.articleVersionLoading
+                : shownVersion === 1 && shownMeta?.feedback === null
+                  ? STR.articleVersionOriginal
+                  : shownMeta?.feedback
+                    ? `${STR.articleVersionFeedback} ${shownMeta.feedback}`
+                    : shownMeta?.current
+                      ? STR.articleVersionCurrent
+                      : ''}
+            </span>
+          </div>
+          <button
+            type="button"
+            className="btn btn-small btn-icon"
+            aria-label={STR.articleVersionNext}
+            title={STR.articleVersionNext}
+            disabled={
+              shownVersion >= versions.length || versionsLoading || restoring
+            }
+            onClick={() => void goToVersion(shownVersion + 1)}
+          >
+            <ChevronRight size={20} aria-hidden="true" />
+          </button>
+          {/* Only while looking at something other than the row: restoring the wording
+              already in use would be a button that does nothing. */}
+          {viewingOlder ? (
+            <button
+              type="button"
+              className="btn btn-small article-versions-restore"
+              disabled={restoring}
+              onClick={() => void restoreViewedVersion()}
+            >
+              {restoring
+                ? STR.articleVersionRestoring
+                : STR.articleVersionRestore}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* Said out loud, because the body below is now showing text that is NOT what the run
+          will export, translate or revise until the button above is pressed. */}
+      {viewingOlder ? (
+        <p className="hint article-versions-note">
+          {STR.articleVersionViewingOld}
+        </p>
+      ) : null}
+
+      {versionError ? <ErrorNotice message={versionError} /> : null}
+
       {/* Display only — the generator's Markdown structure rendered as real headings,
           lists and paragraphs. Copy, .txt/.md download and the PDF export below all
           keep reading `shown` raw, so what leaves the page is unchanged. */}
@@ -332,9 +556,14 @@ export function ArticleView({
             a cross-origin download. It follows the language toggle, and because shownLang
             already falls back to 'mr' when a language has no text, it can never hit the
             route's "translation not ready" 404. */}
-        <a className="btn" href={articlePdfDownloadUrl(detail.id, shownLang)}>
-          {STR.downloadPdf}
-        </a>
+        {/* Rendered from the ROW, so it cannot show the wording being previewed. Hidden
+            rather than left to hand the officer a PDF of different text than the one on
+            screen. Copy and the two downloads above read `shown` and so follow the preview. */}
+        {viewingOlder ? null : (
+          <a className="btn" href={articlePdfDownloadUrl(detail.id, shownLang)}>
+            {STR.downloadPdf}
+          </a>
+        )}
 
         {/* "Same note, other platform". Only when this run has NO poster — article-only
             and DLO runs, which never render PosterPanel and would otherwise have no way
@@ -349,7 +578,8 @@ export function ArticleView({
 
         {/* One button per language that has no translation yet; the one being
             translated right now shows the spinner in its place. */}
-        {(['en', 'hi'] as const).map((language) =>
+        {/* Translation reads the row too — same reason as the PDF link. */}
+        {(viewingOlder ? [] : (['en', 'hi'] as const)).map((language) =>
           has(language) ? null : translating && translatingLang === language ? (
             <span key={language}>{translatingNote(language)}</span>
           ) : prep === 'idle' && !translating ? (
@@ -384,13 +614,63 @@ export function ArticleView({
         </details>
       ) : null}
 
-      <details className="fold">
+      {/* The note, and under it the files it was assembled from. Opening the fold is what
+          fetches them — see loadSourceFiles. */}
+      <details
+        className="fold"
+        onToggle={(event) => {
+          if (event.currentTarget.open) void loadSourceFiles();
+        }}
+      >
         <summary>{STR.noteTitle}</summary>
-        <div className="fold-body">{detail.note}</div>
+        {/* A run started from a pasted article or an upload can carry no note text at all;
+            an empty fold-body would then be pure padding above the source list. */}
+        {detail.note.trim() ? (
+          <div className="fold-body">{detail.note}</div>
+        ) : null}
+        {sourcesLoading ? (
+          <p className="hint source-files-loading">
+            <span className="spinner" aria-hidden="true" />
+            {STR.sourceFilesLoading}
+          </p>
+        ) : null}
+        {sourcesError ? <ErrorNotice message={sourcesError} /> : null}
+        {sourceFiles && sourceFiles.length > 0 ? (
+          <div className="source-files">
+            <ul className="file-list">
+              {sourceFiles.map((file) => (
+                <li key={file.index}>
+                  {/* A YouTube source was never downloaded — it opens at the video itself;
+                      everything else is served back from the private bucket by the API. */}
+                  <a
+                    className="file-row file-row-link"
+                    href={
+                      file.externalUrl ??
+                      generationSourceFileUrl(detail.id, file.index)
+                    }
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {SOURCE_ICON[file.kind]}
+                    <FileName name={file.name} className="file-name" />
+                    <ExternalLink
+                      size={16}
+                      aria-label={STR.sourceFilesNewTab}
+                    />
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
       </details>
 
       <div style={{ marginTop: 18 }}>
-        {revising ? (
+        {/* Not offered while an older wording is on screen: the feedback box revises the ROW,
+            so an officer looking back at version 1 and typing a change would get version 3
+            edited instead. Restoring first, then asking for the change, is the sequence the
+            arrows are there to make possible. */}
+        {viewingOlder ? null : revising ? (
           <span className="translating-note">
             <span className="spinner" aria-hidden="true" />
             {STR.revisingArticle}

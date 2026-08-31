@@ -17,10 +17,14 @@
 // hand-rolled for the same reason.
 
 import { createElement, Fragment, type ReactNode } from 'react';
+import { isExtractedHtml } from '../lib/extractedText';
 import { isTableRow, readTableRun } from '../lib/markdownTable';
 
-const HTML_CONTENT =
-  /<\/?(?:html|body|article|section|div|span|p|h[1-6]|table|thead|tbody|tfoot|tr|th|td|ul|ol|li|blockquote|pre|code|strong|em|small|header|footer|figure|figcaption|br|hr)\b/i;
+// Which representation a page is in is decided in lib/extractedText, beside the
+// conversion that turns the same HTML into prose for the surfaces that hand it to a
+// model. One definition, so a view and a translation can never disagree about what
+// counts as HTML. Re-exported because this module is where it used to live.
+export { isExtractedHtml };
 const ALLOWED_HTML = new Set([
   'article',
   'section',
@@ -83,10 +87,6 @@ const DROP_HTML = new Set([
   'link',
   'meta',
 ]);
-
-export function isExtractedHtml(text: string): boolean {
-  return HTML_CONTENT.test(text);
-}
 
 function positiveSpan(value: string | null): number | undefined {
   if (value === null) return undefined;

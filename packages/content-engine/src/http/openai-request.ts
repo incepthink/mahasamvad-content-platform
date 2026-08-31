@@ -198,9 +198,15 @@ export type OpenAiRequest = Readonly<{
   // Used in log lines and in the thrown message: `OpenAI <label> request failed: ...`.
   label: string;
   apiKey: string;
+  // Omitted = POST, which is every call this transport was written for. GET and DELETE were
+  // added for /chat's vector stores, whose lifecycle is not expressible as POSTs: indexing is
+  // polled with GET and a deleted thread's store is removed with DELETE. Both carry no body,
+  // and both want exactly the retry ladder and the lane accounting POSTs already get — which
+  // is the whole reason they route through here rather than a bare fetch.
+  method?: 'POST' | 'GET' | 'DELETE' | undefined;
   // JSON for ordinary API calls, or multipart form data for Files uploads. Exactly one is
-  // supplied. FormData owns its boundary header, so the transport must not set content-type
-  // for that branch.
+  // supplied ON A POST; a GET or DELETE supplies neither. FormData owns its boundary header,
+  // so the transport must not set content-type for that branch.
   body?: unknown;
   formData?: FormData;
   // Which concurrency lane this call queues in. Omitted = 'default', so every existing
@@ -222,16 +228,21 @@ export async function openAiFetch(
   {
     label,
     apiKey,
+    method,
     body,
     formData,
     lane,
     timeoutMs: timeoutOverride,
   }: OpenAiRequest,
 ): Promise<Response> {
-  if ((body === undefined) === (formData === undefined)) {
+  const verb = method ?? 'POST';
+  if (verb === 'POST' && (body === undefined) === (formData === undefined)) {
     throw new Error(
       `OpenAI ${label} request must supply exactly one of body or formData.`,
     );
+  }
+  if (verb !== 'POST' && (body !== undefined || formData !== undefined)) {
+    throw new Error(`OpenAI ${label} ${verb} request must carry no body.`);
   }
   const attempts = readInt('OPENAI_MAX_RETRIES', 5) + 1;
   // Serialized calls queue behind one another, so a hung request would stall the whole
@@ -249,15 +260,17 @@ export async function openAiFetch(
       let response: Response;
       try {
         response = await fetch(url, {
-          method: 'POST',
+          method: verb,
           headers:
-            formData !== undefined
+            formData !== undefined || body === undefined
               ? { authorization: `Bearer ${apiKey}` }
               : {
                   authorization: `Bearer ${apiKey}`,
                   'content-type': 'application/json',
                 },
-          body: formData ?? JSON.stringify(body),
+          ...(verb === 'POST'
+            ? { body: formData ?? JSON.stringify(body) }
+            : {}),
           signal: AbortSignal.timeout(timeoutMs),
         });
       } catch (error) {

@@ -31,6 +31,10 @@ export type TranscriptionFileEntry = Readonly<{
   sourceAuthor?: string;
   sourceThumbnailUrl?: string;
   status: TranscriptionFileStatus;
+  // How large the archived recording is, counted as it was streamed to storage. Written for
+  // every upload since 2026-08-30 and absent on older rows. The job uses it to decide how
+  // many recordings it may hold in memory at once, so an unknown size is treated as "big".
+  bytes?: number;
   chars?: number;
   error?: string;
   text?: string;
@@ -102,9 +106,16 @@ export type TranscriptionSummaryRow = Readonly<{
   updatedAt: string;
 }>;
 
+// `id` is optional and exists for ONE reason: the create route streams each recording
+// straight to storage as it arrives, and a storage key has to be known before the first byte
+// is written — while the row itself must not be inserted until every file has been accepted,
+// or a rejected upload would leave a run nobody asked for sitting in the history list. So the
+// route mints the id, uses it in the object keys, and hands it back here. Omitted, the
+// database's own default supplies one exactly as before.
 export async function insertTranscription(
   client: SupabaseClient,
   input: Readonly<{
+    id?: string;
     title: string;
     files: readonly TranscriptionFileEntry[];
   }>,
@@ -112,6 +123,7 @@ export async function insertTranscription(
   const { data, error } = await client
     .from(TRANSCRIPTIONS_TABLE)
     .insert({
+      ...(input.id !== undefined ? { id: input.id } : {}),
       title: input.title,
       files: input.files,
       file_count: input.files.length,

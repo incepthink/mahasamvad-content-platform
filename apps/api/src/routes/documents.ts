@@ -14,6 +14,7 @@ import type { SupabaseClient, UsageFeature } from '@dgipr/database';
 import {
   AnalyticsFeatureKeySchema,
   DOCUMENT_MAX_BYTES,
+  DOCUMENT_MAX_MB,
   DocumentUploadSurfaceSchema,
   ExtractDocumentRequestSchema,
   ReextractDocumentRequestSchema,
@@ -45,9 +46,9 @@ export function registerDocumentRoutes(
     let ocrProvider: string | null = null;
     try {
       // Per-request limits: the global multipart config is sized for small reference
-      // images. DOCUMENT_MAX_BYTES is unlimited, so this override exists to LIFT that
-      // global 10 MiB cap rather than to impose one; the 413 branch below is unreachable
-      // and kept only so a future ceiling has somewhere to land.
+      // images, so this override both LIFTS that global 10 MiB cap and imposes the real
+      // one. DOCUMENT_MAX_BYTES is the reading backend's own per-file ceiling, so the 413
+      // branch below is now live — it is what an over-size document actually gets.
       const parts = request.parts({
         limits: { fileSize: DOCUMENT_MAX_BYTES, files: 1 },
       });
@@ -84,15 +85,19 @@ export function registerDocumentRoutes(
         'code' in error &&
         error.code === 'FST_REQ_FILE_TOO_LARGE'
       ) {
-        return reply
-          .code(413)
-          .send({ error: { message: 'फाईल खूप मोठी आहे.' } });
+        return reply.code(413).send({
+          error: {
+            message: `फाईल खूप मोठी आहे. प्रत्येक फाईल कमाल ${DOCUMENT_MAX_MB} MB असावी.`,
+          },
+        });
       }
       throw error;
     }
 
     if (!upload) {
-      return reply.code(400).send({ error: { message: 'कृपया एक फाईल जोडा.' } });
+      return reply
+        .code(400)
+        .send({ error: { message: 'कृपया एक फाईल जोडा.' } });
     }
     try {
       // Probes only. Nothing reaches Sarvam until the user has picked pages at /extract.
@@ -187,10 +192,7 @@ function busyError() {
 // The selection must name pages this document actually has. Rejected here rather than deep
 // in the splitter so the user gets a Marathi message instead of a failed job, and so a
 // nonsense request never reaches a paid OCR call.
-function guardPageSelection(
-  job: DocumentIntakeJob,
-  pages: readonly number[],
-) {
+function guardPageSelection(job: DocumentIntakeJob, pages: readonly number[]) {
   const total = job.pageCount;
   if (total === null) return null;
   const outOfRange = pages.filter((page) => page < 1 || page > total);

@@ -5,14 +5,16 @@
 // Unlike /dlo this path ends at the transcript — there is no review contract and no
 // generation lineage, so there are exactly three routes: create, list, detail.
 
+import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import {
   DLO_UPLOADS_BUCKET,
   getTranscription,
   insertTranscription,
   listTranscriptions,
+  removeObjectsIn,
   updateTranscription,
-  uploadFile,
+  uploadStream,
   type SupabaseClient,
   type TranscriptionFileEntry,
   type TranscriptionRow,
@@ -44,9 +46,15 @@ import {
 // global cap in index.ts. It must be STATED, not omitted: @fastify/multipart DEEP-merges
 // these into the global limits key by key, so a dropped key exposes the global value rather
 // than removing it (that mistake cost a production outage on 2026-08-17 — see routes/dlo.ts).
-// `files` stays capped: toBuffer() holds every upload in process for the length of one
-// request, so the count is what keeps one submission bounded now that the size does not.
 // No `fieldSize` bump: this request carries no text fields.
+//
+// UNLIMITED IS NOW A PROMISE THE BOX CAN KEEP. Until 2026-08-30 this route read each part
+// with `part.toBuffer()`, so "no size limit" meant the whole recording sat in the API
+// process — and a 239.6 MB upload OOM-killed the container mid-transfer, which the officer
+// saw as "सेवेशी संपर्क होऊ शकला नाही" with the recording lost. The file count was described
+// here as what kept a submission bounded; ten unbounded files are not bounded. Each part now
+// streams straight through to S3 (uploadStream), so peak memory is a few MiB per file
+// whatever its length, and the count is back to being an ordinary sanity limit.
 const MAX_FILE_BYTES = Number.POSITIVE_INFINITY;
 
 // Storage object names must be ASCII-safe; the index prefix keeps them unique (display
@@ -119,10 +127,35 @@ export function registerTranscriptionRoutes(
   client: SupabaseClient,
 ): void {
   app.post('/transcriptions', async (request, reply) => {
-    const uploads: Array<{ name: string; data: Buffer }> = [];
+    // The row id is minted HERE rather than by the database, because each recording is
+    // streamed to its final storage key while the request is still arriving — the key has to
+    // exist before the first byte does. The row itself is still inserted last, after every
+    // file has been accepted, so a rejected upload leaves no run in the history list.
+    const runId = randomUUID();
+    const uploads: Array<{ name: string; storagePath: string; bytes: number }> =
+      [];
     // Pasted YouTube links, already probed by the form. Nothing is downloaded here or ever:
     // the transcriber fetches the media itself (@dgipr/schemas' youtube.ts).
     let youtube: YouTubeVideo[] = [];
+
+    // Everything already written to the private bucket for a row that may still never be
+    // inserted. Best-effort on every path that gives up: an abandoned recording is invisible
+    // to the product and nothing would ever come back for it.
+    const discardStaged = async (): Promise<void> => {
+      if (uploads.length === 0) return;
+      try {
+        await removeObjectsIn(
+          client,
+          DLO_UPLOADS_BUCKET,
+          uploads.map((upload) => upload.storagePath),
+        );
+      } catch (error) {
+        console.error(
+          `[transcription ${runId}] could not discard staged uploads:`,
+          error,
+        );
+      }
+    };
 
     const parts = request.parts({
       limits: { fileSize: MAX_FILE_BYTES, files: TRANSCRIPTION_MAX_FILES },
@@ -138,6 +171,7 @@ export function registerTranscriptionRoutes(
           try {
             youtube = YouTubeSourcesSchema.parse(JSON.parse(value));
           } catch {
+            await discardStaged();
             return reply.code(400).send({
               error: { message: 'यूट्युब लिंकची माहिती वाचता आली नाही.' },
             });
@@ -146,6 +180,7 @@ export function registerTranscriptionRoutes(
           // put an arbitrary URL in front of the transcriber.
           for (const video of youtube) {
             if (parseYouTubeVideoId(video.url) === null) {
+              await discardStaged();
               return reply
                 .code(400)
                 .send({ error: { message: 'यूट्युब लिंक वैध नाही.' } });
@@ -155,6 +190,7 @@ export function registerTranscriptionRoutes(
         }
         const name = part.filename ?? '';
         if (!isAudioFileName(name)) {
+          await discardStaged();
           return reply.code(400).send({
             error: {
               message:
@@ -162,13 +198,40 @@ export function registerTranscriptionRoutes(
             },
           });
         }
-        uploads.push({ name, data: await part.toBuffer() });
+        // Straight from the wire to S3 — the recording is never assembled in this process.
+        // Awaited inside the loop deliberately: busboy delivers one part at a time and stalls
+        // until the current one is drained, so this is also what keeps the parts in order.
+        const storagePath = storagePathFor(runId, uploads.length, name);
+        const bytes = await uploadStream(
+          client,
+          DLO_UPLOADS_BUCKET,
+          storagePath,
+          part.file,
+          // Extension-driven rather than trusting the browser's reported type, which is empty
+          // or wrong for several of these containers. `isAudioFileName` above guarantees a hit.
+          audioMimeForFileName(name) ?? 'audio/mpeg',
+        );
+        uploads.push({ name, storagePath, bytes });
+        // busboy TRUNCATES a part that hits the size limit rather than erroring, so without
+        // this a capped upload would be stored and transcribed as if it were the whole
+        // recording. Unreachable while the limit above is Infinity; here so that a future
+        // ceiling fails loudly instead of silently shortening a meeting.
+        if (part.file.truncated) {
+          await discardStaged();
+          return reply
+            .code(413)
+            .send({ error: { message: 'फाईल खूप मोठी आहे.' } });
+        }
       }
     } catch (error) {
-      // @fastify/multipart raises FST_REQ_FILE_TOO_LARGE from toBuffer when a part exceeds
-      // the per-request fileSize limit above. That limit is now unlimited, so this branch is
-      // unreachable and is kept only so a future ceiling has somewhere to land — hence a
-      // message that names no number (the routes/dlo.ts precedent).
+      // Reached by a browser that vanished mid-upload as well as by a rejected part: the
+      // iterator raises FST_MP_PREMATURE_CLOSE, and whatever had already landed belongs to a
+      // run that will never exist.
+      await discardStaged();
+      // @fastify/multipart raises FST_REQ_FILE_TOO_LARGE when a part exceeds the per-request
+      // fileSize limit above. That limit is now unlimited, so this branch is unreachable and
+      // is kept only so a future ceiling has somewhere to land — hence a message that names
+      // no number (the routes/dlo.ts precedent).
       if (
         typeof error === 'object' &&
         error !== null &&
@@ -190,10 +253,12 @@ export function registerTranscriptionRoutes(
       });
     }
 
-    // Insert first (the storage paths need the row id), then archive the originals to the
-    // private bucket, then attach the per-file entries and start the job — the job reads
-    // everything back off the row, so a restart between the two loses nothing silently.
+    // The recordings are already archived — they were streamed there as they arrived, under
+    // keys built from `runId`, which is why this insert can carry that id rather than take
+    // one from the database. Everything else is unchanged: the row is still written before
+    // the job starts, and the job still reads it all back off the row.
     const row = await insertTranscription(client, {
+      id: runId,
       title: transcriptionTitle([
         ...uploads.map((upload) => upload.name),
         // A video's probed title where there is one; the link itself otherwise.
@@ -201,24 +266,14 @@ export function registerTranscriptionRoutes(
       ]),
       files: [],
     });
-    const entries: TranscriptionFileEntry[] = [];
-    for (const [index, upload] of uploads.entries()) {
-      const storagePath = storagePathFor(row.id, index, upload.name);
-      await uploadFile(
-        client,
-        DLO_UPLOADS_BUCKET,
-        storagePath,
-        upload.data,
-        // Extension-driven rather than trusting the browser's reported type, which is empty
-        // or wrong for several of these containers. `isAudioFileName` above guarantees a hit.
-        audioMimeForFileName(upload.name) ?? 'audio/mpeg',
-      );
-      entries.push({
-        name: upload.name,
-        storagePath,
-        status: 'pending',
-      });
-    }
+    const entries: TranscriptionFileEntry[] = uploads.map((upload) => ({
+      name: upload.name,
+      storagePath: upload.storagePath,
+      // What the upload actually weighed. The job reads it to decide how many recordings it
+      // may hold at once, so it is a memory bound rather than a display figure.
+      bytes: upload.bytes,
+      status: 'pending',
+    }));
 
     // Then the links, beside the recordings — the job transcribes both in one pass. No
     // upload and no archive: there are no bytes on our side at any point, only a URL.

@@ -20,17 +20,26 @@ import { z } from 'zod';
 export const DocumentKindSchema = z.enum(['pdf', 'docx', 'txt']);
 export type DocumentKind = z.infer<typeof DocumentKindSchema>;
 
-// No upload ceiling: a department scan can be a whole booklet, and refusing it at the door
-// was the one failure an officer could do nothing about. The routes still pass this as their
-// multipart `fileSize` limit — busboy treats Infinity as "unlimited", which is its own
-// default — so the only bound left is the box's memory: an intake job holds the file's bytes
-// in process for its TTL, so a very large upload costs RAM for up to 60 minutes.
+// 50 MB per file, and this number is NOT ours — it is the ceiling of the backend that now
+// reads every document: "each file must be under 50 MB" (OpenAI file inputs). A document
+// above it cannot be handed to the model at all, so refusing it at the picker is strictly
+// kinder than accepting it and failing minutes into a job.
 //
-// The page-selection spend gate is untouched and is what keeps a 300-page scan cheap:
-// nothing is read until pages are ticked. It is now the ONLY gate — OCR_MAX_TOTAL_PAGES no
-// longer defaults to 50 and is off unless SARVAM_DOC_MAX_TOTAL_PAGES is set, since every
-// page it refused had already been chosen on purpose.
-export const DOCUMENT_MAX_BYTES = Number.POSITIVE_INFINITY;
+// This ceiling was deliberately removed once, and the reasoning then was sound: a department
+// scan can be a whole booklet, and refusing it at the door was the one failure an officer
+// could do nothing about. What changed is that the page-selection spend gate — described
+// then as "the ONLY gate" — is gone from /dlo, because a PDF now goes to the model whole
+// rather than page by page. A byte ceiling is what replaces it.
+//
+// The routes pass this as their multipart `fileSize` limit, so it is enforced server-side as
+// well as at the picker. It bounds memory too: an intake job holds the file's bytes in
+// process for its TTL.
+//
+// PER FILE, NEVER PER REQUEST. An intake may carry several documents and each is read as its
+// own document in its own API call, so OpenAI's "combined limit across all files in the
+// request" clause never binds here — two 40 MB scans are two requests, not one 80 MB one.
+export const DOCUMENT_MAX_MB = 50;
+export const DOCUMENT_MAX_BYTES = DOCUMENT_MAX_MB * 1024 * 1024;
 
 // Which backend produced the page text. Shown to the user because it changes how hard the
 // review step has to work: OCR misreads names and amounts, a text layer is exact.

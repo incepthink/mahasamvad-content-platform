@@ -4,10 +4,14 @@
 // an officer losing work they have not submitted yet.
 //
 // 1. THE DRAFT (sessionStorage). What is typed into the new-intake form before it becomes an
-//    intake: notes, category, heading, style reference, and the ids of the document upload
-//    slots. The slot ids matter more than they look — each <DocumentIntake> card already
-//    survives a reload by keeping its ephemeral job id under `dgipr.dlo.document.${slotId}`,
-//    but only if the SAME slot ids come back, so `nextSlotId` is stored too.
+//    intake: notes, category, heading, style reference, instructions and links.
+//
+//    It used to carry the ids of the document upload SLOTS, because each document was read
+//    here, by an ephemeral <DocumentIntake> job whose id had to be found again after a
+//    reload. Nothing is read at this step any more — a document is uploaded with the intake
+//    and read by the article call itself — so a document is now exactly what a photograph is:
+//    a picked File, held in module state within a session and remembered only by NAME across
+//    a reload.
 //
 // 2. THE OWNERSHIP LIST (localStorage). The intake ids this browser created.
 //
@@ -44,13 +48,13 @@ export type DloDraft = Readonly<{
   styleReference: string;
   // The officer's trusted request for the article (generations.instructions, 0041).
   instructions: string;
-  documentSlotIds: readonly number[];
-  nextSlotId: number;
   // Names only — see the header. Used to ask for the recordings back after a reload.
   audioNames: readonly string[];
-  // Same again for the photographs, and for exactly the same reason: a picked File cannot be
-  // serialized, so a reload keeps the names and the form asks for the files back.
+  // Same again for the photographs and the documents, and for exactly the same reason: a
+  // picked File cannot be serialized, so a reload keeps the names and the form asks for the
+  // files back.
   imageNames: readonly string[];
+  documentNames: readonly string[];
   // YouTube sources, in full. Unlike a picked recording these ARE serializable — a link and
   // the title/thumbnail the probe returned are just strings — so they survive a reload
   // intact and need no "please add these again" callout.
@@ -63,14 +67,9 @@ export const EMPTY_DRAFT: DloDraft = {
   heading: '',
   styleReference: '',
   instructions: '',
-  // No document block until one is asked for. It used to open with one, because the block WAS
-  // the control — there was no other way to reach a file dialog. The sources card's own
-  // "कागदपत्र जोडा" button is that way now, so an empty block on arrival is just height in
-  // front of a form most runs never use it for.
-  documentSlotIds: [],
-  nextSlotId: 0,
   audioNames: [],
   imageNames: [],
+  documentNames: [],
   youtube: [],
 };
 
@@ -108,6 +107,23 @@ export function clearPendingImages(): void {
   pendingImages = [];
 }
 
+// Documents picked but not yet submitted. Its own variable for the same reason the two above
+// are separate: the form rebuilds three pickers after a client-side navigation, and one mixed
+// list would not tell it which file belonged to which.
+let pendingDocuments: File[] = [];
+
+export function getPendingDocuments(): File[] {
+  return pendingDocuments;
+}
+
+export function setPendingDocuments(files: readonly File[]): void {
+  pendingDocuments = [...files];
+}
+
+export function clearPendingDocuments(): void {
+  pendingDocuments = [];
+}
+
 function isBrowser(): boolean {
   return typeof window !== 'undefined';
 }
@@ -120,9 +136,10 @@ export function readDraft(): DloDraft | null {
     const parsed = JSON.parse(raw) as Partial<DloDraft>;
     // Hand-validated rather than zod'd: this is private browser state with one writer, and a
     // shape mismatch should degrade to "no draft" rather than throw during a render.
-    const slotIds = Array.isArray(parsed.documentSlotIds)
-      ? parsed.documentSlotIds.filter((id) => Number.isInteger(id))
-      : EMPTY_DRAFT.documentSlotIds;
+    const names = (value: unknown): string[] =>
+      Array.isArray(value)
+        ? value.filter((name): name is string => typeof name === 'string')
+        : [];
     return {
       notes: typeof parsed.notes === 'string' ? parsed.notes : '',
       category: parsed.category === 'scheme' ? 'scheme' : 'news',
@@ -131,23 +148,9 @@ export function readDraft(): DloDraft | null {
         typeof parsed.styleReference === 'string' ? parsed.styleReference : '',
       instructions:
         typeof parsed.instructions === 'string' ? parsed.instructions : '',
-      // An empty list is a real answer now — "this draft has no documents" — where it used to
-      // be restored to one block because the form could not show none.
-      documentSlotIds: slotIds,
-      nextSlotId:
-        typeof parsed.nextSlotId === 'number' && parsed.nextSlotId >= 0
-          ? parsed.nextSlotId
-          : Math.max(...slotIds, -1) + 1,
-      audioNames: Array.isArray(parsed.audioNames)
-        ? parsed.audioNames.filter(
-            (name): name is string => typeof name === 'string',
-          )
-        : [],
-      imageNames: Array.isArray(parsed.imageNames)
-        ? parsed.imageNames.filter(
-            (name): name is string => typeof name === 'string',
-          )
-        : [],
+      audioNames: names(parsed.audioNames),
+      imageNames: names(parsed.imageNames),
+      documentNames: names(parsed.documentNames),
       // The one field worth schema-parsing rather than hand-checking: it is a nested shape
       // that is submitted to the API as-is, so a malformed draft should restore as "no
       // links" instead of being posted.

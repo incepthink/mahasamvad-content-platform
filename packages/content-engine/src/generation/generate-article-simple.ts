@@ -88,6 +88,10 @@ import {
   articleStyleReferencesEnabled,
   buildArticleMessagesForReferenceMode,
 } from './no-reference-article-prompt.js';
+import {
+  DLO_ARTICLE_PROMPT_VERSION,
+  buildDloArticleMessages,
+} from './dlo-article-prompt.js';
 
 // Which editorial specification writes the article. 'standard' (the unset default) is the full
 // DGIPR specification in simple-article-prompt.ts. 'minimal' is the experiment: five sentences,
@@ -139,6 +143,9 @@ export type SimpleGenerateArticleOptions = Readonly<{
   // Used only when they arrive from trusted input; nothing here infers them.
   location?: string | undefined;
   date?: string | undefined;
+  // The post-name-review /dlo lane has its own complete prompt. It is explicit rather than
+  // inferred from the presence of a DLO row so the content engine stays independent of storage.
+  promptMode?: 'default' | 'dlo' | undefined;
 }>;
 
 // What the run used, persisted to generations.style_reference_meta. Both the calibration signal
@@ -187,10 +194,12 @@ export async function generateArticleSimple(
   const selectedFacts = options?.includeFacts ?? [];
   const statements = options?.statements ?? [];
   const designations = options?.designations ?? [];
+  const dloPrompt = options?.promptMode === 'dlo';
 
   // References are temporarily bypassed by default. The complete existing tier 1 → 2 → 3
-  // selector remains immediately available behind ARTICLE_STYLE_REFERENCES_ENABLED=true.
-  const referencesEnabled = articleStyleReferencesEnabled();
+  // selector remains immediately available behind ARTICLE_STYLE_REFERENCES_ENABLED=true for
+  // ordinary articles. /dlo's approved prompt never carries a style reference.
+  const referencesEnabled = !dloPrompt && articleStyleReferencesEnabled();
   let styleReference = NO_STYLE_REFERENCE;
   if (referencesEnabled) {
     onProgress('retrieve');
@@ -225,11 +234,18 @@ export async function generateArticleSimple(
     date: options?.date,
   } as const;
 
-  const messages = buildArticleMessagesForReferenceMode(
-    promptInputs,
-    variant,
-    referencesEnabled,
-  );
+  const messages = dloPrompt
+    ? buildDloArticleMessages({
+        sourceInformation: note,
+        designations,
+        heading: options?.heading,
+        officerInstructions: options?.instructions,
+      })
+    : buildArticleMessagesForReferenceMode(
+        promptInputs,
+        variant,
+        referencesEnabled,
+      );
   const callOptions = {
     model: ARTICLE_MODEL,
     maxTokens: ARTICLE_BODY_MAX_TOKENS,
@@ -252,17 +268,20 @@ export async function generateArticleSimple(
     );
   }
 
-  // The officer named a length: measure it, and buy ONE rewrite on a miss. Before the
-  // deterministic passes below, which must run on the text that will actually be stored.
-  const fit = await fitArticleToLength(
-    body,
-    options?.instructions?.trim()
-      ? `${note}\n\n=== OFFICER REQUEST ===\n${options.instructions.trim()}`
-      : note,
-    parseLengthRequest(options?.instructions) ??
-      parseLengthRequest(options?.heading),
-    category,
-  );
+  // Ordinary articles measure a requested length and buy ONE rewrite on a miss. /dlo uses only
+  // its approved prompt, so a second rewriting prompt must not silently replace its answer.
+  const fit: Readonly<{ article: string; warning: LengthWarning | null }> =
+    dloPrompt
+      ? { article: body, warning: null }
+      : await fitArticleToLength(
+          body,
+          options?.instructions?.trim()
+            ? `${note}\n\n=== OFFICER REQUEST ===\n${options.instructions.trim()}`
+            : note,
+          parseLengthRequest(options?.instructions) ??
+            parseLengthRequest(options?.heading),
+          category,
+        );
 
   // Deterministic and last, exactly as in the full pipeline: the officer approved "this person
   // is named with this title", and this pass — not the prompt — is the guarantee.
@@ -288,17 +307,21 @@ export async function generateArticleSimple(
 
   // Which specification produced this article. Persisted below, so a good or bad output is
   // attributable to the prompt rather than to a memory of which env line was set that day.
-  const promptVersion = referencesEnabled
-    ? variant === 'minimal'
-      ? MINIMAL_ARTICLE_PROMPT_VERSION
-      : SIMPLE_ARTICLE_PROMPT_VERSION
-    : `${variant}-${NO_REFERENCE_ARTICLE_PROMPT_VERSION}`;
+  const promptVersion = dloPrompt
+    ? DLO_ARTICLE_PROMPT_VERSION
+    : referencesEnabled
+      ? variant === 'minimal'
+        ? MINIMAL_ARTICLE_PROMPT_VERSION
+        : SIMPLE_ARTICLE_PROMPT_VERSION
+      : `${variant}-${NO_REFERENCE_ARTICLE_PROMPT_VERSION}`;
 
   console.log(
     `[simple-article] ${category} | model=${ARTICLE_MODEL} effort=${articleReasoningEffort()} | ` +
       `style-ref=${styleReference.source}x${styleReference.articles.length} | ` +
       `prompt=${promptVersion}${
-        variant === 'minimal' ? ` names=${(options?.names ?? []).length}` : ''
+        !dloPrompt && variant === 'minimal'
+          ? ` names=${(options?.names ?? []).length}`
+          : ''
       } | ${article.length} chars | ` +
       `${article.trim().split(/\s+/u).length} words`,
   );

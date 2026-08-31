@@ -4,10 +4,12 @@ import multipart from '@fastify/multipart';
 import { fileURLToPath } from 'node:url';
 import { ZodError } from 'zod';
 import { createServiceRoleClient } from '@dgipr/database';
+import { isAllowedOrigin } from './cors-origins.js';
 import { registerAnalyticsRoutes } from './routes/analytics.js';
 import { registerCanvaRoutes } from './routes/canva.js';
 import { registerChatRoutes } from './routes/chat.js';
 import { registerDloRoutes } from './routes/dlo.js';
+import { registerNewDloRoutes } from './routes/new-dlo.js';
 import { registerDocumentRoutes } from './routes/documents.js';
 import { registerGenerationRoutes } from './routes/generations.js';
 import { registerGlossaryRoutes } from './routes/glossary.js';
@@ -32,10 +34,14 @@ export async function createServer() {
     bodyLimit: 67_108_864,
   });
 
+  // A callback rather than the list itself, because CORS_ORIGIN entries may be wildcard
+  // patterns (see cors-origins.ts - Vercel gives every deployment a fresh hostname). A
+  // request carrying no Origin header is not a browser request and is left alone; a
+  // disallowed one simply gets no CORS header, which is the array form's behaviour too.
   await app.register(cors, {
-    origin: (
-      process.env.CORS_ORIGIN ?? 'http://localhost:3000,http://127.0.0.1:3000'
-    ).split(','),
+    origin: (origin, cb) => {
+      cb(null, origin === undefined || isAllowedOrigin(origin));
+    },
     methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'],
   });
 
@@ -131,6 +137,7 @@ export async function createServer() {
       registerDesignationRoutes(instance, client);
       registerReferenceRoutes(instance, client);
       registerDloRoutes(instance, client);
+      registerNewDloRoutes(instance, client);
       registerTranscriptionRoutes(instance, client);
       registerVideoRoutes(instance, client);
       // The general assistant. The only route in this API that streams its response.

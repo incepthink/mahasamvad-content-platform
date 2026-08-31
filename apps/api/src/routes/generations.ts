@@ -3,8 +3,13 @@
 
 import type { FastifyInstance } from 'fastify';
 import { PassThrough } from 'node:stream';
+import { once } from 'node:events';
 import { z } from 'zod';
 import {
+  DLO_UPLOADS_BUCKET,
+  downloadFile,
+  downloadFileRange,
+  getDloIntake,
   getGeneration,
   getReferenceImageRow,
   getReferenceTypeRow,
@@ -49,6 +54,7 @@ import {
   PosterFeedbackRequestSchema,
   PosterImageFeedbackRequestSchema,
   RegeneratePosterRequestSchema,
+  RestoreArticleVersionRequestSchema,
   RestorePosterVersionRequestSchema,
   TranslateGenerationRequestSchema,
   UpdateCaptionRequestSchema,
@@ -56,8 +62,10 @@ import {
   isArticleCategory,
   isSocialCategory,
   isYoutubeCategory,
+  intakeFileMimeForFileName,
   referenceCategoryOf,
   type GenerationDetail,
+  type GenerationSourceFile,
   type GenerationStep,
   type GenerationSummary,
   type ThreadItem,
@@ -118,6 +126,12 @@ const PublishRequestSchema = z.object({
 // double click must never produce two live posts. In-process only (like the
 // runner's job registry) — resets on restart, fine for a seconds-long call.
 const publishing = new Set<string>();
+
+// How much of one archived source file is held in memory at a time while it is forwarded to
+// the browser. A meeting recording can be hundreds of megabytes, and buffering one whole is
+// the shape that OOM-killed this container on the upload path (2026-08-30), so the byte route
+// below streams it a part at a time instead.
+const SOURCE_FILE_PART_BYTES = 8 * 1024 * 1024;
 
 // Official-account credentials, read from env at point of use (repo pattern).
 // Empty/missing values → null so the route can 503 with a setup message.
@@ -198,6 +212,84 @@ function posterVersionPaths(
   ];
 }
 
+// Every wording the article has had, oldest→newest. The article-target revision rows ARE the
+// history: each one snapshots the text as it stood after that round, and the first article
+// feedback of a run additionally snapshots the text BEFORE it (see startArticleFeedbackJob),
+// so the original is in the list rather than lost to the round that replaced it.
+//
+// `current` is decided by comparing text against the row, NOT by taking the last entry:
+// restoring an older wording repoints `row.article` and leaves the log alone — the poster
+// restore route's model exactly — so after a restore the newest entry is not the current one.
+// Shared by the detail payload, the text route and the restore route, so a version INDEX means
+// the same thing on all three.
+//
+// A run that has never been given feedback has no rows and gets an empty list: one wording is
+// not a history, and the page shows no version control for it.
+function articleVersionsOf(
+  row: GenerationRow,
+  revisions: readonly {
+    target: string;
+    article: string | null;
+    factCheck: string | null;
+    feedback: string | null;
+    createdAt: string;
+  }[],
+): {
+  version: number;
+  createdAt: string;
+  feedback: string | null;
+  current: boolean;
+  article: string;
+  factCheck: string | null;
+}[] {
+  const snapshots = revisions.filter(
+    (revision) => revision.target === 'article' && revision.article !== null,
+  );
+  if (snapshots.length === 0) return [];
+  // The row is the authority on the CURRENT wording, and it can differ from every snapshot —
+  // a hand edit elsewhere, or a revision whose row-write landed and whose log insert did not.
+  // Comparing trimmed text is enough: both sides are the same string written by the same code.
+  const currentArticle = (row.article ?? '').trim();
+  let matched = false;
+  const versions = snapshots.map((revision, index) => {
+    const article = revision.article ?? '';
+    // Only the LAST matching snapshot is marked current, so a revision that happened to
+    // reproduce an earlier wording does not put the marker in two places.
+    const current = article.trim() === currentArticle;
+    if (current) matched = true;
+    return {
+      version: index + 1,
+      createdAt: revision.createdAt,
+      feedback: revision.feedback,
+      current,
+      article,
+      factCheck: revision.factCheck,
+    };
+  });
+  const latestMatch = versions.reduce(
+    (found, version) => (version.current ? version.version : found),
+    0,
+  );
+  for (const version of versions) {
+    if (version.current && version.version !== latestMatch) {
+      versions[version.version - 1] = { ...version, current: false };
+    }
+  }
+  // The row's wording is in none of them, so it is a version in its own right — appended
+  // rather than swallowed, or the officer would be shown a history their article is not in.
+  if (!matched && currentArticle.length > 0) {
+    versions.push({
+      version: versions.length + 1,
+      createdAt: row.updatedAt,
+      feedback: null,
+      current: true,
+      article: row.article ?? '',
+      factCheck: row.factCheck,
+    });
+  }
+  return versions;
+}
+
 async function toDetail(
   client: SupabaseClient,
   row: GenerationRow,
@@ -209,6 +301,11 @@ async function toDetail(
     posterUrl: publicUrl(client, version.path),
     createdAt: version.createdAt,
   }));
+  // Metadata only — the article text of every version would be tens of kilobytes on a poll
+  // that runs every 2.5 s. /article-versions serves the text when it is actually wanted.
+  const articleVersions = articleVersionsOf(row, revisions).map(
+    ({ article: _article, factCheck: _factCheck, ...meta }) => meta,
+  );
   return {
     id: row.id,
     status: row.status,
@@ -234,6 +331,7 @@ async function toDetail(
     posterUrl: row.posterPath ? publicUrl(client, row.posterPath) : null,
     sceneUrl: row.scenePath ? publicUrl(client, row.scenePath) : null,
     posterVersions,
+    articleVersions,
     // The colour + composition this poster was assigned, flattened to one Marathi line for the
     // UI. Resolved server-side because the libraries live in @dgipr/content-engine and apps/web
     // must not import it (the same rule that moved tweetWeightedLength into @dgipr/schemas).
@@ -548,15 +646,10 @@ export function registerGenerationRoutes(
         // back until the run finished — precisely what this route exists to avoid.
         .header('x-accel-buffering', 'no');
 
-      // Already written: serve it whole and close. This is what a reload after completion
-      // gets, and what keeps a reconnecting EventSource from retrying forever.
-      if (row.article) {
-        send('snapshot', row.article);
-        send('end', {});
-        stream.end();
-        return reply.send(stream);
-      }
-
+      // A LIVE stream wins over the stored article, and that ordering is the whole of what
+      // makes a feedback revision watchable: `row.article` is non-null throughout a rewrite,
+      // so serving it first would answer every revision with the OLD text and close. An
+      // initial run is unaffected — it has no article to prefer.
       const { unsubscribe, live } = subscribeArticleStream(
         request.params.id,
         (event) => {
@@ -569,11 +662,14 @@ export function registerGenerationRoutes(
         },
       );
 
-      // Nothing to watch — this run is not being drafted in this process (it failed, it never
-      // generates an article, or the API restarted). Say so and close; the client's poll is
-      // already following the row.
+      // Nothing to watch — this run is not being drafted or revised in this process (it
+      // finished, it failed, it never generates an article, or the API restarted). Serve
+      // whatever is on the row and close; the client's poll is already following it. This is
+      // also what a reload after completion gets, and what keeps a reconnecting EventSource
+      // from retrying forever.
       if (!live) {
         if (!stream.writableEnded) {
+          if (row.article) send('snapshot', row.article);
           send('end', {});
           stream.end();
         }
@@ -1076,6 +1172,83 @@ export function registerGenerationRoutes(
     },
   );
 
+  // Every wording the article has had, WITH the text. Its own route rather than a field on the
+  // detail payload for the reason the source-file list is: the detail poll runs every 2.5 s
+  // and an article is thousands of characters, so the history would be re-shipped hundreds of
+  // times over a run to serve a control the officer may never touch. The metadata is on the
+  // payload (`articleVersions`), which is what decides whether the control is drawn at all;
+  // this is fetched once, when they actually move between versions.
+  app.get<{ Params: { id: string } }>(
+    '/generations/:id/article-versions',
+    async (request, reply) => {
+      const row = await getGeneration(client, request.params.id);
+      if (!row) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'Generation not found.' } });
+      }
+      const revisions = await listRevisions(client, row.id);
+      return reply.send({ versions: articleVersionsOf(row, revisions) });
+    },
+  );
+
+  // Bring an older wording back as the current article, so every path that reads
+  // `row.article` — the page, the PDF export, translation, poster copy, the next feedback
+  // round — continues from THAT text instead of the latest. They all read the one column and
+  // needed no change: this route moves it.
+  //
+  // ONE column update and nothing else: no revision row, no model call, no spend. Selecting a
+  // version is not an edit and must not look like one, or the strip would grow an entry every
+  // time an officer looked around it (the poster restore route's finding, and the same
+  // reasoning). It is safe precisely because the log is append-only: the wording being
+  // replaced is still a row in it, so nothing is lost and switching back is the same move.
+  app.post<{ Params: { id: string } }>(
+    '/generations/:id/article/restore',
+    async (request, reply) => {
+      const body = RestoreArticleVersionRequestSchema.parse(request.body);
+      const row = await getGeneration(client, request.params.id);
+      if (!row) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'Generation not found.' } });
+      }
+      // A revision in flight is about to overwrite the very column this writes, and the
+      // article feedback jobs report through the registry rather than the row's status — so
+      // both have to be asked.
+      if (isJobRunning(row.id) || isRevisingArticle(row.id)) {
+        return reply.code(409).send({
+          error: { message: 'या बातमीवर सध्या काम सुरू आहे. थोडे थांबा.' },
+        });
+      }
+
+      const revisions = await listRevisions(client, row.id);
+      const versions = articleVersionsOf(row, revisions);
+      const chosen = versions[body.version - 1];
+      if (!chosen) {
+        return reply.code(400).send({
+          error: {
+            message: `या बातमीच्या ${versions.length} आवृत्त्या आहेत; ${body.version} क्रमांकाची आवृत्ती नाही.`,
+          },
+        });
+      }
+      if (chosen.current) {
+        return reply.code(409).send({
+          error: { message: 'हीच आवृत्ती सध्या वापरात आहे.' },
+        });
+      }
+
+      // factCheck moves with the article: the traceability appendix belongs to one wording,
+      // and leaving the previous version's appendix under a restored article would trace it
+      // against sentences it no longer contains.
+      await updateGeneration(client, row.id, {
+        article: chosen.article,
+        factCheck: chosen.factCheck,
+      });
+
+      return reply.send({ article: chosen.article });
+    },
+  );
+
   // Bring an older poster render back as the current one, so every edit path — image
   // feedback, marker feedback, redesign, publish, download — continues from THAT poster
   // instead of the latest. They all read `row.posterPath` and needed no change: this route
@@ -1307,6 +1480,137 @@ export function registerGenerationRoutes(
           `attachment; filename="dgipr-poster-${row.id}.png"`,
         )
         .send(png);
+    },
+  );
+
+  // ---------- the source files this run was generated from ----------
+  //
+  // A run made on /dlo carries `dlo_intake_id` (0018), and that intake still holds the
+  // officer's own uploads in the private dlo-uploads bucket. These two routes hand them back
+  // so the article's मूळ टिपणी fold can list them and open each one, which is what makes the
+  // assembled note checkable against the scan or recording it was transcribed from.
+  //
+  // Deliberately NOT folded into the detail payload: the intake's `files` jsonb carries every
+  // transcript and every OCR'd page, so reading it would re-ship a whole meeting on each tick
+  // of the 2.5 s detail poll. It is fetched once, when the fold is opened.
+  app.get<{ Params: { id: string } }>(
+    '/generations/:id/source-files',
+    async (request, reply) => {
+      const row = await getGeneration(client, request.params.id);
+      if (!row) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'Generation not found.' } });
+      }
+      // A media-room run has no intake behind it (its uploaded document is read by the
+      // shared ephemeral service and never archived), and neither does an intake that has
+      // since been deleted. Both are an empty list, not an error: the fold simply shows the
+      // note on its own, exactly as it does today.
+      const intake = row.dloIntakeId
+        ? await getDloIntake(client, row.dloIntakeId)
+        : null;
+      const files: GenerationSourceFile[] = (intake?.files ?? []).flatMap(
+        (entry, index) =>
+          // Listed only when there is something to open. A document whose ephemeral upload
+          // job had expired by the time the intake was created has its text but not its
+          // bytes (see DloIntakeFileEntry.storagePath), and offering a link that can only
+          // 404 is worse than not offering one.
+          entry.storagePath !== undefined || entry.sourceUrl !== undefined
+            ? [
+                {
+                  index,
+                  name: entry.name,
+                  kind: entry.kind,
+                  externalUrl: entry.sourceUrl ?? null,
+                },
+              ]
+            : [],
+      );
+      return reply.send({ files });
+    },
+  );
+
+  // One of those originals, served back as bytes.
+  //
+  // A proxy rather than a URL for the reason the /dlo review card's photograph is one:
+  // dlo-uploads is PRIVATE, and an officer's meeting material must not become a public
+  // object just so a link can be clicked. Addressed by INDEX, so no storage key is ever
+  // handed to the browser.
+  //
+  // Inline (no content-disposition), because the ask is to OPEN it in a new tab — a PDF, a
+  // photograph and a recording all render in the browser, and anything it cannot render it
+  // downloads on its own. `nosniff` because these are officer-uploaded bytes: the extension
+  // decides the type and the browser may not go looking for a better guess.
+  app.get<{ Params: { id: string; index: string } }>(
+    '/generations/:id/source-files/:index',
+    async (request, reply) => {
+      const row = await getGeneration(client, request.params.id);
+      const intake = row?.dloIntakeId
+        ? await getDloIntake(client, row.dloIntakeId)
+        : null;
+      const index = Number(request.params.index);
+      const entry = Number.isInteger(index) ? intake?.files[index] : undefined;
+      // One 404 for "no such run", "no such file" and "nothing archived" alike: the tab has
+      // nothing to do with the distinction, and the list above only ever offers a link for a
+      // file that has bytes.
+      if (!entry?.storagePath) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'फाईल सापडली नाही.' } });
+      }
+      reply
+        .header('content-type', intakeFileMimeForFileName(entry.name))
+        .header('x-content-type-options', 'nosniff')
+        // The object is immutable — an intake's uploads are written once — so the browser
+        // may keep it. Private, because the bucket is: no shared cache should hold it.
+        .header('cache-control', 'private, max-age=3600');
+      // A meeting recording can be hundreds of megabytes, and buffering one whole is the
+      // exact shape that OOM-killed this container on the upload path (2026-08-30). Where
+      // the size is recorded — every recording streamed to storage since then — it is
+      // forwarded a part at a time instead, so peak memory is one part however long the
+      // file is. Documents and photographs, which have no `bytes` and are small by
+      // construction, take the plain buffered read.
+      if (entry.bytes === undefined) {
+        return reply.send(
+          await downloadFile(client, DLO_UPLOADS_BUCKET, entry.storagePath),
+        );
+      }
+      const total = entry.bytes;
+      const path = entry.storagePath;
+      const stream = new PassThrough();
+      // A reader that goes away — a closed tab, a cancelled load — destroys the stream, and
+      // the loop below must notice: `drain` would never arrive after that, and the remaining
+      // parts would be fetched for nobody.
+      const gone = new AbortController();
+      stream.once('close', () => gone.abort());
+      void (async () => {
+        try {
+          for (let start = 0; start < total; start += SOURCE_FILE_PART_BYTES) {
+            if (gone.signal.aborted) return;
+            const end = Math.min(start + SOURCE_FILE_PART_BYTES, total) - 1;
+            const part = await downloadFileRange(
+              client,
+              DLO_UPLOADS_BUCKET,
+              path,
+              start,
+              end,
+            );
+            if (!stream.write(part)) {
+              await once(stream, 'drain', { signal: gone.signal });
+            }
+          }
+          stream.end();
+        } catch (error) {
+          // The response has already begun, so there is no status left to change: destroy
+          // the stream and let the client see a truncated transfer rather than a file that
+          // silently ends early and looks complete. Already destroyed (the reader left) is
+          // a no-op.
+          stream.destroy(error instanceof Error ? error : new Error('failed'));
+        }
+      })();
+      // Declared up front so the browser can show real progress on a long recording; the
+      // size is what the upload counted as it streamed the bytes to storage.
+      return reply.header('content-length', String(total)).send(stream);
     },
   );
 

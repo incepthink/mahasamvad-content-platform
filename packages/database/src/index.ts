@@ -71,11 +71,15 @@ export {
   VIDEOS_BUCKET,
   uploadPng,
   uploadFile,
+  uploadStream,
   publicUrl,
   publicUrlIn,
   downloadPng,
   downloadFile,
+  downloadFileRange,
+  signedDownloadUrl,
   removeObjects,
+  removeObjectsIn,
 } from './storage.js';
 export {
   VIDEO_PROJECTS_TABLE,
@@ -143,6 +147,7 @@ export {
   getChatFile,
   attachChatFile,
   updateChatFileOpenAiHandle,
+  markChatFileIndexed,
   type ChatRole,
   type ChatAttachmentKind,
   type ChatAttachmentEntry,

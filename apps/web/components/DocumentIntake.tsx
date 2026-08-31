@@ -36,6 +36,7 @@ import type {
   DocumentKind,
   PdfTextSourceValue,
 } from '@dgipr/schemas';
+import { DOCUMENT_MAX_BYTES } from '@dgipr/schemas';
 import {
   createDocumentIntake,
   extractDocumentIntakePages,
@@ -48,6 +49,7 @@ import {
   setPages,
   togglePage,
 } from '../lib/documentSelection';
+import { extractedPlainText } from '../lib/extractedText';
 import { useDocumentIntake } from '../lib/useDocumentIntake';
 import { STR } from '../lib/strings';
 import { errorMessage, storedErrorMessage } from '../lib/errorMessage';
@@ -61,6 +63,16 @@ const EXTENSIONS: Record<DocumentKind, string> = {
   docx: '.docx',
   txt: '.txt',
 };
+
+// For a caller that owns the file control itself (a composer toolbar button, on a surface
+// that mounts this component `headless`): the dialog's filter and the check applied to what
+// comes back, from the one list, so the two can never disagree about what a document is.
+export const DOCUMENT_FILE_ACCEPT = Object.values(EXTENSIONS).join(',');
+
+export function isDocumentFileName(fileName: string): boolean {
+  const name = fileName.toLowerCase();
+  return Object.values(EXTENSIONS).some((ext) => name.endsWith(ext));
+}
 
 function marathiNumber(value: number): string {
   return value.toLocaleString('mr-IN');
@@ -87,20 +99,36 @@ export type DocumentSnapshot = Readonly<{
 export type DocumentIntakeStatus =
   'empty' | 'unread' | 'reading' | 'ready' | 'failed';
 
+/**
+ * Enough to NAME the attached file while it is still being read — which the snapshot
+ * cannot do, being null until there is text (or a deferred selection) to describe. It
+ * exists for the attachment strip above this block: a card that says "वाचत आहोत…" under
+ * a blank name would be worse than no card at all.
+ */
+export type DocumentIntakeInfo = Readonly<{
+  fileName: string;
+  kind: DocumentKind;
+  pageCount: number | null;
+}>;
+
 export function DocumentIntake({
   storageKey,
   accept = ['pdf', 'docx', 'txt'],
   maxChars,
-  maxBytes,
+  maxBytes = DOCUMENT_MAX_BYTES,
   title,
   hint,
   autoOpenPicker = false,
   allowDeferredRead = false,
+  readWholeDocument = false,
   embedded = false,
+  headless = false,
   feature,
+  file,
   onText,
   onTextChange,
   onStatusChange,
+  onError,
   readRequest,
   onRemove,
   submitAction,
@@ -112,10 +140,13 @@ export function DocumentIntake({
   // The caller's character budget, if it has one. Shown against the running total so the
   // page checkboxes become the way to get under it.
   maxChars?: number | undefined;
-  // The caller's per-file upload ceiling, if it has one. Checked before the upload starts,
-  // which on a large scan is the difference between a refusal now and one several minutes
-  // from now. Omitted by every surface that does not cap uploads — the shared document
-  // service itself does not.
+  // The per-file upload ceiling, checked before the upload starts — which on a large scan is
+  // the difference between a refusal now and one several minutes from now.
+  //
+  // DEFAULTED, not optional-and-usually-absent: the ceiling is the reading backend's own
+  // per-file limit, so it is true of every surface rather than a policy each one opts into.
+  // A caller may still pass a LOWER one; passing Infinity is how a future surface with its
+  // own reader opts out.
   maxBytes?: number | undefined;
   // Card heading + hint, when the shared copy does not fit. /dlo needs its own: the default
   // hint promises the file is not stored, and a DLO document IS archived with the intake.
@@ -138,18 +169,42 @@ export function DocumentIntake({
   // LIVE mode only, in practice: a deferred document has no text, so there is nothing for the
   // handoff button to hand over.
   allowDeferredRead?: boolean | undefined;
+  // This surface reads the WHOLE document, so there is no page to choose and no picker to
+  // show. Set by /dlo, where a PDF is handed to the model entire rather than page by page.
+  //
+  // It does not change what is handed over — the picker already defaulted to every page and
+  // `allowDeferredRead` already handed that selection on without a commit — only whether the
+  // officer is asked a question that no longer has consequences. Keeping the selection
+  // machinery underneath is deliberate: `pendingPages` stays the wire shape, so the route,
+  // the intake job and the review step needed no change, and a surface that reads page by
+  // page again is one prop away.
+  readWholeDocument?: boolean | undefined;
   // Renders as a plain block inside the caller's own card instead of as a card of its own.
   // For a surface where the file sits BESIDE its text box rather than replacing it (the
   // media room): a nested card there reads as a second, separate form, and the officer has
   // to work out whether the two are related. Only the wrapper and the heading level change
   // — every state below renders identically inside it.
   embedded?: boolean | undefined;
+  // Renders NOTHING — every hook above the render stays, so the file is still uploaded,
+  // polled, selected whole and reported through the callbacks below, but this component
+  // draws no card. For a surface that already lists its sources somewhere else (/dlo lists
+  // every attachment as a card in its composer strip): with no page to choose, the card
+  // here had only the file's name and a remove button left on it, both of which that strip
+  // already carries, so it was a second copy of an answer the officer had already been
+  // given. A headless caller supplies the file itself (`file`) — there is no file control
+  // to press — and must take `onError`, or an upload refusal has nowhere to appear.
+  headless?: boolean | undefined;
   // Which sidebar feature this upload belongs to, for /analytics attribution only. The
   // document service is shared by four surfaces and knows nothing else about its caller, so
   // without it a PAID OCR read is countable in the bill and attributable to nobody. Optional
   // and never guessed server-side: an omitted value records no service row, which is honest,
   // where a default would put one surface's spend on another's card.
   feature?: AnalyticsFeatureKey | undefined;
+  // The file to read, for a caller that owns the file control itself (see `headless`).
+  // Uploaded once, when it first arrives, and never over a job this component is already
+  // re-attaching to — a read that has been paid for outranks a fresh pick of the same slot.
+  // Ignored while this component renders its own picker; there the <input> is the source.
+  file?: File | undefined;
   // HANDOFF mode: the text reaches the caller only when the button is pressed. Right for a
   // surface whose single text box the file REPLACES (/translate, /proofread) — the click is
   // what authorises overwriting whatever is in it.
@@ -168,7 +223,18 @@ export function DocumentIntake({
   // LIVE mode: lets a parent distinguish an attached scan whose selected pages have not
   // been read yet from a genuinely empty source. Bumping `readRequest` asks this component
   // to run its existing selected-page extraction flow.
-  onStatusChange?: ((status: DocumentIntakeStatus) => void) | undefined;
+  // The second argument names the attached file (null before one is attached), so a
+  // caller listing its sources can label a read that is still running. A caller that only
+  // wants the status ignores it — which is why it is a second parameter rather than a
+  // change to the first.
+  onStatusChange?:
+    | ((status: DocumentIntakeStatus, info: DocumentIntakeInfo | null) => void)
+    | undefined;
+  // Upload refusals (wrong kind, too large, the create call failed) and their clearing,
+  // for a caller that has to show them itself. REQUIRED IN PRACTICE of a `headless` one:
+  // this component renders the notice inline in every other mode, and a refusal nobody
+  // renders is an attachment that silently never appears.
+  onError?: ((message: string | null) => void) | undefined;
   readRequest?: number | undefined;
   // Offered by a surface that shows SEVERAL of these at once (/dlo), where dropping one
   // document has to be possible without dropping the others.
@@ -261,12 +327,20 @@ export function DocumentIntake({
   }, [detail?.status]);
 
   const pages = detail?.pages ?? [];
+  // The string every caller receives, and it is PROSE — a page read by Sarvam's OCR
+  // arrives as semantic HTML (see lib/extractedText), and /translate and /proofread were
+  // handing that markup to a model as the text to work on. The pages themselves are left
+  // exactly as they were extracted: the review list still renders the HTML as a table and
+  // the correction textarea still edits the source, so what is stored and what is shown
+  // are unchanged — only what leaves this component for a model is converted.
   const text = useMemo(
     () =>
-      joinPageTexts(pages, {
-        isSelected: (page) => selected.has(page),
-        edits,
-      }),
+      extractedPlainText(
+        joinPageTexts(pages, {
+          isSelected: (page) => selected.has(page),
+          edits,
+        }),
+      ),
     [pages, selected, edits],
   );
   const overLimit = maxChars !== undefined && text.length > maxChars;
@@ -337,13 +411,36 @@ export function DocumentIntake({
     onTextChangeRef.current?.(text, snapshot);
   }, [text, snapshot]);
 
+  // Memoized on the three fields rather than on `detail`, which is a fresh object on
+  // every poll — without that, the effect below would re-fire every 2.5 seconds and
+  // re-render the caller's whole form for no change.
+  const info = useMemo<DocumentIntakeInfo | null>(
+    () =>
+      detail
+        ? {
+            fileName: detail.fileName,
+            kind: detail.kind,
+            pageCount: detail.pageCount,
+          }
+        : null,
+    [detail?.fileName, detail?.kind, detail?.pageCount],
+  );
+
   const onStatusChangeRef = useRef(onStatusChange);
   useEffect(() => {
     onStatusChangeRef.current = onStatusChange;
   });
   useEffect(() => {
-    onStatusChangeRef.current?.(status);
-  }, [status]);
+    onStatusChangeRef.current?.(status, info);
+  }, [status, info]);
+
+  const onErrorRef = useRef(onError);
+  useEffect(() => {
+    onErrorRef.current = onError;
+  });
+  useEffect(() => {
+    onErrorRef.current?.(error);
+  }, [error]);
 
   // "हा मजकूर वापरा" hands over a snapshot, so any later change to the selection or the
   // text means the caller is now holding something stale — say so rather than leave a
@@ -392,6 +489,20 @@ export function DocumentIntake({
       setUploading(false);
     }
   };
+
+  // The caller's own pick (see `file`). Keyed on the File itself rather than on its name,
+  // so re-picking the same file after a removal still uploads; gated on sessionStorage
+  // rather than on `jobId`, because the re-attach effect above has not committed its state
+  // by the time this one runs — the `autoOpenPicker` reasoning, for the same reason.
+  const uploadedFile = useRef<File | null>(null);
+  useEffect(() => {
+    if (!file || uploadedFile.current === file) return;
+    uploadedFile.current = file;
+    if (window.sessionStorage.getItem(storageKey)) return;
+    // `upload` is deliberately not a dependency: it is recreated every render, and the
+    // File identity guarded above is what decides whether this fires.
+    void upload(file);
+  }, [file, storageKey]);
 
   // "Read these pages." The one call that spends OCR credits on a scanned document — and
   // only on what is ticked. The job goes to 'extracting' and the poll takes over.
@@ -451,6 +562,11 @@ export function DocumentIntake({
   };
 
   // ---------- render ----------
+
+  // Nothing to draw (see `headless`). Every hook above has already run, so the upload, the
+  // poll, the whole-document selection and all three callbacks behave exactly as they do
+  // for a caller that shows the card.
+  if (headless) return null;
 
   // Every state below is wrapped in the same shell, so `embedded` is decided once here
   // rather than at six return sites. A string tag keeps its identity across renders, so
@@ -580,6 +696,31 @@ export function DocumentIntake({
           {fileButton}
           {callerAction}
         </div>
+      </Shell>
+    );
+  }
+
+  // A surface that reads the whole document has nothing to ask. The card still exists —
+  // the officer needs to see WHICH file is attached and be able to swap or drop it — but it
+  // states what will happen instead of requesting a decision. `selected` is already every
+  // page (see the effect above), so the snapshot this reports is unchanged.
+  if (isSelecting && readWholeDocument) {
+    return (
+      <Shell className={shellClass}>
+        <CardTitle icon={FileText} level={titleLevel}>
+          {STR.docWholeReadTitle}
+        </CardTitle>
+        <p className="hint">{STR.docWholeReadHint}</p>
+        <p className="hint" style={{ marginTop: 8 }}>
+          <FileText size={16} aria-hidden="true" />{' '}
+          <FileName name={detail.fileName} /> · {STR.docSelectTotal}{' '}
+          {marathiNumber(detail.pageCount ?? 0)}
+        </p>
+        <div className="btn-row" style={{ marginTop: 14 }}>
+          {fileButton}
+          {callerAction}
+        </div>
+        {error ? <ErrorNotice message={error} /> : null}
       </Shell>
     );
   }

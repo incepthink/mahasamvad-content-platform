@@ -32,6 +32,15 @@ export type AudioUrlInput = Readonly<{
   // Display name — the video's title where the probe found one, else the link itself.
   name: string;
   sourceUrl: string;
+  // When true, the STT seam must NOT resolve this to bytes: hand the URL straight to the
+  // provider. Set for PRESIGNED STORAGE URLs, where the audio is already ours and sitting
+  // in S3 — the point of them is that no part of this process ever holds the recording.
+  //
+  // Without this flag such a URL would take the pasted-link path and be run through yt-dlp
+  // (YOUTUBE_AUDIO_SOURCE defaults to `download`), which would both fail and buffer the
+  // whole file to disk — the exact opposite of why it was signed. A pasted YouTube link
+  // leaves it unset and keeps its existing behaviour byte for byte.
+  providerFetches?: boolean;
 }>;
 
 export type AudioInput = AudioFileInput | AudioUrlInput;

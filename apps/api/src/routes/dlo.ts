@@ -4,6 +4,7 @@
 // generate step funnels straight into the EXISTING generation pipeline — the
 // reviewed combined text becomes a normal generations row's note.
 
+import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import {
   DLO_UPLOADS_BUCKET,
@@ -13,8 +14,10 @@ import {
   insertGeneration,
   listDloIntakes,
   listGenerationsForDloIntakes,
+  removeObjectsIn,
   updateDloIntake,
   uploadFile,
+  uploadStream,
   type DloIntakeFileEntry,
   type DloIntakeFileKind,
   type DloIntakeRow,
@@ -50,6 +53,7 @@ import {
   startDloFileReextractionJob,
   startDloIntakeJob,
 } from '../jobs/dlo-runner.js';
+import { uploadSourceFile } from '@dgipr/content-engine';
 import { getDocumentIntakeJob } from '../jobs/document-intake.js';
 import { startGenerationJob } from '../jobs/runner.js';
 import { rememberDesignations } from '../jobs/designation-writeback.js';
@@ -61,9 +65,15 @@ import { rememberDesignations } from '../jobs/designation-writeback.js';
 // pass 50 MB routinely, and refusing them at the door is a failure the officer can do nothing
 // about (the DOCUMENT_MAX_BYTES / references.ts reasoning — those two routes already accept
 // any size). busboy treats Infinity as "unlimited", so this override now exists purely to
-// LIFT the global cap in index.ts. The bound that remains is the box's memory: toBuffer()
-// holds each upload in process for the length of one request. /transcribe is unchanged and
-// still enforces UPLOAD_FILE_MAX_BYTES.
+// LIFT the global cap in index.ts.
+//
+// SINCE 2026-08-30 RECORDINGS NO LONGER PASS THROUGH MEMORY. This comment used to end "the
+// bound that remains is the box's memory: toBuffer() holds each upload in process" — and that
+// bound was reached in production, killing the API mid-upload on a 239.6 MB recording. Audio
+// parts now stream straight to S3 (uploadStream), so their length costs a few MiB whatever it
+// is. Documents still use toBuffer(), deliberately: their bytes are needed IN THIS PROCESS a
+// few lines later, to be uploaded to OpenAI as a source file, and a PDF or photograph is
+// orders of magnitude smaller than a meeting recording.
 const MAX_FILE_BYTES = Number.POSITIVE_INFINITY;
 // No count limit either, deliberately (2026-08-11): a meeting can produce a dozen recordings
 // and a booklet photographed page by page is a dozen images, so a capped intake would refuse
@@ -103,6 +113,10 @@ const KIND_BY_EXTENSION: Record<string, UploadedFileKind> = {
   ),
   '.pdf': 'pdf',
   '.docx': 'docx',
+  // Accepted since this lane stopped transcribing documents: a .txt goes to the article
+  // model as a file like every other document, so there is nothing left for the intake to
+  // do with it that would justify refusing it at the door.
+  '.txt': 'txt',
 };
 
 // Fallback per kind. Recordings and photographs are stored under their OWN container's type
@@ -120,6 +134,21 @@ function kindOf(fileName: string): UploadedFileKind | null {
   const dot = fileName.lastIndexOf('.');
   if (dot === -1) return null;
   return KIND_BY_EXTENSION[fileName.slice(dot).toLowerCase()] ?? null;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+// The file's own container type where the extension names one — a .png stored as image/jpeg
+// would be served back mislabelled, and OpenAI infers how to parse an upload from what it is
+// told it is.
+function contentTypeFor(name: string, kind: UploadedFileKind): string {
+  return (
+    audioMimeForFileName(name) ??
+    imageMimeForFileName(name) ??
+    CONTENT_TYPE_BY_KIND[kind]
+  );
 }
 
 // Storage object names must be ASCII-safe; the index prefix keeps them unique
@@ -248,10 +277,20 @@ export function registerDloRoutes(
   client: SupabaseClient,
 ): void {
   app.post('/dlo/intakes', async (request, reply) => {
+    // Minted here rather than by the database: a recording is streamed to its final storage
+    // key while the request is still arriving, so the key — and therefore the intake id in it
+    // — has to exist before the first byte does. The row is still inserted below, after every
+    // part has been accepted, so a rejected upload leaves no intake behind.
+    const intakeId = randomUUID();
+    // A recording carries a `storagePath` (already streamed to the bucket, never assembled in
+    // memory); a document carries `data` (its bytes are needed in this process, to be handed
+    // to OpenAI). Exactly one of the two is set.
     const uploads: Array<{
       name: string;
       kind: UploadedFileKind;
-      data: Buffer;
+      data?: Buffer;
+      storagePath?: string;
+      bytes?: number;
     }> = [];
     let notes = '';
     let category = 'news';
@@ -269,6 +308,23 @@ export function registerDloRoutes(
     // the transcriber fetches the media itself (@dgipr/schemas' youtube.ts), so these become
     // entries with a URL and no archive.
     let youtube: YouTubeVideo[] = [];
+
+    // Recordings already written to the private bucket for an intake that may still never be
+    // inserted. Best-effort on every path that gives up.
+    const discardStaged = async (): Promise<void> => {
+      const staged = uploads.flatMap((upload) =>
+        upload.storagePath ? [upload.storagePath] : [],
+      );
+      if (staged.length === 0) return;
+      try {
+        await removeObjectsIn(client, DLO_UPLOADS_BUCKET, staged);
+      } catch (error) {
+        console.error(
+          `[dlo-intake ${intakeId}] could not discard staged uploads:`,
+          error,
+        );
+      }
+    };
 
     const parts = request.parts({
       limits: {
@@ -290,6 +346,7 @@ export function registerDloRoutes(
             try {
               documents = DloCreateDocumentsSchema.parse(JSON.parse(value));
             } catch {
+              await discardStaged();
               return reply.code(400).send({
                 error: { message: 'कागदपत्रांची माहिती वाचता आली नाही.' },
               });
@@ -299,6 +356,7 @@ export function registerDloRoutes(
             try {
               youtube = YouTubeSourcesSchema.parse(JSON.parse(value));
             } catch {
+              await discardStaged();
               return reply.code(400).send({
                 error: { message: 'यूट्युब लिंकची माहिती वाचता आली नाही.' },
               });
@@ -308,6 +366,7 @@ export function registerDloRoutes(
             // arbitrary URL in front of the transcriber.
             for (const video of youtube) {
               if (parseYouTubeVideoId(video.url) === null) {
+                await discardStaged();
                 return reply.code(400).send({
                   error: { message: 'यूट्युब लिंक वैध नाही.' },
                 });
@@ -316,26 +375,53 @@ export function registerDloRoutes(
           }
           continue;
         }
-        const kind = kindOf(part.filename ?? '');
+        const name = part.filename ?? 'file';
+        const kind = kindOf(name);
         if (!kind) {
+          await discardStaged();
           return reply.code(400).send({
             error: {
               message:
-                'फक्त ध्वनिमुद्रण (MP3, AAC, M4A), प्रतिमा (JPG, PNG, WEBP), PDF आणि DOCX फाईल्स स्वीकारल्या जातात.',
+                'फक्त ध्वनिमुद्रण (MP3, AAC, M4A), प्रतिमा (JPG, PNG, WEBP), PDF, DOCX आणि TXT फाईल्स स्वीकारल्या जातात.',
             },
           });
         }
-        uploads.push({
-          name: part.filename ?? 'file',
-          kind,
-          data: await part.toBuffer(),
-        });
+        // A RECORDING goes straight from the wire to S3 and is never assembled here: it is
+        // the one source whose length is unbounded, and buffering it is what OOM-killed the
+        // API in production. Everything else is read into memory on purpose — a document's
+        // bytes are handed to OpenAI a few lines below.
+        if (kind === 'audio') {
+          const storagePath = storagePathFor(intakeId, uploads.length, name);
+          const bytes = await uploadStream(
+            client,
+            DLO_UPLOADS_BUCKET,
+            storagePath,
+            part.file,
+            contentTypeFor(name, kind),
+          );
+          uploads.push({ name, kind, storagePath, bytes });
+          // busboy TRUNCATES a part that hits the size limit rather than erroring, so without
+          // this a capped upload would be stored and transcribed as if it were the whole
+          // recording. Unreachable while the limit above is Infinity.
+          if (part.file.truncated) {
+            await discardStaged();
+            return reply
+              .code(413)
+              .send({ error: { message: 'फाईल खूप मोठी आहे.' } });
+          }
+          continue;
+        }
+        uploads.push({ name, kind, data: await part.toBuffer() });
       }
     } catch (error) {
-      // @fastify/multipart raises FST_REQ_FILE_TOO_LARGE from toBuffer when a part exceeds
-      // the per-request fileSize limit above. That limit is now unlimited, so this branch is
-      // unreachable and is kept only so a future ceiling has somewhere to land — hence a
-      // message that names no number (the documents.ts precedent).
+      // Reached by a browser that vanished mid-upload as well as by a rejected part: the
+      // iterator raises FST_MP_PREMATURE_CLOSE, and whatever had already landed belongs to an
+      // intake that will never exist.
+      await discardStaged();
+      // @fastify/multipart raises FST_REQ_FILE_TOO_LARGE when a part exceeds the per-request
+      // fileSize limit above. That limit is now unlimited, so this branch is unreachable and
+      // is kept only so a future ceiling has somewhere to land — hence a message that names
+      // no number (the documents.ts precedent).
       if (
         typeof error === 'object' &&
         error !== null &&
@@ -351,6 +437,7 @@ export function registerDloRoutes(
 
     const parsedCategory = DloCategorySchema.safeParse(category);
     if (!parsedCategory.success) {
+      await discardStaged();
       return reply.code(400).send({ error: { message: 'Unknown category.' } });
     }
     if (
@@ -364,10 +451,12 @@ export function registerDloRoutes(
       });
     }
 
-    // Insert first (the storage paths need the row id), then upload the
-    // originals to the private bucket, then attach the per-file entries and
-    // start the job — the job reads everything back off the row.
+    // The recordings are already archived — streamed there as they arrived, under keys built
+    // from `intakeId`, which is why this insert carries that id rather than taking one from
+    // the database. Documents are uploaded just below, from the bytes still in hand. The row
+    // is still written before the job starts, and the job still reads everything back off it.
     const row = await insertDloIntake(client, {
+      id: intakeId,
       notes: notes.trim(),
       category: parsedCategory.data,
       heading: heading.trim() || undefined,
@@ -375,24 +464,68 @@ export function registerDloRoutes(
     });
     const entries: DloIntakeFileEntry[] = [];
     for (const [index, upload] of uploads.entries()) {
-      const storagePath = storagePathFor(row.id, index, upload.name);
-      await uploadFile(
-        client,
-        DLO_UPLOADS_BUCKET,
-        storagePath,
-        upload.data,
-        // The file's own container type where the extension names one — a .png stored as
-        // image/jpeg would be served back to the review card mislabelled.
-        audioMimeForFileName(upload.name) ??
-          imageMimeForFileName(upload.name) ??
-          CONTENT_TYPE_BY_KIND[upload.kind],
-      );
-      entries.push({
-        name: upload.name,
-        storagePath,
-        kind: upload.kind,
-        status: 'pending',
-      });
+      // A recording was written during parsing and carries its key; a document's bytes are
+      // still in memory and go up now.
+      const storagePath =
+        upload.storagePath ?? storagePathFor(row.id, index, upload.name);
+      if (upload.storagePath === undefined) {
+        await uploadFile(
+          client,
+          DLO_UPLOADS_BUCKET,
+          storagePath,
+          upload.data as Buffer,
+          contentTypeFor(upload.name, upload.kind),
+        );
+      }
+
+      // A RECORDING is the only source this lane still transcribes. It waits `pending` for
+      // the intake job's transcribe phase, with its content-addressed cache (0031) and its
+      // per-file failure handling — nothing about audio changed.
+      if (upload.kind === 'audio') {
+        entries.push({
+          name: upload.name,
+          storagePath,
+          ...(upload.bytes !== undefined ? { bytes: upload.bytes } : {}),
+          kind: upload.kind,
+          status: 'pending',
+        });
+        continue;
+      }
+
+      // EVERYTHING ELSE is read by the article model itself. The file is uploaded to OpenAI
+      // here, at attach time, and the article call carries its id as an `input_file` (or
+      // `input_image`) part — so a PDF is never probed, never page-selected and never OCR'd,
+      // which is what removes the whole प्रक्रिया → review detour from this lane. See
+      // intake/openai-source-files.ts.
+      //
+      // 'done' with no text is the shape the lane rests on: the intake job skips a done
+      // entry, and `rebuildCombinedText` contributes nothing for it, which the combine step
+      // already understands (it checks for `openaiFileId` before deciding nothing survived).
+      try {
+        const fileId = await uploadSourceFile(
+          upload.data as Buffer,
+          upload.name,
+          contentTypeFor(upload.name, upload.kind),
+        );
+        entries.push({
+          name: upload.name,
+          storagePath,
+          kind: upload.kind,
+          status: 'done',
+          openaiFileId: fileId,
+        });
+      } catch (error) {
+        // The archive above succeeded, so the officer's source is safe — but nothing will
+        // read it. Failing the FILE and saying so beats an article that silently omits a
+        // whole document.
+        entries.push({
+          name: upload.name,
+          storagePath,
+          kind: upload.kind,
+          status: 'failed',
+          error: `ही फाईल वाचनासाठी पाठवता आली नाही: ${errorMessage(error)}`,
+        });
+      }
     }
 
     // Then the YouTube links, beside the recordings because that is what they are — the

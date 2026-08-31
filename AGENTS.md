@@ -207,10 +207,12 @@ it are implemented and working end-to-end:
   harnesses in both 16:9 and 9:16; renderer lint/typecheck/build and API
   typecheck green. Deploy API after rebuilding `@dgipr/poster-renderer`; no n8n.
 - **News dateline, portfolio attribution and meeting-shaped style retrieval** (2026-07-29,
-  migration 0039): every generated `news` article now receives `मुंबई, दि. <आजचा दिवस> :`
-  (location configurable through `ARTICLE_NEWS_DATELINE_LOCATION`) at the start of its body;
-  the day is calculated in `Asia/Kolkata`, rendered in Devanagari, supplied to the simple prompt
-  and deterministically restored after initial generation and article feedback. DLO designation
+  migration 0039; **dateline portion superseded 2026-08-30**): the automatic
+  `मुंबई, दि. <आजचा दिवस> :` insertion has been removed from initial generation and article
+  feedback. It was prefixing a model-written subheading (for example `### आठ मजली…`) because
+  that subheading was the first line after the headline. Source-supported body leads such as
+  `मुंबई : मलबार हिल…` remain untouched, and `ARTICLE_NEWS_DATELINE_LOCATION` is retired.
+  DLO designation
   preparation normalizes the real code-mixed STT form `हायर अँड टेक्निकल एज्यु…` to the
   verified `उच्च व तंत्रशिक्षण मंत्री` portfolio, so the current holder still comes dynamically
   from the glossary (for the observed run: `चंद्रकांत पाटील`), while a one-word person row found
@@ -3042,7 +3044,9 @@ second tier-audit pass corrects mis-tiers, sectioned long-note drafts are tier-a
 coverage loop guards both sides (missing foreground/supporting facts AND over-expanded
 mention/omit detail). RAG stays style-only and the faithfulness/fact-check guards are untouched.
 
-Canva OAuth authentication and poster handoff are implemented in `apps/api/src/routes/canva.ts`.
+Canva OAuth authentication and poster handoff are implemented in `apps/api/src/routes/canva.ts`,
+which since 2026-08-31 holds a REGISTRY of Canva integrations (`CANVA_ACCOUNTS`) rather than one
+client id/secret — see the milestone below.
 
 ## Planned Architecture
 
@@ -3080,6 +3084,260 @@ Canva OAuth authentication and poster handoff are implemented in `apps/api/src/r
 2. `AGENTS.md` must be updated whenever a major architectural decision or implementation milestone changes.
 
 ## Latest Implementation Milestone
+
+- **/translate and /proofread attach files the way /dlo does — and stop sending MARKUP to the
+  model** (2026-08-31, no migration, no n8n, web only): two complaints, one root. Both pages
+  mounted a single `<DocumentIntake>` as a BLOCK under the composer — a card with its own
+  upload control, its own page picker and its own hand-over button — while /dlo, asked the
+  same question, had long since moved to a paperclip, a file dialog and a row of attachment
+  cards. One file at a time, three presses in three places to get a PDF translated
+  (निवडलेली पृष्ठे वाचा → हा मजकूर वापरा → भाषांतर करा), and a second form on a page that
+  already had one.
+  - **`components/common/DocumentAttachments.tsx`** (`useDocumentAttachments`) is that shape
+    for both pages: the paperclip opens the browser's file dialog, SEVERAL documents at once,
+    each becomes a card in the composer's `AttachmentStrip`, and each is read by its own
+    **headless** `<DocumentIntake>` — the props `headless` and `readWholeDocument` already
+    existed for the previous /dlo iteration and had no caller left. So the upload, the poll,
+    the whole-document selection and the OCR read are not reimplemented; what the hook owns is
+    the LIST, because a page needs one combined string, one aggregate status to gate its submit
+    on, and one row of cards.
+  - **THE SPEND GATE IS UNCHANGED**, which is the point to keep. Every PDF is read by OCR
+    (PDF_EXTRACTION_MODE=ocr) and OCR is billed per page, so attaching still only PROBES —
+    free, verified live: a PDF uploaded to `/api/documents` comes back `status: "selecting"`
+    with `pages: []` and nothing reaches Sarvam. भाषांतर करा / तपासणी करा is what authorises
+    the read, and it then continues into the run by itself. What is gone is the per-page
+    QUESTION, not the gate; /dlo dropped it first, on the grounds that a document is attached
+    in order to be read whole.
+  - **The correctness half, and it was invisible: an OCR'd page is HTML, and both pages were
+    sending it to a model verbatim.** Sarvam Document AI's Digitise is called with
+    `output_format=html`, which is right for the REVIEW surfaces (`<ExtractedText>` rebuilds
+    it as React elements so an OCR'd table still reads as a table) and wrong for a string
+    handed to a translator: `<div class="page-body-container"><p>…` was the text being
+    translated and proofread. Since PDF_EXTRACTION_MODE=ocr that was EVERY PDF, not only a
+    scan. New `apps/web/lib/extractedText.ts` (`isExtractedHtml` — moved off
+    `ExtractedText.tsx`, so a view and a translation cannot disagree about what counts as
+    HTML — plus `extractedPlainText`), applied in ONE place: `<DocumentIntake>`'s `text` memo,
+    the string every caller receives. The pages themselves are untouched, so the review list
+    still renders the table and the correction textarea still edits the source. **The media
+    room inherits the fix** — its uploaded document fed the article pipeline the same markup.
+  - **Hand-rolled, not `DOMParser`**, the `markdownTable` precedent: this string is what a
+    paid model receives, and a function that only runs inside a browser cannot be checked.
+    Free harness at **24/24**: `npx tsx --tsconfig apps/web/tsconfig.check.json
+    apps/web/lib/extractedText.check.ts` (run it from `packages/content-engine`, which has
+    tsx). Its load-bearing cases: prose and Markdown come back BYTE-IDENTICAL (the OpenAI OCR
+    rollback returns Markdown — verified live on this deployment), an inline `<strong>` does
+    not break the Marathi sentence around it, a table keeps `cell | cell` rows, `<li>`/`<tr>`
+    break ONE line where a paragraph breaks two, `<script>`/`<style>` bodies are dropped
+    whole, and a bare `<` in `५ < १०` is content rather than the start of a tag.
+  Verified 2026-08-31, all free: workspace typecheck **7/7 green**; eslint clean on all six
+  touched files; prettier clean on every hunk of mine (both page files were **already failing
+  prettier at HEAD** — CRLF — so do NOT `--write` them; the residual diff in
+  `proofread/page.tsx` is a pre-existing `useState<{…}>` wrap); the harness at 24/24; and a
+  Playwright pass against the running dev server, **18/20**, where both failures are the
+  `PageBackdrop` rough.js SSR/CSR `<path>` mismatch that /dlo and the home page — neither
+  touched here — show identically. What it asserts: the submit is dead with nothing supplied,
+  ONE multi-file document input per page, two files attached at once become two named cards,
+  the submit goes live from the file alone, no upload-card heading survives, removing one card
+  leaves the other, and removing the last kills the submit again. **Left for a real run** (OCR
+  spend): one genuinely scanned Marathi PDF through /translate on a `sarvam` deployment, to
+  see the converted prose rather than tags in the output. Deploy is web only.
+
+- **Several Canva integrations, chosen per handoff** (2026-08-31, no migration, no n8n):
+  the Canva button was pinned to ONE `CANVA_CLIENT_ID`/`CANVA_CLIENT_SECRET`, and an officer
+  outside the Canva team that owns that integration was refused at the authorize screen with
+  **"The client ID is invalid."** — before consent, on Canva's own page. That error is the
+  finding worth keeping: the client id in the authorize URL is identical for every user, so
+  an error that depends on WHO is signed in cannot be a credential fault. An integration that
+  has not been released for public use is reachable only from inside its owning team, and
+  Canva reports it to everyone else as an unknown client id. **The real fix is Canva-side** —
+  add those officers to the owning team, or submit the integration for public review (a
+  private integration is team-only and needs Canva Enterprise) — and a second client id
+  changes nothing for a third account. What a second client id DOES solve is a second TEAM:
+  register a fresh integration inside it and route those officers through that one.
+  So `configFromEnv()` became a registry. `CANVA_ACCOUNTS` is a JSON array of
+  `{key,label,clientId,clientSecret,redirectUri?}`; unset, the three legacy variables still
+  make one `default` account, so an existing deployment is byte-for-byte unchanged. Adding an
+  account is an env edit plus an API restart — no migration, and no web deploy either,
+  because the picker reads `GET /api/canva/accounts` (keys and labels only) rather than a
+  `NEXT_PUBLIC_*` build-time copy, which would drift the moment `.env` changed on the box.
+  Four things worth knowing. **The account key has to ride in FRONT of the OAuth state, in
+  plaintext**: the callback receives only `code` and `state`, only the issuing integration's
+  secret can exchange that code, and `stateKey()` derives the AES key FROM that secret — so
+  the payload cannot be opened until the account is known. `${key}.${sealed}` splits on the
+  first dot (base64url contains none), the key is validated to `[a-z0-9_-]{1,32}` so it can
+  never contain one, and the key is repeated INSIDE the sealed payload and checked, so a
+  swapped prefix is rejected explicitly rather than incidentally. **A prefixless state still
+  opens**, against the default account, so an authorization in flight across the deploy
+  completes. **The account is resolved before the row is read**, so a stale tab naming a
+  removed account costs no database round trip. And **an account is a deployment-level
+  credential set, never a per-officer record** — within any one of them every officer still
+  signs in to Canva as themselves and the poster lands in their own account; no token is
+  persisted, here or anywhere.
+  Web: `CanvaLink` renders exactly today's single link when fewer than two accounts are
+  configured, and a native `<select>` beside it otherwise (the `.history-select` idiom — on a
+  phone it opens as the platform's own full-height list); the list is fetched once per page
+  load however many posters are on screen, a failed fetch degrades to the plain link, and the
+  choice is remembered in `localStorage` as a convenience, never as authorization.
+  Verified 2026-08-31, all free: `apps/api` and `apps/web` typecheck green, eslint and
+  prettier clean on all six touched files, and a new offline harness at **16/16** —
+  `npx tsx ../../apps/api/src/routes/canva.check.ts`, run from `packages/content-engine`,
+  which has tsx (the `audio-batches.ts` precedent). It drives the real routes through
+  `fastify.inject` with a stub client that throws on any database read, so every assertion is
+  decided before the DB: the legacy fallback, `CANVA_ACCOUNT_LABEL`, the malformed/dotted-key/
+  duplicate-key refusals, that the accounts route leaks no id or secret, an unknown key as a
+  400 with no DB read, and five state cases (own account opens, re-prefixed rejected, wrong
+  secret rejected, expired rejected, prefixless legacy still opens). **Left for a real run**:
+  a live handoff through a second integration, which needs a second Canva team. Deploy is API
+  + web; no migration, no n8n. New env, both optional: `CANVA_ACCOUNTS`, `CANVA_ACCOUNT_LABEL`.
+
+- **A chat document is read through FILE SEARCH, so the ceiling is 512 MB and not 50 MB**
+  (2026-08-30, migration 0049, no n8n): /chat handed each PDF to the Responses API as an
+  `input_file` part, which puts the whole document in the request — and OpenAI caps that path
+  at **50 MB of file input per request**, which is where `MISC_CHAT_PDF_MAX_BYTES` came from.
+  Officers attach compendiums, scanned booklets and consolidated GRs well past that, and a
+  refusal at the door is a failure they can do nothing about. **File Search is a different
+  product with different limits — 512 MB per file, 5,000,000 tokens per file, 10,000 files per
+  vector store** — so the document half moved onto it (`content-engine/src/chat/file-search.ts`)
+  and the request half stopped carrying documents at all.
+  - **WHAT IS GIVEN UP, and it is not a bug to be fixed later.** `input_file` put the ENTIRE
+    document in the model's context; File Search is retrieval, so the model sees the passages
+    it asked for. "Summarise this whole booklet" is answered from retrieved chunks rather than
+    from every page, and "what is the exact heading on page 1" is a search away rather than a
+    read away. That is the trade the size limit buys. `CHAT_FILE_SEARCH_MAX_RESULTS` (20) is
+    the dial — every passage is billed as input tokens, so it is a cost knob, not a quality
+    one.
+  - **ONE VECTOR STORE PER THREAD, and the reason is a documented-but-untrue array.** The
+    `file_search` tool takes `vector_store_ids` as a LIST and the API accepts several, but only
+    the FIRST is actually searched. A per-file store would therefore make a chat with three
+    PDFs silently lose two of them. `chat_threads.vector_store_id` (0049) is created lazily on
+    the first document turn; `chat_files.vector_store_id` records the store a file has finished
+    indexing into, which is what makes a follow-up about the same PDF free — attaching is
+    idempotent, but chunking and embedding are billed each time.
+  - **The model is TOLD which documents it can search, because it can no longer see them.**
+    `searchableDocumentsLine` emits a second `input_text` part naming them, and only for
+    documents that are indexed RIGHT NOW — naming one that is still building would have the
+    model search it, find nothing, and report the officer's file as empty. The system
+    instruction gained a paragraph saying attachments are not shown in full and must be
+    searched. Without either half the answer is "I cannot see an attachment" about a PDF
+    sitting in the model's own index.
+  - **NOTHING HOLDS THE DOCUMENT.** The route used `await file.toBuffer()` — fine at 50 MB,
+    ~1 GB of resident memory at 512 MB, which is exactly how a 239.6 MB recording OOM-killed
+    this container earlier the same day. The part now streams from the wire into the private
+    bucket (`uploadStream`), and the bucket feeds OpenAI through the **Uploads API** in
+    <=64 MB parts read with a new `downloadFileRange` — so peak memory is ONE part
+    (`OPENAI_UPLOAD_PART_BYTES`, 32 MB) whatever the document's length. `planUploadParts` is
+    pulled out of that loop precisely because both ways it can be wrong are silent: a gap
+    loses a stretch of the document and the officer gets confident answers from what is left,
+    and an overlap makes Complete reject a byte count the parts do not add up to. Below the
+    part size a single `POST /v1/files` is still used.
+  - **The 0048 migration hazard is handled, and it would otherwise have been total.** Files
+    uploaded before this change carry `purpose: 'user_data'`, which File Search **rejects** —
+    so every PDF in every existing chat would have become permanently unreadable. The durable
+    private object is still there, so an attach refusal re-uploads from storage under
+    `purpose: 'assistants'` and attaches again. `attachChatDocument` and
+    `awaitChatDocumentIndexed` are SPLIT for this: only the attach is retried, because a
+    failure past it is about the document or about time and re-sending half a gigabyte would
+    spend the officer's bandwidth to reproduce the same error.
+  - **Indexing runs inside the SSE stream**, after the 200 and inside the cost scope, not
+    before it. Chunking a large scan is minutes of provider work; doing it above would hold a
+    plain HTTP request open with nothing to show, while here a failure takes the same path a
+    model failure does — the officer gets a message and the turn they typed is already stored.
+  - **The vector store is deleted with the thread**, which is the one place /chat departs from
+    the standing "leave uploaded objects alone" rule. The difference is billing, not principle:
+    a stored object costs a fraction of a cent a month and might still be wanted, a vector
+    store is charged per gigabyte per day for an index nothing can reach. Best-effort and
+    FIRST, so a provider outage costs an orphaned index rather than a thread the officer asked
+    to delete and which is still in their rail. Deliberately no `expires_after` — an expiring
+    store would leave a chat pointing at an index that no longer exists.
+  - `openAiFetch` gained `method` (GET/DELETE, no body) because a vector store's lifecycle is
+    not expressible as POSTs; both still want the retry ladder and the lane accounting, which
+    is why they route through the shared transport rather than a bare fetch.
+  Verified 2026-08-30, all free: workspace typecheck **7/7 green**; eslint clean on every
+  touched file; prettier clean on every hunk of mine (`content-engine/src/index.ts`,
+  `database/src/storage.ts`, `web/lib/strings.ts` and `web/lib/useChatAttachments.ts` report
+  whole-file complaints that are **pre-existing CRLF or pre-existing lines** — confirmed per
+  file by diffing prettier's own output against the CR-stripped content, so do NOT `--write`
+  them); and the chat harnesses at **15/15** (`pnpm --filter @dgipr/content-engine chat:test`),
+  including the new `file-search.test.ts` — the 512 MB constant, the part-size clamp at the
+  API's 64 MB, exact part coverage with no gap or overlap across six shapes, and both size
+  guards firing BEFORE anything is read — and, in `misc-chat.test.ts`, a **deny** assertion
+  that a document never comes back as an `input_file` part, which is the exact thing that
+  capped this surface at 50 MB. **Left for a real run** (0049 applied + OpenAI spend): one
+  large PDF end to end — upload, index, ask, and a follow-up question reaching it from a later
+  turn — plus one PRE-0048-era chat proving the re-upload recovery, and a thread deletion
+  confirming the store goes with it. **Deploy: 0049 → `@dgipr/database` →
+  `@dgipr/content-engine` dists → API + web** (ship together — the raised limit and the
+  composer's expectations are one contract). No n8n. New env, all optional:
+  `OPENAI_UPLOAD_PART_BYTES`, `OPENAI_UPLOAD_TIMEOUT_MS`, `CHAT_VECTOR_STORE_TIMEOUT_MS`,
+  `CHAT_VECTOR_STORE_POLL_INTERVAL_MS`, `CHAT_FILE_SEARCH_MAX_RESULTS`.
+  `OPENAI_MISC_CHAT_PDF_DETAIL` is retired — there is no page-image detail to set when the
+  model never receives the pages.
+
+- **A recording is STREAMED to storage, never assembled in the API** (2026-08-30, no migration,
+  no n8n): an officer's 239.6 MB meeting recording failed on `/transcribe` with
+  `सेवेशी संपर्क होऊ शकला नाही` and was lost. Small files had always worked, which is exactly why
+  it survived so long. **The 406 `the request is not multipart` in the API log was not that
+  upload** — reproduced against production, that error is what a POST with NO body and no
+  content-type produces (Fastify's `handle-request.js:47`, the "Request has no body to parse"
+  branch), and a proper multipart POST to the same URL answers correctly. It cannot be what the
+  officer saw either: `errorMessage.ts` maps a 406 to
+  `पाठवलेली माहिती अपूर्ण किंवा चुकीची आहे`, while the banner in the screenshot is
+  `errUnreachable`, which only a browser-level network failure or a 502/503/504 produces. The
+  connection died mid-transfer; the log line is a bodyless probe against a public unauthenticated
+  endpoint. **Read the log for the shape of the request, not for the nearest red line.**
+  The cause was ours and it was memory. Every upload route read each part with
+  `part.toBuffer()`: the whole file resident, briefly twice while busboy's chunks are
+  concatenated, then held again for a single-shot `PutObject` — ~500 MB for one recording on a
+  `t3.small`/`medium` that also runs n8n, PostgREST and Chromium. The container was OOM-killed
+  while the officer watched the progress bar. Corroborating: the pasted log's `reqId` is
+  **`req-3`**, and Fastify's counter restarts at 1 per process, so the API was three requests
+  old — it had just come back up.
+  - **`uploadStream` (`@dgipr/database/storage.ts`, `@aws-sdk/lib-storage`) is the fix.** Parts
+    are forwarded to S3 as they arrive and are never all resident: peak is
+    `S3_UPLOAD_PART_BYTES x S3_UPLOAD_CONCURRENCY`, ~16 MiB, **whatever the file's length**.
+    Measured end to end through the real busboy seam: a 240 MB multipart POST moved RSS 82 →
+    115 MiB and returned an exact byte count, against 108 MiB for a 24 MiB upload — the memory
+    no longer tracks the file size at all. `pipeline` is what propagates a vanished browser into
+    the upload so a truncated object can never be COMPLETED as if whole, and
+    `leavePartsOnError: false` aborts the multipart upload so a dead request cannot leave parts
+    S3 keeps billing for.
+  - **The row id is now minted by the ROUTE**, not the database (`insertTranscription` /
+    `insertDloIntake` take an optional `id`). A storage key has to exist before the first byte
+    does, while the row must still not be inserted until every part has been accepted — a
+    rejected upload must not leave a run in the history list. Every early return now discards
+    what it staged (`removeObjectsIn`, the new bucket-aware sibling of `removeObjects`).
+  - **`bytes` is recorded on each file entry** (jsonb, additive, no migration) as the part is
+    counted through. It is a memory bound, not a display figure — see the next point.
+  - **The JOB was the bigger half of the same bug and is fixed too.** Both transcribe phases
+    downloaded EVERY recording up front with one `Promise.all`: ten two-hour recordings is
+    gigabytes resident, and a file that now uploads successfully still has to be transcribable.
+    They process **groups bounded by total bytes** (`jobs/audio-batches.ts`,
+    `STT_BATCH_MAX_BYTES`, default 256 MiB), downloading sequentially within a group and
+    persisting results per group. **A recording larger than the whole budget is never refused —
+    it gets a group to itself.** Grouping rather than one-at-a-time is deliberate: Sarvam
+    transcribes a group in ONE batch job.
+  - Two more copies removed on the way to the provider: `getObject` now preallocates from
+    GetObject's own `ContentLength` (the `Buffer.concat` at the end held the object twice), and
+    `elevenlabs-stt.ts`'s `new Uint8Array(file.data)` became a zero-copy view — a Node Buffer is
+    already a Uint8Array; what TypeScript objected to was only its `SharedArrayBuffer`-possible
+    backing store.
+  - **`/new-dlo` got the identical treatment** even though it is not the live lane, because it
+    is the same code shape with the same hazard.
+  Verified 2026-08-30, mostly free: workspace typecheck **7/7 green**; eslint clean on all 12
+  touched files; prettier clean on every hunk of mine (six files report whole-file complaints
+  that are **pre-existing** — confirmed by running prettier over their HEAD blobs, which fail
+  identically — so do NOT `--write` them); 13 offline assertions on the batching
+  (`npx tsx apps/api/src/jobs/audio-batches.ts`, run from `packages/content-engine`, which has
+  tsx); and LIVE against the real private bucket — `storage:check-upload` at 24 MiB and 240 MiB
+  with byte-identical round trips, a 240 MB multipart POST through actual `@fastify/multipart`,
+  a client killed mid-upload leaving the server standing, and an explicit permission probe
+  confirming Create/UploadPart/Complete/**Abort**MultipartUpload and DeleteObjects all work for
+  the `dgipr-api` IAM user (only `s3:ListBucketMultipartUploads` is denied, which nothing needs).
+  **Left for a real run** (the local API cannot reach the database — RDS has no public IP and
+  PostgREST is internal-only): one genuine large recording through `/transcribe` on the
+  deployed box, end to end into a transcript. Deploy is `@dgipr/database` →
+  `@dgipr/content-engine` dists → API. New env, all optional: `S3_UPLOAD_PART_BYTES`,
+  `S3_UPLOAD_CONCURRENCY`, `STT_BATCH_MAX_BYTES`.
 
 - **A photograph of a document is read by Sarvam, not OpenAI** (2026-08-27, no migration, no
   n8n, API only): /dlo's प्रतिमा card was the last paid read still pinned to one backend. The

@@ -3,35 +3,62 @@
 // Standalone translation of pasted text OR an uploaded file, between मराठी, इंग्रजी and
 // हिंदी in any direction.
 //
+// SAME SHAPE AS THE OTHER TWO CREATE SURFACES — Creative and Social (app/page.tsx) and
+// लेख / बातमी (app/dlo/page.tsx): a doodle wallpaper, a page-head, and one composer card
+// built out of components/common (FormCard → PromptTextarea → a tool row →
+// AttachmentStrip) WITH THE SUBMIT AT THE END OF THAT ROW. It used to be a legacy `.card`
+// holding a `.note-input`, a row of `.btn btn-small` pills, a full-width upload card and a
+// `.card-action` bar of its own — the same four ideas in four different spellings, which is
+// exactly how these pages drift apart.
+//
+// THE SUBMIT IS IN THE COMPOSER CARD, not pinned to the foot of the viewport. `GenerateBar`
+// earned its place while the compulsory part of a page ran several blocks long and a button
+// at the end of the flow was off screen; here everything a translation needs is in this one
+// card and the blocks below it (the name review, the result) are consequences of pressing
+// it, not things to fill in first. So the button sits with the controls it acts on — the
+// text, the file and the target — and every complaint it can raise is rendered directly
+// under it rather than at the bottom of the window.
+//
 // ONE flow, deliberately. There used to be a second "PDF फाईल" tab running a parallel
 // background job (per-page, per-language, its own routes and its own page picker), which
-// meant two upload experiences, two page pickers and two shapes of result on one page. Now
-// the shared <DocumentIntake> reads any pdf/docx/txt — including a scanned PDF, whose pages
-// are picked before a single OCR credit is spent — and its text is a SECOND source counted
-// beside the box above it. From there everything is the text path: one submit, the name
-// check, one translation.
+// meant two upload experiences, two page pickers and two shapes of result on one page.
 //
-// The upload runs in LIVE mode (onTextChange), not handoff, and the submit reads an unread
-// scan itself — the media room's arrangement, for the same reason. In handoff mode the file's
-// text reached this page only when a button INSIDE the upload card was pressed, so a scanned
-// PDF took three presses in three different places (निवडलेली पृष्ठे वाचा → हा मजकूर वापरा →
-// भाषांतर करा) and an officer who pressed only the last one was told to write something to
-// translate while their document sat there, read and ignored. Now भाषांतर करा is enough on its
-// own: it triggers the OCR read of the ticked pages if that has not happened yet and continues
-// into the translation as soon as the text lands. The page picker is still the spend gate —
-// no page is read unless it was ticked — the press that authorises it has just moved.
+// FILES ARE ATTACHED THE WAY /dlo ATTACHES THEM (components/common/DocumentAttachments):
+// the paperclip opens the browser's file dialog, several documents at once, and each one
+// becomes a card in the strip under the tool row. There is no upload BLOCK any more — a
+// card with its own upload control, its own page picker and its own hand-over button was a
+// second form on a page that already had one, and getting a PDF translated took three
+// presses in three different places (निवडलेली पृष्ठे वाचा → हा मजकूर वापरा → भाषांतर करा).
+// An officer who pressed only the last one was told to write something to translate while
+// their document sat there, read and ignored.
+//
+// भाषांतर करा is now the only press. THE SPEND GATE IS UNCHANGED and is exactly why the
+// reading waits for it: every PDF is read by OCR (PDF_EXTRACTION_MODE=ocr), which is billed
+// per page, so attaching only PROBES — free — and this button is what authorises the read.
+// It reads whatever is attached and unread, then continues into the translation on its own
+// as soon as the text lands. What is gone is the per-page QUESTION, not the gate: /dlo
+// dropped it first, on the grounds that a document is attached in order to be read whole.
+//
+// The files' text is a SECOND source counted beside the box above it rather than pushed
+// into it, so a pasted note and an attached document are independent and either alone is a
+// complete job. From there everything is the text path: one submit, the name check, one
+// translation.
+//
+// The text those documents contribute is PROSE, not the HTML the OCR backend returns —
+// see lib/extractedText. That conversion is why this page stopped sending
+// `<div class="page-body-container">…` to the translator as the text to translate.
 //
 // ONE question is asked — which language to translate INTO — and its three answers are
 // ALWAYS enabled. The officer is not asked what language they pasted, and the text is not
 // inspected to guess it (a मराठी/हिंदी guess shares one script and can only ever be a
 // heuristic; a wrong one sends Hindi to a prompt that calls itself a "Marathi-to-English
-// translator"). Nothing on this row appears, vanishes or switches itself off as they type.
+// translator"). Nothing on this control appears, vanishes or switches itself off as they type.
 //
 // The SOURCE is derived, never asked: Latin script in means an English source, Devanagari
 // means Marathi (or Hindi when मराठी is the target, since Marathi cannot be both). That is a
 // SCRIPT test rather than a language guess, and the API serves every pair it can produce —
 // including the identity ones, which come back unchanged instead of erroring — so no answer
-// on the row can ever be the wrong one to offer. The box's own label names the source the
+// in the menu can ever be the wrong one to offer. The box's own label names the source the
 // current text and target imply, so the derivation is visible without being a question.
 // Everything else downstream (whether the name-review step runs) follows from it.
 //
@@ -45,7 +72,8 @@
 // card with whatever spellings have been typed into it — it does not re-run the extraction.
 // The card carries its own confirm button, but a real name list is long enough to push that
 // button below the fold, so the button the officer already pressed once has to keep working
-// rather than sit greyed out while the page waits for a second one they cannot see.
+// rather than sit greyed out while the page waits for a second one they cannot see. The
+// review card renders under the composer, so that button is a short scroll up from it.
 //
 // Going INTO Marathi there is no review step, and that is not a shortcut — it is that the
 // question has no content. The card asks "is this Marathi name's English/Hindi spelling
@@ -55,7 +83,7 @@
 // replaced by one line saying so.
 //
 // Nothing is stored — not the text, not the uploaded file (the intake job is in-memory with
-// a TTL).
+// a TTL) — so this page has no history list to show, unlike /dlo and /transcribe.
 //
 // This page imposes NO length limit on the text: translateArticle chunks internally, so a
 // long document translates as one long synchronous request. The API's own
@@ -63,22 +91,34 @@
 // surfaces as a request error rather than a local warning.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronDown, Languages, Paperclip } from 'lucide-react';
 import {
   type PrepareTranslationResponse,
   type TextTranslationLanguage,
   type TranslationTermInput,
 } from '@dgipr/schemas';
+import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { AttachmentStrip } from '@/components/common/AttachmentStrip';
+import { ComposerToolbarButton } from '@/components/common/ComposerToolbarButton';
+import { useDocumentAttachments } from '@/components/common/DocumentAttachments';
+import { FormCard } from '@/components/common/FormCard';
+import { PageBackdrop } from '@/components/common/PageBackdrop';
+import { PromptTextarea } from '@/components/common/PromptTextarea';
+import { ErrorNotice } from '@/components/ErrorNotice';
+import { cn } from '@/lib/utils';
 import { prepareTextTranslation, translateText } from '../../lib/api';
 import { downloadBlob } from '../../lib/download';
+import { TRANSLATE_DOODLES } from '../../lib/doodleMarks';
 import { STR } from '../../lib/strings';
 import { errorMessage } from '../../lib/errorMessage';
-import {
-  DocumentIntake,
-  type DocumentIntakeStatus,
-} from '../../components/DocumentIntake';
 import { TranslationTermsReview } from '../../components/TranslationTermsReview';
-import { ComposeSafeTextarea } from '../../components/ComposeSafeInput';
-import { ErrorNotice } from '../../components/ErrorNotice';
 
 type TranslationResult = Readonly<{
   text: string;
@@ -134,14 +174,20 @@ function sourceForTarget(
   return target === 'mr' ? 'hi' : 'mr';
 }
 
-// Where the upload card remembers its in-flight job. Named once because the remove control
-// has to clear it by hand — see clearDocument.
+// The prefix each attached document's reader remembers its in-flight job under. One per
+// surface, or two pages would fight over one job (see useDocumentAttachments).
 const DOC_STORAGE_KEY = 'dgipr.translate.document';
 
 const INPUT_LABELS: Readonly<Record<TextTranslationLanguage, string>> = {
   mr: STR.translateInputLabelMarathi,
   en: STR.translateInputLabelEnglish,
   hi: STR.translateInputLabelHindi,
+};
+
+const TARGET_LABELS: Readonly<Record<TextTranslationLanguage, string>> = {
+  mr: STR.translateTargetMarathi,
+  en: STR.translateTargetEnglish,
+  hi: STR.translateTargetHindi,
 };
 
 const OUTPUT_TITLES: Readonly<Record<TextTranslationLanguage, string>> = {
@@ -161,21 +207,10 @@ const DOWNLOAD_NAMES: Readonly<Record<string, string>> = {
 
 export default function TranslatePage() {
   const [text, setText] = useState('');
-  // The uploaded file's text, kept BESIDE the textarea rather than pushed into it: the two
-  // are independent sources and either one alone is a complete job.
-  const [docText, setDocText] = useState('');
-  const [docStatus, setDocStatus] = useState<DocumentIntakeStatus>('empty');
-  // Bumping this asks the upload card to run its selected-page extraction. A counter rather
-  // than a flag so a retry after a failed read is an explicit new request.
-  const [readRequest, setReadRequest] = useState(0);
-  // The submit is waiting for that read to land before it can translate anything.
+  // The submit is waiting for an attached document to be read before it can translate
+  // anything.
   const [awaitingRead, setAwaitingRead] = useState(false);
   const readRequestedForSubmitRef = useRef(false);
-  // What the upload card last published, so an identical re-publish (a re-render of the
-  // card, a poll that changed nothing) cannot throw away a finished translation.
-  const docTextRef = useRef('');
-  // Remounts the upload card to drop a finished document (its own state is internal).
-  const [docKey, setDocKey] = useState(0);
   // The page's one question. इंग्रजी is the department's commonest job and so is the default.
   const [target, setTarget] = useState<TextTranslationLanguage>('en');
   // Name-check flow: idle → preparing (extracting names) → review (card shown).
@@ -191,38 +226,62 @@ export default function TranslatePage() {
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // What actually gets translated: typed text, uploaded file, or both, in that order.
+  // The attached files, exactly as /dlo holds them: picked through the paperclip below,
+  // listed as cards in the strip under it, and READ only when this page's own submit is
+  // pressed — see useDocumentAttachments for why the reading waits for that press.
+  const docs = useDocumentAttachments({
+    storagePrefix: DOC_STORAGE_KEY,
+    feature: 'translate',
+    onError: setError,
+    // A document that has just been read is new source text, which invalidates a
+    // translation made from the old one exactly as editing the box does.
+    onTextChange: () => resetFlow(),
+    disabled: submitting,
+  });
+
+  // Named once: every gate below reads the list's aggregate status, and an effect that
+  // depended on `docs` itself would re-run on every poll.
+  const docStatus = docs.status;
+
+  // What actually gets translated: typed text, uploaded files, or both, in that order.
   // Blank-line separated so a pasted note and an attached document read as two blocks.
   const combinedText = useMemo(
-    () => [text.trim(), docText.trim()].filter(Boolean).join('\n\n'),
-    [text, docText],
+    () => [text.trim(), docs.text.trim()].filter(Boolean).join('\n\n'),
+    [text, docs.text],
   );
 
-  // Never asked, never guessed at as a LANGUAGE — see sourceForTarget. Every target the row
+  // Never asked, never guessed at as a LANGUAGE — see sourceForTarget. Every target the menu
   // offers therefore yields a pair the API serves, which is what lets all three stay enabled
   // with nothing left to reject.
   const source = sourceForTarget(target, combinedText);
 
-  // The `unread` arm is what keeps a scanned PDF usable: its pages are ticked but nobody has
-  // paid to read them yet, so it contributes nothing to combinedText, and reading it and then
-  // translating is exactly what startSubmit does. Testing the text alone would leave an
-  // officer whose only source is a scan with a dead button and no way forward.
+  // The `unread` arm is what keeps an attached PDF usable: nobody has paid to read it yet,
+  // so it contributes nothing to combinedText, and reading it and then translating is
+  // exactly what startSubmit does. Testing the text alone would leave an officer whose only
+  // source is a file with a dead button and no way forward.
   const canSubmit = combinedText.length > 0 || docStatus === 'unread';
-  // Locks the target row: an open review card was extracted for one target (its columns
+  // Locks the target menu: an open review card was extracted for one target (its columns
   // and its Hindi lock follow it), so changing the target under it would discard the
   // officer's corrections through resetFlow.
   const busy = submitting || awaitingRead || prep !== 'idle';
   // The submit is NOT disabled merely because the name-review card is open. That card is
   // the second half of this page's one submit, not a modal to be answered elsewhere: the
   // officer corrects a spelling and presses भाषांतर करा, which is the button they pressed
-  // to get here and the only one above the fold on a long name list. Pressing it there
-  // confirms the card with what they have typed (see submit). Everything that is genuinely
-  // in flight — the name extraction, an OCR read, the translation itself — still disables
-  // it, since re-pressing those would either double-charge or discard work.
-  const disabled =
-    submitting || awaitingRead || prep === 'preparing' || !canSubmit;
+  // to get here and — pinned — the one always on screen. Pressing it there confirms the
+  // card with what they have typed (see submit). Everything that is genuinely in flight —
+  // the name extraction, an OCR read, the translation itself — still disables it, since
+  // re-pressing those would either double-charge or discard work.
+  const submitBusy = submitting || awaitingRead || prep === 'preparing';
   // The review card only has a question to ask about a MARATHI source (see the header).
   const reviewsNames = source === 'mr';
+
+  const submitLabel = awaitingRead
+    ? STR.docReadingForSubmit
+    : prep === 'preparing'
+      ? STR.namesChecking
+      : submitting
+        ? STR.translating
+        : STR.translateAction;
 
   // Any change to the text or the target invalidates a prepared name list and an old result —
   // a result belongs to the direction it was made in, and on a →मराठी run the text is also
@@ -232,20 +291,6 @@ export default function TranslatePage() {
     setPrep('idle');
     setPrepared(null);
     setError(null);
-  };
-
-  // Throw the attached file away without translating it. "दुसरी फाईल निवडा" only ever
-  // REPLACED it, so an officer who decided to translate the pasted text alone had no way to
-  // detach the document — and in live mode its text is counted at submit whether or not
-  // anyone is still looking at it. A remount is what clears the card's internal state, and
-  // the stored job id has to go with it or the mount effect would re-attach the same file.
-  const clearDocument = () => {
-    window.sessionStorage.removeItem(DOC_STORAGE_KEY);
-    docTextRef.current = '';
-    setDocText('');
-    setDocStatus('empty');
-    setDocKey((n) => n + 1);
-    resetFlow();
   };
 
   // Step 1 on a Marathi source: extract the text's names for review. Failure returns to
@@ -266,7 +311,7 @@ export default function TranslatePage() {
 
   // Step 2: translate, with the confirmed names locked and saved verified where there were
   // any to confirm. The result carries its own direction so the output card cannot mislabel
-  // itself if the pills are changed afterwards (changing them clears the result anyway).
+  // itself if the target is changed afterwards (changing it clears the result anyway).
   const runTranslation = async (terms?: TranslationTermInput[]) => {
     setSubmitting(true);
     setError(null);
@@ -321,7 +366,7 @@ export default function TranslatePage() {
       setAwaitingRead(true);
       if (docStatus === 'unread') {
         readRequestedForSubmitRef.current = true;
-        setReadRequest((request) => request + 1);
+        docs.requestRead();
       }
       return;
     }
@@ -337,11 +382,11 @@ export default function TranslatePage() {
   useEffect(() => {
     if (!awaitingRead) return;
     if (docStatus === 'unread') {
-      // A file attached while we were already waiting, or a read that failed and left pages
-      // ticked: ask once more rather than sitting on a spinner for ever.
+      // A file attached while we were already waiting, or a read that failed: ask once more
+      // rather than sitting on a spinner for ever.
       if (!readRequestedForSubmitRef.current) {
         readRequestedForSubmitRef.current = true;
-        setReadRequest((request) => request + 1);
+        docs.requestRead();
       }
       return;
     }
@@ -350,11 +395,13 @@ export default function TranslatePage() {
       setAwaitingRead(false);
       startSubmitRef.current();
     } else if (docStatus === 'failed' || docStatus === 'empty') {
-      // Nothing came back. Stop waiting and leave the card's own error standing rather than
-      // translating an empty selection.
+      // Nothing came back. Stop waiting and leave the reader's own error standing rather
+      // than translating nothing.
       readRequestedForSubmitRef.current = false;
       setAwaitingRead(false);
     }
+    // Keyed on the document list's STATUS and nothing else: `docs` itself is rebuilt on
+    // every render, so depending on the object would re-run this on every poll.
   }, [awaitingRead, docStatus]);
 
   const copyToClipboard = async () => {
@@ -365,7 +412,15 @@ export default function TranslatePage() {
   };
 
   return (
+    // No foot clearance and so no `.translate-page`: the submit is in the composer card
+    // below, so nothing is pinned over the last block or over the credit line any more.
     <main className="page">
+      {/* Wallpaper for this lane: what an officer brings here is one language and takes
+          away another — books, letters, a globe, an exchange. The marks are decorative
+          only, and the vocabulary lives beside the other lanes' in lib/doodleMarks.ts —
+          see components/common/PageBackdrop.tsx. */}
+      <PageBackdrop marks={TRANSLATE_DOODLES} seed={23} />
+
       <header className="page-head">
         <div className="page-head-text">
           <h1 className="page-title">{STR.translatePageTitle}</h1>
@@ -373,194 +428,221 @@ export default function TranslatePage() {
         </div>
       </header>
 
-      <section className="card">
-        {/* The label names the source the chosen target implies, so the box states what it
-            expects instead of the row below it having to ask. */}
-        <label className="field-label" htmlFor="translate-text">
-          {INPUT_LABELS[source]}
-        </label>
-        <p className="hint">{STR.translateInputHint}</p>
-        {/* Uncontrolled by design: an InScript keyboard assembles each Marathi character in
-            stages a controlled box can overwrite half-formed. See ComposeSafeInput. */}
-        <ComposeSafeTextarea
-          id="translate-text"
-          className="note-input"
-          placeholder={STR.translateInputPlaceholder}
-          value={text}
-          onChange={(next) => {
-            setText(next);
-            resetFlow();
-          }}
-          style={{ marginTop: 10 }}
-        />
-        <p className="hint char-count">
-          {text.length.toLocaleString('en-IN')} {STR.docChars}
-        </p>
+      <div className="flex flex-col gap-5">
+        {/* The one input. Everything that decides WHAT is translated lives in this card:
+            the typed text, the file behind [+], and which language it goes into. */}
+        <FormCard
+          htmlFor="translate-text"
+          // The label names the source the chosen target implies, so the box states what
+          // it expects instead of a separate control having to ask.
+          label={INPUT_LABELS[source]}
+          hint={STR.translateInputHint}
+        >
+          <div className="mt-4">
+            <PromptTextarea
+              id="translate-text"
+              value={text}
+              onChange={(next) => {
+                setText(next);
+                resetFlow();
+              }}
+              placeholder={STR.translateInputPlaceholder}
+              disabled={submitting}
+              className="w-full"
+            />
 
-        {/* The target row sits with the text it is about, not in a card of its own two
-            scrolls further down. All three are ALWAYS enabled — nothing here is conditioned
-            on what the box contains, so nothing appears, vanishes or switches itself off
-            under the officer's cursor as they type. */}
-        <div className="translate-target">
-          <p className="field-label">{STR.translateDirectionLabel}</p>
-          <div
-            className="lang-toggle"
-            role="group"
-            aria-label={STR.translateDirectionLabel}
-          >
-            {TARGET_OPTIONS.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                className="btn btn-small"
-                aria-pressed={target === option.value}
-                disabled={busy}
-                onClick={() => {
-                  setTarget(option.value);
-                  // A result belongs to the direction it was made in; changing the target
-                  // invalidates it exactly like editing the text does.
-                  resetFlow();
-                }}
+            {/* The one band of controls: attach a file, choose the target. Icon-only for
+                the tool, the same h-9 dropdown the other two create surfaces use for the
+                question they ask once and rarely change. */}
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              {/* Opens the browser's file dialog directly, the way /dlo's composer
+                  tools do. It used to toggle an upload BLOCK below the card, which was a
+                  second form with its own upload control and its own page picker. */}
+              <ComposerToolbarButton
+                icon={Paperclip}
+                label={STR.docUpload}
+                disabled={submitting}
+                onClick={docs.pick}
+              />
+
+              {/* All three are ALWAYS offered — nothing here is conditioned on what the
+                  box contains, so nothing appears, vanishes or switches itself off under
+                  the officer's cursor as they type. */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    type="button"
+                    disabled={busy}
+                    aria-label={STR.translateDirectionLabel}
+                    title={STR.translateDirectionLabel}
+                    className="justify-between font-normal"
+                  >
+                    <Languages aria-hidden="true" />
+                    {TARGET_LABELS[target]}
+                    <ChevronDown aria-hidden="true" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-56">
+                  <DropdownMenuGroup>
+                    {TARGET_OPTIONS.map((option) => (
+                      <DropdownMenuItem
+                        key={option.value}
+                        onSelect={() => {
+                          setTarget(option.value);
+                          // A result belongs to the direction it was made in; changing
+                          // the target invalidates it exactly like editing the text does.
+                          resetFlow();
+                        }}
+                      >
+                        {option.label}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              {/* The count and the page's one action, held together and pushed to the
+                  end of the same row — so they wrap onto a line of their own rather than
+                  the button being stranded under a lone tool button on a narrow card.
+                  The same arrangement /dlo's composer uses. */}
+              <div className="ms-auto flex items-center gap-3">
+                {/* A pasted press note is long enough that "how much is this?" is a real
+                    question; an empty box does not need the answer. */}
+                {text.length > 0 ? (
+                  <span className="text-muted-foreground text-sm">
+                    {text.length.toLocaleString('en-IN')} {STR.docChars}
+                  </span>
+                ) : null}
+
+                {/* THE SUBMIT, at the end of the tool row, exactly as it sits on Creative
+                    and Social (components/media-room/NoteComposer) and on /dlo. Both
+                    conditions are the ones the pinned bar carried, unchanged: DISABLED
+                    until there is something to translate (`canSubmit` — which counts a
+                    scanned PDF whose pages are ticked but unread, or an officer whose only
+                    source is a scan would face a dead button), and disabled again while
+                    anything is genuinely in flight. It is deliberately NOT disabled merely
+                    because the name-review card is open: that card is the second half of
+                    this one submit, and pressing here confirms it.
+
+                    Enabled, it carries the slow warm sheen (`mr-submit-flow`,
+                    globals.css) — the only moving thing on the page, so "there is
+                    something to press now" reads without a label; disabled it is quiet and
+                    still. */}
+                <button
+                  type="button"
+                  onClick={startSubmit}
+                  disabled={submitBusy || !canSubmit}
+                  className={cn(
+                    'text-primary-foreground inline-flex h-9 shrink-0 items-center rounded-md px-5 text-sm font-bold transition-[filter]',
+                    'focus-visible:ring-ring/50 outline-none focus-visible:ring-[3px]',
+                    'disabled:cursor-not-allowed disabled:opacity-60',
+                    submitBusy || !canSubmit
+                      ? 'bg-primary'
+                      : 'mr-submit-flow hover:saturate-110 hover:brightness-105',
+                  )}
+                >
+                  {submitLabel}
+                </button>
+              </div>
+            </div>
+
+            {/* Why a press was refused, under the button that was pressed. It used to be
+                in the pinned bar; with the button in the card, a message left down there
+                would be a refusal the officer never sees. */}
+            {error ? (
+              <div className="mt-3">
+                <ErrorNotice message={error} />
+              </div>
+            ) : null}
+
+            {/* The one thing the button's own label has no room for: a long text takes a
+                minute or two. Only while it is actually running. */}
+            {submitting ? (
+              <p
+                className="text-muted-foreground mt-2 text-sm"
+                aria-live="polite"
               >
-                {option.label}
-              </button>
-            ))}
+                {STR.translateMayTakeTime}
+              </p>
+            ) : null}
+
+            {/* Directly under the button that produced it, so "attach" and "attached" are
+                one place on the screen. */}
+            <AttachmentStrip
+              items={docs.items}
+              disabled={submitting}
+              className="mt-4"
+            />
+
+            {/* The hidden file input and one reader per attached document. Renders nothing
+                — every card the officer sees is in the strip above. */}
+            {docs.readers}
           </div>
-        </div>
-      </section>
+        </FormCard>
 
-      {/* The document to translate usually arrives as a file, not in the clipboard. The
-              shared intake reads pdf/docx/txt — a scanned PDF stops to ask which pages are
-              worth OCR'ing before a credit is spent — and its text is counted beside the box
-              above, in LIVE mode, so there is no hand-over button to find and no way to leave
-              an upload behind. No character budget is passed: this page imposes no length
-              limit on the text, so page selection is about OCR spend, not about trimming. */}
-      <DocumentIntake
-        key={docKey}
-        storageKey={DOC_STORAGE_KEY}
-        feature="translate"
-        accept={['pdf', 'docx', 'txt']}
-        onTextChange={(value) => {
-          // Only a real change may invalidate a finished translation.
-          if (value === docTextRef.current) return;
-          docTextRef.current = value;
-          setDocText(value);
-          resetFlow();
-        }}
-        onStatusChange={setDocStatus}
-        readRequest={readRequest}
-        // Offered only once there IS a file: the component renders this control in every
-        // state including the empty upload card, where there is nothing to delete.
-        {...(docStatus === 'empty' ? {} : { onRemove: clearDocument })}
-        // The same भाषांतर करा, beside the file controls. A scanned PDF's page picker is
-        // taller than the viewport, so the submit below it is off screen at exactly the
-        // moment the officer has finished choosing pages.
-        submitAction={
-          <button
-            type="button"
-            className="btn btn-primary btn-small"
-            onClick={startSubmit}
-            disabled={disabled}
-          >
-            {awaitingRead ? STR.docReadingForSubmit : STR.translateAction}
-          </button>
-        }
-      />
-
-      {/* The submit, as an action bar rather than a full sheet of white holding one button
-          (see .card-action). The name-review panel is a sibling below it, not a child: it
-          carries its own frame and would sit inside a tinted bar as a panel within a panel. */}
-      <section className="card card-action">
-        {/* Said before the submit, not after it: an officer used to a two-step submit
-            should know the step is missing on purpose and where the spelling comes from. */}
-        {!reviewsNames ? (
-          <p className="hint">{STR.translateIntoMarathiNames}</p>
+        {prep === 'review' && prepared ? (
+          <TranslationTermsReview
+            terms={prepared}
+            busy={submitting}
+            confirmRequest={confirmRequest}
+            // The panel only ever renders on a Marathi source, where the target is en or
+            // hi — which is exactly what its own prop accepts.
+            language={target === 'hi' ? 'hi' : 'en'}
+            onConfirm={(terms) => void runTranslation(terms)}
+            onCancel={() => {
+              setPrep('idle');
+              setPrepared(null);
+            }}
+          />
         ) : null}
 
-        <div className="btn-row" style={{ marginTop: reviewsNames ? 0 : 14 }}>
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={startSubmit}
-            disabled={disabled}
-          >
-            {STR.translateAction}
-          </button>
-          {awaitingRead ? (
-            <span className="translating-note">
-              <span className="spinner" aria-hidden="true" />
-              {STR.docReadingForSubmit}
-            </span>
-          ) : null}
-          {prep === 'preparing' ? (
-            <span className="translating-note">
-              <span className="spinner" aria-hidden="true" />
-              {STR.namesChecking}
-            </span>
-          ) : null}
-          {submitting ? (
-            <span className="translating-note">
-              <span className="spinner" aria-hidden="true" />
-              {STR.translating} {STR.translateMayTakeTime}
-            </span>
-          ) : null}
-        </div>
-        {error ? <ErrorNotice message={error} /> : null}
-      </section>
+        {result ? (
+          // The same box shape as the composer above it (see FormCard), written out
+          // because this one is headed by an <h2> rather than by a label pointing at a
+          // control.
+          <section className="bg-card rounded-2xl border p-4 shadow-sm sm:p-5">
+            <h2 className="text-foreground m-0 text-base font-semibold">
+              {OUTPUT_TITLES[result.language]}
+            </h2>
 
-      {prep === 'review' && prepared ? (
-        <TranslationTermsReview
-          terms={prepared}
-          busy={submitting}
-          confirmRequest={confirmRequest}
-          // The panel only ever renders on a Marathi source, where the target is en or
-          // hi — which is exactly what its own prop accepts.
-          language={target === 'hi' ? 'hi' : 'en'}
-          onConfirm={(terms) => void runTranslation(terms)}
-          onCancel={() => {
-            setPrep('idle');
-            setPrepared(null);
-          }}
-        />
-      ) : null}
+            {result.unpreservedNames.length > 0 ? (
+              <div className="info-callout warn" style={{ marginTop: 12 }}>
+                <p className="field-label">{STR.translateUnpreservedTitle}</p>
+                <p className="hint">
+                  {STR.translateUnpreservedHint}{' '}
+                  {result.unpreservedNames.join(', ')}
+                </p>
+              </div>
+            ) : null}
 
-      {result ? (
-        <section className="card">
-          <h2>{OUTPUT_TITLES[result.language]}</h2>
-          {result.unpreservedNames.length > 0 ? (
-            <div className="info-callout warn" style={{ marginBottom: 12 }}>
-              <p className="field-label">{STR.translateUnpreservedTitle}</p>
-              <p className="hint">
-                {STR.translateUnpreservedHint}{' '}
-                {result.unpreservedNames.join(', ')}
-              </p>
+            <div className="article-body mt-4">{result.text}</div>
+
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <Button variant="outline" type="button" onClick={copyToClipboard}>
+                {copied ? STR.copied : STR.copyText}
+              </Button>
+              <Button
+                variant="outline"
+                type="button"
+                onClick={() =>
+                  downloadBlob(
+                    DOWNLOAD_NAMES[`${result.source}>${result.language}`] ??
+                      'translation.txt',
+                    result.text,
+                    'text/plain',
+                  )
+                }
+              >
+                {STR.downloadTxt}
+              </Button>
+              <span className="text-muted-foreground ms-auto text-sm">
+                {result.lockedTermCount} {STR.translateLockedTerms}
+              </span>
             </div>
-          ) : null}
-          <div className="article-body">{result.text}</div>
-          <div className="btn-row" style={{ marginTop: 18 }}>
-            <button type="button" className="btn" onClick={copyToClipboard}>
-              {copied ? STR.copied : STR.copyText}
-            </button>
-            <button
-              type="button"
-              className="btn"
-              onClick={() =>
-                downloadBlob(
-                  DOWNLOAD_NAMES[`${result.source}>${result.language}`] ??
-                    'translation.txt',
-                  result.text,
-                  'text/plain',
-                )
-              }
-            >
-              {STR.downloadTxt}
-            </button>
-          </div>
-          <p className="hint">
-            {result.lockedTermCount} {STR.translateLockedTerms}
-          </p>
-        </section>
-      ) : null}
+          </section>
+        ) : null}
+      </div>
     </main>
   );
 }

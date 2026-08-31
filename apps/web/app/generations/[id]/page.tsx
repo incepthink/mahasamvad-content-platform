@@ -2,12 +2,14 @@
 
 import { use, useCallback, useState } from 'react';
 import { isArticleCategory, isSocialCategory } from '@dgipr/schemas';
+import { useArticleStream } from '../../../lib/useArticleStream';
 import { useGeneration } from '../../../lib/useGeneration';
 import { useGenerationThread } from '../../../lib/useGenerationThread';
 import { retryGeneration } from '../../../lib/api';
 import { useTasks } from '../../../lib/TasksProvider';
 import { STR } from '../../../lib/strings';
 import { errorMessage, storedErrorMessage } from '../../../lib/errorMessage';
+import { ArticleDraft } from '../../../components/ArticleDraft';
 import { GenerationThread } from '../../../components/GenerationThread';
 import { ProgressSteps } from '../../../components/ProgressSteps';
 import { TaskProgressBar } from '../../../components/TaskProgressBar';
@@ -19,6 +21,8 @@ import { NextActions } from '../../../components/NextActions';
 import { PosterPanel } from '../../../components/PosterPanel';
 import { PosterSkeleton } from '../../../components/PosterSkeleton';
 import { SocialPostView } from '../../../components/SocialPostView';
+import { PageBackdrop } from '../../../components/common/PageBackdrop';
+import { CREATIVE_DOODLES, NEWS_DOODLES } from '../../../lib/doodleMarks';
 
 // The API persists the provider's complete failure so the server keeps the request id and
 // coarse moderation diagnostics. That blob is useful in logs, not to an officer. OpenAI says
@@ -68,6 +72,31 @@ export default function GenerationDetailPage({
     id,
     detail?.status ?? null,
   );
+
+  // Is there a draft to watch right now? Two cases, and the second is why this is not simply
+  // "the row has no article yet": an officer's feedback REWRITES the article, so the previous
+  // one is on the row for the whole rewrite. That path flips the row to `revise_article`,
+  // which unmounts ArticleView in favour of the step list — so the draft below replaces
+  // nothing and shows अभिप्रायानुसार बातमी सुधारत आहोत… as the article changing.
+  //
+  // The concurrent revision (`articleRevising`, running beside a poster render) is
+  // deliberately NOT here: it keeps ArticleView mounted with the previous article, so a draft
+  // card would put two versions of the same article on screen at once.
+  //
+  // `!detail` opens the stream before the first poll lands, which matters on a run created a
+  // moment ago. A run with nothing to stream (a social lane, a restarted API,
+  // ARTICLE_STREAMING=0) leaves it empty and renders nothing at all, which is the old page.
+  const draftInFlight =
+    !detail ||
+    ((detail.status === 'queued' || detail.status === 'running') &&
+      (!detail.article || detail.step === 'revise_article'));
+
+  // The draft arriving live, so बातमी लिहित आहोत… reads as the article appearing rather than
+  // a step list sitting still for minutes — the same view /dlo's workspace already shows, and
+  // the reason it is one shared component. Dropped once the run settles: ArticleView is then
+  // the authoritative copy and holding the connection open would only wait out the poster
+  // render.
+  const streamedArticle = useArticleStream(id, draftInFlight);
 
   // Every image-producing edit started on THIS page (a poster redesign, a heading redo, a
   // copy/scene re-render, a marker round, attaching a poster to an article run) registers
@@ -190,8 +219,19 @@ export default function GenerationDetailPage({
   const editFailed =
     !!detail.editFailure || (detail.status === 'failed' && hasOutput);
 
+  // Keep the result visually connected to the lane that created it. Article-only
+  // news/scheme work continues DLO's newspaper wallpaper; every poster, thumbnail
+  // and social/caption result continues the Creative lane's image-making wallpaper.
+  const isDloArticle =
+    isArticleCategory(detail.category) && detail.outputType === 'article';
+
   return (
     <main className="page">
+      <PageBackdrop
+        marks={isDloArticle ? NEWS_DOODLES : CREATIVE_DOODLES}
+        seed={isDloArticle ? 31 : 19}
+      />
+
       <div
         className="btn-row"
         style={{ justifyContent: 'space-between', marginBottom: 20 }}
@@ -220,6 +260,12 @@ export default function GenerationDetailPage({
         ) : (
           <ProgressSteps detail={detail} />
         ))}
+
+      {/* The draft, under the step list, while the article is being written or rewritten.
+          Never alongside ArticleView: once the run settles, the stream's last snapshot and
+          ArticleView would be the same text twice — and by then the authoritative copy is
+          the one below, applied designations and all. See `draftInFlight`. */}
+      {draftInFlight ? <ArticleDraft text={streamedArticle} /> : null}
 
       {/* Two different situations, deliberately worded differently. A run that produced
           NOTHING is a failure and reads as one. A run whose earlier output survived — its

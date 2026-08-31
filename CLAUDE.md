@@ -272,6 +272,23 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
   verbatim"; correcting text before it becomes an article is /dlo's review step.
   Audio container rules are NOT redefined here: `AUDIO_FILE_ACCEPT`/`audioMimeForFileName`
   come from `schemas/src/dlo.ts`, so the picker can never offer a file the API refuses.
+  - **NO RECORDING IS EVER HELD WHOLE IN THE API** (2026-08-30). Every upload route streams
+    each audio part straight to S3 with `uploadStream` (`@dgipr/database/storage.ts`,
+    `@aws-sdk/lib-storage`) instead of `part.toBuffer()`, so peak memory is ~16 MiB per file
+    whatever its length — a 239.6 MB recording used to cost ~500 MB and OOM-killed the
+    container mid-upload, losing the officer's meeting. Two consequences to keep: the ROW ID
+    IS MINTED BY THE ROUTE (`insertTranscription`/`insertDloIntake` take an optional `id`),
+    because a storage key must exist before the first byte while the row must not exist until
+    every part is accepted — every early return calls `discardStaged()`; and each entry
+    records `bytes`, which the JOB reads to transcribe in groups bounded by
+    `STT_BATCH_MAX_BYTES` (`apps/api/src/jobs/audio-batches.ts`) rather than downloading a
+    whole run at once. A recording larger than the budget is never refused — it gets a group
+    to itself. Free harness: `npx tsx apps/api/src/jobs/audio-batches.ts` (run it from
+    `packages/content-engine`, which has tsx). Live, against the real bucket:
+    `pnpm --filter @dgipr/database storage:check-upload -- --mb=240` — run it after any change
+    to bucket or IAM policy, since multipart upload needs Create/UploadPart/Complete/**Abort**
+    and a policy granting only `s3:PutObject` passes every other upload in the product while
+    failing every recording.
 - **YouTube links as a source (both /dlo and /transcribe) — yt-dlp since 2026-08-19.**
   This bullet used to read "no downloader, by design": ElevenLabs Scribe takes a
   **`source_url`** and fetched the media itself (its docs name YouTube explicitly;
@@ -586,12 +603,30 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   keep bytes — so reopening a chat re-extracts and re-transcribes nothing; documents go through
   the shared `/api/documents` service and recordings/YouTube links
   through the EXISTING `/api/transcriptions` job (so the 0031 cache applies, at the cost of a
-  chat recording also appearing in /transcribe's history). **Its documents are read on their own
-  OCR backend**: the composer sends `surface: 'chat'` on the upload, the route maps that through
-  `CHAT_OCR_PROVIDER` (default **gemini**) and the whole PDF is read in ONE call
-  (`intake/gemini-doc.ts`) instead of one call per page. The browser names the SURFACE, never
-  the provider; every other surface keeps `OCR_PROVIDER`. /chat also has NO page picker — a
-  chat attachment is read whole on send, so the spend gate is the send itself. The turn route persists the USER
+  chat recording also appearing in /transcribe's history). **A PDF is not OCR'd at all — it is read
+  through OpenAI FILE SEARCH** (`chat/file-search.ts`, migration 0049), which is what makes the
+  per-file ceiling **512 MB** rather than the 50 MB the Responses `input_file` path allowed.
+  Four things to know before touching it. **One vector store per THREAD**
+  (`chat_threads.vector_store_id`), never per file: the `file_search` tool takes a
+  `vector_store_ids` ARRAY but searches only the first id, so a per-file store would silently
+  hide a chat's other documents; `chat_files.vector_store_id` records what has finished indexing,
+  which is what keeps a follow-up free. **The model is told which documents it can search**
+  (`searchableDocumentsLine`, a second `input_text` part) and only for ones indexed right now —
+  it can no longer see them, and naming an unindexed file makes it report the officer's document
+  as empty. **Nothing holds the document**: the part streams to the private bucket
+  (`uploadStream`) and the bucket feeds OpenAI's Uploads API in <=64 MB parts via
+  `downloadFileRange`, so peak memory is one part whatever the length — `await file.toBuffer()`
+  here would be ~1 GB and the 2026-08-30 OOM all over again. And **pre-0048 files carry
+  `purpose: 'user_data'`, which File Search rejects**, so an attach refusal re-uploads from
+  storage under `purpose: 'assistants'`; that is why `attachChatDocument` and
+  `awaitChatDocumentIndexed` are separate — only the attach is worth retrying. Indexing runs
+  INSIDE the SSE stream so a minutes-long chunking failure takes the model-failure path, and the
+  store is deleted with the thread (billed per GB/day, unlike a stored object).
+  DOCX/TXT still go through the shared intake on their own OCR backend: the composer sends
+  `surface: 'chat'`, the route maps it through `CHAT_OCR_PROVIDER` (default **gemini**) and the
+  whole file is read in ONE call (`intake/gemini-doc.ts`). The browser names the SURFACE, never
+  the provider; every other surface keeps `OCR_PROVIDER`. /chat has NO page picker — a chat
+  attachment is read whole on send, so the spend gate is the send itself. The turn route persists the USER
   message BEFORE anything can fail and stores a PARTIAL answer on failure, because those tokens
   are paid for. And the SSE route writes to `reply.raw`, which bypasses Fastify's reply
   pipeline — so the **CORS header is written by hand** (without it the browser rejects a stream
@@ -743,10 +778,17 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   `components/PageRangeSelector.tsx` (**the** page picker — see below),
   `components/DocumentIntake.tsx` (the whole ephemeral upload→pick→review flow, for surfaces
   that just want a string — in two modes: **handoff** (`onText`, the default) commits only
-  when "हा मजकूर वापरा" is pressed, right for a surface whose one box the file REPLACES
-  (/translate, /proofread); **live** (`onTextChange`) streams the current text as it changes
-  and hides the button, for a surface that keeps the file BESIDE its own box (the media
-  room), where an unpressed button silently discarded the whole upload),
+  when "हा मजकूर वापरा" is pressed, right for a surface whose one box the file REPLACES;
+  **live** (`onTextChange`) streams the current text as it changes and hides the button, for
+  a surface that keeps the file BESIDE its own box (the media room), where an unpressed
+  button silently discarded the whole upload),
+  **`components/common/DocumentAttachments.tsx`** (`useDocumentAttachments` — the /dlo
+  composer's attach model for /translate and /proofread: the paperclip opens the file dialog,
+  several documents at once, each read by its own `headless` `<DocumentIntake>`, all of them
+  listed as cards in the composer's `AttachmentStrip`. It owns the LIST — one combined
+  string, one aggregate status for the submit to gate on, one row of cards — and reimplements
+  nothing about reading a document. **The spend gate is unchanged**: attaching PROBES, and
+  the surface's own submit is what authorises the OCR),
   `lib/useDocumentIntake.ts`,
   `lib/documentSelection.ts`. Neither `DocumentPages` nor `PageRangeSelector` holds selection
   state, on purpose — the surfaces disagree about how to store one (/translate tracks pages
@@ -815,14 +857,18 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   them one at a time. Page numbers are the DOCUMENT's throughout — blank pages are kept,
   never renumbered away. Harness:
   `tsx --env-file=../../.env src/intake/pdf-pages.ts <file.pdf> [--ocr|--text] [--pages=2,5,9] [--probe]`.
-- **`/translate` has ONE flow — there is no PDF mode.** A file (pdf/docx/txt) is read by the
-  shared `<DocumentIntake>` and its text lands in the SAME box the user could have pasted
-  into; from there it is the pasted-text path exactly, synchronous, name check and all
+- **`/translate` has ONE flow — there is no PDF mode.** Files (pdf/docx/txt, several at
+  once) are attached through the composer's paperclip exactly as they are on /dlo
+  (`useDocumentAttachments`), and their text is counted BESIDE the box the user could have
+  pasted into; from there it is the pasted-text path exactly, synchronous, name check and all
   (`apps/web/app/translate/page.tsx`). `TRANSLATE_TEXT_MAX_CHARS` is therefore 60,000, not
   10,000 — a whole document has to fit — and `translateArticle` already chunks internally, so
-  the cap bounds how LONG one synchronous request runs, not whether it works. The intake is
-  given that cap as `maxChars`, which is what makes page selection the way to trim an
-  over-long booklet.
+  the cap bounds how LONG one synchronous request runs, not whether it works.
+  **भाषांतर करा is the only press**: it reads whatever is attached and unread (the spend
+  gate — attaching only probes) and continues into the translation when the text lands. The
+  upload BLOCK, its page picker and its hand-over button are gone; /proofread is identical.
+  The text a document contributes is PROSE — `lib/extractedText` converts the OCR backend's
+  HTML, which this page used to send to the translator as the text to translate.
   The **dead** per-page/per-language document path (background job, `selecting` status, AI
   page instruction, separate English/Hindi page-by-page results) still exists server-side and
   is deliberately left intact but UNUSED: `apps/api/src/jobs/translate-document.ts`, the
