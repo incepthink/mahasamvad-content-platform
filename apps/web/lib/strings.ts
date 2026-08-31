@@ -223,10 +223,10 @@ export const STR = {
   dloAiPromptPlaceholder: 'उदा. ५० कोटींच्या निधीवर भर द्या; भाषा सोपी ठेवा…',
   // All three file sources are attached from ONE card (components/DloSourcesCard) — the
   // question "what do you want to add?" is the same for each, and three cards asking it made
-  // the officer scroll past two they were not using. The hint carries the difference that is
-  // real: a recording and a photograph are read during प्रक्रिया, while a document is read
-  // here and now, page by page, with a scan stopping to ask which pages are worth OCR'ing
-  // before a single credit is spent.
+  // the officer scroll past two they were not using. Nothing is read at this step at all:
+  // every source is uploaded with the intake, and a document reaches the article model as a
+  // file rather than as text somebody extracted first — which is why there is no page
+  // picker here and the hint promises only that the reading happens during प्रक्रिया.
   dloAttachTitle: 'स्रोत जोडा',
   dloAttachHint:
     'बैठकीचे ध्वनिमुद्रण, कागदपत्रांचे फोटो आणि PDF / DOCX / TXT फाईल — एकावेळी अनेक जोडता येतील, फाईलच्या आकाराची मर्यादा नाही. ध्वनिमुद्रण, प्रतिमा आणि कागदपत्रांमधील मजकूर प्रक्रियेदरम्यान वाचला जाईल आणि तपासणी टप्प्यावर दुरुस्त करता येईल.',
@@ -256,6 +256,12 @@ export const STR = {
   // file button and its own [+] went with the page picker, so this button opens the file
   // dialog itself and everything attached is a card in the strip.
   dloDocsUpload: 'कागदपत्र जोडा',
+  dloDocsFilesTitle: 'जोडलेली कागदपत्रे',
+  // Per-source status in /dlo's workspace list. A document is 'ready' the moment it is
+  // attached — uploading it IS the whole of preparing it — so only a recording ever sits
+  // on the second one for long.
+  dloFileReady: 'तयार',
+  dloFileWorking: 'सुरू आहे…',
   dloRemoveFile: 'फाईल काढा',
 
   // YouTube links as a source, shared by /dlo and /transcribe (components/YouTubeLinkInput).
@@ -1388,10 +1394,13 @@ export const STR = {
   // hiding — how many RUNS there are, which is not the same count as the recordings above.
   transcribeRunCountSuffix: 'ध्वनिलेखने',
   transcribeOpen: 'उघडा',
+  transcribeClose: 'बंद करा',
   transcribeDownloadName: 'ध्वनिलेखन',
   // Carries this transcript to /dlo as the note of a new intake. Named for what the officer
   // gets at the end of that flow, not for what the button does to the text.
   transcribeToArticle: 'बातमी तयार करा',
+  transcribeToArticleHint:
+    'हा मजकूर लेखाच्या टिपणीत जाईल. तिथे तो तपासून व दुरुस्त करून बातमी तयार करता येईल.',
 
   // Errors
   // Said at the picker, before the upload starts — the whole point of checking the size in

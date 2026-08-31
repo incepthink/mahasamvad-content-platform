@@ -12,8 +12,6 @@
 // way; the storage only spares the officer having to look for it.
 
 import { useEffect, useState } from 'react';
-import { TRANSCRIBE_DOODLES } from '../../lib/doodleMarks';
-import { PageBackdrop } from '../../components/common/PageBackdrop';
 import { TranscriptionForm } from '../../components/TranscriptionForm';
 import { TranscriptionList } from '../../components/TranscriptionList';
 import { TranscriptionResult } from '../../components/TranscriptionResult';
@@ -58,15 +56,7 @@ export default function TranscribePage() {
   const busy = detail?.status === 'queued' || detail?.status === 'running';
 
   return (
-    // No foot clearance: the submit is in the composer card (see TranscribeComposer), so
-    // nothing is pinned over the last block or over the credit line any more — the shape
-    // app/page.tsx already uses.
     <main className="page">
-      {/* Wallpaper for this lane: what an officer brings here is a recording. The marks
-          are decorative only, and the vocabulary lives beside the other lanes' in
-          lib/doodleMarks.ts — see components/common/PageBackdrop.tsx. */}
-      <PageBackdrop marks={TRANSCRIBE_DOODLES} seed={31} />
-
       <header className="page-head">
         <div className="page-head-text">
           <h1 className="page-title">{STR.transcribeTitle}</h1>
@@ -74,20 +64,16 @@ export default function TranscribePage() {
         </div>
       </header>
 
-      {/* The input and its output use the same compact card system. Keeping them in one
-          stack supplies the standard 20px rhythm even though neither card uses the old
-          `.card + .card` margin rule. */}
-      <div className="flex flex-col gap-5">
-        <TranscriptionForm onStarted={start} busy={busy} />
+      <TranscriptionForm onStarted={start} busy={busy} />
 
-        {selectedId ? (
-          <TranscriptionResult
-            detail={detail}
-            error={error}
-            onRetry={() => void refreshDetail()}
-          />
-        ) : null}
-      </div>
+      {selectedId ? (
+        <TranscriptionResult
+          detail={detail}
+          error={error}
+          onRetry={() => void refreshDetail()}
+          onClose={() => select(null)}
+        />
+      ) : null}
 
       <TranscriptionList
         items={items}

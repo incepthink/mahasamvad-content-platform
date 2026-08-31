@@ -20,7 +20,7 @@ const DEVANAGARI_DIGITS = [
   '९',
 ] as const;
 const EXISTING_DATELINE =
-  /^.{1,80}?,\s*दि\.?\s*[०-९0-9]{1,2}(?:\s+[\p{L}\p{M}]+\s+[०-९0-9]{4})?\s*:\s*/u;
+  /^(?:\*\*)?[^\n,*]{1,80},\s*दि\.?\s*[०-९0-9]{1,2}(?:\s+[\p{L}\p{M}]+\s+[०-९0-9]{4})?\s*:\s*(?:\*\*)?[\s\u00a0]*/u;
 
 const MARKDOWN_HEADING = /^#{1,6}\s+/u;
 // A Marathi news headline is a fragment: it carries no closing full stop, danda, question or
@@ -85,7 +85,13 @@ export function ensureArticleDateline(
   if (filled.length === 0) return `${trimmed}\n\n${dateline.text}`;
 
   const headline = headlineIndex(filled);
-  const body = filled.find((line) => line.index > (headline ?? -1));
+  // A deck/subheading may sit between the headline and lead. It is article furniture, not the
+  // first body paragraph, so never turn `## ऑनलाइन अर्ज...` into a dateline. This is the exact
+  // shape DLO commonly produces when the source carries a headline plus a secondary headline.
+  const body = filled.find(
+    (line) =>
+      line.index > (headline ?? -1) && !MARKDOWN_HEADING.test(line.value),
+  );
   if (!body) return `${trimmed}\n\n${dateline.text}`;
 
   // Self-healing: a run that put the dateline on the headline (see headlineIndex) has it
@@ -184,6 +190,15 @@ if (process.argv[1]?.endsWith('article-dateline.ts')) {
       },
     ),
     '# शीर्षक\n\nमुंबई, दि. २९ : पहिला परिच्छेद.',
+  );
+  check(
+    'a Markdown deck is kept and the bold source dateline beneath it is replaced',
+    ensureArticleDateline(
+      '# दहावीच्या फेब्रुवारी-मार्च २०२७ परीक्षेसाठी\n\n## ऑनलाइन अर्ज भरण्यास १९ ऑगस्टपासून प्रारंभ\n\n**पुणे, दि. १८ :**\u00a0महाराष्ट्र राज्य मंडळामार्फत अर्ज स्वीकारले जातील.',
+      'news',
+      { now },
+    ),
+    '# दहावीच्या फेब्रुवारी-मार्च २०२७ परीक्षेसाठी\n\n## ऑनलाइन अर्ज भरण्यास १९ ऑगस्टपासून प्रारंभ\n\nमुंबई, दि. २९ : महाराष्ट्र राज्य मंडळामार्फत अर्ज स्वीकारले जातील.',
   );
   check(
     'scheme articles are unchanged',

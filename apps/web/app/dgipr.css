@@ -5042,6 +5042,22 @@ a.thread-node:hover {
   flex: none;
 }
 
+/* A source that could not be read, said in the row's own status slot rather than as a
+   separate notice: the list is the account of what was attached, so the failure belongs
+   on the line it happened to. Colour is not carrying the meaning on its own — the text
+   says what went wrong (see the rule at the top of this file). */
+.file-row .file-size--failed {
+  color: var(--err);
+}
+
+/* The status slot doubles as a "still working" line, so it has to lay a spinner beside
+   its text without becoming a flex container in the two cases that are just text. */
+.file-row .file-size .spinner {
+  display: inline-block;
+  vertical-align: -2px;
+  margin-inline-end: 6px;
+}
+
 /* Pages landing one by one while a scanned PDF is read (PageReadProgress).
    `:has()` rather than putting flex-wrap on .file-row itself, so the wrap applies only to a
    row that actually carries this block and every other file list is untouched. */

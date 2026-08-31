@@ -14,43 +14,39 @@
 // them, so the misunderstanding has to be prevented here rather than explained afterwards.
 
 import { useId } from 'react';
+import { BookOpen } from 'lucide-react';
 import { STR } from '../lib/strings';
-import { FormCard } from './common/FormCard';
-import { PromptTextarea } from './common/PromptTextarea';
+import { ComposeSafeTextarea } from './ComposeSafeInput';
 
 export function StyleReferenceField({
   value,
   onChange,
-  disabled = false,
-  className = 'mt-6',
 }: {
   value: string;
   onChange: (next: string) => void;
-  disabled?: boolean | undefined;
-  className?: string | undefined;
 }) {
   // Both /dlo steps can mount this field, and a fixed id would make one step's label focus the
   // other step's input — the bug PageRangeSelector already hit.
   const id = useId();
 
   return (
-    <FormCard
-      htmlFor={id}
-      label={STR.styleRefLabel}
-      hint={STR.styleRefHint}
-      className={className}
-    >
+    <section className="card">
+      <label className="field-label" htmlFor={id}>
+        <BookOpen size={18} className="label-icon" aria-hidden="true" />
+        {STR.styleRefLabel}
+      </label>
+      <p className="hint">{STR.styleRefHint}</p>
       {/* Uncontrolled by design — see ComposeSafeInput. A pasted article arrives whole, but an
           officer may still correct it by hand, and that is the path that loses characters. */}
-      <PromptTextarea
+      <ComposeSafeTextarea
         id={id}
+        className="note-input"
         rows={6}
         placeholder={STR.styleRefPlaceholder}
         value={value}
         onChange={onChange}
-        disabled={disabled}
-        className="mt-3 max-h-96 min-h-36 w-full"
+        style={{ marginTop: 10 }}
       />
-    </FormCard>
+    </section>
   );
 }

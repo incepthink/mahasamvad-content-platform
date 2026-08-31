@@ -32,7 +32,6 @@ export default function DloIntakePage({
       intakeId={id}
       startOverHref="/dlo"
       unifiedInstructions
-      showBackdrop
       autoGenerate
     />
   );

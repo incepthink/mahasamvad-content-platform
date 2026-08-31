@@ -1,25 +1,15 @@
 'use client';
 
-// /transcribe's input step: attach recordings, press once, done. Deliberately the smallest
-// form in the app — a transcription has no category, no heading and no style reference,
-// because nothing downstream reads them.
+// /transcribe's input step: pick recordings, submit, done. Deliberately the smallest form in
+// the app — a transcription has no category, no heading and no style reference, because
+// nothing downstream reads them.
 //
-// It is ONE card that carries its own action — the shape app/page.tsx uses:
+// It is two cards, matching /dlo's intake form: the shared <AudioFilePicker> holds the files,
+// and <TranscriptionSubmit> below it holds the action. This component owns only the state the
+// two share, so the picker looks identical on both surfaces by construction rather than by
+// two sets of markup being kept in step.
 //
-//   TranscribeComposer — the recordings, the link panel, and the submit that acts on them
-//
-// It used to be three stacked cards with a plain button at the end of them, then one
-// composer over a `GenerateBar` pinned to the foot of the viewport. The pinned bar earns
-// its place where a form is several blocks long and the button would otherwise sit below
-// optional material; here the composer IS the form, and everything under it (the result,
-// the past runs) is output rather than input. So the action sits with the controls it acts
-// on. This component still owns every piece of state the run is built from.
-//
-// The action is DISABLED until at least one source exists, so "nothing was supplied" is a
-// dead button rather than an error after a press; the message survives for the share-target
-// path below, which submits without anyone pressing anything.
-//
-// There is still no sessionStorage draft, unlike DloIntakeForm. A File is a live browser
+// There is no sessionStorage draft either, unlike DloIntakeForm. A File is a live browser
 // handle that cannot be serialized, and here it is the ONLY input: a draft that could
 // remember nothing but the file names would be a promise this form cannot keep. The run
 // itself survives a reload — it is a row, and the list below finds it again.
@@ -32,7 +22,9 @@ import {
 } from '@dgipr/schemas';
 import { createTranscription } from '../lib/api';
 import { consumeSharedAudio } from '../lib/sharedAudio';
-import { TranscribeComposer } from './transcribe/TranscribeComposer';
+import { AudioFilePicker } from './AudioFilePicker';
+import { TranscriptionSubmit } from './TranscriptionSubmit';
+import { YouTubeLinkInput } from './YouTubeLinkInput';
 import { STR } from '../lib/strings';
 import { errorMessage } from '../lib/errorMessage';
 
@@ -42,8 +34,6 @@ export function TranscriptionForm({
 }: {
   // Called with the new run's id, so the page can show its progress immediately.
   onStarted: (id: string) => void;
-  // A run of this browser's is still going. Submitting a second is allowed by the API, but
-  // the result card shows one run at a time, so the button waits.
   busy: boolean;
 }) {
   const [files, setFiles] = useState<File[]>([]);
@@ -142,18 +132,33 @@ export function TranscriptionForm({
   }, []);
 
   return (
-    <TranscribeComposer
-      files={files}
-      onFilesChange={setFiles}
-      youtube={youtube}
-      onYoutubeChange={setYoutube}
-      onError={setError}
-      error={error}
-      submitLabel={submitting ? STR.submitting : STR.transcribeSubmit}
-      canSubmit={files.length > 0 || youtube.length > 0}
-      submitBusy={submitting || busy}
-      onSubmit={submit}
-      disabled={submitting}
-    />
+    <>
+      <AudioFilePicker
+        title={STR.transcribeNewTitle}
+        hint={STR.transcribeHint}
+        uploadLabel={STR.transcribeUpload}
+        filesTitle={STR.transcribeFilesTitle}
+        files={files}
+        onChange={setFiles}
+        onError={setError}
+        maxFiles={TRANSCRIPTION_MAX_FILES}
+        disabled={submitting}
+      />
+
+      <YouTubeLinkInput
+        videos={youtube}
+        onChange={setYoutube}
+        onError={setError}
+        disabled={submitting}
+        maxLinks={TRANSCRIPTION_MAX_FILES}
+      />
+
+      <TranscriptionSubmit
+        onSubmit={submit}
+        submitting={submitting}
+        busy={busy}
+        error={error}
+      />
+    </>
   );
 }

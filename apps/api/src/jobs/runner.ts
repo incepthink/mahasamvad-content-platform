@@ -25,6 +25,7 @@ import {
   generateArticle,
   generateArticleSimple,
   generateArticleFromSources,
+  ensureArticleDateline,
   type SimpleGenerateArticleOptions,
   type ArticleNameEntry,
   generateCopy,
@@ -902,11 +903,12 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
               styleReferenceMeta: null,
             };
           })();
-    // Keep the model's article structure intact. In particular, do not inject a generated
-    // `मुंबई, दि. … :` prefix: when the model writes a subheading before the lead, prefixing
-    // the first post-headline line turns that subheading into a malformed dateline. A location
-    // lead that is supported by the source (for example `मुंबई :`) remains untouched.
-    const finalArticle = result.article;
+    // DLO publication copy always opens its BODY with today's Mumbai dateline. The deterministic
+    // pass skips headline/deck lines and replaces a source dateline (including a bold Markdown
+    // one), so source wording such as `पुणे, दि. १८ :` cannot leak into the published lead.
+    const finalArticle = dloArticle
+      ? ensureArticleDateline(result.article, 'news')
+      : result.article;
 
     // The article is final; anything still watching should stop here rather than hold a
     // connection open through the 1-2 minute poster render. Sending the AUTHORITATIVE text as
@@ -2755,7 +2757,9 @@ export function startArticleFeedbackJob(
     );
     designationWarnings.set(id, [...revised.designationIssues]);
     lengthWarnings.set(id, revised.lengthWarning);
-    const revisedArticle = revised.article;
+    const revisedArticle = row.dloIntakeId
+      ? ensureArticleDateline(revised.article, 'news')
+      : revised.article;
 
     // The deltas carried the first pass; the coverage/faithfulness passes and
     // applyDesignations have since rewritten it. One replacing snapshot settles that before
@@ -2848,7 +2852,9 @@ export function startConcurrentArticleFeedbackJob(
           );
           designationWarnings.set(id, [...revised.designationIssues]);
           lengthWarnings.set(id, revised.lengthWarning);
-          const revisedArticle = revised.article;
+          const revisedArticle = row.dloIntakeId
+            ? ensureArticleDateline(revised.article, 'news')
+            : revised.article;
 
           finishArticleStream(id, revisedArticle);
 

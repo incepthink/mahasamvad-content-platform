@@ -23,9 +23,12 @@ import { ComposeSafeTextarea } from './ComposeSafeInput';
 export function AiInstructionsField({
   value,
   onChange,
+  disabled = false,
 }: {
   value: string;
   onChange: (next: string) => void;
+  // Locked while a run this field feeds is already being submitted.
+  disabled?: boolean | undefined;
 }) {
   // Both /dlo steps can mount this field, and a fixed id would make one step's label focus the
   // other step's input — the bug PageRangeSelector already hit.
@@ -48,6 +51,7 @@ export function AiInstructionsField({
         placeholder={STR.aiInstructionsPlaceholder}
         value={value}
         onChange={onChange}
+        disabled={disabled}
         style={{ marginTop: 10 }}
       />
       {value.trim().length > 0 ? (
