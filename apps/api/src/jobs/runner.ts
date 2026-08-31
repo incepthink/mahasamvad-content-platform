@@ -128,7 +128,10 @@ import {
   type TranslationTermInput,
 } from '@dgipr/schemas';
 import { recordTasksFromCost } from './service-usage.js';
-import { sourceFilesForGeneration } from './source-files.js';
+import {
+  sourceContextForGeneration,
+  sourceFilesForGeneration,
+} from './source-files.js';
 import { listKnownDesignations } from './translation-terms.js';
 
 const running = new Set<string>();
@@ -687,20 +690,39 @@ async function designationContext(
   }
 }
 
-// The verified glossary rows whose Marathi form occurs in the note, as the article prompt wants
-// them. BOTH prompt variants read them as of simple-v4: neither specification states name rules
-// any more, so each is handed the spellings themselves — the dictionary reaching the article as
-// SPELLING rather than only as designations.
+// The verified glossary rows whose Marathi form occurs in this run's source text, as the
+// article prompt wants them. BOTH prompt variants read them as of simple-v4: neither
+// specification states name rules any more, so each is handed the spellings themselves — the
+// dictionary reaching the article as SPELLING rather than only as designations.
+//
+// IT TAKES EVERY TEXT THE RUN HAS, and on the file lane that is the whole point. The match is
+// a substring scan, so a row can only be found in text we hold — and there a document is never
+// transcribed, so `row.note` is the typed context plus the audio transcripts alone. Scanning
+// it found none of the names, places, organisations or scheme names that occur inside the
+// attached PDF, and the block was silently omitted: the model wrote a government article with
+// no verified spelling for any of them. The name step's digest (source-files.ts) is the only
+// text this lane produces about its documents, so it is passed here beside the note.
 //
 // Best-effort by construction: a failure logs and returns [], because an unreachable dictionary
 // must cost the spelling hints, never the article. applyDesignations() remains the structural
 // guarantee, and it runs off the officer-approved pairs regardless of what this returns.
 async function articleNameDictionary(
   client: SupabaseClient,
-  note: string,
+  ...sources: readonly (string | null | undefined)[]
 ): Promise<ArticleNameEntry[]> {
+  // De-duplicated because the sources legitimately coincide: on an audio-only intake the
+  // name digest IS the note, and scanning the same transcript twice runs every dictionary row
+  // against a doubled string for the same answer.
+  const text = [
+    ...new Set(
+      sources
+        .map((source) => (source ?? '').trim())
+        .filter((source) => source.length > 0),
+    ),
+  ].join('\n\n');
+  if (text.length === 0) return [];
   try {
-    const terms = await findGlossaryTermsInText(client, note);
+    const terms = await findGlossaryTermsInText(client, text);
     return terms.map((term) => ({
       marathi: term.marathi,
       termType: term.termType,
@@ -810,7 +832,8 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
             // generators take the same options and return the same shape — so this is the
             // only line that differs between the lanes, and everything below (the dateline,
             // the warnings, the style-reference write, posters, translation) is shared.
-            const sourceFiles = await sourceFilesForGeneration(client, row);
+            const { files: sourceFiles, nameContext } =
+              await sourceContextForGeneration(client, row);
             const writeArticle =
               sourceFiles.length > 0
                 ? (note: string, options: SimpleGenerateArticleOptions) =>
@@ -830,9 +853,11 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
               // same article rather than a differently-directed one. The `full` pipeline does
               // not take it — it is the legacy opt-out, deliberately left byte-for-byte.
               instructions: row.instructions,
-              // The verified dictionary rows this note actually mentions. Read by both prompt
-              // variants: neither spells out name rules, both are handed the spellings.
-              names: await articleNameDictionary(client, row.note),
+              // The verified dictionary rows this run's sources actually mention. Read by
+              // both prompt variants: neither spells out name rules, both are handed the
+              // spellings. The digest is what makes this non-empty on the file lane, where
+              // the note holds none of the document's text — see articleNameDictionary.
+              names: await articleNameDictionary(client, row.note, nameContext),
               onProgress: progress,
               // Publish the draft as it is written, so the officer reads it appearing rather
               // than watching a progress bar for minutes. Display only — the authoritative
@@ -1843,17 +1868,9 @@ async function renderAndStoreSocialPoster(
   //    shipped yesterday. Kept under the 'classify' step rather than given one of its own, so
   //    the officer's progress list still runs classify → copy → image in order.
   //
-  //    NOTE ON THE OFFICER'S BRIEF: `customPrompt` is wired through as context (labelled, and
-  //    explicitly not a source of facts — see extract-poster-points.ts), but a run carrying an
-  //    AI प्रॉम्प्ट is verbatim by definition of `usesVerbatimText` above, so today it is always
-  //    null here. Letting that lane curate its content while the brief governs its design is one
-  //    line — dropping `customPrompt !== null` from `usesVerbatimText`.
   const posterSource = usesVerbatimText
     ? null
-    : await extractPosterPoints({
-        note: row.note,
-        officerPrompt: customPrompt ?? undefined,
-      });
+    : await extractPosterPoints({ note: row.note });
   const posterNote = posterSource?.curated ? posterSource.text : row.note;
   if (posterSource) {
     console.log(
@@ -2628,6 +2645,51 @@ export function startGenerateCaptionJob(
   })();
 }
 
+// Snapshot the article as it stands BEFORE the first feedback round of a run.
+//
+// A revision row is written after a revision, so the log has always held every wording except
+// the one the officer started with — and that is the one they most often want back, because
+// the round most likely to disappoint is the first. Without this, "go back" could reach every
+// version except the original.
+//
+// Written only when no article snapshot exists yet, so it happens once per run and a later
+// round adds nothing. It carries no `feedback`, which is what marks it as the baseline rather
+// than as somebody's edit: nothing was revised to produce it.
+//
+// KNOWN CONSEQUENCE, not an oversight: `nextVersion` names the next poster object
+// `poster-v{revisions.length + 2}`, so a run whose article is edited before its poster is
+// re-rendered skips a number. That was already true of every article and caption revision —
+// the sequence is a source of unique, increasing, never-reused paths (the CDN rule), not a
+// dense count — and the version STRIP is built from the stored paths, so nothing on screen
+// is renumbered.
+async function snapshotArticleBaseline(
+  client: SupabaseClient,
+  row: GenerationRow,
+): Promise<void> {
+  if (!row.article) return;
+  try {
+    const revisions = await listRevisions(client, row.id);
+    const hasSnapshot = revisions.some(
+      (revision) => revision.target === 'article' && revision.article !== null,
+    );
+    if (hasSnapshot) return;
+    await insertRevision(client, {
+      generationId: row.id,
+      target: 'article',
+      feedback: null,
+      article: row.article,
+      factCheck: row.factCheck,
+    });
+  } catch (error) {
+    // Best-effort, and deliberately: the officer asked for a revision, not for a backup. A
+    // failure here costs the ability to step back past this round, never the round itself.
+    console.warn(
+      `[revise-article ${row.id}] could not snapshot the original wording:`,
+      error,
+    );
+  }
+}
+
 // Feedback loop for the article: revise under the original guardrails (note stays
 // the sole fact source) and snapshot the result in the revision log. 5W1H is NOT
 // re-derived here — it's extracted from the immutable note, so it never goes stale
@@ -2644,6 +2706,8 @@ export function startArticleFeedbackJob(
     const row = await getGeneration(client, id);
     if (!row) throw new Error(`Generation ${id} not found.`);
     if (!row.article) throw new Error(`Generation ${id} has no article yet.`);
+    // Before the article is overwritten, and only on the first round of this run.
+    await snapshotArticleBaseline(client, row);
 
     await updateGeneration(client, id, {
       status: 'running',
@@ -2671,6 +2735,12 @@ export function startArticleFeedbackJob(
       row.excludedFacts ?? [],
       rowHasFactCheck(row),
       row.instructions ?? undefined,
+      // The SAME sources the article was written from. The revision prompt treats its NOTES
+      // block as the only authoritative fact source, and on the /new-dlo lane `row.note` is
+      // the typed context alone -- so without this a feedback round asked the model to rewrite
+      // an article while forbidding it to restate anything the article says. Empty for every
+      // other run, which keeps the text path unchanged.
+      await sourceFilesForGeneration(client, row),
     );
     designationWarnings.set(id, [...revised.designationIssues]);
     lengthWarnings.set(id, revised.lengthWarning);
@@ -2717,6 +2787,8 @@ export function startConcurrentArticleFeedbackJob(
           if (!row) throw new Error(`Generation ${id} not found.`);
           if (!row.article)
             throw new Error(`Generation ${id} has no article yet.`);
+          // As on the status-owning path: the wording being replaced is kept first.
+          await snapshotArticleBaseline(client, row);
 
           const currentContent = row.factCheck
             ? `${row.article}\n\n${FACT_CHECK_DELIMITER}\n${row.factCheck}`
@@ -2737,6 +2809,8 @@ export function startConcurrentArticleFeedbackJob(
             row.excludedFacts ?? [],
             rowHasFactCheck(row),
             row.instructions ?? undefined,
+            // As on the status-owning path above: the article's facts are in these files.
+            await sourceFilesForGeneration(client, row),
           );
           designationWarnings.set(id, [...revised.designationIssues]);
           lengthWarnings.set(id, revised.lengthWarning);

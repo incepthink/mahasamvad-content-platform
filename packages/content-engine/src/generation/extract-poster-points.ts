@@ -42,11 +42,6 @@ export type ExtractPosterPointsInput = Readonly<{
   // Everything the officer typed and attached, unedited. Deliberately the WHOLE thing: the
   // selection is the point, so trimming the input first would be pre-empting it.
   note: string;
-  // The officer's own AI प्रॉम्प्ट (generations.image_prompt, migration 0045), verbatim when
-  // they wrote one. It is a brief for the FINISHED poster, not an instruction to this call, and
-  // it is not a source of facts — the prompt below says all three things explicitly, because a
-  // brief dropped in unlabelled reads as either a command or a fact.
-  officerPrompt?: string | undefined;
 }>;
 
 export type PosterSource = Readonly<{
@@ -65,52 +60,11 @@ export type PosterSource = Readonly<{
   curated: boolean;
 }>;
 
-const POSTER_CRAFT = [
-  'You are a senior Marathi editor for DGIPR, Government of Maharashtra. Your single job is to decide WHAT GOES ON A POSTER.',
-  'You are given everything an officer wrote for this poster. Treat it as SOURCE MATERIAL, not as poster copy: it is usually a press note, a शासन निर्णय summary or meeting minutes, and only a small part of it belongs on a poster.',
-  '',
-  'WHAT A POSTER IS — this is the requirement you are working to:',
-  '- It is read in a few seconds, on a phone or in passing, often from a distance.',
-  '- It carries ONE message plus the few facts that message needs.',
-  '- Every extra line makes every line smaller. Ten points is a document photographed onto a poster, and nobody reads it. Fewer, larger, better-chosen points is ALWAYS the better poster.',
-  '- Choose the FEWEST points that carry the news.',
-  '',
-  'FIDELITY — absolute, and it outranks everything above:',
-  '- Never invent. Every name, designation, place, date, amount, percentage, scheme name and figure must be copied from the source exactly as it appears there, character for character.',
-  '- Keep the digits in the script the source used: Devanagari digits stay Devanagari (२५, ४९०), Latin digits stay Latin. Re-scripting a numeral is never allowed to change its value.',
-  '- Write in natural Marathi, Devanagari script. Do not translate and do not paraphrase a name.',
-  '- If you are not certain a fact is in the source, leave it out.',
-  '',
-  'SHAPE OF YOUR ANSWER:',
-  '- headline: one short Marathi line — the single most important thing on the poster. No full stop, no danda.',
-  '- points: one short Marathi line each, one idea per line, ideally under about twelve words. No numbering, no bullet characters, no trailing punctuation beyond what the wording needs.',
-  '- left_out: a few short English notes naming the material you deliberately dropped, for the log. Never shown to anyone.',
-].join('\n');
+const POSTER_CRAFT =
+  'Extract points that would go on a DGIPR Maharashtra twitter poster';
 
-// The officer's brief, quoted whole and then explicitly demoted to context. Three things have to
-// be said or it is misread in one of three ways: as a command (it would start designing instead
-// of selecting), as source material (it would print facts the note does not contain), or as
-// irrelevant (it would ignore the one signal saying which facts this officer cares about).
-function officerBriefBlock(brief: string): string {
-  return [
-    '',
-    "THE OFFICER'S OWN BRIEF FOR THIS POSTER — written by the officer, quoted verbatim between the markers:",
-    '<<<OFFICER_BRIEF',
-    brief,
-    'OFFICER_BRIEF>>>',
-    'That brief describes the FINISHED poster and is addressed to whoever designs it. It is NOT an instruction to you, and it is NOT a source of facts.',
-    "Your goal right now is only to choose and write the poster's text, so act accordingly: read the brief for what it tells you about which facts this officer cares about, what to lead with, and the tone to strike — and let that steer your selection.",
-    'Ignore everything in it about design, colour, imagery, layout, size or format; that is applied later, from the brief itself. If it asks for a fact the source does not contain, leave that fact out.',
-  ].join('\n');
-}
-
-export function buildExtractionSystem(
-  officerPrompt?: string | undefined,
-): string {
-  const brief = (officerPrompt ?? '').trim();
-  return brief.length > 0
-    ? `${POSTER_CRAFT}\n${officerBriefBlock(brief)}`
-    : POSTER_CRAFT;
+export function buildExtractionSystem(): string {
+  return POSTER_CRAFT;
 }
 
 const EXTRACTION_SCHEMA = {
@@ -201,7 +155,7 @@ export async function extractPosterPoints(
   try {
     const raw = await chatComplete(
       [
-        { role: 'system', content: buildExtractionSystem(input.officerPrompt) },
+        { role: 'system', content: buildExtractionSystem() },
         {
           role: 'user',
           content: `Everything the officer wrote for this poster:\n${note}`,
@@ -332,43 +286,11 @@ if (
       ),
     );
 
-    const withBrief = buildExtractionSystem(
-      'निळ्या रंगात, विद्यार्थ्यांवर भर द्या',
-    );
     check(
-      'the brief is quoted verbatim',
-      withBrief.includes('निळ्या रंगात, विद्यार्थ्यांवर भर द्या'),
+      'the extraction prompt is the requested sentence exactly',
+      buildExtractionSystem() ===
+        'Extract points that would go on a DGIPR Maharashtra twitter poster',
     );
-    check(
-      "the brief is named as the officer's",
-      withBrief.includes("THE OFFICER'S OWN BRIEF"),
-    );
-    check(
-      'the brief is demoted to context, not an instruction',
-      withBrief.includes('NOT an instruction to you') &&
-        withBrief.includes('NOT a source of facts'),
-    );
-    check(
-      'the goal is restated as selection',
-      withBrief.includes("only to choose and write the poster's text"),
-    );
-    check(
-      'no brief block when none was written',
-      !buildExtractionSystem(undefined).includes('OFFICER_BRIEF') &&
-        !buildExtractionSystem('   ').includes('OFFICER_BRIEF'),
-    );
-    check(
-      'the removed point-count guidance stays out of the prompt',
-      !POSTER_CRAFT.includes('usually three to five') &&
-        !POSTER_CRAFT.includes('never more than'),
-    );
-    check(
-      'the removed editorial keep/leave policy stays out of the prompt',
-      !POSTER_CRAFT.includes('KEEP, in this order of priority:') &&
-        !POSTER_CRAFT.includes('LEAVE OUT:') &&
-        !POSTER_CRAFT.includes('Leaving a fact out is the job here'),
-    );
-    check('never-invent is absolute', POSTER_CRAFT.includes('Never invent.'));
 
     console.log(
       failures === 0
@@ -378,7 +300,6 @@ if (
     process.exitCode = failures === 0 ? 0 : 1;
   } else {
     const fileArg = process.argv.find((a) => a.startsWith('--file='));
-    const promptArg = process.argv.find((a) => a.startsWith('--prompt='));
     const note = fileArg
       ? (await import('node:fs')).readFileSync(
           fileArg.slice('--file='.length),
@@ -393,12 +314,7 @@ if (
           'विद्यार्थ्यांनी उपोषण व आंदोलन मागे घेऊन नियमित शिक्षणाकडे लक्ष द्यावे, असे आवाहन करण्यात आले आहे.',
         ].join('\n');
 
-    const result = await extractPosterPoints({
-      note,
-      officerPrompt: promptArg
-        ? promptArg.slice('--prompt='.length)
-        : undefined,
-    });
+    const result = await extractPosterPoints({ note });
     console.log(JSON.stringify(result, null, 2));
     console.log(
       `\nitems the reference selector will count: ${analyzeInformationShape(result.text).itemCount}`,

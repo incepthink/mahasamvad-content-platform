@@ -580,19 +580,19 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
       ? verbatim
       : buildFreshChange(copyStyle, copy);
     return [
-      `Create a premium 1280 × 1504 portrait social-media poster for DGIPR, Government of Maharashtra.
-
-Let the supplied content determine the composition. Make the main message the visual focus, group related facts, and use typography, imagery, icons, diagrams or data visualisation only where they improve understanding. Avoid a generic stack of identical cards. The result should feel official, modern, optimistic and easy to scan on a phone.
+      `Create a 1280 × 1504 social-media poster for DGIPR, Government of Maharashtra.
 
 TEXT ACCURACY IS MANDATORY:
-- Reproduce every Marathi word exactly as supplied, character for character.
-- Preserve every letter, मात्रा, जोडाक्षर and अनुस्वार in its correct position.
-- Never rewrite, autocorrect, shorten or approximate a word.
-- For example, “देशातील सर्वोत्तम” must remain exactly “देशातील सर्वोत्तम”; forms such as “देशतील सर्वोत्ततम” are incorrect.
-- Use only Devanagari numerals: ० १ २ ३ ४ ५ ६ ७ ८ ९. Never use 0 1 2 3 4 5 6 7 8 9.
+- Preserve every अक्षर, मात्रा, जोडाक्षर and अनुस्वार in its correct position.
+- Pay special attention to conjuncts such as “क्ती” and “र्दे”. Never separate, reorder, replace or omit their characters or matras.
+- Words such as “व्यक्ती”, “शक्ती”, “युक्ती” and “निर्देश” must remain exactly as supplied.
+- Do not rewrite, translate, autocorrect, abbreviate or approximate any word.
 - Before finishing, compare every rendered word and number with the supplied content and correct all differences.
 
-Do not invent, omit, reinterpret or duplicate information. Keep every line comfortably readable; reflow the layout or reduce the headline before making body text too small.`,
+Use only Devanagari numerals: ० १ २ ३ ४ ५ ६ ७ ८ ९.
+Never use Western numerals: 0 1 2 3 4 5 6 7 8 9.
+
+Do not add any logo, emblem, seal, QR code, government wordmark, or map of any state, district or country.`,
       '',
       'POSTER CONTENT:',
       '',
@@ -925,10 +925,14 @@ if (
       // The replacement prompt is intentionally compact: one content-led design paragraph, one
       // text-fidelity block, the runtime content, and three short chrome/fit rules.
       for (const needle of [
-        'Create a premium 1280 × 1504 portrait social-media poster for DGIPR',
+        'Create a 1280 × 1504 social-media poster for DGIPR, Government of Maharashtra.',
         'TEXT ACCURACY IS MANDATORY',
-        '“देशातील सर्वोत्तम” must remain exactly “देशातील सर्वोत्तम”',
+        'Preserve every अक्षर, मात्रा, जोडाक्षर and अनुस्वार in its correct position',
+        'Pay special attention to conjuncts such as “क्ती” and “र्दे”',
+        'Words such as “व्यक्ती”, “शक्ती”, “युक्ती” and “निर्देश” must remain exactly as supplied',
         'Use only Devanagari numerals: ० १ २ ३ ४ ५ ६ ७ ८ ९',
+        'Never use Western numerals: 0 1 2 3 4 5 6 7 8 9',
+        'map of any state, district or country',
         'POSTER CONTENT:',
         'Official branding is added later by software',
         'top-right 180 × 170 pixels',
@@ -1344,7 +1348,7 @@ if (
       ] as const) {
         if (
           !prompt.startsWith(
-            'Create a premium 1280 × 1504 portrait social-media poster for DGIPR',
+            'Create a 1280 × 1504 social-media poster for DGIPR, Government of Maharashtra.',
           )
         )
           failures.push(`the ${name} prompt lost the compact replacement`);
@@ -1390,7 +1394,7 @@ if (
         "the fresh_verbatim prompt does not carry the officer's text verbatim",
       );
     for (const needle of [
-      'Create a premium 1280 × 1504 portrait social-media poster for DGIPR',
+      'Create a 1280 × 1504 social-media poster for DGIPR, Government of Maharashtra.',
       'TEXT ACCURACY IS MANDATORY',
       'Use only Devanagari numerals: ० १ २ ३ ४ ५ ६ ७ ८ ९',
       'POSTER CONTENT:',

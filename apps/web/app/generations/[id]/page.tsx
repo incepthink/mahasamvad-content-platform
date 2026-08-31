@@ -2,12 +2,14 @@
 
 import { use, useCallback, useState } from 'react';
 import { isArticleCategory, isSocialCategory } from '@dgipr/schemas';
+import { useArticleStream } from '../../../lib/useArticleStream';
 import { useGeneration } from '../../../lib/useGeneration';
 import { useGenerationThread } from '../../../lib/useGenerationThread';
 import { retryGeneration } from '../../../lib/api';
 import { useTasks } from '../../../lib/TasksProvider';
 import { STR } from '../../../lib/strings';
 import { errorMessage, storedErrorMessage } from '../../../lib/errorMessage';
+import { ArticleDraft } from '../../../components/ArticleDraft';
 import { GenerationThread } from '../../../components/GenerationThread';
 import { ProgressSteps } from '../../../components/ProgressSteps';
 import { TaskProgressBar } from '../../../components/TaskProgressBar';
@@ -69,6 +71,19 @@ export default function GenerationDetailPage({
   const { thread, refresh: refreshThread } = useGenerationThread(
     id,
     detail?.status ?? null,
+  );
+
+  // The draft arriving live, so बातमी लिहित आहोत… reads as the article appearing rather than
+  // a step list sitting still for minutes — the same view /dlo's workspace already shows, and
+  // the reason it is one shared component. Watched until the article is on the row: once it is,
+  // ArticleView below is the authoritative copy and holding the connection open would only wait
+  // out the poster render. A run with nothing to stream (a social lane, a restarted API,
+  // ARTICLE_STREAMING=0) leaves it empty and renders nothing at all, which is the old page.
+  const streamedArticle = useArticleStream(
+    id,
+    !detail ||
+      (!detail.article &&
+        (detail.status === 'queued' || detail.status === 'running')),
   );
 
   // Every image-producing edit started on THIS page (a poster redesign, a heading redo, a
@@ -233,6 +248,15 @@ export default function GenerationDetailPage({
         ) : (
           <ProgressSteps detail={detail} />
         ))}
+
+      {/* The draft, under the step list, while the article is still being written. Gated on
+          the article NOT being on the row: once it is, the stream's last snapshot and
+          ArticleView would be the same text twice — and by then the authoritative copy is
+          the one below, applied designations and all. */}
+      {!detail.article &&
+      (detail.status === 'queued' || detail.status === 'running') ? (
+        <ArticleDraft text={streamedArticle} />
+      ) : null}
 
       {/* Two different situations, deliberately worded differently. A run that produced
           NOTHING is a failure and reads as one. A run whose earlier output survived — its

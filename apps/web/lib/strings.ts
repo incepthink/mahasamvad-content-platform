@@ -760,8 +760,32 @@ export const STR = {
   // Results
   articleTitle: 'तयार झालेली बातमी',
   givenArticle: 'दिलेली बातमी',
+  // Article version history — the arrows above the article, shown once a feedback round has
+  // produced a second wording. "आवृत्ती" is the word the poster strip already uses, so the two
+  // histories read as the same idea in two places.
+  articleVersionsLabel: 'बातमीच्या आवृत्त्या',
+  articleVersionPrev: 'मागील आवृत्ती',
+  articleVersionNext: 'पुढील आवृत्ती',
+  articleVersionOf: (shown: number, total: number) =>
+    `आवृत्ती ${shown.toLocaleString('mr-IN')} / ${total.toLocaleString('mr-IN')}`,
+  articleVersionOriginal: 'पहिली बातमी',
+  articleVersionCurrent: 'सध्या वापरात',
+  // What was asked for to produce the version being looked at — so the strip reads as a
+  // history of changes rather than a row of numbers.
+  articleVersionFeedback: 'तुमची सूचना:',
+  articleVersionLoading: 'आवृत्त्या पाहत आहोत…',
+  // Viewing an older wording changes nothing until this is pressed; the button says so.
+  articleVersionRestore: 'ही आवृत्ती पुन्हा वापरा',
+  articleVersionRestoring: 'बदलत आहोत…',
+  articleVersionViewingOld:
+    'ही जुनी आवृत्ती फक्त पाहत आहात. वापरायची असेल तर खालील बटण दाबा.',
+
   factCheckTitle: 'तथ्य-तपासणी (माहिती कुठून आली?)',
   noteTitle: 'मूळ टिपणी',
+  // The intake's own uploads, listed inside the मूळ टिपणी fold so the assembled note can be
+  // checked against the scan, photograph or recording it was transcribed from.
+  sourceFilesLoading: 'स्रोत फाईल्स पाहत आहोत…',
+  sourceFilesNewTab: '(नव्या टॅबमध्ये उघडेल)',
 
   // 5W1H at-a-glance card (कोण/काय/केव्हा/कुठे/का/कसे — extracted from the note)
   fiveWOneHTitle: 'थोडक्यात — कोण, काय, केव्हा, कुठे, का, कसे',
@@ -918,6 +942,8 @@ export const STR = {
   // Icon-only controls, so every one of these is its title/aria-label — never visible text.
   iconDownloadPoster: 'पोस्टर डाउनलोड करा',
   iconOpenPosterInCanva: 'Canva मध्ये पोस्टर उघडा',
+  // Shown only when the deployment has more than one Canva integration configured.
+  canvaAccountLabel: 'कोणत्या Canva खात्यातून पाठवायचे?',
   iconRedesignPoster: 'वेगळी रचना तयार करा',
   iconRecolourPoster: 'वेगळ्या रंगात तयार करा',
   iconEditPoster: 'चित्रात बदल करा (पोस्टरवर खूण करा)',

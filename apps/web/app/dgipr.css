@@ -2813,6 +2813,36 @@ details.fold[aria-disabled='true'] summary {
   height: 18px;
 }
 
+/* The Canva button preceded by its integration picker, drawn only when the deployment has
+   more than one configured. Native <select> for the reason .history-select gives: on a
+   phone it opens as the platform's own full-height list. The pair wraps as a unit so the
+   select never ends a line on its own, orphaned from the button it qualifies. */
+.canva-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.canva-picker select {
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: inherit;
+  max-width: 160px;
+  height: 40px;
+  padding: 0 8px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--card);
+  cursor: pointer;
+}
+
+.canva-picker select:focus-visible {
+  outline: 3px solid var(--ring);
+  outline-offset: 0;
+  border-color: var(--accent);
+}
+
 /* "Same note, other platform" — an .icon-btn carrying the platform mark, its name, and
    a trailing arrow, so it grows past the square. It sits in the same row as the actions
    on this run; the arrow is what says this one navigates instead of acting. */
@@ -7758,4 +7788,129 @@ a.thread-node:hover {
   color: var(--muted);
   font-size: 0.85rem;
   white-space: nowrap;
+}
+
+/* A source file listed under an article's मूळ टिपणी fold: the .file-row above, made into a
+   link. It carries no heading, no rule and no card frame — the fold it sits in is already
+   titled, and a boxed row inside an open fold read as a second panel. */
+.source-files {
+  /* Sibling of .fold-body inside the fold, so it carries that body's own gutters rather
+     than sitting flush against the fold's border. */
+  padding: 0 18px 14px;
+}
+
+/* Only when the note itself is above it — an empty note renders no body at all, and the
+   list should then sit straight under the summary. */
+.fold-body + .source-files {
+  margin-top: 10px;
+}
+
+/* The spinner is a flex item beside its label, not an inline-block sitting on the text
+   baseline — without this it rides low and butts against the first character. */
+.source-files-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 0 18px 14px;
+}
+
+a.file-row-link {
+  color: inherit;
+  text-decoration: none;
+  border-color: transparent;
+  background: transparent;
+  padding-left: 0;
+  padding-right: 0;
+  transition: color 0.15s ease;
+}
+
+a.file-row-link:hover,
+a.file-row-link:focus-visible {
+  border-color: transparent;
+  background: transparent;
+  color: var(--accent);
+}
+
+a.file-row-link:hover .file-name,
+a.file-row-link:focus-visible .file-name {
+  text-decoration: underline;
+}
+
+/* The "opens in a new tab" arrow sits at the far end, away from the name that takes the
+   slack. `flex: none` so it is never the thing that shrinks. */
+a.file-row-link > svg:last-child {
+  flex: none;
+  color: var(--muted);
+}
+
+/* ---------- article version arrows ---------- */
+/* The article's history, above the article itself. The poster's equivalent is a strip of
+   thumbnails (.poster-versions) because a poster can be recognised at a glance; an article
+   cannot, so this is a pager — two arrows and a line saying what you are looking at — and the
+   text below is the preview. */
+.article-versions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+
+/* Takes the slack between the two arrows, and `min-width: 0` so a long feedback line
+   shrinks instead of widening the card (a flex item's automatic minimum is its content). */
+.article-versions-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.article-versions-count {
+  font-weight: 600;
+}
+
+/* The officer's own instruction, which can be a sentence: one line, ellipsis, full text in
+   the title attribute is not available here so it wraps at two lines rather than being cut
+   to nothing on a phone. */
+.article-versions-label .hint {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Square, so the two arrows read as a pair rather than as two words of different lengths. */
+.btn.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* Large enough to hit on a phone — the 44px floor the rest of the app keeps. */
+  min-width: 44px;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+
+.article-versions-restore {
+  flex: none;
+}
+
+/* Said above the body it applies to, and tinted so a preview is never mistaken for the
+   article the run will publish. */
+.article-versions-note {
+  margin: -6px 0 12px;
+  padding: 8px 12px;
+  border-radius: var(--r-sm);
+  background: var(--warn-soft);
+}
+
+@media (max-width: 520px) {
+  /* The restore button drops to its own full-width row rather than squeezing the arrows,
+     which are what the officer is aiming at. */
+  .article-versions-restore {
+    flex: 1 0 100%;
+  }
 }

@@ -106,6 +106,40 @@ function textFrom(body: ResponsesBody): string {
 }
 
 /**
+ * What the model is told about WHERE the facts are, when some of them are in attached files.
+ *
+ * Every prompt in this package states that a NOTES / SOURCE INFORMATION block is the only
+ * authoritative fact source. On the source-file lane that block can be very nearly empty — an
+ * intake may be one scan and nothing typed — and an empty block does not read as "the facts
+ * are attached", it reads as "there are no facts", which is the shape that makes a model
+ * either invent or refuse. So the block names the attached documents and says they are the
+ * source. Any text the intake DOES have (the officer's typed note, a recording's transcript)
+ * is stated first, because it is already exact and needs no reading.
+ *
+ * It lives here rather than beside the generator that first needed it because the REVISION
+ * path and the length-fit rewrite need the identical sentence: three prompts describing the
+ * same attachments three ways is three chances for one of them to stop counting them as a
+ * source. This module is the one both sides already depend on.
+ */
+export function sourceInformationBlock(
+  text: string,
+  files: readonly SourceFileRef[],
+): string {
+  const parts: string[] = [];
+  const trimmed = text.trim();
+  if (trimmed !== '') parts.push(trimmed);
+  if (files.length > 0) {
+    const names = files.map((file) => file.name).join(', ');
+    parts.push(
+      `सोबत जोडलेल्या ${files.length} फाईलमध्ये (${names}) ` +
+        'या बातमीची उर्वरित माहिती आहे. त्या फाईल्स पूर्ण वाचा आणि त्यांतील नावे, पदनामे, तारखा, ' +
+        'रकमा, टक्केवारी व योजनांची नावे जशीची तशी वापरा.',
+    );
+  }
+  return parts.join('\n\n');
+}
+
+/**
  * The files, as the parts a Responses user turn carries.
  *
  * Each is preceded by a short line naming the officer's own file name. Without it the model

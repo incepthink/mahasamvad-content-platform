@@ -13,7 +13,23 @@
 // broken, it is just the other lane.
 
 import { getDloIntake, type SupabaseClient } from '@dgipr/database';
+import { parseDloReviewState } from '@dgipr/schemas';
 import type { SourceFileRef } from '@dgipr/content-engine';
+
+/**
+ * What an article run can read of its intake: the files the model opens for itself, and the
+ * verbatim name-bearing sentences the name step already read out of them.
+ *
+ * The digest is here rather than in a second lookup because both come off the same row, and
+ * a generation job that fetched the intake twice for two fields of it would be paying for
+ * the same read twice.
+ */
+export type GenerationSourceContext = Readonly<{
+  files: SourceFileRef[];
+  // '' when the name step has not run, when the intake predates it, or on a database without
+  // 0036. The caller then builds its dictionary from the note alone, exactly as before.
+  nameContext: string;
+}>;
 
 /**
  * The OpenAI file handles attached to this generation's intake, in upload order.
@@ -26,12 +42,29 @@ export async function sourceFilesForGeneration(
   client: SupabaseClient,
   row: Readonly<{ dloIntakeId?: string | null }>,
 ): Promise<SourceFileRef[]> {
+  return (await sourceContextForGeneration(client, row)).files;
+}
+
+/**
+ * The same lookup, plus the stored name digest — what the article job wants.
+ *
+ * THE DIGEST IS WHY THIS EXISTS. On the file lane a document is never transcribed, so the
+ * generation's own `note` holds the typed context and the audio transcripts and nothing
+ * else. Scanning that for verified glossary rows finds none of the names, places,
+ * organisations or scheme names that occur inside an attached PDF, and the article was being
+ * written with an empty NAME DICTIONARY as a result. The name step's digest is the only text
+ * this lane produces about its documents, so it is what the dictionary must be built from.
+ */
+export async function sourceContextForGeneration(
+  client: SupabaseClient,
+  row: Readonly<{ dloIntakeId?: string | null }>,
+): Promise<GenerationSourceContext> {
   const intakeId = row.dloIntakeId;
-  if (!intakeId) return [];
+  if (!intakeId) return { files: [], nameContext: '' };
   try {
     const intake = await getDloIntake(client, intakeId);
-    if (!intake) return [];
-    return intake.files.flatMap((file): SourceFileRef[] =>
+    if (!intake) return { files: [], nameContext: '' };
+    const files = intake.files.flatMap((file): SourceFileRef[] =>
       file.openaiFileId && file.status === 'done'
         ? [
             {
@@ -45,11 +78,16 @@ export async function sourceFilesForGeneration(
           ]
         : [],
     );
+    return {
+      files,
+      nameContext:
+        parseDloReviewState(intake.reviewState)?.nameContext?.trim() ?? '',
+    };
   } catch (error) {
     console.warn(
       `[source-files] could not read intake ${intakeId}; writing from text alone:`,
       error,
     );
-    return [];
+    return { files: [], nameContext: '' };
   }
 }

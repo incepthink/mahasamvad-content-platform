@@ -3044,7 +3044,9 @@ second tier-audit pass corrects mis-tiers, sectioned long-note drafts are tier-a
 coverage loop guards both sides (missing foreground/supporting facts AND over-expanded
 mention/omit detail). RAG stays style-only and the faithfulness/fact-check guards are untouched.
 
-Canva OAuth authentication and poster handoff are implemented in `apps/api/src/routes/canva.ts`.
+Canva OAuth authentication and poster handoff are implemented in `apps/api/src/routes/canva.ts`,
+which since 2026-08-31 holds a REGISTRY of Canva integrations (`CANVA_ACCOUNTS`) rather than one
+client id/secret — see the milestone below.
 
 ## Planned Architecture
 
@@ -3082,6 +3084,54 @@ Canva OAuth authentication and poster handoff are implemented in `apps/api/src/r
 2. `AGENTS.md` must be updated whenever a major architectural decision or implementation milestone changes.
 
 ## Latest Implementation Milestone
+
+- **Several Canva integrations, chosen per handoff** (2026-08-31, no migration, no n8n):
+  the Canva button was pinned to ONE `CANVA_CLIENT_ID`/`CANVA_CLIENT_SECRET`, and an officer
+  outside the Canva team that owns that integration was refused at the authorize screen with
+  **"The client ID is invalid."** — before consent, on Canva's own page. That error is the
+  finding worth keeping: the client id in the authorize URL is identical for every user, so
+  an error that depends on WHO is signed in cannot be a credential fault. An integration that
+  has not been released for public use is reachable only from inside its owning team, and
+  Canva reports it to everyone else as an unknown client id. **The real fix is Canva-side** —
+  add those officers to the owning team, or submit the integration for public review (a
+  private integration is team-only and needs Canva Enterprise) — and a second client id
+  changes nothing for a third account. What a second client id DOES solve is a second TEAM:
+  register a fresh integration inside it and route those officers through that one.
+  So `configFromEnv()` became a registry. `CANVA_ACCOUNTS` is a JSON array of
+  `{key,label,clientId,clientSecret,redirectUri?}`; unset, the three legacy variables still
+  make one `default` account, so an existing deployment is byte-for-byte unchanged. Adding an
+  account is an env edit plus an API restart — no migration, and no web deploy either,
+  because the picker reads `GET /api/canva/accounts` (keys and labels only) rather than a
+  `NEXT_PUBLIC_*` build-time copy, which would drift the moment `.env` changed on the box.
+  Four things worth knowing. **The account key has to ride in FRONT of the OAuth state, in
+  plaintext**: the callback receives only `code` and `state`, only the issuing integration's
+  secret can exchange that code, and `stateKey()` derives the AES key FROM that secret — so
+  the payload cannot be opened until the account is known. `${key}.${sealed}` splits on the
+  first dot (base64url contains none), the key is validated to `[a-z0-9_-]{1,32}` so it can
+  never contain one, and the key is repeated INSIDE the sealed payload and checked, so a
+  swapped prefix is rejected explicitly rather than incidentally. **A prefixless state still
+  opens**, against the default account, so an authorization in flight across the deploy
+  completes. **The account is resolved before the row is read**, so a stale tab naming a
+  removed account costs no database round trip. And **an account is a deployment-level
+  credential set, never a per-officer record** — within any one of them every officer still
+  signs in to Canva as themselves and the poster lands in their own account; no token is
+  persisted, here or anywhere.
+  Web: `CanvaLink` renders exactly today's single link when fewer than two accounts are
+  configured, and a native `<select>` beside it otherwise (the `.history-select` idiom — on a
+  phone it opens as the platform's own full-height list); the list is fetched once per page
+  load however many posters are on screen, a failed fetch degrades to the plain link, and the
+  choice is remembered in `localStorage` as a convenience, never as authorization.
+  Verified 2026-08-31, all free: `apps/api` and `apps/web` typecheck green, eslint and
+  prettier clean on all six touched files, and a new offline harness at **16/16** —
+  `npx tsx ../../apps/api/src/routes/canva.check.ts`, run from `packages/content-engine`,
+  which has tsx (the `audio-batches.ts` precedent). It drives the real routes through
+  `fastify.inject` with a stub client that throws on any database read, so every assertion is
+  decided before the DB: the legacy fallback, `CANVA_ACCOUNT_LABEL`, the malformed/dotted-key/
+  duplicate-key refusals, that the accounts route leaks no id or secret, an unknown key as a
+  400 with no DB read, and five state cases (own account opens, re-prefixed rejected, wrong
+  secret rejected, expired rejected, prefixless legacy still opens). **Left for a real run**:
+  a live handoff through a second integration, which needs a second Canva team. Deploy is API
+  + web; no migration, no n8n. New env, both optional: `CANVA_ACCOUNTS`, `CANVA_ACCOUNT_LABEL`.
 
 - **A chat document is read through FILE SEARCH, so the ceiling is 512 MB and not 50 MB**
   (2026-08-30, migration 0049, no n8n): /chat handed each PDF to the Responses API as an

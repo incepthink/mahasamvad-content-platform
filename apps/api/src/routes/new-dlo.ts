@@ -46,6 +46,8 @@ import {
   IMAGE_FILE_EXTENSIONS,
   DloCategorySchema,
   NewDloGenerateRequestSchema,
+  parseDloReviewState,
+  serializeDloReviewState,
 } from '@dgipr/schemas';
 import {
   createCostAccumulator,
@@ -62,6 +64,53 @@ import { rememberDesignations } from '../jobs/designation-writeback.js';
 import { prepareDesignations } from '../jobs/translation-terms.js';
 import { recordTasksFromCost } from '../jobs/service-usage.js';
 import { sourceFilesForGeneration } from '../jobs/source-files.js';
+
+// Keep the step-2 name digest on the intake so the ARTICLE call can read it.
+//
+// Why it has to be stored at all: on this lane nothing transcribes a document, so
+// `combined_text` is the typed context plus the audio transcripts and NOTHING ELSE. The
+// article job builds its NAME DICTIONARY by scanning text for verified glossary rows, and
+// scanning that string finds none of the names, places, organisations or scheme names that
+// live inside an attached PDF — so the model was writing a government article with no
+// verified spelling for any of them. This digest is the only text the lane produces, and it
+// is already paid for here; recomputing it at generate time would be a second model call
+// over the same files for the same answer.
+//
+// A MERGE, not a write: `review_state` also carries what the officer typed on the intake
+// form (0036), and this must not drop it. Best-effort for the same reason the form's own
+// seed is — on a database without 0036 this costs the dictionary, not the run — and the
+// existing `writer` is preserved so a client reading the blob back never sees a stranger's
+// id and warns about an edit nobody made.
+async function rememberNameContext(
+  client: SupabaseClient,
+  row: Readonly<{ id: string; reviewState: unknown }>,
+  nameContext: string,
+): Promise<void> {
+  const digest = nameContext.trim();
+  if (digest.length === 0) return;
+  const saved = parseDloReviewState(row.reviewState);
+  try {
+    await updateDloIntake(client, row.id, {
+      reviewState: serializeDloReviewState({
+        edits: saved?.edits ?? {},
+        excluded: saved?.excluded ?? [],
+        ...(saved?.styleReference
+          ? { styleReference: saved.styleReference }
+          : {}),
+        ...(saved?.instructions ? { instructions: saved.instructions } : {}),
+        ...(saved?.pointers ? { pointers: saved.pointers } : {}),
+        ...(saved?.designations ? { designations: saved.designations } : {}),
+        nameContext: digest,
+        writer: saved?.writer ?? 'name-scan',
+      }),
+    });
+  } catch (error) {
+    console.error(
+      `[new-dlo ${row.id}] could not store the name digest (is 0036 applied?):`,
+      error,
+    );
+  }
+}
 
 const DLO_UPLOADS_BUCKET = 'dlo-uploads';
 
@@ -350,6 +399,10 @@ export function registerNewDloRoutes(
         ),
       );
       recordTasksFromCost(client, 'article', cost);
+      // The article call needs this same text (see rememberNameContext), and this is the one
+      // place it exists. Awaited rather than fired off, so the officer cannot press
+      // "generate" between the two and get a run written without it.
+      await rememberNameContext(client, row, digest);
       return result;
     },
   );

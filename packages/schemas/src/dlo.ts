@@ -380,6 +380,15 @@ export const DloReviewStateSchema = z.object({
   instructions: z.string().optional(),
   pointers: DloReviewPointersSchema.optional(),
   designations: DloReviewDesignationsSchema.optional(),
+  // The verbatim name-bearing sentences the step-2 scan read out of the attached files
+  // (extract-name-context.ts). Stored because on the file lane this is the ONLY text there
+  // is: documents are never transcribed, so `combined_text` holds the typed context and the
+  // audio transcripts alone, and a glossary lookup over it finds none of the names, places,
+  // organisations or scheme names that occur inside a PDF. The article job reads it back to
+  // build the prompt’s NAME DICTIONARY. Stored rather than recomputed because step 2 has
+  // already paid for it — asking again at generate time is a second model call over the same
+  // files for the same answer.
+  nameContext: z.string().optional(),
   // Who wrote this and when. The intake list is shared and there is no auth, so two people can
   // open the same intake; a client that reads back a `writer` it did not produce knows someone
   // else has saved and warns instead of silently overwriting. A random per-tab id rather than a
@@ -422,6 +431,7 @@ export function serializeDloReviewState(
     instructions?: string | undefined;
     pointers?: z.infer<typeof DloReviewPointersSchema> | undefined;
     designations?: z.infer<typeof DloReviewDesignationsSchema> | undefined;
+    nameContext?: string | undefined;
     writer: string;
     updatedAt?: string | undefined;
   }>,
@@ -434,6 +444,7 @@ export function serializeDloReviewState(
     ...(input.instructions ? { instructions: input.instructions } : {}),
     ...(input.pointers ? { pointers: input.pointers } : {}),
     ...(input.designations ? { designations: input.designations } : {}),
+    ...(input.nameContext ? { nameContext: input.nameContext } : {}),
     writer: input.writer,
     updatedAt: input.updatedAt ?? new Date().toISOString(),
   };
@@ -657,3 +668,59 @@ export function combineIntakeSources(
   }
   return parts.join('\n\n');
 }
+
+// ---------- an intake's archived originals, served back to the officer ----------
+//
+// A finished article is checked against what it was MADE from, and until now the only thing
+// the generation carried forward was the assembled text. These shapes let the article's
+// मूळ टिपणी fold list the recordings, scans, photographs and documents of the /dlo intake
+// the run came from, each openable in a new tab.
+//
+// They live here, beside DloIntakeFileSchema, rather than in api.ts: dlo.ts already imports
+// api.ts, so the dependency can only run this way round — and what these describe IS an
+// intake file, seen from the generation side.
+
+// The content type to SERVE one of those originals under. Audio and photographs reuse the
+// maps above (the same extension decided how the object was stored in the first place);
+// documents get the three types the intake accepts. An unknown extension answers
+// application/octet-stream, so the browser downloads it rather than guessing — the honest
+// result for bytes we cannot name.
+export const DOCUMENT_MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
+  '.pdf': 'application/pdf',
+  '.docx':
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.doc': 'application/msword',
+  '.txt': 'text/plain; charset=utf-8',
+};
+
+export function intakeFileMimeForFileName(fileName: string): string {
+  const dot = fileName.lastIndexOf('.');
+  const extension = dot === -1 ? '' : fileName.slice(dot).toLowerCase();
+  return (
+    AUDIO_MIME_BY_EXTENSION[extension] ??
+    IMAGE_MIME_BY_EXTENSION[extension] ??
+    DOCUMENT_MIME_BY_EXTENSION[extension] ??
+    'application/octet-stream'
+  );
+}
+
+// One source of the intake a generation was produced from, as the article page lists it.
+export const GenerationSourceFileSchema = z.object({
+  // Position in the intake's `files` array — the address the byte route takes. An index
+  // rather than a storage path, so a private object's key never reaches the browser.
+  index: z.number().int().nonnegative(),
+  name: z.string(),
+  kind: DloIntakeFileSchema.shape.kind,
+  // A 'youtube' source was never downloaded — the transcriber fetched it — so it is opened
+  // at the video itself. Every other kind is served from the private bucket by the API, and
+  // carries null here.
+  externalUrl: z.string().nullable(),
+});
+export type GenerationSourceFile = z.infer<typeof GenerationSourceFileSchema>;
+
+export const GenerationSourceFilesResponseSchema = z.object({
+  files: z.array(GenerationSourceFileSchema),
+});
+export type GenerationSourceFilesResponse = z.infer<
+  typeof GenerationSourceFilesResponseSchema
+>;

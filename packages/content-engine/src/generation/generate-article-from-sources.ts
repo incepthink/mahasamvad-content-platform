@@ -56,7 +56,10 @@ import {
   type SimpleGeneratedArticle,
 } from './generate-article-simple.js';
 import type { SourceFileRef } from '../intake/openai-source-files.js';
-import { respondWithSources } from './responses-with-sources.js';
+import {
+  respondWithSources,
+  sourceInformationBlock,
+} from './responses-with-sources.js';
 import {
   DLO_ARTICLE_PROMPT_VERSION,
   buildDloArticleMessages,
@@ -69,34 +72,6 @@ export type SourceArticleOptions = SimpleGenerateArticleOptions &
     // the text lane, on the same prompt, through a different transport.
     files?: readonly SourceFileRef[] | undefined;
   }>;
-
-/**
- * What the model is told about where the facts are.
- *
- * The prompt's SOURCE INFORMATION block is a string, and with files there may be very little
- * to put in it — an intake can be one scan and nothing typed. Rather than hand the model an
- * empty block (which reads as "there are no facts" and is the shape that invites invention),
- * the block names the attached documents and says they are the source. Any text the intake
- * DOES have — the officer's typed note, a recording's transcript — is stated first, because
- * it is already exact and needs no reading.
- */
-function sourceInformationBlock(
-  text: string,
-  files: readonly SourceFileRef[],
-): string {
-  const parts: string[] = [];
-  const trimmed = text.trim();
-  if (trimmed !== '') parts.push(trimmed);
-  if (files.length > 0) {
-    const names = files.map((file) => file.name).join(', ');
-    parts.push(
-      `सोबत जोडलेल्या ${files.length} फाईल${files.length > 1 ? 'मध्ये' : 'मध्ये'} (${names}) ` +
-        'या बातमीची उर्वरित माहिती आहे. त्या फाईल्स पूर्ण वाचा आणि त्यांतील नावे, पदनामे, तारखा, ' +
-        'रकमा, टक्केवारी व योजनांची नावे जशीच्या तशी वापरा.',
-    );
-  }
-  return parts.join('\n\n');
-}
 
 /**
  * Writes one article from the attached sources.
@@ -184,7 +159,9 @@ export async function generateArticleFromSources(
 
   // Ordinary source articles measure a requested length and buy ONE rewrite on a miss. /dlo
   // uses only its approved prompt, so a second rewriting prompt must not silently replace its
-  // answer. The ordinary rewrite runs on the text rather than re-attaching paid source files.
+  // answer. The rewrite RE-ATTACHES the source files: they are what the article's facts came
+  // from, and a rewrite that cannot see them is told, in as many words, that those facts are
+  // unsupported (see the `files` argument on fitArticleToLength).
   const fit = dloPrompt
     ? { article: body, warning: null }
     : await fitArticleToLength(
@@ -195,6 +172,7 @@ export async function generateArticleFromSources(
         parseLengthRequest(options?.instructions) ??
           parseLengthRequest(options?.heading),
         category,
+        files,
       );
 
   const designationResult = applyDesignations(fit.article, designations, {
