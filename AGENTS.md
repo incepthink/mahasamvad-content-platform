@@ -3085,6 +3085,63 @@ client id/secret — see the milestone below.
 
 ## Latest Implementation Milestone
 
+- **/translate and /proofread attach files the way /dlo does — and stop sending MARKUP to the
+  model** (2026-08-31, no migration, no n8n, web only): two complaints, one root. Both pages
+  mounted a single `<DocumentIntake>` as a BLOCK under the composer — a card with its own
+  upload control, its own page picker and its own hand-over button — while /dlo, asked the
+  same question, had long since moved to a paperclip, a file dialog and a row of attachment
+  cards. One file at a time, three presses in three places to get a PDF translated
+  (निवडलेली पृष्ठे वाचा → हा मजकूर वापरा → भाषांतर करा), and a second form on a page that
+  already had one.
+  - **`components/common/DocumentAttachments.tsx`** (`useDocumentAttachments`) is that shape
+    for both pages: the paperclip opens the browser's file dialog, SEVERAL documents at once,
+    each becomes a card in the composer's `AttachmentStrip`, and each is read by its own
+    **headless** `<DocumentIntake>` — the props `headless` and `readWholeDocument` already
+    existed for the previous /dlo iteration and had no caller left. So the upload, the poll,
+    the whole-document selection and the OCR read are not reimplemented; what the hook owns is
+    the LIST, because a page needs one combined string, one aggregate status to gate its submit
+    on, and one row of cards.
+  - **THE SPEND GATE IS UNCHANGED**, which is the point to keep. Every PDF is read by OCR
+    (PDF_EXTRACTION_MODE=ocr) and OCR is billed per page, so attaching still only PROBES —
+    free, verified live: a PDF uploaded to `/api/documents` comes back `status: "selecting"`
+    with `pages: []` and nothing reaches Sarvam. भाषांतर करा / तपासणी करा is what authorises
+    the read, and it then continues into the run by itself. What is gone is the per-page
+    QUESTION, not the gate; /dlo dropped it first, on the grounds that a document is attached
+    in order to be read whole.
+  - **The correctness half, and it was invisible: an OCR'd page is HTML, and both pages were
+    sending it to a model verbatim.** Sarvam Document AI's Digitise is called with
+    `output_format=html`, which is right for the REVIEW surfaces (`<ExtractedText>` rebuilds
+    it as React elements so an OCR'd table still reads as a table) and wrong for a string
+    handed to a translator: `<div class="page-body-container"><p>…` was the text being
+    translated and proofread. Since PDF_EXTRACTION_MODE=ocr that was EVERY PDF, not only a
+    scan. New `apps/web/lib/extractedText.ts` (`isExtractedHtml` — moved off
+    `ExtractedText.tsx`, so a view and a translation cannot disagree about what counts as
+    HTML — plus `extractedPlainText`), applied in ONE place: `<DocumentIntake>`'s `text` memo,
+    the string every caller receives. The pages themselves are untouched, so the review list
+    still renders the table and the correction textarea still edits the source. **The media
+    room inherits the fix** — its uploaded document fed the article pipeline the same markup.
+  - **Hand-rolled, not `DOMParser`**, the `markdownTable` precedent: this string is what a
+    paid model receives, and a function that only runs inside a browser cannot be checked.
+    Free harness at **24/24**: `npx tsx --tsconfig apps/web/tsconfig.check.json
+    apps/web/lib/extractedText.check.ts` (run it from `packages/content-engine`, which has
+    tsx). Its load-bearing cases: prose and Markdown come back BYTE-IDENTICAL (the OpenAI OCR
+    rollback returns Markdown — verified live on this deployment), an inline `<strong>` does
+    not break the Marathi sentence around it, a table keeps `cell | cell` rows, `<li>`/`<tr>`
+    break ONE line where a paragraph breaks two, `<script>`/`<style>` bodies are dropped
+    whole, and a bare `<` in `५ < १०` is content rather than the start of a tag.
+  Verified 2026-08-31, all free: workspace typecheck **7/7 green**; eslint clean on all six
+  touched files; prettier clean on every hunk of mine (both page files were **already failing
+  prettier at HEAD** — CRLF — so do NOT `--write` them; the residual diff in
+  `proofread/page.tsx` is a pre-existing `useState<{…}>` wrap); the harness at 24/24; and a
+  Playwright pass against the running dev server, **18/20**, where both failures are the
+  `PageBackdrop` rough.js SSR/CSR `<path>` mismatch that /dlo and the home page — neither
+  touched here — show identically. What it asserts: the submit is dead with nothing supplied,
+  ONE multi-file document input per page, two files attached at once become two named cards,
+  the submit goes live from the file alone, no upload-card heading survives, removing one card
+  leaves the other, and removing the last kills the submit again. **Left for a real run** (OCR
+  spend): one genuinely scanned Marathi PDF through /translate on a `sarvam` deployment, to
+  see the converted prose rather than tags in the output. Deploy is web only.
+
 - **Several Canva integrations, chosen per handoff** (2026-08-31, no migration, no n8n):
   the Canva button was pinned to ONE `CANVA_CLIENT_ID`/`CANVA_CLIENT_SECRET`, and an officer
   outside the Canva team that owns that integration was refused at the authorize screen with

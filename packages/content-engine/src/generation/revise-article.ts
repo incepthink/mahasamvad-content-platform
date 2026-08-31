@@ -15,6 +15,7 @@ import {
   ARTICLE_MODEL,
   articleReasoningEffort,
   chatComplete,
+  chatCompleteStream,
   type ChatMessage,
 } from './openai-chat.js';
 import type { SourceFileRef } from '../intake/openai-source-files.js';
@@ -424,6 +425,12 @@ export async function reviseArticle(
   // than run half-blind (see the guards below). Empty on every other lane, which keeps its
   // chatComplete calls and its full coverage/faithfulness loop byte-for-byte unchanged.
   files: readonly SourceFileRef[] = [],
+  // The live view of the rewrite, if the caller has one. Only the FIRST call streams — the
+  // coverage-inject and faithfulness passes below rewrite the whole article again, and
+  // streaming a second full text over the first would read as the article being written
+  // twice. The caller replaces what it showed with the returned article when this settles
+  // (runner.ts's finishArticleStream), which is what makes the intermediate view safe.
+  onDelta?: ((chunk: string) => void) | undefined,
 ): Promise<RevisedArticle> {
   const { article: articleBeforeRevision } = splitContent(currentContent);
   const expand = wantsExpansion(feedback, articleBeforeRevision);
@@ -464,10 +471,16 @@ export async function reviseArticle(
         model: ARTICLE_MODEL,
         maxOutputTokens: ARTICLE_BODY_MAX_TOKENS,
         reasoningEffort: articleReasoningEffort(),
+        ...(onDelta ? { onDelta } : {}),
       })
-    : await chatComplete(revisionMessages, {
-        maxTokens: ARTICLE_BODY_MAX_TOKENS,
-      });
+    : onDelta
+      ? await chatCompleteStream(revisionMessages, {
+          onDelta,
+          maxTokens: ARTICLE_BODY_MAX_TOKENS,
+        })
+      : await chatComplete(revisionMessages, {
+          maxTokens: ARTICLE_BODY_MAX_TOKENS,
+        });
 
   // Completeness guard, mirroring generateArticle's coverage step (which the feedback path
   // otherwise lacks): the brief-independent citizen-fact check always runs, and an explicit

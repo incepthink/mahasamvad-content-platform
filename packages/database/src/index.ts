@@ -77,6 +77,7 @@ export {
   downloadPng,
   downloadFile,
   downloadFileRange,
+  signedDownloadUrl,
   removeObjects,
   removeObjectsIn,
 } from './storage.js';

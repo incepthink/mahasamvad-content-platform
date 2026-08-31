@@ -646,15 +646,10 @@ export function registerGenerationRoutes(
         // back until the run finished — precisely what this route exists to avoid.
         .header('x-accel-buffering', 'no');
 
-      // Already written: serve it whole and close. This is what a reload after completion
-      // gets, and what keeps a reconnecting EventSource from retrying forever.
-      if (row.article) {
-        send('snapshot', row.article);
-        send('end', {});
-        stream.end();
-        return reply.send(stream);
-      }
-
+      // A LIVE stream wins over the stored article, and that ordering is the whole of what
+      // makes a feedback revision watchable: `row.article` is non-null throughout a rewrite,
+      // so serving it first would answer every revision with the OLD text and close. An
+      // initial run is unaffected — it has no article to prefer.
       const { unsubscribe, live } = subscribeArticleStream(
         request.params.id,
         (event) => {
@@ -667,11 +662,14 @@ export function registerGenerationRoutes(
         },
       );
 
-      // Nothing to watch — this run is not being drafted in this process (it failed, it never
-      // generates an article, or the API restarted). Say so and close; the client's poll is
-      // already following the row.
+      // Nothing to watch — this run is not being drafted or revised in this process (it
+      // finished, it failed, it never generates an article, or the API restarted). Serve
+      // whatever is on the row and close; the client's poll is already following it. This is
+      // also what a reload after completion gets, and what keeps a reconnecting EventSource
+      // from retrying forever.
       if (!live) {
         if (!stream.writableEnded) {
+          if (row.article) send('snapshot', row.article);
           send('end', {});
           stream.end();
         }

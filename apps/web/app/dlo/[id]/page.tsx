@@ -10,9 +10,13 @@
 // transcript to review. The old page-by-page workspace is still in the tree
 // (components/DloWorkspace.tsx) and is what to restore if that lane is ever wanted back.
 //
-// The one difference from /new-dlo is the direction UI: this lane keeps the same single
+// Two differences from /new-dlo. The direction UI: this lane keeps the same single
 // "AI साठी सूचना" box on both screens instead of splitting heading, instructions and a style
-// sample into three separate questions after upload.
+// sample into three separate questions after upload. And `autoGenerate`: there is NO name-
+// confirm step here — the intake form already asks for everything a run needs, so the article
+// is written as soon as the sources are ready and the officer lands on /generations/[id],
+// where the draft streams in. This screen is only ever the wait in between. See
+// DloFileWorkspace's `autoGenerate` for the two costs that choice carries.
 
 import { use } from 'react';
 import { DloFileWorkspace } from '../../../components/DloFileWorkspace';
@@ -29,6 +33,7 @@ export default function DloIntakePage({
       startOverHref="/dlo"
       unifiedInstructions
       showBackdrop
+      autoGenerate
     />
   );
 }

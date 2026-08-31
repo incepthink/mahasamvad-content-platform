@@ -73,18 +73,30 @@ export default function GenerationDetailPage({
     detail?.status ?? null,
   );
 
+  // Is there a draft to watch right now? Two cases, and the second is why this is not simply
+  // "the row has no article yet": an officer's feedback REWRITES the article, so the previous
+  // one is on the row for the whole rewrite. That path flips the row to `revise_article`,
+  // which unmounts ArticleView in favour of the step list — so the draft below replaces
+  // nothing and shows अभिप्रायानुसार बातमी सुधारत आहोत… as the article changing.
+  //
+  // The concurrent revision (`articleRevising`, running beside a poster render) is
+  // deliberately NOT here: it keeps ArticleView mounted with the previous article, so a draft
+  // card would put two versions of the same article on screen at once.
+  //
+  // `!detail` opens the stream before the first poll lands, which matters on a run created a
+  // moment ago. A run with nothing to stream (a social lane, a restarted API,
+  // ARTICLE_STREAMING=0) leaves it empty and renders nothing at all, which is the old page.
+  const draftInFlight =
+    !detail ||
+    ((detail.status === 'queued' || detail.status === 'running') &&
+      (!detail.article || detail.step === 'revise_article'));
+
   // The draft arriving live, so बातमी लिहित आहोत… reads as the article appearing rather than
   // a step list sitting still for minutes — the same view /dlo's workspace already shows, and
-  // the reason it is one shared component. Watched until the article is on the row: once it is,
-  // ArticleView below is the authoritative copy and holding the connection open would only wait
-  // out the poster render. A run with nothing to stream (a social lane, a restarted API,
-  // ARTICLE_STREAMING=0) leaves it empty and renders nothing at all, which is the old page.
-  const streamedArticle = useArticleStream(
-    id,
-    !detail ||
-      (!detail.article &&
-        (detail.status === 'queued' || detail.status === 'running')),
-  );
+  // the reason it is one shared component. Dropped once the run settles: ArticleView is then
+  // the authoritative copy and holding the connection open would only wait out the poster
+  // render.
+  const streamedArticle = useArticleStream(id, draftInFlight);
 
   // Every image-producing edit started on THIS page (a poster redesign, a heading redo, a
   // copy/scene re-render, a marker round, attaching a poster to an article run) registers
@@ -249,14 +261,11 @@ export default function GenerationDetailPage({
           <ProgressSteps detail={detail} />
         ))}
 
-      {/* The draft, under the step list, while the article is still being written. Gated on
-          the article NOT being on the row: once it is, the stream's last snapshot and
+      {/* The draft, under the step list, while the article is being written or rewritten.
+          Never alongside ArticleView: once the run settles, the stream's last snapshot and
           ArticleView would be the same text twice — and by then the authoritative copy is
-          the one below, applied designations and all. */}
-      {!detail.article &&
-      (detail.status === 'queued' || detail.status === 'running') ? (
-        <ArticleDraft text={streamedArticle} />
-      ) : null}
+          the one below, applied designations and all. See `draftInFlight`. */}
+      {draftInFlight ? <ArticleDraft text={streamedArticle} /> : null}
 
       {/* Two different situations, deliberately worded differently. A run that produced
           NOTHING is a failure and reads as one. A run whose earlier output survived — its

@@ -2702,7 +2702,12 @@ export function startArticleFeedbackJob(
   // The article being revised is still on the row, so a failed revision is recovered with
   // the same feedback re-armed.
   armEditRetry(id, () => startArticleFeedbackJob(client, id, feedback));
-  runJob(client, id, 'article_revision', async () => {
+  // Registered synchronously, before any await, for the same reason the initial run does it:
+  // the browser opens its stream the moment this POST answers, and a revision that has not
+  // reached its model call yet would otherwise be told there is nothing to watch. A previous
+  // run's finished stream may still be in the map inside its TTL; this replaces it.
+  if (articleStreamingEnabled()) beginArticleStream(id);
+  const revise = async (): Promise<void> => {
     const row = await getGeneration(client, id);
     if (!row) throw new Error(`Generation ${id} not found.`);
     if (!row.article) throw new Error(`Generation ${id} has no article yet.`);
@@ -2741,10 +2746,21 @@ export function startArticleFeedbackJob(
       // an article while forbidding it to restate anything the article says. Empty for every
       // other run, which keeps the text path unchanged.
       await sourceFilesForGeneration(client, row),
+      // The rewrite as it is written, so अभिप्रायानुसार बातमी सुधारत आहोत… reads as the
+      // article changing rather than as a spinner. Display only — the returned article is
+      // authoritative and the final snapshot below replaces whatever was shown.
+      articleStreamingEnabled()
+        ? (chunk: string) => pushArticleDelta(id, chunk)
+        : undefined,
     );
     designationWarnings.set(id, [...revised.designationIssues]);
     lengthWarnings.set(id, revised.lengthWarning);
     const revisedArticle = revised.article;
+
+    // The deltas carried the first pass; the coverage/faithfulness passes and
+    // applyDesignations have since rewritten it. One replacing snapshot settles that before
+    // the poll delivers the row.
+    finishArticleStream(id, revisedArticle);
 
     await updateGeneration(client, id, {
       article: revisedArticle,
@@ -2757,6 +2773,17 @@ export function startArticleFeedbackJob(
       article: revisedArticle,
       factCheck: revised.factCheck,
     });
+  };
+
+  runJob(client, id, 'article_revision', async () => {
+    try {
+      await revise();
+    } finally {
+      // Whatever happened, no more text is coming — release every watcher instead of leaving
+      // it on the heartbeat until the TTL. Idempotent: the success path already closed on the
+      // revised article. The initial run does exactly this, for the same reason.
+      endArticleStream(id);
+    }
   });
 }
 
@@ -2778,6 +2805,9 @@ export function startConcurrentArticleFeedbackJob(
 ): void {
   revisingArticle.add(id);
   reviseArticleErrors.delete(id);
+  // Safe to replace whatever is in the map: this path only runs while the initial job is in
+  // its POSTER phase, so that run's article stream was already closed on the finished article.
+  if (articleStreamingEnabled()) beginArticleStream(id);
   void (async () => {
     const cost = createCostAccumulator();
     try {
@@ -2811,10 +2841,16 @@ export function startConcurrentArticleFeedbackJob(
             row.instructions ?? undefined,
             // As on the status-owning path above: the article's facts are in these files.
             await sourceFilesForGeneration(client, row),
+            // As on the status-owning path above: the rewrite as it is written.
+            articleStreamingEnabled()
+              ? (chunk: string) => pushArticleDelta(id, chunk)
+              : undefined,
           );
           designationWarnings.set(id, [...revised.designationIssues]);
           lengthWarnings.set(id, revised.lengthWarning);
           const revisedArticle = revised.article;
+
+          finishArticleStream(id, revisedArticle);
 
           await updateGeneration(client, id, {
             article: revisedArticle,
@@ -2849,6 +2885,9 @@ export function startConcurrentArticleFeedbackJob(
           cost,
         );
       }
+      // Nothing more is coming, however this ended. Idempotent — the success path already
+      // closed on the revised article.
+      endArticleStream(id);
       revisingArticle.delete(id);
     }
   })();

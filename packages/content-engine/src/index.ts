@@ -159,6 +159,7 @@ export {
   sttProviderApiKeyEnv,
   sttKeyPresent,
   sttSupportsSourceUrl,
+  sttProviderFetchesUrls,
 } from './intake/stt-provider.js';
 export { transcribeAudioFiles } from './intake/sarvam-stt.js';
 // A pasted link is resolved to bytes here since ElevenLabs' YouTube fetching broke

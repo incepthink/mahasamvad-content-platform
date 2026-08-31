@@ -81,8 +81,19 @@ export function sttSupportsSourceUrl(): boolean {
   return youTubeAudioSource() === 'download' || sttProviderName() !== 'sarvam';
 }
 
+// Whether the configured provider can fetch a URL ITSELF, which is what lets a caller hand
+// it a presigned storage URL instead of downloading the recording into this process first.
+//
+// ElevenLabs takes a `source_url`; Sarvam's batch API uploads bytes and has no equivalent,
+// so a Sarvam deployment must keep downloading. Callers ask this rather than testing
+// STT_PROVIDER themselves, so STT_PROVIDER=sarvam stays a working rollback.
+export function sttProviderFetchesUrls(): boolean {
+  return sttProviderName() !== 'sarvam';
+}
+
 // Dispatch to the configured backend. Everything reaching here has already been through
-// the URL resolution above, so on the download path `files` is all bytes.
+// the URL resolution above, so on the download path `files` is all bytes -- EXCEPT a
+// providerFetches URL, which is deliberately passed through untouched.
 async function transcribeViaProvider(
   provider: string,
   files: readonly AudioInput[],
@@ -144,7 +155,14 @@ export async function transcribeAudio(
   const prepared: AudioInput[] = [];
 
   for (const [index, file] of files.entries()) {
-    if (isAudioUrlInput(file) && youTubeAudioSource() === 'download') {
+    if (
+      isAudioUrlInput(file) &&
+      // A presigned storage URL is passed straight to the provider: resolving it here is
+      // what this flag exists to prevent (yt-dlp cannot read it, and buffering it would
+      // reintroduce the memory failure signing it removes).
+      file.providerFetches !== true &&
+      youTubeAudioSource() === 'download'
+    ) {
       try {
         // Sequentially, deliberately: these are whole press conferences, and a handful
         // of parallel downloads is both a bandwidth spike and the shape of traffic
@@ -194,6 +212,7 @@ if (
   );
 
   check('elevenlabs can transcribe a source URL', sttSupportsSourceUrl());
+  check('elevenlabs fetches URLs itself', sttProviderFetchesUrls());
 
   process.env.STT_PROVIDER = '  Sarvam  ';
   check('trimmed + lowercased', sttProviderName() === 'sarvam');
@@ -201,6 +220,9 @@ if (
     'sarvam gate names SARVAM_API_KEY',
     sttProviderApiKeyEnv() === 'SARVAM_API_KEY',
   );
+  // Which is what stops a Sarvam deployment being handed a presigned URL its batch API
+  // cannot fetch — the runners keep downloading the bytes there.
+  check('sarvam does not fetch URLs itself', !sttProviderFetchesUrls());
   // The default now resolves a link to bytes before dispatch, so a link is transcribable
   // on EVERY provider — including the one whose API cannot fetch one.
   delete process.env.YOUTUBE_AUDIO_SOURCE;
@@ -226,6 +248,27 @@ if (
     { name: 'two', sourceUrl: 'https://www.youtube.com/watch?v=bbbbbbbbbbb' },
   ]).then((results) => {
     sarvamUrlResults = results;
+  });
+
+  // THE REGRESSION GUARD FOR PRESIGNED STORAGE URLS. In `download` mode (the default) an
+  // ordinary URL input is resolved to bytes here with yt-dlp — which for a presigned S3 URL
+  // would both fail and buffer the recording, defeating the entire point of signing it. A
+  // providerFetches input must therefore bypass that loop and reach the provider untouched.
+  // Asserted on the SARVAM path because its refusal is a deterministic Marathi string
+  // produced with no key and no network: seeing it proves dispatch was reached. If the
+  // bypass ever regresses, this instead spawns yt-dlp and the message will not match.
+  delete process.env.YOUTUBE_AUDIO_SOURCE;
+  process.env.STT_PROVIDER = 'sarvam';
+  let presignedResults: AudioTranscription[] = [];
+  void transcribeAudio([
+    {
+      name: 'meeting.mp3',
+      sourceUrl:
+        'https://s3.example.invalid/dlo-uploads/x.mp3?X-Amz-Signature=z',
+      providerFetches: true,
+    },
+  ]).then((results) => {
+    presignedResults = results;
   });
 
   // An unknown provider must be refused BEFORE any download is attempted, so the
@@ -265,6 +308,13 @@ if (
       'sarvam returns one entry per URL input, in order',
       sarvamUrlResults.length === 2 &&
         sarvamUrlResults.every((result) => 'error' in result),
+    );
+    check(
+      'a presigned URL is handed to the provider, never to yt-dlp',
+      presignedResults.length === 1 &&
+        presignedResults.every(
+          (result) => 'error' in result && result.error.includes('ElevenLabs'),
+        ),
     );
     check(
       'the sarvam refusal names ElevenLabs',

@@ -49,6 +49,7 @@ import {
   setPages,
   togglePage,
 } from '../lib/documentSelection';
+import { extractedPlainText } from '../lib/extractedText';
 import { useDocumentIntake } from '../lib/useDocumentIntake';
 import { STR } from '../lib/strings';
 import { errorMessage, storedErrorMessage } from '../lib/errorMessage';
@@ -326,12 +327,20 @@ export function DocumentIntake({
   }, [detail?.status]);
 
   const pages = detail?.pages ?? [];
+  // The string every caller receives, and it is PROSE — a page read by Sarvam's OCR
+  // arrives as semantic HTML (see lib/extractedText), and /translate and /proofread were
+  // handing that markup to a model as the text to work on. The pages themselves are left
+  // exactly as they were extracted: the review list still renders the HTML as a table and
+  // the correction textarea still edits the source, so what is stored and what is shown
+  // are unchanged — only what leaves this component for a model is converted.
   const text = useMemo(
     () =>
-      joinPageTexts(pages, {
-        isSelected: (page) => selected.has(page),
-        edits,
-      }),
+      extractedPlainText(
+        joinPageTexts(pages, {
+          isSelected: (page) => selected.has(page),
+          edits,
+        }),
+      ),
     [pages, selected, edits],
   );
   const overLimit = maxChars !== undefined && text.length > maxChars;

@@ -34,10 +34,12 @@ import {
   isAudioUrlInput,
   transcribeAudio,
   type AudioInput,
+  sttProviderFetchesUrls,
 } from '@dgipr/content-engine';
 import {
   DLO_UPLOADS_BUCKET,
   downloadFile,
+  signedDownloadUrl,
   getCachedTranscripts,
   getDloIntake,
   hashAudioContent,
@@ -336,12 +338,18 @@ export function startDloIntakeJob(client: SupabaseClient, id: string): void {
         // Everything inside this loop is what the phase always did; it just no longer holds
         // the whole intake's audio at once, which several two-hour recordings would not fit
         // into. A recording larger than the budget still gets a group to itself.
+        // When the provider fetches URLs itself the recordings are handed over as PRESIGNED
+        // S3 URLs and never enter this process, so there is no residency for the byte budget
+        // to bound. Weighing them 0 keeps them in one group rather than letting each claim a
+        // whole group and serialise the intake for nothing.
+        const handOffUrls = sttProviderFetchesUrls();
         const batches = batchBySize(
           audioIndexes.map((index) => {
             const entry = entries[index]!;
             // A link's audio is fetched inside the STT seam, so its size is unknowable here
             // and it is treated as a group's worth — the cautious reading, deliberately.
-            return entry.kind === 'youtube' ? undefined : entry.bytes;
+            if (entry.kind === 'youtube') return undefined;
+            return handOffUrls ? 0 : entry.bytes;
           }),
         );
         // ONE accumulator for the whole phase, so the logged figure and the analytics event
@@ -373,6 +381,28 @@ export function startDloIntakeJob(client: SupabaseClient, id: string): void {
               inputs.push({
                 name: entry.name,
                 sourceUrl: entry.sourceUrl ?? '',
+              });
+              continue;
+            }
+            if (handOffUrls) {
+              // THE RECORDING IS NEVER LOADED: a presigned GET URL goes to the provider and
+              // the audio travels S3 -> transcriber directly, removing the ~480 MB spike (a
+              // whole download plus the copy `new Blob([bytes])` makes) that OOM-killed the
+              // container on meeting recordings. Same storagePath guard as downloadEntry —
+              // a document whose ephemeral upload expired has no bytes to sign.
+              if (!entry.storagePath) {
+                throw new Error(
+                  `या फाईलची मूळ प्रत उपलब्ध नाही: ${entry.name}`,
+                );
+              }
+              inputs.push({
+                name: entry.name,
+                sourceUrl: await signedDownloadUrl(
+                  client,
+                  DLO_UPLOADS_BUCKET,
+                  entry.storagePath,
+                ),
+                providerFetches: true,
               });
               continue;
             }

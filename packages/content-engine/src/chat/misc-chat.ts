@@ -14,6 +14,7 @@
 
 import { recordChatUsage } from '../cost/cost-meter.js';
 import { openAiFetch } from '../http/openai-request.js';
+import { readResponseStream as readOpenAiResponseStream } from '../http/openai-response-stream.js';
 
 const RESPONSES_URL = 'https://api.openai.com/v1/responses';
 
@@ -333,93 +334,18 @@ function recordUsage(
   return billedModel;
 }
 
-// One frame of the Responses event stream. Every frame carries its own `type`, so the SSE
-// `event:` line is redundant and only `data:` is read — the shape `chatCompleteStream`
-// already relies on.
-type OpenAiStreamFrame = Readonly<{
-  type?: string;
-  delta?: string;
-  response?: OpenAiResponseBody;
-  message?: string;
-  error?: Readonly<{ message?: string }> | null;
-}>;
-
-// Read the event stream, forwarding text as it is written. Resolves with the authoritative
-// final response, or null when the stream ended before one arrived.
-//
-// Exported for the no-network test: that deltas actually reach the browser one at a time is
-// the whole point of this file, and it is not something a running instance shows you twice.
-export async function readResponseStream(
+// Reading the Responses event stream is the PROVIDER's contract, not this feature's, so the
+// loop lives in http/openai-response-stream.ts and the article lane's source-file call reads
+// its stream with the same one. This is the /chat-shaped view of it — the generic pinned to
+// this module's own response body — kept under this name because the no-network test imports
+// it from here: that deltas actually reach the browser one at a time is the whole point of
+// this file, and it is not something a running instance shows you twice.
+export function readResponseStream(
   body: ReadableStream<Uint8Array>,
   onDelta: (chunk: string) => void,
   onText: (chunk: string) => void,
 ): Promise<OpenAiResponseBody | null> {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let final: OpenAiResponseBody | null = null;
-
-  try {
-    reading: for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      // Bare CR is never meaningful here (a carriage return inside a JSON string is escaped
-      // as two characters), so the event separator is exactly a blank line however the server
-      // framed its lines and wherever a chunk split.
-      buffer = (buffer + decoder.decode(value, { stream: true })).replace(
-        /\r/g,
-        '',
-      );
-
-      let separator = buffer.indexOf('\n\n');
-      while (separator !== -1) {
-        const event = buffer.slice(0, separator);
-        buffer = buffer.slice(separator + 2);
-        for (const line of event.split('\n')) {
-          if (!line.startsWith('data:')) continue;
-          const data = line.slice(5).trim();
-          if (data === '') continue;
-          if (data === '[DONE]') break reading;
-          let frame: OpenAiStreamFrame;
-          try {
-            frame = JSON.parse(data) as OpenAiStreamFrame;
-          } catch {
-            // A malformed frame is not worth failing a paid turn over: the completed frame
-            // is the authority on the text, so a dropped delta is recovered there.
-            console.warn('[openai] skipped an unparseable chat stream frame');
-            continue;
-          }
-
-          if (
-            frame.type === 'response.output_text.delta' ||
-            frame.type === 'response.refusal.delta'
-          ) {
-            const chunk = frame.delta ?? '';
-            if (chunk !== '') {
-              onText(chunk);
-              onDelta(chunk);
-            }
-          } else if (
-            frame.type === 'response.completed' ||
-            frame.type === 'response.incomplete' ||
-            frame.type === 'response.failed'
-          ) {
-            final = frame.response ?? null;
-            if (final !== null) break reading;
-          } else if (frame.type === 'error') {
-            const detail =
-              frame.error?.message ?? frame.message ?? 'unknown error';
-            throw new Error(`OpenAI chat stream failed: ${detail}.`);
-          }
-        }
-        separator = buffer.indexOf('\n\n');
-      }
-    }
-  } finally {
-    await reader.cancel().catch(() => undefined);
-  }
-
-  return final;
+  return readOpenAiResponseStream<OpenAiResponseBody>(body, onDelta, onText);
 }
 
 // An options object rather than four positional arguments: `vectorStoreId` and

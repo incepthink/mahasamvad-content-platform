@@ -778,10 +778,17 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   `components/PageRangeSelector.tsx` (**the** page picker — see below),
   `components/DocumentIntake.tsx` (the whole ephemeral upload→pick→review flow, for surfaces
   that just want a string — in two modes: **handoff** (`onText`, the default) commits only
-  when "हा मजकूर वापरा" is pressed, right for a surface whose one box the file REPLACES
-  (/translate, /proofread); **live** (`onTextChange`) streams the current text as it changes
-  and hides the button, for a surface that keeps the file BESIDE its own box (the media
-  room), where an unpressed button silently discarded the whole upload),
+  when "हा मजकूर वापरा" is pressed, right for a surface whose one box the file REPLACES;
+  **live** (`onTextChange`) streams the current text as it changes and hides the button, for
+  a surface that keeps the file BESIDE its own box (the media room), where an unpressed
+  button silently discarded the whole upload),
+  **`components/common/DocumentAttachments.tsx`** (`useDocumentAttachments` — the /dlo
+  composer's attach model for /translate and /proofread: the paperclip opens the file dialog,
+  several documents at once, each read by its own `headless` `<DocumentIntake>`, all of them
+  listed as cards in the composer's `AttachmentStrip`. It owns the LIST — one combined
+  string, one aggregate status for the submit to gate on, one row of cards — and reimplements
+  nothing about reading a document. **The spend gate is unchanged**: attaching PROBES, and
+  the surface's own submit is what authorises the OCR),
   `lib/useDocumentIntake.ts`,
   `lib/documentSelection.ts`. Neither `DocumentPages` nor `PageRangeSelector` holds selection
   state, on purpose — the surfaces disagree about how to store one (/translate tracks pages
@@ -850,14 +857,18 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   them one at a time. Page numbers are the DOCUMENT's throughout — blank pages are kept,
   never renumbered away. Harness:
   `tsx --env-file=../../.env src/intake/pdf-pages.ts <file.pdf> [--ocr|--text] [--pages=2,5,9] [--probe]`.
-- **`/translate` has ONE flow — there is no PDF mode.** A file (pdf/docx/txt) is read by the
-  shared `<DocumentIntake>` and its text lands in the SAME box the user could have pasted
-  into; from there it is the pasted-text path exactly, synchronous, name check and all
+- **`/translate` has ONE flow — there is no PDF mode.** Files (pdf/docx/txt, several at
+  once) are attached through the composer's paperclip exactly as they are on /dlo
+  (`useDocumentAttachments`), and their text is counted BESIDE the box the user could have
+  pasted into; from there it is the pasted-text path exactly, synchronous, name check and all
   (`apps/web/app/translate/page.tsx`). `TRANSLATE_TEXT_MAX_CHARS` is therefore 60,000, not
   10,000 — a whole document has to fit — and `translateArticle` already chunks internally, so
-  the cap bounds how LONG one synchronous request runs, not whether it works. The intake is
-  given that cap as `maxChars`, which is what makes page selection the way to trim an
-  over-long booklet.
+  the cap bounds how LONG one synchronous request runs, not whether it works.
+  **भाषांतर करा is the only press**: it reads whatever is attached and unread (the spend
+  gate — attaching only probes) and continues into the translation when the text lands. The
+  upload BLOCK, its page picker and its hand-over button are gone; /proofread is identical.
+  The text a document contributes is PROSE — `lib/extractedText` converts the OCR backend's
+  HTML, which this page used to send to the translator as the text to translate.
   The **dead** per-page/per-language document path (background job, `selecting` status, AI
   page instruction, separate English/Hindi page-by-page results) still exists server-side and
   is deliberately left intact but UNUSED: `apps/api/src/jobs/translate-document.ts`, the

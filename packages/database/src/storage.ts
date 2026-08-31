@@ -20,6 +20,7 @@ import {
   S3ServiceException,
 } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { Transform, type Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -383,6 +384,49 @@ export async function downloadFile(
   path: string,
 ): Promise<Buffer> {
   return getObject(bucket, path);
+}
+
+// A short-lived, PRESIGNED GET URL for a stored object, so a third party can fetch it
+// DIRECTLY and this process never holds the bytes at all.
+//
+// WHY THIS EXISTS. The 2026-08-30 streaming work fixed the upload half of the memory problem
+// (uploadStream) and left the JOB half: transcribing a 239.6 MB meeting recording still meant
+// downloadFile -> a 240 MB Buffer, then `new Blob([bytes])` in the ElevenLabs client, whose
+// constructor COPIES its sources rather than referencing them -- ~480 MB resident on a t3 box
+// that also runs n8n, Caddy and PostgREST. The container was OOM-killed (exit 137) after the
+// upload had already succeeded. Handing the provider a URL removes both copies: the audio goes
+// from S3 to the transcriber without passing through here.
+//
+// Signed against the object's REAL bucket, so it works for the PRIVATE dlo-uploads bucket that
+// has no public URL -- which is the whole point, since that is where every recording lives.
+//
+// The expiry must outlast the consumer's own timeout, not just the request that hands the URL
+// over: ElevenLabs may hold a long recording for its full ELEVENLABS_STT_TIMEOUT_MS (20 min by
+// default), and a URL that expires mid-transcription fails a job that was working. The default
+// below is deliberately generous for that reason; it is a capability window, not a cache.
+export async function signedDownloadUrl(
+  _client: SupabaseClient,
+  bucket: string,
+  path: string,
+  expiresInSeconds = 60 * 60,
+): Promise<string> {
+  return getSignedUrl(
+    // The cast is a TYPE-IDENTITY artifact, not an incompatibility: the presigner resolves
+    // its own copy of the @smithy packages, so its `Client` and client-s3's `S3Client` are
+    // structurally identical classes TypeScript treats as distinct (they "have separate
+    // declarations of a private property 'handlers'"). Same shape as this file's existing
+    // `response.Body as unknown as AsyncIterable<Uint8Array>`. Deduping @smithy repo-wide
+    // was tried and does not clear it.
+    getS3Client() as unknown as Parameters<typeof getSignedUrl>[0],
+    new GetObjectCommand({
+      Bucket: resolveBucket(bucket),
+      // The RAW path, as every other S3 command here uses -- encodeObjectPath is for
+      // building public URLs. Percent-encoding it would sign a URL for a key that does
+      // not exist; the signer escapes the key itself.
+      Key: path,
+    }),
+    { expiresIn: expiresInSeconds },
+  );
 }
 
 // ONE SLICE of a stored object, so a caller can forward a large file somewhere else without

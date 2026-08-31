@@ -21,6 +21,7 @@ import {
   runInCostScope,
   runInCostTask,
   sttProviderName,
+  sttProviderFetchesUrls,
   totalCostUsd,
   transcribeAudio,
   type AudioInput,
@@ -28,6 +29,7 @@ import {
 import {
   DLO_UPLOADS_BUCKET,
   downloadFile,
+  signedDownloadUrl,
   getCachedTranscripts,
   getTranscription,
   hashAudioContent,
@@ -90,12 +92,21 @@ export function startTranscriptionJob(
       // the current group, so the whole run's audio is never resident at once. A single
       // recording larger than the budget still gets a group to itself and is transcribed;
       // nothing is ever refused for its size.
+      // When the provider fetches URLs itself, the recordings are handed over as PRESIGNED
+      // S3 URLs and never enter this process — so nothing is resident, and the byte budget
+      // that exists to bound residency has nothing to bound. Weighing them 0 keeps them in
+      // one group (ElevenLabs still runs them at its own concurrency) instead of each
+      // unknown-size entry claiming a whole group and serialising the run for no reason.
+      const handOffUrls = sttProviderFetchesUrls();
       const batches = batchBySize(
-        entries.map((entry) =>
-          // A link's audio is fetched inside the STT seam, so its size is unknowable here and
-          // it is treated as a group's worth — the cautious reading, deliberately.
-          entry.sourceUrl !== undefined ? undefined : entry.bytes,
-        ),
+        entries.map((entry) => {
+          if (entry.sourceUrl !== undefined) {
+            // A pasted link's audio is fetched inside the STT seam, so its size is
+            // unknowable here and it is treated as a group's worth — the cautious reading.
+            return undefined;
+          }
+          return handOffUrls ? 0 : entry.bytes;
+        }),
       );
       // ONE accumulator for the whole run, so the logged figure and the analytics event stay
       // the run's total rather than the last group's.
@@ -118,20 +129,34 @@ export function startTranscriptionJob(
         const inputs: AudioInput[] = [];
         for (const index of batch) {
           const entry = entries[index]!;
-          inputs.push(
-            entry.sourceUrl !== undefined
-              ? { name: entry.name, sourceUrl: entry.sourceUrl }
-              : {
-                  name: entry.name,
-                  data: await downloadFile(
-                    client,
-                    DLO_UPLOADS_BUCKET,
-                    // An entry without a sourceUrl was uploaded, so it has a storagePath;
-                    // the fallback is unreachable defence rather than a real case.
-                    entry.storagePath ?? '',
-                  ),
-                },
-          );
+          if (entry.sourceUrl !== undefined) {
+            inputs.push({ name: entry.name, sourceUrl: entry.sourceUrl });
+            continue;
+          }
+          // An entry without a sourceUrl was uploaded, so it has a storagePath; the
+          // fallback is unreachable defence rather than a real case.
+          const storagePath = entry.storagePath ?? '';
+          if (handOffUrls) {
+            // THE RECORDING IS NEVER LOADED. A presigned GET URL goes to the provider and
+            // the audio travels S3 -> transcriber directly. This is what removes the ~480 MB
+            // spike (a 240 MB download plus the copy `new Blob([bytes])` makes) that was
+            // OOM-killing the container on meeting recordings AFTER the upload had already
+            // succeeded — the half of the 2026-08-30 streaming work that was left undone.
+            inputs.push({
+              name: entry.name,
+              sourceUrl: await signedDownloadUrl(
+                client,
+                DLO_UPLOADS_BUCKET,
+                storagePath,
+              ),
+              providerFetches: true,
+            });
+            continue;
+          }
+          inputs.push({
+            name: entry.name,
+            data: await downloadFile(client, DLO_UPLOADS_BUCKET, storagePath),
+          });
         }
         // The empty string is never looked up as a key — those positions are skipped below.
         const hashes = inputs.map((input) =>

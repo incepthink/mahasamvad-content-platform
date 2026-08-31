@@ -15,53 +15,49 @@
 //
 // THE SUBMIT IS IN THE COMPOSER CARD, and there is only ONE of it. There were two: a
 // `.card-action` bar under the composer, and a duplicate passed into the upload card as
-// `submitAction`, which existed because a scanned PDF's page picker is taller than the
-// viewport and the bar below it was off screen. The upload block now opens BELOW the tool
-// row that carries तपासणी करा, so the picker can be as tall as it likes without pushing the
-// button anywhere — and everything below this card (the issues, the corrected text) is a
-// consequence of pressing it rather than something to fill in first. Every complaint the
-// press can raise is rendered directly under it.
+// `submitAction`, which existed because a scanned PDF's page picker was taller than the
+// viewport and the bar below it was off screen. Everything below this card (the issues, the
+// corrected text) is a consequence of pressing it rather than something to fill in first,
+// and every complaint the press can raise is rendered directly under it.
 //
-// The upload runs in LIVE mode (onTextChange), not handoff, and the submit reads an unread
-// scan itself — /translate's arrangement, for the same reason. In handoff mode the file's
-// text reached this page only when a button INSIDE the upload card was pressed, so a
-// scanned PDF took three presses in three different places (निवडलेली पृष्ठे वाचा →
-// हा मजकूर वापरा → तपासणी करा) and an officer who pressed only the last one was told to
-// write something to check while their document sat there, read and ignored. Now
-// तपासणी करा is enough on its own: it triggers the OCR read of the ticked pages if that
-// has not happened yet and continues into the check as soon as the text lands. The page
-// picker is still the spend gate — no page is read unless it was ticked — the press that
-// authorises it has just moved.
+// FILES ARE ATTACHED THE WAY /dlo ATTACHES THEM (components/common/DocumentAttachments):
+// the paperclip opens the browser's file dialog, several documents at once, and each one
+// becomes a card in the strip under the tool row. There is no upload BLOCK any more — a
+// card with its own upload control, its own page picker and its own hand-over button was a
+// second form on a page that already had one, and getting a PDF checked took three presses
+// in three different places (निवडलेली पृष्ठे वाचा → हा मजकूर वापरा → तपासणी करा). An officer
+// who pressed only the last one was told to write something to check while their document
+// sat there, read and ignored.
 //
-// The upload block itself lives BEHIND THE PAPERCLIP inside the composer, and what is
-// attached is a card in the strip under the tool row (AttachmentStrip). The block folds
-// away on its own once the file is read and stays open while it still has something to
-// ask — a page selection, or a failure.
+// तपासणी करा is now the only press. THE SPEND GATE IS UNCHANGED and is exactly why the
+// reading waits for it: every PDF is read by OCR (PDF_EXTRACTION_MODE=ocr), which is billed
+// per page, so attaching only PROBES — free — and this button is what authorises the read.
+// It reads whatever is attached and unread, then continues into the check on its own as
+// soon as the text lands.
 //
-// The file's text is counted BESIDE the textarea rather than pushed into it, so a pasted
-// note and an attached document are two independent sources and either one alone is a
-// complete job. Both are joined at submit, and the string actually sent is remembered
+// The files' text is counted BESIDE the textarea rather than pushed into it, so a pasted
+// note and an attached document are independent sources and either one alone is a complete
+// job. Both are joined at submit, and the string actually sent is remembered
 // (`checkedText`) because the corrected text and its highlight replay are only meaningful
-// against the exact input they were produced from.
+// against the exact input they were produced from. That string is PROSE, not the HTML the
+// OCR backend returns — see lib/extractedText, which is why a marked correction now lands
+// on a word rather than inside a tag.
 //
 // Nothing is stored — not the text, not the uploaded file (the intake job is in-memory with
 // a TTL) — so this page has no history list, unlike /dlo and /transcribe.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { FileText, Paperclip } from 'lucide-react';
+import { Paperclip } from 'lucide-react';
 import {
-  UPLOAD_FILE_MAX_BYTES,
   buildProofreadHighlights,
   type ProofreadHighlight,
   type ProofreadIssue,
   type ProofreadResponse,
 } from '@dgipr/schemas';
 import { Button } from '@/components/ui/button';
-import {
-  AttachmentStrip,
-  type AttachmentItem,
-} from '@/components/common/AttachmentStrip';
+import { AttachmentStrip } from '@/components/common/AttachmentStrip';
 import { ComposerToolbarButton } from '@/components/common/ComposerToolbarButton';
+import { useDocumentAttachments } from '@/components/common/DocumentAttachments';
 import { FormCard } from '@/components/common/FormCard';
 import { PageBackdrop } from '@/components/common/PageBackdrop';
 import { PromptTextarea } from '@/components/common/PromptTextarea';
@@ -72,18 +68,10 @@ import { PROOFREAD_DOODLES } from '../../lib/doodleMarks';
 import { PROOFREAD_TYPE_LABELS, STR } from '../../lib/strings';
 import { errorMessage } from '../../lib/errorMessage';
 import { ErrorNotice } from '../../components/ErrorNotice';
-import {
-  DocumentIntake,
-  type DocumentIntakeInfo,
-  type DocumentIntakeStatus,
-} from '../../components/DocumentIntake';
 
-// Where the upload card remembers its in-flight job. Named once because the remove control
-// has to clear it by hand — see clearDocument.
+// The prefix each attached document's reader remembers its in-flight job under. One per
+// surface, or two pages would fight over one job (see useDocumentAttachments).
 const DOC_STORAGE_KEY = 'dgipr.proofread.document';
-
-// The upload block this page's paperclip opens, named so the button can point at it.
-const DOC_PANEL_ID = 'proofread-document';
 
 // Display order for error-severity issues; style advisories render separately.
 const ERROR_TYPE_ORDER = [
@@ -296,27 +284,9 @@ function CorrectedArticle({
 
 export default function ProofreadPage() {
   const [text, setText] = useState('');
-  // The uploaded file's text, kept BESIDE the textarea rather than pushed into it: the two
-  // are independent sources and either one alone is a complete job.
-  const [docText, setDocText] = useState('');
-  const [docStatus, setDocStatus] = useState<DocumentIntakeStatus>('empty');
-  // Enough to NAME the file in the attachment strip while it is still being read — the
-  // snapshot cannot, being null until there is text to describe.
-  const [docInfo, setDocInfo] = useState<DocumentIntakeInfo | null>(null);
-  // Whether the upload block below the strip is on screen. Opened by the paperclip and by
-  // the attachment card; folded away on its own once a read starts (see the effect below).
-  const [docOpen, setDocOpen] = useState(false);
-  // Bumping this asks the upload card to run its selected-page extraction. A counter rather
-  // than a flag so a retry after a failed read is an explicit new request.
-  const [readRequest, setReadRequest] = useState(0);
-  // The submit is waiting for that read to land before it can check anything.
+  // The submit is waiting for an attached document to be read before it can check anything.
   const [awaitingRead, setAwaitingRead] = useState(false);
   const readRequestedForSubmitRef = useRef(false);
-  // What the upload card last published, so an identical re-publish (a re-render of the
-  // card, a poll that changed nothing) cannot throw away a finished check.
-  const docTextRef = useRef('');
-  // Remounts the upload card to drop a finished document (its own state is internal).
-  const [docKey, setDocKey] = useState(0);
   const [checking, setChecking] = useState(false);
   const [result, setResult] = useState<ProofreadResponse | null>(null);
   // The exact string the current result was produced from. The corrected text is a
@@ -326,17 +296,34 @@ export default function ProofreadPage() {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  // What actually gets checked: typed text, uploaded file, or both, in that order.
+  // The attached files, exactly as /dlo holds them: picked through the paperclip below,
+  // listed as cards in the strip under it, and READ only when this page's own submit is
+  // pressed — see useDocumentAttachments for why the reading waits for that press.
+  const docs = useDocumentAttachments({
+    storagePrefix: DOC_STORAGE_KEY,
+    feature: 'proofread',
+    onError: setError,
+    // A document that has just been read is new source text, which invalidates a check made
+    // from the old one exactly as editing the box does.
+    onTextChange: () => resetFlow(),
+    disabled: checking,
+  });
+
+  // Named once: every gate below reads the list's aggregate status, and an effect that
+  // depended on `docs` itself would re-run on every poll.
+  const docStatus = docs.status;
+
+  // What actually gets checked: typed text, uploaded files, or both, in that order.
   // Blank-line separated so a pasted note and an attached document read as two blocks.
   const combinedText = useMemo(
-    () => [text.trim(), docText.trim()].filter(Boolean).join('\n\n'),
-    [text, docText],
+    () => [text.trim(), docs.text.trim()].filter(Boolean).join('\n\n'),
+    [text, docs.text],
   );
 
-  // The `unread` arm is what keeps a scanned PDF usable: its pages are ticked but nobody has
-  // paid to read them yet, so it contributes nothing to combinedText, and reading it and then
-  // checking is exactly what startSubmit does. Testing the text alone would leave an officer
-  // whose only source is a scan with a dead button and no way forward.
+  // The `unread` arm is what keeps an attached PDF usable: nobody has paid to read it yet,
+  // so it contributes nothing to combinedText, and reading it and then checking is exactly
+  // what startSubmit does. Testing the text alone would leave an officer whose only source
+  // is a file with a dead button and no way forward.
   const canSubmit = combinedText.length > 0 || docStatus === 'unread';
   const busy = checking || awaitingRead;
   const disabled = busy || !canSubmit;
@@ -351,72 +338,6 @@ export default function ProofreadPage() {
     setResult(null);
     setError(null);
   };
-
-  // Throw the attached file away without checking it. A remount is what clears the card's
-  // internal state, and the stored job id has to go with it or the mount effect would
-  // re-attach the same file.
-  const clearDocument = () => {
-    window.sessionStorage.removeItem(DOC_STORAGE_KEY);
-    docTextRef.current = '';
-    setDocText('');
-    // The remount reports 'empty' with no file on its own, but not until it has mounted —
-    // and until then the strip would still be showing a card for a document that is gone.
-    setDocInfo(null);
-    setDocStatus('empty');
-    setDocOpen(false);
-    setDocKey((n) => n + 1);
-    resetFlow();
-  };
-
-  // Once a file IS attached, the upload block folds away on its own and its card in the
-  // strip takes over — reading progress, page count, remove. Only on the TRANSITION into a
-  // read, so re-opening the block from the card leaves it open. A scan waiting for its page
-  // selection, or a failed read, is exempt: `docNeedsBlock` below keeps that block on screen
-  // regardless, because it is asking a question.
-  const docReadStartedRef = useRef(false);
-  useEffect(() => {
-    const reading = docStatus === 'reading' || docStatus === 'ready';
-    if (reading && !docReadStartedRef.current) setDocOpen(false);
-    docReadStartedRef.current = reading;
-  }, [docStatus]);
-
-  // Folding either of these away would hide the question, and in the page-selection case
-  // the check would then run over a document nobody had paid to read.
-  const docNeedsBlock = docStatus === 'unread' || docStatus === 'failed';
-  const showDoc = docOpen || docNeedsBlock;
-
-  const attachments: AttachmentItem[] = docInfo
-    ? [
-        {
-          id: 'document',
-          name: docInfo.fileName,
-          icon: FileText,
-          meta:
-            docStatus === 'reading'
-              ? STR.attachmentReading
-              : docStatus === 'unread'
-                ? STR.attachmentNeedsPages
-                : docStatus === 'failed'
-                  ? STR.attachmentFailed
-                  : docInfo.pageCount !== null
-                    ? `${docInfo.pageCount.toLocaleString('mr-IN')} ${STR.attachmentPagesSuffix}`
-                    : STR.attachmentReady,
-          busy: docStatus === 'reading',
-          failed: docStatus === 'failed',
-          removeLabel: `${STR.docRemove}: ${docInfo.fileName}`,
-          onRemove: clearDocument,
-          // Only while the block is foldable: opening it is the point of the card, but a
-          // block that is on screen asking a question must not be closable from here.
-          ...(docNeedsBlock
-            ? {}
-            : {
-                open: showDoc,
-                openLabel: showDoc ? STR.attachmentClose : STR.attachmentOpen,
-                onOpen: () => setDocOpen((open) => !open),
-              }),
-        },
-      ]
-    : [];
 
   const submit = async () => {
     if (combinedText.length === 0) return;
@@ -442,7 +363,7 @@ export default function ProofreadPage() {
       setAwaitingRead(true);
       if (docStatus === 'unread') {
         readRequestedForSubmitRef.current = true;
-        setReadRequest((request) => request + 1);
+        docs.requestRead();
       }
       return;
     }
@@ -458,11 +379,11 @@ export default function ProofreadPage() {
   useEffect(() => {
     if (!awaitingRead) return;
     if (docStatus === 'unread') {
-      // A file attached while we were already waiting, or a read that failed and left pages
-      // ticked: ask once more rather than sitting on a spinner for ever.
+      // A file attached while we were already waiting, or a read that failed: ask once more
+      // rather than sitting on a spinner for ever.
       if (!readRequestedForSubmitRef.current) {
         readRequestedForSubmitRef.current = true;
-        setReadRequest((request) => request + 1);
+        docs.requestRead();
       }
       return;
     }
@@ -471,11 +392,13 @@ export default function ProofreadPage() {
       setAwaitingRead(false);
       startSubmitRef.current();
     } else if (docStatus === 'failed' || docStatus === 'empty') {
-      // Nothing came back. Stop waiting and leave the card's own error standing rather than
-      // checking an empty selection.
+      // Nothing came back. Stop waiting and leave the reader's own error standing rather
+      // than checking nothing.
       readRequestedForSubmitRef.current = false;
       setAwaitingRead(false);
     }
+    // Keyed on the document list's STATUS and nothing else: `docs` itself is rebuilt on
+    // every render, so depending on the object would re-run this on every poll.
   }, [awaitingRead, docStatus]);
 
   const copyCorrected = async () => {
@@ -553,13 +476,14 @@ export default function ProofreadPage() {
             {/* The one band of controls: attach a file, then the page's one action.
                 Icon-only for the tool, the same h-9 row the other create surfaces use. */}
             <div className="mt-3 flex flex-wrap items-center gap-2">
+              {/* Opens the browser's file dialog directly, the way /dlo's composer
+                  tools do. It used to toggle an upload BLOCK below the card, which was a
+                  second form with its own upload control and its own page picker. */}
               <ComposerToolbarButton
                 icon={Paperclip}
                 label={STR.docUpload}
                 disabled={checking}
-                active={showDoc}
-                controls={DOC_PANEL_ID}
-                onClick={() => setDocOpen((open) => !open)}
+                onClick={docs.pick}
               />
 
               {/* The count and the action travel together at the right edge, in one group
@@ -627,50 +551,15 @@ export default function ProofreadPage() {
             {/* Directly under the tool that produced it, so "attach" and "attached" are
                 one place on the screen. */}
             <AttachmentStrip
-              items={attachments}
+              items={docs.items}
               disabled={checking}
               className="mt-4"
             />
+
+            {/* The hidden file input and one reader per attached document. Renders nothing
+                — every card the officer sees is in the strip above. */}
+            {docs.readers}
           </div>
-
-          {/* The text to check usually exists as a file — a draft press note, a scanned GR.
-              The shared intake reads pdf/docx/txt; a scanned PDF stops to ask which pages
-              are worth OCR'ing before a single credit is spent.
-
-              LIVE mode (onTextChange): its text is counted beside the box above rather than
-              pushed into it, so there is no hand-over button to find and no way to leave an
-              upload behind. See the header.
-
-              No rule of its own: `.doc-intake-embedded` already draws the divider and the
-              spacing above itself, and a wrapper adding a second `border-t` would stack two
-              lines above the block. */}
-          {showDoc ? (
-            <div id={DOC_PANEL_ID} className="mt-3">
-              <DocumentIntake
-                key={docKey}
-                storageKey={DOC_STORAGE_KEY}
-                embedded
-                feature="proofread"
-                maxBytes={UPLOAD_FILE_MAX_BYTES}
-                onTextChange={(value) => {
-                  // Only a real change may invalidate a finished check.
-                  if (value === docTextRef.current) return;
-                  docTextRef.current = value;
-                  setDocText(value);
-                  resetFlow();
-                }}
-                onStatusChange={(status, info) => {
-                  setDocStatus(status);
-                  setDocInfo(info);
-                }}
-                readRequest={readRequest}
-                // Offered only once there IS a file: the component renders this control in
-                // every state including the empty upload card, where there is nothing to
-                // delete — and the paperclip already closes that.
-                {...(docStatus === 'empty' ? {} : { onRemove: clearDocument })}
-              />
-            </div>
-          ) : null}
         </FormCard>
 
         {/* Everything below is OUTPUT — a consequence of the press above, never something

@@ -21,30 +21,32 @@
 //
 // ONE flow, deliberately. There used to be a second "PDF फाईल" tab running a parallel
 // background job (per-page, per-language, its own routes and its own page picker), which
-// meant two upload experiences, two page pickers and two shapes of result on one page. Now
-// the shared <DocumentIntake> reads any pdf/docx/txt — including a scanned PDF, whose pages
-// are picked before a single OCR credit is spent — and its text is a SECOND source counted
-// beside the box above it. From there everything is the text path: one submit, the name
-// check, one translation.
+// meant two upload experiences, two page pickers and two shapes of result on one page.
 //
-// The upload runs in LIVE mode (onTextChange), not handoff, and the submit reads an unread
-// scan itself — the media room's arrangement, for the same reason. In handoff mode the file's
-// text reached this page only when a button INSIDE the upload card was pressed, so a scanned
-// PDF took three presses in three different places (निवडलेली पृष्ठे वाचा → हा मजकूर वापरा →
-// भाषांतर करा) and an officer who pressed only the last one was told to write something to
-// translate while their document sat there, read and ignored. Now भाषांतर करा is enough on its
-// own: it triggers the OCR read of the ticked pages if that has not happened yet and continues
-// into the translation as soon as the text lands. The page picker is still the spend gate —
-// no page is read unless it was ticked — the press that authorises it has just moved.
+// FILES ARE ATTACHED THE WAY /dlo ATTACHES THEM (components/common/DocumentAttachments):
+// the paperclip opens the browser's file dialog, several documents at once, and each one
+// becomes a card in the strip under the tool row. There is no upload BLOCK any more — a
+// card with its own upload control, its own page picker and its own hand-over button was a
+// second form on a page that already had one, and getting a PDF translated took three
+// presses in three different places (निवडलेली पृष्ठे वाचा → हा मजकूर वापरा → भाषांतर करा).
+// An officer who pressed only the last one was told to write something to translate while
+// their document sat there, read and ignored.
 //
-// The upload block itself now lives BEHIND the paperclip inside the composer, and what is
-// attached is a card in the strip under the tool row (AttachmentStrip), the shape /dlo and
-// the media room already use. The block folds away on its own once the file is read and
-// stays open while it still has something to ask — a page selection, or a failure. There is
-// no longer a duplicate submit inside the upload card either: it existed because a scanned
-// PDF's page picker is taller than the viewport and the submit below it was off screen. The
-// upload block now opens BELOW the tool row that carries भाषांतर करा, so the picker can be
-// as tall as it likes without pushing the button anywhere.
+// भाषांतर करा is now the only press. THE SPEND GATE IS UNCHANGED and is exactly why the
+// reading waits for it: every PDF is read by OCR (PDF_EXTRACTION_MODE=ocr), which is billed
+// per page, so attaching only PROBES — free — and this button is what authorises the read.
+// It reads whatever is attached and unread, then continues into the translation on its own
+// as soon as the text lands. What is gone is the per-page QUESTION, not the gate: /dlo
+// dropped it first, on the grounds that a document is attached in order to be read whole.
+//
+// The files' text is a SECOND source counted beside the box above it rather than pushed
+// into it, so a pasted note and an attached document are independent and either alone is a
+// complete job. From there everything is the text path: one submit, the name check, one
+// translation.
+//
+// The text those documents contribute is PROSE, not the HTML the OCR backend returns —
+// see lib/extractedText. That conversion is why this page stopped sending
+// `<div class="page-body-container">…` to the translator as the text to translate.
 //
 // ONE question is asked — which language to translate INTO — and its three answers are
 // ALWAYS enabled. The officer is not asked what language they pasted, and the text is not
@@ -89,7 +91,7 @@
 // surfaces as a request error rather than a local warning.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, FileText, Languages, Paperclip } from 'lucide-react';
+import { ChevronDown, Languages, Paperclip } from 'lucide-react';
 import {
   type PrepareTranslationResponse,
   type TextTranslationLanguage,
@@ -103,11 +105,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import {
-  AttachmentStrip,
-  type AttachmentItem,
-} from '@/components/common/AttachmentStrip';
+import { AttachmentStrip } from '@/components/common/AttachmentStrip';
 import { ComposerToolbarButton } from '@/components/common/ComposerToolbarButton';
+import { useDocumentAttachments } from '@/components/common/DocumentAttachments';
 import { FormCard } from '@/components/common/FormCard';
 import { PageBackdrop } from '@/components/common/PageBackdrop';
 import { PromptTextarea } from '@/components/common/PromptTextarea';
@@ -118,11 +118,6 @@ import { downloadBlob } from '../../lib/download';
 import { TRANSLATE_DOODLES } from '../../lib/doodleMarks';
 import { STR } from '../../lib/strings';
 import { errorMessage } from '../../lib/errorMessage';
-import {
-  DocumentIntake,
-  type DocumentIntakeInfo,
-  type DocumentIntakeStatus,
-} from '../../components/DocumentIntake';
 import { TranslationTermsReview } from '../../components/TranslationTermsReview';
 
 type TranslationResult = Readonly<{
@@ -179,12 +174,9 @@ function sourceForTarget(
   return target === 'mr' ? 'hi' : 'mr';
 }
 
-// Where the upload card remembers its in-flight job. Named once because the remove control
-// has to clear it by hand — see clearDocument.
+// The prefix each attached document's reader remembers its in-flight job under. One per
+// surface, or two pages would fight over one job (see useDocumentAttachments).
 const DOC_STORAGE_KEY = 'dgipr.translate.document';
-
-// The upload block this page's paperclip opens, named so the button can point at it.
-const DOC_PANEL_ID = 'translate-document';
 
 const INPUT_LABELS: Readonly<Record<TextTranslationLanguage, string>> = {
   mr: STR.translateInputLabelMarathi,
@@ -215,27 +207,10 @@ const DOWNLOAD_NAMES: Readonly<Record<string, string>> = {
 
 export default function TranslatePage() {
   const [text, setText] = useState('');
-  // The uploaded file's text, kept BESIDE the textarea rather than pushed into it: the two
-  // are independent sources and either one alone is a complete job.
-  const [docText, setDocText] = useState('');
-  const [docStatus, setDocStatus] = useState<DocumentIntakeStatus>('empty');
-  // Enough to NAME the file in the attachment strip while it is still being read — the
-  // snapshot cannot, being null until there is text to describe.
-  const [docInfo, setDocInfo] = useState<DocumentIntakeInfo | null>(null);
-  // Whether the upload block below the strip is on screen. Opened by the paperclip and by
-  // the attachment card; folded away on its own once a read starts (see the effect below).
-  const [docOpen, setDocOpen] = useState(false);
-  // Bumping this asks the upload card to run its selected-page extraction. A counter rather
-  // than a flag so a retry after a failed read is an explicit new request.
-  const [readRequest, setReadRequest] = useState(0);
-  // The submit is waiting for that read to land before it can translate anything.
+  // The submit is waiting for an attached document to be read before it can translate
+  // anything.
   const [awaitingRead, setAwaitingRead] = useState(false);
   const readRequestedForSubmitRef = useRef(false);
-  // What the upload card last published, so an identical re-publish (a re-render of the
-  // card, a poll that changed nothing) cannot throw away a finished translation.
-  const docTextRef = useRef('');
-  // Remounts the upload card to drop a finished document (its own state is internal).
-  const [docKey, setDocKey] = useState(0);
   // The page's one question. इंग्रजी is the department's commonest job and so is the default.
   const [target, setTarget] = useState<TextTranslationLanguage>('en');
   // Name-check flow: idle → preparing (extracting names) → review (card shown).
@@ -251,11 +226,28 @@ export default function TranslatePage() {
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // What actually gets translated: typed text, uploaded file, or both, in that order.
+  // The attached files, exactly as /dlo holds them: picked through the paperclip below,
+  // listed as cards in the strip under it, and READ only when this page's own submit is
+  // pressed — see useDocumentAttachments for why the reading waits for that press.
+  const docs = useDocumentAttachments({
+    storagePrefix: DOC_STORAGE_KEY,
+    feature: 'translate',
+    onError: setError,
+    // A document that has just been read is new source text, which invalidates a
+    // translation made from the old one exactly as editing the box does.
+    onTextChange: () => resetFlow(),
+    disabled: submitting,
+  });
+
+  // Named once: every gate below reads the list's aggregate status, and an effect that
+  // depended on `docs` itself would re-run on every poll.
+  const docStatus = docs.status;
+
+  // What actually gets translated: typed text, uploaded files, or both, in that order.
   // Blank-line separated so a pasted note and an attached document read as two blocks.
   const combinedText = useMemo(
-    () => [text.trim(), docText.trim()].filter(Boolean).join('\n\n'),
-    [text, docText],
+    () => [text.trim(), docs.text.trim()].filter(Boolean).join('\n\n'),
+    [text, docs.text],
   );
 
   // Never asked, never guessed at as a LANGUAGE — see sourceForTarget. Every target the menu
@@ -263,10 +255,10 @@ export default function TranslatePage() {
   // with nothing left to reject.
   const source = sourceForTarget(target, combinedText);
 
-  // The `unread` arm is what keeps a scanned PDF usable: its pages are ticked but nobody has
-  // paid to read them yet, so it contributes nothing to combinedText, and reading it and then
-  // translating is exactly what startSubmit does. Testing the text alone would leave an
-  // officer whose only source is a scan with a dead button and no way forward.
+  // The `unread` arm is what keeps an attached PDF usable: nobody has paid to read it yet,
+  // so it contributes nothing to combinedText, and reading it and then translating is
+  // exactly what startSubmit does. Testing the text alone would leave an officer whose only
+  // source is a file with a dead button and no way forward.
   const canSubmit = combinedText.length > 0 || docStatus === 'unread';
   // Locks the target menu: an open review card was extracted for one target (its columns
   // and its Hindi lock follow it), so changing the target under it would discard the
@@ -300,74 +292,6 @@ export default function TranslatePage() {
     setPrepared(null);
     setError(null);
   };
-
-  // Throw the attached file away without translating it. "दुसरी फाईल निवडा" only ever
-  // REPLACED it, so an officer who decided to translate the pasted text alone had no way to
-  // detach the document — and in live mode its text is counted at submit whether or not
-  // anyone is still looking at it. A remount is what clears the card's internal state, and
-  // the stored job id has to go with it or the mount effect would re-attach the same file.
-  const clearDocument = () => {
-    window.sessionStorage.removeItem(DOC_STORAGE_KEY);
-    docTextRef.current = '';
-    setDocText('');
-    // The remount reports 'empty' with no file on its own, but not until it has mounted —
-    // and until then the strip would still be showing a card for a document that is gone.
-    setDocInfo(null);
-    setDocStatus('empty');
-    setDocOpen(false);
-    setDocKey((n) => n + 1);
-    resetFlow();
-  };
-
-  // Once a file IS attached, the upload block folds away on its own and its card in the
-  // strip takes over — reading progress, page count, remove. Only on the TRANSITION into a
-  // read, so re-opening the block from the card leaves it open. A scan waiting for its page
-  // selection, or a failed read, is exempt: `docNeedsBlock` below keeps that block on screen
-  // regardless, because it is asking a question.
-  const docReadStartedRef = useRef(false);
-  useEffect(() => {
-    const reading = docStatus === 'reading' || docStatus === 'ready';
-    if (reading && !docReadStartedRef.current) setDocOpen(false);
-    docReadStartedRef.current = reading;
-  }, [docStatus]);
-
-  // Folding either of these away would hide the question, and in the page-selection case
-  // the run would then be submitted from a document nobody had paid to read.
-  const docNeedsBlock = docStatus === 'unread' || docStatus === 'failed';
-  const showDoc = docOpen || docNeedsBlock;
-
-  const attachments: AttachmentItem[] = docInfo
-    ? [
-        {
-          id: 'document',
-          name: docInfo.fileName,
-          icon: FileText,
-          meta:
-            docStatus === 'reading'
-              ? STR.attachmentReading
-              : docStatus === 'unread'
-                ? STR.attachmentNeedsPages
-                : docStatus === 'failed'
-                  ? STR.attachmentFailed
-                  : docInfo.pageCount !== null
-                    ? `${docInfo.pageCount.toLocaleString('mr-IN')} ${STR.attachmentPagesSuffix}`
-                    : STR.attachmentReady,
-          busy: docStatus === 'reading',
-          failed: docStatus === 'failed',
-          removeLabel: `${STR.docRemove}: ${docInfo.fileName}`,
-          onRemove: clearDocument,
-          // Only while the block is foldable: opening it is the point of the card, but a
-          // block that is on screen asking a question must not be closable from here.
-          ...(docNeedsBlock
-            ? {}
-            : {
-                open: showDoc,
-                openLabel: showDoc ? STR.attachmentClose : STR.attachmentOpen,
-                onOpen: () => setDocOpen((open) => !open),
-              }),
-        },
-      ]
-    : [];
 
   // Step 1 on a Marathi source: extract the text's names for review. Failure returns to
   // idle with a Marathi error — never silently translating with unchecked names.
@@ -442,7 +366,7 @@ export default function TranslatePage() {
       setAwaitingRead(true);
       if (docStatus === 'unread') {
         readRequestedForSubmitRef.current = true;
-        setReadRequest((request) => request + 1);
+        docs.requestRead();
       }
       return;
     }
@@ -458,11 +382,11 @@ export default function TranslatePage() {
   useEffect(() => {
     if (!awaitingRead) return;
     if (docStatus === 'unread') {
-      // A file attached while we were already waiting, or a read that failed and left pages
-      // ticked: ask once more rather than sitting on a spinner for ever.
+      // A file attached while we were already waiting, or a read that failed: ask once more
+      // rather than sitting on a spinner for ever.
       if (!readRequestedForSubmitRef.current) {
         readRequestedForSubmitRef.current = true;
-        setReadRequest((request) => request + 1);
+        docs.requestRead();
       }
       return;
     }
@@ -471,11 +395,13 @@ export default function TranslatePage() {
       setAwaitingRead(false);
       startSubmitRef.current();
     } else if (docStatus === 'failed' || docStatus === 'empty') {
-      // Nothing came back. Stop waiting and leave the card's own error standing rather than
-      // translating an empty selection.
+      // Nothing came back. Stop waiting and leave the reader's own error standing rather
+      // than translating nothing.
       readRequestedForSubmitRef.current = false;
       setAwaitingRead(false);
     }
+    // Keyed on the document list's STATUS and nothing else: `docs` itself is rebuilt on
+    // every render, so depending on the object would re-run this on every poll.
   }, [awaitingRead, docStatus]);
 
   const copyToClipboard = async () => {
@@ -529,13 +455,14 @@ export default function TranslatePage() {
                 the tool, the same h-9 dropdown the other two create surfaces use for the
                 question they ask once and rarely change. */}
             <div className="mt-3 flex flex-wrap items-center gap-2">
+              {/* Opens the browser's file dialog directly, the way /dlo's composer
+                  tools do. It used to toggle an upload BLOCK below the card, which was a
+                  second form with its own upload control and its own page picker. */}
               <ComposerToolbarButton
                 icon={Paperclip}
                 label={STR.docUpload}
                 disabled={submitting}
-                active={showDoc}
-                controls={DOC_PANEL_ID}
-                onClick={() => setDocOpen((open) => !open)}
+                onClick={docs.pick}
               />
 
               {/* All three are ALWAYS offered — nothing here is conditioned on what the
@@ -643,49 +570,15 @@ export default function TranslatePage() {
             {/* Directly under the button that produced it, so "attach" and "attached" are
                 one place on the screen. */}
             <AttachmentStrip
-              items={attachments}
+              items={docs.items}
               disabled={submitting}
               className="mt-4"
             />
-          </div>
 
-          {/* The document to translate usually arrives as a file, not in the clipboard. The
-              shared intake reads pdf/docx/txt — a scanned PDF stops to ask which pages are
-              worth OCR'ing before a credit is spent — and its text is counted beside the box
-              above, in LIVE mode, so there is no hand-over button to find and no way to
-              leave an upload behind. No character budget is passed: this page imposes no
-              length limit on the text, so page selection is about OCR spend, not about
-              trimming. */}
-          {/* No rule of its own: `.doc-intake-embedded` already draws the divider and the
-              spacing above itself, and a wrapper adding a second `border-t` stacked two
-              lines above the block. The same bare `mt-3` NoteComposer uses. */}
-          {showDoc ? (
-            <div id={DOC_PANEL_ID} className="mt-3">
-              <DocumentIntake
-                key={docKey}
-                storageKey={DOC_STORAGE_KEY}
-                embedded
-                feature="translate"
-                accept={['pdf', 'docx', 'txt']}
-                onTextChange={(value) => {
-                  // Only a real change may invalidate a finished translation.
-                  if (value === docTextRef.current) return;
-                  docTextRef.current = value;
-                  setDocText(value);
-                  resetFlow();
-                }}
-                onStatusChange={(status, info) => {
-                  setDocStatus(status);
-                  setDocInfo(info);
-                }}
-                readRequest={readRequest}
-                // Offered only once there IS a file: the component renders this control in
-                // every state including the empty upload card, where there is nothing to
-                // delete — and the [+] toggle already closes that.
-                {...(docStatus === 'empty' ? {} : { onRemove: clearDocument })}
-              />
-            </div>
-          ) : null}
+            {/* The hidden file input and one reader per attached document. Renders nothing
+                — every card the officer sees is in the strip above. */}
+            {docs.readers}
+          </div>
         </FormCard>
 
         {prep === 'review' && prepared ? (

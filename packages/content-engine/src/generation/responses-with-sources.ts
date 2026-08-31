@@ -23,6 +23,7 @@ import { pathToFileURL } from 'node:url';
 
 import { recordChatUsage, type ChatUsage } from '../cost/cost-meter.js';
 import { openAiFetch } from '../http/openai-request.js';
+import { readResponseStream } from '../http/openai-response-stream.js';
 import type { ChatMessage } from './openai-chat.js';
 import type { SourceFileRef } from '../intake/openai-source-files.js';
 import { DLO_SOURCE_FILES_MARKER } from './dlo-article-prompt.js';
@@ -170,6 +171,10 @@ export function buildSourcesRequest(options: {
   model: string;
   maxOutputTokens: number;
   reasoningEffort: 'none' | 'low' | 'medium' | 'high';
+  // Ask for the answer as an event stream. Set only when the caller has somewhere to put the
+  // partial text; everything else about the request is identical, so a streamed and a blocking
+  // article are the same call to the same model with the same prompt.
+  stream?: boolean;
 }): Record<string, unknown> {
   // The system message becomes `instructions`, which is where Responses puts it. Several
   // system messages are joined rather than dropped — the prompt builders emit one today, and
@@ -234,6 +239,7 @@ export function buildSourcesRequest(options: {
     store: false,
     max_output_tokens: options.maxOutputTokens,
     reasoning: { effort: options.reasoningEffort },
+    ...(options.stream ? { stream: true } : {}),
   };
 }
 
@@ -243,6 +249,12 @@ export function buildSourcesRequest(options: {
  * Throws rather than returning a fragment when the response did not reach `completed`: an
  * article assembled from a truncated answer is the one failure an officer cannot see, since
  * it reads as a short article rather than as an error.
+ *
+ * With `onDelta` the answer is STREAMED, so the officer reads the article appearing instead of
+ * watching a step list for minutes. The returned text is unchanged either way — the completed
+ * frame is the authority, and every guard below runs on it exactly as before. This is why the
+ * /new-dlo lane (the one whose sources are files) did not stream while the text lane did: the
+ * text lane goes through `chatCompleteStream` and this transport had no streaming half at all.
  */
 export async function respondWithSources(options: {
   label: string;
@@ -252,27 +264,65 @@ export async function respondWithSources(options: {
   maxOutputTokens: number;
   reasoningEffort?: 'none' | 'low' | 'medium' | 'high';
   timeoutMs?: number;
+  // The live view, if the caller has one. Display only: never a source of truth, and never a
+  // reason to fail a paid call — see the fallback below.
+  onDelta?: ((chunk: string) => void) | undefined;
 }): Promise<string> {
-  const body = buildSourcesRequest({
-    messages: options.messages,
-    files: options.files,
-    model: options.model,
-    maxOutputTokens: options.maxOutputTokens,
-    reasoningEffort: options.reasoningEffort ?? 'medium',
-  });
+  const request = (stream: boolean): Promise<Response> =>
+    openAiFetch(RESPONSES_URL, {
+      label: options.label,
+      apiKey: requireApiKey(),
+      // The article lane, serialized with every other pipeline call: this IS the pipeline's
+      // model call, not document-reading traffic queued alongside it.
+      body: buildSourcesRequest({
+        messages: options.messages,
+        files: options.files,
+        model: options.model,
+        maxOutputTokens: options.maxOutputTokens,
+        reasoningEffort: options.reasoningEffort ?? 'medium',
+        stream,
+      }),
+      ...(options.timeoutMs !== undefined
+        ? { timeoutMs: options.timeoutMs }
+        : {}),
+    });
 
-  const response = await openAiFetch(RESPONSES_URL, {
-    label: options.label,
-    apiKey: requireApiKey(),
-    // The article lane, serialized with every other pipeline call: this IS the pipeline's
-    // model call, not document-reading traffic queued alongside it.
-    body,
-    ...(options.timeoutMs !== undefined
-      ? { timeoutMs: options.timeoutMs }
-      : {}),
-  });
+  const onDelta = options.onDelta;
+  let result: ResponsesBody;
+  if (onDelta) {
+    let streamed = '';
+    try {
+      const response = await request(true);
+      const body = response.body;
+      if (!body) throw new Error('response carried no body');
+      const streamedResult = await readResponseStream<ResponsesBody>(
+        body,
+        onDelta,
+        (chunk) => {
+          streamed += chunk;
+        },
+        options.label,
+      );
+      if (streamedResult === null) {
+        throw new Error('the stream ended before the response completed');
+      }
+      result = streamedResult;
+    } catch (error) {
+      // Past the first token there is nothing to fall back TO: those tokens are billed and
+      // already on the officer's screen, so a second call would bill the article twice and
+      // rewrite it under them. Before it, a stream that could not be opened at all is a
+      // transport problem and the blocking request is the same answer.
+      if (streamed !== '') throw error;
+      console.warn(
+        `[openai] ${options.label} stream unavailable (${String(error)}); ` +
+          'falling back to a non-streaming call',
+      );
+      result = (await (await request(false)).json()) as ResponsesBody;
+    }
+  } else {
+    result = (await (await request(false)).json()) as ResponsesBody;
+  }
 
-  const result = (await response.json()) as ResponsesBody;
   recordUsage(result, options.model);
 
   const text = textFrom(result).trim();
@@ -356,6 +406,27 @@ if (
   check(
     body.store === false,
     'store must be false — this is not a conversation',
+  );
+  // Streaming is opt-in and changes NOTHING else about the request: the same prompt, the same
+  // files, the same model. A `stream` that leaked into the blocking path would make every
+  // caller without an onDelta read an event stream as JSON.
+  check(
+    body.stream === undefined,
+    'a request built without stream must not carry the flag',
+  );
+  const streamed = buildSourcesRequest({
+    messages,
+    files,
+    model: 'm',
+    maxOutputTokens: 100,
+    reasoningEffort: 'medium',
+    stream: true,
+  });
+  check(streamed.stream === true, 'stream: true was not sent');
+  check(
+    JSON.stringify({ ...streamed, stream: undefined }) ===
+      JSON.stringify({ ...body, stream: undefined }),
+    'streaming altered something other than the stream flag',
   );
 
   // No files ⇒ the request must be byte-identical to a plain text call, so the two lanes

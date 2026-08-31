@@ -145,6 +145,11 @@ export async function generateArticleFromSources(
     model: ARTICLE_MODEL,
     maxOutputTokens: ARTICLE_BODY_MAX_TOKENS,
     reasoningEffort: articleReasoningEffort(),
+    // The live draft, exactly as the text lane publishes it. This lane silently did NOT: the
+    // caller has always passed `onDelta`, `SimpleGenerateArticleOptions` has always carried
+    // it, and it was simply dropped here — so an intake with a document attached showed a
+    // progress bar where an intake without one showed the article being written.
+    ...(options?.onDelta ? { onDelta: options.onDelta } : {}),
   });
 
   // Defensive, and for the same reason the text lane is: the specification asks for the
