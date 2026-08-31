@@ -23,6 +23,20 @@ export {
   type SimpleArticlePhase,
   type StyleReferenceMeta,
 } from './generation/generate-article-simple.js';
+// The new /dlo lane: the officer's documents go to the article call as `input_file` parts,
+// with no page-by-page transcription stage in front of it. Same prompt, same deterministic
+// guarantees, same result shape as generateArticleSimple above — only the source transport
+// differs. See generate-article-from-sources.ts for what that trade gives up.
+export {
+  generateArticleFromSources,
+  type SourceArticleOptions,
+} from './generation/generate-article-from-sources.js';
+export { extractNameContextFromSources } from './generation/extract-name-context.js';
+export {
+  uploadSourceFile,
+  deleteSourceFile,
+  type SourceFileRef,
+} from './intake/openai-source-files.js';
 export {
   selectStyleReference,
   styleReferenceMinSimilarity,
@@ -145,6 +159,7 @@ export {
   sttProviderApiKeyEnv,
   sttKeyPresent,
   sttSupportsSourceUrl,
+  sttProviderFetchesUrls,
 } from './intake/stt-provider.js';
 export { transcribeAudioFiles } from './intake/sarvam-stt.js';
 // A pasted link is resolved to bytes here since ElevenLabs' YouTube fetching broke
@@ -310,21 +325,33 @@ export {
   type ShortenNarrationOptions,
 } from './video/shorten-narration.js';
 
-// The general assistant at /chat. Native PDFs go directly through OpenAI Files + Responses;
+// The general assistant at /chat. Documents go through OpenAI File Search rather than
+// Responses file input, which is what lifts the size ceiling from 50 MB to 512 MB;
 // publication-specific rules continue to belong to their dedicated surfaces.
 export {
   MISC_CHAT_MODEL,
-  MISC_CHAT_PDF_MAX_BYTES,
   MISC_CHAT_SYSTEM_INSTRUCTION,
   buildOpenAiResponseInput,
+  fileSearchTools,
+  searchableDocumentsLine,
   streamMiscChatReply,
   textFromOpenAiResponse,
-  uploadOpenAiChatDocument,
   type MiscChatTurn,
+  type MiscChatRequest,
   type MiscChatReply,
   type MiscChatLifecycleEvent,
-  type OpenAiChatFileHandle,
 } from './chat/misc-chat.js';
+export {
+  MISC_CHAT_PDF_MAX_BYTES,
+  attachChatDocument,
+  awaitChatDocumentIndexed,
+  createChatVectorStore,
+  deleteChatVectorStore,
+  uploadOpenAiChatDocument,
+  uploadPartBytes,
+  type ChunkReader,
+  type OpenAiChatFileHandle,
+} from './chat/file-search.js';
 
 // Cost metering — the runner opens a scope per job and reads the accumulator back.
 export {
@@ -427,6 +454,13 @@ export {
   type PosterTypeOption,
   type PosterClassification,
 } from './generation/classify-poster-type.js';
+export {
+  extractPosterPoints,
+  formatPosterSource,
+  POSTER_POINT_LIMIT,
+  type ExtractPosterPointsInput,
+  type PosterSource,
+} from './generation/extract-poster-points.js';
 export {
   generatePosterCopy,
   posterCopyItemCount,

@@ -5,8 +5,9 @@
 //
 // Images, recordings, DOCX and TXT keep the ATTACH → SEND → PREPARE rule: picking them costs
 // nothing, and `prepare()` does their work only after Send. PDFs are the deliberate exception.
-// They start a native OpenAI Files upload as soon as they are selected, overlapping preparation
-// with the time the officer spends typing. No page-by-page OCR or transcription occurs.
+// They start an upload to OpenAI as soon as they are selected, overlapping preparation with
+// the time the officer spends typing. No page-by-page OCR or transcription occurs — the model
+// reads them through file search, which is also why a chat PDF may be up to 512 MB.
 //
 // **PRESSING SEND NEVER WAITS FOR ANY OF IT.** `prepare()` is called after the turn is already
 // on screen, so an officer who picks a 30 MB PDF and immediately types a question is not held
@@ -21,7 +22,8 @@
 //     was being prepared is not in the snapshot and so survives untouched.
 //
 // Where the remaining work happens:
-//   - PDFs go directly to the chat upload endpoint and Gemini Files;
+//   - PDFs go directly to the chat upload endpoint, which stages them in the private bucket
+//     and hands them to OpenAI for file search;
 //   - DOCX/TXT still go through the shared ephemeral document service (/api/documents);
 //   - recordings and YouTube links go through the EXISTING /api/transcriptions job, which
 //     brings the 0031 content-addressed cache with it — a recording already transcribed on
@@ -96,7 +98,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 // Upload one legacy text document and return its text. PDFs never enter this function: their
-// native Gemini upload begins in addDocuments() and produces a documentId rather than text.
+// upload begins in addDocuments() and produces a documentId rather than text.
 //
 // **DOCX/TXT reads the WHOLE document — there is no page picker here.** The publishing
 // surfaces (/dlo, /translate, /proofread, the media room) retain their page picker and OCR

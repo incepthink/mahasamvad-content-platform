@@ -59,6 +59,10 @@ export type ChatFileRow = Readonly<{
   storagePath: string;
   openAiFileId: string | null;
   bytes: number | null;
+  // The vector store this file has finished INDEXING into (0049). Set once the OpenAI
+  // vector-store file reaches `completed`, which is what makes a follow-up turn about the
+  // same PDF free: attaching is idempotent, but chunking and embedding are billed each time.
+  vectorStoreId: string | null;
   createdAt: string;
   updatedAt: string;
 }>;
@@ -68,6 +72,10 @@ export type ChatThreadRow = Readonly<{
   title: string;
   messageCount: number;
   lastMessageAt: string | null;
+  // ONE File Search vector store per thread (0049), created lazily on the first document
+  // turn. Per thread and not per file because the Responses file_search tool searches only
+  // the first id it is given, so a chat's PDFs must share one store to all be reachable.
+  vectorStoreId: string | null;
   createdAt: string;
   updatedAt: string;
 }>;
@@ -77,6 +85,7 @@ type ChatThreadDbRow = {
   title: string | null;
   message_count: number | null;
   last_message_at: string | null;
+  vector_store_id: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -102,6 +111,7 @@ type ChatFileDbRow = {
   storage_path: string;
   openai_file_id: string | null;
   byte_size: number | string | null;
+  vector_store_id: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -112,6 +122,7 @@ function threadFromDbRow(row: ChatThreadDbRow): ChatThreadRow {
     title: row.title ?? '',
     messageCount: row.message_count ?? 0,
     lastMessageAt: row.last_message_at,
+    vectorStoreId: row.vector_store_id ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -143,6 +154,7 @@ function fileFromDbRow(row: ChatFileDbRow): ChatFileRow {
     storagePath: row.storage_path,
     openAiFileId: row.openai_file_id,
     bytes: row.byte_size === null ? null : Number(row.byte_size),
+    vectorStoreId: row.vector_store_id ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -151,7 +163,7 @@ function fileFromDbRow(row: ChatFileDbRow): ChatFileRow {
 // Everything the rail shows and nothing more — never `content` or `attachments`, which is the
 // whole reason the counters above are columns.
 const THREAD_COLUMNS =
-  'id,title,message_count,last_message_at,created_at,updated_at';
+  'id,title,message_count,last_message_at,vector_store_id,created_at,updated_at';
 
 export async function insertChatThread(
   client: SupabaseClient,
@@ -168,7 +180,10 @@ export async function insertChatThread(
 }
 
 export type ChatThreadPatch = Partial<
-  Pick<ChatThreadRow, 'title' | 'messageCount' | 'lastMessageAt'>
+  Pick<
+    ChatThreadRow,
+    'title' | 'messageCount' | 'lastMessageAt' | 'vectorStoreId'
+  >
 >;
 
 export async function updateChatThread(
@@ -181,6 +196,9 @@ export async function updateChatThread(
   if (patch.messageCount !== undefined) row.message_count = patch.messageCount;
   if (patch.lastMessageAt !== undefined) {
     row.last_message_at = patch.lastMessageAt;
+  }
+  if (patch.vectorStoreId !== undefined) {
+    row.vector_store_id = patch.vectorStoreId;
   }
   const { error } = await client
     .from(CHAT_THREADS_TABLE)
@@ -364,6 +382,27 @@ export async function updateChatFileOpenAiHandle(
   if (error)
     throw new Error(`Failed to update chat file ${id}: ${error.message}`);
   return fileFromDbRow(data as unknown as ChatFileDbRow);
+}
+
+// Record that this file has finished indexing into `vectorStoreId` (0049), so a later turn
+// re-uses the index rather than paying to chunk and embed the same PDF again. Written only
+// after OpenAI reports the vector-store file `completed`: a row claiming an index that is
+// still building would make the model search an empty document and answer from nothing.
+export async function markChatFileIndexed(
+  client: SupabaseClient,
+  id: string,
+  vectorStoreId: string,
+): Promise<void> {
+  const { error } = await client
+    .from(CHAT_FILES_TABLE)
+    .update({
+      vector_store_id: vectorStoreId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', id);
+  if (error) {
+    throw new Error(`Failed to mark chat file ${id} indexed: ${error.message}`);
+  }
 }
 
 // A whole conversation, oldest first — both what the page renders and what the next request to

@@ -1,13 +1,14 @@
 'use client';
 
-// The YouTube source card, shared by /dlo's intake form and /transcribe — the same reasoning
-// that gave AudioFilePicker one implementation for two surfaces. Paste a link, see which
-// video it is, submit it as a source.
+// The YouTube source panel, shared by /dlo's intake form, /transcribe and /chat — one
+// implementation rather than three lookalikes that drift apart. Paste a link, see which video
+// it is, submit it as a source.
 //
-// It sits BESIDE the recording picker rather than inside it, because the two ask for
-// different things in different ways (a file dialog vs a pasted URL) even though the intake
-// treats what comes out of them identically. What they share is the card shape, so this reads
-// as a sibling of the picker above it.
+// On both create surfaces it renders `embedded`, INSIDE the composer, opened by that
+// composer's link tool: a recording and a link are answers to one question ("what am I
+// transcribing?") even though one is a file dialog and the other a pasted URL, and a card of
+// its own read as a second, separate form. It kept its `card` wrapper for a caller that has
+// no composer to sit in.
 //
 // Three decisions worth keeping:
 //
@@ -52,7 +53,10 @@ import { errorMessage } from '../lib/errorMessage';
 // prop passed at each call site: three surfaces render this card (/dlo, /transcribe, /chat)
 // and a per-caller flag is the kind that gets missed on the fourth. Nothing on the server
 // changed; flip this back to `false` to restore it.
-const YOUTUBE_INPUT_OFF = true;
+//
+// Exported so a surface that only offers a BUTTON opening this card (/dlo's composer) can
+// dim the button too, instead of presenting a live-looking tool that opens an inert panel.
+export const YOUTUBE_INPUT_OFF = true;
 
 export function YouTubeLinkInput({
   videos,
@@ -60,17 +64,23 @@ export function YouTubeLinkInput({
   onError,
   disabled = false,
   maxLinks = MAX_YOUTUBE_LINKS,
+  embedded = false,
 }: {
   videos: readonly YouTubeVideo[];
   // Called with the whole next list, so the caller keeps ownership of what it will submit —
-  // this component only decides which links are allowed to join them (the AudioFilePicker
-  // contract).
+  // this component only decides which links are allowed to join them (the contract every
+  // source picker on both create surfaces follows).
   onChange: (videos: YouTubeVideo[]) => void;
   // Rejections go to the caller so they appear beside the submit button with every other
   // reason a run cannot start. Local, transient problems are shown in the card instead.
   onError: (message: string | null) => void;
   disabled?: boolean | undefined;
   maxLinks?: number | undefined;
+  // Renders as a plain block inside the caller's own card instead of as a card of its own —
+  // the <DocumentIntake embedded> contract, and for the same reason: on /dlo this panel is
+  // opened by a tool button inside the composer, and a nested card there reads as a second,
+  // separate form. Only the wrapper and the heading level change.
+  embedded?: boolean | undefined;
 }) {
   const [url, setUrl] = useState('');
   const [probing, setProbing] = useState(false);
@@ -144,14 +154,19 @@ export function YouTubeLinkInput({
     return () => clearTimeout(timer);
   }, [atLimit, off, probing, url]);
 
+  const Wrapper = embedded ? 'div' : 'section';
+
   return (
-    <section
-      className={`card${off ? ' yt-card--off' : ''}`}
+    <Wrapper
+      className={`${embedded ? '' : 'card'}${off ? ' yt-card--off' : ''}`}
       aria-disabled={off || undefined}
     >
-      {/* An <h2>, matching the recording picker above it and every other card heading — see
-          AudioFilePicker for why .field-label on a <p> rendered unweighted. */}
-      <CardTitle icon={CirclePlay}>{STR.ytTitle}</CardTitle>
+      {/* A real heading, not a .field-label on a <p>: that class is scoped to <label> in
+          globals.css, so it rendered unweighted and the title read as body text. Embedded
+          it drops to an <h3>, the composer around it already carrying the <h2>. */}
+      <CardTitle icon={CirclePlay} level={embedded ? 3 : 2}>
+        {STR.ytTitle}
+      </CardTitle>
       <p className="hint">{STR.ytHint}</p>
 
       <div className="yt-add" style={{ marginTop: 12 }}>
@@ -298,6 +313,6 @@ export function YouTubeLinkInput({
           </ul>
         </>
       ) : null}
-    </section>
+    </Wrapper>
   );
 }

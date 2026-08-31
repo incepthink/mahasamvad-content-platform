@@ -24,8 +24,8 @@ import {
   applyDesignations,
   generateArticle,
   generateArticleSimple,
-  currentArticleDateline,
-  ensureArticleDateline,
+  generateArticleFromSources,
+  type SimpleGenerateArticleOptions,
   type ArticleNameEntry,
   generateCopy,
   generatePosterCopy,
@@ -42,6 +42,7 @@ import {
   pickPlacement,
   placementById,
   posterCopyItemCount,
+  extractPosterPoints,
   resolvePosterSubject,
   resolveThumbnailPeople,
   toStyleHistory,
@@ -127,6 +128,10 @@ import {
   type TranslationTermInput,
 } from '@dgipr/schemas';
 import { recordTasksFromCost } from './service-usage.js';
+import {
+  sourceContextForGeneration,
+  sourceFilesForGeneration,
+} from './source-files.js';
 import { listKnownDesignations } from './translation-terms.js';
 
 const running = new Set<string>();
@@ -685,20 +690,39 @@ async function designationContext(
   }
 }
 
-// The verified glossary rows whose Marathi form occurs in the note, as the article prompt wants
-// them. BOTH prompt variants read them as of simple-v4: neither specification states name rules
-// any more, so each is handed the spellings themselves — the dictionary reaching the article as
-// SPELLING rather than only as designations.
+// The verified glossary rows whose Marathi form occurs in this run's source text, as the
+// article prompt wants them. BOTH prompt variants read them as of simple-v4: neither
+// specification states name rules any more, so each is handed the spellings themselves — the
+// dictionary reaching the article as SPELLING rather than only as designations.
+//
+// IT TAKES EVERY TEXT THE RUN HAS, and on the file lane that is the whole point. The match is
+// a substring scan, so a row can only be found in text we hold — and there a document is never
+// transcribed, so `row.note` is the typed context plus the audio transcripts alone. Scanning
+// it found none of the names, places, organisations or scheme names that occur inside the
+// attached PDF, and the block was silently omitted: the model wrote a government article with
+// no verified spelling for any of them. The name step's digest (source-files.ts) is the only
+// text this lane produces about its documents, so it is passed here beside the note.
 //
 // Best-effort by construction: a failure logs and returns [], because an unreachable dictionary
 // must cost the spelling hints, never the article. applyDesignations() remains the structural
 // guarantee, and it runs off the officer-approved pairs regardless of what this returns.
 async function articleNameDictionary(
   client: SupabaseClient,
-  note: string,
+  ...sources: readonly (string | null | undefined)[]
 ): Promise<ArticleNameEntry[]> {
+  // De-duplicated because the sources legitimately coincide: on an audio-only intake the
+  // name digest IS the note, and scanning the same transcript twice runs every dictionary row
+  // against a doubled string for the same answer.
+  const text = [
+    ...new Set(
+      sources
+        .map((source) => (source ?? '').trim())
+        .filter((source) => source.length > 0),
+    ),
+  ].join('\n\n');
+  if (text.length === 0) return [];
   try {
-    const terms = await findGlossaryTermsInText(client, note);
+    const terms = await findGlossaryTermsInText(client, text);
     return terms.map((term) => ({
       marathi: term.marathi,
       termType: term.termType,
@@ -795,14 +819,32 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
       designations,
       knownDesignations,
     } as const;
-    const dateline = currentArticleDateline(shared.category);
-
-    const mode = articleGenerationMode();
+    // /dlo's post-name-review prompt is an explicit product contract, not an experiment behind
+    // ARTICLE_GENERATION_MODE. Keep it on the single-call path even when another article surface
+    // opts back into the legacy full pipeline.
+    const dloArticle = Boolean(row.dloIntakeId);
+    const mode = dloArticle ? 'simple' : articleGenerationMode();
     const result =
       mode === 'simple'
         ? await (async () => {
-            const simple = await generateArticleSimple(row.note, {
+            // The new /dlo lane's sources, if this run has any: documents and photographs
+            // the article call reads for itself. Empty for every other run, and the two
+            // generators take the same options and return the same shape — so this is the
+            // only line that differs between the lanes, and everything below (the dateline,
+            // the warnings, the style-reference write, posters, translation) is shared.
+            const { files: sourceFiles, nameContext } =
+              await sourceContextForGeneration(client, row);
+            const writeArticle =
+              sourceFiles.length > 0
+                ? (note: string, options: SimpleGenerateArticleOptions) =>
+                    generateArticleFromSources(note, {
+                      ...options,
+                      files: sourceFiles,
+                    })
+                : generateArticleSimple;
+            const simple = await writeArticle(row.note, {
               ...shared,
+              promptMode: dloArticle ? 'dlo' : 'default',
               // Tier 1 of the style-reference hierarchy (migration 0035). Read off the ROW, so
               // a retry reproduces the same reference rather than silently re-styling.
               styleReference: row.styleReference,
@@ -811,14 +853,11 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
               // same article rather than a differently-directed one. The `full` pipeline does
               // not take it — it is the legacy opt-out, deliberately left byte-for-byte.
               instructions: row.instructions,
-              // The verified dictionary rows this note actually mentions. Read by both prompt
-              // variants: neither spells out name rules, both are handed the spellings.
-              names: await articleNameDictionary(client, row.note),
-              // Every DGIPR news copy starts with the configured publication place and today's
-              // India-local date. The model receives it for flow; ensureArticleDateline below
-              // enforces it deterministically on the final text.
-              location: dateline?.location,
-              date: dateline?.date,
+              // The verified dictionary rows this run's sources actually mention. Read by
+              // both prompt variants: neither spells out name rules, both are handed the
+              // spellings. The digest is what makes this non-empty on the file lane, where
+              // the note holds none of the document's text — see articleNameDictionary.
+              names: await articleNameDictionary(client, row.note, nameContext),
               onProgress: progress,
               // Publish the draft as it is written, so the officer reads it appearing rather
               // than watching a progress bar for minutes. Display only — the authoritative
@@ -863,7 +902,11 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
               styleReferenceMeta: null,
             };
           })();
-    const finalArticle = ensureArticleDateline(result.article, shared.category);
+    // Keep the model's article structure intact. In particular, do not inject a generated
+    // `मुंबई, दि. … :` prefix: when the model writes a subheading before the lead, prefixing
+    // the first post-headline line turns that subheading into a malformed dateline. A location
+    // lead that is supported by the source (for example `मुंबई :`) remains untouched.
+    const finalArticle = result.article;
 
     // The article is final; anything still watching should stop here rather than hold a
     // connection open through the 1-2 minute poster render. Sending the AUTHORITATIVE text as
@@ -1574,6 +1617,11 @@ async function resolveSocialReference(
   id: string,
   row: GenerationRow,
   brand: TemplateBrand,
+  // The text this reference is being chosen FOR. On the AI-copy lanes it is the CURATED poster
+  // content (extract-poster-points.ts), not the raw note — the whole point of curating before
+  // resolving is that capacity is matched to what the poster will actually carry. Defaults to
+  // the note, which is what every verbatim lane passes and what this always used to read.
+  information: string,
 ): Promise<ResolvedReference> {
   // NO per-design-mode options, and there is nothing left to add one for. This function is now
   // only ever called for a mode that renders INTO the reference it returns, so every caller
@@ -1588,12 +1636,12 @@ async function resolveSocialReference(
       client,
       row.referenceTypeId,
       id,
-      row.note,
+      information,
     );
     if (pinned) return pinned;
   }
   if (brand === 'cmo') {
-    return resolveCmoReference(client, id, row.note);
+    return resolveCmoReference(client, id, information);
   }
 
   // Ordinary run, information-first: compare the raw note against every enabled master of the
@@ -1609,7 +1657,7 @@ async function resolveSocialReference(
       client,
       brand,
       id,
-      row.note,
+      information,
       recentMasters(recencyKey),
     );
     rememberMaster(recencyKey, resolved.master.id, resolved.poolSize ?? 1);
@@ -1620,7 +1668,7 @@ async function resolveSocialReference(
   // (which excludes CMO), then select the best-fit master within the chosen type.
   const types = await listSocialTypes(client, 'dgipr');
   const classification = await classifyPosterType(
-    row.note,
+    information,
     types.map((t) => ({ slug: t.slug, description: t.description })),
   );
   const type =
@@ -1635,7 +1683,7 @@ async function resolveSocialReference(
       wantsPhoto: classification.wantsPhoto,
     },
     id,
-    row.note,
+    information,
     recentMasters(recencyKey),
   );
   rememberMaster(recencyKey, master.id, type.images.length);
@@ -1749,7 +1797,7 @@ async function renderAndStoreSocialPoster(
   const customPrompt =
     brand === 'cmo' ? null : (row.imagePrompt?.trim() ?? '') || null;
 
-  // 1. Resolve the poster type + the master — FOR THE TEMPLATE MODES ONLY.
+  // ABOUT THE REFERENCE RESOLUTION BELOW (step 1) — FOR THE TEMPLATE MODES ONLY.
   //
   //    A 'fresh' run now resolves NOTHING (2026-08-07). It used to resolve one anyway and use it
   //    "headlessly": no pixels reached the image model, but the picked master still decided the
@@ -1773,9 +1821,73 @@ async function renderAndStoreSocialPoster(
   //    brand forces the type and skips selection; otherwise the note is compared against the
   //    whole enabled library, capacity-first, by ONE process for every template mode.
   await updateGeneration(client, id, { step: 'classify' });
+
+  // 0. WHAT GOES ON THE POSTER — decided BEFORE the template is chosen.
+  //
+  //    Which lane this run is on has to be known here rather than after resolution, because the
+  //    curation has to happen first; it is derivable already, since `resolved` is non-null for
+  //    exactly the modes that are not fresh.
+  //
+  //    The fixed-template mode ("ठरलेले टेम्पलेट") deliberately gives the image model only the
+  //    unchanged reference image and the officer's information, with two chrome exclusions. It
+  //    therefore skips poster-copy generation entirely: generated structured copy would be
+  //    hidden editorial work — and, worse, generatePosterCopy condenses the information to the
+  //    master's slot count, which is exactly the content loss that path must not have.
+  //
+  //    BOTH social categories take that branch. It was 'twitter'-only, which silently gave a
+  //    Facebook run the copy pipeline instead — the same ठरलेले टेम्पलेट choice producing a
+  //    different poster depending on the platform. isSocialCategory is the repo's standing rule
+  //    for exactly this class of bug.
+  const isSimpleTemplateEdit =
+    !isFresh &&
+    isSocialCategory(row.category) &&
+    brand === 'dgipr' &&
+    designMode === 'onbrand';
+  // 'fresh_verbatim' skips the copy call for the SAME reason, one lane over: generated
+  // structured copy would be hidden editorial work over text the officer wrote to be printed.
+  // customPrompt skips it for the third time over — on that lane they have opted out of the
+  // platform's opinions about the poster altogether.
+  const usesVerbatimText =
+    isSimpleTemplateEdit || isFreshVerbatim || customPrompt !== null;
+
+  //    On every OTHER lane — fresh, adaptive and CMO, i.e. exactly where जसाच्या तसा मजकूर is
+  //    unticked — the officer's whole input now goes to one editorial call that decides what
+  //    belongs on a poster at all, and everything downstream works from THAT instead of the raw
+  //    note. Before this, nothing in the lane ever asked the question: the point count fell out
+  //    of analyzeInformationShape counting every sentence, enforceSourceStructure then finding a
+  //    master big enough to hold all of them, and generatePosterCopy being pinned to that
+  //    master's slot count — so a ten-sentence press note deterministically became a ten-row
+  //    poster nobody can read.
+  //
+  //    It runs BEFORE resolveSocialReference and not inside the copy step, and that ordering is
+  //    the load-bearing part: curate afterwards and the template has already been chosen for ten
+  //    items, leaving the image model to invent filler for the empty rows — the exact failure
+  //    enforceSourceStructure exists to prevent.
+  //
+  //    Best-effort: any failure returns the raw note, so the worst case is the behaviour that
+  //    shipped yesterday. Kept under the 'classify' step rather than given one of its own, so
+  //    the officer's progress list still runs classify → copy → image in order.
+  //
+  const posterSource = usesVerbatimText
+    ? null
+    : await extractPosterPoints({ note: row.note });
+  const posterNote = posterSource?.curated ? posterSource.text : row.note;
+  if (posterSource) {
+    console.log(
+      `[job ${id}] poster content: ${JSON.stringify({
+        curated: posterSource.curated,
+        points: posterSource.points.length,
+        headline: posterSource.headline,
+        leftOut: posterSource.leftOut,
+      })}`,
+    );
+  }
+
+  // 1. Resolve the poster type + the master, from the CURATED content on an AI-copy lane and
+  //    from the officer's own text on a verbatim one.
   const resolved = isFresh
     ? null
-    : await resolveSocialReference(client, id, row, brand);
+    : await resolveSocialReference(client, id, row, brand, posterNote);
 
   console.log(
     `[job ${id}] social poster reference: ${JSON.stringify(
@@ -1801,50 +1913,29 @@ async function renderAndStoreSocialPoster(
     posterCapacityWarnings.delete(id);
   }
 
-  // The fixed-template mode ("ठरलेले टेम्पलेट") deliberately gives the image model only the
-  // unchanged reference image and the officer's information, with two chrome exclusions. It
-  // therefore skips poster-copy generation entirely: generated structured copy would be hidden
-  // editorial work — and, worse, generatePosterCopy condenses the information to the master's
-  // slot count, which is exactly the content loss this path must not have. Adaptive, fresh and
-  // CMO runs keep the established copy pipeline.
-  //
-  // BOTH social categories take this branch. It was 'twitter'-only, which silently gave a
-  // Facebook run the copy pipeline instead — the same ठरलेले टेम्पलेट choice producing a
-  // different poster depending on the platform. isSocialCategory is the repo's standing rule
-  // for exactly this class of bug; the two lanes are meant to be indistinguishable here, and
-  // merging the two UI options later is now purely a web change.
-  const isSimpleTemplateEdit =
-    resolved !== null &&
-    isSocialCategory(row.category) &&
-    brand === 'dgipr' &&
-    designMode === 'onbrand';
-  // 'fresh_verbatim' skips the copy call for the SAME reason, one lane over: generated structured
-  // copy would be hidden editorial work over text the officer wrote to be printed, and
-  // generatePosterCopy condenses to 3-6 points, which is exactly the content loss this mode exists
-  // to avoid. It also saves the call outright.
-  // customPrompt skips it for the third time over, and for the same reason the two lanes beside
-  // it do: generatePosterCopy would rewrite the officer's text into a structured headline +
-  // points, which is hidden editorial work over text they wrote to be printed — and on this lane
-  // they have opted out of the platform's opinions about the poster altogether.
-  const usesVerbatimText =
-    isSimpleTemplateEdit || isFreshVerbatim || customPrompt !== null;
   let copyResult: Awaited<ReturnType<typeof generatePosterCopy>> | null = null;
   if (!usesVerbatimText) {
-    // 2. Scheme-name lock source: verified glossary scheme/org names present in the note.
-    //    These must survive in the copy in full (lock-scheme-names). Free — a substring
-    //    match over the small verified set, no model call.
-    const glossaryTerms = await findGlossaryTermsInText(client, row.note);
+    // 2. Scheme-name lock source: verified glossary scheme/org names present in the CURATED
+    //    content. These must survive in the copy in full (lock-scheme-names). Free — a
+    //    substring match over the small verified set, no model call. Read off the curated text
+    //    rather than the whole note on purpose: a scheme named only in a paragraph the poster
+    //    is not carrying is not a name the copy has to preserve, and demanding it would push
+    //    the copy back toward the material that was just deselected.
+    const glossaryTerms = await findGlossaryTermsInText(client, posterNote);
     const lockedSchemeNames = glossaryTerms
       .filter((t) => t.termType === 'scheme' || t.termType === 'org')
       .map((t) => t.marathi);
 
-    // 3. Copy (gpt-5.6-luna, metered inside this job's cost scope).
+    // 3. Copy (gpt-5.6-luna, metered inside this job's cost scope), written from the CURATED
+    //    content rather than the raw note — so the master's slot pin below is now a pin to a
+    //    number of points a poster can actually carry, and `contentLed`'s no-ceiling rule on
+    //    the fresh lane has already-selected material to work from.
     //    On a fresh run there is no resolved type, so the copy runs on the 'generic' registry
     //    (headline + 3-6 supporting points) with a null layoutSpec — no slot pin, no operator
     //    type description steering the tone toward a template's purpose.
     await updateGeneration(client, id, { step: 'copy' });
     copyResult = await generatePosterCopy({
-      note: row.note,
+      note: posterNote,
       postType: resolved?.type.slug ?? FRESH_COPY_STYLE,
       copyStyle: resolved?.type.copyStyle ?? FRESH_COPY_STYLE,
       description: resolved?.type.description,
@@ -1975,7 +2066,9 @@ async function renderAndStoreSocialPoster(
         // tell the image model to repeat the reference's rows, and "repeat" is the wrong word to
         // put anywhere near a prompt that must reproduce the officer's text unchanged. It still
         // warns the officer through posterCapacityWarnings above.
-        itemCount: isSimpleTemplateEdit ? resolved.itemCount : undefined,
+        // `isSimpleTemplateEdit` implies a resolved reference (it requires !isFresh), but that
+        // is now derived before resolution so the optional chain is what tells the compiler.
+        itemCount: isSimpleTemplateEdit ? resolved?.itemCount : undefined,
         copyStyle:
           copyResult?.copyStyle ?? resolved?.type.copyStyle ?? FRESH_COPY_STYLE,
         designMode,
@@ -2552,6 +2645,51 @@ export function startGenerateCaptionJob(
   })();
 }
 
+// Snapshot the article as it stands BEFORE the first feedback round of a run.
+//
+// A revision row is written after a revision, so the log has always held every wording except
+// the one the officer started with — and that is the one they most often want back, because
+// the round most likely to disappoint is the first. Without this, "go back" could reach every
+// version except the original.
+//
+// Written only when no article snapshot exists yet, so it happens once per run and a later
+// round adds nothing. It carries no `feedback`, which is what marks it as the baseline rather
+// than as somebody's edit: nothing was revised to produce it.
+//
+// KNOWN CONSEQUENCE, not an oversight: `nextVersion` names the next poster object
+// `poster-v{revisions.length + 2}`, so a run whose article is edited before its poster is
+// re-rendered skips a number. That was already true of every article and caption revision —
+// the sequence is a source of unique, increasing, never-reused paths (the CDN rule), not a
+// dense count — and the version STRIP is built from the stored paths, so nothing on screen
+// is renumbered.
+async function snapshotArticleBaseline(
+  client: SupabaseClient,
+  row: GenerationRow,
+): Promise<void> {
+  if (!row.article) return;
+  try {
+    const revisions = await listRevisions(client, row.id);
+    const hasSnapshot = revisions.some(
+      (revision) => revision.target === 'article' && revision.article !== null,
+    );
+    if (hasSnapshot) return;
+    await insertRevision(client, {
+      generationId: row.id,
+      target: 'article',
+      feedback: null,
+      article: row.article,
+      factCheck: row.factCheck,
+    });
+  } catch (error) {
+    // Best-effort, and deliberately: the officer asked for a revision, not for a backup. A
+    // failure here costs the ability to step back past this round, never the round itself.
+    console.warn(
+      `[revise-article ${row.id}] could not snapshot the original wording:`,
+      error,
+    );
+  }
+}
+
 // Feedback loop for the article: revise under the original guardrails (note stays
 // the sole fact source) and snapshot the result in the revision log. 5W1H is NOT
 // re-derived here — it's extracted from the immutable note, so it never goes stale
@@ -2564,10 +2702,17 @@ export function startArticleFeedbackJob(
   // The article being revised is still on the row, so a failed revision is recovered with
   // the same feedback re-armed.
   armEditRetry(id, () => startArticleFeedbackJob(client, id, feedback));
-  runJob(client, id, 'article_revision', async () => {
+  // Registered synchronously, before any await, for the same reason the initial run does it:
+  // the browser opens its stream the moment this POST answers, and a revision that has not
+  // reached its model call yet would otherwise be told there is nothing to watch. A previous
+  // run's finished stream may still be in the map inside its TTL; this replaces it.
+  if (articleStreamingEnabled()) beginArticleStream(id);
+  const revise = async (): Promise<void> => {
     const row = await getGeneration(client, id);
     if (!row) throw new Error(`Generation ${id} not found.`);
     if (!row.article) throw new Error(`Generation ${id} has no article yet.`);
+    // Before the article is overwritten, and only on the first round of this run.
+    await snapshotArticleBaseline(client, row);
 
     await updateGeneration(client, id, {
       status: 'running',
@@ -2595,13 +2740,27 @@ export function startArticleFeedbackJob(
       row.excludedFacts ?? [],
       rowHasFactCheck(row),
       row.instructions ?? undefined,
+      // The SAME sources the article was written from. The revision prompt treats its NOTES
+      // block as the only authoritative fact source, and on the /new-dlo lane `row.note` is
+      // the typed context alone -- so without this a feedback round asked the model to rewrite
+      // an article while forbidding it to restate anything the article says. Empty for every
+      // other run, which keeps the text path unchanged.
+      await sourceFilesForGeneration(client, row),
+      // The rewrite as it is written, so अभिप्रायानुसार बातमी सुधारत आहोत… reads as the
+      // article changing rather than as a spinner. Display only — the returned article is
+      // authoritative and the final snapshot below replaces whatever was shown.
+      articleStreamingEnabled()
+        ? (chunk: string) => pushArticleDelta(id, chunk)
+        : undefined,
     );
     designationWarnings.set(id, [...revised.designationIssues]);
     lengthWarnings.set(id, revised.lengthWarning);
-    const revisedArticle = ensureArticleDateline(
-      revised.article,
-      articleCategoryOf(row.category),
-    );
+    const revisedArticle = revised.article;
+
+    // The deltas carried the first pass; the coverage/faithfulness passes and
+    // applyDesignations have since rewritten it. One replacing snapshot settles that before
+    // the poll delivers the row.
+    finishArticleStream(id, revisedArticle);
 
     await updateGeneration(client, id, {
       article: revisedArticle,
@@ -2614,6 +2773,17 @@ export function startArticleFeedbackJob(
       article: revisedArticle,
       factCheck: revised.factCheck,
     });
+  };
+
+  runJob(client, id, 'article_revision', async () => {
+    try {
+      await revise();
+    } finally {
+      // Whatever happened, no more text is coming — release every watcher instead of leaving
+      // it on the heartbeat until the TTL. Idempotent: the success path already closed on the
+      // revised article. The initial run does exactly this, for the same reason.
+      endArticleStream(id);
+    }
   });
 }
 
@@ -2635,6 +2805,9 @@ export function startConcurrentArticleFeedbackJob(
 ): void {
   revisingArticle.add(id);
   reviseArticleErrors.delete(id);
+  // Safe to replace whatever is in the map: this path only runs while the initial job is in
+  // its POSTER phase, so that run's article stream was already closed on the finished article.
+  if (articleStreamingEnabled()) beginArticleStream(id);
   void (async () => {
     const cost = createCostAccumulator();
     try {
@@ -2644,6 +2817,8 @@ export function startConcurrentArticleFeedbackJob(
           if (!row) throw new Error(`Generation ${id} not found.`);
           if (!row.article)
             throw new Error(`Generation ${id} has no article yet.`);
+          // As on the status-owning path: the wording being replaced is kept first.
+          await snapshotArticleBaseline(client, row);
 
           const currentContent = row.factCheck
             ? `${row.article}\n\n${FACT_CHECK_DELIMITER}\n${row.factCheck}`
@@ -2664,13 +2839,18 @@ export function startConcurrentArticleFeedbackJob(
             row.excludedFacts ?? [],
             rowHasFactCheck(row),
             row.instructions ?? undefined,
+            // As on the status-owning path above: the article's facts are in these files.
+            await sourceFilesForGeneration(client, row),
+            // As on the status-owning path above: the rewrite as it is written.
+            articleStreamingEnabled()
+              ? (chunk: string) => pushArticleDelta(id, chunk)
+              : undefined,
           );
           designationWarnings.set(id, [...revised.designationIssues]);
           lengthWarnings.set(id, revised.lengthWarning);
-          const revisedArticle = ensureArticleDateline(
-            revised.article,
-            articleCategoryOf(row.category),
-          );
+          const revisedArticle = revised.article;
+
+          finishArticleStream(id, revisedArticle);
 
           await updateGeneration(client, id, {
             article: revisedArticle,
@@ -2705,6 +2885,9 @@ export function startConcurrentArticleFeedbackJob(
           cost,
         );
       }
+      // Nothing more is coming, however this ended. Idempotent — the success path already
+      // closed on the revised article.
+      endArticleStream(id);
       revisingArticle.delete(id);
     }
   })();

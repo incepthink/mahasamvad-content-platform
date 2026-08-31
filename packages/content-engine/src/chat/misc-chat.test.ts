@@ -2,18 +2,23 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   MISC_CHAT_MODEL,
-  MISC_CHAT_PDF_MAX_BYTES,
   MISC_CHAT_SYSTEM_INSTRUCTION,
   buildOpenAiResponseInput,
+  fileSearchTools,
   readResponseStream,
+  searchableDocumentsLine,
   textFromOpenAiResponse,
   type MiscChatTurn,
 } from './misc-chat.js';
+import { MISC_CHAT_PDF_MAX_BYTES } from './file-search.js';
 
 test('chat defaults to the top OpenAI text tier and a broad honest assistant prompt', () => {
   // /chat has no deterministic post-filter behind it, so the single call is the product.
   assert.equal(MISC_CHAT_MODEL, 'gpt-5.6-sol');
-  assert.equal(MISC_CHAT_PDF_MAX_BYTES, 50 * 1024 * 1024);
+  // File Search's own per-file ceiling, not ours. It replaced the Responses file-input path
+  // precisely because that path's 50 MB was the binding limit on what an officer could ask
+  // about, so a silent regression here would take the whole feature back with it.
+  assert.equal(MISC_CHAT_PDF_MAX_BYTES, 512 * 1024 * 1024);
   assert.match(
     MISC_CHAT_SYSTEM_INSTRUCTION,
     /general-purpose AI chat assistant/,
@@ -22,6 +27,60 @@ test('chat defaults to the top OpenAI text tier and a broad honest assistant pro
   assert.match(MISC_CHAT_SYSTEM_INSTRUCTION, /Do not claim/);
   assert.match(MISC_CHAT_SYSTEM_INSTRUCTION, /never invent facts/);
   assert.doesNotMatch(MISC_CHAT_SYSTEM_INSTRUCTION, /Act as.*Gemini/i);
+  // The model is no longer handed the document itself, so it has to be told the tool exists
+  // and that the attachment is behind it. Without this it answers "I cannot see an
+  // attachment" about a PDF sitting in its own index.
+  assert.match(MISC_CHAT_SYSTEM_INSTRUCTION, /file_search/);
+  assert.match(MISC_CHAT_SYSTEM_INSTRUCTION, /not shown to you in full/);
+});
+
+test('a document reaches the model as a searchable NAME, never as file input', () => {
+  const withDocuments: MiscChatTurn = {
+    role: 'user',
+    content: 'Compare these.',
+    attachments: [
+      { kind: 'document', name: 'gr.pdf', documentFileId: 'file-gr' },
+      { kind: 'document', name: 'budget.pdf', documentFileId: 'file-budget' },
+      // Indexing has not finished for this one, so it must not be named: the model would
+      // search for it, find nothing, and report the document as empty.
+      { kind: 'document', name: 'pending.pdf' },
+    ],
+  };
+  assert.equal(
+    searchableDocumentsLine(withDocuments),
+    'Attached documents, searchable with the file_search tool: gr.pdf, budget.pdf',
+  );
+  assert.equal(
+    searchableDocumentsLine({ role: 'user', content: 'Hello.' }),
+    null,
+  );
+
+  const input = buildOpenAiResponseInput([withDocuments], false);
+  const parts = input[0]?.content;
+  assert.ok(Array.isArray(parts));
+  // The regression that matters: a document must never come back as an `input_file` part,
+  // which is what capped this surface at 50 MB.
+  assert.equal(
+    parts.some((part) => part.type === 'input_file'),
+    false,
+  );
+  assert.deepEqual(parts, [
+    { type: 'input_text', text: 'Compare these.' },
+    {
+      type: 'input_text',
+      text: 'Attached documents, searchable with the file_search tool: gr.pdf, budget.pdf',
+    },
+  ]);
+});
+
+test('the file_search tool is offered only when the thread has a store', () => {
+  assert.deepEqual(fileSearchTools(undefined), []);
+  const tools = fileSearchTools('vs_123');
+  assert.equal(tools.length, 1);
+  assert.equal(tools[0]?.type, 'file_search');
+  // ONE id. The field is an array and the API accepts several, but only the first is
+  // searched, so a second store here would silently hide a chat's other documents.
+  assert.deepEqual(tools[0]?.vector_store_ids, ['vs_123']);
 });
 
 const turns: readonly MiscChatTurn[] = [
@@ -55,7 +114,7 @@ const turns: readonly MiscChatTurn[] = [
   },
 ];
 
-test('stateless recovery replays roles, extracted text, native PDFs and images', () => {
+test('stateless recovery replays roles, extracted text, searchable PDFs and images', () => {
   const input = buildOpenAiResponseInput(turns, false);
   assert.equal(input.length, 3);
   assert.deepEqual(input[0], {
@@ -66,9 +125,8 @@ test('stateless recovery replays roles, extracted text, native PDFs and images',
         text: 'Summarise this.\n\n--- note.mp3 ---\nA short transcript.',
       },
       {
-        type: 'input_file',
-        file_id: 'file-report',
-        detail: 'auto',
+        type: 'input_text',
+        text: 'Attached documents, searchable with the file_search tool: report.pdf',
       },
     ],
   });

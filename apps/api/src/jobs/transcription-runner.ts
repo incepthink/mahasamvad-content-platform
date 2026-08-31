@@ -21,6 +21,7 @@ import {
   runInCostScope,
   runInCostTask,
   sttProviderName,
+  sttProviderFetchesUrls,
   totalCostUsd,
   transcribeAudio,
   type AudioInput,
@@ -28,6 +29,7 @@ import {
 import {
   DLO_UPLOADS_BUCKET,
   downloadFile,
+  signedDownloadUrl,
   getCachedTranscripts,
   getTranscription,
   hashAudioContent,
@@ -38,6 +40,7 @@ import {
 } from '@dgipr/database';
 import { combineTranscripts } from '@dgipr/schemas';
 
+import { batchBySize } from './audio-batches.js';
 import { recordTasksFromCost } from './service-usage.js';
 import { transcriptCacheMode } from './transcript-cache-mode.js';
 
@@ -83,90 +86,187 @@ export function startTranscriptionJob(
         ...entry,
       }));
 
-      // Download every UPLOADED recording (the batch needs the bytes anyway) and hash it.
-      // The hash is the cache key. It is only CONSULTED under TRANSCRIPT_CACHE_MODE=read; by
-      // default every recording is transcribed afresh and the hash serves the write-back
-      // alone.
-      //
-      // A pasted YouTube link is neither downloaded nor hashed: the transcriber fetches the
-      // media itself, so there are no bytes on our side — which also means the
-      // content-addressed cache (0031) simply does not apply to it, and its position below
-      // is always a miss.
-      const inputs: AudioInput[] = await Promise.all(
-        entries.map(async (entry) =>
-          entry.sourceUrl !== undefined
-            ? { name: entry.name, sourceUrl: entry.sourceUrl }
-            : {
-                name: entry.name,
-                data: await downloadFile(
-                  client,
-                  DLO_UPLOADS_BUCKET,
-                  // An entry without a sourceUrl was uploaded, so it has a storagePath;
-                  // the fallback is unreachable defence rather than a real case.
-                  entry.storagePath ?? '',
-                ),
-              },
-        ),
+      // ONE GROUP OF RECORDINGS AT A TIME, bounded by total bytes (see audio-batches.ts).
+      // Everything inside the loop is what this job always did — download, hash, consult the
+      // cache, transcribe the misses, write the results back — but only for the recordings in
+      // the current group, so the whole run's audio is never resident at once. A single
+      // recording larger than the budget still gets a group to itself and is transcribed;
+      // nothing is ever refused for its size.
+      // When the provider fetches URLs itself, the recordings are handed over as PRESIGNED
+      // S3 URLs and never enter this process — so nothing is resident, and the byte budget
+      // that exists to bound residency has nothing to bound. Weighing them 0 keeps them in
+      // one group (ElevenLabs still runs them at its own concurrency) instead of each
+      // unknown-size entry claiming a whole group and serialising the run for no reason.
+      const handOffUrls = sttProviderFetchesUrls();
+      const batches = batchBySize(
+        entries.map((entry) => {
+          if (entry.sourceUrl !== undefined) {
+            // A pasted link's audio is fetched inside the STT seam, so its size is
+            // unknowable here and it is treated as a group's worth — the cautious reading.
+            return undefined;
+          }
+          return handOffUrls ? 0 : entry.bytes;
+        }),
       );
-      // The empty string is never looked up as a key — those positions are skipped below.
-      const hashes = inputs.map((input) =>
-        isAudioUrlInput(input) ? '' : hashAudioContent(input.data),
-      );
+      // ONE accumulator for the whole run, so the logged figure and the analytics event stay
+      // the run's total rather than the last group's.
+      const cost = createCostAccumulator();
+      let transcribedAnything = false;
 
-      // Off by default: nothing is reused, so every position below is a miss. Under
-      // TRANSCRIPT_CACHE_MODE=read a cache read failure (e.g. an un-applied 0031) must not
-      // sink transcription — treat it as an empty cache and transcribe everything.
-      let cached: Map<string, string>;
-      if (transcriptCacheMode() === 'read') {
-        try {
-          cached = await getCachedTranscripts(
-            client,
-            hashes.filter((hash) => hash !== ''),
-          );
-        } catch (error) {
-          console.error(
-            `[transcription ${id}] transcript cache read failed:`,
-            error,
-          );
+      for (const batch of batches) {
+        // Download this group's recordings and hash them. The hash is the cache key. It is
+        // only CONSULTED under TRANSCRIPT_CACHE_MODE=read; by default every recording is
+        // transcribed afresh and the hash serves the write-back alone.
+        //
+        // Sequentially, not Promise.all: parallel downloads would put the whole group's bytes
+        // in flight at once on top of the ones already held, which is the spike this loop
+        // exists to remove. The transcription that follows is the slow part anyway.
+        //
+        // A pasted YouTube link is neither downloaded nor hashed here: the transcriber fetches
+        // the media itself, so there are no bytes on our side — which also means the
+        // content-addressed cache (0031) simply does not apply to it, and its position below
+        // is always a miss.
+        const inputs: AudioInput[] = [];
+        for (const index of batch) {
+          const entry = entries[index]!;
+          if (entry.sourceUrl !== undefined) {
+            inputs.push({ name: entry.name, sourceUrl: entry.sourceUrl });
+            continue;
+          }
+          // An entry without a sourceUrl was uploaded, so it has a storagePath; the
+          // fallback is unreachable defence rather than a real case.
+          const storagePath = entry.storagePath ?? '';
+          if (handOffUrls) {
+            // THE RECORDING IS NEVER LOADED. A presigned GET URL goes to the provider and
+            // the audio travels S3 -> transcriber directly. This is what removes the ~480 MB
+            // spike (a 240 MB download plus the copy `new Blob([bytes])` makes) that was
+            // OOM-killing the container on meeting recordings AFTER the upload had already
+            // succeeded — the half of the 2026-08-30 streaming work that was left undone.
+            inputs.push({
+              name: entry.name,
+              sourceUrl: await signedDownloadUrl(
+                client,
+                DLO_UPLOADS_BUCKET,
+                storagePath,
+              ),
+              providerFetches: true,
+            });
+            continue;
+          }
+          inputs.push({
+            name: entry.name,
+            data: await downloadFile(client, DLO_UPLOADS_BUCKET, storagePath),
+          });
+        }
+        // The empty string is never looked up as a key — those positions are skipped below.
+        const hashes = inputs.map((input) =>
+          isAudioUrlInput(input) ? '' : hashAudioContent(input.data),
+        );
+
+        // Off by default: nothing is reused, so every position below is a miss. Under
+        // TRANSCRIPT_CACHE_MODE=read a cache read failure (e.g. an un-applied 0031) must not
+        // sink transcription — treat it as an empty cache and transcribe everything.
+        let cached: Map<string, string>;
+        if (transcriptCacheMode() === 'read') {
+          try {
+            cached = await getCachedTranscripts(
+              client,
+              hashes.filter((hash) => hash !== ''),
+            );
+          } catch (error) {
+            console.error(
+              `[transcription ${id}] transcript cache read failed:`,
+              error,
+            );
+            cached = new Map();
+          }
+        } else {
           cached = new Map();
         }
-      } else {
-        cached = new Map();
-      }
 
-      const missPositions: number[] = [];
-      for (const [index] of entries.entries()) {
-        const hash = hashes[index]!;
-        const hit = hash === '' ? undefined : cached.get(hash);
-        if (hit !== undefined) {
-          entries[index] = {
-            ...entries[index]!,
-            status: 'done',
-            chars: hit.length,
-            text: hit,
-            cached: true,
-          };
-        } else {
-          missPositions.push(index);
+        // Positions WITHIN this group, so `inputs[position]` and `hashes[position]` line up;
+        // `batch[position]` is the entry it belongs to.
+        const missPositions: number[] = [];
+        for (const [position, index] of batch.entries()) {
+          const hash = hashes[position]!;
+          const hit = hash === '' ? undefined : cached.get(hash);
+          if (hit !== undefined) {
+            entries[index] = {
+              ...entries[index]!,
+              status: 'done',
+              chars: hit.length,
+              text: hit,
+              cached: true,
+            };
+          } else {
+            missPositions.push(position);
+          }
+        }
+        // Read mode only (no run has hits with the cache off): show them straight away — on an
+        // all-cached run this is the whole result and the officer should not wait on a Sarvam
+        // call that is never made.
+        if (missPositions.length < batch.length) {
+          await updateTranscription(client, id, { files: entries });
+        }
+
+        if (missPositions.length > 0) {
+          transcribedAnything = true;
+          // A cost scope purely for visibility: `transcriptions` has no cost column, so the
+          // metered figure is LOGGED rather than persisted. Only the ElevenLabs path records
+          // (it returns word timestamps to measure); a Sarvam run logs nothing.
+          const results = await runInCostScope(cost, () =>
+            runInCostTask('audio_transcription', () =>
+              transcribeAudio(
+                missPositions.map((position) => inputs[position]!),
+              ),
+            ),
+          );
+          await Promise.all(
+            results.map(async (result, resultIndex) => {
+              const position = missPositions[resultIndex]!;
+              const index = batch[position]!;
+              if ('text' in result) {
+                entries[index] = {
+                  ...entries[index]!,
+                  status: 'done',
+                  chars: result.text.length,
+                  text: result.text,
+                  cached: false,
+                };
+                // Best-effort: a cache write failure must not fail a recording that just
+                // transcribed fine. A URL source has no bytes and therefore no key, so it is
+                // simply not cached.
+                try {
+                  if (hashes[position] !== '') {
+                    await putCachedTranscript(
+                      client,
+                      hashes[position]!,
+                      result.text,
+                    );
+                  }
+                } catch (error) {
+                  console.error(
+                    `[transcription ${id}] transcript cache write failed:`,
+                    error,
+                  );
+                }
+              } else {
+                entries[index] = {
+                  ...entries[index]!,
+                  status: 'failed',
+                  error: result.error,
+                };
+              }
+            }),
+          );
+          // Persisted per group rather than only at the end, so a long multi-recording run
+          // fills the result card as it goes and a crash cannot discard transcripts that have
+          // already been paid for.
+          await updateTranscription(client, id, { files: entries });
         }
       }
-      // Read mode only (no run has hits with the cache off): show them straight away — on an
-      // all-cached run this is the whole result and the officer should not wait on a Sarvam
-      // call that is never made.
-      if (missPositions.length < entries.length) {
-        await updateTranscription(client, id, { files: entries });
-      }
 
-      if (missPositions.length > 0) {
-        // A cost scope purely for visibility: `transcriptions` has no cost column, so the
-        // metered figure is LOGGED rather than persisted. Only the ElevenLabs path records
-        // (it returns word timestamps to measure); a Sarvam run logs nothing.
-        const cost = createCostAccumulator();
-        const results = await runInCostScope(cost, () =>
-          runInCostTask('audio_transcription', () =>
-            transcribeAudio(missPositions.map((index) => inputs[index]!)),
-          ),
-        );
+      if (transcribedAnything) {
         if (cost.sttSeconds > 0) {
           console.log(
             `[transcription ${id}] ${sttProviderName()} STT: ` +
@@ -178,43 +278,6 @@ export function startTranscriptionJob(
         // page's STT actually cost — hence an event rather than a column read. Fire-and-
         // forget: an analytics write must never fail a transcript that already landed.
         recordTasksFromCost(client, 'transcribe', cost);
-        await Promise.all(
-          results.map(async (result, resultIndex) => {
-            const index = missPositions[resultIndex]!;
-            if ('text' in result) {
-              entries[index] = {
-                ...entries[index]!,
-                status: 'done',
-                chars: result.text.length,
-                text: result.text,
-                cached: false,
-              };
-              // Best-effort: a cache write failure must not fail a recording that just
-              // transcribed fine. A URL source has no bytes and therefore no key, so it is
-              // simply not cached.
-              try {
-                if (hashes[index] !== '') {
-                  await putCachedTranscript(
-                    client,
-                    hashes[index]!,
-                    result.text,
-                  );
-                }
-              } catch (error) {
-                console.error(
-                  `[transcription ${id}] transcript cache write failed:`,
-                  error,
-                );
-              }
-            } else {
-              entries[index] = {
-                ...entries[index]!,
-                status: 'failed',
-                error: result.error,
-              };
-            }
-          }),
-        );
       }
 
       const combined = combineTranscripts(

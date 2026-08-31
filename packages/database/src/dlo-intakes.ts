@@ -52,6 +52,11 @@ export type DloIntakeFileEntry = Readonly<{
   storagePath?: string | undefined;
   kind: DloIntakeFileKind;
   status: DloIntakeFileStatus;
+  // How large the archived original is, counted as it was streamed to storage. Written for
+  // every recording uploaded since 2026-08-30 and absent on older rows and on documents. The
+  // transcribe phase uses it to decide how many recordings it may hold in memory at once, so
+  // an unknown size is treated as "big".
+  bytes?: number;
   chars?: number;
   error?: string;
   // Audio/DOCX carry their whole text; PDFs carry `pages` instead. A PDF's `pages`
@@ -86,6 +91,12 @@ export type DloIntakeFileEntry = Readonly<{
   // private or unlisted video), which never blocks the source.
   sourceAuthor?: string;
   sourceThumbnailUrl?: string;
+  // ---------- the new /dlo lane (/new-dlo) ----------
+  // This source handle on OpenAI, uploaded once when the officer attached it. The article
+  // call carries it as an input_file part instead of being handed text somebody transcribed
+  // first. Additive on a jsonb column, so no migration: an entry without it is an ordinary
+  // old-lane source and every existing reader ignores it.
+  openaiFileId?: string;
 }>;
 
 export type DloIntakeRow = Readonly<{
@@ -162,9 +173,14 @@ export type DloIntakeSummaryRow = Readonly<{
   updatedAt: string;
 }>;
 
+// `id` is optional and exists for the same reason as insertTranscription's: the create
+// routes stream each recording straight to storage as it arrives, and a storage key has to
+// exist before the first byte is written, while the row must not. Omitted, the database's own
+// default supplies one exactly as before.
 export async function insertDloIntake(
   client: SupabaseClient,
   input: Readonly<{
+    id?: string;
     notes: string;
     category: DloIntakeCategory;
     heading?: string | undefined;
@@ -174,6 +190,7 @@ export async function insertDloIntake(
   const { data, error } = await client
     .from(DLO_INTAKES_TABLE)
     .insert({
+      ...(input.id !== undefined ? { id: input.id } : {}),
       notes: input.notes,
       category: input.category,
       heading: input.heading ?? null,

@@ -642,6 +642,69 @@ export const PosterVersionSchema = z.object({
 });
 export type PosterVersion = z.infer<typeof PosterVersionSchema>;
 
+// ---------- the article's own version history ----------
+//
+// Every feedback round rewrites `generations.article` in place, so until now the previous
+// wording was simply gone: an officer who asked for a change and got something worse had no
+// way back. The poster has had this since it was built — each render writes a new immutable
+// object and `posterVersions` lists them — and the article's equivalent is the revision log,
+// which has snapshotted the result of every round all along.
+//
+// The one thing the log did NOT hold is the article BEFORE the first round, because a
+// revision row is written after a revision. That is the version an officer most wants back,
+// so the first article feedback of a run now snapshots the pre-revision text as its own row
+// first (see startArticleFeedbackJob). Runs edited before this change begin at their first
+// revision; nothing is reconstructed, because there is nothing to reconstruct from.
+//
+// METADATA ONLY, deliberately: this rides the 2.5 s detail poll, and an article is thousands
+// of characters. The text is fetched on demand from /article-versions when the officer
+// actually moves between versions.
+export const ArticleVersionSchema = z.object({
+  // 1-based, oldest→newest — the address /article/restore takes.
+  version: z.number().int().min(1),
+  createdAt: z.string(),
+  // The instruction that PRODUCED this version, so the strip reads as a history of what was
+  // asked for rather than a row of numbers. null on the baseline, which was nobody's edit.
+  feedback: z.string().nullable(),
+  // Whether this is the wording currently on the row. Decided server-side by comparing text:
+  // restoring an older version repoints the article without touching the log, exactly as
+  // restoring a poster repoints `posterPath`, so "which one is current" is not the last one.
+  current: z.boolean(),
+});
+export type ArticleVersion = z.infer<typeof ArticleVersionSchema>;
+
+// The same list WITH the text, fetched on demand — see the metadata note above.
+export const ArticleVersionTextSchema = ArticleVersionSchema.extend({
+  article: z.string(),
+  factCheck: z.string().nullable(),
+});
+export type ArticleVersionText = z.infer<typeof ArticleVersionTextSchema>;
+
+export const ArticleVersionsResponseSchema = z.object({
+  versions: z.array(ArticleVersionTextSchema),
+});
+export type ArticleVersionsResponse = z.infer<
+  typeof ArticleVersionsResponseSchema
+>;
+
+// Bring an older wording back as the current article. `version` indexes the list above, not a
+// row id, for the reason the poster route takes an index: the server derives the list and must
+// not take an identifier from the browser. It is ONE column write — the revision log is
+// untouched, so the version being replaced stays in it and switching back is the same move.
+export const RestoreArticleVersionRequestSchema = z.object({
+  version: z.number().int().min(1),
+});
+export type RestoreArticleVersionRequest = z.infer<
+  typeof RestoreArticleVersionRequestSchema
+>;
+
+export const RestoreArticleVersionResponseSchema = z.object({
+  article: z.string(),
+});
+export type RestoreArticleVersionResponse = z.infer<
+  typeof RestoreArticleVersionResponseSchema
+>;
+
 // 5W1H (कोण/काय/केव्हा/कुठे/का/कसे) extracted from the note before drafting, as a
 // fact-grounding + inverted-pyramid scaffold. Every field is a Marathi string;
 // "" means the note did not state it (never inferred/invented — see AGENTS.md).
@@ -696,6 +759,10 @@ export const GenerationDetailSchema = z.object({
   // Every poster render of this generation, oldest→newest (empty when the run has
   // no poster). The last entry always matches `posterUrl`.
   posterVersions: z.array(PosterVersionSchema),
+  // Every wording of the article this run has had, oldest→newest, metadata only (see
+  // ArticleVersionSchema). One entry, or none, means there is nothing to move between and the
+  // page shows no version control at all. Defaulted so an older API's payload still parses.
+  articleVersions: z.array(ArticleVersionSchema).default([]),
   // The Marathi name of the colour palette + composition this poster was assigned, e.g.
   // "गडद नीलम व पोर्सिलेन · डावी रंगपट्टी". null on article runs, on edit-mode/CMO social runs
   // (which follow a template rather than an assignment), and on runs made before the rotation.

@@ -12,9 +12,17 @@
 import { pathToFileURL } from 'node:url';
 import {
   ARTICLE_BODY_MAX_TOKENS,
+  ARTICLE_MODEL,
+  articleReasoningEffort,
   chatComplete,
+  chatCompleteStream,
   type ChatMessage,
 } from './openai-chat.js';
+import type { SourceFileRef } from '../intake/openai-source-files.js';
+import {
+  respondWithSources,
+  sourceInformationBlock,
+} from './responses-with-sources.js';
 import type { AttributedStatement, SelectedFact } from '@dgipr/schemas';
 import {
   FACT_CHECK_DELIMITER,
@@ -405,6 +413,24 @@ export async function reviseArticle(
   withFactCheck = true,
   // The trusted request used for the original draft. Kept last for call-site compatibility.
   officerRequest?: string,
+  // The uploaded documents and photographs this run's article was WRITTEN from (/new-dlo).
+  //
+  // Without them this whole function was a shredder on that lane, and silently: the article's
+  // facts live in a PDF the officer attached, `note` is the typed context alone and is very
+  // often empty, and every prompt below states that NOTES is the only authoritative source
+  // while the current draft is explicitly not one. So the model was handed a finished article,
+  // an empty fact source, and an instruction not to state anything the fact source does not
+  // support -- and it complied. Attaching the files restores the source the article was
+  // written from, and the three note-only passes that CANNOT be given them are skipped rather
+  // than run half-blind (see the guards below). Empty on every other lane, which keeps its
+  // chatComplete calls and its full coverage/faithfulness loop byte-for-byte unchanged.
+  files: readonly SourceFileRef[] = [],
+  // The live view of the rewrite, if the caller has one. Only the FIRST call streams — the
+  // coverage-inject and faithfulness passes below rewrite the whole article again, and
+  // streaming a second full text over the first would read as the article being written
+  // twice. The caller replaces what it showed with the returned article when this settles
+  // (runner.ts's finishArticleStream), which is what makes the intermediate view safe.
+  onDelta?: ((chunk: string) => void) | undefined,
 ): Promise<RevisedArticle> {
   const { article: articleBeforeRevision } = splitContent(currentContent);
   const expand = wantsExpansion(feedback, articleBeforeRevision);
@@ -417,23 +443,44 @@ export async function reviseArticle(
     .map((fact) => fact.text.trim())
     .filter(Boolean);
   const hasApprovedInventory = includeFacts.length > 0 || statements.length > 0;
+  const hasFiles = files.length > 0;
 
-  let content = await chatComplete(
-    buildRevisionMessages(
-      note,
-      currentContent,
-      feedback,
-      category,
-      expand,
-      designations,
-      includeFacts,
-      statements,
-      excludeFacts,
-      officerRequest,
-      heading,
-    ),
-    { maxTokens: ARTICLE_BODY_MAX_TOKENS },
+  // With files attached the NOTES block names them, so the officer's typed context and the
+  // documents read as one source rather than as "there is nothing here" (see
+  // sourceInformationBlock). `authoritativeSource` above deliberately keeps the RAW note: it
+  // feeds the checkers, and a block that only NAMES a file is not something a text-only
+  // checker can verify an article against.
+  const revisionMessages = buildRevisionMessages(
+    hasFiles ? sourceInformationBlock(note, files) : note,
+    currentContent,
+    feedback,
+    category,
+    expand,
+    designations,
+    includeFacts,
+    statements,
+    excludeFacts,
+    officerRequest,
+    heading,
   );
+  let content = hasFiles
+    ? await respondWithSources({
+        label: 'article revision from sources',
+        messages: revisionMessages,
+        files,
+        model: ARTICLE_MODEL,
+        maxOutputTokens: ARTICLE_BODY_MAX_TOKENS,
+        reasoningEffort: articleReasoningEffort(),
+        ...(onDelta ? { onDelta } : {}),
+      })
+    : onDelta
+      ? await chatCompleteStream(revisionMessages, {
+          onDelta,
+          maxTokens: ARTICLE_BODY_MAX_TOKENS,
+        })
+      : await chatComplete(revisionMessages, {
+          maxTokens: ARTICLE_BODY_MAX_TOKENS,
+        });
 
   // Completeness guard, mirroring generateArticle's coverage step (which the feedback path
   // otherwise lacks): the brief-independent citizen-fact check always runs, and an explicit
@@ -443,20 +490,34 @@ export async function reviseArticle(
   const approvedCoverage = hasApprovedInventory
     ? await findMissingApprovedFacts(revisedArticle, includeFacts, statements)
     : null;
+  // The two note-derived checks are skipped when the facts are in attached files. They read
+  // `authoritativeSource`, which on that lane is the typed context alone -- so what they would
+  // report as "missing from the article" is only ever the sliver that was typed, and the inject
+  // pass they feed rewrites the WHOLE article under "NOTES is the only fact source, the current
+  // article is not". A pass that can see a tenth of the source is not a coverage check; it is a
+  // rewrite with nine tenths of the evidence withheld. The approved-inventory check is
+  // different and still runs: it compares the article against an explicit list of facts the
+  // officer ticked, and needs no view of the source to do it.
   const [citizenMissing, broadMissing] = approvedCoverage
     ? [approvedCoverage.missing, [] as string[]]
-    : await Promise.all([
-        findMissingNoteFacts(revisedArticle, authoritativeSource, excludeFacts),
-        expand
-          ? findMissingInformation(
-              revisedArticle,
-              authoritativeSource,
-              heading,
-              undefined,
-              excludeFacts,
-            )
-          : Promise.resolve<string[]>([]),
-      ]);
+    : hasFiles
+      ? [[] as string[], [] as string[]]
+      : await Promise.all([
+          findMissingNoteFacts(
+            revisedArticle,
+            authoritativeSource,
+            excludeFacts,
+          ),
+          expand
+            ? findMissingInformation(
+                revisedArticle,
+                authoritativeSource,
+                heading,
+                undefined,
+                excludeFacts,
+              )
+            : Promise.resolve<string[]>([]),
+        ]);
   const seen = new Set<string>();
   const missing = [...citizenMissing, ...broadMissing].filter((item) => {
     const key = item.trim();
@@ -486,13 +547,22 @@ export async function reviseArticle(
   const { article: injectedArticle } = splitContent(content);
   // Heading passed as allowed context so an angle-true title line isn't flagged; designations
   // for the same reason — the article already carries them and they are not in the note.
-  const unsupported = await findUnsupportedClaims(
-    injectedArticle,
-    authoritativeSource,
-    heading,
-    designations,
-    statements,
-  );
+  //
+  // Skipped outright when the facts are in attached files, and this is the pass that made the
+  // failure total rather than partial: every claim taken from the PDF is absent from
+  // `authoritativeSource`, so the checker flags the article almost in full and then buys a
+  // repair call whose one instruction is to DELETE what it flagged. Re-attaching the files to
+  // a checker AND to its repair would be two more paid reads of the same documents for a
+  // verdict the model that just wrote the revision already had in front of it.
+  const unsupported = hasFiles
+    ? []
+    : await findUnsupportedClaims(
+        injectedArticle,
+        authoritativeSource,
+        heading,
+        designations,
+        statements,
+      );
 
   if (unsupported.length > 0) {
     content = await chatComplete(
@@ -517,6 +587,10 @@ export async function reviseArticle(
     authoritativeSource,
     lengthRequest,
     category,
+    // Attached rather than skipped: a length ask is the commonest feedback there is, and this
+    // rewrite is the only thing that measures the result. It is the one of the three that can
+    // be handed the source, so it is.
+    files,
   );
   if (fit.article !== repairedArticle) content = fit.article;
 
@@ -524,8 +598,13 @@ export async function reviseArticle(
   // from the final revised article (scheme only) and stitch it on with the delimiter —
   // keeping the { content, article, factCheck } contract unchanged. News has no appendix.
   const { article: rawArticle } = splitContent(content);
+  // Not on the source-file lane, for the third time and the same reason: the appendix traces
+  // each claim back to the note, so tracing against a note that holds a tenth of the source
+  // would stamp `(टिपणीत आधार नाही)` across the officer's own document. Such a run has no
+  // appendix anyway (withFactCheck is false for a simple-mode article), so this is a guard,
+  // not a behaviour change.
   const factCheck =
-    category === 'scheme' && withFactCheck
+    category === 'scheme' && withFactCheck && !hasFiles
       ? await generateFactCheck(rawArticle, authoritativeSource)
       : null;
 
@@ -646,6 +725,51 @@ if (
     'a length named in the request becomes the shared LENGTH REQUIREMENT block',
     user.includes('### LENGTH REQUIREMENT') &&
       user.includes('about 1200 characters'),
+  );
+
+  // The reported bug: on the /new-dlo lane the article's facts are in attached files and
+  // `note` is often empty, so the revision prompt stated that its only authoritative source
+  // was blank while forbidding the model to restate the draft. An empty NOTES block here is
+  // what a gutted feedback round looks like before it happens.
+  console.log('\n=== the source files reach the revision prompt ===');
+  const withFiles = buildRevisionMessages(
+    sourceInformationBlock('', [
+      { fileId: 'file-a', kind: 'document', name: 'gr.pdf' },
+      { fileId: 'file-b', kind: 'image', name: 'patra.jpg' },
+    ]),
+    '# शीर्षक\n\nपहिला परिच्छेद.',
+    'सुरुवात आणखी आकर्षक करा',
+    'news',
+    false,
+  );
+  const filesUser = withFiles[1]?.content ?? '';
+  const filesNotes = filesUser.slice(
+    filesUser.indexOf('<NOTES'),
+    filesUser.indexOf('</NOTES>'),
+  );
+  check(
+    'the NOTES block is not empty when every fact is in a file',
+    filesNotes.replace(/<NOTES[^>]*>/, '').trim().length > 0,
+  );
+  check(
+    'it names the attached files by the officer’s own file names',
+    filesNotes.includes('gr.pdf') && filesNotes.includes('patra.jpg'),
+  );
+  check(
+    'it tells the model to read them as the source',
+    filesNotes.includes('पूर्ण वाचा'),
+  );
+  // A typed note and the attachments are ONE source, not two competing ones.
+  const mixed = sourceInformationBlock('टिपणी मजकूर.', [
+    { fileId: 'file-a', kind: 'document', name: 'gr.pdf' },
+  ]);
+  check(
+    'typed context is stated first, with the files after it',
+    mixed.indexOf('टिपणी मजकूर.') < mixed.indexOf('gr.pdf'),
+  );
+  check(
+    'with no files the block is the note, byte for byte',
+    sourceInformationBlock('टिपणी मजकूर.', []) === 'टिपणी मजकूर.',
   );
 
   console.log('\n=== the feedback box wins over the stored request ===');

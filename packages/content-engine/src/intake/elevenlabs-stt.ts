@@ -163,10 +163,21 @@ async function transcribeOne(file: AudioInput): Promise<string> {
   // A URL source carries no bytes at all — that is the whole point of it. Everything below
   // is shared; only which field names the audio differs.
   const contentType = audioMimeForFileName(file.name) ?? 'audio/mpeg';
-  // Copied out of the Buffer ONCE, outside the retry loop: a Node Buffer may be a view
-  // into a pooled (possibly shared) ArrayBuffer, which is not a BlobPart, and re-copying
-  // a whole recording per attempt would be wasteful.
-  const bytes = isAudioUrlInput(file) ? null : new Uint8Array(file.data);
+  // A ZERO-COPY view over the recording, not a copy of it. This line used to be
+  // `new Uint8Array(file.data)`, which duplicates the whole thing and holds both for the
+  // length of the request — 240 MB of pure waste on a meeting recording, on a box this job
+  // has already been OOM-killed on. A Node Buffer IS a Uint8Array and needs no conversion;
+  // what TypeScript objects to is only that a Buffer's backing store is typed as possibly
+  // SharedArrayBuffer, which a Buffer produced by this codebase never is. So the view is
+  // rebuilt over the same memory, with that one assertion, and nothing is copied until the
+  // Blob below reads it.
+  const bytes = isAudioUrlInput(file)
+    ? null
+    : new Uint8Array(
+        file.data.buffer as ArrayBuffer,
+        file.data.byteOffset,
+        file.data.byteLength,
+      );
 
   let lastError: Error | null = null;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {

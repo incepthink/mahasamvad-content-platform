@@ -6,9 +6,12 @@ import {
   type AnalyticsRange,
   type AnalyticsResponse,
   DloIntakeDetailSchema,
+  ArticleVersionsResponseSchema,
   DloIntakeListResponseSchema,
   DloReviewPatchResponseSchema,
   GenerationDetailSchema,
+  GenerationSourceFilesResponseSchema,
+  RestoreArticleVersionResponseSchema,
   GenerationSummarySchema,
   GlossaryListResponseSchema,
   GlossaryTermSchema,
@@ -36,9 +39,11 @@ import {
   type DloIntakeSummary,
   type DloReviewPatchRequest,
   type DloReviewPatchResponse,
+  type ArticleVersionText,
   type CreateGlossaryTermRequest,
   type CreateReferenceTypeRequest,
   type GenerationDetail,
+  type GenerationSourceFile,
   type GenerationSummary,
   type GlossaryListResponse,
   type GlossaryTerm,
@@ -521,8 +526,52 @@ export function posterDownloadUrl(id: string): string {
 
 // A normal navigation rather than fetch: the API redirects through Canva OAuth and finally
 // into the new Canva design, all in the tab opened by the user's click.
-export function posterCanvaUrl(id: string): string {
-  return `${API_URL}/api/canva/generations/${id}`;
+// Every wording this run's article has had, with the text. Fetched on demand rather than
+// carried on the detail payload for the same reason the source files are: the payload is
+// polled every 2.5 s and an article is thousands of characters. The payload's
+// `articleVersions` carries the metadata that decides whether the control is drawn at all.
+export async function getArticleVersions(
+  id: string,
+): Promise<ArticleVersionText[]> {
+  const body = await requestJson(`/api/generations/${id}/article-versions`);
+  return ArticleVersionsResponseSchema.parse(body).versions;
+}
+
+// Make an older wording the current article again. One column write on the server — the
+// revision log is untouched, so the wording being replaced stays in the list and coming
+// forward again is the same call with a different number.
+export async function restoreArticleVersion(
+  id: string,
+  version: number,
+): Promise<string> {
+  const body = await requestJson(`/api/generations/${id}/article/restore`, {
+    method: 'POST',
+    body: JSON.stringify({ version }),
+  });
+  return RestoreArticleVersionResponseSchema.parse(body).article;
+}
+
+// `account` names WHICH Canva integration to authorize through, not which personal Canva
+// account the poster lands in — see CanvaLink.tsx. Omitted, the API uses its first
+// configured integration, which is the whole of a single-integration deployment.
+export function posterCanvaUrl(id: string, account?: string): string {
+  const url = `${API_URL}/api/canva/generations/${id}`;
+  return account ? `${url}?account=${encodeURIComponent(account)}` : url;
+}
+
+export type CanvaAccount = { key: string; label: string };
+
+// The Canva integrations this deployment can hand a poster to, keys and labels only. Read
+// from the API rather than a NEXT_PUBLIC_* build-time copy, so adding one is an .env edit
+// on the API box with no web deploy; an empty list means Canva is not configured, and the
+// caller then draws the plain button whose click surfaces the API's own 503.
+export async function getCanvaAccounts(): Promise<CanvaAccount[]> {
+  const body = await requestJson('/api/canva/accounts');
+  return z
+    .object({
+      accounts: z.array(z.object({ key: z.string(), label: z.string() })),
+    })
+    .parse(body).accounts;
 }
 
 // The article as a printable A4 PDF (DGIPR letterhead, Chromium-typeset Devanagari — a
@@ -530,6 +579,24 @@ export function posterCanvaUrl(id: string): string {
 // A URL rather than a fetch for the same reason posterDownloadUrl is one: only the server
 // can force a cross-origin download, and a plain <a href> gets the browser's native
 // download for free.
+// The source files of the /dlo intake this run was generated from — the recordings, scans,
+// photographs and documents the officer actually uploaded. Fetched on demand rather than
+// carried on the detail payload: the intake's files hold every transcript and OCR'd page,
+// which the 2.5 s detail poll must never re-ship. Empty for a run with no intake behind it.
+export async function getGenerationSourceFiles(
+  id: string,
+): Promise<GenerationSourceFile[]> {
+  const body = await requestJson(`/api/generations/${id}/source-files`);
+  return GenerationSourceFilesResponseSchema.parse(body).files;
+}
+
+// One of those files, opened in a new tab. A URL rather than a fetch because the officer is
+// opening a document, not loading data — and it has to be the API's own route: dlo-uploads
+// is private, so there is no public URL to link to.
+export function generationSourceFileUrl(id: string, index: number): string {
+  return `${API_URL}/api/generations/${id}/source-files/${index}`;
+}
+
 export function articlePdfDownloadUrl(
   id: string,
   language: 'mr' | TranslationLanguage = 'mr',
