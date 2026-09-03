@@ -239,15 +239,16 @@ export {
   describeVideoScenes,
   planReadyVideoScript,
   splitReadyVideoScript,
+  type DescribeVideoScenesOptions,
   type DescribedVideoScene,
   type DescribedVideoScenes,
 } from './video/plan-ready-video-script.js';
+// The two lanes' complete task statements and reference-image attachment helper.
 export {
-  planVideoScenes,
-  type VideoScenePlan,
-  type VideoScenePlanScene,
-  type VideoScenePlanOptions,
-} from './video/plan-video-scenes.js';
+  NOTE_VIDEO_TASK,
+  READY_SCRIPT_VIDEO_TASK,
+  withPromptImages,
+} from './video/script-brief.js';
 export {
   directVideoMotion,
   type DirectVideoMotionInput,
@@ -291,6 +292,29 @@ export {
   type GeminiImageInput,
   type GeminiImageAspect,
 } from './video/gemini-image-client.js';
+// The /new-video-workflow EXPERIMENT (Gemini Interactions API). Nothing above or below this
+// block uses it: the production pipeline plans, narrates, captions and brands, and this one
+// deliberately does none of that — it sends the officer's prompt to one model verbatim.
+export {
+  GEMINI_VIDEO_MODEL,
+  INTERACTION_IMAGE_MAX_BYTES,
+  INTERACTION_IMAGE_MIME_TYPES,
+  INTERACTION_MAX_IMAGES,
+  INTERACTION_PROMPT_MAX_CHARS,
+  InteractionRequestError,
+  awaitInteraction,
+  buildInteractionRequest,
+  createVideoInteraction,
+  downloadInteractionVideo,
+  getInteraction,
+  interactionErrorMessage,
+  interactionOutputOf,
+  isTerminalInteractionStatus,
+  type Interaction,
+  type InteractionImage,
+  type InteractionOutput,
+  type InteractionStatus,
+} from './video/gemini-interactions-client.js';
 export {
   renderFrame,
   frameProviderApiKeyEnv,
@@ -478,6 +502,18 @@ export {
   type BuildCustomPosterPromptInput,
   type BuildFeedbackPromptInput,
 } from './generation/build-poster-prompt.js';
+// Step 1 of the Dynamic Poster lane (migration 0052): gpt-5.6-sol reads the officer's still
+// poster and writes the prompt gemini-omni renders the clip from. The measured resolution is
+// supplied to it as fact — see the header for why it is not asked for.
+export {
+  generateMotionPrompt,
+  buildMotionPromptRequest,
+  parseMotionPrompt,
+  MOTION_BRIEF,
+  MOTION_PROMPT_MODEL,
+  MOTION_PROMPT_REASONING_EFFORT,
+  type MotionPromptInput,
+} from './generation/motion-prompt.js';
 // The YouTube-thumbnail image prompts (migration 0042). The ट्विटर fixed-template prompt
 // re-cut for a 1280x720 frame; the reserved-zone numbers must stay in sync with
 // poster-renderer/src/youtube-chrome.ts, whose harness asserts them.

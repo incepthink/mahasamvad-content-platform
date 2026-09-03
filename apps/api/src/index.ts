@@ -20,6 +20,7 @@ import { registerDesignationRoutes } from './routes/designations.js';
 import { registerReferenceRoutes } from './routes/references.js';
 import { registerTranscriptionRoutes } from './routes/transcriptions.js';
 import { registerVideoRoutes } from './routes/video.js';
+import { registerNewVideoWorkflowRoutes } from './routes/new-video-workflow.js';
 import { registerYouTubeRoutes } from './routes/youtube.js';
 
 export async function createServer() {
@@ -140,6 +141,10 @@ export async function createServer() {
       registerNewDloRoutes(instance, client);
       registerTranscriptionRoutes(instance, client);
       registerVideoRoutes(instance, client);
+      // ISOLATED EXPERIMENT (/new-video-workflow): Gemini-style conversational video, held
+      // in memory rather than in a table. Registered beside the production video routes and
+      // deliberately sharing no state with them.
+      registerNewVideoWorkflowRoutes(instance, client);
       // The general assistant. The only route in this API that streams its response.
       registerChatRoutes(instance, client);
       // Department usage analytics. Read-only and derived — writes nothing.

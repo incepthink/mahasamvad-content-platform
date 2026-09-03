@@ -10,12 +10,29 @@
 // file lands. `sending` is the only thing that swaps the button, exactly as it does for an
 // answer already streaming.
 //
-// EVERY attachment is a chip here, documents included: the document button opens the file
-// explorer directly, exactly like the image button, and the file is read whole. The page
+// EVERY attachment appears in the tray, documents included: the document button opens the
+// file explorer directly, exactly like the image button, and the file is read whole. The page
 // picker other surfaces show belongs to their spend gate — see readDocument in
-// useChatAttachments for why a chat attachment does not get one.
+// useChatAttachments for why a chat attachment does not get one. A PICTURE is drawn as a
+// thumbnail and everything else as a named chip; that split, and why, lives in
+// components/conversation/AttachmentTray, which /new-video-workflow renders too.
+//
+// A picture can also be PASTED — Ctrl+V of a screenshot, or of an image copied from a page.
+// Two listeners rather than one: the React handler on this card covers a paste into the text
+// box, and a document listener covers a paste made without clicking into it first, which is
+// how most people paste a screenshot. The document one stands down whenever the paste was
+// already taken (`defaultPrevented`) or belongs to some other field on the page, so the two
+// can never attach the same picture twice.
 
-import { useRef, useState, type KeyboardEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ClipboardEvent,
+  type KeyboardEvent,
+} from 'react';
 import {
   AUDIO_FILE_ACCEPT,
   CHAT_MESSAGE_MAX_CHARS,
@@ -31,13 +48,17 @@ import {
   Mic,
   Send,
   Square,
-  X,
 } from 'lucide-react';
 import { ComposeSafeTextarea, isComposingEvent } from './ComposeSafeInput';
-import { YouTubeLinkInput } from './YouTubeLinkInput';
-import { FileName } from './FileName';
+import { YouTubeLinkInput, YOUTUBE_INPUT_OFF } from './YouTubeLinkInput';
+import {
+  AttachmentTray,
+  type TrayAttachment,
+} from './conversation/AttachmentTray';
 import { STR } from '../lib/strings';
 import { storedErrorMessage } from '../lib/errorMessage';
+import { imageFilesFromClipboard, isEditableTarget } from '../lib/pastedImages';
+import { useFilePreviews } from '../lib/useFilePreviews';
 import {
   CHAT_DOCUMENT_ACCEPT,
   type DraftAttachment,
@@ -128,8 +149,80 @@ export function ChatComposer({
     }
   };
 
+  // Returns true when the clipboard was ours to take, which is also when the browser's own
+  // paste must be stopped — a picture would otherwise drop a file name into the text box in
+  // the browsers that write one.
+  const takeImages = useCallback(
+    (data: DataTransfer | null): boolean => {
+      const { files, rejected } = imageFilesFromClipboard(data);
+      if (files.length === 0) {
+        if (rejected === 0) return false;
+        setError(STR.chatPasteUnsupported);
+        return true;
+      }
+      if (full) {
+        setError(STR.chatAttachTooMany);
+        return true;
+      }
+      setError(null);
+      onAddImages(files);
+      return true;
+    },
+    [full, onAddImages],
+  );
+
+  // A paste made with nothing focused, or with the focus on one of the tool buttons. Anything
+  // typed into another field on the page keeps its own paste.
+  useEffect(() => {
+    const onDocumentPaste = (event: globalThis.ClipboardEvent) => {
+      if (event.defaultPrevented) return;
+      if (isEditableTarget(event.target)) return;
+      if (takeImages(event.clipboardData)) event.preventDefault();
+    };
+    document.addEventListener('paste', onDocumentPaste);
+    return () => document.removeEventListener('paste', onDocumentPaste);
+  }, [takeImages]);
+
+  const onPaste = (event: ClipboardEvent<HTMLDivElement>) => {
+    if (takeImages(event.clipboardData)) event.preventDefault();
+  };
+
+  // A picked picture is held here until the turn is sent (useChatAttachments), so the file
+  // itself is what the thumbnail is minted from — there is no uploaded URL to show yet, and
+  // by the time there is one the chip has already been consumed by the turn.
+  const imageFiles = useMemo(
+    () =>
+      attachments.flatMap((attachment) =>
+        attachment.kind === 'image' && attachment.file ? [attachment.file] : [],
+      ),
+    [attachments],
+  );
+  const previews = useFilePreviews(imageFiles);
+
+  const trayItems: TrayAttachment[] = attachments.map((attachment) => {
+    const preview =
+      attachment.kind === 'image' && attachment.file
+        ? previews.get(attachment.file)
+        : undefined;
+    return {
+      key: attachment.key,
+      // An image pasted from the clipboard arrives unnamed; the fallback is what the
+      // tooltip and the remove button say about it.
+      name: attachment.name || STR.chatAttachImage,
+      previewUrl: preview,
+      icon: KIND_ICON[attachment.kind],
+      status: stateLabel(attachment),
+      busy:
+        attachment.state === 'preparing' || attachment.state === 'transcribing',
+      ready: attachment.state === 'ready',
+      failed: attachment.state === 'failed',
+      removeLabel: STR.chatAttachRemove,
+      onRemove: () => onRemove(attachment.key),
+    };
+  });
+
   return (
-    <div className="chat-composer">
+    <div className="chat-composer" onPaste={onPaste}>
       {showYouTube ? (
         <div className="chat-youtube">
           <YouTubeLinkInput
@@ -147,37 +240,7 @@ export function ChatComposer({
         </div>
       ) : null}
 
-      {attachments.length > 0 ? (
-        <ul className="chat-tray">
-          {attachments.map((attachment) => {
-            const Icon = KIND_ICON[attachment.kind];
-            return (
-              <li
-                key={attachment.key}
-                className={`chat-tray-item is-${attachment.state}`}
-              >
-                <Icon size={16} aria-hidden="true" />
-                <FileName
-                  name={attachment.name || STR.chatAttachImage}
-                  className="chat-tray-name"
-                  max={28}
-                />
-                <span className="chat-tray-state">
-                  {stateLabel(attachment)}
-                </span>
-                <button
-                  type="button"
-                  className="chat-tray-remove"
-                  onClick={() => onRemove(attachment.key)}
-                  aria-label={STR.chatAttachRemove}
-                >
-                  <X size={15} aria-hidden="true" />
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      ) : null}
+      <AttachmentTray items={trayItems} />
 
       <div className="chat-input-row">
         {/* Uncontrolled by design — see ComposeSafeInput. Clearing after a successful send
@@ -226,14 +289,17 @@ export function ChatComposer({
           >
             <Mic size={20} aria-hidden="true" />
           </button>
-          {/* Disabled alongside the card it opens (YOUTUBE_INPUT_OFF in
-              YouTubeLinkInput) — a tool button that opens an inert panel is worse
+          {/* Gated on `full` like the three tools beside it, and on nothing else: it
+              opens the same card the other two create surfaces render, so if that card
+              is ever switched off again (YOUTUBE_INPUT_OFF in YouTubeLinkInput) this
+              button must be dimmed with it — a tool that opens an inert panel is worse
               than one that plainly cannot be pressed. */}
           <button
             type="button"
-            className="btn-ghost chat-tool chat-tool--off"
+            className={`btn-ghost chat-tool${YOUTUBE_INPUT_OFF ? ' chat-tool--off' : ''}`}
             onClick={() => setShowYouTube((open) => !open)}
-            disabled
+            disabled={full || YOUTUBE_INPUT_OFF}
+            aria-expanded={showYouTube}
             title={STR.chatAttachYouTube}
             aria-label={STR.chatAttachYouTube}
           >

@@ -87,8 +87,8 @@ const SLICE_LABELS: Readonly<Record<string, string>> = {
   english: STR.analyticsSliceEnglish,
   hindi: STR.analyticsSliceHindi,
   marathi: STR.analyticsSliceMarathi,
-  short: STR.analyticsSliceShort,
-  long: STR.analyticsSliceLong,
+  videoNote: STR.analyticsSliceVideoNote,
+  videoScript: STR.analyticsSliceVideoScript,
 };
 
 // Service rows name a CAPABILITY, not a provider — "ध्वनिलेखन" stays ध्वनिलेखन across a

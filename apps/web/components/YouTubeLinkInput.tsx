@@ -47,16 +47,17 @@ import { CardTitle } from './CardTitle';
 import { STR } from '../lib/strings';
 import { errorMessage } from '../lib/errorMessage';
 
-// TEMPORARILY TURNED OFF EVERYWHERE (UI only). The card still renders — an officer who has
-// used it should see that the capability exists and is unavailable, not find it silently
-// missing — but it is inert and dimmed. This is deliberately a module constant rather than a
-// prop passed at each call site: three surfaces render this card (/dlo, /transcribe, /chat)
-// and a per-caller flag is the kind that gets missed on the fourth. Nothing on the server
-// changed; flip this back to `false` to restore it.
+// The UI kill switch for YouTube links, ON EVERY SURFACE THAT RENDERS THIS CARD (/dlo,
+// /transcribe, /chat). Flip to `true` and the card still renders — an officer who has used
+// it should see that the capability exists and is unavailable, not find it silently missing
+// — but it is inert and dimmed. Nothing on the server is gated by it.
 //
-// Exported so a surface that only offers a BUTTON opening this card (/dlo's composer) can
+// Deliberately a module constant rather than a prop passed at each call site: three surfaces
+// render this card and a per-caller flag is the kind that gets missed on the fourth.
+//
+// Exported so a surface that only offers a BUTTON opening this card (/chat's composer) can
 // dim the button too, instead of presenting a live-looking tool that opens an inert panel.
-export const YOUTUBE_INPUT_OFF = true;
+export const YOUTUBE_INPUT_OFF = false;
 
 export function YouTubeLinkInput({
   videos,
@@ -94,7 +95,8 @@ export function YouTubeLinkInput({
 
   const atLimit = videos.length >= maxLinks;
   // Every guard below reads this, never the prop: the kill switch has to win over a caller
-  // that passes `disabled={false}`.
+  // that passes `disabled={false}`, and a parent becoming busy must also cancel a probe that
+  // was queued while the field was available.
   const off = disabled || YOUTUBE_INPUT_OFF;
 
   const add = async (raw: string) => {

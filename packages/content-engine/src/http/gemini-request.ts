@@ -73,7 +73,13 @@ function createLimiter(concurrency: number): Limiter {
 // call in the package by a wide margin — one request can carry hundreds of PDF pages and
 // transcribe every one of them — so it must neither be held to the image clock nor allowed to
 // fill the frame pool while a storyboard is rendering.
-export type GeminiLane = 'default' | 'image' | 'ocr';
+// 'video' is the Interactions API (video/gemini-interactions-client.ts, the /new-video-workflow
+// experiment). Its own lane for the reason 'ocr' has one: the create call carries base64
+// reference images and, if `background` is ever rejected by the model, BLOCKS for the whole
+// render. Held to the Veo lane it would inherit concurrency 1 and a 120s clock — so an
+// experiment would serialize behind a production storyboard, and a slow render would be
+// aborted by a timeout that is not retried (see TIMEOUT_ATTEMPTS).
+export type GeminiLane = 'default' | 'image' | 'ocr' | 'video';
 
 type LaneConfig = Readonly<{ concurrency: number; timeoutMs: number }>;
 
@@ -88,6 +94,11 @@ function laneConfig(lane: GeminiLane): LaneConfig {
       return {
         concurrency: readInt('GEMINI_OCR_MAX_CONCURRENCY', 2),
         timeoutMs: readInt('GEMINI_OCR_TIMEOUT_MS', 900_000),
+      };
+    case 'video':
+      return {
+        concurrency: readInt('GEMINI_VIDEO_MAX_CONCURRENCY', 2),
+        timeoutMs: readInt('GEMINI_VIDEO_TIMEOUT_MS', 300_000),
       };
     default:
       return {
@@ -171,8 +182,9 @@ export class GeminiTimeoutError extends Error {
       `Gemini ${label} request timed out after ${Math.round(timeoutMs / 1000)}s` +
         (attempts > 1 ? ` on each of ${attempts} attempts` : '') +
         '. Raise GEMINI_IMAGE_TIMEOUT_MS (frames), GEMINI_OCR_TIMEOUT_MS ' +
-        '(document reading) or GEMINI_REQUEST_TIMEOUT_MS (Veo) if this is ' +
-        'normal for the model.',
+        '(document reading), GEMINI_VIDEO_TIMEOUT_MS (the Interactions video ' +
+        'experiment) or GEMINI_REQUEST_TIMEOUT_MS (Veo) if this is normal for ' +
+        'the model.',
     );
     this.name = 'GeminiTimeoutError';
     this.timeoutMs = timeoutMs;

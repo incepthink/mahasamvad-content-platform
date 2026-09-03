@@ -219,7 +219,11 @@ const editFailures = new Map<string, EditFailure>();
 // run and still fails the row.
 const pendingEditRetries = new Map<string, () => void>();
 
-function armEditRetry(id: string, retry: () => void): void {
+// Exported for jobs/dynamic-poster.ts, which is a `generations` job like every one in this
+// file and needs the same status/cost/edit-recovery envelope — it lives in its own module only
+// because this one is already long enough. Nothing else may use these two: a job that does not
+// go through runJob leaves the row `running` for ever when it throws.
+export function armEditRetry(id: string, retry: () => void): void {
   pendingEditRetries.set(id, retry);
 }
 
@@ -433,6 +437,38 @@ function scenePath(id: string, version: number): string {
 function posterPath(id: string, version: number): string {
   return `generations/${id}/poster-v${version}.png`;
 }
+// The same render WITHOUT the brand chrome, so an officer can download the artwork alone
+// (see GET /generations/:id/poster-plain.png). It has to be stored rather than derived: the
+// logo is a DESTRUCTIVE composite on every lane — the article footer too — so once a poster
+// is flattened the pixels under the branding are gone and no amount of cropping brings them
+// back. Deterministic from the poster's own path, so the route needs no column to find it.
+// Only renders from 2026-09-03 onward have one; older versions simply do not, and the route
+// says so in Marathi.
+function plainPosterPath(id: string, version: number): string {
+  return `generations/${id}/poster-v${version}-plain.png`;
+}
+export function plainPathForPoster(posterObjectPath: string): string | null {
+  return posterObjectPath.endsWith('.png')
+    ? `${posterObjectPath.slice(0, -'.png'.length)}-plain.png`
+    : null;
+}
+
+// BEST-EFFORT, and deliberately so: this is a convenience copy of a render the officer has
+// already paid for. A storage failure here must never fail the job or lose the poster, which
+// is the ordering principle the 0028 style write and the caption step already follow.
+async function storePlainPoster(
+  client: SupabaseClient,
+  id: string,
+  version: number,
+  raw: Buffer,
+  upsert = false,
+): Promise<void> {
+  try {
+    await uploadPng(client, plainPosterPath(id, version), raw, upsert);
+  } catch (error) {
+    console.warn(`[job ${id}] could not store the un-chromed poster:`, error);
+  }
+}
 // The CMO poster's single circle photograph, generated + composited in code. Unversioned
 // and stable: the photo never changes across feedback rounds (a text/layout edit must not
 // swap it), so it is written once on the initial render and re-read on every feedback
@@ -529,7 +565,7 @@ async function recoverEditFailure(
 // A retry armed by `armEditRetry` marks the body as an EDIT of an already-produced run (see
 // `editFailures`): its failure restores the row instead of failing it, and the thunk re-arms
 // this same job with the same arguments for the officer's retry button.
-function runJob(
+export function runJob(
   client: SupabaseClient,
   id: string,
   task: string,
@@ -584,6 +620,8 @@ function runJob(
             task === 'article_poster_creation' ||
             task === 'social_post_creation' ||
             task === 'youtube_thumbnail_creation' ||
+            task === 'dynamic_poster_creation' ||
+            task === 'dynamic_poster_revision' ||
             task === 'poster_regeneration' ||
             task === 'poster_content_revision' ||
             task === 'poster_image_revision';
@@ -1281,6 +1319,15 @@ async function renderAndStoreArticlePoster(
   const posterPng = await overlayArticleChrome(rawPoster);
   const posterObjectPath = posterPath(id, version);
   await uploadPng(client, posterObjectPath, posterPng, options.upsert ?? false);
+  // The artwork on its own, for the un-branded download. Written AFTER the poster so a
+  // storage hiccup on this convenience copy can never cost the paid render.
+  await storePlainPoster(
+    client,
+    id,
+    version,
+    rawPoster,
+    options.upsert ?? false,
+  );
 
   await updateGeneration(client, id, { copy, posterPath: posterObjectPath });
 
@@ -1348,8 +1395,10 @@ type ArticlePosterResult = {
 //
 // The prompt is built in the API now (build-article-poster-prompt.ts) rather than in the
 // workflow's Code node, so the reserved-zone geometry lives beside the chrome overlay it must
-// stay in sync with. The crisp brand chrome (महासंवाद logo top-left + department footer strip)
-// is composited here in code — the image model can't render those Devanagari lockups reliably.
+// stay in sync with. It returns the model's RAW edit — the crisp brand chrome (महासंवाद logo
+// top-left + department footer strip) is stamped by the CALLER, which is what lets the caller
+// keep the un-chromed artwork for the plain download. Both callers stamp; the initial-render
+// one always did, since it also measures colours on the raw poster.
 //
 // LEGACY FIELDS: `reference_url` / `image_feedback` / `marker_count` are still sent, duplicating
 // `image_url`, purely so a newly-deployed API talking to a not-yet-pushed workflow degrades to
@@ -1396,10 +1445,7 @@ async function renderArticlePosterEditViaN8n(
   if (!result.poster_png_base64) {
     throw new Error('n8n article-poster webhook returned no poster.');
   }
-  // Stamp the static logo/footer PNGs over their reserved zones. Also runs on the
-  // image-feedback path (the input poster already carries the chrome; re-stamping
-  // heals any drift the edit introduced).
-  return overlayArticleChrome(Buffer.from(result.poster_png_base64, 'base64'));
+  return Buffer.from(result.poster_png_base64, 'base64');
 }
 
 // Shape the thin social-post-v2-api workflow returns from its Respond-to-Webhook node.
@@ -1493,7 +1539,9 @@ async function renderSocialPosterFeedbackViaN8n(
     actions?: readonly PosterClearAction[];
     inventory?: readonly string[];
   } = {},
-): Promise<Buffer> {
+  // Both halves: `png` is what the officer receives, `raw` the same edit BEFORE the chrome
+  // goes back on — which is the un-branded copy the plain download serves.
+): Promise<{ png: Buffer; raw: Buffer }> {
   const prompt = buildFeedbackPrompt({
     imageFeedback: feedback,
     brand,
@@ -1521,9 +1569,9 @@ async function renderSocialPosterFeedbackViaN8n(
         'CMO feedback re-render requires the cached circle photo.',
       );
     }
-    return overlayCmoChrome(rawPoster, cmoPhoto);
+    return { png: await overlayCmoChrome(rawPoster, cmoPhoto), raw: rawPoster };
   }
-  return overlayTwitterChrome(rawPoster);
+  return { png: await overlayTwitterChrome(rawPoster), raw: rawPoster };
 }
 
 // In-process recency ring: the master ids the last few DGIPR runs of a given type used, so
@@ -2166,6 +2214,11 @@ async function renderAndStoreSocialPoster(
   }
   const posterObjectPath = posterPath(id, version);
   await uploadPng(client, posterObjectPath, posterPng);
+  // The artwork on its own, for the un-branded download. On the DGIPR lane this is the
+  // 1280x1504 canvas the model actually painted — no badge stamped over its corner and no
+  // footer strip joined below it. CMO's is its 1280x1600 render with the leader header,
+  // footer and photo circle all still absent.
+  await storePlainPoster(client, id, version, rawPoster);
 
   // Working title → referenceTitle (surfaced in UI). Persisted with the poster so a later
   // caption failure never loses the paid render. A fresh run has no reference ranker to name it,
@@ -3305,6 +3358,9 @@ export function startPosterImageFeedbackJob(
     }
 
     let posterPng: Buffer;
+    // The same edit before its chrome is stamped back on, kept for the un-branded download.
+    // Left undefined on the थंबनेल lane, which has no plain download.
+    let rawPoster: Buffer | undefined;
     if (isYoutubeCategory(row.category)) {
       // Thumbnail lane: edit the CURRENT thumbnail directly (no n8n). The marker and
       // clear-space semantics are the shared ones — clearSpaceRule is the same block
@@ -3334,7 +3390,7 @@ export function startPosterImageFeedbackJob(
         row.templateBrand === 'cmo'
           ? await downloadPng(client, cmoPhotoPath(id))
           : undefined;
-      posterPng = await renderSocialPosterFeedbackViaN8n(
+      const rendered = await renderSocialPosterFeedbackViaN8n(
         id,
         inputUrl,
         feedbackText,
@@ -3343,6 +3399,8 @@ export function startPosterImageFeedbackJob(
         cmoPhoto,
         { actions: clearActions, inventory: contentInventory },
       );
+      posterPng = rendered.png;
+      rawPoster = rendered.raw;
       recordImageCost('twitter', imageQuality());
     } else {
       // The article poster's feedback prompt is built here too now (it used to live in the
@@ -3355,10 +3413,14 @@ export function startPosterImageFeedbackJob(
         clearActions,
         contentInventory,
       });
-      posterPng = await renderArticlePosterEditViaN8n(id, inputUrl, prompt, {
+      // The stamped chrome is erased by the edit (stampedChromeRule) and composited again
+      // here, which is what keeps it crisp through repeated rounds — and leaves `rawPoster`
+      // as a genuine un-branded copy of this version.
+      rawPoster = await renderArticlePosterEditViaN8n(id, inputUrl, prompt, {
         imageFeedback: feedbackText,
         markerCount: annotations.length,
       });
+      posterPng = await overlayArticleChrome(rawPoster);
       recordImageCost('article', imageQuality());
     }
 
@@ -3386,6 +3448,7 @@ export function startPosterImageFeedbackJob(
 
     const posterObjectPath = posterPath(id, version);
     await uploadPng(client, posterObjectPath, posterPng);
+    if (rawPoster) await storePlainPoster(client, id, version, rawPoster);
     await updateGeneration(client, id, { posterPath: posterObjectPath });
     await insertRevision(client, {
       generationId: id,

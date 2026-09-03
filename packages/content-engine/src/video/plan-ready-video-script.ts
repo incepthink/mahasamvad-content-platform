@@ -4,9 +4,10 @@
 
 import { z } from 'zod';
 import {
-  VIDEO_CLIP_MAX_SECONDS,
   VIDEO_KEY_POINT_MAX_CHARS,
   VIDEO_NARRATION_MAX_CHARS,
+  VIDEO_SCENE_LABEL_MAX_CHARS,
+  VIDEO_SCENE_MAX_SECONDS,
   VIDEO_STYLE_MAX_CHARS,
   allocateVideoSceneDurations,
   estimateNarrationSeconds,
@@ -15,15 +16,18 @@ import {
 import {
   chatComplete,
   VIDEO_CHAT_MODEL,
-  type ChatMessage,
+  type AnyChatMessage,
 } from '../generation/openai-chat.js';
-import {
-  keyPointOf,
-  type GeneratedVideoScript,
-} from './generate-video-script.js';
+import { type GeneratedVideoScript } from './generate-video-script.js';
+import { keyPointOf } from './video-key-point.js';
+import { READY_SCRIPT_VIDEO_TASK, withPromptImages } from './script-brief.js';
 
 const VisualSceneSchema = z.object({
   beat: z.string().trim().min(1).max(240),
+  // The card's own storyboard title. Optional so a model that omits it costs
+  // this scene its subtitle rather than costing the whole plan — every other
+  // field here is load-bearing.
+  scene_label: z.string().trim().max(VIDEO_SCENE_LABEL_MAX_CHARS).optional(),
   visual_brief: z.string().trim().min(1),
   end_visual_brief: z.string().trim().optional(),
   shot_hint: z.string().trim().min(1).max(160),
@@ -40,6 +44,56 @@ function visualPlanSchema(sceneCount: number) {
     style: z.string().trim().min(1).max(VIDEO_STYLE_MAX_CHARS),
     scenes: z.array(VisualSceneSchema).length(sceneCount),
   });
+}
+
+// The application contract is carried by Structured Outputs instead of prompt
+// prose. This keeps the natural-language instruction exactly as requested while
+// still giving the review UI a dependable object to render.
+function visualPlanJsonSchema(sceneCount: number): unknown {
+  return {
+    type: 'object',
+    additionalProperties: false,
+    required: ['title', 'style', 'scenes'],
+    properties: {
+      title: { type: 'string', minLength: 1, maxLength: 200 },
+      style: {
+        type: 'string',
+        minLength: 1,
+        maxLength: VIDEO_STYLE_MAX_CHARS,
+      },
+      scenes: {
+        type: 'array',
+        minItems: sceneCount,
+        maxItems: sceneCount,
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: [
+            'scene_label',
+            'beat',
+            'visual_brief',
+            'end_visual_brief',
+            'shot_hint',
+            'key_point',
+          ],
+          properties: {
+            scene_label: {
+              type: 'string',
+              maxLength: VIDEO_SCENE_LABEL_MAX_CHARS,
+            },
+            beat: { type: 'string', minLength: 1, maxLength: 240 },
+            visual_brief: { type: 'string', minLength: 1 },
+            end_visual_brief: { type: 'string' },
+            shot_hint: { type: 'string', minLength: 1, maxLength: 160 },
+            key_point: {
+              type: 'string',
+              maxLength: VIDEO_KEY_POINT_MAX_CHARS,
+            },
+          },
+        },
+      },
+    },
+  };
 }
 
 function parseJson(raw: string): unknown {
@@ -79,7 +133,7 @@ function scriptSeconds(normalized: string, measuredSeconds?: number): number {
 function maxSceneChars(normalized: string, seconds: number): number {
   if (seconds <= 0) return VIDEO_NARRATION_MAX_CHARS;
   const charsPerSecond = normalized.length / seconds;
-  return Math.max(1, Math.floor(VIDEO_CLIP_MAX_SECONDS * charsPerSecond));
+  return Math.max(1, Math.floor(VIDEO_SCENE_MAX_SECONDS * charsPerSecond));
 }
 
 // Prefix sums over "this word plus one joining space", so the length of any
@@ -172,14 +226,12 @@ export function splitReadyVideoScript(
   const normalized = normalizeVideoNarrationScript(script);
   const seconds = scriptSeconds(normalized, measuredSeconds);
 
-  // How many clips this narration NEEDS, with no ceiling above it (2026-08-12):
-  // the two-minute limit was the note lane's eight-scene planner range applied
-  // to a lane whose length is the officer's own. A longer script simply gets
-  // more scenes; the spend decision stays at gate 2, where the estimate is
-  // priced from exactly this count.
+  // How many five-second clips this narration needs, with no ceiling on the
+  // number of scenes. The spend decision stays at gate 2, where the estimate
+  // is priced from exactly this count.
   const requestedScenes = Math.max(
     1,
-    Math.ceil(seconds / VIDEO_CLIP_MAX_SECONDS),
+    Math.ceil(seconds / VIDEO_SCENE_MAX_SECONDS),
   );
   const sceneCharCap = maxSceneChars(normalized, seconds);
   const words = normalized.split(' ');
@@ -189,10 +241,10 @@ export function splitReadyVideoScript(
     );
   }
 
-  // The derived count is a FLOOR, not the answer. ceil(seconds / 15) leaves as
+  // The derived count is a FLOOR, not the answer. ceil(seconds / 5) leaves as
   // little as a fraction of a second of slack across the whole script, and the
   // split can only cut between words — so a script whose speech lands just past
-  // a multiple of 15 has no legal partition at that count and simply needs one
+  // a multiple of 5 has no legal partition at that count and simply needs one
   // more scene. (Latent before this change too, and it aborted the project.)
   // An extra scene costs nothing but a shorter clip: the windows are allocated
   // from the same measured total.
@@ -215,47 +267,39 @@ export function splitReadyVideoScript(
   );
 }
 
-function systemPrompt(sceneCount: number): string {
-  return [
-    'Plan visuals for an already-final Marathi government explainer voiceover.',
-    'The supplied scene narrations are authoritative and immutable. Do not return, rewrite, correct, shorten, translate, or paraphrase narration.',
-    `Return visual metadata for exactly ${sceneCount} scenes, in the supplied order.`,
-    'Each visual_brief must describe one realistic live-action shot in Maharashtra, India.',
-    'Write beat and key_point in Marathi. Write visual_brief, end_visual_brief, shot_hint and style in English.',
-    'Usually leave end_visual_brief empty; use it only when the shot needs a precise final state.',
-    `key_point is optional, must be directly supported by that scene narration, and must be at most ${VIDEO_KEY_POINT_MAX_CHARS} characters. Leave it empty rather than exceeding that.`,
-    'style is one consistent English live-action look shared by every scene.',
-    'Return only JSON:',
-    '{ "title": "...", "style": "...", "scenes": [ { "beat": "...", "visual_brief": "...", "end_visual_brief": "", "shot_hint": "...", "key_point": "" } ] }',
-  ].join('\n');
+function systemPrompt(): string {
+  return READY_SCRIPT_VIDEO_TASK;
 }
 
 function userContent(
   chunks: readonly string[],
-  heading: string | undefined,
+  options: DescribeVideoScenesOptions,
 ): string {
-  const lines = chunks.map(
-    (narration, index) =>
-      `<SCENE number="${index + 1}">\n${narration}\n</SCENE>`,
+  const prompt = options.aiPrompt?.trim();
+  return JSON.stringify(
+    {
+      script: chunks,
+      ...(prompt ? { prompt } : {}),
+    },
+    null,
+    2,
   );
-  return [
-    ...(heading
-      ? ['<HEADING purpose="requested_title">', heading, '</HEADING>', '']
-      : []),
-    '<FINAL_NARRATION purpose="visual_planning_only">',
-    ...lines,
-    '</FINAL_NARRATION>',
-    '',
-    '<TASK>',
-    'Return visual metadata only. Never include narration in the response.',
-    '</TASK>',
-  ].join('\n');
 }
 
 // One scene's visual metadata — everything the pipeline derives FROM a
 // narration rather than reading out of it.
+// The officer's direction for the project, and the reference pictures they
+// attached to it. Both reach this call AND gate 1's re-plan, which is why they
+// are read off the ROW rather than passed once at create time.
+export interface DescribeVideoScenesOptions {
+  aiPrompt?: string | undefined;
+  promptImageUrls?: readonly string[] | undefined;
+}
+
 export interface DescribedVideoScene {
   visualBrief: string;
+  // Short English storyboard title. Empty when the model returned none.
+  sceneLabel: string;
   endVisualBrief?: string | undefined;
   keyPoint: string;
   beat: string;
@@ -282,20 +326,26 @@ export interface DescribedVideoScenes {
 // derived rather than transcribed.
 export async function describeVideoScenes(
   chunks: readonly string[],
-  options: Readonly<{ heading?: string | undefined }> = {},
+  options: Readonly<DescribeVideoScenesOptions> = {},
 ): Promise<DescribedVideoScenes> {
   if (chunks.length === 0) {
     throw new Error('Cannot plan visuals for an empty scene list.');
   }
   const schema = visualPlanSchema(chunks.length);
-  const messages: ChatMessage[] = [
-    { role: 'system', content: systemPrompt(chunks.length) },
-    { role: 'user', content: userContent(chunks, options.heading) },
-  ];
+  const messages: AnyChatMessage[] = withPromptImages(
+    [
+      { role: 'system', content: systemPrompt() },
+      { role: 'user', content: userContent(chunks, options) },
+    ],
+    options.promptImageUrls ?? [],
+  );
   const raw = await chatComplete(messages, {
     model: VIDEO_CHAT_MODEL,
     temperature: 0.3,
-    responseFormat: 'json_object',
+    jsonSchema: {
+      name: 'video_storyboard',
+      schema: visualPlanJsonSchema(chunks.length),
+    },
     // Room for the ANSWER, and it grows with the script: the plan carries a
     // beat, two briefs, a shot hint and an overlay line PER SCENE, so the
     // 4096 default silently truncated the JSON once a script needed more than
@@ -317,6 +367,7 @@ export async function describeVideoScenes(
       const endVisualBrief = visual.end_visual_brief?.trim();
       return {
         visualBrief: visual.visual_brief,
+        sceneLabel: visual.scene_label?.trim() ?? '',
         ...(endVisualBrief ? { endVisualBrief } : {}),
         keyPoint: keyPointOf(visual.key_point, narration),
         beat: visual.beat,
@@ -328,19 +379,28 @@ export async function describeVideoScenes(
 
 export async function planReadyVideoScript(
   script: string,
-  options: Readonly<{
-    heading?: string | undefined;
-    // Duration of a real synthesized WAV of this exact script in the configured
-    // voice. Supply it whenever TTS is available: it decides the scene count,
-    // the per-scene char cap and the clip windows, none of which a fixed
-    // chars-per-second constant can get right across two TTS providers.
-    measuredSeconds?: number | undefined;
-  }> = {},
+  options: Readonly<
+    DescribeVideoScenesOptions & {
+      // Duration of a real synthesized WAV of this exact script in the
+      // configured voice. Supply it whenever TTS is available: it decides the
+      // scene count, the per-scene char cap and the clip windows, none of which
+      // a fixed chars-per-second constant can get right across two TTS
+      // providers.
+      measuredSeconds?: number | undefined;
+      // The project's title when the officer named one. Legacy rows only — the
+      // create form's शीर्षक field was replaced by the AI prompt — so it is
+      // normally absent and the model's own title stands.
+      title?: string | undefined;
+    }
+  > = {},
 ): Promise<GeneratedVideoScript> {
   const normalized = normalizeVideoNarrationScript(script);
   const chunks = splitReadyVideoScript(normalized, options.measuredSeconds);
   const described = await describeVideoScenes(chunks, {
-    ...(options.heading !== undefined ? { heading: options.heading } : {}),
+    ...(options.aiPrompt !== undefined ? { aiPrompt: options.aiPrompt } : {}),
+    ...(options.promptImageUrls !== undefined
+      ? { promptImageUrls: options.promptImageUrls }
+      : {}),
   });
 
   // Weights stay char-derived (they are relative, so the rate cancels out), but
@@ -351,7 +411,7 @@ export async function planReadyVideoScript(
     Math.ceil(scriptSeconds(normalized, options.measuredSeconds)),
   );
   return {
-    title: options.heading ?? described.title,
+    title: options.title ?? described.title,
     style: described.style,
     scenes: chunks.map((narration, index) => {
       const visual = described.scenes[index]!;
@@ -363,6 +423,7 @@ export async function planReadyVideoScript(
           : {}),
         keyPoint: visual.keyPoint,
         beat: visual.beat,
+        sceneLabel: visual.sceneLabel,
         shotHint: visual.shotHint,
         plannedDurationSeconds: plannedDurations[index]!,
       };

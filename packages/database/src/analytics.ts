@@ -237,15 +237,14 @@ export async function listTranscriptionsForAnalytics(
 export type AnalyticsVideoRow = Readonly<{
   id: string;
   status: string;
-  durationBucket: string;
   inputMode: string | null;
   costUsd: number;
   costBreakdown: AnalyticsCostBreakdown | null;
   createdAt: string;
 }>;
 
-// `scenes` is not selected (it holds every scene's narration), so total rendered seconds is
-// estimated from `duration_bucket` by the aggregator rather than summed exactly.
+// `scenes` is not selected because it holds every scene's narration. Rendered
+// seconds come from the lightweight cost breakdown instead.
 export async function listVideoProjectsForAnalytics(
   client: SupabaseClient,
   from: string,
@@ -254,7 +253,6 @@ export async function listVideoProjectsForAnalytics(
   const rows = await fetchPaged<{
     id: string;
     status: string;
-    duration_bucket: string;
     input_mode: string | null;
     cost_usd: number | string | null;
     cost_breakdown: AnalyticsCostBreakdown | null;
@@ -262,14 +260,13 @@ export async function listVideoProjectsForAnalytics(
   }>(
     client,
     VIDEO_PROJECTS_TABLE,
-    'id,status,duration_bucket,input_mode,cost_usd,cost_breakdown,created_at',
+    'id,status,input_mode,cost_usd,cost_breakdown,created_at',
     from,
     to,
   );
   return rows.map((row) => ({
     id: row.id,
     status: row.status,
-    durationBucket: row.duration_bucket,
     inputMode: row.input_mode ?? null,
     costUsd: Number(row.cost_usd ?? 0) || 0,
     costBreakdown: row.cost_breakdown ?? null,

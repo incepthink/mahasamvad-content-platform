@@ -75,7 +75,7 @@ RUN PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=0 \
 # Updating: yt-dlp is a moving target against a hostile extractor, so bump YTDLP_VERSION
 # whenever YouTube changes break it (releases: github.com/yt-dlp/yt-dlp/releases). Runtime
 # knobs — cookies, a proxy, extra extractor args — are env, not a rebuild.
-ARG YTDLP_VERSION=2026.07.04
+ARG YTDLP_VERSION=2026.08.19
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates curl; \

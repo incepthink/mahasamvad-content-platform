@@ -8,6 +8,7 @@ import {
   VIDEO_CHAT_MODEL,
   type ChatMessage,
 } from '../generation/openai-chat.js';
+import { READY_SCRIPT_VIDEO_TASK } from './script-brief.js';
 
 const DirectedSceneSchema = z.object({
   // All three UNCAPPED, matching RegenerateStillRequestSchema: no provider on
@@ -25,6 +26,35 @@ function resultSchemaFor(sceneCount: number) {
   return z.object({
     scenes: z.array(DirectedSceneSchema).length(sceneCount),
   });
+}
+
+function resultJsonSchemaFor(sceneCount: number): unknown {
+  return {
+    type: 'object',
+    additionalProperties: false,
+    required: ['scenes'],
+    properties: {
+      scenes: {
+        type: 'array',
+        minItems: sceneCount,
+        maxItems: sceneCount,
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: [
+            'opening_visual_brief',
+            'motion_brief',
+            'camera_direction',
+          ],
+          properties: {
+            opening_visual_brief: { type: 'string', minLength: 1 },
+            motion_brief: { type: 'string', minLength: 1 },
+            camera_direction: { type: 'string', minLength: 1 },
+          },
+        },
+      },
+    },
+  };
 }
 
 function parseJson(raw: string): unknown {
@@ -62,15 +92,7 @@ export type DirectVideoMotionInput = Readonly<{
 }>;
 
 function systemPrompt(): string {
-  return [
-    'You are an exceptionally imaginative live-action film director.',
-    'Turn every supplied scene into vivid, expressive and highly specific screen direction that makes the shot feel alive for its exact duration.',
-    'Describe the complete visible performance in chronological order: changing facial expressions, eye focus, posture, gestures, hands and objects, environmental life, and purposeful camera choreography.',
-    'Create a true opening moment before the action begins, so the video model has somewhere to go.',
-    'Be bold, cinematic and emotionally observant. Use your own creative judgement; there are no house-style rules or stock action templates.',
-    'Return only JSON in this shape:',
-    '{ "scenes": [ { "opening_visual_brief": "...", "motion_brief": "...", "camera_direction": "..." } ] }',
-  ].join('\n');
+  return READY_SCRIPT_VIDEO_TASK;
 }
 
 function userContent(input: DirectVideoMotionInput): string {
@@ -108,7 +130,10 @@ export async function directVideoMotion(
   const raw = await chatComplete(messages, {
     model: VIDEO_CHAT_MODEL,
     temperature: 0.9,
-    responseFormat: 'json_object',
+    jsonSchema: {
+      name: 'video_motion_direction',
+      schema: resultJsonSchemaFor(input.scenes.length),
+    },
   });
 
   const validate = (candidate: string) => {
@@ -121,30 +146,7 @@ export async function directVideoMotion(
     return result.data;
   };
 
-  let result: z.infer<typeof schema>;
-  try {
-    result = validate(raw);
-  } catch (firstError) {
-    const repaired = await chatComplete(
-      [
-        ...messages,
-        { role: 'assistant', content: raw },
-        {
-          role: 'user',
-          content: [
-            'Return the same creative direction as valid JSON matching the requested shape.',
-            `Validation error: ${(firstError as Error).message}`,
-          ].join('\n'),
-        },
-      ],
-      {
-        model: VIDEO_CHAT_MODEL,
-        temperature: 0,
-        responseFormat: 'json_object',
-      },
-    );
-    result = validate(repaired);
-  }
+  const result: z.infer<typeof schema> = validate(raw);
 
   return result.scenes.map((scene) => ({
     openingVisualBrief: scene.opening_visual_brief,

@@ -43,6 +43,44 @@ export class UnreadableImageError extends Error {
   }
 }
 
+// The same normalisation for a Dynamic Poster's SOURCE, plus the one thing that lane needs
+// and a reference image does not: the officer's own pixel dimensions.
+//
+// Why they are reported separately from the returned bytes. The whole promise of that lane is
+// that the clip comes back at the resolution of the poster that was uploaded, and the way that
+// promise is kept is by naming the number in the prompt handed to the video model. Asking the
+// model to read its own input's dimensions is exactly the kind of thing these models get
+// almost right; measuring them here makes the number a fact. So `width`/`height` are the
+// UPRIGHT source dimensions — after EXIF rotation, before the long-edge bound — and the bytes
+// may be smaller, which costs nothing because the bound preserves the aspect ratio.
+export type NormalizedSourceImage = Readonly<{
+  png: Buffer;
+  width: number;
+  height: number;
+}>;
+
+export async function normalizeSourceImage(
+  data: Buffer,
+): Promise<NormalizedSourceImage> {
+  try {
+    const image = sharp(data).rotate();
+    const { width, height } = await image.metadata();
+    if (!width || !height) throw new Error('unreadable image dimensions');
+    const longEdge = Math.max(width, height);
+    const resized =
+      longEdge > REFERENCE_LONG_EDGE
+        ? image.resize({
+            width: Math.round(width * (REFERENCE_LONG_EDGE / longEdge)),
+            height: Math.round(height * (REFERENCE_LONG_EDGE / longEdge)),
+            fit: 'inside',
+          })
+        : image;
+    return { png: await resized.png().toBuffer(), width, height };
+  } catch (error) {
+    throw new UnreadableImageError(error);
+  }
+}
+
 // Returns PNG bytes, upright, with the long edge capped. Throws
 // UnreadableImageError when the bytes are not an image sharp can decode.
 export async function normalizeReferenceImage(data: Buffer): Promise<Buffer> {

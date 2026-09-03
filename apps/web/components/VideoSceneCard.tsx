@@ -17,19 +17,19 @@
 // so on ITS card, not sink the project.
 
 import { useEffect, useRef, useState } from 'react';
+import { Image as ImageIcon, Trash2 } from 'lucide-react';
 import type { VideoScene } from '@dgipr/schemas';
 import { ErrorNotice } from './ErrorNotice';
+import { InlineEditableField } from './InlineEditableField';
 import { storedErrorMessage } from '../lib/errorMessage';
 import {
   IMAGE_FILE_ACCEPT,
   VIDEO_KEY_POINT_MAX_CHARS,
   VIDEO_NARRATION_MAX_CHARS,
-  estimateNarrationSeconds,
 } from '@dgipr/schemas';
 import {
   STR,
   videoMotionBriefLength,
-  videoNarrationEstimate,
   videoNarrationTooLong,
   videoSceneTiming,
 } from '../lib/strings';
@@ -230,11 +230,13 @@ export function VideoSceneCard({
           {onRemove ? (
             <button
               type="button"
-              className="btn btn-small"
+              className="video-icon-action video-icon-action-danger"
               onClick={onRemove}
               disabled={busy}
+              aria-label={STR.videoRemoveScene}
+              title={STR.videoRemoveScene}
             >
-              {STR.videoRemoveScene}
+              <Trash2 size={18} aria-hidden="true" />
             </button>
           ) : null}
         </div>
@@ -244,37 +246,26 @@ export function VideoSceneCard({
             which detaches the nodes React is holding — the next removal then
             throws "removeChild … not a child of this node". Removing a whole
             ELEMENT stays safe, because element nodes are not reparented. */}
+        {/* The storyboard's own title for this scene ("Opening — Newborn
+            daughter"), directly under "दृश्य N" — the card reads as a
+            storyboard row rather than as a form with a stray label above it.
+            Scenes planned before the label existed simply do not show one. */}
+        {scene.sceneLabel ? (
+          <p className="scene-label">{scene.sceneLabel}</p>
+        ) : null}
         {scene.beat ? (
           <p className="hint">{`${STR.videoSceneBeatLabel}: ${scene.beat}`}</p>
         ) : null}
-        <label className="field-label" htmlFor={`scene-narration-${index}`}>
-          {STR.videoNarrationLabel}
-        </label>
-        {/* The writer saw this planned visual window. The speech estimate is a
-            guide; all boxes are synthesized later as one continuous track. */}
-        <p className="hint">
-          {(onNarrationChange
-            ? STR.videoNarrationHint
-            : STR.videoNarrationLockedHint) +
-            (scene.narration.trim().length > 0
-              ? ` · ${videoNarrationEstimate(
-                  estimateNarrationSeconds(scene.narration),
-                  scene.durationSeconds,
-                )}`
-              : '')}
-        </p>
-        {/* Deliberately no maxLength on the textarea: silently truncating a
-            pasted paragraph loses the officer's words, which is worse than
-            saying the line is too long. The save button is disabled while any
-            scene is over, so this is the only place the count has to be seen. */}
-        <textarea
+        <InlineEditableField
           id={`scene-narration-${index}`}
-          className="note-input"
-          style={{ minHeight: 70 }}
+          label={
+            onNarrationChange
+              ? STR.videoNarrationLabel
+              : STR.videoNarrationVerbatimLabel
+          }
           value={scene.narration}
           disabled={busy}
-          readOnly={onNarrationChange === undefined}
-          onChange={(event) => onNarrationChange?.(event.target.value)}
+          onChange={onNarrationChange}
         />
         {scene.narration.trim().length > VIDEO_NARRATION_MAX_CHARS ? (
           <p className="form-error">
@@ -284,65 +275,37 @@ export function VideoSceneCard({
             )}
           </p>
         ) : null}
-        <label
-          className="field-label"
-          htmlFor={`scene-key-point-${index}`}
-          style={{ marginTop: 12 }}
-        >
-          {STR.videoKeyPointLabel}
-        </label>
-        <p className="hint">{STR.videoKeyPointHint}</p>
-        <input
+        <InlineEditableField
           id={`scene-key-point-${index}`}
-          type="text"
-          className="note-input"
+          label={STR.videoKeyPointLabel}
           value={scene.keyPoint ?? ''}
+          kind="text"
           maxLength={VIDEO_KEY_POINT_MAX_CHARS}
           disabled={busy}
-          onChange={(event) => onKeyPointChange?.(event.target.value)}
+          onChange={onKeyPointChange}
         />
-        <label
-          className="field-label"
-          htmlFor={`scene-brief-${index}`}
-          style={{ marginTop: 12 }}
-        >
-          {STR.videoBriefLabel}
-        </label>
-        <p className="hint">{STR.videoBriefHint}</p>
-        <textarea
+        <InlineEditableField
           id={`scene-brief-${index}`}
-          className="note-input"
-          style={{ minHeight: 70 }}
+          label={STR.videoStoryboardFrameLabel}
           value={scene.visualBrief}
           disabled={busy}
-          onChange={(event) => onBriefChange?.(event.target.value)}
+          onChange={onBriefChange}
         />
-        <label
-          className="field-label"
-          htmlFor={`scene-end-brief-${index}`}
-          style={{ marginTop: 12 }}
-        >
-          {STR.videoEndBriefLabel}
-        </label>
-        <p className="hint">{STR.videoEndBriefHint}</p>
-        <textarea
-          id={`scene-end-brief-${index}`}
-          className="note-input"
-          style={{ minHeight: 70 }}
-          value={scene.endVisualBrief ?? ''}
-          disabled={busy}
-          onChange={(event) => onEndBriefChange?.(event.target.value)}
-        />
+        {scene.endVisualBrief?.trim() && onEndBriefChange ? (
+          <InlineEditableField
+            id={`scene-end-brief-${index}`}
+            label={STR.videoEndBriefLabel}
+            value={scene.endVisualBrief}
+            disabled={busy}
+            onChange={onEndBriefChange}
+          />
+        ) : null}
         {/* The officer's own reference picture — gate 1 only, and only when the
             page supplies the handler. It sits directly under the two briefs
             because it is read TOGETHER with them: the picture does its work by
             being named in the दृश्य-वर्णन above. */}
         {onReferenceImagePick ? (
           <>
-            <p className="field-label" style={{ marginTop: 12 }}>
-              {STR.videoReferenceImageLabel}
-            </p>
-            <p className="hint">{STR.videoReferenceImageHint}</p>
             <input
               ref={referenceInputRef}
               type="file"
@@ -367,13 +330,14 @@ export function VideoSceneCard({
                 }}
               />
             ) : null}
-            <div className="btn-row" style={{ marginTop: 8 }}>
+            <div className="btn-row video-scene-actions">
               <button
                 type="button"
                 className="btn btn-small"
                 disabled={busy || referenceImageBusy}
                 onClick={() => referenceInputRef.current?.click()}
               >
+                <ImageIcon size={17} aria-hidden="true" />
                 {referenceImageBusy
                   ? STR.videoReferenceImageUploading
                   : referenceImageUrl
@@ -390,6 +354,16 @@ export function VideoSceneCard({
                   {STR.videoReferenceImageRemove}
                 </button>
               ) : null}
+              {onInsertAfter ? (
+                <button
+                  type="button"
+                  className="btn btn-small"
+                  disabled={busy}
+                  onClick={onInsertAfter}
+                >
+                  {STR.videoInsertSceneAfter}
+                </button>
+              ) : null}
             </div>
             {referenceImageUrl ? (
               <p className="hint" style={{ marginTop: 6 }}>
@@ -401,7 +375,7 @@ export function VideoSceneCard({
             ) : null}
           </>
         ) : null}
-        {onInsertAfter ? (
+        {!onReferenceImagePick && onInsertAfter ? (
           <div className="btn-row" style={{ marginTop: 12 }}>
             <button
               type="button"
@@ -423,6 +397,9 @@ export function VideoSceneCard({
         <h2>{heading}</h2>
         <SceneStatusChip scene={scene} />
       </div>
+      {scene.sceneLabel ? (
+        <p className="scene-label">{scene.sceneLabel}</p>
+      ) : null}
       <div
         style={{
           display: 'flex',
@@ -834,16 +811,18 @@ export function VideoSceneCard({
                   {STR.videoAnimateCancel}
                 </button>
               </>
-            ) : (
-              <button
-                type="button"
-                className="btn btn-small"
-                disabled={busy}
-                onClick={() => setRemoveArmed(true)}
-              >
-                {STR.videoRemoveScene}
-              </button>
-            )
+              ) : (
+                <button
+                  type="button"
+                  className="video-icon-action video-icon-action-danger"
+                  disabled={busy}
+                  onClick={() => setRemoveArmed(true)}
+                  aria-label={STR.videoRemoveScene}
+                  title={STR.videoRemoveScene}
+                >
+                  <Trash2 size={18} aria-hidden="true" />
+                </button>
+              )
           ) : null}
         </div>
       ) : null}

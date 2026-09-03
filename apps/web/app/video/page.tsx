@@ -1,17 +1,22 @@
 'use client';
 
-// Explainer-video entry: note mode writes a 30-second narration; ready-script
-// mode preserves supplied Marathi narration and estimates its natural duration
-// for free. Both keep expensive rendering behind the two review gates.
+// Explainer-video entry: note mode writes narration from the supplied text;
+// ready-script mode preserves supplied Marathi narration. Both divide it into
+// as many five-second scenes as needed and keep expensive rendering behind the
+// two review gates.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
+  IMAGE_FILE_ACCEPT,
   NARRATION_AUDIO_ACCEPT,
   UPLOAD_FILE_MAX_BYTES,
-  VIDEO_CLIP_MAX_SECONDS,
+  VIDEO_AI_PROMPT_MAX_CHARS,
+  VIDEO_PROMPT_IMAGE_LIMIT,
+  VIDEO_SCENE_MAX_SECONDS,
   estimateNarrationSeconds,
+  isImageFileName,
   isMarathiVideoNarration,
   normalizeVideoNarrationScript,
   type VideoInputMode,
@@ -79,7 +84,12 @@ export default function VideoPage() {
   const router = useRouter();
   const [inputMode, setInputMode] = useState<VideoInputMode>('note');
   const [note, setNote] = useState('');
-  const [heading, setHeading] = useState('');
+  // The officer's own direction, plus the pictures it refers to. Both are sent
+  // to the planning model beside the lane's own task statement; neither is a
+  // source of facts, which the field's hint and the prompt block both say.
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [promptImages, setPromptImages] = useState<File[]>([]);
+  const promptImageInputRef = useRef<HTMLInputElement | null>(null);
   const [orientation, setOrientation] = useState<VideoOrientation>('landscape');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -117,17 +127,56 @@ export default function VideoPage() {
     usingUploadedAudio && audioSeconds !== null
       ? audioSeconds
       : estimateNarrationSeconds(normalizeVideoNarrationScript(note));
-  // Shown, never enforced (2026-08-12): the two-minute ceiling this used to be
-  // measured against is gone, so a long script simply gets more clips. The line
-  // stays because the scene count is what gate 2 will be priced from.
+  // Shown, never enforced: a long script simply gets more five-second clips.
+  // The line stays because the scene count is what gate 2 will be priced from.
   const scriptSceneCount = Math.max(
     1,
-    Math.ceil(scriptEstimateSeconds / VIDEO_CLIP_MAX_SECONDS),
+    Math.ceil(scriptEstimateSeconds / VIDEO_SCENE_MAX_SECONDS),
   );
   const scriptNotMarathi =
     inputMode === 'script' &&
     note.trim() !== '' &&
     !isMarathiVideoNarration(note);
+
+  // Object URLs for the thumbnails, revoked when a picture leaves the list — a
+  // create form can sit open for a long time while an officer writes the note.
+  const promptImageUrls = useMemo(
+    () => promptImages.map((file) => URL.createObjectURL(file)),
+    [promptImages],
+  );
+  useEffect(
+    () => () => {
+      for (const url of promptImageUrls) URL.revokeObjectURL(url);
+    },
+    [promptImageUrls],
+  );
+
+  // The browser refuses what the route would refuse, so an oversized or
+  // unsupported picture is reported before the upload starts (the /dlo picker
+  // rule). The count is capped here too, because busboy's own `files` limit
+  // silently STOPS emitting parts rather than rejecting.
+  const addPromptImages = (files: readonly File[]) => {
+    setError(null);
+    const accepted: File[] = [];
+    for (const file of files) {
+      if (promptImages.length + accepted.length >= VIDEO_PROMPT_IMAGE_LIMIT) {
+        setError(STR.videoPromptImagesFull(VIDEO_PROMPT_IMAGE_LIMIT));
+        break;
+      }
+      if (!isImageFileName(file.name)) {
+        setError(STR.videoPromptImageWrongType);
+        continue;
+      }
+      if (file.size > UPLOAD_FILE_MAX_BYTES) {
+        setError(STR.videoPromptImageTooBig);
+        continue;
+      }
+      accepted.push(file);
+    }
+    if (accepted.length > 0) {
+      setPromptImages((current) => [...current, ...accepted]);
+    }
+  };
 
   const clearAudio = () => {
     setNarrationAudio(null);
@@ -184,15 +233,15 @@ export default function VideoPage() {
       const id = await createVideoProject(
         {
           note: note.trim(),
-          ...(heading.trim() ? { heading: heading.trim() } : {}),
+          ...(aiPrompt.trim() ? { aiPrompt: aiPrompt.trim() } : {}),
           inputMode,
-          durationBucket: 'short',
           orientation,
           tier: 'fast',
         },
         // Only ever with a ready script — a note run has no final words for a
         // recording to be of.
         inputMode === 'script' ? narrationAudio : null,
+        promptImages,
       );
       router.push(`/video/${id}`);
     } catch (e) {
@@ -331,19 +380,103 @@ export default function VideoPage() {
         ) : null}
         <label
           className="field-label"
-          htmlFor="video-heading"
-          style={{ marginTop: 12 }}
+          htmlFor="video-ai-prompt"
+          style={{ marginTop: 16 }}
         >
-          {STR.videoHeadingLabel}
+          {STR.videoAiPromptLabel}
         </label>
-        <input
-          id="video-heading"
-          type="text"
-          value={heading}
-          maxLength={200}
-          onChange={(event) => setHeading(event.target.value)}
-          style={{ marginTop: 8 }}
+        <p className="hint" style={{ marginTop: 4 }}>
+          {STR.videoAiPromptHint}
+        </p>
+        <textarea
+          id="video-ai-prompt"
+          className="note-input"
+          style={{ marginTop: 8, minHeight: 90 }}
+          value={aiPrompt}
+          maxLength={VIDEO_AI_PROMPT_MAX_CHARS}
+          placeholder={STR.videoAiPromptPlaceholder}
+          disabled={submitting}
+          onChange={(event) => setAiPrompt(event.target.value)}
         />
+        <p className="field-label" style={{ marginTop: 12 }}>
+          {STR.videoPromptImagesLabel}
+        </p>
+        <p className="hint" style={{ marginTop: 4 }}>
+          {STR.videoPromptImagesHint}
+        </p>
+        {/* Hidden input driven by a button, so the control matches every other
+            affordance on the page instead of the browser's default chrome. Its
+            value is cleared after each pick, or re-choosing the SAME file fires
+            no change event and nothing appears to happen. */}
+        <input
+          ref={promptImageInputRef}
+          type="file"
+          accept={IMAGE_FILE_ACCEPT}
+          multiple
+          style={{ display: 'none' }}
+          onChange={(event) => {
+            const files = [...(event.target.files ?? [])];
+            event.target.value = '';
+            addPromptImages(files);
+          }}
+        />
+        {promptImages.length > 0 ? (
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: 10,
+              marginTop: 10,
+            }}
+          >
+            {promptImages.map((file, index) => (
+              <figure
+                key={`${file.name}-${index}`}
+                style={{ margin: 0, width: 132 }}
+              >
+                <img
+                  src={promptImageUrls[index]}
+                  alt={STR.videoPromptImageAlt(index + 1)}
+                  style={{
+                    width: '100%',
+                    height: 96,
+                    objectFit: 'cover',
+                    borderRadius: 8,
+                    display: 'block',
+                  }}
+                />
+                <figcaption>
+                  <FileName name={file.name} className="hint" max={18} />
+                  <button
+                    type="button"
+                    className="btn btn-small"
+                    style={{ marginTop: 4 }}
+                    disabled={submitting}
+                    onClick={() =>
+                      setPromptImages((current) =>
+                        current.filter((_, at) => at !== index),
+                      )
+                    }
+                  >
+                    {STR.videoPromptImagesRemove}
+                  </button>
+                </figcaption>
+              </figure>
+            ))}
+          </div>
+        ) : null}
+        <div className="btn-row" style={{ marginTop: 10 }}>
+          <button
+            type="button"
+            className="btn btn-small"
+            disabled={
+              submitting || promptImages.length >= VIDEO_PROMPT_IMAGE_LIMIT
+            }
+            onClick={() => promptImageInputRef.current?.click()}
+          >
+            {STR.videoPromptImagesAdd}
+          </button>
+        </div>
       </section>
 
       <section className="card">

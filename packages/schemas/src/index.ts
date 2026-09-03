@@ -20,6 +20,12 @@ export * from './copy.js';
 // definition in this barrel (the copy.js/document.js precedent).
 export * from './designations.js';
 
+// Dynamic Posters (/generations lane, migration 0052): a still poster uploaded by the
+// officer, motionised into a looping clip. Exported BEFORE api.js, which imports its version
+// shape and its storage-path guard, so each name has exactly one definition in this barrel
+// (the copy.js/designations.js precedent).
+export * from './dynamic-poster.js';
+
 // Generation API request/response schemas (apps/api + apps/web).
 export * from './api.js';
 
@@ -61,6 +67,11 @@ export * from './tweet.js';
 
 // AI explainer-video API schemas + shared tier pricing / SRT builder.
 export * from './video.js';
+
+// The /new-video-workflow EXPERIMENT: Gemini-style conversational video generation. Exported
+// after video.js and deliberately sharing nothing with it — no scenes, no tiers, no pricing
+// table — so the production pipeline can change without dragging the experiment with it.
+export * from './new-video-workflow.js';
 
 // The general assistant at /chat: thread/message shapes, the attachment union and the SSE
 // event framing. Exported after document.js and youtube.js, whose upload and link rules its

@@ -57,6 +57,7 @@ import {
   VIDEOS_BUCKET,
   downloadFile,
   getVideoProject,
+  publicUrlIn,
   updateVideoProject,
   addVideoProjectCost,
   uploadFile,
@@ -65,10 +66,9 @@ import {
   type VideoSceneEntry,
 } from '@dgipr/database';
 import {
-  VIDEO_CLIP_MAX_SECONDS,
   VIDEO_CLIP_MIN_SECONDS,
-  VIDEO_TOTAL_FIT_TOLERANCE,
-  VIDEO_TOTAL_SECONDS,
+  VIDEO_NARRATION_FIT_TOLERANCE,
+  VIDEO_SCENE_MAX_SECONDS,
   UPLOADED_NARRATION_VOICE,
   allocateVideoSceneDurations,
   buildSrt,
@@ -318,15 +318,31 @@ export function startVideoScriptJob(
     // how many clips the script gets, and there is no ceiling above it. It is
     // still measured BEFORE the plan, because the scene count, the per-scene
     // char cap and the clip windows all come off this number.
+    // The officer's own direction and reference pictures reach BOTH lanes'
+    // planning call. The pictures travel as public `videos`-bucket URLs, so
+    // nothing is downloaded here; the bucket is public for exactly this reason.
+    const direction = {
+      ...(row.aiPrompt ? { aiPrompt: row.aiPrompt } : {}),
+      ...(row.promptImagePaths.length > 0
+        ? {
+            promptImageUrls: row.promptImagePaths.map((path) =>
+              publicUrlIn(client, VIDEOS_BUCKET, path),
+            ),
+          }
+        : {}),
+    };
     const script =
       row.inputMode === 'script'
         ? await planReadyVideoScript(row.note, {
-            heading: row.heading ?? undefined,
+            ...direction,
+            // Legacy rows only: the create form's शीर्षक field was replaced by
+            // the AI prompt, so a new project has no requested title and the
+            // model's own stands.
+            ...(row.heading ? { title: row.heading } : {}),
             ...(measured ? { measuredSeconds: measured.seconds } : {}),
           })
         : await generateVideoScript(row.note, {
-            durationBucket: row.durationBucket,
-            heading: row.heading ?? undefined,
+            ...direction,
           });
 
     // The provisional visual timeline the script writer saw. The continuous
@@ -351,6 +367,7 @@ export function startVideoScriptJob(
       durationSeconds: scene.plannedDurationSeconds,
       status: 'pending',
       beat: scene.beat,
+      ...(scene.sceneLabel ? { sceneLabel: scene.sceneLabel } : {}),
       shotHint: scene.shotHint,
       ...(measured
         ? {
@@ -825,7 +842,7 @@ async function ensureNarrationAudio(
   client: SupabaseClient,
   id: string,
   scenes: VideoSceneEntry[],
-  totalTarget: number,
+  narrationEstimate: number,
   preserveWords: boolean,
 ): Promise<void> {
   const haveKey = sarvamKeyPresent();
@@ -835,8 +852,10 @@ async function ensureNarrationAudio(
     (sum, scene) => sum + scene.durationSeconds,
     0,
   );
-  const providerCapacity = scenes.length * VIDEO_CLIP_MAX_SECONDS;
-  const desiredTotal = freezeWindows ? frozenTotal : totalTarget;
+  const sceneCapacity = freezeWindows
+    ? frozenTotal
+    : scenes.length * VIDEO_SCENE_MAX_SECONDS;
+  const desiredTotal = freezeWindows ? frozenTotal : narrationEstimate;
 
   // Checked BEFORE the key gate, because an uploaded narration is current
   // whether or not this deployment holds a TTS key at all — that is the whole
@@ -863,7 +882,7 @@ async function ensureNarrationAudio(
       );
       const durations = allocateVideoSceneDurations(
         scenes.map((scene) => scene.durationSeconds),
-        Math.max(totalTarget, estimated),
+        Math.max(narrationEstimate, estimated),
       );
       for (const [index, scene] of scenes.entries()) {
         scenes[index] = { ...scene, durationSeconds: durations[index]! };
@@ -874,10 +893,12 @@ async function ensureNarrationAudio(
   }
 
   const ceiling = preserveWords
-    ? providerCapacity
+    ? sceneCapacity
     : Math.min(
-        providerCapacity,
-        freezeWindows ? frozenTotal : totalTarget * VIDEO_TOTAL_FIT_TOLERANCE,
+        sceneCapacity,
+        freezeWindows
+          ? frozenTotal
+          : narrationEstimate * VIDEO_NARRATION_FIT_TOLERANCE,
       );
   try {
     await storeContinuousNarration(
@@ -906,7 +927,7 @@ async function ensureNarrationAudio(
       const durations = allocateVideoSceneDurations(
         scenes.map((scene) => scene.durationSeconds),
         Math.max(
-          totalTarget,
+          narrationEstimate,
           estimateNarrationSeconds(continuousNarrationText(scenes)),
         ),
       );
@@ -1039,9 +1060,7 @@ export function startStoryboardJob(client: SupabaseClient, id: string): void {
       client,
       id,
       scenes,
-      row.inputMode === 'script'
-        ? estimateNarrationSeconds(continuousNarrationText(scenes))
-        : VIDEO_TOTAL_SECONDS[row.durationBucket],
+      estimateNarrationSeconds(continuousNarrationText(scenes)),
       row.inputMode === 'script',
     );
     await updateVideoProject(client, id, { step: 'stills' });

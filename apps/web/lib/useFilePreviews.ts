@@ -12,11 +12,17 @@
 // appeared, which is exactly the shape the bug was reported in. Minted and revoked in one
 // effect, a cleanup can only ever revoke what its own setup made.
 //
+// THE INPUT IS STABILISED HERE rather than at every call site. A composer derives its file
+// list from attachment state that changes for reasons a picture does not care about (a
+// document's read finishing, an upload reporting ready), and a fresh array each render would
+// revoke and re-mint every URL — the <img> then reloads and the thumbnails flicker while a
+// turn is being prepared. So the effect runs on the FILES, not on the array holding them.
+//
 // Returned as a Map keyed by the File itself rather than by index, so a caller that mixes
 // photographs into a list with other kinds of source (the attachment strip) cannot line the
 // wrong URL up against the wrong file.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export function useFilePreviews(
   files: readonly File[],
@@ -24,15 +30,23 @@ export function useFilePreviews(
   const [previews, setPreviews] = useState<ReadonlyMap<File, string>>(
     () => new Map(),
   );
+  // The array the effect last saw. Replaced only when the files themselves differ, so an
+  // equal-but-new array is not a change.
+  const stable = useRef<readonly File[]>(files);
+  const same =
+    stable.current.length === files.length &&
+    files.every((file, index) => stable.current[index] === file);
+  if (!same) stable.current = files;
+  const tracked = stable.current;
 
   useEffect(() => {
     const next = new Map<File, string>();
-    for (const file of files) next.set(file, URL.createObjectURL(file));
+    for (const file of tracked) next.set(file, URL.createObjectURL(file));
     setPreviews(next);
     return () => {
       for (const url of next.values()) URL.revokeObjectURL(url);
     };
-  }, [files]);
+  }, [tracked]);
 
   return previews;
 }

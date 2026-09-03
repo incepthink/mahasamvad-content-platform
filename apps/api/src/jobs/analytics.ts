@@ -53,7 +53,6 @@ import {
   ANALYTICS_TIME_ZONE,
   AnalyticsServiceKeySchema,
   usdToInr,
-  VIDEO_TOTAL_SECONDS,
   type AnalyticsBreakdown,
   type AnalyticsDay,
   type AnalyticsFeature,
@@ -1087,14 +1086,13 @@ function buildFeatures(
     (total, row) => total + row.costUsd,
     0,
   );
-  // Exact rendered seconds would mean pulling every project's `scenes` jsonb (which carries
-  // all narration), so the planned total is used instead — the two agree within a second.
+  // Use metered rendered seconds. Old rows without that detail contribute no
+  // guessed duration; the retired short/long bucket is not a generation limit
+  // and is no longer presented as one in analytics.
   const seconds = current.videos
     .filter((row) => row.status === 'completed')
     .reduce(
-      (total, row) =>
-        total +
-        (VIDEO_TOTAL_SECONDS[row.durationBucket as 'short' | 'long'] ?? 0),
+      (total, row) => total + (row.costBreakdown?.videoSeconds ?? 0),
       0,
     );
   const video: AnalyticsFeature = {
@@ -1110,12 +1108,12 @@ function buildFeatures(
     ],
     breakdown: breakdown([
       [
-        'short',
-        current.videos.filter((row) => row.durationBucket === 'short').length,
+        'videoNote',
+        current.videos.filter((row) => row.inputMode === 'note').length,
       ],
       [
-        'long',
-        current.videos.filter((row) => row.durationBucket === 'long').length,
+        'videoScript',
+        current.videos.filter((row) => row.inputMode === 'script').length,
       ],
     ]),
     // The only feature whose table records clip seconds and TTS characters of its own, so

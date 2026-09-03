@@ -1,19 +1,23 @@
 'use client';
 
-// The whole /chat surface: the rail on the left, the conversation on the right. Rendered by
-// both routes — `/chat` with no id (a new conversation) and `/chat/[id]` with one — so the two
-// pages are three lines each and there is exactly one place this layout lives.
+// The whole /chat surface. Rendered by both routes — `/chat` with no id (a new conversation)
+// and `/chat/[id]` with one — so the two pages are three lines each.
+//
+// The LAYOUT is not here: the rail, the drawer, the collapse toggle and the narrow-screen bar
+// all live in components/conversation/ConversationWorkspace, shared with
+// /new-video-workflow. What is here is chat's own data — the threads, the turn being
+// streamed, the attachments — and the labels it gives that shell.
 //
 // A new chat gets its URL WITHOUT a Next navigation (history.replaceState). Router.replace
 // would remount this tree and kill the stream the officer is watching; all the URL has to do
 // here is become reloadable and shareable, which replaceState achieves on its own. The rail
 // still updates, because it is refreshed explicitly rather than by the route changing.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { PanelLeft } from 'lucide-react';
 import { ChatConversation } from './ChatConversation';
-import { ChatThreadRail } from './ChatThreadRail';
+import { ConversationWorkspace } from './conversation/ConversationWorkspace';
+import type { ConversationRailGroup } from './conversation/ConversationRail';
 import { deleteChatThread } from '../lib/api';
 import { forgetMyChatId } from '../lib/chatDraft';
 import { STR } from '../lib/strings';
@@ -24,7 +28,6 @@ import { useChatThreadList } from '../lib/useChatThreadList';
 export function ChatWorkspace({ threadId }: { threadId: string | null }) {
   const router = useRouter();
   const list = useChatThreadList();
-  const [railOpen, setRailOpen] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
 
   const onThreadCreated = useCallback(
@@ -76,74 +79,64 @@ export function ChatWorkspace({ threadId }: { threadId: string | null }) {
     [chat.threadId, list, router],
   );
 
-  // The drawer is a mobile affordance; closing it on Escape matches the sidebar and TasksMenu.
-  useEffect(() => {
-    if (!railOpen) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setRailOpen(false);
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [railOpen]);
+  const groups = useMemo<ConversationRailGroup[]>(
+    () => [
+      {
+        label: STR.chatYours,
+        items: list.mine.map((thread) => ({
+          id: thread.id,
+          title: thread.title || STR.chatNew,
+          href: `/chat/${thread.id}`,
+        })),
+      },
+      {
+        label: STR.chatOthers,
+        items: list.others.map((thread) => ({
+          id: thread.id,
+          title: thread.title || STR.chatNew,
+          href: `/chat/${thread.id}`,
+        })),
+      },
+    ],
+    [list.mine, list.others],
+  );
 
   return (
-    <main className="chat-page">
-      {railOpen ? (
-        <button
-          type="button"
-          className="chat-rail-scrim"
-          aria-label={STR.chatCloseList}
-          onClick={() => setRailOpen(false)}
-        />
-      ) : null}
-
-      <ChatThreadRail
-        mine={list.mine}
-        others={list.others}
-        activeId={chat.threadId}
-        loading={list.loading}
-        error={list.error}
-        onRetry={() => void list.refresh()}
-        open={railOpen}
-        onClose={() => setRailOpen(false)}
-        onDelete={(id) => void onDelete(id)}
-        deleting={deleting}
+    <ConversationWorkspace
+      groups={groups}
+      activeId={chat.threadId}
+      title={chat.thread?.title || STR.chatTitle}
+      newHref="/chat"
+      newLabel={STR.chatNew}
+      emptyLabel={STR.chatNoThreads}
+      listFailedLabel={STR.chatListFailed}
+      deleteLabel={STR.chatDelete}
+      deleteConfirmLabel={STR.chatDeleteConfirm}
+      openListLabel={STR.chatOpenList}
+      loading={list.loading}
+      error={list.error}
+      onRetry={() => void list.refresh()}
+      onDelete={(id) => void onDelete(id)}
+      deleting={deleting}
+    >
+      <ChatConversation
+        thread={chat.thread}
+        messages={chat.messages}
+        streaming={chat.streaming}
+        sending={chat.sending}
+        loading={chat.loading}
+        error={chat.error}
+        attachments={attachments.attachments}
+        preparing={attachments.preparing}
+        full={attachments.full}
+        onAddImages={attachments.addImages}
+        onAddDocuments={attachments.addDocuments}
+        onAddAudio={attachments.addAudio}
+        onAddYouTube={attachments.addYouTube}
+        onRemoveAttachment={attachments.remove}
+        onSend={send}
+        onStop={chat.stop}
       />
-
-      <div className="chat-main">
-        <header className="chat-bar">
-          <button
-            type="button"
-            className="btn-ghost chat-bar-toggle"
-            onClick={() => setRailOpen(true)}
-            aria-label={STR.chatOpenList}
-          >
-            <PanelLeft size={20} aria-hidden="true" />
-          </button>
-          <h1 className="chat-bar-title">
-            {chat.thread?.title || STR.chatTitle}
-          </h1>
-        </header>
-
-        <ChatConversation
-          thread={chat.thread}
-          messages={chat.messages}
-          streaming={chat.streaming}
-          sending={chat.sending}
-          loading={chat.loading}
-          error={chat.error}
-          attachments={attachments.attachments}
-          preparing={attachments.preparing}
-          full={attachments.full}
-          onAddImages={attachments.addImages}
-          onAddDocuments={attachments.addDocuments}
-          onAddAudio={attachments.addAudio}
-          onAddYouTube={attachments.addYouTube}
-          onRemoveAttachment={attachments.remove}
-          onSend={send}
-          onStop={chat.stop}
-        />
-      </div>
-    </main>
+    </ConversationWorkspace>
   );
 }

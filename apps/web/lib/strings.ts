@@ -27,6 +27,11 @@ export const STR = {
   navMenu: 'मेनू',
   navCollapse: 'मेनू लहान करा',
   navExpand: 'मेनू मोठा करा',
+  // The conversation rail's own collapse, shared by /chat and /new-video-workflow. Named for
+  // the LIST rather than for a menu, so the two controls on screen do not read alike.
+  railCollapse: 'यादी लहान करा',
+  railExpand: 'यादी मोठी करा',
+  railCancel: 'नको',
   poweredBy: 'Powered by',
   installAppTitle: 'मोबाईलवर Newsroom जोडा',
   installAppHint:
@@ -92,6 +97,56 @@ export const STR = {
   mediaFormatArticlePosterDesc: 'लेखासोबत प्रसिद्ध करण्यासाठीचे पोस्टर',
   mediaOutputVideo: 'व्हिडिओ',
   mediaOutputVideoDesc: 'टिपणीवरून मराठी व्हिडिओ',
+  // The Dynamic Poster lane. The one format on this page whose SOURCE is a picture rather
+  // than text, which is why choosing it replaces the note box with an upload.
+  mediaFormatDynamicPoster: 'डायनॅमिक पोस्टर',
+  mediaFormatDynamicPosterDesc: 'तयार पोस्टरला हालचाल देऊन व्हिडिओ',
+  // ---- the upload card that replaces the note box on that lane ----
+  motionSourceLabel: 'पोस्टर अपलोड करा',
+  motionSourceHint:
+    'तयार पोस्टरची प्रतिमा द्या — तिच्यातील मजकूर जसाच्या तसा राहील आणि पोस्टरमधील काहीही वगळले जाणार नाही.',
+  motionSourceDrop: 'प्रतिमा इथे ओढून आणा, किंवा निवडण्यासाठी क्लिक करा',
+  motionSourceFormats: 'PNG, JPG किंवा WEBP',
+  motionSourceChange: 'दुसरे पोस्टर निवडा',
+  motionSourceRemove: 'काढून टाका',
+  motionSourceUploading: 'पोस्टर अपलोड होत आहे…',
+  motionSourceRequired: 'कृपया आधी पोस्टरची प्रतिमा अपलोड करा.',
+  motionDirectionLabel: 'AI प्रॉम्प्ट (ऐच्छिक)',
+  motionDirectionHint:
+    'काय हलले पाहिजे ते सांगा — उदा. “झेंडा फडकवा, फोटो स्थिर ठेवा”. रिकामे ठेवल्यास मंच स्वतः ठरवेल.',
+  motionDirectionPlaceholder: 'उदा. पाण्यावर लाटा दाखवा, मजकूर स्थिर ठेवा',
+  // ---- the clip's shape, under that box (migration 0053) ----
+  // The ratio is the ONE size instruction the motion prompt carries now — the poster's own
+  // pixel size used to be, and a video model cannot deliver an arbitrary one. Named by the
+  // frame the officer publishes into, with the ratio kept beside it because that is what
+  // they are used to reading on a design tool.
+  motionAspectLabel: 'व्हिडिओचा आकार',
+  // The DEFAULT, and the fix for the lane's first reported defect: a 4:5 poster forced into a
+  // 9:16 frame lost ~15% off each side, because the whole poster and a full 9:16 screen cannot
+  // both fit. Keeping the poster's own shape asks for neither compromise.
+  motionAspectSource: 'पोस्टरसारखाच',
+  motionAspectPortrait: 'उभा ९:१६',
+  motionAspectLandscape: 'आडवा १६:९',
+  motionAspectHint:
+    'पोस्टरसारखाच आकार ठेवल्यास पूर्ण पोस्टर जसेच्या तसे दिसते. उभा किंवा आडवा निवडल्यास पोस्टर त्या चौकटीत बसवले जाते आणि वर-खाली किंवा दोन्ही बाजूंना पोस्टरच्याच रंगाच्या पट्ट्या येतात — पोस्टरचा कोणताही भाग कापला जात नाही.',
+  // ---- the detail page ----
+  motionOutputTitle: 'तयार झालेला डायनॅमिक पोस्टर',
+  motionSourceCaption: 'मूळ पोस्टर',
+  motionDownloadVideo: 'व्हिडिओ डाउनलोड',
+  motionDownloadGif: 'GIF डाउनलोड',
+  // Stated rather than hidden: a GIF that never arrived is a real state (the conversion is
+  // best-effort so a failure never costs the paid clip), and a missing button with no
+  // explanation reads as the page being broken.
+  motionGifUnavailable: 'या आवृत्तीची GIF तयार होऊ शकली नाही.',
+  motionFeedbackLabel: 'AI प्रॉम्प्ट',
+  motionFeedbackHint:
+    'आणखी काय बदलायचे ते सांगा. हा बदल याच व्हिडिओवर होईल — नवीन आवृत्ती तयार होईल आणि जुनी तशीच राहील.',
+  motionFeedbackPlaceholder: 'उदा. पार्श्वभूमी थोडी गडद करा',
+  motionFeedbackSend: 'बदल करा',
+  motionFeedbackBusy: 'नवीन आवृत्ती तयार होत आहे…',
+  motionVersionsLabel: 'आवृत्त्या',
+  motionVersionInitial: 'पहिली आवृत्ती',
+  motionPromptLabel: 'वापरलेला AI प्रॉम्प्ट',
   notePlaceholder:
     'उदा. शासन निर्णय, बैठकीची टिपणी, योजनेची माहिती… ही टिपणीच लेखाचा एकमेव आधार असेल.',
   headingLabel: 'शीर्षक किंवा बातमीचा रोख (ऐच्छिक)',
@@ -824,6 +879,7 @@ export const STR = {
   // Poster-skeleton label while the article is shown but the poster still renders
   posterPreparing: 'पोस्टर तयार होत आहे…',
   downloadPoster: 'पोस्टर डाउनलोड करा',
+  downloadPosterPlain: 'लोगो-फूटरशिवाय डाउनलोड करा',
   editCopy: 'पोस्टरवरील मजकूर बदला',
   closeEditCopy: 'बदल बंद करा',
   rerender: 'पोस्टर पुन्हा तयार करा',
@@ -947,6 +1003,7 @@ export const STR = {
   // Icon-button row under a social poster + the icon pair inside the caption box.
   // Icon-only controls, so every one of these is its title/aria-label — never visible text.
   iconDownloadPoster: 'पोस्टर डाउनलोड करा',
+  iconDownloadPosterPlain: 'लोगो-फूटरशिवाय डाउनलोड करा',
   iconOpenPosterInCanva: 'Canva मध्ये पोस्टर उघडा',
   // Shown only when the deployment has more than one Canva integration configured.
   canvaAccountLabel: 'कोणत्या Canva खात्यातून पाठवायचे?',
@@ -1476,7 +1533,7 @@ export const STR = {
   videoInputModeLabel: 'व्हिडिओ कशावरून तयार करायचा?',
   videoInputModeNote: 'टिपणीवरून',
   videoInputModeNoteDesc:
-    'टिपणीतील माहितीतून ३० सेकंदांची संहिता तयार केली जाईल.',
+    'टिपणीतील माहितीतून संहिता तयार करून ती जास्तीत जास्त ५ सेकंदांच्या दृश्यांमध्ये विभागली जाईल.',
   videoInputModeScript: 'तयार संहितेवरून',
   videoInputModeScriptDesc:
     'मराठी निवेदनातील प्रत्येक शब्द जशाचा तसा ठेवून व्हिडिओची वेळ ठरवली जाईल.',
@@ -1497,12 +1554,24 @@ export const STR = {
   videoNarrationAudioUnreadable:
     'ही ध्वनिफीत ब्राउझरला वाचता आली नाही; तरीही पाठवून पाहता येईल.',
   videoNarrationAudioTooBig: 'ध्वनिफीत ५० MB पेक्षा मोठी असू शकत नाही.',
-  videoHeadingLabel: 'शीर्षक / मुख्य मुद्दा (ऐच्छिक)',
-  videoDurationLabel: 'व्हिडिओची लांबी',
-  videoDurationShort: '३० सेकंद',
-  videoDurationShortHint: 'निवेदन ३० सेकंदांत बसवले जाते — साधारण २–४ दृश्ये',
-  videoDurationLong: '१ मिनिट',
-  videoDurationLongHint: 'निवेदन १ मिनिटात बसवले जाते — साधारण ४–८ दृश्ये',
+  // The officer's own direction for this project. It REPLACED the old
+  // शीर्षक / मुख्य मुद्दा field, which asked for a title and steered nothing an
+  // officer could see; this steers the storyboard and says so.
+  videoAiPromptLabel: 'AI प्रॉम्प्ट (ऐच्छिक)',
+  videoAiPromptHint:
+    'AI ला काय हवे आहे ते तुमच्या शब्दांत सांगा — कशावर भर द्यायचा, दृश्ये कशी दिसावीत, कोणता सूर हवा. हे नेहमीच्या सूचनांच्या जोडीने पाठवले जाते; माहिती मात्र वरील मजकुरातूनच घेतली जाईल.',
+  videoAiPromptPlaceholder:
+    'उदा. सुरुवात लाभार्थ्याच्या घरातून करा; दृश्ये उबदार आणि आशादायी ठेवा.',
+  videoPromptImagesLabel: 'संदर्भ चित्रे (ऐच्छिक)',
+  videoPromptImagesHint:
+    'ठिकाण, व्यक्ती, वस्तू किंवा हवा असलेला लूक दाखवणारी चित्रे जोडा. ती संहिता व दृश्य आराखडा ठरवणाऱ्या AI ला दाखवली जातील.',
+  videoPromptImagesAdd: 'चित्रे जोडा',
+  videoPromptImagesRemove: 'काढा',
+  videoPromptImagesFull: (limit: number) =>
+    `जास्तीत जास्त ${limit} चित्रे जोडता येतात.`,
+  videoPromptImageTooBig: 'चित्र ५० MB पेक्षा मोठे असू शकत नाही.',
+  videoPromptImageWrongType: 'फक्त JPG, PNG किंवा WEBP चित्रे जोडता येतात.',
+  videoPromptImageAlt: (index: number) => `जोडलेले संदर्भ चित्र ${index}`,
   videoOrientationLabel: 'आकार',
   videoOrientationLandscape: 'आडवा (16:9)',
   videoOrientationLandscapeHint: 'YouTube, वेबसाईट',
@@ -1534,15 +1603,17 @@ export const STR = {
     'सर्व दृश्यांतील निवेदन एकाच सलग आवाजात वाचले जाईल; दृश्य बदलताना विराम पडणार नाही. क्रमाने वाचल्यावर संहिता नैसर्गिक वाहते आहे का ते पहा. दृश्याने त्याच क्षणी ऐकू येणारे प्रत्येक वाक्य दाखवण्याची गरज नाही.',
   videoSceneLabel: 'दृश्य',
   videoSceneBeatLabel: 'निवेदनाचा मुद्दा',
+  // Gate 1 reads as a storyboard: each card is a scene title, the narration
+  // exactly as it will be spoken, and one frame description.
   videoNarrationLabel: 'निवेदन (मराठी)',
+  videoNarrationVerbatimLabel: 'निवेदन — जसेच्या तसे',
+  videoStoryboardFrameLabel: 'दृश्य / स्टोरीबोर्ड फ्रेम',
   videoNarrationHint:
-    'ही सर्व निवेदन-खाने क्रमाने जोडून एकच सलग आवाज तयार होईल. दृश्याची नियोजित वेळ ३–१५ सेकंद आहे; संपूर्ण निवेदन निवडलेल्या एकूण वेळेत बसवा.',
+    'ही सर्व निवेदन-खाने क्रमाने जोडून एकच सलग आवाज तयार होईल. प्रत्येक दृश्य जास्तीत जास्त ५ सेकंदांचे आहे; निवेदन मोठे असल्यास ते अधिक दृश्यांमध्ये विभागा.',
   videoNarrationLockedHint:
     'हे तुम्ही दिलेले अंतिम निवेदन आहे. प्रत्येक शब्द जशाचा तसा ठेवला जाईल; फक्त दृश्य-वर्णन संपादित करता येईल.',
   videoNarrationTooFast: 'निवेदन थोडे वेगाने वाजेल — हवे असल्यास लहान करा.',
   videoNarrationListen: 'निवेदनाचा आवाज ऐका',
-  videoNarrationTotalOver:
-    'सलग निवेदन एकूण वेळेपेक्षा जास्त आहे — मजकूर लहान करा, नाहीतर संपूर्ण संहिता सलगपणा राखून आपोआप संक्षिप्त केली जाईल.',
   videoBriefLabel: 'प्रारंभ दृश्य-वर्णन (इंग्रजी)',
   videoBriefHint:
     'या दृश्यातून काय दाखवायचे आहे ते लिहा. निवेदनाची खरी लांबी ठरल्यानंतर दिग्दर्शन, अभिनय, हावभाव आणि कॅमेऱ्याची हालचाल स्वतंत्रपणे तयार होईल.',
@@ -1767,9 +1838,60 @@ export const STR = {
   chatAttachEmpty: 'या फाईलमध्ये वाचण्यासारखा मजकूर मिळाला नाही.',
   chatAttachWait: 'फाईल तयार होईपर्यंत थांबा.',
   chatAttachTooMany: 'एका संदेशाला जास्तीत जास्त १० फाईल्स जोडता येतात.',
+  // Ctrl+V of a screenshot or a copied picture. Only these three formats reach the
+  // upload route (it decides by extension), so a TIFF or GIF is named rather than
+  // silently ignored — a paste that does nothing reads as the feature being broken.
+  chatPasteUnsupported: 'फक्त JPG, PNG किंवा WEBP चित्रे चिकटवता येतात.',
   chatAttachedImage: 'चित्र',
   chatCopy: 'कॉपी करा',
   chatCopied: 'कॉपी झाले',
+
+  // ---------- प्रायोगिक: Gemini व्हिडिओ संभाषण (/new-video-workflow) ----------
+  //
+  // The prompt goes to the model exactly as typed: nothing of this product's house style,
+  // branding or scene planning is added, which is what this surface is for.
+  nvwTitle: 'Gemini व्हिडिओ संभाषण',
+  nvwSub:
+    'प्रॉम्प्ट लिहा, हवी असल्यास संदर्भ-चित्रे जोडा आणि व्हिडिओ तयार करा. पुढील सूचनेने तोच व्हिडिओ बदलता येतो.',
+  nvwExperimentNote:
+    'तुमचा प्रॉम्प्ट जसाच्या तसा Gemini कडे पाठवला जातो — या मंचाची शैली, लोगो किंवा निवेदन जोडले जात नाही.',
+  nvwEmptyTitle: 'कोणता व्हिडिओ तयार करायचा?',
+  nvwEmptyHint:
+    'उदा. “मुंबईच्या समुद्रकिनारी सूर्यास्ताचा एक शांत शॉट.” — नंतर “पार्श्वभूमी बदला” असे लिहून तोच व्हिडिओ सुधारता येतो.',
+  nvwPlaceholder: 'प्रॉम्प्ट इथे लिहा…',
+  nvwSend: 'व्हिडिओ तयार करा',
+  nvwSendFollowUp: 'बदल करा',
+  nvwNewConversation: 'नवीन संभाषण',
+  nvwAttachImage: 'संदर्भ-चित्र जोडा',
+  // A video prompt runs to thousands of characters; the box stays small and this is
+  // how it is read whole.
+  nvwExpand: 'पूर्ण स्क्रीनवर लिहा',
+  nvwCollapse: 'लहान करा',
+  nvwRemoveImage: 'काढून टाका',
+  nvwImageUploading: 'चढवत आहोत…',
+  nvwImageReady: 'तयार',
+  nvwImageFailed: 'हे चित्र चढवता आले नाही.',
+  // Ctrl+V of a screenshot or a copied picture, beside the संदर्भ-चित्र button.
+  nvwPasteUnsupported: 'फक्त PNG, JPG किंवा WEBP चित्रे चिकटवता येतात.',
+  nvwImageTooMany: 'एका सूचनेला जास्तीत जास्त ४ संदर्भ-चित्रे जोडता येतात.',
+  // Video generation is minutes, not seconds, so the wait is named rather than left to a
+  // spinner the officer would read as a hang.
+  nvwQueued: 'रांगेत आहे…',
+  nvwGenerating: 'व्हिडिओ तयार होत आहे… (काही मिनिटे लागू शकतात)',
+  nvwFailed: 'हा व्हिडिओ तयार होऊ शकला नाही.',
+  nvwLoadFailed: 'हे संभाषण उघडता आले नाही.',
+  nvwBusy: 'आधीचा व्हिडिओ तयार होईपर्यंत थांबा.',
+  nvwVideoUnsupported: 'तुमचा ब्राउझर हा व्हिडिओ दाखवू शकत नाही.',
+  nvwModelSaid: 'Gemini चा संदेश:',
+  // The rail (migration 0050). Its own labels rather than the chat ones: an officer scanning
+  // this list is looking for a video they made, not for a chat.
+  nvwYours: 'तुमची संभाषणे',
+  nvwOthers: 'इतर संभाषणे',
+  nvwNoConversations: 'अजून एकही संभाषण नाही.',
+  nvwListFailed: 'संभाषणांची यादी उघडता आली नाही.',
+  nvwDelete: 'संभाषण काढून टाका',
+  nvwDeleteConfirm: 'हे संभाषण कायमचे काढून टाकायचे?',
+  nvwOpenList: 'संभाषणांची यादी',
 
   // ---------- वापर विश्लेषण (/analytics) ----------
   navAnalytics: 'वापर विश्लेषण',
@@ -1918,8 +2040,8 @@ export const STR = {
   analyticsSliceEnglish: 'इंग्रजी',
   analyticsSliceHindi: 'हिंदी',
   analyticsSliceMarathi: 'मराठी',
-  analyticsSliceShort: '३० सेकंदांचे',
-  analyticsSliceLong: '१ मिनिटाचे',
+  analyticsSliceVideoNote: 'टिपणीवरून',
+  analyticsSliceVideoScript: 'तयार संहितेवरून',
 } as const;
 
 // The window the page is reporting on, spelled out. Shown under the title because
@@ -2070,6 +2192,10 @@ export const STEP_LABELS: Record<GenerationStep, string> = {
   revise_copy: 'अभिप्रायानुसार मजकूर सुधारत आहोत…',
   revise_scene: 'नवीन चित्र तयार करत आहोत…',
   revise_image: 'चित्र पुन्हा तयार करत आहोत…',
+  // Dynamic Poster. Two phases, and the second is minutes long — which is exactly why it is
+  // named rather than folded into a generic "तयार करत आहोत".
+  motion_prompt: 'पोस्टर वाचून सूचना तयार करत आहोत…',
+  motion_render: 'पोस्टरला हालचाल देत आहोत…',
   translate: 'भाषांतर',
   done: 'पूर्ण झाले',
 };
@@ -2107,6 +2233,7 @@ export const CATEGORY_LABELS: Record<Category, string> = {
   twitter: 'ट्विटर',
   facebook: 'फेसबुक',
   youtube: 'यूट्यूब',
+  dynamic_poster: 'डायनॅमिक',
 };
 
 // What a run actually produced, for the history card and the thread rail. A social
@@ -2208,11 +2335,9 @@ export function videoNarrationEstimate(
 // remedy is stated because it is not obvious — the text has to be split across
 // two scenes, not deleted.
 export function videoNarrationTooLong(chars: number, max: number): string {
-  return `हे निवेदन ${chars.toLocaleString('mr-IN')} अक्षरांचे आहे. एका दृश्याचे निवेदन जास्तीत जास्त ${max.toLocaleString('mr-IN')} अक्षरे असू शकते — एक क्लिप १५ सेकंदांपेक्षा मोठी होत नाही. “यानंतर नवीन दृश्य जोडा” वापरून हा मजकूर दोन दृश्यांत विभागा.`;
+  return `हे निवेदन ${chars.toLocaleString('mr-IN')} अक्षरांचे आहे. एका दृश्याचे निवेदन जास्तीत जास्त ${max.toLocaleString('mr-IN')} अक्षरे असू शकते — एक दृश्य ५ सेकंदांपेक्षा मोठे होत नाही. “यानंतर नवीन दृश्य जोडा” वापरून हा मजकूर दोन दृश्यांत विभागा.`;
 }
 
-// Gate-1 running total against the project's selected length. Advisory only:
-// the storyboard job measures the real audio and shortens what overruns.
 // The clip provider caps its prompt, so a very long hand-typed direction is
 // shortened at render time rather than failing. Say so while it is being typed.
 export const VIDEO_MOTION_BRIEF_ADVISORY_CHARS = 600;
@@ -2221,13 +2346,6 @@ export function videoMotionBriefLength(chars: number): string {
   return chars > VIDEO_MOTION_BRIEF_ADVISORY_CHARS
     ? `${chars} अक्षरे — इतकी लांब सूचना व्हिडिओ तयार करताना सुमारे ${VIDEO_MOTION_BRIEF_ADVISORY_CHARS} अक्षरांपर्यंत छोटी केली जाईल.`
     : `${chars} अक्षरे`;
-}
-
-export function videoNarrationTotal(
-  estimatedSeconds: number,
-  targetSeconds: number,
-): string {
-  return `एकूण निवेदन: अंदाजे ${estimatedSeconds.toFixed(0)} से. / लक्ष्य ${targetSeconds} से.`;
 }
 
 export function videoReadyScriptEstimate(

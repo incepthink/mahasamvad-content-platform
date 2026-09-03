@@ -3,12 +3,10 @@
 // Marathi script (gate 1) → storyboard keyframe stills (gate 2) → provider-
 // rendered clips stitched into one voiced MP4 + SRT.
 //
-// AUDIO LEADS, CLIPS FOLLOW (2026-07-26): the narration is authored against the
-// project's TOTAL time (VIDEO_TOTAL_SECONDS — 30s or 60s), never against a clip
-// window. After TTS measures each scene's WAV, the clip duration is DERIVED
-// from the speech (clipSecondsForNarration: clamp(3, 15, ceil(seconds)) — Kling
-// takes integer 3-15s). Narration is never trimmed or sped up to fit a clip;
-// the clip stretches to fit the speech.
+// AUDIO LEADS, CLIPS FOLLOW: the narration has no whole-video duration cap.
+// It is divided into as many scenes as needed, with every newly planned scene
+// capped at five seconds. Legacy rows may still contain longer provider-valid
+// clips and remain readable.
 //
 // The per-second tier prices and the SRT builder live HERE, not in
 // content-engine: the web renders the pre-spend cost estimate on gate 2 and
@@ -41,16 +39,16 @@ export const VideoProjectStepSchema = z.enum([
 ]);
 export type VideoProjectStep = z.infer<typeof VideoProjectStepSchema>;
 
-// The officer's total-length pick: short = a ~30s video, long = ~1 minute
-// (VIDEO_TOTAL_SECONDS maps the values). The column keeps its historical
-// 'short'/'long' CHECK values so no migration was needed when the buckets
-// became exact totals.
+// Legacy storage values. The duration picker has been removed and neither
+// value limits new narration; the column keeps its historical CHECK values so
+// existing rows and deployments need no migration.
 export const VideoDurationBucketSchema = z.enum(['short', 'long']);
 export type VideoDurationBucket = z.infer<typeof VideoDurationBucketSchema>;
 
-// How the narration entered the project. A note is rewritten into a fixed
-// 30-second voiceover; a script is already-final Marathi narration whose words
-// must survive unchanged and whose natural speaking time decides the video.
+// How the narration entered the project. A note is rewritten into a voiceover;
+// a script is already-final Marathi narration whose words must survive
+// unchanged. In both lanes the narration's natural speaking time decides how
+// many five-second scenes the video needs.
 export const VideoInputModeSchema = z.enum(['note', 'script']);
 export type VideoInputMode = z.infer<typeof VideoInputModeSchema>;
 
@@ -99,59 +97,33 @@ export const VIDEO_TIER_PRICE_PER_SECOND_USD: Readonly<
   lite: KLING_720P_USD_PER_SECOND,
 };
 
-// The NOTE lane's planner range. Duration and story needs decide the result;
-// there is no preferred count per time bucket. It is not a ceiling on a stored
-// scene list: the READY-SCRIPT lane derives its scene count from how long the
-// supplied narration actually speaks (2026-08-12), so a long script legitimately
-// produces more scenes than this — see VIDEO_CLIP_MAX_SECONDS below and
-// splitReadyVideoScript. The note lane cannot reach it anyway: its budget is
-// VIDEO_TOTAL_SECONDS (30/60s), which eight 15-second clips already cover twice
-// over.
-export const VIDEO_SCENE_LIMIT: Readonly<{ min: number; max: number }> = {
-  min: 1,
-  max: 8,
-};
+// A storyboard must contain at least one scene. There is deliberately no
+// maximum: longer narration creates more five-second scenes.
+export const VIDEO_SCENE_LIMIT: Readonly<{ min: number }> = { min: 1 };
 
-// Kling 3.0's real clip bounds (whole seconds; kling-client validates the same
-// range at pre-flight). The MAX is also the per-scene SPEECH ceiling: a scene
-// whose narration measures past 15s is rewritten shorter, because no clip can
-// stretch further. Veo cannot do variable lengths (its start+end interpolation
-// exists only at 8s), so the veo adapter rejects anything outside {4, 6, 8} —
-// variable clips require VIDEO_CLIP_PROVIDER=kling, the deployed default.
+// Newly planned scene windows are whole seconds from 3 through 5. Kling can
+// technically render as long as 15 seconds, but the product intentionally uses
+// shorter scenes and creates more of them. The provider maximum remains the
+// schema ceiling solely so historical 6-15 second rows continue to parse.
 export const VIDEO_CLIP_MIN_SECONDS = 3;
+export const VIDEO_SCENE_MAX_SECONDS = 5;
 export const VIDEO_CLIP_MAX_SECONDS = 15;
 
-// NOTE (2026-08-12): VIDEO_SCRIPT_MAX_SECONDS is DELETED. Ready-script mode had
-// a two-minute ceiling — eight clips at 15 seconds each — which was the note
-// lane's scene limit leaking onto a lane that has no reason to obey it. A ready
-// script's length is the officer's decision, so the scene count is now derived
-// from how long the narration speaks and nothing rejects a long one. The spend
-// guard is unchanged and is where it belongs: gate 2's explicit confirm, priced
-// from the real scene count (VIDEO_TIER_PRICE_PER_SECOND_USD). Do not
-// reintroduce a duration cap here without a provider fact to point at.
+// There is no script-duration ceiling in either input lane. A narration's
+// length determines its scene count, and gate 2 prices that real count before
+// any clip is rendered.
 
-// The officer-selected TOTAL video length per bucket — the narration's budget.
-// A soft target: the narrate phase shortens the worst-offending scenes while
-// the measured total overruns it by more than VIDEO_TOTAL_FIT_TOLERANCE, then
-// delivers whatever it has (a video a few seconds long beats mutilated speech).
-export const VIDEO_TOTAL_SECONDS: Readonly<
-  Record<VideoDurationBucket, number>
-> = {
-  short: 30,
-  long: 60,
-};
+// How far a real voice measurement may exceed its estimate before the narrate
+// phase attempts to shorten wording to the already-created scene capacity.
+export const VIDEO_NARRATION_FIT_TOLERANCE = 1.15;
 
-// How far the measured narration total may overrun VIDEO_TOTAL_SECONDS before
-// the narrate phase spends shorten calls on the longest scenes.
-export const VIDEO_TOTAL_FIT_TOLERANCE = 1.15;
+// One second inside the five-second scene ceiling, so ceil() still lands at or
+// below five after a rewrite.
+export const VIDEO_SCENE_REWRITE_TARGET_SECONDS = 4;
 
-// What a scene that busts the 15s clip ceiling is rewritten toward — 1s inside
-// the ceiling so ceil() still lands the derived clip at ≤ 15.
-export const VIDEO_SCENE_REWRITE_TARGET_SECONDS = 14;
-
-// A scene's clip length in whole seconds. Was the 4|6|8 Veo union; widened to
-// Kling's real 3-15 range when durations became audio-derived. Legacy 4/6/8
-// rows all pass (WINDOW FREEZE keeps their rendered clips valid).
+// Stored scene duration. New windows are capped by VIDEO_SCENE_MAX_SECONDS,
+// while the wider provider maximum keeps legacy 6-15 second rows readable
+// (WINDOW FREEZE keeps their rendered clips valid).
 export const VideoSceneDurationSchema = z
   .number()
   .int()
@@ -165,7 +137,7 @@ export type VideoSceneDuration = z.infer<typeof VideoSceneDurationSchema>;
 // is what makes muxNarration's atempo unreachable on a newly derived scene.
 export function clipSecondsForNarration(narrationSeconds: number): number {
   return Math.min(
-    VIDEO_CLIP_MAX_SECONDS,
+    VIDEO_SCENE_MAX_SECONDS,
     Math.max(VIDEO_CLIP_MIN_SECONDS, Math.ceil(narrationSeconds)),
   );
 }
@@ -180,7 +152,7 @@ export function allocateVideoSceneDurations(
 ): number[] {
   if (sceneWeights.length === 0) return [];
   const minimum = sceneWeights.length * VIDEO_CLIP_MIN_SECONDS;
-  const maximum = sceneWeights.length * VIDEO_CLIP_MAX_SECONDS;
+  const maximum = sceneWeights.length * VIDEO_SCENE_MAX_SECONDS;
   const total = Math.max(minimum, Math.min(maximum, Math.ceil(totalSeconds)));
   const weights = sceneWeights.map((weight) => Math.max(1, weight));
   const weightTotal = weights.reduce((sum, weight) => sum + weight, 0);
@@ -190,7 +162,7 @@ export function allocateVideoSceneDurations(
     let pick = -1;
     let largestDeficit = Number.NEGATIVE_INFINITY;
     for (const [index, duration] of durations.entries()) {
-      if (duration >= VIDEO_CLIP_MAX_SECONDS) continue;
+      if (duration >= VIDEO_SCENE_MAX_SECONDS) continue;
       const ideal = (total * weights[index]!) / weightTotal;
       const deficit = ideal - duration;
       if (deficit > largestDeficit) {
@@ -218,7 +190,7 @@ export function allocateVideoSceneDurations(
 // THE RATE IS PER-VOICE, SO IT IS CONFIGURABLE (2026-07-31). 16.5 is bulbul's
 // number and stays the default; ElevenLabs reads the same Marathi at ~10.9
 // chars/s, and the difference is not cosmetic on the READY-SCRIPT lane. There
-// the scene count is ceil(estimateNarrationSeconds(script) / 15) and the words
+// the scene count is ceil(estimateNarrationSeconds(script) / 5) and the words
 // may never be trimmed or sped up, so a rate that is 50% too fast plans too few
 // clips and the narrate gate REFUSES the project after the officer has already
 // approved it. Set NARRATION_CHARS_PER_SECOND beside NARRATION_TTS_PROVIDER.
@@ -240,15 +212,11 @@ function readNarrationCharsPerSecond(): number {
 
 export const DEFAULT_NARRATION_CHARS_PER_SECOND = readNarrationCharsPerSecond();
 
-// The hard per-scene ceiling: the LONGEST clip's worth of speech at the
-// measured rate (15s × 16.5 ≈ 248 chars). Feeds BOTH the script generator's
-// schema (content-engine) and UpdateVideoScriptRequestSchema, so the two can
-// never drift apart. A schema ceiling, not a target — the authoring target is
-// the TOTAL budget (videoNarrationBudgetChars); this only rejects a single
-// line no clip could ever hold, and the real guarantee is downstream anyway:
-// the storyboard job measures the actual WAV and shortens what still overruns.
+// The hard per-scene ceiling: five seconds of speech at the configured rate.
+// It validates officer edits; generated narration itself has no total ceiling
+// and is divided into additional scenes instead.
 export const VIDEO_NARRATION_MAX_CHARS = Math.round(
-  VIDEO_CLIP_MAX_SECONDS * DEFAULT_NARRATION_CHARS_PER_SECOND,
+  VIDEO_SCENE_MAX_SECONDS * DEFAULT_NARRATION_CHARS_PER_SECOND,
 );
 
 // Spoken Marathi in words/second — the same budget expressed the way a writing
@@ -264,19 +232,6 @@ export const VIDEO_NARRATION_MAX_CHARS = Math.round(
 export const NARRATION_WORDS_PER_SECOND =
   Math.round(2.3 * (DEFAULT_NARRATION_CHARS_PER_SECOND / 16.5) * 100) / 100;
 
-// The whole video's narration budget — what the planner and the script writer
-// author toward, and what the narrate phase's total-fit pass enforces with
-// real measurements. 30s → ~495 chars / ~69 words; 60s → ~990 / ~138.
-export function videoNarrationBudgetChars(bucket: VideoDurationBucket): number {
-  return Math.round(
-    VIDEO_TOTAL_SECONDS[bucket] * DEFAULT_NARRATION_CHARS_PER_SECOND,
-  );
-}
-
-export function videoNarrationBudgetWords(bucket: VideoDurationBucket): number {
-  return Math.round(VIDEO_TOTAL_SECONDS[bucket] * NARRATION_WORDS_PER_SECOND);
-}
-
 // The on-screen Marathi key point burned onto a scene (the amount, the
 // deadline, the count, the scheme name). A ceiling, not a target: this is one
 // readable line in the lower third at 1080p, and a second line would start
@@ -291,6 +246,24 @@ export const VIDEO_KEY_POINT_MAX_CHARS = 48;
 // is officer-editable at gate 1. Lives here so the generator's schema
 // (content-engine) and UpdateVideoScriptRequestSchema cannot drift.
 export const VIDEO_STYLE_MAX_CHARS = 1200;
+
+// The officer's own direction for one project ("AI प्रॉम्प्ट"), migration 0051.
+// A ceiling rather than a target: it is an instruction to the script/storyboard
+// model, not a source of facts, and the note beside it is what the article-side
+// NOTE_MAX_CHARS bound is for.
+export const VIDEO_AI_PROMPT_MAX_CHARS = 2000;
+
+// How many reference pictures may ride with that prompt. They are sent to the
+// PLANNING model as extra image parts, so each one is billed as input on every
+// planning call — including gate 1's free-to-the-officer re-plan. Four is what a
+// reference sheet or a handful of location photographs needs; the browser and
+// the create route both enforce it, so a hand-made request cannot spend more.
+export const VIDEO_PROMPT_IMAGE_LIMIT = 4;
+
+// The scene's own storyboard label ("Opening — Newborn daughter"): the line the
+// review card is titled with, under "दृश्य N". English, like the visual brief it
+// belongs with, and stored on the scenes jsonb so it needed no migration.
+export const VIDEO_SCENE_LABEL_MAX_CHARS = 120;
 
 // Where the Government of Maharashtra lockup sits on a video frame, as
 // fractions of the frame WIDTH, so one number serves 720p, 1080p and 9:16
@@ -378,6 +351,9 @@ export const VideoSceneSchema = z.object({
   status: VideoSceneStatusSchema,
   // Planner's Marathi one-liner: the information this scene must convey.
   beat: z.string().optional(),
+  // The storyboard's short English label for this scene, shown as the card's
+  // own title. Absent on scenes planned before it existed.
+  sceneLabel: z.string().optional(),
   // Planner's English shot/camera direction ("wide establishing shot, slow
   // push-in") — threaded into the keyframe + Veo motion prompts.
   shotHint: z.string().optional(),
@@ -404,7 +380,17 @@ export const VideoProjectDetailSchema = z.object({
   step: VideoProjectStepSchema.nullable(),
   error: z.string().nullable(),
   note: z.string(),
+  // Legacy only: the create form asked for a title/angle until 2026-09-02 and
+  // rows from before then still carry one (the list cards name themselves from
+  // it). `aiPrompt` replaced it as the officer's direction.
   heading: z.string().nullable(),
+  // Defaulted so a payload from an API without 0051 — or before this field
+  // existed — parses as "no direction" rather than failing the poll.
+  aiPrompt: z.string().nullable().default(null),
+  // Public URLs of the reference pictures attached to that prompt, so the page
+  // can show back what was sent. The PATHS stay server-side: nothing sends them
+  // back, unlike a scene's reference image.
+  promptImageUrls: z.array(z.string()).default([]),
   inputMode: VideoInputModeSchema,
   durationBucket: VideoDurationBucketSchema,
   orientation: VideoOrientationSchema,
@@ -509,9 +495,14 @@ export const UPLOADED_NARRATION_VOICE = 'upload';
 export const CreateVideoProjectRequestSchema = z
   .object({
     note: z.string().trim().min(20),
-    heading: z.string().trim().max(200).optional(),
+    // The officer's free-text direction, appended to the lane's own task
+    // statement. Never a source of facts — the prompt block says so, and the
+    // note stays the only authority.
+    aiPrompt: z.string().trim().max(VIDEO_AI_PROMPT_MAX_CHARS).optional(),
     inputMode: VideoInputModeSchema.default('note'),
-    durationBucket: VideoDurationBucketSchema,
+    // Kept only for the existing database column. New clients omit it and the
+    // neutral legacy value is persisted without controlling generation.
+    durationBucket: VideoDurationBucketSchema.default('short'),
     orientation: VideoOrientationSchema,
     tier: VideoTierSchema,
     // Set by the create route when the request carried a narration file. It
@@ -603,13 +594,8 @@ export const UpdateVideoScriptRequestSchema = z.object({
         durationSeconds: VideoSceneDurationSchema.optional(),
       }),
     )
-    // Only a floor. There WAS a VIDEO_SCENE_LIMIT.max ceiling here, which was
-    // the note lane's planner range applied to every stored scene list — it
-    // would now reject a ready-script project whose narration legitimately
-    // needs more than eight clips. The note lane's own ceiling is enforced
-    // where it is a product decision (the planner prompt, and the web's
-    // add-scene control), not on a save that must be able to store whatever
-    // the split produced.
+    // Only a floor. Longer narration may be saved as as many five-second scenes
+    // as it needs.
     .min(VIDEO_SCENE_LIMIT.min),
 });
 export type UpdateVideoScriptRequest = z.infer<
@@ -640,7 +626,7 @@ export type UpdateVideoScriptRequest = z.infer<
 // against the old, larger ceiling. In both, the officer was left with a raw
 // zod `too_big` payload on a button that would not have changed the line
 // anyway. The per-clip fit is still guaranteed where it is actually decided —
-// windows come from clipSecondsForNarration (clamped to VIDEO_CLIP_MAX_SECONDS)
+// windows come from clipSecondsForNarration (clamped to five seconds)
 // and the storyboard job measures the real WAV — and the save/submit buttons,
 // which DO commit a split, keep the ceiling.
 //

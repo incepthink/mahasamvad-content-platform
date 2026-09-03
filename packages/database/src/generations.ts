@@ -9,12 +9,9 @@ export const GENERATION_REVISIONS_TABLE = 'generation_revisions';
 export type OutputType = 'article' | 'poster' | 'both';
 // 'youtube' is the 1280x720 thumbnail lane (migration 0042). Mirrors CategorySchema in
 // @dgipr/schemas; kept structural here so this package stays dependency-free.
+// 'dynamic_poster' is the motionised-poster lane (migration 0052).
 export type Category =
-  | 'news'
-  | 'scheme'
-  | 'twitter'
-  | 'facebook'
-  | 'youtube';
+  'news' | 'scheme' | 'twitter' | 'facebook' | 'youtube' | 'dynamic_poster';
 // Mirrors DesignModeSchema in @dgipr/schemas — a 2x2 of who DESIGNS the poster (a template, or
 // the image model from scratch) x where its TEXT comes from (generatePosterCopy, or the officer's
 // note verbatim). 'fresh_verbatim' is the from-scratch/verbatim cell. generations.design_mode is
@@ -33,7 +30,9 @@ export type RevisionTarget =
   | 'manual_copy'
   | 'poster_image'
   | 'caption'
-  | 'manual_caption';
+  | 'manual_caption'
+  // One Dynamic Poster render (migration 0052) — the lane's version history.
+  | 'motion';
 
 // One row in generations. `copy` stays `unknown` here — the database package does
 // not depend on the Copy schema; callers validate with CopySchema when needed.
@@ -131,6 +130,21 @@ export type GenerationRow = Readonly<{
   scenePrompt: string | null;
   scenePath: string | null;
   posterPath: string | null;
+  // ---------- Dynamic Poster (migration 0052) ----------
+  // The still poster the officer uploaded, and the clip made from it. All null on every
+  // other lane. `motionInteractionId` is THE CHAIN POINT: the Gemini interaction a follow-up
+  // continues from, advanced only by a render that actually produced a clip.
+  sourceImagePath: string | null;
+  motionPath: string | null;
+  motionGifPath: string | null;
+  motionPrompt: string | null;
+  motionInteractionId: string | null;
+  // The clip's aspect ratio, 'source' | '9:16' | '16:9' (migration 0053). Null on every other
+  // lane, and on a Dynamic Poster created before the control existed — the job reads it as
+  // 'source', the poster's own shape, so null is a value rather than a gap. Plain text with
+  // no CHECK, which is why a third value needed no migration; the job PARSES it rather than
+  // casting, so a hand-edited row cannot put an arbitrary string into a paid render's prompt.
+  motionAspect: string | null;
   // Total USD this generation has cost so far (text measured from OpenAI usage + a fixed
   // per-render image tier price), accumulated across the initial run and any feedback
   // jobs. Null for pre-feature rows. `costBreakdown` holds the token/split audit detail.
@@ -207,6 +221,12 @@ type GenerationDbRow = {
   scene_prompt: string | null;
   scene_path: string | null;
   poster_path: string | null;
+  source_image_path: string | null;
+  motion_path: string | null;
+  motion_gif_path: string | null;
+  motion_prompt: string | null;
+  motion_interaction_id: string | null;
+  motion_aspect: string | null;
   // PostgREST may serialise numeric as a string; fromDbRow coerces to number.
   cost_usd: number | string | null;
   cost_breakdown: unknown;
@@ -281,6 +301,16 @@ function fromDbRow(row: GenerationDbRow): GenerationRow {
     scenePrompt: row.scene_prompt,
     scenePath: row.scene_path,
     posterPath: row.poster_path,
+    // ?? null: a pre-0052 database returns no such columns (undefined), which JSON.stringify
+    // would DROP from the detail payload and fail the web's Zod parse — the 0021 finding.
+    sourceImagePath: row.source_image_path ?? null,
+    motionPath: row.motion_path ?? null,
+    motionGifPath: row.motion_gif_path ?? null,
+    motionPrompt: row.motion_prompt ?? null,
+    motionInteractionId: row.motion_interaction_id ?? null,
+    // ?? null for the 0052 reason one line up: a database without 0053 returns no such
+    // column, and an undefined here would be dropped from the detail payload.
+    motionAspect: row.motion_aspect ?? null,
     costUsd:
       row.cost_usd === null || row.cost_usd === undefined
         ? null
@@ -316,6 +346,12 @@ export type GenerationPatch = Partial<
     | 'scenePrompt'
     | 'scenePath'
     | 'posterPath'
+    // Dynamic Poster (0052). Every one of these is written by a render, so unlike the
+    // insert-only officer inputs they belong here.
+    | 'motionPath'
+    | 'motionGifPath'
+    | 'motionPrompt'
+    | 'motionInteractionId'
     | 'posterStyle'
     | 'posterHeading'
     | 'styleReferenceMeta'
@@ -343,6 +379,12 @@ function patchToDbRow(patch: GenerationPatch): Record<string, unknown> {
   if (patch.scenePrompt !== undefined) row.scene_prompt = patch.scenePrompt;
   if (patch.scenePath !== undefined) row.scene_path = patch.scenePath;
   if (patch.posterPath !== undefined) row.poster_path = patch.posterPath;
+  if (patch.motionPath !== undefined) row.motion_path = patch.motionPath;
+  if (patch.motionGifPath !== undefined)
+    row.motion_gif_path = patch.motionGifPath;
+  if (patch.motionPrompt !== undefined) row.motion_prompt = patch.motionPrompt;
+  if (patch.motionInteractionId !== undefined)
+    row.motion_interaction_id = patch.motionInteractionId;
   if (patch.posterStyle !== undefined) row.poster_style = patch.posterStyle;
   if (patch.posterHeading !== undefined)
     row.poster_heading = patch.posterHeading;
@@ -407,6 +449,14 @@ export async function insertGeneration(
     styleReference?: string | undefined;
     // Insert-only (migration 0041): the officer's trusted request for this article.
     instructions?: string | undefined;
+    // Insert-only (migration 0052): the poster the officer uploaded for a Dynamic Poster
+    // run. Insert-only for the reason imagePrompt is — a retry and every follow-up re-read
+    // the row, so the source must be the same object every time.
+    sourceImagePath?: string | undefined;
+    // Insert-only (migration 0053): the clip's aspect ratio. Same reason again — the
+    // follow-up path regenerates the motion prompt, so the shape must be on the row.
+    // Pass it ONLY when it is not the default; see the insert below.
+    motionAspect?: string | undefined;
     // Insert-only: the note is a finished article; the runner skips generation.
     articleProvided?: boolean | undefined;
   }>,
@@ -463,6 +513,16 @@ export async function insertGeneration(
       // Same omit-unless-typed treatment (migration 0041), so an un-applied 0041 costs this
       // one field rather than every create.
       ...(input.instructions ? { instructions: input.instructions } : {}),
+      // Same again (migration 0052). This one cannot save the run it belongs to — a Dynamic
+      // Poster with no source is not a run — but it keeps every OTHER create working on a
+      // database where 0052 has not been applied.
+      ...(input.sourceImagePath
+        ? { source_image_path: input.sourceImagePath }
+        : {}),
+      // Same again (migration 0053), and the caller passes this only for the NON-default
+      // ratio — which is what confines an un-applied 0053 to landscape requests instead of
+      // failing every Dynamic Poster create. The job reads null as the portrait default.
+      ...(input.motionAspect ? { motion_aspect: input.motionAspect } : {}),
       article_provided: input.articleProvided ?? false,
     })
     .select()
@@ -694,6 +754,11 @@ export type RevisionRow = Readonly<{
   scenePrompt: string | null;
   scenePath: string | null;
   posterPath: string | null;
+  // One Dynamic Poster render (target 'motion', migration 0052). Its own columns rather than
+  // poster_path, which every poster reader in the API treats as a PNG — an .mp4 sitting in it
+  // would be listed as a poster version by posterVersionPaths.
+  motionPath: string | null;
+  motionGifPath: string | null;
   createdAt: string;
 }>;
 
@@ -707,6 +772,8 @@ export type NewRevision = Readonly<{
   scenePrompt?: string | null;
   scenePath?: string | null;
   posterPath?: string | null;
+  motionPath?: string | null;
+  motionGifPath?: string | null;
 }>;
 
 type RevisionDbRow = {
@@ -720,6 +787,8 @@ type RevisionDbRow = {
   scene_prompt: string | null;
   scene_path: string | null;
   poster_path: string | null;
+  motion_path: string | null;
+  motion_gif_path: string | null;
   created_at: string;
 };
 
@@ -737,6 +806,12 @@ export async function insertRevision(
     scene_prompt: revision.scenePrompt ?? null,
     scene_path: revision.scenePath ?? null,
     poster_path: revision.posterPath ?? null,
+    // Omitted unless this revision actually is a motion render, so an un-applied 0052 costs
+    // the Dynamic Poster lane rather than every article/poster revision ever logged.
+    ...(revision.motionPath ? { motion_path: revision.motionPath } : {}),
+    ...(revision.motionGifPath
+      ? { motion_gif_path: revision.motionGifPath }
+      : {}),
   });
   if (error) {
     throw new Error(`Failed to insert revision: ${error.message}`);
@@ -768,6 +843,8 @@ export async function listRevisions(
     scenePrompt: row.scene_prompt,
     scenePath: row.scene_path,
     posterPath: row.poster_path,
+    motionPath: row.motion_path ?? null,
+    motionGifPath: row.motion_gif_path ?? null,
     createdAt: row.created_at,
   }));
 }

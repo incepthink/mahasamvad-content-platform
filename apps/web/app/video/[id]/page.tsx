@@ -22,11 +22,9 @@ import {
   VIDEO_NARRATION_MAX_CHARS,
   VIDEO_SCENE_LIMIT,
   VIDEO_STYLE_MAX_CHARS,
-  VIDEO_TOTAL_FIT_TOLERANCE,
   VIDEO_LOCKUP_MARGIN_RATIO,
   VIDEO_LOCKUP_WIDTH_RATIO,
   UPLOADED_NARRATION_VOICE,
-  VIDEO_TOTAL_SECONDS,
   clipSecondsForNarration,
   estimateNarrationSeconds,
 } from '@dgipr/schemas';
@@ -49,7 +47,6 @@ import {
 } from '../../../lib/api';
 import { useVideoProject } from '../../../lib/useVideoProject';
 import {
-  videoNarrationTotal,
   videoReadyScriptEstimate,
   STR,
   VIDEO_STEP_LABELS,
@@ -57,6 +54,7 @@ import {
 import { errorMessage, storedErrorMessage } from '../../../lib/errorMessage';
 import { ErrorNotice } from '../../../components/ErrorNotice';
 import { VideoSceneCard } from '../../../components/VideoSceneCard';
+import { InlineEditableField } from '../../../components/InlineEditableField';
 import { VideoStatusChip } from '../../../components/VideoStatusChip';
 import { VideoResultView } from '../../../components/VideoResultView';
 
@@ -95,6 +93,10 @@ type SceneDraft = {
   referenceImagePath: string;
   referenceImageUrl: string;
   beat?: string | undefined;
+  // The storyboard's own title for the scene. Read-only here — it is the
+  // model's, re-derived by the re-plan — so it is carried for display alone and
+  // is never sent back on a save.
+  sceneLabel?: string | undefined;
 };
 
 // Names an inserted card until a save turns it into a stored scene. Module
@@ -131,6 +133,7 @@ function draftsFrom(scenes: readonly VideoScene[]): SceneDraft[] {
     referenceImageUrl: scene.referenceImageUrl ?? '',
     durationSeconds: scene.durationSeconds,
     beat: scene.beat,
+    sceneLabel: scene.sceneLabel,
   }));
 }
 
@@ -344,14 +347,9 @@ export default function VideoProjectPage({
   }
 
   const bounds = VIDEO_SCENE_LIMIT;
-  // The eight-scene ceiling is the NOTE lane's product limit — its narration is
-  // budgeted at 30/60 seconds, so more cuts than that is chopping. A ready
-  // script's length is the officer's own and its scene count is derived from
-  // it (2026-08-12), so counting an already-longer project against eight would
-  // only remove the extra-visual-cut affordance from exactly the projects that
-  // have the most narration to illustrate.
-  const canAddScene =
-    detail.inputMode === 'note' ? (drafts ?? []).length < bounds.max : true;
+  // There is no scene-count ceiling. Longer narration is represented by more
+  // scenes, each with a maximum five-second window.
+  const canAddScene = true;
   // Removing is offered on BOTH lanes for the same reason narration editing is
   // (see the gate-1 card below): on a ready-script project it is only legal
   // once the scene's words have been moved into a neighbour, and the API's
@@ -359,9 +357,8 @@ export default function VideoProjectPage({
   // control instead would remove the legal use too — an officer who merged two
   // scenes' words then had no way to drop the emptied one.
   const canRemoveScene = (drafts ?? []).length > bounds.min;
-  // Gate-1 budget line: what the edited drafts are estimated to speak, against
-  // the project's selected total. Estimated from characters, so it is a guide,
-  // not a verdict — the storyboard job measures the real WAVs.
+  // Gate-1 duration line. It reports the narration's natural estimate and the
+  // resulting scene count; there is no whole-video target to compare it with.
   const totalNarrationSeconds = (drafts ?? []).reduce(
     (sum, draft) => sum + estimateNarrationSeconds(draft.narration),
     0,
@@ -374,13 +371,9 @@ export default function VideoProjectPage({
     (sum, scene) => sum + (scene.narrationSeconds ?? 0),
     0,
   );
-  const narrationTarget = VIDEO_TOTAL_SECONDS[detail.durationBucket];
-  const narrationOverBudget =
-    detail.inputMode === 'note' &&
-    totalNarrationSeconds > narrationTarget * VIDEO_TOTAL_FIT_TOLERANCE;
   // Unlike the running total above, this one BLOCKS the two buttons that COMMIT
   // a split: the save route rejects a narration longer than one clip's worth of
-  // speech (no clip may exceed VIDEO_CLIP_MAX_SECONDS), so letting the press
+  // speech (a new scene may not exceed five seconds), so letting the press
   // through only produced a raw zod `too_big` payload. The card that is over
   // says so, and the remedy is to split the line across two scenes.
   //
@@ -732,21 +725,14 @@ export default function VideoProjectPage({
             <h2>{STR.videoScriptTitle}</h2>
             <p className="hint">{STR.videoScriptIntro}</p>
           </section>
-          <section className="card">
-            <label className="field-label" htmlFor="video-style">
-              {STR.videoStyleLabel}
-            </label>
-            <p className="hint" style={{ marginTop: 4 }}>
-              {STR.videoStyleHint}
-            </p>
-            <textarea
+          <section className="card video-style-card">
+            <InlineEditableField
               id="video-style"
-              className="textarea"
-              style={{ marginTop: 6, minHeight: 90 }}
+              label={STR.videoStyleLabel}
               value={styleDraft}
               maxLength={VIDEO_STYLE_MAX_CHARS}
               disabled={busy}
-              onChange={(event) => setStyleDraft(event.target.value)}
+              onChange={setStyleDraft}
             />
           </section>
           {drafts.map((draft, index) => (
@@ -761,6 +747,9 @@ export default function VideoProjectPage({
                 durationSeconds: draft.durationSeconds,
                 status: 'pending',
                 ...(draft.beat !== undefined ? { beat: draft.beat } : {}),
+                ...(draft.sceneLabel !== undefined
+                  ? { sceneLabel: draft.sceneLabel }
+                  : {}),
               }}
               mode="edit"
               busy={busy}
@@ -880,36 +869,24 @@ export default function VideoProjectPage({
                 {STR.videoRemoveSceneScriptHint}
               </p>
             ) : null}
-            {/* The running narration total against the project's selected
-                length. Advisory ONLY — it never blocks the submit, because the
-                storyboard job measures the real audio and shortens whatever
-                still overruns; a character estimate must not veto a script the
-                voice might well fit. */}
-            <p
-              className={narrationOverBudget ? 'form-error' : 'hint'}
-              style={{ marginTop: 8 }}
-            >
+            {/* The running narration duration and scene count. There is no
+                whole-video target; longer narration simply needs more scenes. */}
+            <p className="hint" style={{ marginTop: 8 }}>
               {/* With the officer's own recording the length is no longer an
                   estimate — it was MEASURED at create time, and the per-scene
                   shares of that WAV sum to it. Labelling it "अंदाज" would
                   understate what the pipeline actually knows. */}
               {/* Joined into ONE expression rather than left as two adjacent
                   text children — see the note in WorkingCard. */}
-              {(narrationIsUploaded
+              {narrationIsUploaded
                 ? `${STR.videoNarrationAudioMeasured}: ${videoReadyScriptEstimate(
                     measuredNarrationSeconds,
                     detail.scenes.length,
                   )}`
-                : detail.inputMode === 'script'
-                  ? `${STR.videoScriptEstimateLabel}: ${videoReadyScriptEstimate(
-                      totalNarrationSeconds,
-                      drafts.length,
-                    )}`
-                  : videoNarrationTotal(
-                      totalNarrationSeconds,
-                      narrationTarget,
-                    )) +
-                (narrationOverBudget ? ` ${STR.videoNarrationTotalOver}` : '')}
+                : `${STR.videoScriptEstimateLabel}: ${videoReadyScriptEstimate(
+                    totalNarrationSeconds,
+                    drafts.length,
+                  )}`}
             </p>
             <p className="hint" style={{ marginTop: 8 }}>
               {STR.videoToStoryboardHint}

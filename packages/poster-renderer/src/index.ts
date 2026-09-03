@@ -81,8 +81,22 @@ export type { PosterColours, HueBucket } from './poster-colours.js';
 // representation the image clients may assume they are holding.
 export {
   normalizeReferenceImage,
+  normalizeSourceImage,
   UnreadableImageError,
 } from './reference-image.js';
+export type { NormalizedSourceImage } from './reference-image.js';
+// Pads an image into an exact aspect ratio so a model asked for that ratio has no side left to
+// crop — the deterministic half of the Dynamic Poster's framing. See aspect-fit.ts.
+export { fitImageToAspect } from './aspect-fit.js';
+export type { AspectFit } from './aspect-fit.js';
+// A Dynamic Poster's clip as a GIF, for the places a video file will not go. A second
+// artifact beside the MP4, never a replacement for it — see motion-gif.ts.
+export {
+  mp4ToGif,
+  GIF_FPS,
+  GIF_LONG_EDGE,
+  type MotionGifOptions,
+} from './video/motion-gif.js';
 export { renderHtmlToPng } from './render-html.js';
 export type { RenderOptions } from './render-html.js';
 export { renderHtmlToPdf, ChromiumUnavailableError } from './render-html.js';

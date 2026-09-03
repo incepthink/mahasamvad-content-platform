@@ -1,7 +1,11 @@
 'use client';
 
 import { use, useCallback, useState } from 'react';
-import { isArticleCategory, isSocialCategory } from '@dgipr/schemas';
+import {
+  isArticleCategory,
+  isDynamicPosterCategory,
+  isSocialCategory,
+} from '@dgipr/schemas';
 import { useArticleStream } from '../../../lib/useArticleStream';
 import { useGeneration } from '../../../lib/useGeneration';
 import { useGenerationThread } from '../../../lib/useGenerationThread';
@@ -15,6 +19,7 @@ import { ProgressSteps } from '../../../components/ProgressSteps';
 import { TaskProgressBar } from '../../../components/TaskProgressBar';
 import { StatusChip } from '../../../components/StatusChip';
 import { ArticleView } from '../../../components/ArticleView';
+import { DynamicPosterView } from '../../../components/DynamicPosterView';
 import { ErrorNotice } from '../../../components/ErrorNotice';
 import { FiveWOneHView } from '../../../components/FiveWOneHView';
 import { NextActions } from '../../../components/NextActions';
@@ -170,6 +175,13 @@ export default function GenerationDetailPage({
   // Scoped to poster-affecting steps so an article-only revision still shows ProgressSteps.
   // The social-redesign steps (classify/copy/image) only count here when a poster already
   // exists — an INITIAL run has no posterUrl during them, so it still shows the step list.
+  // A follow-up on a Dynamic Poster: the previous clip stays on screen with a spinner over it
+  // rather than the card being replaced by the step list, exactly as a poster re-render does.
+  const motionBusy =
+    isDynamicPosterCategory(detail.category) &&
+    !!detail.motionUrl &&
+    (detail.status === 'queued' || detail.status === 'running');
+
   const posterBusy =
     !!detail.posterUrl &&
     (detail.status === 'queued' || detail.status === 'running') &&
@@ -211,7 +223,11 @@ export default function GenerationDetailPage({
   // created WITHOUT a caption has `article === null`, which is exactly the run that used to
   // vanish: the result view was gated on the article alone, so one failed marker round hid
   // the poster and every version behind it.
-  const hasOutput = !!detail.posterUrl || !!detail.article;
+  // A Dynamic Poster run has neither a poster PNG nor an article — its output is the clip.
+  // Without it here, one failed follow-up would hide a run that has a perfectly good video on
+  // it, which is the exact failure this flag was introduced to prevent for social posters.
+  const hasOutput =
+    !!detail.posterUrl || !!detail.article || !!detail.motionUrl;
   // An edit that did not land, over output that did. Either the API said so (`editFailure`,
   // the row already back to `completed`), or the row is `failed` from before that existed.
   const editFailed =
@@ -234,6 +250,7 @@ export default function GenerationDetailPage({
       {(detail.status === 'queued' || detail.status === 'running') &&
         !posterBusy &&
         !posterPending &&
+        !motionBusy &&
         // A यूट्यूब थंबनेल run has no article stages to list, so it takes the compact
         // bar the social lane uses rather than ProgressSteps' news/scheme step list.
         (!isArticleCategory(detail.category) ? (
@@ -330,11 +347,19 @@ export default function GenerationDetailPage({
       {(detail.status === 'completed' ||
         posterBusy ||
         posterPending ||
+        motionBusy ||
         // A failure must not hide what the run already produced — the article, the poster,
         // or the poster's whole version history. The notice stays above; the result renders
         // below it and stays fully editable, which is what makes the run recoverable at all.
         (detail.status === 'failed' && hasOutput)) &&
-        (isSocialCategory(detail.category) ? (
+        (isDynamicPosterCategory(detail.category) ? (
+          <DynamicPosterView
+            detail={detail}
+            onChanged={refresh}
+            busy={motionBusy}
+            onImageWorkStarted={trackImageWork}
+          />
+        ) : isSocialCategory(detail.category) ? (
           <SocialPostView
             detail={detail}
             onChanged={refresh}

@@ -30,6 +30,7 @@ import {
   StartVideoAnimationRequestSchema,
   UPLOAD_FILE_MAX_BYTES,
   UPLOAD_FILE_MAX_MB,
+  VIDEO_PROMPT_IMAGE_LIMIT,
   UpdateSceneMotionRequestSchema,
   UpdateVideoScriptRequestSchema,
   allocateVideoSceneDurations,
@@ -132,6 +133,13 @@ function referencePathPrefix(id: string): string {
   return `projects/${id}/references/`;
 }
 
+// The pictures attached to the project's AI prompt. A separate prefix from the
+// per-scene references above so the two can never be confused by the guard that
+// refuses a foreign path — these are never submitted BACK by a client.
+function promptImagePathPrefix(id: string): string {
+  return `projects/${id}/prompt/`;
+}
+
 // What a submitted card's reference picture RESOLVES to, given what is stored.
 // Three inputs, three outcomes, and the distinction is the whole reason the
 // field is optional rather than always sent:
@@ -224,13 +232,16 @@ function reconcileScriptScenes(
           : {}),
       ...(referenceImagePath !== undefined ? { referenceImagePath } : {}),
       // Preserve the timeline the script writer saw. A genuinely new scene
-      // gets a provisional text-derived weight; the continuous voice phase
-      // normalises all weights back to the selected 30/60-second total.
+      // gets a provisional text-derived window, capped at five seconds. The
+      // continuous voice phase has no whole-video target.
       durationSeconds:
         existing?.durationSeconds ??
         clipSecondsForNarration(estimateNarrationSeconds(scene.narration)),
       status: 'pending',
       ...(existing?.beat !== undefined ? { beat: existing.beat } : {}),
+      ...(existing?.sceneLabel !== undefined
+        ? { sceneLabel: existing.sceneLabel }
+        : {}),
       ...(existing?.shotHint !== undefined
         ? { shotHint: existing.shotHint }
         : {}),
@@ -312,6 +323,10 @@ function applyDescribedVisuals(
     // Empty is meaningful and is kept as such — that scene gets no overlay.
     keyPoint: visual.keyPoint,
     beat: visual.beat,
+    // Dropped rather than kept blank when the model returned none: the card
+    // falls back to "दृश्य N", where a stale label from the previous plan would
+    // be titling a scene it no longer describes.
+    ...(visual.sceneLabel ? { sceneLabel: visual.sceneLabel } : {}),
     shotHint: visual.shotHint,
     status: 'pending',
   };
@@ -414,16 +429,22 @@ const NARRATION_MAX_BYTES = UPLOAD_FILE_MAX_BYTES;
 type MultipartCreate = Readonly<{
   raw: Record<string, unknown>;
   audio: { data: Buffer; extension: string } | null;
+  // Reference pictures attached to the AI prompt, already normalised to PNG in
+  // the order they were sent. Normalising HERE rather than in the paid script
+  // job is the reference-image rule: the officer is standing in front of the
+  // form, so an unreadable file is refused now.
+  promptImages: Buffer[];
   // A refusal the officer must READ, so it is carried back as a plain Marathi
   // sentence rather than thrown as a ZodError — the shared error handler sends
   // a ZodError's message verbatim, which is a JSON array of issue objects.
   reject: string | null;
 }>;
 
-// Collect the create form's fields plus its one optional `narration` file.
-// Fields arrive as strings, so the two booleans/enums are left as-is for the
-// schema and only `heading` is dropped when empty (an empty string would fail
-// nothing but would be stored as a heading nobody typed).
+// Collect the create form's fields plus its files: one optional `narration`
+// recording (ready-script lane) and up to VIDEO_PROMPT_IMAGE_LIMIT
+// `promptImages` pictures. Fields arrive as strings, so the booleans/enums are
+// left as-is for the schema and only `aiPrompt` is dropped when empty (an empty
+// string would fail nothing but would be stored as a direction nobody typed).
 async function readMultipartCreate(request: {
   parts: (options?: {
     limits?: { fileSize?: number; files?: number };
@@ -439,15 +460,40 @@ async function readMultipartCreate(request: {
 }): Promise<MultipartCreate> {
   const raw: Record<string, unknown> = {};
   let audio: { data: Buffer; extension: string } | null = null;
+  const promptImages: Buffer[] = [];
   let reject: string | null = null;
+  // One recording plus the picture allowance. busboy's `files` limit does not
+  // reject past the cap — it silently STOPS emitting parts (the /dlo finding) —
+  // so the count is checked below as well, where it can be reported.
   const parts = request.parts({
-    limits: { fileSize: NARRATION_MAX_BYTES, files: 1 },
+    limits: {
+      fileSize: NARRATION_MAX_BYTES,
+      files: VIDEO_PROMPT_IMAGE_LIMIT + 1,
+    },
   });
   for await (const part of parts) {
     if (part.type === 'field') {
       const value = typeof part.value === 'string' ? part.value : '';
-      if (part.fieldname === 'heading' && value.trim() === '') continue;
+      if (part.fieldname === 'aiPrompt' && value.trim() === '') continue;
       raw[part.fieldname] = value;
+      continue;
+    }
+    if (part.fieldname === 'promptImages') {
+      const data = await part.toBuffer();
+      if (!isImageFileName(part.filename)) {
+        reject = `हे चित्र स्वीकारता येत नाही. ${IMAGE_FILE_EXTENSIONS.join(', ')} पैकी एक द्या.`;
+        continue;
+      }
+      if (promptImages.length >= VIDEO_PROMPT_IMAGE_LIMIT) {
+        reject = `AI प्रॉम्प्टसोबत जास्तीत जास्त ${VIDEO_PROMPT_IMAGE_LIMIT} चित्रे देता येतात.`;
+        continue;
+      }
+      try {
+        promptImages.push(await normalizeReferenceImage(data));
+      } catch {
+        reject =
+          'यापैकी एक चित्र वाचता आले नाही. दुसऱ्या स्वरूपात (उदा. JPG) पुन्हा द्या.';
+      }
       continue;
     }
     if (part.fieldname !== 'narration') {
@@ -467,7 +513,7 @@ async function readMultipartCreate(request: {
       extension: part.filename.slice(dot).toLowerCase(),
     };
   }
-  return { raw, audio, reject };
+  return { raw, audio, promptImages, reject };
 }
 
 const BUSY_MESSAGE = 'या प्रकल्पावर आधीच काम सुरू आहे.';
@@ -497,6 +543,13 @@ function toDetail(
     error: row.error,
     note: row.note,
     heading: row.heading,
+    aiPrompt: row.aiPrompt,
+    // URLs, not paths: the page only ever DISPLAYS these, and nothing sends one
+    // back — unlike a scene's reference picture, whose path round-trips on the
+    // save that attaches it.
+    promptImageUrls: row.promptImagePaths.map((path) =>
+      publicUrlIn(client, VIDEOS_BUCKET, path),
+    ),
     inputMode: row.inputMode,
     durationBucket: row.durationBucket,
     orientation: row.orientation,
@@ -535,6 +588,9 @@ function toDetail(
       durationSeconds: scene.durationSeconds,
       status: scene.status,
       ...(scene.beat !== undefined ? { beat: scene.beat } : {}),
+      ...(scene.sceneLabel !== undefined
+        ? { sceneLabel: scene.sceneLabel }
+        : {}),
       ...(scene.shotHint !== undefined ? { shotHint: scene.shotHint } : {}),
       ...(scene.narrationAudioSeconds !== undefined
         ? { narrationSeconds: scene.narrationAudioSeconds }
@@ -624,7 +680,12 @@ export function registerVideoRoutes(
   app.post('/video/projects', async (request, reply) => {
     const parsed = request.isMultipart()
       ? await readMultipartCreate(request)
-      : { raw: request.body, audio: null, reject: null };
+      : {
+          raw: request.body,
+          audio: null,
+          promptImages: [] as Buffer[],
+          reject: null,
+        };
     if (parsed.reject) {
       return reply.code(400).send({ error: { message: parsed.reject } });
     }
@@ -669,7 +730,7 @@ export function registerVideoRoutes(
 
     const row = await insertVideoProject(client, {
       note: body.note,
-      heading: body.heading,
+      ...(body.aiPrompt ? { aiPrompt: body.aiPrompt } : {}),
       inputMode: body.inputMode,
       durationBucket: body.durationBucket,
       orientation: body.orientation,
@@ -685,6 +746,39 @@ export function registerVideoRoutes(
       const path = `projects/${row.id}/narration-v1.wav`;
       await uploadFile(client, VIDEOS_BUCKET, path, narrationWav, 'audio/wav');
       uploaded = { path, version: 1, seconds: narrationSeconds };
+    }
+    // The pictures land after the insert because their storage key needs the
+    // row id, exactly as the narration track above does. Written to the row
+    // before the job starts, since the script job — and gate 1's re-plan, long
+    // afterwards — both read them off it.
+    if (parsed.promptImages.length > 0) {
+      try {
+        const paths: string[] = [];
+        for (const [index, png] of parsed.promptImages.entries()) {
+          const path = `${promptImagePathPrefix(row.id)}${index + 1}.png`;
+          await uploadFile(client, VIDEOS_BUCKET, path, png, 'image/png');
+          paths.push(path);
+        }
+        await updateVideoProject(client, row.id, { promptImagePaths: paths });
+      } catch (error) {
+        // NOT best-effort: silently dropping the pictures would plan the whole
+        // storyboard without the references the officer attached it for. The
+        // row already exists, so it is failed HERE with a readable reason
+        // instead of being left for the orphan reaper, whose message ("the
+        // server restarted") would be untrue.
+        request.log.error(error);
+        await updateVideoProject(client, row.id, {
+          status: 'failed',
+          step: null,
+          error: 'संदर्भ चित्रे जतन करता आली नाहीत.',
+        });
+        return reply.code(500).send({
+          error: {
+            message:
+              'संदर्भ चित्रे जतन करता आली नाहीत. चित्रांशिवाय किंवा पुन्हा प्रयत्न करा.',
+          },
+        });
+      }
     }
     startVideoScriptJob(client, row.id, uploaded);
     return reply.code(202).send({ id: row.id });
@@ -848,9 +942,8 @@ export function registerVideoRoutes(
       const style = body.style ?? row.style;
       const styleChanged = style !== row.style;
 
-      // Scene count is governed by the schema's own VIDEO_SCENE_LIMIT bound
-      // (the planner's bucket preference is not a validation rule — the
-      // officer at gate 1 knows best). Incoming durationSeconds is IGNORED:
+      // Scene count has only the schema's one-scene floor; longer narration may
+      // use as many five-second scenes as needed. Incoming durationSeconds is IGNORED:
       // windows are server-assigned by the storyboard job's voice phase from
       // the measured narration audio.
       // Reject a payload that claims the same stored scene twice: two cards
@@ -953,7 +1046,16 @@ export function registerVideoRoutes(
       const scenes = reconcileScriptScenes(row, body.scenes, false);
       const described = await describeVideoScenes(
         scenes.map((scene) => scene.narration),
-        { ...(row.heading ? { heading: row.heading } : {}) },
+        {
+          ...(row.aiPrompt ? { aiPrompt: row.aiPrompt } : {}),
+          ...(row.promptImagePaths.length > 0
+            ? {
+                promptImageUrls: row.promptImagePaths.map((path) =>
+                  publicUrlIn(client, VIDEOS_BUCKET, path),
+                ),
+              }
+            : {}),
+        },
       );
       for (const [index, scene] of scenes.entries()) {
         scenes[index] = applyDescribedVisuals(scene, described.scenes[index]!);

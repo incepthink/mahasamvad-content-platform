@@ -19,6 +19,7 @@ import type {
 import {
   Copy,
   Download,
+  ImageDown,
   // Palette — the "वेगळ्या रंगात तयार करा" recolour redo, hidden from the UI (see the
   // commented button below). Restore this import with it.
   RotateCw,
@@ -27,6 +28,7 @@ import {
 } from 'lucide-react';
 import {
   generateCaption,
+  plainPosterDownloadUrl,
   posterDownloadUrl,
   publishGeneration,
   regeneratePoster,
@@ -391,6 +393,15 @@ export function SocialPostView({
                 aria-label={STR.iconDownloadPoster}
               >
                 <Download size={18} strokeWidth={1.9} aria-hidden="true" />
+              </a>
+              {/* The artwork alone, without the stamped badge and footer band. */}
+              <a
+                className="icon-btn"
+                href={plainPosterDownloadUrl(detail.id)}
+                title={STR.iconDownloadPosterPlain}
+                aria-label={STR.iconDownloadPosterPlain}
+              >
+                <ImageDown size={18} strokeWidth={1.9} aria-hidden="true" />
               </a>
               <CanvaLink generationId={detail.id} />
               <button

@@ -17,7 +17,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { isSocialCategory } from '@dgipr/schemas';
+import { isDynamicPosterCategory, isSocialCategory } from '@dgipr/schemas';
 import type { Category, GenerationDetail } from '@dgipr/schemas';
 import { createGeneration, requestArticlePoster } from '../lib/api';
 import { useTasks } from '../lib/TasksProvider';
@@ -227,6 +227,14 @@ export function NextActions({
 }) {
   const terminal = detail.status === 'completed' || detail.status === 'failed';
   if (!terminal) return null;
+
+  // A Dynamic Poster has no next step to offer here, and offering one would be worse than
+  // offering none. Its source is the uploaded PICTURE, so the edit-note re-run below would
+  // submit a fresh run carrying only the motion direction and no poster — a request the API
+  // refuses, i.e. a button that can only fail. The way to change this run is the AI प्रॉम्प्ट
+  // box on the card above, which edits the clip rather than starting over; the way to start
+  // over is the create form, with the poster attached again.
+  if (isDynamicPosterCategory(detail.category)) return null;
 
   const isSocial = isSocialCategory(detail.category);
 

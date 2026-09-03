@@ -2,11 +2,14 @@
 // schemas, read/write rows via @dgipr/database, and hand real work to jobs/runner.
 
 import type { FastifyInstance } from 'fastify';
+import { randomUUID } from 'node:crypto';
 import { PassThrough } from 'node:stream';
 import { once } from 'node:events';
 import { z } from 'zod';
 import {
   DLO_UPLOADS_BUCKET,
+  POSTERS_BUCKET,
+  VIDEOS_BUCKET,
   downloadFile,
   downloadFileRange,
   getDloIntake,
@@ -19,6 +22,8 @@ import {
   listRevisions,
   listThreadGenerations,
   publicUrl,
+  publicUrlIn,
+  uploadFile,
   downloadPng,
   recordUsageEvent,
   uploadPng,
@@ -28,8 +33,10 @@ import {
 } from '@dgipr/database';
 import {
   ChromiumUnavailableError,
+  UnreadableImageError,
   generateArticlePdf,
   generateArticlePoster,
+  normalizeSourceImage,
 } from '@dgipr/poster-renderer';
 import {
   createCostAccumulator,
@@ -50,6 +57,11 @@ import {
   CreateArticlePosterRequestSchema,
   CreateGenerationRequestSchema,
   FiveWOneHSchema,
+  DEFAULT_MOTION_ASPECT,
+  MOTION_SOURCE_MAX_BYTES,
+  MOTION_SOURCE_MAX_MB,
+  MOTION_SOURCE_PREFIX,
+  MotionFeedbackRequestSchema,
   GenerationStepSchema,
   PosterFeedbackRequestSchema,
   PosterImageFeedbackRequestSchema,
@@ -60,6 +72,8 @@ import {
   UpdateCaptionRequestSchema,
   UpdateCopyRequestSchema,
   isArticleCategory,
+  isDynamicPosterCategory,
+  isMotionSourcePath,
   isSocialCategory,
   isYoutubeCategory,
   intakeFileMimeForFileName,
@@ -84,6 +98,7 @@ import {
   getLengthWarning,
   getPosterCapacityWarning,
   nameDesignationsOf,
+  plainPathForPoster,
   getTranslatingLanguage,
   isJobRunning,
   isRevisingArticle,
@@ -103,6 +118,11 @@ import {
   startYoutubeThumbnailJob,
   startTranslateJob,
 } from '../jobs/runner.js';
+import {
+  motionVersionsOf,
+  startDynamicPosterJob,
+  startMotionFeedbackJob,
+} from '../jobs/dynamic-poster.js';
 import { rememberDesignations } from '../jobs/designation-writeback.js';
 import { prepareTranslationTerms } from '../jobs/translation-terms.js';
 import { recordTasksFromCost } from '../jobs/service-usage.js';
@@ -301,6 +321,15 @@ async function toDetail(
     posterUrl: publicUrl(client, version.path),
     createdAt: version.createdAt,
   }));
+  // Dynamic Poster (0052). Empty on every other lane, so this costs nothing there.
+  const motionVersions = motionVersionsOf(row, revisions).map((version) => ({
+    videoUrl: publicUrlIn(client, VIDEOS_BUCKET, version.path),
+    gifUrl: version.gifPath
+      ? publicUrlIn(client, VIDEOS_BUCKET, version.gifPath)
+      : null,
+    direction: version.direction,
+    createdAt: version.createdAt,
+  }));
   // Metadata only — the article text of every version would be tens of kilobytes on a poll
   // that runs every 2.5 s. /article-versions serves the text when it is actually wanted.
   const articleVersions = articleVersionsOf(row, revisions).map(
@@ -330,6 +359,18 @@ async function toDetail(
     fiveWOneH: fiveWOneH.success ? fiveWOneH.data : null,
     posterUrl: row.posterPath ? publicUrl(client, row.posterPath) : null,
     sceneUrl: row.scenePath ? publicUrl(client, row.scenePath) : null,
+    // The officer's own uploaded poster, and the clip made from it (0052).
+    sourceImageUrl: row.sourceImagePath
+      ? publicUrlIn(client, POSTERS_BUCKET, row.sourceImagePath)
+      : null,
+    motionUrl: row.motionPath
+      ? publicUrlIn(client, VIDEOS_BUCKET, row.motionPath)
+      : null,
+    motionGifUrl: row.motionGifPath
+      ? publicUrlIn(client, VIDEOS_BUCKET, row.motionGifPath)
+      : null,
+    motionPrompt: row.motionPrompt,
+    motionVersions,
     posterVersions,
     articleVersions,
     // The colour + composition this poster was assigned, flattened to one Marathi line for the
@@ -453,6 +494,15 @@ export function registerGenerationRoutes(
         });
       }
     }
+    // The uploaded poster a Dynamic Poster run reads (migration 0052). Checked HERE as well
+    // as in the schema, deliberately: this path is the one field on the request that points a
+    // paid render at an object, so the rule that it must be one this API minted is stated
+    // where the row is written, not only where the body is parsed.
+    if (body.sourceImagePath && !isMotionSourcePath(body.sourceImagePath)) {
+      return reply
+        .code(400)
+        .send({ error: { message: 'Unknown uploaded poster.' } });
+    }
     // Lineage: a follow-up spawned from a run's detail page names its source;
     // the thread root is derived here (never client-supplied) so chains stay
     // flat under the original run.
@@ -531,6 +581,26 @@ export function registerGenerationRoutes(
         isSocialCategory(body.category) && rendersPoster
           ? body.imagePrompt
           : undefined,
+      // The uploaded poster a Dynamic Poster run is made from (migration 0052). The schema
+      // has already refused it on any other lane and refused a path this API did not mint;
+      // scoping it again here is the imagePrompt rule — what gets STORED is checked
+      // separately from what was accepted, so a future caller that slips past the schema
+      // still cannot leave a source on a row nothing will read.
+      sourceImagePath: isDynamicPosterCategory(body.category)
+        ? body.sourceImagePath
+        : undefined,
+      // The clip's shape (migration 0053), scoped the same way and for the same reason.
+      // Stored ONLY when it is not the default: the job reads a null aspect as 'source' —
+      // the poster's own ratio — so omitting it keeps every ordinary run working on a
+      // database where 0053 has not been applied, and an un-applied 0053 now costs exactly
+      // the two fixed frames. The 0029 blast-radius rule, applied to a value that always
+      // has one.
+      motionAspect:
+        isDynamicPosterCategory(body.category) &&
+        body.motionAspect &&
+        body.motionAspect !== DEFAULT_MOTION_ASPECT
+          ? body.motionAspect
+          : undefined,
     });
     // Twitter/Facebook → external n8n social-post job; news/scheme → in-process
     // article pipeline. A social run is poster-only unless the caller asked for a
@@ -544,6 +614,10 @@ export function registerGenerationRoutes(
       // One image and nothing else: no article, no caption, no n8n. See
       // startYoutubeThumbnailJob.
       startYoutubeThumbnailJob(client, row.id);
+    } else if (isDynamicPosterCategory(row.category)) {
+      // Two calls and nothing else: gpt-5.6-sol writes the motion prompt, gemini-omni renders
+      // the clip. No article, no caption, no reference library, no n8n.
+      startDynamicPosterJob(client, row.id);
     } else {
       startGenerationJob(client, row.id);
     }
@@ -1351,7 +1425,11 @@ export function registerGenerationRoutes(
       // thing they can want. Every error reaches it — a moderation refusal, a provider 5xx, a
       // timeout — because none of them are distinguishable here and all of them are worth
       // one more attempt.
-      if (!row.posterPath && !row.article) {
+      // A Dynamic Poster has neither a poster PNG nor an article — its output is the clip.
+      // Without `motionPath` here a failed FOLLOW-UP would read as "this run produced
+      // nothing", take the branch below, and re-render v1 over the clip the officer already
+      // had while resetting the Gemini chain to its start.
+      if (!row.posterPath && !row.article && !row.motionPath) {
         if (row.status !== 'failed') {
           return reply.code(409).send({
             error: {
@@ -1382,6 +1460,11 @@ export function registerGenerationRoutes(
           });
         } else if (isYoutubeCategory(row.category)) {
           startYoutubeThumbnailJob(client, row.id);
+        } else if (isDynamicPosterCategory(row.category)) {
+          // Re-reads the uploaded poster and the direction off the row, so this reproduces
+          // the officer's original request exactly — which is what makes the source column
+          // insert-only.
+          startDynamicPosterJob(client, row.id);
         } else {
           startGenerationJob(client, row.id);
         }
@@ -1480,6 +1563,230 @@ export function registerGenerationRoutes(
           `attachment; filename="dgipr-poster-${row.id}.png"`,
         )
         .send(png);
+    },
+  );
+
+  // The same poster WITHOUT the brand chrome — the artwork exactly as the image model
+  // painted it, for an officer who wants to place it in their own layout.
+  //
+  // It is a SEPARATE stored object, not a crop of the finished poster: the logo is a
+  // destructive composite on every lane (the article footer too), so the pixels underneath a
+  // flattened poster are gone. The social footer is the one part that could be cropped back
+  // off — it is appended below the artwork — but a poster missing only its footer is not what
+  // was asked for, so both lanes serve the stored render instead.
+  //
+  // GET, like poster.png above and for the same reason. Because it is a plain navigation, the
+  // 404 below is what the officer SEES in the tab — hence Marathi. It is the expected answer
+  // for any poster rendered before 2026-09-03 and for the legacy ARTICLE_POSTER_MODE=html
+  // path, neither of which kept the un-chromed render; a redo produces one.
+  app.get<{ Params: { id: string } }>(
+    '/generations/:id/poster-plain.png',
+    async (request, reply) => {
+      const row = await getGeneration(client, request.params.id);
+      if (!row?.posterPath) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'पोस्टर सापडले नाही.' } });
+      }
+      // Derived from the CURRENT version's path, so a restore to an older poster serves that
+      // version's plain copy rather than the newest one.
+      const plainPath = plainPathForPoster(row.posterPath);
+      let png: Buffer | null = null;
+      if (plainPath) {
+        try {
+          png = await downloadPng(client, plainPath);
+        } catch {
+          png = null;
+        }
+      }
+      if (!png) {
+        return reply.code(404).send({
+          error: {
+            message:
+              'या पोस्टरची लोगो-फूटरशिवाय प्रत उपलब्ध नाही. ' +
+              'पोस्टर पुन्हा तयार केल्यावर ती मिळेल.',
+          },
+        });
+      }
+      recordUsageEvent(client, {
+        feature: isSocialCategory(row.category) ? 'social' : 'article',
+        action: 'poster_download',
+        detail: { category: row.category, variant: 'plain' },
+      });
+      return reply
+        .header('content-type', 'image/png')
+        .header(
+          'content-disposition',
+          `attachment; filename="dgipr-poster-${row.id}-plain.png"`,
+        )
+        .send(png);
+    },
+  );
+
+  // ---------- Dynamic Poster (migration 0052) ----------
+  //
+  // Uploading is its own route rather than a multipart create, so the create request stays the
+  // one JSON shape every other format sends. It hands back a PATH, and the create request
+  // carries that path back: a public URL is a string anyone can type, while a path is checked
+  // against MOTION_SOURCE_PREFIX before a paid render is pointed at it. The officer may still
+  // be typing their direction when this lands, which is the /video reference-image shape.
+  app.post('/generations/motion-image', async (request, reply) => {
+    // Per-request, because the global multipart limit is 10 MiB and was chosen for something
+    // else — a print-resolution poster export is legitimately larger.
+    const file = await request.file({
+      limits: { fileSize: MOTION_SOURCE_MAX_BYTES, files: 1 },
+    });
+    if (!file) {
+      return reply.code(400).send({ error: { message: 'फाईल मिळाली नाही.' } });
+    }
+    const name = file.filename ?? '';
+    const extension = name.slice(name.lastIndexOf('.')).toLowerCase();
+    // Extension-driven, like every other upload path here: the browser's reported type is not
+    // trusted, and sharp is what decides whether the bytes are really an image.
+    if (!['.png', '.jpg', '.jpeg', '.webp'].includes(extension)) {
+      return reply.code(400).send({
+        error: { message: 'फक्त PNG, JPG किंवा WEBP पोस्टर स्वीकारले जाते.' },
+      });
+    }
+
+    let data: Buffer;
+    try {
+      data = await file.toBuffer();
+    } catch (error) {
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        error.code === 'FST_REQ_FILE_TOO_LARGE'
+      ) {
+        return reply.code(413).send({
+          error: {
+            message: `पोस्टर खूप मोठे आहे. कमाल ${MOTION_SOURCE_MAX_MB} MB.`,
+          },
+        });
+      }
+      throw error;
+    }
+    if (data.length === 0) {
+      return reply
+        .code(400)
+        .send({ error: { message: 'ही फाईल रिकामी आहे.' } });
+    }
+
+    // Refused HERE rather than stored and failed later inside the render: the officer is
+    // standing in front of the form, which is why normalizeSourceImage is not best-effort
+    // (see reference-image.ts).
+    let normalized;
+    try {
+      normalized = await normalizeSourceImage(data);
+    } catch (error) {
+      if (error instanceof UnreadableImageError) {
+        return reply.code(400).send({
+          error: { message: 'ही प्रतिमा वाचता आली नाही. दुसरी फाईल निवडा.' },
+        });
+      }
+      throw error;
+    }
+
+    // The name is minted here, so isMotionSourcePath can be a real check rather than a
+    // formality — there is no user-supplied component in it at all.
+    const path = `${MOTION_SOURCE_PREFIX}${Date.now()}-${randomUUID().slice(0, 8)}.png`;
+    await uploadFile(client, POSTERS_BUCKET, path, normalized.png, 'image/png');
+    return reply.send({
+      path,
+      url: publicUrlIn(client, POSTERS_BUCKET, path),
+      name,
+      width: normalized.width,
+      height: normalized.height,
+    });
+  });
+
+  // The AI प्रॉम्प्ट box beside the finished clip. Continues the SAME Gemini interaction, so
+  // this edits the video on screen rather than starting again from the poster.
+  app.post<{ Params: { id: string } }>(
+    '/generations/:id/motion/feedback',
+    async (request, reply) => {
+      const body = MotionFeedbackRequestSchema.parse(request.body);
+      const row = await getGeneration(client, request.params.id);
+      if (!row) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'Generation not found.' } });
+      }
+      if (!isDynamicPosterCategory(row.category)) {
+        return reply
+          .code(400)
+          .send({ error: { message: 'This run is not a Dynamic Poster.' } });
+      }
+      if (!row.motionPath) {
+        return reply
+          .code(409)
+          .send({ error: { message: 'This run has no clip to revise yet.' } });
+      }
+      // One render at a time per row: the next follow-up continues from whatever this one
+      // produces, so two in flight would race for the same chain point.
+      if (isJobRunning(row.id) || row.status === 'running') {
+        return reply
+          .code(409)
+          .send({ error: { message: 'This run is already busy.' } });
+      }
+      startMotionFeedbackJob(client, row.id, body.feedback);
+      return reply.code(202).send({ ok: true });
+    },
+  );
+
+  // Download proxies, for the reason poster.png above has one: the HTML `download` attribute
+  // is ignored cross-origin, so the browser cannot force a save from the storage URL. The page
+  // PLAYS the MP4 straight from the bucket — only saving needs to come through here.
+  app.get<{ Params: { id: string } }>(
+    '/generations/:id/motion.mp4',
+    async (request, reply) => {
+      const row = await getGeneration(client, request.params.id);
+      if (!row?.motionPath) {
+        return reply.code(404).send({ error: { message: 'Clip not found.' } });
+      }
+      const bytes = await downloadFile(client, VIDEOS_BUCKET, row.motionPath);
+      recordUsageEvent(client, {
+        feature: 'social',
+        action: 'poster_download',
+        detail: { category: row.category, format: 'mp4' },
+      });
+      return reply
+        .header('content-type', 'video/mp4')
+        .header(
+          'content-disposition',
+          `attachment; filename="dgipr-dynamic-poster-${row.id}.mp4"`,
+        )
+        .send(bytes);
+    },
+  );
+
+  app.get<{ Params: { id: string } }>(
+    '/generations/:id/motion.gif',
+    async (request, reply) => {
+      const row = await getGeneration(client, request.params.id);
+      // A row whose GIF conversion failed has an MP4 and no GIF — a real state, not an error,
+      // which is why the page only offers this link when motionGifUrl is present.
+      if (!row?.motionGifPath) {
+        return reply.code(404).send({ error: { message: 'GIF not found.' } });
+      }
+      const bytes = await downloadFile(
+        client,
+        VIDEOS_BUCKET,
+        row.motionGifPath,
+      );
+      recordUsageEvent(client, {
+        feature: 'social',
+        action: 'poster_download',
+        detail: { category: row.category, format: 'gif' },
+      });
+      return reply
+        .header('content-type', 'image/gif')
+        .header(
+          'content-disposition',
+          `attachment; filename="dgipr-dynamic-poster-${row.id}.gif"`,
+        )
+        .send(bytes);
     },
   );
 

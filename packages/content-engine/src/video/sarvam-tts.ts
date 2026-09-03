@@ -5,7 +5,7 @@
 // one call, decode, return the bytes.
 //
 // The video runner supplies the complete joined narration in one call so scene
-// cuts do not reset the voice or insert silence. A normal 60-second script is
+// cuts do not reset the voice or insert silence. A longer script is
 // ~990 characters, below bulbul:v3's 2500-char / bulbul:v2's 1500-char limit.
 // This file only synthesizes; the caller measures the returned WAV and can
 // coherently shorten the whole script before trying again.

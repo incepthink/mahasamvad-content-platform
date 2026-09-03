@@ -958,6 +958,68 @@ textarea.note-input {
   flex-shrink: 0;
 }
 
+/* डायनॅमिक पोस्टर's output shape. A segmented control on a tinted track, the
+   .analytics-ranges idiom, rather than loose buttons: this is one either/or answer, not
+   three commands.
+
+   IT USED TO LIVE INSIDE .note-field, absolutely placed in the strip the text box reserves
+   at its foot beside the send button, and that is why this rule was scoped. It was moved out
+   into a field of its own when the poster's own ratio became a third option: the track no
+   longer fitted in the width left beside the button, so it wrapped onto two rows across the
+   officer's own text. So it is in normal flow now, `wrap` is a genuine last resort rather
+   than the common case, and the scoped selector is gone — nothing may reintroduce it without
+   also shortening the labels. */
+.motion-aspect {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 4px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.motion-aspect-option {
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.9rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  padding: 6px 16px;
+  min-height: 40px;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.motion-aspect-option:hover:not(:disabled):not(.active) {
+  background: var(--card);
+  color: var(--text);
+}
+
+.motion-aspect-option.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  box-shadow: var(--shadow-sm);
+}
+
+.motion-aspect-option:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .motion-aspect-option {
+    transition: none;
+  }
+}
+
 /* The shared spinner is accent-on-accent-soft, which disappears on the maroon
    fill; on this button it has to read as white. */
 .note-send .spinner {
@@ -1219,22 +1281,22 @@ textarea.note-input {
 
 /* The chat rail is a narrow column, so the notice drops its icon column and its
    button shrinks — the same component, sized for the one place it has ~240px. */
-.error-notice.chat-rail-notice {
+.error-notice.conv-rail-notice {
   margin: 12px 10px;
   padding: 10px 12px;
   gap: 8px;
   font-size: 0.9rem;
 }
 
-.error-notice.chat-rail-notice .error-notice-icon {
+.error-notice.conv-rail-notice .error-notice-icon {
   display: none;
 }
 
-.error-notice.chat-rail-notice .error-notice-text {
+.error-notice.conv-rail-notice .error-notice-text {
   font-size: 0.9rem;
 }
 
-.error-notice.chat-rail-notice .btn {
+.error-notice.conv-rail-notice .btn {
   min-height: 40px;
   padding: 8px 14px;
   font-size: 0.9rem;
@@ -2122,6 +2184,112 @@ textarea.note-input {
   margin: 8px 0 0;
 }
 
+/* The storyboard's own title for a video scene, directly under "दृश्य N". It is
+   a title, not a field, so it carries no label of its own — an em-dashed phrase
+   ("Opening — Newborn daughter") reads as one only when it is set apart from the
+   hint text below it. Latin, like the visual brief it belongs with, so it takes
+   a slightly tighter line height than the Devanagari around it. */
+.scene-label {
+  margin: -6px 0 10px;
+  font-size: 1.02rem;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--text);
+}
+
+/* Gate 1 is a read-first review surface. Text is presented as content until an
+   officer asks to edit that one field; this keeps long scene cards scannable. */
+.inline-edit-field {
+  margin-top: 18px;
+}
+
+.inline-edit-title {
+  display: block;
+  margin: 0 0 6px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1.4;
+  color: var(--text);
+}
+
+.inline-edit-value {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.inline-edit-value.is-empty {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.inline-edit-trigger,
+.video-icon-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  min-height: 40px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  box-shadow: none;
+}
+
+/* Always visible: the pencil is the only affordance saying a field can be
+   edited at all, and a hover-reveal hides it from touch and from anyone
+   scanning the card. */
+.inline-edit-trigger {
+  margin-top: 4px;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
+}
+
+.inline-edit-trigger:hover:not(:disabled),
+.video-icon-action:hover:not(:disabled) {
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+}
+
+.inline-edit-trigger:focus-visible,
+.video-icon-action:focus-visible {
+  outline: 3px solid var(--ring);
+  outline-offset: 1px;
+}
+
+.inline-edit-trigger:disabled,
+.video-icon-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.inline-edit-control {
+  display: block;
+  margin-top: 6px;
+}
+
+textarea.inline-edit-control {
+  min-height: 82px;
+}
+
+.video-icon-action-danger:hover:not(:disabled) {
+  background: var(--err-soft);
+  color: var(--err);
+}
+
+.video-style-card .inline-edit-field {
+  margin-top: 0;
+}
+
+.video-scene-actions {
+  margin-top: 12px;
+}
+
 /* ---------- article view ---------- */
 
 .article-head {
@@ -2462,6 +2630,169 @@ details.fold[aria-disabled='true'] summary {
   width: 44px;
   height: 44px;
   border-width: 4px;
+}
+
+/* ---------- Dynamic Poster (migration 0052) ---------- */
+
+/* The uploaded source, before there is one. A drop zone rather than a bare file button
+   because a poster arrives by drag far more often than by dialog — but the whole zone is a
+   real <button>, so keyboard and screen-reader users get the same control rather than a
+   div that only reacts to a pointer. */
+.motion-drop {
+  border: 2px dashed var(--border-strong);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+
+.motion-drop.is-over {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.motion-drop-button {
+  width: 100%;
+  min-height: 168px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px 16px;
+  border: 0;
+  background: none;
+  border-radius: var(--r-lg);
+  color: var(--muted);
+  font: inherit;
+  text-align: center;
+  cursor: pointer;
+}
+
+.motion-drop-button:disabled {
+  cursor: default;
+  opacity: 0.72;
+}
+
+/* Once uploaded: the poster beside its own measured size, which is the promise this lane
+   makes — the clip comes back at exactly these pixels. */
+.motion-source {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+}
+
+.motion-source-thumb {
+  width: 120px;
+  height: auto;
+  max-height: 200px;
+  object-fit: contain;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: #fff;
+  display: block;
+  flex: none;
+}
+
+.motion-source-meta {
+  /* overflow:hidden, not min-width:0 alone — it is what lets a flex item shrink below its
+     content, which is what keeps a 50-character phone filename from widening the card
+     (see components/FileName). */
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.motion-source-name {
+  display: block;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The finished clip. Same frame as .poster-image so the two formats read alike. */
+.motion-video {
+  width: 100%;
+  height: auto;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  display: block;
+  background: #000;
+}
+
+.motion-versions {
+  margin-top: 18px;
+}
+
+.motion-version-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.motion-version {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  font: inherit;
+  cursor: pointer;
+}
+
+.motion-version.is-active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.motion-version-n {
+  font-weight: 700;
+}
+
+.motion-version-when {
+  font-size: 0.86em;
+  color: var(--muted);
+}
+
+.motion-source-ref {
+  margin-top: 22px;
+}
+
+.motion-source-ref .motion-source-thumb {
+  margin-top: 8px;
+  width: 160px;
+}
+
+.motion-prompt-fold {
+  margin-top: 18px;
+}
+
+.motion-prompt-fold summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+/* One column below the two-pane breakpoint, like every other .poster-layout consumer:
+   a 420px track and a video player do not both fit on a phone. */
+@media (max-width: 860px) {
+  .motion-source {
+    flex-direction: column;
+  }
+
+  .motion-source-thumb {
+    width: 100%;
+    max-height: 260px;
+  }
 }
 
 /* Click-to-point marker overlay (PosterAnnotator). Pointer-transparent unless
@@ -6906,14 +7237,21 @@ a.thread-node:hover {
   }
 }
 
-/* ---------- चॅट (/chat) ----------
-   The one route that opts out of `.page`. A conversation needs a fixed viewport
+/* ---------- संभाषण-मांडणी (/chat AND /new-video-workflow) ----------
+   The two routes that opt out of `.page`. A conversation needs a fixed viewport
    with its own scrolling region rather than a document that grows downward: the
    composer has to stay reachable and the answer has to scroll under it.
    Everything else — the tokens, the radius scale, 18px type, status as text and
-   colour — is the same system as every other page. */
+   colour — is the same system as every other page.
 
-.chat-page {
+   `.conv-*` is the SHELL — the grid, the rail, the drawer, the narrow-screen bar
+   — and belongs to components/conversation/. `.chat-*` below it is the
+   conversation BODY (pane, scroll, column, bubbles, composer), which
+   /new-video-workflow reuses as it stands rather than growing a second
+   conversation design. Change a `.conv-` rule and BOTH surfaces move; that is
+   the point of the split, not an accident of naming. */
+
+.conv-page {
   /* The conversation owns the whole viewport; the footer sits BELOW it and is
      reached by scrolling the page, rather than taking ~90px off every chat.
      A DEFINITE height (not min-height) is what lets the two scrollers inside
@@ -6928,29 +7266,29 @@ a.thread-node:hover {
      and the composer — so the page reads as layers rather than one white sheet.
      The rail is a step deeper again, which is also what separates it from the
      white app sidebar immediately to its left. */
-  --chat-canvas: #f7f1e7;
-  --chat-rail-bg: #efe6d8;
+  --conv-canvas: #f7f1e7;
+  --conv-rail-bg: #efe6d8;
 
-  background: var(--chat-canvas);
+  background: var(--conv-canvas);
 }
 
 /* The footer's usual breathing room would otherwise open a sand-coloured gap
    under a full-height conversation. */
-.chat-page + .site-footer {
+.conv-page + .site-footer {
   margin-top: 0;
 }
 
 /* ----- the rail ----- */
 
-.chat-rail {
+.conv-rail {
   display: flex;
   flex-direction: column;
   min-height: 0;
   border-right: 1px solid var(--border);
-  background: var(--chat-rail-bg);
+  background: var(--conv-rail-bg);
 }
 
-.chat-rail-head {
+.conv-rail-head {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -6960,7 +7298,7 @@ a.thread-node:hover {
 /* A row in the list, not a card sitting on top of it: flat until hovered, aligned
    with the chat titles below it. Deliberately under the 56px primary height too —
    this is navigation, and the screen's primary action is Send. */
-.chat-rail-new {
+.conv-rail-new {
   flex: 1;
   justify-content: flex-start;
   min-height: 44px;
@@ -6977,25 +7315,74 @@ a.thread-node:hover {
 }
 
 /* :not(:disabled) so this outweighs .btn's own hover rule rather than racing it. */
-.chat-rail-new:hover:not(:disabled) {
+.conv-rail-new:hover:not(:disabled) {
   background: var(--card);
   border-color: transparent;
   color: var(--accent-dark);
 }
 
 /* Only the drawer needs a close button. */
-.chat-rail-close {
+.conv-rail-close {
   display: none;
 }
 
-.chat-rail-scroll {
+/* The collapse toggle, mirroring `.sidebar-collapse` immediately to its left —
+   same 38px target, same muted-until-hovered treatment — so the two controls in
+   that corner read as the same kind of thing. Hidden in the drawer, where the
+   rail is already an overlay and "collapse" would mean nothing. */
+.conv-rail-collapse {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+}
+
+.conv-rail-collapse:hover {
+  background: var(--card);
+  color: var(--accent-dark);
+}
+
+/* ----- collapsed: an icon strip ----- */
+
+/* The grid column is what actually collapses; the rail simply fills whatever it
+   is given. 64px leaves the two 38px buttons centred with real edges. */
+.conv-page.rail-collapsed {
+  grid-template-columns: 64px minmax(0, 1fr);
+}
+
+.conv-rail.collapsed .conv-rail-head {
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 8px 6px;
+}
+
+/* Square, centred and label-less. `flex: none` undoes the expanded row's `flex: 1`,
+   which would otherwise stretch it down the column. */
+.conv-rail.collapsed .conv-rail-new {
+  flex: none;
+  width: 38px;
+  height: 38px;
+  min-height: 0;
+  padding: 0;
+  justify-content: center;
+}
+
+.conv-rail.collapsed .conv-rail-new-label {
+  display: none;
+}
+
+.conv-rail-scroll {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   padding: 4px 10px 24px;
 }
 
-.chat-rail-group {
+.conv-rail-group {
   margin: 14px 8px 6px;
   font-size: 0.78rem;
   font-weight: 700;
@@ -7003,7 +7390,7 @@ a.thread-node:hover {
   color: var(--muted);
 }
 
-.chat-rail-list {
+.conv-rail-list {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -7012,18 +7399,18 @@ a.thread-node:hover {
   gap: 2px;
 }
 
-.chat-rail-item {
+.conv-rail-item {
   display: flex;
   align-items: center;
   border-radius: var(--r-sm);
 }
 
-.chat-rail-item:hover,
-.chat-rail-item.active {
+.conv-rail-item:hover,
+.conv-rail-item.active {
   background: var(--accent-soft);
 }
 
-.chat-rail-link {
+.conv-rail-link {
   flex: 1;
   min-width: 0;
   padding: 10px 4px 10px 12px;
@@ -7036,12 +7423,12 @@ a.thread-node:hover {
   text-overflow: ellipsis;
 }
 
-.chat-rail-item.active .chat-rail-link {
+.conv-rail-item.active .conv-rail-link {
   font-weight: 600;
   color: var(--accent-dark);
 }
 
-.chat-rail-delete {
+.conv-rail-delete {
   flex: none;
   display: grid;
   place-items: center;
@@ -7061,45 +7448,45 @@ a.thread-node:hover {
     color 0.12s ease;
 }
 
-.chat-rail-item:hover .chat-rail-delete,
-.chat-rail-delete:focus-visible {
+.conv-rail-item:hover .conv-rail-delete,
+.conv-rail-delete:focus-visible {
   opacity: 1;
 }
 
-.chat-rail-delete:hover {
+.conv-rail-delete:hover {
   color: var(--err);
 }
 
 /* Touch has no hover, so the control simply has to be present. */
 @media (hover: none) {
-  .chat-rail-delete {
+  .conv-rail-delete {
     opacity: 1;
   }
 }
 
-.chat-rail-empty,
-.chat-rail-confirm,
-.chat-rail-error {
+.conv-rail-empty,
+.conv-rail-confirm,
+.conv-rail-error {
   margin: 12px 10px;
   font-size: 0.9rem;
   color: var(--muted);
 }
 
-.chat-rail-error {
+.conv-rail-error {
   padding: 10px 12px;
   border-radius: var(--r-sm);
   background: var(--err-soft);
   color: var(--err);
 }
 
-.chat-rail-confirm {
+.conv-rail-confirm {
   padding: 10px 12px;
   border-radius: var(--r-sm);
   background: var(--warn-soft);
   color: var(--text);
 }
 
-.chat-rail-confirm-cancel {
+.conv-rail-confirm-cancel {
   border: none;
   background: none;
   padding: 0;
@@ -7109,13 +7496,13 @@ a.thread-node:hover {
   cursor: pointer;
 }
 
-.chat-rail-scrim {
+.conv-scrim {
   display: none;
 }
 
 /* ----- the conversation ----- */
 
-.chat-main {
+.conv-main {
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -7124,7 +7511,7 @@ a.thread-node:hover {
 
 /* The bar exists for the DRAWER TOGGLE, which only appears below 900px — see the
    min-width block under it, where the whole header stops taking any space. */
-.chat-bar {
+.conv-bar {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -7136,11 +7523,11 @@ a.thread-node:hover {
   backdrop-filter: blur(10px);
 }
 
-.chat-bar-toggle {
+.conv-bar-toggle {
   display: none;
 }
 
-.chat-bar-title {
+.conv-bar-title {
   margin: 0;
   font-size: 1.05rem;
   font-weight: 600;
@@ -7155,11 +7542,11 @@ a.thread-node:hover {
    <h1> is removed from SIGHT, not from the document — a page with no heading is a
    page a screen reader cannot summarise. */
 @media (min-width: 901px) {
-  .chat-bar {
+  .conv-bar {
     display: contents;
   }
 
-  .chat-bar-title {
+  .conv-bar-title {
     position: absolute;
     width: 1px;
     height: 1px;
@@ -7446,6 +7833,7 @@ a.thread-node:hover {
   padding: 0;
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
 }
 
@@ -7505,11 +7893,74 @@ a.thread-node:hover {
   color: var(--err);
 }
 
+/* ----- a picked picture -----
+
+   A photograph is recognised by what it SHOWS, so it is drawn at a size that can
+   be recognised and nothing is repeated beside it in words: the file name and the
+   upload state live in the tooltip and in the accessibility tree, where they cost
+   no space. 76px is the smallest tile a room, a face or a document page is still
+   readable at, and four of them plus their gaps still fit a 360px phone. */
+.chat-tray-tile {
+  position: relative;
+  flex: none;
+  width: 76px;
+  height: 76px;
+}
+
+.chat-tray-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: var(--r-lg);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+}
+
+.chat-tray-tile.is-failed .chat-tray-image {
+  border-color: var(--err);
+}
+
+/* The spinner sits ON the picture rather than beside it — the tile is the only
+   place the officer is looking while their own upload runs. */
+.chat-tray-veil {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-lg);
+  background: rgba(28, 22, 17, 0.45);
+}
+
+/* A failure keeps a mark as well as a colour: a dimmed thumbnail alone cannot say
+   "this one did not work", and colour is never the only signal here. */
+.chat-tray-veil.is-failed {
+  background: var(--err-soft);
+  color: var(--err);
+}
+
+/* Overlapping the corner, so it never eats into the picture it removes. */
+.chat-tray-tile-remove {
+  position: absolute;
+  top: -7px;
+  inset-inline-end: -7px;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border-strong);
+  background: var(--card);
+  box-shadow: var(--shadow-sm);
+}
+
+/* The Gemini shape: the text box owns the WHOLE width of the card and the
+   controls sit in a bar beneath it. They used to stand in a column at the right
+   edge, which took a bite out of every line of a long prompt and squeezed the
+   text to a third of the card on a phone. */
 .chat-input-row {
   display: flex;
-  align-items: flex-end;
-  gap: 8px;
-  padding: 8px 8px 8px 18px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  padding: 8px 10px 8px;
   border: 1.5px solid var(--border);
   border-radius: var(--r-xl);
   background: var(--card);
@@ -7525,20 +7976,23 @@ a.thread-node:hover {
 }
 
 .chat-input {
-  flex: 1;
+  width: 100%;
   min-width: 0;
   border: none;
   background: none;
-  padding: 12px 0;
+  padding: 8px 8px 2px;
   font: inherit;
   color: var(--text);
   resize: none;
   /* Grows with the text to a point, then scrolls — so a long paste never pushes
      the send button off the screen. `field-sizing` is what does the growing and is
      recent (Chrome 123+); the min-height is the fallback, so a browser without it
-     gets a composer-shaped box that scrolls rather than a single squeezed line. */
-  min-height: 3.2em;
-  max-height: 40vh;
+     gets a composer-shaped box that scrolls rather than a single squeezed line.
+     Deliberately about two lines at rest: the box is what an empty screen is
+     mostly made of, and the expand button (nvw) is how a 20,000-character prompt
+     is read, not a permanently tall card. */
+  min-height: 2.4em;
+  max-height: 26vh;
   field-sizing: content;
 }
 
@@ -7546,6 +8000,9 @@ a.thread-node:hover {
   outline: none;
 }
 
+/* A full-width bar under the text: attachment tools from the left, the send
+   button pushed to the right by its own auto margin — so neither composer needed
+   its markup split into two groups to get there. */
 .chat-tools {
   display: flex;
   align-items: center;
@@ -7587,7 +8044,7 @@ a.thread-node:hover {
   height: 44px;
   min-height: 0;
   padding: 0;
-  margin-left: 6px;
+  margin-left: auto;
   border-radius: 50%;
   background: var(--accent);
   border-color: var(--accent);
@@ -7628,7 +8085,7 @@ a.thread-node:hover {
    100dvh conversation would hang that far past the fold. 63px is that bar,
    measured: 42px logo row + 2 x 10px padding + its hairline. */
 @media (max-width: 860px) {
-  .chat-page {
+  .conv-page {
     height: calc(100dvh - 63px);
   }
 }
@@ -7636,11 +8093,11 @@ a.thread-node:hover {
 /* ----- the rail becomes a drawer ----- */
 
 @media (max-width: 900px) {
-  .chat-page {
+  .conv-page {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .chat-rail {
+  .conv-rail {
     position: fixed;
     inset: 0 auto 0 0;
     z-index: 40;
@@ -7650,12 +8107,12 @@ a.thread-node:hover {
     box-shadow: var(--shadow-lg);
   }
 
-  .chat-rail.open {
+  .conv-rail.open {
     transform: translateX(0);
   }
 
-  .chat-rail-close,
-  .chat-bar-toggle {
+  .conv-rail-close,
+  .conv-bar-toggle {
     display: grid;
     place-items: center;
     width: 42px;
@@ -7664,7 +8121,38 @@ a.thread-node:hover {
     border-radius: 50%;
   }
 
-  .chat-rail-scrim {
+  /* The rail is a fixed-width overlay here, so there is nothing to collapse INTO
+     — the close button is the affordance. The collapsed class can still be on the
+     element (it is remembered across widths), so its effects are undone rather
+     than merely left unstyled: without this, opening the drawer on a phone after
+     collapsing on a desktop would show a 64px strip with no titles in it. */
+  .conv-rail-collapse {
+    display: none;
+  }
+
+  .conv-page.rail-collapsed {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .conv-rail.collapsed .conv-rail-head {
+    flex-direction: row;
+    padding: 14px 10px 6px;
+  }
+
+  .conv-rail.collapsed .conv-rail-new {
+    flex: 1;
+    width: auto;
+    height: auto;
+    min-height: 44px;
+    padding: 10px 12px;
+    justify-content: flex-start;
+  }
+
+  .conv-rail.collapsed .conv-rail-new-label {
+    display: inline;
+  }
+
+  .conv-scrim {
     display: block;
     position: fixed;
     inset: 0;
@@ -7679,7 +8167,34 @@ a.thread-node:hover {
   }
 
   .chat-composer-wrap {
-    padding: 8px 14px 14px;
+    padding: 8px 12px 12px;
+  }
+
+  .chat-input-row {
+    padding: 6px 8px;
+  }
+
+  .chat-input {
+    padding: 6px 6px 2px;
+    /* Under 16px iOS Safari zooms the page on focus and never zooms back out. */
+    font-size: 16px;
+    max-height: 24vh;
+  }
+
+  /* /chat carries five tools plus send. At 42px each that is 254px of a ~300px
+     bar on a 360px phone — tight enough that one more tool would wrap. */
+  .chat-tool {
+    width: 40px;
+    height: 40px;
+  }
+
+  .chat-send {
+    width: 42px;
+    height: 42px;
+  }
+
+  .chat-tray-name {
+    max-width: 14ch;
   }
 
   .chat-bubble {
@@ -7688,9 +8203,9 @@ a.thread-node:hover {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .chat-rail,
+  .conv-rail,
   .chat-turn-actions,
-  .chat-rail-delete {
+  .conv-rail-delete {
     transition: none;
   }
 
@@ -7929,4 +8444,156 @@ a.file-row-link > svg:last-child {
   .article-versions-restore {
     flex: 1 0 100%;
   }
+}
+
+/* ---------- प्रायोगिक: Gemini व्हिडिओ संभाषण (/new-video-workflow) ----------
+
+   An ISOLATED EXPERIMENT, and this block is deliberately small: the page reuses the
+   chat composer, tray, bubble and turn rules above rather than growing a second
+   conversation design. What is here is only what a VIDEO conversation needs and a text
+   one does not — a player, a thumbnail on an attachment chip, and a failure block that
+   shows the provider's own words verbatim. */
+
+.nvw-page {
+  max-width: 860px;
+}
+
+.nvw-note {
+  margin: 0 0 24px;
+}
+
+/* The turns and the composer share one measure, exactly as .chat-column does on /chat —
+   but here it sits inside the ordinary .page document rather than a 100dvh grid, so it
+   needs no scroller of its own. */
+.nvw-column {
+  max-width: none;
+}
+
+.nvw-empty {
+  padding: 8px 0 28px;
+}
+
+/* The composer is DOCKED at the foot of the pane on this surface, empty
+   conversation included — unlike /chat, which lifts it under the greeting. A
+   video prompt is a long piece of writing that gets edited and re-sent, so the
+   box wants to be in the one place it will always be, not to move the first time
+   a turn lands. The greeting is centred in the space above it instead. */
+.nvw-pane .chat-scroll.is-empty {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  /* Nothing scrolls, so the fade would only dim the greeting. */
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+/* ----- the expanded composer -----
+
+   A 20,000-character prompt is not readable in a box two lines tall, and the
+   growth cap has to stay (a composer that eats the conversation is worse). So
+   the box can be thrown full-screen instead. It is the SAME element, moved by
+   position: fixed and nothing else — re-mounting it in a portal would drop the
+   caret and, with ComposeSafeTextarea, re-seed the field from its mount value. */
+.nvw-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 59;
+  border: none;
+  padding: 0;
+  background: rgba(28, 22, 17, 0.45);
+  cursor: pointer;
+}
+
+.chat-composer.is-expanded {
+  position: fixed;
+  top: 4vh;
+  bottom: 4vh;
+  left: 0;
+  right: 0;
+  z-index: 60;
+  /* Centred and capped: the whole viewport's width would set a 1200px line, which
+     is harder to read than the box it replaced, not easier. */
+  width: min(1000px, 92vw);
+  margin: 0 auto;
+}
+
+.chat-composer.is-expanded .chat-input-row {
+  flex: 1;
+  min-height: 0;
+}
+
+/* field-sizing: content sizes to the TEXT, which in a definite-height box means
+   a short prompt leaves the bar floating mid-air and a long one overflows. Back
+   to ordinary sizing here, so flex fills the card and the text scrolls in it. */
+.chat-composer.is-expanded .chat-input {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  field-sizing: normal;
+}
+
+@media (max-width: 900px) {
+  .chat-composer.is-expanded {
+    top: 8px;
+    bottom: 8px;
+    width: auto;
+    margin: 0 8px;
+  }
+}
+
+/* Generation runs for minutes, so the wait is a labelled line rather than a bare spinner
+   the officer would read as a hang. */
+.nvw-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 12px;
+  color: var(--muted);
+}
+
+.nvw-video {
+  display: block;
+  width: 100%;
+  max-width: 640px;
+  border-radius: var(--r-lg);
+  background: #000;
+  box-shadow: var(--shadow-md);
+}
+
+.nvw-model-text {
+  margin: 12px 0 0;
+  color: var(--muted);
+}
+
+.nvw-model-label {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.nvw-error {
+  margin: 4px 0 0;
+  padding: 12px 14px;
+  border: 1px solid var(--err);
+  border-radius: var(--r-md);
+  background: var(--err-soft);
+}
+
+.nvw-error-title {
+  margin: 0;
+  font-weight: 600;
+}
+
+/* Verbatim, wrapped, scrollable: this is a provider message (often English, sometimes a
+   whole JSON detail) and reading it is the entire reason this page exists. Every other
+   surface normalises such a string away, on purpose — see NewVideoTurnView. */
+.nvw-error-detail {
+  margin: 8px 0 0;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--text);
 }

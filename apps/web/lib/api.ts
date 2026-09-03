@@ -11,6 +11,8 @@ import {
   DloReviewPatchResponseSchema,
   GenerationDetailSchema,
   GenerationSourceFilesResponseSchema,
+  MotionSourceResponseSchema,
+  type MotionSourceResponse,
   RestoreArticleVersionResponseSchema,
   GenerationSummarySchema,
   GlossaryListResponseSchema,
@@ -97,6 +99,15 @@ import {
   type VideoReferenceImageUploadResponse,
   type CreateVideoProjectInput,
   type RegenerateStillRequest,
+  NewVideoConversationListSchema,
+  NewVideoConversationSchema,
+  NewVideoImageUploadResponseSchema,
+  NewVideoTurnResponseSchema,
+  type NewVideoConversation,
+  type NewVideoConversationSummary,
+  type NewVideoImage,
+  type NewVideoTurnRequest,
+  type NewVideoTurnResponse,
   type UpdateSceneMotionRequest,
   type ReplanVideoScriptRequest,
   type UpdateVideoScriptRequest,
@@ -522,6 +533,54 @@ export function dloFileImageUrl(intakeId: string, index: number): string {
 
 export function posterDownloadUrl(id: string): string {
   return `${API_URL}/api/generations/${id}/poster.png`;
+}
+
+// The same poster with the logo and footer left off — the artwork alone, stored separately
+// at render time because the chrome is composited destructively (see the route). A poster
+// rendered before that landed has no plain copy and the route answers in Marathi; the button
+// is still offered, since redoing the poster is what produces one.
+export function plainPosterDownloadUrl(id: string): string {
+  return `${API_URL}/api/generations/${id}/poster-plain.png`;
+}
+
+// ---------- Dynamic Poster (migration 0052) ----------
+
+// Uploading the officer's still poster. Multipart with no content-type header — the browser
+// sets the boundary, the createDloIntake precedent. It returns a storage PATH, which is what
+// the create request then carries: the API accepts only paths it minted itself.
+export async function uploadMotionSource(
+  file: File,
+): Promise<MotionSourceResponse> {
+  const form = new FormData();
+  form.append('file', file);
+  const response = await fetch(`${API_URL}/api/generations/motion-image`, {
+    method: 'POST',
+    body: form,
+  });
+  return MotionSourceResponseSchema.parse(await readJsonResponse(response));
+}
+
+// The AI प्रॉम्प्ट box beside the finished clip. 202 — the render is a background job the
+// detail poll then follows, exactly like a poster re-render.
+export async function sendMotionFeedback(
+  id: string,
+  feedback: string,
+): Promise<void> {
+  await requestJson(`/api/generations/${id}/motion/feedback`, {
+    method: 'POST',
+    body: JSON.stringify({ feedback }),
+  });
+}
+
+// Downloads go through the API for the reason posterDownloadUrl does: `download` on an
+// anchor is ignored cross-origin, so only the server can force a save. Playing the clip does
+// NOT come through here — the page plays it straight from the public bucket.
+export function motionVideoDownloadUrl(id: string): string {
+  return `${API_URL}/api/generations/${id}/motion.mp4`;
+}
+
+export function motionGifDownloadUrl(id: string): string {
+  return `${API_URL}/api/generations/${id}/motion.gif`;
 }
 
 // A normal navigation rather than fetch: the API redirects through Canva OAuth and finally
@@ -984,14 +1043,23 @@ export async function deleteReferenceImage(id: string): Promise<void> {
 export async function createVideoProject(
   input: CreateVideoProjectInput,
   narrationAudio?: File | null,
+  // Reference pictures for the AI prompt. They are shown to the model that
+  // writes the script/storyboard, so they travel with the create request rather
+  // than through the per-scene upload route, which only exists because a scene
+  // is edited long after its project was made.
+  promptImages: readonly File[] = [],
 ): Promise<string> {
-  if (narrationAudio) {
+  if (narrationAudio || promptImages.length > 0) {
     const form = new FormData();
     for (const [key, value] of Object.entries(input)) {
       if (value === undefined) continue;
       form.append(key, String(value));
     }
-    form.append('narration', narrationAudio, narrationAudio.name);
+    if (narrationAudio)
+      form.append('narration', narrationAudio, narrationAudio.name);
+    for (const image of promptImages) {
+      form.append('promptImages', image, image.name);
+    }
     const response = await fetch(`${API_URL}/api/video/projects`, {
       method: 'POST',
       body: form,
@@ -1323,4 +1391,63 @@ export async function sendChatMessage(
   } finally {
     await reader.cancel().catch(() => undefined);
   }
+}
+
+// ---------------------------------------------------------------------------
+// /new-video-workflow — Gemini conversational video
+// ---------------------------------------------------------------------------
+//
+// Deliberately separate from the /video functions above: that is the production explainer
+// pipeline (scenes, gates, tiers) and this is a conversation over one video. Nothing is
+// shared, so either can change without dragging the other along.
+
+// One reference image, uploaded while the officer is still typing. The returned id is what a
+// turn carries — the browser never names a storage path.
+export async function uploadNewVideoImage(file: File): Promise<NewVideoImage> {
+  const form = new FormData();
+  form.append('file', file);
+  const response = await fetch(`${API_URL}/api/new-video-workflow/images`, {
+    method: 'POST',
+    body: form,
+  });
+  return NewVideoImageUploadResponseSchema.parse(
+    await readJsonResponse(response),
+  );
+}
+
+// Omitting `conversationId` starts a new, independent conversation — which is all the
+// "नवीन संभाषण" button does.
+export async function sendNewVideoTurn(
+  input: NewVideoTurnRequest,
+): Promise<NewVideoTurnResponse> {
+  const body = await requestJson('/api/new-video-workflow/turns', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  return NewVideoTurnResponseSchema.parse(body);
+}
+
+export async function getNewVideoConversation(
+  id: string,
+): Promise<NewVideoConversation> {
+  const body = await requestJson(`/api/new-video-workflow/conversations/${id}`);
+  return NewVideoConversationSchema.parse(body);
+}
+
+// The rail (migration 0050). Summaries only: no turns and no prompts, so this stays cheap
+// enough to re-fetch whenever something changes.
+export async function listNewVideoConversations(): Promise<
+  NewVideoConversationSummary[]
+> {
+  const body = await requestJson('/api/new-video-workflow/conversations');
+  return NewVideoConversationListSchema.parse(body);
+}
+
+export async function deleteNewVideoConversation(id: string): Promise<void> {
+  const response = await fetch(
+    `${API_URL}/api/new-video-workflow/conversations/${id}`,
+    { method: 'DELETE' },
+  );
+  // 204, so there is no body to read — but a failure still carries one.
+  if (!response.ok) await readJsonResponse(response);
 }

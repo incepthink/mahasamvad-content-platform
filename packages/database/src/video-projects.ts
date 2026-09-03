@@ -68,6 +68,12 @@ export type VideoSceneEntry = Readonly<{
   // keyframe + Veo prompts. Absent on pre-planner projects.
   beat?: string;
   shotHint?: string;
+  // The storyboard's own short label for this scene ("Opening — Newborn
+  // daughter"): what the card is called at review, above the narration and the
+  // frame description. English, like the visual brief it sits with, and jsonb
+  // so it needed no migration. Absent on projects planned before it existed —
+  // the card then falls back to "दृश्य N" alone.
+  sceneLabel?: string;
   stillPath?: string;
   stillVersion?: number;
   // The scene's END frame (second reviewed still, Veo's lastFrame input).
@@ -132,6 +138,13 @@ export type VideoProjectRow = Readonly<{
   error: string | null;
   note: string;
   heading: string | null;
+  // The officer's free-text direction for this project (migration 0051), and
+  // the reference pictures they attached beside it. Both are read by the script
+  // job AND by gate 1's re-plan, which is why they live on the ROW rather than
+  // travelling as job arguments the way the narration recording does. A
+  // database without 0051 reads as null/empty.
+  aiPrompt: string | null;
+  promptImagePaths: readonly string[];
   inputMode: VideoInputMode;
   durationBucket: VideoDurationBucket;
   orientation: VideoOrientation;
@@ -163,6 +176,8 @@ type VideoProjectDbRow = {
   error: string | null;
   note: string;
   heading: string | null;
+  ai_prompt?: string | null;
+  prompt_image_paths?: string[] | null;
   input_mode: VideoInputMode;
   duration_bucket: VideoDurationBucket;
   orientation: VideoOrientation;
@@ -190,6 +205,8 @@ function fromDbRow(row: VideoProjectDbRow): VideoProjectRow {
     error: row.error,
     note: row.note,
     heading: row.heading,
+    aiPrompt: row.ai_prompt ?? null,
+    promptImagePaths: row.prompt_image_paths ?? [],
     inputMode: row.input_mode,
     durationBucket: row.duration_bucket,
     orientation: row.orientation,
@@ -216,6 +233,10 @@ export async function insertVideoProject(
   input: Readonly<{
     note: string;
     heading?: string | undefined;
+    // Omitted from the INSERT unless something was typed, so a database without
+    // 0051 fails only a create that actually carries a direction (the 0029/0041
+    // principle) rather than every video run.
+    aiPrompt?: string | undefined;
     inputMode: VideoInputMode;
     durationBucket: VideoDurationBucket;
     orientation: VideoOrientation;
@@ -227,6 +248,7 @@ export async function insertVideoProject(
     .insert({
       note: input.note,
       heading: input.heading ?? null,
+      ...(input.aiPrompt ? { ai_prompt: input.aiPrompt } : {}),
       input_mode: input.inputMode,
       duration_bucket: input.durationBucket,
       orientation: input.orientation,
@@ -248,6 +270,7 @@ export type VideoProjectPatch = Partial<
     | 'step'
     | 'error'
     | 'scenes'
+    | 'promptImagePaths'
     | 'captionsEnabled'
     | 'title'
     | 'style'
@@ -269,6 +292,10 @@ export async function updateVideoProject(
   if (patch.step !== undefined) row.step = patch.step;
   if (patch.error !== undefined) row.error = patch.error;
   if (patch.scenes !== undefined) row.scenes = patch.scenes;
+  // Written once, right after the create route has uploaded the pictures — the
+  // storage key needs the row id, so it cannot ride along in the insert.
+  if (patch.promptImagePaths !== undefined)
+    row.prompt_image_paths = patch.promptImagePaths;
   if (patch.captionsEnabled !== undefined)
     row.captions_enabled = patch.captionsEnabled;
   if (patch.title !== undefined) row.title = patch.title;

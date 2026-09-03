@@ -19,6 +19,32 @@ The long-term product will:
 Scaffolding is done. The core generation pipeline and a first web product on top of
 it are implemented and working end-to-end:
 
+- **Video script/storyboard authoring now uses only two plain task prompts and
+  five-second scenes**
+  (2026-09-03, no migration; supersedes the prompt/rules portion of the 2026-09-02
+  migration-0051 milestone): `टिपणीवरून` first sends exactly `make a script from the
+  provided text`, then sends the generated script through exactly `make a storyboard from
+  the Provided script. Each scene can only be up to 5 seconds, so divide the narration
+  accordingly and create more scenes.`; `तयार संहितेवरून` uses only the storyboard
+  instruction. The note lane no longer runs fact extraction, plan-first writing,
+  historical-style retrieval,
+  coverage grading or repair prompts. Storyboard metadata and the later motion-direction
+  pass use the same storyboard instruction. Required JSON fields and field limits are
+  enforced with OpenAI Structured Outputs and Zod rather than natural-language rules, so the
+  review UI keeps its existing title/style/scene/brief/key-point contract without adding text
+  to either prompt. The officer's optional AI direction remains input data and reference
+  pictures remain image inputs. The former 30/60-second narration target and eight-scene note
+  ceiling are no longer part of generation or narration fitting. Both lanes split narration
+  into as many scenes as needed; every newly planned scene is capped at five seconds, while
+  the wider stored-duration schema remains only so older 6-15 second projects still load.
+  Deterministic script splitting, timing allocation and numeric key-point validation remain
+  code-side. Verified free: workspace typecheck **7/7 green**, targeted ESLint clean,
+  prompt/key-point harnesses green, explicit five-second splitting/allocation checks green,
+  `git diff --check` clean, and the complete production build green (only the pre-existing
+  analytics/layout unused warnings). A real two-call note run and one ready-script run remain
+  for paid verification. Deploy by rebuilding `@dgipr/schemas` then
+  `@dgipr/content-engine`, and ship API + web together; no migration or n8n change.
+
 - **OpenAI Responses replaces Gemini for native PDF chat** (2026-08-27, migration 0048;
   supersedes the 0046 Gemini runtime): the old Gemini Interactions path was conclusively the
   failure point — 3.7, 3.6 and 3.5 Flash-Lite all created interactions but produced no complete
@@ -3084,6 +3110,390 @@ client id/secret — see the milestone below.
 2. `AGENTS.md` must be updated whenever a major architectural decision or implementation milestone changes.
 
 ## Latest Implementation Milestone
+
+- **A Dynamic Poster is no longer cropped to fit its frame** (2026-09-03, no migration, no
+  n8n — SUPERSEDES the resolution half of the Dynamic Poster milestone below and the
+  two-fixed-frames half of 0053): the lane's first reported defect. A 4:5 poster (हर घर तिरंगा,
+  1280x1600) came back as a 9:16 clip with the left and right sides gone — `हर घर` reading as
+  `र घर`, the icon column and the flag's right edge cut away — on every run.
+  - **THE MODEL WAS NOT IGNORING THE PROMPT. THE PROMPT WAS IMPOSSIBLE.** `MOTION_BRIEF`
+    demanded, in one paragraph, "the output must be in 9:16 aspect ratio — this exact aspect
+    ratio must be maintained" AND "the full poster visible full-screen and nothing cut off".
+    For a 0.800 source inside a 0.5625 frame those cannot both hold: filling it shows
+    `0.5625/0.800 = 70.3%` of the poster's width, i.e. **14.84% lost off each side** — which is
+    what the reported render measured. Asked to choose, it obeyed the more concrete half. **A
+    stronger sentence could never have fixed this**, and that is the finding worth keeping: when
+    a prompt states two requirements that are geometrically exclusive, rewriting either one is
+    wasted work. The officer's own Gemini-chat comparison came back correct precisely because no
+    ratio was imposed there (the chat title in their screenshot is their own sentence,
+    `I_wanted_you_to_make_a_looping`).
+  - **The default output shape is now the POSTER'S OWN ratio** (`MOTION_ASPECTS` gains
+    `'source'`, `DEFAULT_MOTION_ASPECT` becomes it). This platform renders its social posters at
+    1280x1600 *deliberately* — 4:5, so they fill a 1080x1350 Instagram/Facebook portrait frame
+    with no gap — so the department's own artwork was being forced into a frame it was never
+    designed for. The two fixed frames stay for a reel or a landscape post; they are now a
+    choice rather than the only options.
+  - **A frame the poster does not already have is a GUARANTEE, not a request.**
+    `fitImageToAspect` (`poster-renderer/src/aspect-fit.ts`) letterboxes or pillarboxes the
+    source into the target ratio BEFORE anything is sent, so the image the model receives
+    already IS that shape with every pixel of the artwork inside it and there is no side left to
+    crop. Instruct-then-guarantee, the shape this repo uses wherever an image model has
+    repeatedly failed a rule (`extendCanvasForFooter` for the branding band; Chromium typesetting
+    rather than asking a model to spell Devanagari). It **never crops and never stretches** —
+    both would defeat the point — and the bars are filled from the poster's own edge using
+    `footer-extension.ts`'s probe: a flat edge takes a solid fill sampled from it, a textured one
+    gets its last rows stretched and softened. Black bars would read as a mistake; these read as
+    the poster's ground continuing.
+  - **The prompt now states the frame as settled** rather than as a target to hit: a new
+    sentence says the uploaded image is already exactly that ratio and rules out zooming,
+    re-framing, cropping and panning. And the ratio it names comes from `aspectRatioLabel` on
+    the FRAMED image, so what the prompt says and what the model is looking at cannot disagree.
+    The brief's cap moved 900 → 1050 chars for exactly that one sentence; it is still a cap, and
+    still there so "one more rule" has to be a deliberate decision.
+  - **No migration.** `motion_aspect` is plain text with no CHECK (0053 says so), so a third
+    value was additive. The route still omits the column unless the officer chose a
+    non-default, so an un-applied 0053 now costs the two fixed frames alone. A pre-existing row
+    carrying null now falls back to `'source'` rather than `'9:16'` — **that is the intended
+    repair, not a regression**: those rows were rendered cropped, so a follow-up on one should
+    reframe it rather than faithfully reproduce the defect.
+  - **The control moved out of the text box's foot into a field of its own.** It was a chip
+    strip absolutely placed beside the send button with `max-width: calc(100% - 98px)`; a third
+    option pushed it past that and it wrapped onto two rows over the officer's own text. It also
+    earns a hint now — "the poster is padded" is the one thing an officer cannot see until the
+    clip comes back, and bars nobody warned them about read as a defect. The `.motion-aspect`
+    CSS rule was un-scoped from `.note-field` in the same move (leaving it scoped would have
+    silently dropped the pill track's own styling).
+  Verified 2026-09-03, all free: workspace typecheck **7/7 green**; eslint clean on all ten
+  touched files; prettier clean on every hunk of mine (eight files report whole-file complaints
+  that are **pre-existing CRLF** — confirmed per file by diffing prettier's own output against
+  the CR-stripped content, zero content diff — and `routes/generations.ts`'s one real hunk is at
+  line 1212, untouched by this change, so do NOT `--write` any of them). Two harnesses:
+  `npx tsx src/generation/motion-prompt.ts` (the ratio carried into BOTH places the brief names
+  it, no `{{ASPECT}}` surviving, the no-re-framing sentence present, an arbitrary `4:5` label
+  travelling as readily as the two fixed frames) and the new
+  `npx tsx src/aspect-fit.ts` in poster-renderer, whose decisive assertion **extracts the
+  original back out of each padded canvas and compares it byte for byte** — 1280x1600 stays
+  untouched at its own ratio, becomes 1280x2276 letterboxed at 9:16 and 2844x1600 pillarboxed at
+  16:9, with the poster's own pixels identical in both. Plus **browser verification at 1360 and
+  390** against the running app: one radiogroup with three options, the poster's own shape
+  preselected, the pill track still flex/rounded/bordered and in normal flow, no overflow of its
+  field or of the page, 40px+ targets, the hint present, and no page errors.
+  **Left for a real run** (model spend): one Dynamic Poster on the reported हर घर तिरंगा poster
+  at the default, confirming the clip comes back whole — and one at 9:16, confirming the bars
+  are the poster's own colours rather than a crop. Deploy is `@dgipr/schemas` →
+  `@dgipr/poster-renderer` → `@dgipr/content-engine` dists → API + web (ship together — the
+  third aspect value is a shared contract). No migration, no n8n, no new env.
+
+- **डायनॅमिक पोस्टर — a finished still poster, motionised into a looping clip** (2026-09-02,
+  migration 0052, no n8n): every format on क्रिएटिव्ह आणि सोशल starts from TEXT. This one starts
+  from a picture the department already has: the officer uploads a finished poster, optionally
+  says what should move, and gets back an MP4 that loops plus a GIF — with the poster's own
+  Devanagari untouched and the output at the resolution that went in.
+  - **Two calls, and the first one is the decisive one.** `generateMotionPrompt`
+    (`content-engine/src/generation/motion-prompt.ts`) puts the poster in front of gpt-5.6-sol
+    at HIGH reasoning effort and asks it to WRITE the gemini-omni prompt; that prompt plus the
+    poster then go to `createVideoInteraction`. The video model never sees the department's
+    intent, only the sentences step 1 produced, which is why that call is pinned a tier up
+    (`OPENAI_MOTION_PROMPT_MODEL`) — nothing downstream re-checks it.
+  - **THE RESOLUTION IS SUPPLIED AS FACT, NOT ASKED FOR**, and this is the one place the
+    officer's own brief was amended. It said "find out what is the resolution of my uploaded
+    image and mention it in the Gemini prompt". These models are unreliable at reading their own
+    input's pixel dimensions, and that number is the entire promise of the lane — so
+    `normalizeSourceImage` (new in poster-renderer, beside `normalizeReferenceImage`) MEASURES
+    it and the brief states it. The model still has to write it into the prompt, which is what
+    the brief actually needed. `width`/`height` are the UPRIGHT source dimensions — after EXIF
+    rotation, before the 2048px bound — so a phone-held-upright poster is not read sideways and
+    a print-resolution export still reports its real size.
+  - **The officer's direction is ranked, not merely passed.** It arrives as free text beside the
+    upload and is the only thing on this lane that says what should MOVE. A model asked to write
+    a prompt "taking this into account" routinely acknowledges such a line and then writes a
+    generic prompt anyway, so `directionBlock` states it as a requirement AND names that exact
+    failure ("restating it, or acknowledging it and then writing generic motion instead, is a
+    failure"). Harness-asserted in both directions. It is OPTIONAL — the poster alone is a
+    complete request — which is why `CreateGenerationRequestSchema.note` lost its `.min()` and
+    the floor moved into `superRefine`, applied per lane.
+  - **It is a `generations` row, not a table of its own** (`category: 'dynamic_poster'`, the
+    0042 precedent), because it is one of the formats the create form offers and the officer
+    expects to find it in history beside the others. The job goes through runner.ts's `runJob`
+    like every other generation job — status/step, the cost scope, the usage meter and the
+    edit-failure recovery are inherited rather than reimplemented — and lives in its own module
+    (`apps/api/src/jobs/dynamic-poster.ts`) only because runner.ts is already 3,000 lines.
+    `runJob`/`armEditRetry` are now exported for it and for nothing else.
+  - **THE CHAIN RULE, borrowed verbatim from /new-video-workflow**, is what makes the AI
+    प्रॉम्प्ट box on the detail page an EDIT rather than a fresh start:
+    `motion_interaction_id` is advanced ONLY by a render that produced a clip, so a failed
+    follow-up leaves the chain on the video the officer can still see. Each follow-up is a
+    `generation_revisions` row with target `'motion'`, which IS the version history — every
+    render writes its own immutable object, so a follow-up that comes back worse never destroys
+    the clip already paid for.
+  - **The GIF is a SECOND artifact, best-effort, and derived after the MP4 is stored**
+    (`mp4ToGif`, poster-renderer, which owns ffmpeg). A per-clip palette (`palettegen
+    stats_mode=diff` + `sierra2_4a` dithering) rather than the default web palette, because a
+    DGIPR poster is large flat saffron and maroon with Devanagari over it and a generic palette
+    bands the flats and crawls the text edges. An ffmpeg failure logs and moves on: the clip is
+    what was billed for, and the page says the GIF is unavailable rather than hiding a button.
+  - **The upload is its own route** (`POST /generations/motion-image`), so the create request
+    stays the one JSON shape every other format sends. It returns a storage PATH and the create
+    request carries that back — a public URL is a string anyone can type, while a path is
+    checked against `MOTION_SOURCE_PREFIX` in the schema AND again in the route before a paid
+    render is pointed at it. The object name has no user-supplied component at all.
+  - **Four readers had to be told about the new lane, and three of them were found by walking
+    them rather than by a type error.** `hasOutput` on the detail page now counts a clip, or one
+    failed follow-up would hide a run with a perfectly good video on it (the exact failure that
+    flag exists to prevent for social posters). The retry route's "this run produced nothing"
+    test counts it too — without that, a failed FOLLOW-UP would take the run-it-again branch,
+    re-render v1 over the existing clip and reset the Gemini chain — and its dispatch gained the
+    lane, which otherwise fell through to `startGenerationJob` and the article pipeline's
+    hard-fail. And `NextActions` returns null here: its edit-note re-run would submit a fresh
+    run carrying the motion direction and no poster, i.e. a button that can only 400. The way to
+    change a Dynamic Poster is the follow-up box; the way to start over is the create form.
+  - Deliberately absent: no reference library, no poster-copy call, no chrome overlay, no
+    caption, no publishing, no Canva. The officer's poster is finished artwork that already
+    carries the department's branding, and stamping a second lockup onto it would be a defect.
+  Verified 2026-09-02: workspace typecheck **7/7 green**; eslint clean on all 20 touched files;
+  prettier clean on every hunk of mine (five edited files report whole-file complaints that are
+  **pre-existing** — confirmed by running prettier over their HEAD blobs, which fail identically
+  — so do NOT `--write` them). Free harnesses: `npx tsx src/generation/motion-prompt.ts` (17
+  assertions — the resolution stated as fact in both places, the sentence it replaced denied,
+  the three locks, the direction carried verbatim and ranked, and the answer parser against
+  plain/fenced/bare/empty JSON) and an offline `mp4ToGif` run that built a real 1280x1600 MP4
+  with ffmpeg and asserted the output is a GIF89a, 576x720 (portrait preserved, long edge
+  bounded) and carries the NETSCAPE2.0 loop block. Live against the running app: the upload
+  route end to end against the real bucket (a PNG normalised, stored under the guarded prefix
+  and measured), the extension guard in Marathi, all four create guards (the path on another
+  lane, no path, a foreign path, a traversal attempt) refused **before** any row is written,
+  and — the blast-radius check — an ordinary create still returning 202 with 0052 unapplied
+  while a Dynamic Poster create is the only thing that fails. Browser: 26 assertions at 1360
+  and 390 (the card, the note box replaced by the upload and the brief, the poster options
+  gone, the send dead until a poster is attached, no overflow, no page errors, and the ordinary
+  form restored on switching away) plus a full upload round trip (preview, measured size, send
+  going live on the poster alone, removal putting the drop zone back).
+  **Left for a real run** (0052 applied + model spend): one poster end to end, and one follow-up
+  on it — which is also the only way to confirm what this design cannot: whether gemini-omni
+  honours the resolution the prompt names, and whether it leaves the Devanagari alone.
+  **Deploy: 0052 → `@dgipr/schemas` → `@dgipr/database` → `@dgipr/poster-renderer` →
+  `@dgipr/content-engine` dists → API + web** (ship together — the upload response, the create
+  request's `sourceImagePath` and the detail payload's motion fields are one contract). No n8n.
+  New env, both optional: `OPENAI_MOTION_PROMPT_MODEL`, `OPENAI_MOTION_PROMPT_REASONING_EFFORT`.
+  `GEMINI_API_KEY` is required for this page.
+
+- **/video asks for a SCRIPT AND A STORYBOARD, and the officer writes the prompt**
+  (2026-09-02, migration 0051, no n8n): the create form's one officer-authored field was
+  **शीर्षक / मुख्य मुद्दा (ऐच्छिक)** — a title-or-angle that reached the planners as
+  `<HEADING purpose="requested_angle">` and, on the ready-script lane, silently REPLACED the
+  model's own title. It is gone. In its place is **AI प्रॉम्प्ट**, free text plus up to four
+  reference pictures, and both are shown to the model that plans the storyboard.
+  - **Each lane now opens with its own task statement, in the department's words**
+    (`content-engine/src/video/script-brief.ts`). टिपणीवरून: *"From the provided information I
+    want you to make a script and storyboard for an Explainer Video for Maharashtra DGIPR
+    department."* तयार संहितेवरून: *"The provided TEXT is a script … Use the script as it is and
+    make a storyboard for it."* They live in one module rather than inline in the two planners
+    so the lanes cannot drift about what is being produced, and the harness asserts that the
+    ready-script statement never asks for a script to be WRITTEN — that lane's words are final,
+    its split is deterministic and its save route rejects a changed narration.
+  - **The officer's prompt is APPENDED, never a replacement**, and is fenced. `aiPromptBlock`
+    renders it last, tagged `officer_direction_not_a_fact_source`, followed by a sentence saying
+    it supplies no names, dates, amounts, designations, scheme names or places. Without that a
+    free paragraph sitting beside a NOTE marked `only_authoritative_fact_source` is exactly the
+    shape a model reads as a second, unreviewed note.
+  - **The pictures go to the PLANNING model, and deliberately nowhere else.** They ride the
+    planner turn as image parts (`withPromptImages`, over the multimodal `AnyChatMessage` path
+    /chat already uses), because the plan is where the shots are CHOSEN — a picture that reached
+    only the frame render could no longer change what is being shot. They are NOT attached to
+    the storyboard renders: a scene's own `referenceImagePath` remains the way to say "this
+    building", and `renderFrame` carries one reference image because two inline pictures under
+    one instruction leave the model guessing which is which. `promptImagesNote` names them in
+    the text first — an unannounced image is one the model has to guess the purpose of.
+  - **They travel as public `videos`-bucket URLs**, so nothing is downloaded and re-encoded; the
+    bucket has been public since 0026 for exactly this kind of reason. Normalised to PNG at the
+    ROUTE (`normalizeReferenceImage`, EXIF rotate + 2048px bound) with the officer standing in
+    front of the form, the reference-image rule.
+  - **Migration 0051 is `ai_prompt` + `prompt_image_paths`, and both are read off the ROW**
+    rather than passed as job arguments the way the narration recording is — because gate 1's
+    **AI ने पुन्हा तयार करा** re-plan happens long after the create request is gone, and a
+    direction it could not see would quietly re-describe every scene without it. `ai_prompt` is
+    omitted from the INSERT unless something was typed (the 0029/0041 principle) and the picture
+    paths are written right after it, so an un-applied 0051 fails only a create that actually
+    carries a direction. **Verified live against a database without 0051**: the list and detail
+    routes answer normally with `aiPrompt: null` / `promptImageUrls: []`, and every other video
+    run is untouched. The picture write is deliberately **not** best-effort — losing the
+    references would plan the storyboard without the thing it was attached for — so a failure
+    fails the ROW with a readable Marathi reason instead of leaving it for the orphan reaper,
+    whose "the server restarted" message would be untrue.
+  - **`heading` is kept, not dropped.** The column, the detail field and the list card's
+    `title ?? heading ?? noteExcerpt` fallback all stay, because rows created before today carry
+    one; `planReadyVideoScript`'s option is renamed `heading` → `title` to say what it actually
+    did. Nothing sends a heading any more.
+  - **Gate 1 reads as a storyboard.** Every scene now carries a short English `sceneLabel`
+    ("Opening — Newborn daughter") which the card is titled with under **दृश्य N**; the
+    narration label becomes **निवेदन — जसेच्या तसे** on the ready-script lane, where the words
+    are the officer's and locked; and the start brief is labelled **दृश्य / स्टोरीबोर्ड फ्रेम**,
+    with both planners now asked for two-to-four sentences naming location, people, action and
+    mood — a frame an illustrator could draw without asking a question. `sceneLabel` is jsonb, so
+    **no migration**; it is optional at every layer and a scene planned before today simply shows
+    no label. It survives a brief edit (it names the scene, not the frame) and is re-derived by
+    the re-plan, where a blank one DROPS the field rather than leaving a stale title over a scene
+    it no longer describes.
+  Verified 2026-09-02, all free: workspace typecheck **7/7 green**; eslint clean on all 14
+  touched files; prettier clean on every hunk of mine (six files report whole-file complaints
+  that are **pre-existing CRLF** — confirmed per file by diffing prettier's own output against
+  the CR-stripped content, zero content diff, so do NOT `--write` them, and the two real diffs in
+  `video/[id]/page.tsx` and `VideoSceneCard.tsx` are at lines this change never touched); the new
+  `script-brief` harness at **26/26** (`npx tsx src/video/script-brief.ts`, from
+  content-engine) plus `video-prompts`, `generate-video-script --check` and `clip-provider` still
+  green. Live against the running API: the list and detail routes above, and all three create
+  guards firing **before any spend** — an over-long prompt as a Marathi 400, a `.txt` offered as
+  a picture named with the accepted extensions, and a fifth picture refused by name. The
+  rendered `/video` page carries the AI प्रॉम्प्ट field and its picker and no longer carries
+  शीर्षक. **Left for a real run** (model spend): one project per lane with a prompt and a
+  picture attached, confirming the storyboard describes frames against the reference and that
+  each card is titled by its own label. **Deploy: 0051 → `@dgipr/schemas` → `@dgipr/database` →
+  `@dgipr/content-engine` dists → API + web** (ship together — `aiPrompt`, `promptImageUrls` and
+  the create form's multipart field are one contract). No n8n, no new env.
+
+- **/new-video-workflow gets a history rail, and it is the SAME rail /chat has** (2026-09-02,
+  migration 0050, no n8n): the Gemini video page had no history at all — not because the rail
+  was missing, but because there was nothing to list. It shipped the day before as a comparison
+  harness holding conversations in a Map inside the API (3-hour TTL, 50 rows, single process,
+  everything lost on restart), and its own hook kept the conversation id in React state ON
+  PURPOSE, since a remembered id would outlive the conversation it named. It is a product
+  surface now, so the state of record moved into the database and the page became a workspace.
+  - **Migration 0050 is three tables**, and each is the shape 0044 already argued for.
+    `new_video_conversations` + `new_video_turns` are TWO tables rather than a `turns` jsonb
+    array, because a conversation GROWS a turn at a time: a jsonb array would be read and
+    rewritten wholesale on every status change, which is quadratic AND a lost-update race
+    between the polling route and the running job. `new_video_images` is separate because a
+    reference picture is uploaded BEFORE the turn exists, and resolving its id is what stops a
+    browser pointing the model at an object this API never accepted. The denormalized
+    `title`/`turn_count`/`last_turn_at` exist so the rail's list query never touches a turn — a
+    prompt runs to 20,000 characters and the list is refreshed while a render is in flight.
+  - **Two rules survived the move verbatim, and they are why the job file was rewritten rather
+    than wrapped.** THE CHAIN RULE — only a turn that produced a video advances
+    `last_interaction_id`; a failed one leaves the chain where it was, or every later "change
+    the background" edits something the officer never saw. And THE BOUNDARY —
+    `toConversationDetail` is the one place rows become payloads, and it drops the Gemini
+    interaction id and the storage path. Both got *easier* to break, not harder: the chain
+    point is now a column two code paths write, and the private fields are now STORED rather
+    than held transiently, so "it cannot leak because we never had it" stopped being true.
+    That is what the rewritten offline harness is for.
+  - **`busy` is derived from the turns, never cached on the conversation row.** The job that
+    would have to clear such a flag is the same job that can die, and a permanently
+    "generating" badge on a finished conversation is a failure the in-memory version could not
+    have had.
+  - **Two real bugs the harness caught, both introduced by the move.** `appendTurn` decided
+    whether to name the conversation from `conversation.title === ''` — a row read at the top
+    of the request, i.e. exactly the field most likely to be stale — so a follow-up could
+    rename a conversation to its own instruction; it now keys on the turn COUNT, which comes
+    from the turns just listed and cannot disagree with what is being appended. And the row
+    mappers returned `undefined` for a nullable column a driver omits, where every wire shape
+    says nullable, not optional.
+  - **The rail is `components/conversation/ConversationRail` + `ConversationWorkspace`, shared
+    with /chat, and `ChatThreadRail` is DELETED.** Everything a surface legitimately differs
+    about is a prop — the groups and their headings, where "new" goes, every label, whether
+    deletion is offered — so neither component knows what a chat or a video is, and a change to
+    rail behaviour lands on both pages at once. That was the explicit ask. The CSS split
+    follows it: `.conv-*` is the SHELL (grid, rail, drawer, bar) and `.chat-*` is the
+    conversation BODY, which /new-video-workflow reuses as it stands rather than growing a
+    second design.
+  - **The collapse toggle sits beside नवीन चॅट and mirrors the app sidebar's** — same icons,
+    same 38px target, same localStorage shape. ONE key (`dgipr.rail-collapsed`) for both
+    surfaces on purpose: an officer who put the list away expressed a preference about how they
+    work, not about one page. The load-bearing line is `iconStrip = collapsed && !open`: `open`
+    only means anything below the two-pane breakpoint, where the rail is a DRAWER the officer
+    has just asked to see, so without that guard someone who collapsed on a desktop opens the
+    drawer on their phone to an empty 64px strip. Collapsed, the list is not rendered at all
+    rather than hidden with CSS.
+  - **`dgipr.nvw.mine` is ORDERING ONLY and must never become auth** — the `dgipr.chat.mine`
+    arrangement, for the same reason: there is no login and the table has no owner column, so
+    every conversation is listed and openable by anyone, which the two rail groups say out
+    loud.
+  - Deletion is refused with a Marathi 409 while a render is in flight (the job writes back to
+    a row it expects to find, and a deleted conversation would turn a paid generation into a
+    log line), and the generated MP4s are deliberately left in the bucket — they are paid
+    renders, and this repo does not delete those on a click aimed at a list row.
+  Verified 2026-09-02, all free: workspace typecheck **7/7 green**; eslint clean on all 16
+  touched files; prettier clean (the three files it rewrote are ones authored outright here, so
+  `--write` was safe on them — it is NOT safe on the repo's pre-existing CRLF files); the
+  rewritten offline harness at **37/37** (`npx tsx apps/api/src/jobs/new-video-workflow.check.ts`,
+  run from `packages/content-engine`, which has tsx — it drives the real job functions through a
+  fake PostgREST client, and asserts the chain rule in BOTH directions, that no interaction id
+  or storage path reaches a payload or the rail, and that reference images resolve in the order
+  they were SENT rather than the order the database answers in); and **36 browser assertions**
+  against the running app at 1360 and 390 on BOTH surfaces with no page errors — the rail 296px
+  expanded and 64px collapsed, the label and list gone in the strip, the state remembered, the
+  same collapse carrying from /chat to /new-video-workflow, and the phone drawer opening as a
+  full list rather than a strip after a desktop collapse. **Left for a real run**: applying 0050
+  (it needs the EC2 tunnel + `RDS_MASTER_PASSWORD`), then one video conversation end to end —
+  send, reload mid-render, reopen from the rail, follow up, delete. **Verified live in the
+  meantime that the blast radius is as designed**: with 0050 absent the routes register, /chat
+  and every other feature are untouched, and only the three table-backed queries 500.
+  **Deploy: 0050 → `@dgipr/schemas` → `@dgipr/database` dists → API + web** (ship together — the
+  conversation list and the `title` field are one contract). No n8n, no new env.
+
+- **`/new-video-workflow` — Gemini conversational video** (2026-09-01, no migration, no n8n;
+  **its persistence and its rail are SUPERSEDED by 0050 at the top of this file** — everything
+  about the prompt, the chain and the boundary still holds): a page for comparing the Gemini
+  Interactions API against the Gemini chat app. A prompt (plus up to 4 reference images) becomes a video, and
+  a follow-up instruction edits that video through `previous_interaction_id`. **Nothing in
+  the production /video pipeline changed** — no scenes, no planner, no script, no TTS, no
+  captions, no lockup, no outro, no Veo and no Kling. It is deliberately NOT in the sidebar;
+  reach it by URL.
+  - **The prompt reaches Gemini VERBATIM, and that is the whole feature.** The page exists
+    to measure this API against the chat app, so anything this repo adds to the request
+    invalidates the comparison silently. `buildInteractionRequest`
+    (`content-engine/src/video/gemini-interactions-client.ts`) sends the officer's string as
+    a single unmodified text part and sends **no** `system_instruction`, `generation_config`,
+    `safety_settings`, negative prompt, aspect ratio or resolution — asserted as DENY checks
+    in the test file, which is what stops a future "small improvement" from quietly
+    reintroducing one. Marathi is carried character-for-character (a stray `.normalize()`
+    would recompose Devanagari matras and look identical in a terminal).
+  - **The API shape, measured live rather than assumed**: `POST /v1beta/interactions` with
+    `{model, input, store: true, background: true, previous_interaction_id?,
+    response_format: {type:'video', delivery:'uri'}}`, polled at
+    `GET /v1beta/interactions/{id}` until a terminal status. The video arrives inside a
+    `model_output` step as `{type:'video', uri|data}`; a `thought` step is NOT the answer and
+    is skipped. `background` and `response_format` ride the **learned-capability ladder**
+    (the veo-client doctrine): a 400 naming either is cached per model id and the call is
+    retried without it, so a model that cannot do URI delivery falls back to inline base64.
+  - **SUPERSEDED 2026-09-02 by migration 0050 — see the milestone at the top of this file.**
+    This shipped in memory (`apps/api/src/jobs/new-video-workflow.ts`, the
+    `document-intake.ts` model): a Map, a 3-hour TTL and hard ceilings, on the argument that an
+    experiment did not earn a migration. The conversations are rows now, so the costs recorded
+    here — an API restart losing in-flight work, a single-process constraint, no history list —
+    are gone. What is still true is the second half: only the STATE was ever ephemeral, and the
+    generated MP4s and uploaded reference images have always gone to the existing public
+    buckets, because a browser has to be able to play and show them.
+  - **The chain rule lives in one named function.** `markTurnCompleted` advances
+    `conversation.lastInteractionId`; `markTurnFailed` deliberately does not. Without the
+    second half a failed turn would strand the conversation on an interaction that has no
+    video, and every later "change the background" would edit something the officer never
+    saw (the /chat rule: only a completed answer advances state).
+  - **Nothing private crosses the wire**: no API key, no Gemini interaction id, no
+    authenticated Gemini file URL, no storage path. A turn request may name only image **ids
+    this API minted** — the /chat `imageUrl` prefix guard, one step stricter.
+  - **A failure shows the PROVIDER'S OWN WORDS**, in a monospace block, which is the one
+    deliberate departure from `storedErrorMessage`'s house rule. Everywhere else an English
+    internal message is replaced by a canned Marathi sentence; here reading the safety-filter
+    reason or the rejected parameter *is* the job.
+  Verified 2026-09-01: workspace typecheck **7/7 green**; eslint clean on all 16 touched
+  files; prettier clean; **12 offline unit tests** (`pnpm --filter @dgipr/content-engine
+  video:interactions:test`) and **27 offline registry checks** (`npx tsx
+  src/jobs/new-video-workflow.check.ts` from apps/api); every route guard exercised against
+  the running API (404/400/409, an unknown image id, and a storage path offered in place of
+  an id); and **25 browser assertions** at 1360 and 390 with no overflow and no page errors.
+  Verified LIVE end to end (real Gemini spend): a text-only prompt produced a 2.2 MB MP4
+  re-hosted at a public CDN URL, and a follow-up turn carrying a **new reference image**
+  continued the same interaction and produced a second video — with the payload confirmed to
+  carry no interaction id and no storage path. **Trap for the next agent:** Git Bash on
+  Windows mangles Devanagari in `curl -d`, so a Marathi body must go through
+  `--data-binary @file` — a rejection there is the shell, not the schema.
+  Deploy is `@dgipr/schemas` -> `@dgipr/content-engine` dists -> API + web (ship together;
+  the turn payload is a shared contract). No migration, no n8n. New env, all optional:
+  `GEMINI_VIDEO_MODEL`, `GEMINI_VIDEO_MAX_CONCURRENCY`, `GEMINI_VIDEO_TIMEOUT_MS`,
+  `GEMINI_VIDEO_POLL_INTERVAL_MS`, `GEMINI_VIDEO_RENDER_TIMEOUT_MS`,
+  `GEMINI_VIDEO_FILE_POLL_INTERVAL_MS`, `GEMINI_VIDEO_FILE_TIMEOUT_MS`. `GEMINI_API_KEY` is
+  required for this page.
+
 
 - **/translate and /proofread attach files the way /dlo does — and stop sending MARKUP to the
   model** (2026-08-31, no migration, no n8n, web only): two complaints, one root. Both pages

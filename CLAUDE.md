@@ -358,6 +358,28 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
     a default-on हायलाइट toggle); CSS block sits under the `.issue-*` one it borrows its
     "background tints only, no strikethrough" rule from. Copy and .txt download still
     emit `result.correctedText` untouched.
+- **The officer's own direction on `/video`: `video_projects.ai_prompt` + `prompt_image_paths`
+  (0051).** The create form's शीर्षक field is GONE; **AI प्रॉम्प्ट** plus up to
+  `VIDEO_PROMPT_IMAGE_LIMIT` (4) reference pictures replaced it. Both lanes now open their
+  system prompt with their own task statement (`content-engine/src/video/script-brief.ts` —
+  `NOTE_VIDEO_TASK` writes a script AND a storyboard, `READY_SCRIPT_VIDEO_TASK` storyboards an
+  unchanged script), the direction is APPENDED under `aiPromptBlock` and explicitly forbidden
+  from supplying facts, and the pictures ride the PLANNING turn as image parts
+  (`withPromptImages`, public `videos`-bucket URLs — no download). They deliberately do NOT
+  reach the frame renders: a scene's own `referenceImagePath` is still the way to say "this
+  building", and `renderFrame` carries one reference image. Read off the ROW rather than passed
+  as job arguments, because gate 1's re-plan runs long after the create request; `ai_prompt` is
+  omitted from the INSERT unless typed (0029/0041), so an un-applied 0051 fails only a create
+  that carries one. `heading` is KEPT for legacy rows (the list card's title fallback);
+  `planReadyVideoScript`'s option is renamed `title` to say what it did. Free harness:
+  `tsx src/video/script-brief.ts`.
+- **Gate 1 reads as a storyboard**: each scene carries a short English `sceneLabel`
+  ("Opening — Newborn daughter") titling its card under दृश्य N (jsonb, no migration, optional
+  everywhere — a pre-0051 scene shows none); the narration label becomes
+  **निवेदन — जसेच्या तसे** where the words are locked; the start brief is
+  **दृश्य / स्टोरीबोर्ड फ्रेम** and both planners are asked for a two-to-four-sentence frame an
+  illustrator could draw. The label survives a brief edit and is re-derived by the re-plan,
+  where a blank one DROPS the field rather than leaving a stale title.
 - Explainer videos (`/video` — note → AI scene PLAN → per-scene Marathi script →
   TTS voiceover → REALISTIC start+end frame pair per scene → provider-interpolated
   VOICED MP4 + SRT. **2026-07-26: realistic live-action look, not illustration**, and
@@ -561,6 +583,55 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   `tsx --env-file=../../.env src/video/veo-client.ts <start.png> [end.png]` (two
   PNGs force the 8s interpolation window, ~$1.20 fast — the veo-path equivalent,
   proving the lastFrame shape). No n8n anywhere on this path.
+- **Dynamic Posters (`category: 'dynamic_poster'`, migration 0052) — a finished still poster,
+  motionised.** The one format on क्रिएटिव्ह आणि सोशल whose SOURCE is a picture rather than
+  text. Upload route + feedback route + two download proxies →
+  `apps/api/src/routes/generations.ts` (`POST /generations/motion-image`,
+  `POST /generations/:id/motion/feedback`, `GET /generations/:id/motion.{mp4,gif}`); job →
+  `apps/api/src/jobs/dynamic-poster.ts`; step 1's prompt →
+  `packages/content-engine/src/generation/motion-prompt.ts`; step 2 reuses
+  `video/gemini-interactions-client.ts` (the /new-video-workflow client, unchanged); the GIF →
+  `packages/poster-renderer/src/video/motion-gif.ts`; the source normaliser →
+  `poster-renderer/src/reference-image.ts` (`normalizeSourceImage`, beside
+  `normalizeReferenceImage`); limits + wire shapes + the storage-path guard →
+  `packages/schemas/src/dynamic-poster.ts`; web → the `dynamic_poster` card in
+  `apps/web/app/page.tsx` (which swaps the note card for `MotionSourcePicker` + an AI प्रॉम्प्ट
+  box) and `components/DynamicPosterView.tsx` on the detail page.
+  Six things to know before changing it. **THE OUTPUT SHAPE IS AN ASPECT RATIO, AND THE
+  DEFAULT IS THE POSTER'S OWN** (`motion_aspect`, 0053; `'source'` | `'9:16'` | `'16:9'`, with
+  null = `'source'`). It began as the poster's exact pixel RESOLUTION measured by sharp and
+  demanded back — which a video model does not deliver, so the loudest requirement in the
+  prompt was the one thing the render could never honour — and then as the two fixed frames
+  alone, which was worse: a DGIPR social poster is 4:5, and the brief asks for that ratio AND
+  "the full poster, nothing cut off" in one breath, which for 4:5 inside 9:16 is impossible
+  (only 0.5625/0.8 = 70% of its width fits). Real renders came back with **~15% cut off each
+  side**. So the poster's own ratio is the default and nothing is compromised in the common
+  case — and **a ratio the poster does not already have is GUARANTEED, not requested**:
+  `fitImageToAspect` (`poster-renderer/src/aspect-fit.ts`) letterboxes or pillarboxes the
+  source into that exact frame before it is sent, filling the bars from the poster's own edge
+  (the `extendCanvasForFooter` technique), so the image the model receives already IS the
+  requested shape with all the artwork inside it and there is no side left to crop. It never
+  crops and never stretches; its free harness extracts the original back out of the padded
+  canvas and compares it byte for byte, which is the only thing that proves that. The prompt
+  states the ratio as settled (`already exactly {{ASPECT}} … no zooming, re-framing, cropping
+  or panning`) and the label comes from `aspectRatioLabel` on the FRAMED image, so the ratio
+  stated and the ratio supplied cannot disagree. Free harnesses:
+  `npx tsx src/aspect-fit.ts` (poster-renderer) and `npx tsx src/generation/motion-prompt.ts`.
+  **The officer's direction is optional**, which is
+  why `CreateGenerationRequestSchema.note` lost its `.min()` and the floor moved into
+  `superRefine` per lane — and it is RANKED in the prompt with the acknowledge-and-ignore
+  failure named, or the model restates it and writes generic motion anyway. **The chain rule**
+  (/new-video-workflow's): `motion_interaction_id` advances only on a render that produced a
+  clip, so a failed follow-up still edits the video on screen. **Follow-ups are
+  `generation_revisions` rows with target `'motion'`**, which is the version history — each
+  render writes its own immutable object, and the detail page's strip is a VIEWER, not a
+  restore control (nothing downstream reads the clip, so there is nothing to re-point). **The
+  GIF is best-effort and derived after the MP4 is stored** — the clip is the paid artifact, so
+  an ffmpeg failure logs and the page says so. **The create request names a storage PATH, not a
+  URL**, checked against `MOTION_SOURCE_PREFIX` in the schema and again in the route: it is the
+  one field that points a paid render at an object. Deliberately absent: no reference library,
+  no poster copy, no chrome, no caption, no publishing, no Canva, no n8n — and `NextActions`
+  renders nothing here, since its edit-note re-run would submit a run with no poster.
 - **Department usage analytics (`/analytics`) — how much the department uses the platform.**
   One read-only endpoint serves the landing page AND all six drill-downs, which is what makes a
   card's number and its feature page's number impossible to disagree: route →
@@ -581,15 +652,31 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   officer's run (verified live against a database without 0043), which is also why an un-applied
   0043 costs only the three event-backed cards. The payload carries machine keys only; every
   Marathi label is in `apps/web/lib/strings.ts`.
+- **The conversation shell (`/chat` AND `/new-video-workflow`) — one rail, one layout.**
+  `apps/web/components/conversation/ConversationWorkspace.tsx` owns the full-viewport grid, the
+  narrow-screen drawer + scrim + Escape, the top bar and the collapse state;
+  `ConversationRail.tsx` owns the list itself. Both take everything surface-specific as props
+  (groups and their headings, where "new" goes, every label), so **neither knows what a chat or
+  a video is** and a change to rail behaviour lands on both pages at once. Collapse →
+  `lib/useRailCollapse.ts`, ONE localStorage key (`dgipr.rail-collapsed`) across both surfaces
+  on purpose: an officer who put the list away expressed a preference about how they work, not
+  about one page. The load-bearing detail is `iconStrip = collapsed && !open` in the rail —
+  `open` only means anything below the two-pane breakpoint, where the rail is a DRAWER the
+  officer just asked to see, and without that guard someone who collapsed on a desktop opens
+  the drawer on their phone to an empty 64px strip. CSS: the `.conv-*` block in `dgipr.css` is
+  the SHELL; `.chat-*` below it is the conversation BODY (pane, scroll, column, bubbles,
+  composer) and /new-video-workflow reuses it as it stands rather than growing a second
+  conversation design. Free harness (needs `pnpm dev`): the rail check in the milestone notes.
 - **The general assistant (`/chat`) — the one surface that is not a pipeline.** Ask anything,
   attach anything, chats stored and reopenable. Routes → `apps/api/src/routes/chat.ts` (create/
   list/detail/delete a thread, the SSE turn, an image upload); engine →
   `packages/content-engine/src/chat/misc-chat.ts`; rows → `packages/database/src/chat.ts`
   (migration 0044, TWO tables); shapes + the SSE event framing + `chatTitleFrom` →
   `packages/schemas/src/chat.ts`; web → `apps/web/app/chat/page.tsx` + `chat/[id]/page.tsx` →
-  `ChatWorkspace` (rail + conversation) with `ChatThreadRail`/`ChatConversation`/
+  `ChatWorkspace` (chat's own data) over the SHARED shell below, with `ChatConversation`/
   `ChatMessageBubble`/`ChatComposer`, and `useChatThread`/`useChatThreadList`/
-  `useChatAttachments`/`lib/chatDraft.ts`.
+  `useChatAttachments`/`lib/chatDraft.ts`. **`ChatThreadRail` is deleted** — the rail is now
+  `components/conversation/ConversationRail`, shared with /new-video-workflow.
   Six things to know before changing it. **There is NO system prompt and that is the product
   decision**, not an omission — the module header says why, and the consequence is that this
   page does not inherit the glossary, the never-invent rules or the Marathi-first contract
@@ -1076,6 +1163,24 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   `article-chrome.ts` / `twitter-chrome.ts` / `cmo-chrome.ts` + `cmo-geometry.ts` —
   sharp overlays of the brand chrome onto n8n article/twitter/CMO posters); public API in
   `packages/poster-renderer/src/index.ts`
+- **The poster WITHOUT its chrome — `GET /api/generations/:id/poster-plain.png`.** It serves a
+  SECOND stored object, `generations/{id}/poster-v{n}-plain.png`, not a crop of the finished
+  poster: the logo is a destructive composite on every lane (the article footer too), so once a
+  poster is flattened the pixels under the branding are gone. The social footer alone could be
+  cropped back off — it is appended below the artwork — but a poster missing only its footer is
+  not what was asked for. `storePlainPoster` in `apps/api/src/jobs/runner.ts` writes the raw
+  render at the three sites that produce one (article initial/regenerate, social
+  initial/regenerate, and the shared image-feedback re-render), always AFTER the poster write
+  and **best-effort**: a convenience copy must never cost a paid render (the 0028 principle).
+  So `renderArticlePosterEditViaN8n` now returns the model's RAW edit and both callers stamp
+  the chrome themselves, and `renderSocialPosterFeedbackViaN8n` returns `{ png, raw }`. The
+  route derives the object from `row.posterPath` (`plainPathForPoster`), so a restore to an
+  older version serves that version's plain copy and no column is needed. **A poster rendered
+  before 2026-09-03, and every `ARTICLE_POSTER_MODE=html` poster, has none** — the route
+  answers a Marathi 404 saying a redo will produce one, which the officer SEES because this is
+  a plain navigation (the `article.pdf` precedent). Web: a second `ImageDown` icon in the
+  `poster-icon-actions` row of `SocialPostView` and `PosterPanel`, the latter hidden on the
+  थंबनेल lane, which keeps no un-chromed render.
 - **Article → PDF export** (the finished article as an official A4 document): template →
   `packages/poster-renderer/src/article-pdf-template.ts` (letterhead + justified paragraphs
   + `A4_MARGIN`), orchestrator → `generate-article-pdf.ts`, Chromium → `renderHtmlToPdf` in
@@ -1257,6 +1362,37 @@ the analytics page's six cards would read as never used. Self-contained and addi
 fire-and-forget and the aggregator treats a read failure as "not tracked", so an un-applied 0043
 disables three cards rather than any feature — verified live, a poster download still returned 200
 with the table absent. Apply before the API deploy anyway.
+`0052` — the Dynamic Poster lane: `generations.category` gains `'dynamic_poster'`,
+`generation_revisions.target` gains `'motion'`, plus five additive columns on `generations`
+(`source_image_path`, `motion_path`, `motion_gif_path`, `motion_prompt`,
+`motion_interaction_id`) and two on `generation_revisions` (`motion_path`, `motion_gif_path`).
+The columns follow the omit-unless-present rule, but the two CHECK widenings cannot be worked
+around from code — so **apply it BEFORE the API deploy**: without it every Dynamic Poster
+create fails and nothing else does. Verified live against a database without it: an ordinary
+create still returns 202, every input guard still answers in Marathi, and the dynamic-poster
+create is the only thing that fails. The motion snapshot columns are separate from
+`poster_path` deliberately — that column is a PNG every poster reader in the API treats as one,
+and an .mp4 in it would be listed as a poster version by `posterVersionPaths`.
+`0051` — `video_projects.ai_prompt` + `prompt_image_paths` (the officer's free-text direction
+for one video project and the reference pictures attached to it, replacing the retired शीर्षक
+field). Additive + nullable, and `insertVideoProject` omits `ai_prompt` unless something was
+typed, so an un-applied 0051 fails only a create that actually carries a direction — verified
+live, the list/detail routes answer normally with `aiPrompt: null` and every other video run is
+untouched. The picture paths are written in a SEPARATE update right after the insert (their
+storage key needs the row id) and that write is deliberately NOT best-effort: losing the
+references would plan a storyboard without the thing they were attached for, so a failure fails
+the row with a readable Marathi reason. Apply before the API deploy.
+`0050` — `new_video_conversations` + `new_video_turns` + `new_video_images` (the Gemini
+conversational video at `/new-video-workflow`, promoted off an in-process Map). TWO tables for
+0044's reason — a conversation grows a turn at a time, so a `turns` jsonb array would be read
+and rewritten wholesale on every status change, which is both quadratic and a lost-update race
+between the polling route and the running job. `new_video_images` is separate because a
+reference picture is uploaded BEFORE the turn exists, and resolving its id is what stops a
+browser pointing the model at an object this API never accepted. The denormalized
+`title`/`turn_count`/`last_turn_at` exist so the rail's list query never reads a 20,000-char
+prompt. Self-contained and additive: nothing outside that page reads these tables, so an
+un-applied 0050 disables it alone — **verified live**, the routes register, every other feature
+is untouched, and only the three table-backed queries 500.
 `0044` — `chat_threads` + `chat_messages` (the general assistant at `/chat`). TWO tables rather
 than a `messages` jsonb column, unlike every other feature here: a chat GROWS a turn at a time,
 so a jsonb array would be read and rewritten wholesale on every message — quadratic, and the

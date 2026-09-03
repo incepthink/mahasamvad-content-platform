@@ -158,6 +158,33 @@ export {
   type ChatFileRow,
   type NewChatFile,
 } from './chat.js';
+// /new-video-workflow — Gemini conversational video (migration 0050). Its own module rather
+// than a flavour of chat.ts: a turn is a paid render with a provider chain point, not a
+// message, and nothing outside that page reads these tables.
+export {
+  NEW_VIDEO_CONVERSATIONS_TABLE,
+  NEW_VIDEO_TURNS_TABLE,
+  NEW_VIDEO_IMAGES_TABLE,
+  insertNewVideoConversation,
+  updateNewVideoConversation,
+  getNewVideoConversationRow,
+  listNewVideoConversations,
+  deleteNewVideoConversation,
+  insertNewVideoTurn,
+  updateNewVideoTurn,
+  listNewVideoTurns,
+  insertNewVideoImage,
+  listNewVideoImagesByIds,
+  type NewVideoTurnStatusValue,
+  type NewVideoTurnImage,
+  type NewVideoConversationRow,
+  type NewVideoConversationPatch,
+  type NewVideoTurnRow,
+  type NewVideoTurnPatch,
+  type NewVideoImageRow,
+  type NewNewVideoTurn,
+  type NewNewVideoImage,
+} from './new-video.js';
 export {
   USAGE_EVENTS_TABLE,
   recordUsageEvent,

@@ -6,6 +6,7 @@
 import { useState } from 'react';
 import {
   Download,
+  ImageDown,
   // Palette — the recolour redo, hidden from the UI (see the commented button below).
   RotateCw,
   SquareDashed,
@@ -14,6 +15,7 @@ import {
 import { POSTER_HEADING_MAX_CHARS, isYoutubeCategory } from '@dgipr/schemas';
 import type { GenerationDetail } from '@dgipr/schemas';
 import {
+  plainPosterDownloadUrl,
   posterDownloadUrl,
   regeneratePoster,
   sendPosterFeedback,
@@ -166,6 +168,18 @@ export function PosterPanel({
             >
               <Download size={18} strokeWidth={1.9} aria-hidden="true" />
             </a>
+            {/* The artwork alone, without the stamped logo and footer. Offered on the
+                article poster only: the थंबनेल lane keeps no un-chromed render. */}
+            {!isThumbnail ? (
+              <a
+                className="icon-btn"
+                href={plainPosterDownloadUrl(detail.id)}
+                title={STR.downloadPosterPlain}
+                aria-label={STR.downloadPosterPlain}
+              >
+                <ImageDown size={18} strokeWidth={1.9} aria-hidden="true" />
+              </a>
+            ) : null}
             <CanvaLink generationId={detail.id} />
             {/* A fresh redesign of this same run. Only offered on the pixel-feedback
                 lane: in `html` mode the poster is typeset from a cached scene and the

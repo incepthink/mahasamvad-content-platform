@@ -35,16 +35,21 @@ import { useRouter } from 'next/navigation';
 import {
   Clapperboard,
   ClipboardPaste,
+  Film,
   Image as ImageIcon,
   MessageSquareText,
   MonitorPlay,
+  Ratio,
   Send,
   Sparkles,
   Type,
   Wand2,
 } from 'lucide-react';
 import {
+  DEFAULT_MOTION_ASPECT,
   IMAGE_PROMPT_MAX_CHARS,
+  MOTION_ASPECTS,
+  MOTION_DIRECTION_MAX_CHARS,
   POSTER_HEADING_MAX_CHARS,
   POSTER_TEXT_MIN_CHARS,
   UPLOAD_FILE_MAX_BYTES,
@@ -52,7 +57,12 @@ import {
   isSocialCategory,
   referenceCategoryOf,
 } from '@dgipr/schemas';
-import type { Category, DesignMode } from '@dgipr/schemas';
+import type {
+  Category,
+  DesignMode,
+  MotionAspect,
+  MotionSourceResponse,
+} from '@dgipr/schemas';
 import { createGeneration, getGeneration } from '../lib/api';
 import { useTasks } from '../lib/TasksProvider';
 import { STR } from '../lib/strings';
@@ -64,6 +74,7 @@ import {
 import ReferencePicker, {
   type ReferenceSelection,
 } from '../components/ReferencePicker';
+import { MotionSourcePicker } from '../components/MotionSourcePicker';
 import { SocialLogoStack } from '../components/SocialLogoStack';
 import { Disclosure } from '../components/Disclosure';
 import { ErrorNotice } from '../components/ErrorNotice';
@@ -128,6 +139,15 @@ const FORMATS = [
     name: 'बॅनर',
     desc: STR.mediaFormatArticlePosterDesc,
   },
+  // The one format on this page whose SOURCE is a picture rather than text — picking it
+  // replaces the note box above with an upload and a motion brief. It is a real Category
+  // (migration 0052), so it needs no mapping here either.
+  {
+    value: 'dynamic_poster',
+    icon: Film,
+    name: STR.mediaFormatDynamicPoster,
+    desc: STR.mediaFormatDynamicPosterDesc,
+  },
   {
     value: 'video',
     icon: Clapperboard,
@@ -145,7 +165,7 @@ const FORMATS = [
 // never held in state.
 type SelectableFormat = Extract<
   Format,
-  'twitter' | 'scheme' | 'youtube' | 'caption'
+  'twitter' | 'scheme' | 'youtube' | 'caption' | 'dynamic_poster'
 >;
 
 // Where the upload card remembers its in-flight job across a refresh. The page also clears
@@ -160,7 +180,10 @@ function selectableFormatOf(value: string | null): SelectableFormat | null {
   // the picker no longer has a card for it — it folds into the one क्रिएटिव्ह card, which
   // renders the same poster.
   if (value === 'facebook') return 'twitter';
-  return value === 'twitter' || value === 'scheme' || value === 'youtube'
+  return value === 'twitter' ||
+    value === 'scheme' ||
+    value === 'youtube' ||
+    value === 'dynamic_poster'
     ? value
     : null;
 }
@@ -210,6 +233,31 @@ export default function NewGenerationPage() {
   // the automatic named-subject resolution, which is what most runs want — this is the
   // override for when the officer already knows the poster must say a particular thing.
   const [posterHeading, setPosterHeading] = useState('');
+  // डायनॅमिक पोस्टर only: the officer's uploaded poster, already stored (the picker uploads on
+  // pick) and holding the storage path the create request carries. Held across a format switch
+  // like the two fields above — an upload the officer made is not thrown away because they
+  // looked at another card — and simply not sent on a lane that ignores it.
+  const [motionSource, setMotionSource] = useState<MotionSourceResponse | null>(
+    null,
+  );
+  // The motion brief for that lane. Its OWN state rather than the note box above, which is
+  // hidden here: the two mean different things (that one is content, this one is direction),
+  // and sharing it would send whatever was typed for a poster as the instruction for a clip.
+  const [motionDirection, setMotionDirection] = useState('');
+  // The SHAPE of the clip (migration 0053), and the only size question this lane asks. It used
+  // to ask none: the motion prompt stated the uploaded poster's exact pixel resolution and
+  // demanded it back, which a video model does not deliver — so the loudest requirement in the
+  // prompt was the one thing the render could never honour.
+  //
+  // THE POSTER'S OWN SHAPE IS THE DEFAULT, and choosing anything else used to be the lane's
+  // worst bug rather than a preference: a DGIPR social poster is 4:5, and a 4:5 poster asked
+  // for a 9:16 clip came back with ~15% cut off each side, because the prompt demanded both
+  // that ratio and the whole poster and only 70% of its width fits. The two fixed frames stay
+  // for a department publishing into a reel or a landscape post; picking one now pads the
+  // poster into it rather than letting the render crop to fill it.
+  const [motionAspect, setMotionAspect] = useState<MotionAspect>(
+    DEFAULT_MOTION_ASPECT,
+  );
   const [reference, setReference] = useState<ReferenceSelection | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -260,6 +308,11 @@ export default function NewGenerationPage() {
   // social run by category and would otherwise inherit the whole poster form — the template
   // picker, the design question, the जसाच्या तसा मजकूर checkbox and the AI प्रॉम्प्ट box, none
   // of which can affect a run that paints nothing.
+  // The डायनॅमिक पोस्टर lane. Tested first alongside the caption lane and excluded from every
+  // flag below, because its source is an IMAGE: the note box, the document intake, the
+  // template picker and every poster option would all be answering questions this run does not
+  // ask.
+  const isDynamicPoster = category === 'dynamic_poster';
   const isCaption = category === 'caption';
   // What actually goes on the wire. 'caption' is not a Category, and the platform it maps to is
   // a real choice rather than a formality: generateSocialCaption branches on it, and the twitter
@@ -269,10 +322,11 @@ export default function NewGenerationPage() {
   const submitCategory: Category = isCaption ? 'facebook' : category;
   // The क्रिएटिव्ह lane (submitted as 'twitter'). Still asked through isSocialCategory so a
   // ?format=facebook handoff, and any future second social card, behave identically.
-  const isSocial = !isCaption && isSocialCategory(category);
+  const isSocial = !isCaption && !isDynamicPoster && isSocialCategory(category);
   // The लेख पोस्टर lane. Asked positively rather than as !isSocial, which silently swept
   // यूट्यूब थंबनेल in with it — a thumbnail writes no article and locks no poster heading.
-  const isArticle = !isCaption && isArticleCategory(category);
+  const isArticle =
+    !isCaption && !isDynamicPoster && isArticleCategory(category);
   // Has the officer explicitly chosen a template? This is the ONLY design question on the
   // क्रिएटिव्ह lane (2026-08-07): no template means a fully-AI poster, a template means that
   // template is followed. There is no separate "design mode" control any more.
@@ -346,8 +400,11 @@ export default function NewGenerationPage() {
   // paid to read them yet, so it contributes no text to combinedNote, and reading it and then
   // submitting is exactly what startSubmit does. Testing the text alone would leave an officer
   // whose only source is a scan with a dead button and no way forward.
-  const canSubmit =
-    combinedNote.length >= POSTER_TEXT_MIN_CHARS || docStatus === 'unread';
+  // डायनॅमिक पोस्टर is sourced from the picture, so the uploaded poster IS the requirement and
+  // the direction beside it is optional — the officer may reasonably have nothing to add.
+  const canSubmit = isDynamicPoster
+    ? motionSource !== null
+    : combinedNote.length >= POSTER_TEXT_MIN_CHARS || docStatus === 'unread';
   const submitBusy = submitting || awaitingRead;
   const submitLabel = awaitingRead
     ? STR.docReadingForSubmit
@@ -378,10 +435,15 @@ export default function NewGenerationPage() {
   };
 
   const submit = async () => {
+    if (isDynamicPoster && !motionSource) {
+      setError(STR.motionSourceRequired);
+      return;
+    }
     // The box holds the poster's own text now, which can legitimately be a few characters
     // ('भारत टॅक्सी' is 11) — the old 20-character article minimum would have refused it.
     // POSTER_TEXT_MIN_CHARS is shared with the API's schema, so the two cannot drift.
-    if (combinedNote.length < POSTER_TEXT_MIN_CHARS) {
+    // Not applied on डायनॅमिक पोस्टर, whose source is the uploaded picture.
+    if (!isDynamicPoster && combinedNote.length < POSTER_TEXT_MIN_CHARS) {
       setError(STR.posterTextTooShort);
       return;
     }
@@ -401,7 +463,10 @@ export default function NewGenerationPage() {
         setError(STR.busyError);
         return;
       }
-    } else if (hasActiveArticleTask) {
+      // डायनॅमिक पोस्टर takes NEITHER gate. Those two exist because their lanes share a serial
+      // resource — one n8n workflow, one article pipeline — and this one shares neither: it is
+      // its own two calls straight to gpt-5.6-sol and gemini-omni.
+    } else if (!isDynamicPoster && hasActiveArticleTask) {
       setError(STR.busyError);
       return;
     }
@@ -409,7 +474,9 @@ export default function NewGenerationPage() {
     setError(null);
     try {
       const id = await createGeneration({
-        note: combinedNote,
+        // On डायनॅमिक पोस्टर the note IS the motion direction, and an empty one is a complete
+        // request — the picture is the source. Every other lane sends what it always has.
+        note: isDynamicPoster ? motionDirection.trim() : combinedNote,
         category: submitCategory,
         // 'article' means "this run renders NO poster" on both lanes — the फक्त कॅप्शन card.
         // Every other format here renders one.
@@ -439,6 +506,13 @@ export default function NewGenerationPage() {
         referenceImageId:
           reference?.kind === 'image' ? reference.id : undefined,
         referenceTypeId: reference?.kind === 'type' ? reference.id : undefined,
+        // The uploaded poster (migration 0052). A PATH, never a URL: the API accepts only
+        // paths it minted, so this is the one thing that can point a paid render at an object.
+        sourceImagePath:
+          isDynamicPoster && motionSource ? motionSource.path : undefined,
+        // The clip's shape (migration 0053). Sent on this lane only — the schema rejects it
+        // anywhere else, since no other lane renders a clip for it to describe.
+        motionAspect: isDynamicPoster ? motionAspect : undefined,
       });
       // Every format now opens its own progress page. Keep tracking the run so the navbar
       // tasks panel still offers a shortcut, but do not open that panel automatically.
@@ -484,204 +558,298 @@ export default function NewGenerationPage() {
         </div>
       </header>
 
-      <section className="card">
-        <label className="field-label" htmlFor="note">
-          <ClipboardPaste size={18} className="label-icon" aria-hidden="true" />
-          {fromArticle ? STR.articleSourceLabel : STR.articlePasteLabel}
-        </label>
-        <p className="hint">
-          {fromArticle ? STR.articleSourceHint : STR.articlePasteHint}
-        </p>
-        {/* Handoff from a finished run's cross-format link. The failure is stated rather
-            than silent — an empty box with no explanation reads as the link not working. */}
-        {prefill === 'loading' ? (
-          <p className="hint" aria-live="polite">
-            <span className="spinner" aria-hidden="true" /> {STR.prefillLoading}
-          </p>
-        ) : prefill === 'applied' ? (
-          <p className="form-success">{STR.prefillApplied}</p>
-        ) : prefill === 'failed' ? (
-          <ErrorNotice message={STR.prefillFailed} />
-        ) : null}
-        {/* The submit lives INSIDE the text box, bottom-right, the way a composer does.
-            It used to be a full-width तयार करा bar in its own card ABOVE the form — put
-            there because a button under the whole page (textarea + upload card + format
-            cards) is off-screen for most of the time spent here. Anchoring it to the box
-            keeps it in view without detaching it from what it acts on, and the error line
-            follows it so a refusal (too short, another run in flight) is still reported
-            where the action was taken. */}
-        <div className="note-field">
-          <textarea
-            id="note"
-            className="note-input"
-            placeholder={
-              fromArticle
-                ? STR.articleSourcePlaceholder
-                : STR.articlePastePlaceholder
-            }
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
+      {/* THE SOURCE IS A PICTURE ON ONE LANE ONLY. डायनॅमिक पोस्टर starts from a finished
+          poster the officer already has, so the box that would ask for text is replaced
+          outright rather than left there to be ignored: an upload, a motion brief, and the
+          same send button. Everything below this card — the format picker, and on other
+          lanes the poster heading and the template pin — is unchanged. */}
+      {isDynamicPoster ? (
+        <section className="card">
+          <MotionSourcePicker
+            value={motionSource}
+            disabled={submitting}
+            onChange={setMotionSource}
           />
-          <button
-            type="button"
-            className="btn btn-primary note-send"
-            onClick={() => void startSubmit()}
-            disabled={submitBusy || !canSubmit}
-            title={submitLabel}
-            aria-label={submitLabel}
-          >
-            {submitBusy ? (
-              <span className="spinner" aria-hidden="true" />
-            ) : (
-              <Send size={20} aria-hidden="true" />
-            )}
-          </button>
-        </div>
-        {error ? <ErrorNotice message={error} /> : null}
-
-        {/* THE OFFICER'S OWN PROMPT (migration 0045), क्रिएटिव्ह only. Directly under the text
-            box because the two are sent together and mean nothing apart: this is the design
-            brief, that is the words to put on it.
-
-            IT REPLACES, IT DOES NOT ADD. Fill it and the platform's entire assembled poster
-            prompt is skipped — the image model gets the DGIPR designer line, this brief, the
-            text above, and the reserved-zone rule, which stays because the badge and footer are
-            composited in code afterwards and would otherwise land on top of the officer's own
-            poster. Nothing else: no palette, no arrangement anchor, no reference-structure
-            block, and no poster-copy call is made. The hint says so in as many words, because
-            an officer who types one extra instruction expecting it to be ADDED to the usual
-            rules would be reading this box exactly backwards.
-
-            The template picker below still works with it: pinned, the master is the edit canvas
-            and this is the only instruction sent with it; unpinned, the poster is generated from
-            scratch. That question is answered by pinning, exactly as it is today.
-
-            बॅनर, यूट्यूब थंबनेल and फक्त कॅप्शन do not show it — the first two build their image
-            prompts on lanes this does not touch, and the third paints nothing at all. */}
-        {isSocial ? (
+          {/* Optional, and the hint says so. The poster alone is a complete request; this is
+              where an officer says which part of it should move. */}
           <div className="option-field">
-            <label className="field-label" htmlFor="image-prompt">
+            <label className="field-label" htmlFor="motion-direction">
               <Wand2 size={18} className="label-icon" aria-hidden="true" />
-              {STR.imagePromptLabel}
+              {STR.motionDirectionLabel}
             </label>
-            <p className="hint">{STR.imagePromptHint}</p>
-            <textarea
-              id="image-prompt"
-              className="note-input"
-              maxLength={IMAGE_PROMPT_MAX_CHARS}
-              placeholder={STR.imagePromptPlaceholder}
-              value={imagePrompt}
-              disabled={submitting}
-              onChange={(e) => setImagePrompt(e.target.value)}
-            />
+            <p className="hint">{STR.motionDirectionHint}</p>
+            <div className="note-field">
+              <textarea
+                id="motion-direction"
+                className="note-input"
+                maxLength={MOTION_DIRECTION_MAX_CHARS}
+                placeholder={STR.motionDirectionPlaceholder}
+                value={motionDirection}
+                disabled={submitting}
+                onChange={(e) => setMotionDirection(e.target.value)}
+              />
+              {/* submit() directly rather than startSubmit(): that one exists to read an
+                  attached document before generating, and this lane has none. */}
+              <button
+                type="button"
+                className="btn btn-primary note-send"
+                onClick={() => void submit()}
+                disabled={submitBusy || !canSubmit}
+                title={submitLabel}
+                aria-label={submitLabel}
+              >
+                {submitBusy ? (
+                  <span className="spinner" aria-hidden="true" />
+                ) : (
+                  <Send size={20} aria-hidden="true" />
+                )}
+              </button>
+            </div>
           </div>
-        ) : null}
-
-        {/* Two opt-ins about the text above, in the card that holds it. Both are क्रिएटिव्ह-only
-            and both are OFF by default:
-
-            जसाच्या तसा मजकूर — print the box unchanged instead of writing the poster's copy out
-              of it. Was a pair of tabs above the box; almost every run wants the default, so an
-              unticked checkbox states it in a quarter of the height. Available with or without a
-              template ('fresh_verbatim' / 'onbrand').
-            कॅप्शनही तयार करा — the caption is a second paid call and can be added afterwards from
-              the detail page, so off is a cheap default rather than a lossy one.
-
-            बॅनर and यूट्यूब थंबनेल send neither value, so neither box is shown there — a control
-            that cannot affect the run would be a lie. */}
-        {isSocial ? (
-          <>
-            <label className="option-toggle">
-              <input
-                type="checkbox"
-                checked={verbatimText}
-                disabled={submitting}
-                onChange={(e) =>
-                  setContentSource(e.target.checked ? 'verbatim' : 'ai')
-                }
-              />
-              <span>
-                <span className="option-toggle-name">
-                  {STR.posterSourceVerbatim}
-                </span>
-                <span className="option-toggle-desc">
-                  {STR.posterSourceVerbatimDesc}
-                </span>
-              </span>
+          {/* THE SHAPE OF THE CLIP. A field of its own rather than a chip strip floating in
+              the text box's foot, which is where it started: a third option pushed that strip
+              past the width the box reserves beside its send button, and it wrapped onto two
+              rows over the officer's own text. It also earns a hint — "the poster is padded"
+              is the one thing they cannot see until the clip comes back, and bars nobody
+              warned them about read as a defect. */}
+          <div className="option-field">
+            <label className="field-label" htmlFor="motion-aspect-source">
+              <Ratio size={18} className="label-icon" aria-hidden="true" />
+              {STR.motionAspectLabel}
             </label>
-            <label className="option-toggle">
-              <input
-                type="checkbox"
-                checked={wantCaption}
-                disabled={submitting}
-                onChange={(e) => setWantCaption(e.target.checked)}
-              />
-              <span>
-                <span className="option-toggle-name">
-                  {STR.captionToggleLabel}
-                </span>
-                <span className="option-toggle-desc">
-                  {STR.captionToggleHint}
-                </span>
-              </span>
-            </label>
-          </>
-        ) : null}
-
-        {/* A finished article often arrives as a file rather than in the clipboard — a Word
-            document, or a scanned press note. The shared intake reads it here; a scanned PDF
-            stops to ask which pages are worth OCR'ing before a single credit is spent.
-
-            EMBEDDED: inside this card rather than as one of its own, because the file is a
-            source for the same box above it — as its own card it read as a separate form and
-            an officer could finish the page without noticing the two were related.
-
-            LIVE mode (onTextChange): the file's text is a SECOND source counted beside the box
-            above, not something pushed into it — so pasting, uploading, or doing both all just
-            work. It used to be appended by a button inside the card, which meant an upload that
-            was never handed over was silently dropped and the submit complained the टिपणी was
-            too short. */}
-        <DocumentIntake
-          key={docKey}
-          storageKey={DOC_STORAGE_KEY}
-          embedded
-          // Names this surface so a paid OCR read lands on this feature's service card
-          // rather than being counted in the bill and attributed to nobody.
-          feature="social"
-          maxBytes={UPLOAD_FILE_MAX_BYTES}
-          onTextChange={(text) => {
-            setDocText(text);
-            if (text.trim()) setError(null);
-          }}
-          onStatusChange={setDocStatus}
-          readRequest={readRequest}
-          // Throw the attached file away without starting a run. "दुसरी फाईल निवडा" only ever
-          // REPLACED it, so an officer who decided to generate from the typed text alone had
-          // no way to detach the document — and in live mode its text is counted at submit
-          // whether or not anyone is still looking at it. Same clear the submit path runs.
-          //
-          // Offered only once there IS a file: the component renders this control in every
-          // state including the empty upload card, where /dlo needs it (its slot itself is
-          // dismissible) and this surface has nothing to delete.
-          {...(docStatus === 'empty' ? {} : { onRemove: clearDocument })}
-          // The same तयार करा, beside the file controls. A scanned PDF's page picker is taller
-          // than the viewport, so the composer's send button above it is off screen at exactly
-          // the moment the officer has finished choosing pages and wants to start the run.
-          submitAction={
+            <p className="hint">{STR.motionAspectHint}</p>
+            <div
+              className="motion-aspect"
+              role="radiogroup"
+              aria-label={STR.motionAspectLabel}
+            >
+              {MOTION_ASPECTS.map((value) => (
+                <button
+                  key={value}
+                  id={`motion-aspect-${value === 'source' ? 'source' : value.replace(':', '-')}`}
+                  type="button"
+                  role="radio"
+                  aria-checked={motionAspect === value}
+                  className={`motion-aspect-option${motionAspect === value ? ' active' : ''}`}
+                  disabled={submitting}
+                  onClick={() => setMotionAspect(value)}
+                >
+                  {value === 'source'
+                    ? STR.motionAspectSource
+                    : value === '9:16'
+                      ? STR.motionAspectPortrait
+                      : STR.motionAspectLandscape}
+                </button>
+              ))}
+            </div>
+          </div>
+          {error ? <ErrorNotice message={error} /> : null}
+        </section>
+      ) : (
+        <section className="card">
+          <label className="field-label" htmlFor="note">
+            <ClipboardPaste
+              size={18}
+              className="label-icon"
+              aria-hidden="true"
+            />
+            {fromArticle ? STR.articleSourceLabel : STR.articlePasteLabel}
+          </label>
+          <p className="hint">
+            {fromArticle ? STR.articleSourceHint : STR.articlePasteHint}
+          </p>
+          {/* Handoff from a finished run's cross-format link. The failure is stated rather
+              than silent — an empty box with no explanation reads as the link not working. */}
+          {prefill === 'loading' ? (
+            <p className="hint" aria-live="polite">
+              <span className="spinner" aria-hidden="true" />{' '}
+              {STR.prefillLoading}
+            </p>
+          ) : prefill === 'applied' ? (
+            <p className="form-success">{STR.prefillApplied}</p>
+          ) : prefill === 'failed' ? (
+            <ErrorNotice message={STR.prefillFailed} />
+          ) : null}
+          {/* The submit lives INSIDE the text box, bottom-right, the way a composer does.
+              It used to be a full-width तयार करा bar in its own card ABOVE the form — put
+              there because a button under the whole page (textarea + upload card + format
+              cards) is off-screen for most of the time spent here. Anchoring it to the box
+              keeps it in view without detaching it from what it acts on, and the error line
+              follows it so a refusal (too short, another run in flight) is still reported
+              where the action was taken. */}
+          <div className="note-field">
+            <textarea
+              id="note"
+              className="note-input"
+              placeholder={
+                fromArticle
+                  ? STR.articleSourcePlaceholder
+                  : STR.articlePastePlaceholder
+              }
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+            />
             <button
               type="button"
-              className="btn btn-primary btn-small"
+              className="btn btn-primary note-send"
               onClick={() => void startSubmit()}
               disabled={submitBusy || !canSubmit}
+              title={submitLabel}
+              aria-label={submitLabel}
             >
-              {/* Label only — the shared .spinner is accent-on-accent-soft and vanishes on a
-                  maroon fill (the reason .note-send redefines it), and submitLabel already
-                  states which of the two waits this is. */}
-              {submitLabel}
+              {submitBusy ? (
+                <span className="spinner" aria-hidden="true" />
+              ) : (
+                <Send size={20} aria-hidden="true" />
+              )}
             </button>
-          }
-        />
-      </section>
+          </div>
+          {error ? <ErrorNotice message={error} /> : null}
+
+          {/* THE OFFICER'S OWN PROMPT (migration 0045), क्रिएटिव्ह only. Directly under the text
+              box because the two are sent together and mean nothing apart: this is the design
+              brief, that is the words to put on it.
+
+              IT REPLACES, IT DOES NOT ADD. Fill it and the platform's entire assembled poster
+              prompt is skipped — the image model gets the DGIPR designer line, this brief, the
+              text above, and the reserved-zone rule, which stays because the badge and footer are
+              composited in code afterwards and would otherwise land on top of the officer's own
+              poster. Nothing else: no palette, no arrangement anchor, no reference-structure
+              block, and no poster-copy call is made. The hint says so in as many words, because
+              an officer who types one extra instruction expecting it to be ADDED to the usual
+              rules would be reading this box exactly backwards.
+
+              The template picker below still works with it: pinned, the master is the edit canvas
+              and this is the only instruction sent with it; unpinned, the poster is generated from
+              scratch. That question is answered by pinning, exactly as it is today.
+
+              बॅनर, यूट्यूब थंबनेल and फक्त कॅप्शन do not show it — the first two build their image
+              prompts on lanes this does not touch, and the third paints nothing at all. */}
+          {isSocial ? (
+            <div className="option-field">
+              <label className="field-label" htmlFor="image-prompt">
+                <Wand2 size={18} className="label-icon" aria-hidden="true" />
+                {STR.imagePromptLabel}
+              </label>
+              <p className="hint">{STR.imagePromptHint}</p>
+              <textarea
+                id="image-prompt"
+                className="note-input"
+                maxLength={IMAGE_PROMPT_MAX_CHARS}
+                placeholder={STR.imagePromptPlaceholder}
+                value={imagePrompt}
+                disabled={submitting}
+                onChange={(e) => setImagePrompt(e.target.value)}
+              />
+            </div>
+          ) : null}
+
+          {/* Two opt-ins about the text above, in the card that holds it. Both are क्रिएटिव्ह-only
+              and both are OFF by default:
+
+              जसाच्या तसा मजकूर — print the box unchanged instead of writing the poster's copy out
+                of it. Was a pair of tabs above the box; almost every run wants the default, so an
+                unticked checkbox states it in a quarter of the height. Available with or without a
+                template ('fresh_verbatim' / 'onbrand').
+              कॅप्शनही तयार करा — the caption is a second paid call and can be added afterwards from
+                the detail page, so off is a cheap default rather than a lossy one.
+
+              बॅनर and यूट्यूब थंबनेल send neither value, so neither box is shown there — a control
+              that cannot affect the run would be a lie. */}
+          {isSocial ? (
+            <>
+              <label className="option-toggle">
+                <input
+                  type="checkbox"
+                  checked={verbatimText}
+                  disabled={submitting}
+                  onChange={(e) =>
+                    setContentSource(e.target.checked ? 'verbatim' : 'ai')
+                  }
+                />
+                <span>
+                  <span className="option-toggle-name">
+                    {STR.posterSourceVerbatim}
+                  </span>
+                  <span className="option-toggle-desc">
+                    {STR.posterSourceVerbatimDesc}
+                  </span>
+                </span>
+              </label>
+              <label className="option-toggle">
+                <input
+                  type="checkbox"
+                  checked={wantCaption}
+                  disabled={submitting}
+                  onChange={(e) => setWantCaption(e.target.checked)}
+                />
+                <span>
+                  <span className="option-toggle-name">
+                    {STR.captionToggleLabel}
+                  </span>
+                  <span className="option-toggle-desc">
+                    {STR.captionToggleHint}
+                  </span>
+                </span>
+              </label>
+            </>
+          ) : null}
+
+          {/* A finished article often arrives as a file rather than in the clipboard — a Word
+              document, or a scanned press note. The shared intake reads it here; a scanned PDF
+              stops to ask which pages are worth OCR'ing before a single credit is spent.
+
+              EMBEDDED: inside this card rather than as one of its own, because the file is a
+              source for the same box above it — as its own card it read as a separate form and
+              an officer could finish the page without noticing the two were related.
+
+              LIVE mode (onTextChange): the file's text is a SECOND source counted beside the box
+              above, not something pushed into it — so pasting, uploading, or doing both all just
+              work. It used to be appended by a button inside the card, which meant an upload that
+              was never handed over was silently dropped and the submit complained the टिपणी was
+              too short. */}
+          <DocumentIntake
+            key={docKey}
+            storageKey={DOC_STORAGE_KEY}
+            embedded
+            // Names this surface so a paid OCR read lands on this feature's service card
+            // rather than being counted in the bill and attributed to nobody.
+            feature="social"
+            maxBytes={UPLOAD_FILE_MAX_BYTES}
+            onTextChange={(text) => {
+              setDocText(text);
+              if (text.trim()) setError(null);
+            }}
+            onStatusChange={setDocStatus}
+            readRequest={readRequest}
+            // Throw the attached file away without starting a run. "दुसरी फाईल निवडा" only ever
+            // REPLACED it, so an officer who decided to generate from the typed text alone had
+            // no way to detach the document — and in live mode its text is counted at submit
+            // whether or not anyone is still looking at it. Same clear the submit path runs.
+            //
+            // Offered only once there IS a file: the component renders this control in every
+            // state including the empty upload card, where /dlo needs it (its slot itself is
+            // dismissible) and this surface has nothing to delete.
+            {...(docStatus === 'empty' ? {} : { onRemove: clearDocument })}
+            // The same तयार करा, beside the file controls. A scanned PDF's page picker is taller
+            // than the viewport, so the composer's send button above it is off screen at exactly
+            // the moment the officer has finished choosing pages and wants to start the run.
+            submitAction={
+              <button
+                type="button"
+                className="btn btn-primary btn-small"
+                onClick={() => void startSubmit()}
+                disabled={submitBusy || !canSubmit}
+              >
+                {/* Label only — the shared .spinner is accent-on-accent-soft and vanishes on a
+                    maroon fill (the reason .note-send redefines it), and submitLabel already
+                    states which of the two waits this is. */}
+                {submitLabel}
+              </button>
+            }
+          />
+        </section>
+      )}
 
       <section className="card">
         {/* Folded shut. The format is chosen once and then usually left alone (क्रिएटिव्ह is the

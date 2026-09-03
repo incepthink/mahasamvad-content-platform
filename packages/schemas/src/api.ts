@@ -4,6 +4,12 @@
 import { z } from 'zod';
 import { CopySchema, DesignModeSchema } from './copy.js';
 import {
+  MOTION_DIRECTION_MAX_CHARS,
+  MotionAspectSchema,
+  MotionVersionSchema,
+  isMotionSourcePath,
+} from './dynamic-poster.js';
+import {
   DesignationWarningSchema,
   NameDesignationSchema,
   NameDesignationsSchema,
@@ -22,6 +28,10 @@ export const CategorySchema = z.enum([
   'twitter',
   'facebook',
   'youtube',
+  // A finished still poster the officer uploads, motionised into a short looping clip
+  // (migration 0052). Its source is an IMAGE rather than a note, it writes no article and
+  // no caption, and it uses no reference library — see dynamic-poster.ts.
+  'dynamic_poster',
 ]);
 export type Category = z.infer<typeof CategorySchema>;
 
@@ -47,6 +57,16 @@ export function isSocialCategory(
 // `category === 'youtube'`, so adding a second thumbnail format later is one edit here.
 export function isYoutubeCategory(category: Category): category is 'youtube' {
   return category === 'youtube';
+}
+
+// The Dynamic Poster lane (migration 0052). Its own predicate for the reason the two above
+// are: every lane branch must ask a named question, never `category === 'dynamic_poster'`,
+// so a second motion format later is one edit here. Deliberately NOT social and NOT an
+// article category — it renders no poster PNG, writes no prose, and publishes nowhere.
+export function isDynamicPosterCategory(
+  category: Category,
+): category is 'dynamic_poster' {
+  return category === 'dynamic_poster';
 }
 
 // The article pipeline's own categories — everything that writes Marathi prose. Stated
@@ -103,6 +123,11 @@ export const GenerationStepSchema = z.enum([
   'caption',
   'scene',
   'render',
+  // Dynamic Poster (migration 0052). Two phases and no more: gpt-5.6-sol writes the motion
+  // prompt, then gemini-omni renders the clip from it. The second is minutes long, which is
+  // exactly why it is named rather than folded into 'render'.
+  'motion_prompt',
+  'motion_render',
   'revise_article',
   'revise_copy',
   'revise_scene',
@@ -125,6 +150,10 @@ export const RevisionTargetSchema = z.enum([
   // poster_copy / manual_copy. Migration 0023.
   'caption',
   'manual_caption',
+  // One render of a Dynamic Poster's clip (migration 0052). Every follow-up writes a new
+  // immutable object, so this log IS the version history — exactly as poster_image is for
+  // the poster. `feedback` is the officer's own instruction; null on the first render.
+  'motion',
 ]);
 export type RevisionTarget = z.infer<typeof RevisionTargetSchema>;
 
@@ -263,7 +292,12 @@ export const CreateGenerationRequestSchema = z
   .object({
     // The Marathi note (टिपणी) — a factual source for everything generated. On the
     // poster-first lanes it is also the text printed on the poster.
-    note: z.string().trim().min(POSTER_TEXT_MIN_CHARS),
+    //
+    // The minimum is enforced in superRefine rather than here, because ONE lane is not
+    // sourced from it at all: a Dynamic Poster's source is the uploaded image, and its note
+    // holds the officer's optional motion direction. Every other lane keeps the floor it has
+    // always had — see the superRefine below.
+    note: z.string().trim(),
     // What the run produces. 'article' means NO POSTER on BOTH lanes: on news/scheme the
     // poster phase is skipped, and on twitter/facebook it is the caption-only run (the
     // caption lives in the `article` column, the social lane's convention). 'poster' and
@@ -330,6 +364,17 @@ export const CreateGenerationRequestSchema = z
     // used as the edit canvas; with no pin the poster is generated from scratch.
     // Absent/empty ⇒ today's built prompt.
     imagePrompt: z.string().trim().max(IMAGE_PROMPT_MAX_CHARS).optional(),
+    // Dynamic Poster runs only (migration 0052): the storage path of the poster the officer
+    // uploaded, as returned by POST /generations/motion-image. A PATH rather than a URL
+    // because the route checks it against MOTION_SOURCE_PREFIX — a public URL is a string
+    // anyone can type, and this one names the object a paid render reads.
+    sourceImagePath: z.string().trim().optional(),
+    // Dynamic Poster runs only: the shape of the clip — 'source' (the poster's own ratio,
+    // the default), '9:16' (portrait) or '16:9' (landscape), the three buttons under the
+    // create form's AI प्रॉम्प्ट box. It is the one size statement the motion prompt makes,
+    // having replaced the poster's exact pixel resolution. Absent ⇒ DEFAULT_MOTION_ASPECT,
+    // which is also what a row created before the control existed falls back to.
+    motionAspect: MotionAspectSchema.optional(),
     // Article runs only (news/scheme): the officer's trusted request for this article — writing
     // direction plus facts or corrections supplied directly here. Absent/empty ⇒ the article
     // the pipeline writes today.
@@ -340,6 +385,60 @@ export const CreateGenerationRequestSchema = z
       .optional(),
   })
   .superRefine((value, ctx) => {
+    // The note floor, applied per lane. A Dynamic Poster is sourced from the uploaded image,
+    // so an empty note is a complete request there and the note is capped as the officer's
+    // motion direction instead. Every other lane keeps the floor that is the only thing
+    // standing between an empty box and a paid render.
+    if (value.category === 'dynamic_poster') {
+      if (!value.sourceImagePath || value.sourceImagePath.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'A Dynamic Poster run needs an uploaded poster image.',
+          path: ['sourceImagePath'],
+        });
+      } else if (!isMotionSourcePath(value.sourceImagePath)) {
+        // Checked HERE as well as in the route, so a path this API did not mint is refused
+        // by the schema before any row is written.
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'sourceImagePath does not name an uploaded poster.',
+          path: ['sourceImagePath'],
+        });
+      }
+      if (value.note.length > MOTION_DIRECTION_MAX_CHARS) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `The motion direction may be at most ${MOTION_DIRECTION_MAX_CHARS} characters.`,
+          path: ['note'],
+        });
+      }
+    } else {
+      if (value.note.length < POSTER_TEXT_MIN_CHARS) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `The note must be at least ${POSTER_TEXT_MIN_CHARS} characters.`,
+          path: ['note'],
+        });
+      }
+      // An uploaded poster has nowhere to go on any other lane — accepting it would store a
+      // path nothing reads and imply the run was made from an image it never saw.
+      if (value.sourceImagePath) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'sourceImagePath is only accepted on a Dynamic Poster run.',
+          path: ['sourceImagePath'],
+        });
+      }
+      // Same rule, same reason: no other lane renders a clip, so a stored aspect there would
+      // be a size nothing ever reads.
+      if (value.motionAspect) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'motionAspect is only accepted on a Dynamic Poster run.',
+          path: ['motionAspect'],
+        });
+      }
+    }
     if (value.referenceImageId && value.referenceTypeId) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -756,6 +855,18 @@ export const GenerationDetailSchema = z.object({
   fiveWOneH: FiveWOneHSchema.nullable(),
   posterUrl: z.string().nullable(),
   sceneUrl: z.string().nullable(),
+  // ---------- Dynamic Poster (migration 0052) ----------
+  // The poster the officer uploaded, and the current clip made from it. All null on every
+  // other lane, and defaulted so an older API's payload still parses.
+  sourceImageUrl: z.string().nullable().default(null),
+  motionUrl: z.string().nullable().default(null),
+  motionGifUrl: z.string().nullable().default(null),
+  // The prompt gpt-5.6-sol wrote for gemini-omni. Surfaced so a disappointing clip can be
+  // told apart from a disappointing prompt without reading the API log.
+  motionPrompt: z.string().nullable().default(null),
+  // Every render of that clip, oldest→newest; the last entry matches `motionUrl`. One entry
+  // means there is nothing to move between and the page shows no version control at all.
+  motionVersions: z.array(MotionVersionSchema).default([]),
   // Every poster render of this generation, oldest→newest (empty when the run has
   // no poster). The last entry always matches `posterUrl`.
   posterVersions: z.array(PosterVersionSchema),

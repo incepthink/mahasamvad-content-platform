@@ -34,6 +34,7 @@
     "what-changed:demo": "tsx --env-file=../../.env src/scripts/what-changed-demo.ts",
     "what-changed:test": "tsx --test src/what-changed/find-topic-articles.test.ts src/what-changed/render-carousel.test.ts",
     "chat:test": "tsx --test src/chat/misc-chat.test.ts src/chat/file-search.test.ts",
+    "video:interactions:test": "tsx --test src/video/gemini-interactions-client.test.ts",
     "translate:test": "tsx --test src/generation/translate-article.test.ts",
     "polish:test": "tsx --env-file=../../.env src/generation/polish-article.ts",
     "youtube:check": "tsx src/intake/youtube-audio.ts --check"
