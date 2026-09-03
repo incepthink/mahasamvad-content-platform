@@ -25,8 +25,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   SpellCheck,
-  // Restore alongside the /new-video-workflow nav entry below.
-  // Video,
+  Video,
   X,
 } from 'lucide-react';
 import { STR } from '../lib/strings';
@@ -43,12 +42,7 @@ const NAV_LINKS = [
   { href: '/glossary', label: STR.navGlossary, Icon: BookOpen },
   { href: '/references', label: STR.navReferences, Icon: LayoutTemplate },
   { href: '/video', label: STR.navVideo, Icon: Clapperboard },
-  // HIDDEN FOR PRODUCTION: /new-video-workflow needs migration 0050's three tables
-  // (new_video_conversations / new_video_turns / new_video_images). The page and its
-  // routes still exist and are reachable by URL; only the nav entry is withheld.
-  // Restore this line, the Video icon import above, and STR.navVideo's 'storyboard'
-  // label together.
-  // { href: '/new-video-workflow', label: STR.navNewVideo, Icon: Video },
+  { href: '/new-video-workflow', label: STR.navNewVideo, Icon: Video },
   // The catch-all, after the specific tools and before the two "look back at what happened"
   // entries: it is a tool, not a record.
   { href: '/chat', label: STR.navChat, Icon: MessagesSquare },

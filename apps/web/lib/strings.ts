@@ -1527,9 +1527,7 @@ export const STR = {
     'तुम्ही शोधत असलेले पान उपलब्ध नाही. ते काढून टाकलेले असू शकते किंवा पत्ता चुकीचा असू शकतो.',
 
   // Explainer videos (/video)
-  // Renamed to 'storyboard' when /new-video-workflow took the plain video label. That
-  // entry is hidden in production, so this reverts to the name officers know.
-  navVideo: 'व्हिडिओ (Beta)',
+  navVideo: 'स्टोरीबोर्ड',
   videoTitle: 'नवीन व्हिडिओ तयार करा',
   videoIntro:
     'टिपणीवरून दोन स्वतंत्र गोष्टी तयार होतील: मराठी निवेदन आणि आवाज बंद असतानाही माहिती समजावणारी साधी दृश्य-कथा. आधी दोन्ही तपासा — व्हिडिओ तयार करण्याचा खर्च फक्त तुमच्या मंजुरीनंतरच होतो.',
