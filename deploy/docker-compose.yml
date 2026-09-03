@@ -56,6 +56,19 @@ services:
     restart: unless-stopped
     env_file:
       - .env.prod                      # Supabase + OpenAI + n8n wiring (see template)
+    volumes:
+      # Optional YouTube authentication for yt-dlp. Compose always mounts a harmless,
+      # committed placeholder so an ordinary deployment needs no extra file. On a host
+      # whose datacentre IP hits YouTube's bot check, put the real Netscape cookie file
+      # outside the repo (mode 600) and set YTDLP_COOKIES_HOST_FILE in deploy/.env.
+      # The in-container path is deliberately stable; .env.prod enables its use through
+      # YTDLP_COOKIES_FILE=/run/secrets/youtube-cookies.txt.
+      #
+      # Not read-only: yt-dlp saves its cookie jar on exit even when it only loaded the
+      # file, so a :ro mount makes an otherwise successful download fail while closing.
+      - type: bind
+        source: ${YTDLP_COOKIES_HOST_FILE:-./youtube-cookies.empty.txt}
+        target: /run/secrets/youtube-cookies.txt
     environment:
       HOST: 0.0.0.0
       PORT: "3001"

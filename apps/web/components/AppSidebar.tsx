@@ -25,6 +25,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   SpellCheck,
+  Video,
   X,
 } from 'lucide-react';
 import { STR } from '../lib/strings';
@@ -41,6 +42,7 @@ const NAV_LINKS = [
   { href: '/glossary', label: STR.navGlossary, Icon: BookOpen },
   { href: '/references', label: STR.navReferences, Icon: LayoutTemplate },
   { href: '/video', label: STR.navVideo, Icon: Clapperboard },
+  { href: '/new-video-workflow', label: STR.navNewVideo, Icon: Video },
   // The catch-all, after the specific tools and before the two "look back at what happened"
   // entries: it is a tool, not a record.
   { href: '/chat', label: STR.navChat, Icon: MessagesSquare },

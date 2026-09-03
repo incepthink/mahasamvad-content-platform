@@ -46,7 +46,6 @@ import {
   Wand2,
 } from 'lucide-react';
 import {
-  DEFAULT_MOTION_ASPECT,
   IMAGE_PROMPT_MAX_CHARS,
   MOTION_ASPECTS,
   MOTION_DIRECTION_MAX_CHARS,
@@ -92,6 +91,25 @@ import { ErrorNotice } from '../components/ErrorNotice';
 // (which means "renders no poster" on both lanes), so it submits as 'facebook' — see
 // submitCategory below for why that platform and not the other.
 type Format = Category | 'video' | 'caption';
+
+// WHAT THE डायनॅमिक पोस्टर FORM OFFERS as the clip's shape — the two frames a department
+// actually publishes into. 'source' (पोस्टरसारखाच, the poster's own ratio) is deliberately
+// NOT offered here any more: the officer chooses the frame, not the input's shape.
+//
+// It is removed from the PICKER only, never from the contract. `MOTION_ASPECTS` still carries
+// it, the route still accepts it, and a row with no stored aspect still falls back to it
+// (DEFAULT_MOTION_ASPECT in @dgipr/schemas) — so every Dynamic Poster made before this change
+// keeps rendering exactly as it did. Filtering the shared list rather than hand-writing a
+// second one is what keeps the two from drifting if a third frame is ever added.
+const OFFERED_MOTION_ASPECTS = MOTION_ASPECTS.filter(
+  (value) => value !== 'source',
+);
+
+// The form's default, now that the poster's own shape is not on offer. Portrait, because that
+// is the frame these clips are made for (a reel or a story); either choice PADS the poster
+// into the frame rather than cropping it (fitImageToAspect on the API side), so neither one
+// can lose a side of the artwork the way the pre-0053 renders did.
+const DEFAULT_OFFERED_MOTION_ASPECT: MotionAspect = '9:16';
 
 type FormatIcon = ComponentType<{
   size?: number;
@@ -249,14 +267,15 @@ export default function NewGenerationPage() {
   // demanded it back, which a video model does not deliver — so the loudest requirement in the
   // prompt was the one thing the render could never honour.
   //
-  // THE POSTER'S OWN SHAPE IS THE DEFAULT, and choosing anything else used to be the lane's
-  // worst bug rather than a preference: a DGIPR social poster is 4:5, and a 4:5 poster asked
-  // for a 9:16 clip came back with ~15% cut off each side, because the prompt demanded both
-  // that ratio and the whole poster and only 70% of its width fits. The two fixed frames stay
-  // for a department publishing into a reel or a landscape post; picking one now pads the
-  // poster into it rather than letting the render crop to fill it.
+  // The form offers the two published FRAMES only (see OFFERED_MOTION_ASPECTS above) — the
+  // poster's own ratio is still a valid value everywhere else, it is simply not a question the
+  // officer is asked here. Choosing a frame is safe because the source is PADDED into it
+  // before the render (fitImageToAspect), which is what closed the lane's first reported
+  // defect: a 4:5 poster asked for a 9:16 clip used to come back with ~15% cut off each side,
+  // the prompt having demanded both that ratio and the whole poster when only 70% of its
+  // width fits.
   const [motionAspect, setMotionAspect] = useState<MotionAspect>(
-    DEFAULT_MOTION_ASPECT,
+    DEFAULT_OFFERED_MOTION_ASPECT,
   );
   const [reference, setReference] = useState<ReferenceSelection | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -613,7 +632,7 @@ export default function NewGenerationPage() {
               is the one thing they cannot see until the clip comes back, and bars nobody
               warned them about read as a defect. */}
           <div className="option-field">
-            <label className="field-label" htmlFor="motion-aspect-source">
+            <label className="field-label" htmlFor="motion-aspect-9-16">
               <Ratio size={18} className="label-icon" aria-hidden="true" />
               {STR.motionAspectLabel}
             </label>
@@ -623,10 +642,10 @@ export default function NewGenerationPage() {
               role="radiogroup"
               aria-label={STR.motionAspectLabel}
             >
-              {MOTION_ASPECTS.map((value) => (
+              {OFFERED_MOTION_ASPECTS.map((value) => (
                 <button
                   key={value}
-                  id={`motion-aspect-${value === 'source' ? 'source' : value.replace(':', '-')}`}
+                  id={`motion-aspect-${value.replace(':', '-')}`}
                   type="button"
                   role="radio"
                   aria-checked={motionAspect === value}
@@ -634,11 +653,9 @@ export default function NewGenerationPage() {
                   disabled={submitting}
                   onClick={() => setMotionAspect(value)}
                 >
-                  {value === 'source'
-                    ? STR.motionAspectSource
-                    : value === '9:16'
-                      ? STR.motionAspectPortrait
-                      : STR.motionAspectLandscape}
+                  {value === '9:16'
+                    ? STR.motionAspectPortrait
+                    : STR.motionAspectLandscape}
                 </button>
               ))}
             </div>

@@ -1,0 +1,5 @@
+# Netscape HTTP Cookie File
+#
+# Harmless placeholder mounted when deploy/.env does not define
+# YTDLP_COOKIES_HOST_FILE. Do not put real cookies in this tracked file; store them
+# outside the repository and point Compose at them through deploy/.env instead.

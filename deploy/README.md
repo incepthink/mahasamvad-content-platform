@@ -358,6 +358,53 @@ layer), where a registry sends only the layers that changed.
 
 ---
 
+## YouTube bot checks on `/transcribe`, `/dlo` and `/chat`
+
+The API image already contains yt-dlp. If an ordinary YouTube link fails with the stored
+per-file error `bot check`, YouTube is refusing the EC2/datacentre address; rebuilding the
+same image does not change that address. Configure either cookies or an outbound proxy.
+Directly uploaded recordings need neither.
+
+**Cookies:** export only `youtube.com` cookies in Netscape/Mozilla `cookies.txt` format from
+a dedicated YouTube browser session. Treat the file like a password. Copy it to the host
+outside the repository, then point Compose at that host path and the API at the stable
+container path:
+
+```bash
+sudo install -d -m 700 /opt/dgipr-secrets
+sudo install -m 600 /tmp/youtube-cookies.txt /opt/dgipr-secrets/youtube-cookies.txt
+
+# deploy/.env — consumed by Docker Compose on the HOST
+YTDLP_COOKIES_HOST_FILE=/opt/dgipr-secrets/youtube-cookies.txt
+
+# deploy/.env.prod — injected into the API CONTAINER
+YTDLP_COOKIES_FILE=/run/secrets/youtube-cookies.txt
+```
+
+`docker-compose.yml` mounts a harmless tracked placeholder unless the host variable is set,
+so developers and deployments without cookies keep working unchanged. The real mount is
+writable because yt-dlp saves its jar on exit; it is never copied into the image. After
+changing either env file, recreate the container and verify only the non-secret header:
+
+```bash
+docker compose up -d --force-recreate api
+docker compose exec api sh -lc 'test -s "$YTDLP_COOKIES_FILE" && head -n 1 "$YTDLP_COOKIES_FILE"'
+```
+
+The expected first line is `# Netscape HTTP Cookie File` or `# HTTP Cookie File`.
+
+**Proxy:** no mount is needed. Put the proxy URL only in `deploy/.env.prod`, then recreate
+the API container:
+
+```bash
+YTDLP_PROXY=http://user:password@proxy-host:port
+```
+
+Do not print `docker compose config` into tickets or logs: it expands the API environment
+and may expose the cookie path, proxy credentials and unrelated production secrets.
+
+---
+
 ## Operations notes
 
 - **Logs**: `docker compose logs -f api` / `... n8n`. Rotated at 50 MB x 5 per service

@@ -121,14 +121,15 @@ export const STR = {
   // frame the officer publishes into, with the ratio kept beside it because that is what
   // they are used to reading on a design tool.
   motionAspectLabel: 'व्हिडिओचा आकार',
-  // The DEFAULT, and the fix for the lane's first reported defect: a 4:5 poster forced into a
-  // 9:16 frame lost ~15% off each side, because the whole poster and a full 9:16 screen cannot
-  // both fit. Keeping the poster's own shape asks for neither compromise.
-  motionAspectSource: 'पोस्टरसारखाच',
+  // The two frames the form offers. पोस्टरसारखाच (the poster's own ratio) was a third option
+  // here and is deliberately gone from the picker — it remains a valid stored value and the
+  // fallback for a row that carries none, so nothing already rendered changes.
   motionAspectPortrait: 'उभा ९:१६',
   motionAspectLandscape: 'आडवा १६:९',
+  // "The poster is padded" is the one thing they cannot see until the clip comes back, and bars
+  // nobody warned them about read as a defect — so the hint says it before the render.
   motionAspectHint:
-    'पोस्टरसारखाच आकार ठेवल्यास पूर्ण पोस्टर जसेच्या तसे दिसते. उभा किंवा आडवा निवडल्यास पोस्टर त्या चौकटीत बसवले जाते आणि वर-खाली किंवा दोन्ही बाजूंना पोस्टरच्याच रंगाच्या पट्ट्या येतात — पोस्टरचा कोणताही भाग कापला जात नाही.',
+    'निवडलेल्या चौकटीत पोस्टर बसवले जाते आणि गरज असल्यास वर-खाली किंवा दोन्ही बाजूंना पोस्टरच्याच रंगाच्या पट्ट्या येतात — पोस्टरचा कोणताही भाग कापला जात नाही.',
   // ---- the detail page ----
   motionOutputTitle: 'तयार झालेला डायनॅमिक पोस्टर',
   motionSourceCaption: 'मूळ पोस्टर',
@@ -1526,7 +1527,7 @@ export const STR = {
     'तुम्ही शोधत असलेले पान उपलब्ध नाही. ते काढून टाकलेले असू शकते किंवा पत्ता चुकीचा असू शकतो.',
 
   // Explainer videos (/video)
-  navVideo: 'व्हिडिओ (Beta)',
+  navVideo: 'स्टोरीबोर्ड',
   videoTitle: 'नवीन व्हिडिओ तयार करा',
   videoIntro:
     'टिपणीवरून दोन स्वतंत्र गोष्टी तयार होतील: मराठी निवेदन आणि आवाज बंद असतानाही माहिती समजावणारी साधी दृश्य-कथा. आधी दोन्ही तपासा — व्हिडिओ तयार करण्याचा खर्च फक्त तुमच्या मंजुरीनंतरच होतो.',
@@ -1850,6 +1851,7 @@ export const STR = {
   //
   // The prompt goes to the model exactly as typed: nothing of this product's house style,
   // branding or scene planning is added, which is what this surface is for.
+  navNewVideo: 'व्हिडिओ',
   nvwTitle: 'Gemini व्हिडिओ संभाषण',
   nvwSub:
     'प्रॉम्प्ट लिहा, हवी असल्यास संदर्भ-चित्रे जोडा आणि व्हिडिओ तयार करा. पुढील सूचनेने तोच व्हिडिओ बदलता येतो.',
