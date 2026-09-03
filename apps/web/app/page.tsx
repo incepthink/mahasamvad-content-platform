@@ -35,7 +35,8 @@ import { useRouter } from 'next/navigation';
 import {
   Clapperboard,
   ClipboardPaste,
-  Film,
+  // Restore alongside the डायनॅमिक पोस्टर card in FORMAT_CARDS.
+  // Film,
   Image as ImageIcon,
   MessageSquareText,
   MonitorPlay,
@@ -157,15 +158,24 @@ const FORMATS = [
     name: 'बॅनर',
     desc: STR.mediaFormatArticlePosterDesc,
   },
-  // The one format on this page whose SOURCE is a picture rather than text — picking it
-  // replaces the note box above with an upload and a motion brief. It is a real Category
-  // (migration 0052), so it needs no mapping here either.
-  {
-    value: 'dynamic_poster',
-    icon: Film,
-    name: STR.mediaFormatDynamicPoster,
-    desc: STR.mediaFormatDynamicPosterDesc,
-  },
+  // HIDDEN FOR PRODUCTION. The one format on this page whose SOURCE is a picture rather
+  // than text — picking it replaces the note box above with an upload and a motion brief.
+  // It is a real Category (migration 0052), so it needs no mapping here either.
+  //
+  // Withheld because every create from this form now sends a NON-default motionAspect
+  // (the picker offers only 9:16 and 16:9, while DEFAULT_MOTION_ASPECT is 'source'), so
+  // insertGeneration always writes generations.motion_aspect — which needs migration
+  // 0053. Restore this card, the Film icon import above, and the deep-link branch in
+  // selectableFormatOf together, once 0053 is applied.
+  //
+  // Only CREATING one is withheld: an existing dynamic_poster run still lists in history
+  // and still opens on the detail page through DynamicPosterView.
+  // {
+  //   value: 'dynamic_poster',
+  //   icon: Film,
+  //   name: STR.mediaFormatDynamicPoster,
+  //   desc: STR.mediaFormatDynamicPosterDesc,
+  // },
   {
     value: 'video',
     icon: Clapperboard,
@@ -198,10 +208,10 @@ function selectableFormatOf(value: string | null): SelectableFormat | null {
   // the picker no longer has a card for it — it folds into the one क्रिएटिव्ह card, which
   // renders the same poster.
   if (value === 'facebook') return 'twitter';
-  return value === 'twitter' ||
-    value === 'scheme' ||
-    value === 'youtube' ||
-    value === 'dynamic_poster'
+  // 'dynamic_poster' is deliberately absent while its card is hidden above: this function
+  // exists so a stale or hand-typed link cannot put the form into a state the picker
+  // cannot show, and with no card there is no such state to reach.
+  return value === 'twitter' || value === 'scheme' || value === 'youtube'
     ? value
     : null;
 }
