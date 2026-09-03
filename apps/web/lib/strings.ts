@@ -99,7 +99,7 @@ export const STR = {
   mediaOutputVideoDesc: 'टिपणीवरून मराठी व्हिडिओ',
   // The Dynamic Poster lane. The one format on this page whose SOURCE is a picture rather
   // than text, which is why choosing it replaces the note box with an upload.
-  mediaFormatDynamicPoster: 'डायनॅमिक पोस्टर',
+  mediaFormatDynamicPoster: 'डायनॅमिक पोस्टर (beta)',
   mediaFormatDynamicPosterDesc: 'तयार पोस्टरला हालचाल देऊन व्हिडिओ',
   // ---- the upload card that replaces the note box on that lane ----
   motionSourceLabel: 'पोस्टर अपलोड करा',

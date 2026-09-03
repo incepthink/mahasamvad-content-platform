@@ -272,8 +272,9 @@ export default function VideoProjectPage({
   const [referenceErrors, setReferenceErrors] = useState<
     Record<string, string>
   >({});
-  // Two-step confirm for the full animate (irreversible spend).
-  const [animateArmed, setAnimateArmed] = useState(false);
+  // Two-step confirm for the full animate (irreversible spend). Commented
+  // out with the animate button below.
+  // const [animateArmed, setAnimateArmed] = useState(false);
   // Scenes the officer ticked for a re-shoot whose clip is already current.
   // ONLY those — a scene the animate is going to render anyway is never in
   // here, so this list stays what it is sent as: an addition to the job's own
@@ -301,7 +302,7 @@ export default function VideoProjectPage({
       setCaptionsOn(detail.captionsEnabled);
     }
     if (detail.status !== 'storyboard_ready') {
-      setAnimateArmed(false);
+      // setAnimateArmed(false);
       setExtraScenes([]);
     }
     lastStatus.current = detail.status;
@@ -1067,6 +1068,7 @@ export default function VideoProjectPage({
                 </p>
               </>
             ) : null}
+            {/* BETA: the video generation button is hidden for now.
             <div className="btn-row">
               {animateArmed ? (
                 <>
@@ -1112,6 +1114,7 @@ export default function VideoProjectPage({
                 {STR.videoAnimateConfirm}
               </p>
             ) : null}
+            */}
             {!allStillsReady ? (
               <p className="hint" style={{ marginTop: 8 }}>
                 {STR.videoStillPending}

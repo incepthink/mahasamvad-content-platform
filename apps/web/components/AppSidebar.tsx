@@ -41,8 +41,14 @@ const NAV_LINKS = [
   { href: '/proofread', label: STR.navProofread, Icon: SpellCheck },
   { href: '/glossary', label: STR.navGlossary, Icon: BookOpen },
   { href: '/references', label: STR.navReferences, Icon: LayoutTemplate },
-  { href: '/video', label: STR.navVideo, Icon: Clapperboard },
-  { href: '/new-video-workflow', label: STR.navNewVideo, Icon: Video },
+  // Both video lanes are labelled beta in the sidebar only — `navVideo` is
+  // also the analytics feature name, which is not a beta badge.
+  { href: '/video', label: `${STR.navVideo} (beta)`, Icon: Clapperboard },
+  {
+    href: '/new-video-workflow',
+    label: `${STR.navNewVideo} (beta)`,
+    Icon: Video,
+  },
   // The catch-all, after the specific tools and before the two "look back at what happened"
   // entries: it is a tool, not a record.
   { href: '/chat', label: STR.navChat, Icon: MessagesSquare },
