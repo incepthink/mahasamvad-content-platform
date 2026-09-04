@@ -802,6 +802,41 @@ export const STR = {
     'AI ने तयार केलेली प्रतिमा सुरक्षितता तपासणीत नाकारली गेली. बालकाचे वास्तवदर्शी चित्र आणि शोषण, अत्याचार, हिंसा किंवा दुखापतीसारखा संवेदनशील विषय एकत्र आल्यास असे होऊ शकते. घटना, इजा किंवा त्रास न दाखवता संरक्षण, हेल्पलाईन किंवा मदतीचे प्रतीकात्मक व अहिंसक दृश्य वापरून नवीन काम तयार करा.',
   imageSafetyError:
     'AI प्रतिमा सुरक्षितता तपासणीत नाकारली गेली. “AI प्रॉम्प्ट”मधील संवेदनशील किंवा हानी दाखवणारे दृश्य बदला आणि प्रतीकात्मक, अहिंसक दृश्य वापरून नवीन काम तयार करा.',
+  // A Dynamic Poster fails through Gemini's video service, whose refusals the OpenAI
+  // moderation wording above does not cover — so every one of them used to reach the officer
+  // as `failedHint`, "काहीतरी चुकले", with no cause and nothing to change.
+  //
+  // The likeness block is the one worth wording carefully, because the provider's own
+  // sentence actively misleads: it says "we can't create videos with real people's names or
+  // likenesses", which reads as an accusation about the WORDS on the poster. The run that
+  // prompted this (796229b9) had no name anywhere — not printed on the poster, not in the
+  // prompt we send it — and was refused for the photograph of two faces shaking hands. So
+  // this names the real trigger and the one change that can clear it.
+  motionBlockedPeopleError:
+    'AI व्हिडिओ सेवेने हे पोस्टर नाकारले — त्यावर व्यक्तींच्या चेहऱ्यांचे छायाचित्र आहे. नाव लिहिलेले नसले तरी खऱ्या दिसणाऱ्या चेहऱ्यांचा व्हिडिओ ही सेवा तयार करत नाही. चेहरे नसलेले पोस्टर वापरून पुन्हा तयार करा.',
+  motionBlockedError:
+    'AI व्हिडिओ सेवेने हे पोस्टर सुरक्षितता तपासणीत नाकारले. पोस्टरमधील संवेदनशील दृश्य किंवा मजकूर बदलून नवीन पोस्टर अपलोड करा.',
+  motionTimeoutError:
+    'AI व्हिडिओ सेवेकडून ठरलेल्या वेळेत व्हिडिओ आला नाही. काही वेळाने पुन्हा प्रयत्न करा.',
+  motionQuotaError:
+    'AI व्हिडिओ सेवेची सध्याची मर्यादा संपली आहे. काही वेळाने पुन्हा प्रयत्न करा किंवा प्रशासकाशी संपर्क साधा.',
+  motionNoVideoError:
+    'AI व्हिडिओ सेवेने व्हिडिओ न देताच काम थांबवले. पुन्हा प्रयत्न करा; तसेच झाल्यास “हालचालीची सूचना” सोपी करून नवीन पोस्टर तयार करा.',
+  motionSourceMissingError:
+    'या कामासाठी अपलोड केलेले पोस्टर सापडले नाही. पोस्टर पुन्हा अपलोड करून नवीन काम तयार करा.',
+  // Replaces failedRetryHint on a refusal: the same poster will be refused the same way, and
+  // a retry is not free — it re-runs the paid prompt call before the block is hit again.
+  motionBlockedRetryHint:
+    'पोस्टर न बदलता पुन्हा प्रयत्न केल्यास तोच निकाल येईल.',
+  // Replaces failedNewRunHint on this lane. "पुढील पाऊल" is an article/social fold and is
+  // deliberately not rendered for a Dynamic Poster, so pointing at it left the officer
+  // looking for a control that is not on the page.
+  motionNewRunHint:
+    'मुख्य पानावर जाऊन नवीन पोस्टर अपलोड करा आणि पुन्हा तयार करा.',
+  // The provider's own words, folded away under the Marathi sentence. English and technical
+  // on purpose: it is what an operator needs to read when the sentence above is the general
+  // one, and it is the only place the row's stored error is visible without the database.
+  failureDetailSummary: 'तांत्रिक तपशील (AI सेवेचा प्रतिसाद)',
   retry: 'पुन्हा प्रयत्न करा',
   // Shown when an EDIT failed but everything produced earlier is still here — a different
   // situation from a run that produced nothing, and it must not read like one.

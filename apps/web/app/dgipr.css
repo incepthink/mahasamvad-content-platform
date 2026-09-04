@@ -1229,6 +1229,35 @@ textarea.note-input {
   border-top-color: var(--err);
 }
 
+/* ---------- provider detail fold (app/generations/[id]/page.tsx) ---------- */
+
+/* The raw provider message under a failure card. Secondary by construction: closed,
+   quiet, small, and monospaced so it reads as machine output rather than as something
+   addressed to the officer. `anywhere` because it carries JSON, ids and URLs, which have
+   no break opportunity and would otherwise set the card's minimum width. */
+.failure-detail {
+  margin-top: 12px;
+}
+
+.failure-detail > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.failure-detail > p {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
 /* ---------- crash + 404 (app/error.tsx, app/not-found.tsx) ---------- */
 
 /* A whole-page state rather than a notice inside a working screen, so it is centred and

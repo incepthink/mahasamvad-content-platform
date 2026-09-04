@@ -5,6 +5,7 @@ import {
   isArticleCategory,
   isDynamicPosterCategory,
   isSocialCategory,
+  type Category,
 } from '@dgipr/schemas';
 import { useArticleStream } from '../../../lib/useArticleStream';
 import { useGeneration } from '../../../lib/useGeneration';
@@ -36,8 +37,83 @@ const CHILD_SUBJECT = /बालक|बाल हक्क|मुलगा|म�
 const HARM_SUBJECT =
   /शोषण|अत्याचार|लैंगिक|छळ|हिंसा|दुखापत|abuse|exploitation|sexual|violence|injur|assault/i;
 
-function generationErrorForOfficer(error: string | null, note: string): string {
+// A Dynamic Poster fails through Gemini's video service, not OpenAI's image API, so none of
+// its failures match the reader above and every one of them used to land on the shared
+// whitelist — which correctly refuses an English provider blob and so left the officer with
+// "काहीतरी चुकले" and nothing to change. Recognised here for the same reason the moderation
+// codes are: the ROW keeps the provider's own words (they are the audit trail, and the fold
+// under the card still shows them), while the SCREEN gets a sentence naming the cause.
+//
+// `retryable: false` means the identical run can only fail the identical way, which on this
+// lane is not merely useless — a retry re-runs the paid motion-prompt call before the block
+// is reached again.
+type MotionFailure = Readonly<{ message: string; retryable: boolean }>;
+
+function dynamicPosterFailure(error: string): MotionFailure | null {
+  const text = error.toLowerCase();
+
+  // Gemini's input filter. Its own sentence — "we can't create videos with real people's
+  // names or likenesses" — reads as an accusation about the words on the poster, and the
+  // run that prompted this had no name anywhere (see the strings). The trigger is a
+  // photorealistic face in the uploaded poster, so that is what this says.
+  if (text.includes('content_blocked') || text.includes('input blocked')) {
+    const aboutPeople =
+      text.includes('likeness') ||
+      text.includes('real people') ||
+      text.includes('person');
+    return {
+      message: aboutPeople
+        ? STR.motionBlockedPeopleError
+        : STR.motionBlockedError,
+      retryable: false,
+    };
+  }
+
+  // The row's own inputs are gone. Re-running cannot put the poster back.
+  if (text.includes('has no uploaded poster')) {
+    return { message: STR.motionSourceMissingError, retryable: false };
+  }
+
+  // A daily/billing cap clears on its own clock; a rate limit clears sooner. Neither is
+  // anything the officer can change about their poster, so both say "later".
+  if (
+    text.includes('resource_exhausted') ||
+    text.includes('quota') ||
+    text.includes('billing') ||
+    text.includes('429')
+  ) {
+    return { message: STR.motionQuotaError, retryable: true };
+  }
+
+  if (text.includes('timed out') || text.includes('timeout')) {
+    return { message: STR.motionTimeoutError, retryable: true };
+  }
+
+  // The interaction ended without a clip: a refusal with no code, an `incomplete` status, or
+  // a generated file the provider could not prepare. Worth retrying — these are the ones
+  // that do sometimes land on a second attempt.
+  if (
+    text.includes('without returning a video') ||
+    text.includes('ended the interaction') ||
+    text.includes('could not prepare the generated video') ||
+    text.includes('returned no interaction id')
+  ) {
+    return { message: STR.motionNoVideoError, retryable: true };
+  }
+
+  return null;
+}
+
+function generationErrorForOfficer(
+  error: string | null,
+  note: string,
+  category: Category,
+): string {
   if (!error) return STR.failedHint;
+  if (isDynamicPosterCategory(category)) {
+    const motion = dynamicPosterFailure(error);
+    if (motion) return motion.message;
+  }
   // Everything that is NOT a recognised moderation refusal goes through the shared
   // reader-test rather than straight to the screen. A job stores whatever it caught,
   // which is a Marathi sentence when the job wrote one and a provider blob, a storage
@@ -56,6 +132,21 @@ function generationErrorForOfficer(error: string | null, note: string): string {
     return STR.imageSafetyInputError;
   }
   return STR.imageSafetyError;
+}
+
+// The provider's own words, under the Marathi sentence and folded away. Deliberately the
+// one place in this product that shows an officer a raw provider message: on the Dynamic
+// Poster lane the sentence above is a translation of a refusal nobody can see otherwise, and
+// reading it currently means querying the row in the database. English and technical, so it
+// is collapsed, marked as such, and never the first thing on the card.
+function FailureDetail({ error }: { error: string | null }) {
+  if (!error) return null;
+  return (
+    <details className="failure-detail">
+      <summary>{STR.failureDetailSummary}</summary>
+      <p>{error}</p>
+    </details>
+  );
 }
 
 export default function GenerationDetailPage({
@@ -228,6 +319,17 @@ export default function GenerationDetailPage({
   // it, which is the exact failure this flag was introduced to prevent for social posters.
   const hasOutput =
     !!detail.posterUrl || !!detail.article || !!detail.motionUrl;
+  // This lane's reading of whatever failed — the sentence, whether pressing the button again
+  // could ever help, and the provider's untouched words for the fold below the card. One
+  // value, so the card's sentence, its hints and its detail cannot disagree about the cause.
+  // `editFailure` first because a follow-up render is the only failure a completed Dynamic
+  // Poster can carry; on a run that produced nothing, it is null and this reads `error`.
+  const motionRawError = isDynamicPosterCategory(detail.category)
+    ? (detail.editFailure ?? detail.error)
+    : null;
+  const motionFailure = motionRawError
+    ? dynamicPosterFailure(motionRawError)
+    : null;
   // An edit that did not land, over output that did. Either the API said so (`editFailure`,
   // the row already back to `completed`), or the row is `failed` from before that existed.
   const editFailed =
@@ -282,7 +384,11 @@ export default function GenerationDetailPage({
         <section className="card">
           <h2>{STR.failedTitle}</h2>
           <p className="hint">
-            {generationErrorForOfficer(detail.error, detail.note)}
+            {generationErrorForOfficer(
+              detail.error,
+              detail.note,
+              detail.category,
+            )}
           </p>
           {/* One button for EVERY failure of an initial run — a moderation refusal, a
               provider outage, a timeout. None of them are told apart here and all of them
@@ -301,8 +407,20 @@ export default function GenerationDetailPage({
           </div>
           {retryError ? <ErrorNotice message={retryError} /> : null}
           <p className="hint" style={{ marginTop: 12 }}>
-            {STR.failedRetryHint} {STR.failedNewRunHint}
+            {/* A refusal is not "try again": the same poster is refused the same way, and
+                the attempt is not free — it re-runs the paid prompt call first. The button
+                stays (every failure keeps one), the promise does not. */}
+            {motionFailure && !motionFailure.retryable
+              ? STR.motionBlockedRetryHint
+              : STR.failedRetryHint}{' '}
+            {/* पुढील पाऊल is an article/social fold and NextActions renders nothing at all
+                for a Dynamic Poster, so on this lane the note-edit hint pointed at a control
+                that is not on the page. */}
+            {isDynamicPosterCategory(detail.category)
+              ? STR.motionNewRunHint
+              : STR.failedNewRunHint}
           </p>
+          <FailureDetail error={motionRawError} />
         </section>
       )}
 
@@ -315,6 +433,7 @@ export default function GenerationDetailPage({
               message={generationErrorForOfficer(
                 detail.editFailure ?? detail.error,
                 detail.note,
+                detail.category,
               )}
             />
           ) : null}
@@ -341,6 +460,7 @@ export default function GenerationDetailPage({
             </button>
           </div>
           {retryError ? <ErrorNotice message={retryError} /> : null}
+          <FailureDetail error={motionRawError} />
         </section>
       )}
 

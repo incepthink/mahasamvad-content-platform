@@ -22,22 +22,6 @@ const REALISM_RULE =
 const SETTING_RULE =
   'Set in Maharashtra, India, with Indian people, clothing, buildings, vehicles and public spaces that feel authentic to the location.';
 
-const WORLD_REFERENCE_RULE =
-  'An attached image comes from an earlier scene in this video. Keep its visual world, colour treatment and production style. When the new scene uses the same recurring person or object, preserve that identity and appearance; create the new location and action described here.';
-
-// The officer's own photograph, attached to ONE scene at gate 1. Deliberately a
-// different rule from WORLD_REFERENCE_RULE rather than the same one reused: that
-// rule tells the model the picture is a frame of this very video and asks it to
-// inherit the film look, which is false and unhelpful for a phone photograph of
-// a real building, and it says nothing about the thing the officer actually
-// attached the picture for.
-//
-// It is reference MATERIAL, not a frame to reproduce: the scene description
-// still decides the framing, the action and the light, or an attached picture
-// would quietly override the shot the rest of the pipeline planned.
-const SUPPLIED_REFERENCE_RULE =
-  'The attached image is reference material supplied for this scene. Where the scene description refers to that place, person, object or activity, reproduce its real appearance faithfully. Do not copy the attached photograph itself: compose the framing, action, camera position and lighting described here, in the visual style above.';
-
 // Which single picture, if any, is attached to a start-frame render. One at a
 // time by construction — the frame seam carries one reference image, because two
 // inline pictures under one instruction leave the model guessing which is which.
@@ -49,24 +33,12 @@ export const CLIP_NEGATIVE_PROMPT =
   'illustration, 3D render, CGI look';
 
 export function buildKeyframePrompt(
-  style: string,
-  visualBrief: string,
-  shotHint?: string,
-  reference?: KeyframeReference,
+  _style: string,
+  _visualBrief: string,
+  _shotHint?: string,
+  _reference?: KeyframeReference,
 ): string {
-  return [
-    `Visual style: ${style.trim()}`,
-    `Opening scene: ${visualBrief.trim()}`,
-    ...(shotHint ? [`Framing: ${shotHint.trim()}`] : []),
-    '',
-    'Create the opening frame of an engaging Government of Maharashtra explainer-video shot. Show a natural starting moment with room for the subject and camera to move.',
-    SETTING_RULE,
-    REALISM_RULE,
-    FEW_PEOPLE_RULE,
-    ...(reference === 'world' ? [WORLD_REFERENCE_RULE] : []),
-    ...(reference === 'supplied' ? [SUPPLIED_REFERENCE_RULE] : []),
-    NO_TALKING_RULE,
-  ].join('\n');
+  return 'make a storyboard for a social media Video for Maharashtra DGIPR department';
 }
 
 export function buildEndFramePrompt(
@@ -288,7 +260,6 @@ if (
   );
 
   for (const [label, prompt] of [
-    ['start frame', start],
     ['end frame', end],
     ['clip motion', motion],
   ] as const) {
@@ -302,30 +273,12 @@ if (
     check(`${label}: forbids talking`, prompt.includes('Nobody speaks'));
   }
 
+  const storyboardPrompt =
+    'make a storyboard for a social media Video for Maharashtra DGIPR department';
+  check('start frame: uses the exact storyboard prompt', start === storyboardPrompt);
   check(
-    'start frame: reference is conditional',
-    !start.includes('earlier scene') && startWithRef.includes('earlier scene'),
-  );
-  check(
-    'start frame: recurring identity follows the reference',
-    startWithRef.includes('preserve that identity and appearance'),
-  );
-  // The two reference kinds must stay DISTINCT rules. Collapsing them back into
-  // one would tell the model an officer's phone photograph is a frame of this
-  // video (so inherit its film look) and would drop the only sentence saying
-  // what the attached picture is for.
-  check(
-    'start frame: a supplied picture is not called an earlier scene',
-    !startWithSupplied.includes('earlier scene') &&
-      startWithSupplied.includes('reference material supplied for this scene'),
-  );
-  check(
-    'start frame: a supplied picture is reference, not the frame to copy',
-    startWithSupplied.includes('Do not copy the attached photograph itself'),
-  );
-  check(
-    'start frame: no reference rule without a reference',
-    !start.includes('attached image') && !start.includes('attached photograph'),
+    'start frame: reference inputs do not alter the storyboard prompt',
+    startWithRef === storyboardPrompt && startWithSupplied === storyboardPrompt,
   );
   check(
     'end frame: names the required destination',
