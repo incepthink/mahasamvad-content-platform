@@ -11,6 +11,10 @@
 // transient failures (429/5xx). Do not call fetch against api.openai.com directly.
 
 import { openAiFetch, type OpenAiLane } from '../http/openai-request.js';
+import {
+  readChatCompletionStream,
+  type ChatCompletionStreamResult,
+} from '../http/openai-chat-stream.js';
 import { recordChatUsage, type ChatUsage } from '../cost/cost-meter.js';
 
 const CHAT_URL = 'https://api.openai.com/v1/chat/completions';
@@ -259,16 +263,6 @@ export async function chatComplete(
   return content;
 }
 
-// One chunk of a `stream: true` completion. `choices` is empty on the final usage-only
-// chunk, which is why every field here is optional.
-type ChatStreamChunk = {
-  choices?: Array<{
-    delta?: { content?: string | null };
-    finish_reason?: string | null;
-  }>;
-  usage?: ChatUsage;
-};
-
 // Streaming twin of chatComplete: identical request, identical return value (the complete
 // assistant message), but the text is handed to `onDelta` as it arrives so a caller can show
 // it being written. Text only — no json_object/json_schema variant, because the one caller is
@@ -357,63 +351,29 @@ export async function chatCompleteStream(
   const body = response.body;
   if (!body) return fallback('response carried no body');
 
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
+  // The frame loop itself is the shared Chat Completions reader
+  // (http/openai-chat-stream.ts): the "\n\n" framing, the [DONE] sentinel and the buffering
+  // of a frame that arrived split across two reads are the endpoint's contract, not this
+  // caller's, and /chat's self-hosted Qwen provider reads the same wire format. What stays
+  // here is everything that IS this caller's — whether a failure may still fall back to a
+  // blocking call, what an empty answer means, and the cost meter.
   let content = '';
-  let finishReason: string | undefined;
-  let usage: ChatUsage | undefined;
-
+  let result: ChatCompletionStreamResult<ChatUsage>;
   try {
-    reading: for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      // Bare CR is never meaningful here (a carriage return inside a JSON string is
-      // escaped as two characters), so dropping it makes the event separator exactly
-      // "\n\n" regardless of how the server framed its lines or where a chunk split.
-      buffer = (buffer + decoder.decode(value, { stream: true })).replace(
-        /\r/g,
-        '',
-      );
-
-      let separator = buffer.indexOf('\n\n');
-      while (separator !== -1) {
-        const event = buffer.slice(0, separator);
-        buffer = buffer.slice(separator + 2);
-        for (const line of event.split('\n')) {
-          if (!line.startsWith('data:')) continue;
-          const data = line.slice(5).trim();
-          if (data === '') continue;
-          if (data === '[DONE]') break reading;
-          let chunk: ChatStreamChunk;
-          try {
-            chunk = JSON.parse(data) as ChatStreamChunk;
-          } catch {
-            // A malformed frame is not worth failing a paid generation over; the
-            // completed text is reassembled from the frames that did parse.
-            console.warn('[openai] skipped an unparseable chat stream frame');
-            continue;
-          }
-          if (chunk.usage) usage = chunk.usage;
-          const choice = chunk.choices?.[0];
-          if (choice?.finish_reason) finishReason = choice.finish_reason;
-          const delta = choice?.delta?.content;
-          if (delta) {
-            content += delta;
-            options.onDelta(delta);
-          }
-        }
-        separator = buffer.indexOf('\n\n');
-      }
-    }
+    result = await readChatCompletionStream<ChatUsage>(
+      body,
+      (chunk) => options.onDelta(chunk),
+      (chunk) => {
+        content += chunk;
+      },
+    );
   } catch (error) {
     // Nothing arrived, so nothing was billed and nothing was shown: the non-streaming
     // call is still the cheaper way to finish. Past the first token it is not.
     if (content === '') return fallback(error);
     throw error;
-  } finally {
-    await reader.cancel().catch(() => undefined);
   }
+  const { finishReason, usage } = result;
 
   recordChatUsage(model, usage);
   if (!content) {

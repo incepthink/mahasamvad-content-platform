@@ -2,8 +2,9 @@
 // @dgipr/content-engine for the answer, stream it out. The route assembles no prompt; the
 // content engine owns the one general-purpose chat instruction and OpenAI provider input.
 //
-// Seven routes: create/list/detail/delete a thread, send a turn (the only streaming route in
-// this API), and upload an image or a native PDF.
+// Eight routes: create/list/detail/delete a thread, send a turn (the only streaming route in
+// this API), upload an image or a native PDF, and report which model providers this
+// deployment offers.
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
@@ -37,12 +38,14 @@ import {
   CHAT_ATTACHMENT_TEXT_MAX_CHARS,
   CHAT_HISTORY_TURNS,
   CHAT_MAX_ATTACHMENTS,
+  DEFAULT_CHAT_PROVIDER,
   SendChatMessageRequestSchema,
   chatTitleFrom,
   imageMimeForFileName,
   isImageFileName,
   type ChatAttachment,
   type ChatMessage,
+  type ChatProviderInfo,
   type ChatStreamEvent,
   type ChatThreadDetail,
   type ChatThreadSummary,
@@ -50,17 +53,21 @@ import {
 import {
   attachChatDocument,
   awaitChatDocumentIndexed,
+  chatProviderCapabilities,
+  chatProviders,
   createChatVectorStore,
   createCostAccumulator,
   deleteChatVectorStore,
+  isQwenChatError,
   MISC_CHAT_PDF_MAX_BYTES,
   runInCostScope,
   streamMiscChatReply,
+  streamQwenChatReply,
   totalCostUsd,
   uploadOpenAiChatDocument,
-  type MiscChatLifecycleEvent,
   type MiscChatTurn,
   type OpenAiChatFileHandle,
+  type QwenChatLifecycleEvent,
 } from '@dgipr/content-engine';
 import { isAllowedOrigin } from '../cors-origins.js';
 
@@ -403,6 +410,19 @@ export function registerChatRoutes(
   // produced it, so a storage or bucket reconfiguration cannot leave the guard behind.
   const imageUrlPrefix = publicUrl(client, 'chat/');
 
+  // Which model providers this deployment offers, and what each may be given. Fetched once
+  // by the composer, exactly as GET /api/canva/accounts is, and for the same reason: which
+  // providers exist is a runtime server fact, and a NEXT_PUBLIC_* build-time duplicate drifts
+  // the moment .env changes on the API box. Ids, labels and capabilities only — a self-hosted
+  // endpoint's URL and key never leave the server.
+  //
+  // The list is always non-empty (OpenAI is what the rest of the product runs on), so an
+  // empty answer means the request failed rather than that chat is unavailable.
+  app.get('/chat/providers', async () => {
+    const providers: ChatProviderInfo[] = chatProviders();
+    return providers;
+  });
+
   app.post('/chat/threads', async (_request, reply) => {
     const row = await insertChatThread(client);
     return reply.code(201).send({ id: row.id });
@@ -635,7 +655,48 @@ export function registerChatRoutes(
 
       const body = SendChatMessageRequestSchema.parse(request.body);
       const content = body.content.trim();
+      // Absent = Qwen. Whether this
+      // deployment has the named provider SET UP is deliberately not asked here — see the
+      // guard below and chat-providers.ts.
+      const provider = body.provider ?? DEFAULT_CHAT_PROVIDER;
+      const capabilities = chatProviderCapabilities(provider);
       const submitted = body.attachments ?? [];
+
+      // What the answering model can actually read. The composer greys these controls out,
+      // and this is the backstop — a browser is never the last word on what reaches a
+      // provider, and an old tab is exactly the client that would offer a picture to a text
+      // model. Attaching a file the model cannot see produces a confident answer that ignores
+      // it, which is worse than any error, and the fix is the officer's to make in the
+      // composer.
+      //
+      // Read off the CLIENT'S OWN CLAIM, above, so the refusal costs no database round trip:
+      // resolving an attachment reads chat_files and binds the file to this thread, which is
+      // work done on behalf of a turn that is not going to happen (the /canva/generations
+      // precedent, where the account is resolved before the row is read). It is refused
+      // before the turn is persisted too, unlike a provider failure — this is a request the
+      // officer must change, not one they can retry.
+      //
+      // Audio and YouTube are absent by construction: both arrive as extracted text, which
+      // every provider reads.
+      const unreadable = submitted.find(
+        (attachment) =>
+          (attachment.kind === 'image' && !capabilities.supportsImages) ||
+          (attachment.kind === 'document' &&
+            (attachment.documentId !== undefined
+              ? !capabilities.supportsPdf
+              : !capabilities.supportsTextDocuments)),
+      );
+      if (unreadable) {
+        return reply.code(400).send({
+          error: {
+            message:
+              unreadable.kind === 'image'
+                ? `${capabilities.label} चित्रे वाचू शकत नाही. चित्र काढून टाका, किंवा दुसरा प्रदाता निवडा.`
+                : `${capabilities.label} ही फाईल वाचू शकत नाही. ती काढून टाका, किंवा दुसरा प्रदाता निवडा.`,
+          },
+        });
+      }
+
       const resolvedAttachments = await Promise.all(
         submitted.map((attachment) =>
           toStoredAttachment(client, thread.id, attachment, imageUrlPrefix),
@@ -687,6 +748,10 @@ export function registerChatRoutes(
 
       const history = await listChatMessages(client, thread.id);
       const previousMessage = history.at(-2);
+      // OpenAI's stored-response chain, and read only by that lane. A Qwen turn never writes
+      // one, so this is null whenever the previous answer came from the other provider — and
+      // an OpenAI turn following a Qwen one therefore replays the transcript statelessly
+      // rather than chaining past a turn OpenAI never saw.
       const previousResponseId =
         previousMessage?.role === 'assistant'
           ? previousMessage.responseId
@@ -702,6 +767,9 @@ export function registerChatRoutes(
       const accumulator = createCostAccumulator();
       let answer = '';
       let failure: string | null = null;
+      // A Marathi sentence the provider itself supplied, when it has one. Kept apart from
+      // `failure`, which is the English diagnosis stored on the row for whoever reads the log.
+      let userFacing: string | null = null;
       let model: string | null = null;
       let responseId: string | null = null;
 
@@ -710,13 +778,49 @@ export function registerChatRoutes(
           answer += delta;
           sendEvent(reply, { type: 'delta', text: delta });
         };
-        const onLifecycle = (event: MiscChatLifecycleEvent): void => {
+        // Thinking, not answer: streamed so the pane shows progress instead of sitting dead
+        // while a reasoning model deliberates, never added to `answer` and never stored.
+        // Only the Qwen lane produces these today.
+        const onReasoning = (chunk: string): void => {
+          sendEvent(reply, { type: 'reasoning', text: chunk });
+        };
+        // Typed against the WIDER event, which is assignable in both directions — every field
+        // the Qwen lane adds is optional, so this handler is still what streamMiscChatReply
+        // asks for. Typing it here rather than at the base is what makes `context` (a
+        // transcript this provider had to shorten) and `preflight` (the pod's real
+        // max_model_len) visibly part of what gets logged, instead of fields that happen to
+        // survive because pino serialises whatever object it is handed.
+        const onLifecycle = (event: QwenChatLifecycleEvent): void => {
           request.log.info(
-            { threadId: thread.id, openAiChat: event },
-            `OpenAI chat ${event.phase}`,
+            { threadId: thread.id, provider, chat: event },
+            `${capabilities.label} chat ${event.phase}`,
           );
         };
         const result = await runInCostScope(accumulator, async () => {
+          if (provider === 'qwen') {
+            // prepareThreadDocuments is SKIPPED, and that is the load-bearing line of this
+            // branch rather than an optimisation. It creates an OpenAI vector store and
+            // chunks every document in view into it — real, per-gigabyte-per-day spend — to
+            // serve a File Search tool this provider does not have and could not be given.
+            // Running it here would bill the officer for an index nothing will ever read.
+            //
+            // The empty map is the same statement one level down: `toTurn` maps a document
+            // attachment to a `documentFileId` only when the file is searchable RIGHT NOW,
+            // and nothing is, so no PDF leaves a trace in the transcript. The guard above has
+            // already refused one anyway; this is what keeps the two agreeing if it ever
+            // does not.
+            const reply_ = await streamQwenChatReply({
+              turns: recentHistory.map((row) => toTurn(row, new Map())),
+              onDelta,
+              onReasoning,
+              onLifecycle,
+            });
+            // No response id, ever. vLLM stores nothing to chain onto, and never writing one
+            // is what keeps a later OpenAI turn replaying the transcript instead of chaining
+            // past an answer OpenAI never produced.
+            return { model: reply_.model, responseId: null };
+          }
+
           // Indexing runs HERE — after the stream is open and inside the cost scope — rather
           // than before the 200. Chunking a large scan is minutes of provider work, and doing
           // it above would hold a plain HTTP request open with nothing to show for it; here a
@@ -762,7 +866,14 @@ export function registerChatRoutes(
         responseId = result.responseId;
       } catch (error) {
         failure = error instanceof Error ? error.message : String(error);
-        request.log.error({ err: error }, 'chat reply failed');
+        // A provider that words its own failures keeps the two apart on purpose: `failure` is
+        // the English diagnosis with the status and URL in it, for the log and the row, and
+        // this is the one Marathi sentence naming the officer's next move. The web's
+        // officer-readability whitelist REPLACES anything that fails it, so an untyped
+        // failure's English message would never have reached the screen at all — which is why
+        // the fallback below stays for the lanes that do not carry one.
+        userFacing = isQwenChatError(error) ? error.userMessage : null;
+        request.log.error({ err: error, provider }, 'chat reply failed');
       }
 
       // The answer streams, so `answer` holds whatever reached the browser. A failed turn
@@ -812,7 +923,8 @@ export function registerChatRoutes(
       if (failure !== null) {
         sendEvent(reply, {
           type: 'error',
-          message: 'उत्तर तयार करता आले नाही. पुन्हा प्रयत्न करा.',
+          message:
+            userFacing ?? 'उत्तर तयार करता आले नाही. पुन्हा प्रयत्न करा.',
         });
       } else {
         sendEvent(reply, {

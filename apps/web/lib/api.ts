@@ -83,12 +83,14 @@ import {
   type YouTubeVideo,
   ChatDocumentUploadResponseSchema,
   ChatImageUploadResponseSchema,
+  ChatProviderListSchema,
   ChatStreamEventSchema,
   ChatThreadDetailSchema,
   ChatThreadListSchema,
   CreateChatThreadResponseSchema,
   type ChatDocumentUploadResponse,
   type ChatImageUploadResponse,
+  type ChatProviderInfo,
   type ChatStreamEvent,
   type ChatThreadDetail,
   type ChatThreadSummary,
@@ -1254,6 +1256,15 @@ export async function restitchVideo(id: string): Promise<void> {
 // ---------------------------------------------------------------------------
 // /chat — the general assistant
 // ---------------------------------------------------------------------------
+
+// Which model providers this deployment offers, and what each one may be given. Ids, labels
+// and capabilities only — a self-hosted endpoint's URL and key never leave the server, which
+// is also why this is a request rather than a NEXT_PUBLIC_* build-time copy: that would drift
+// the moment .env changed on the API box (the GET /api/canva/accounts precedent).
+export async function listChatProviders(): Promise<ChatProviderInfo[]> {
+  const body = await requestJson('/api/chat/providers');
+  return ChatProviderListSchema.parse(body);
+}
 
 export async function createChatThread(): Promise<string> {
   const body = await requestJson('/api/chat/threads', { method: 'POST' });

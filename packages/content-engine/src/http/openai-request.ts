@@ -216,6 +216,17 @@ export type OpenAiRequest = Readonly<{
   // the OCR path sets it: its calls are short and independent, so a page that hangs should
   // give up long before an article-length generation would.
   timeoutMs?: number | undefined;
+  // Per-call override of the retry ladder's length. Omitted = OPENAI_MAX_RETRIES, so every
+  // existing caller is unchanged; 0 means one attempt and no retry.
+  //
+  // The ladder above is written for a RATE-LIMITED server: a 429 is the server asking us to
+  // wait, and waiting is the only thing that works. It is exactly wrong for a server that is
+  // SWITCHED OFF, which is the ordinary state of /chat's self-hosted Qwen pod ($2.09/hr, and
+  // stopped between sessions). There the same ladder spends five backoffs and up to six full
+  // timeouts before anyone is told, in front of an officer who is watching a chat. That lane
+  // fails fast instead: a short reachability GET with no retry at all, then the streamed
+  // answer with one, which still covers a genuine blip or a server-requested short wait.
+  maxRetries?: number | undefined;
 }>;
 
 // POST a JSON body to an OpenAI endpoint, serialized against every other call from this
@@ -233,6 +244,7 @@ export async function openAiFetch(
     formData,
     lane,
     timeoutMs: timeoutOverride,
+    maxRetries,
   }: OpenAiRequest,
 ): Promise<Response> {
   const verb = method ?? 'POST';
@@ -244,7 +256,11 @@ export async function openAiFetch(
   if (verb !== 'POST' && (body !== undefined || formData !== undefined)) {
     throw new Error(`OpenAI ${label} ${verb} request must carry no body.`);
   }
-  const attempts = readInt('OPENAI_MAX_RETRIES', 5) + 1;
+  // `??`, not `||`: 0 is a meaningful value here and means "do not retry".
+  const attempts =
+    (maxRetries !== undefined
+      ? Math.max(0, Math.floor(maxRetries))
+      : readInt('OPENAI_MAX_RETRIES', 5)) + 1;
   // Serialized calls queue behind one another, so a hung request would stall the whole
   // pipeline rather than just itself. The timeout is the release valve. 5 minutes, not the
   // original 3: on gpt-5.6 a full-length Marathi article body at 'medium' reasoning spends
@@ -255,19 +271,25 @@ export async function openAiFetch(
       ? timeoutOverride
       : readInt('OPENAI_REQUEST_TIMEOUT_MS', 300_000);
 
+  // An empty apiKey means "send no authorization header", not "send an empty bearer".
+  // Every OpenAI caller obtains its key before it reaches this transport (requireApiKey and
+  // friends throw when it is missing), so that case is /chat's self-hosted Qwen provider
+  // alone: vLLM started without --api-key serves unauthenticated, and there is then no key
+  // to present. FormData owns its own boundary header, so content-type is set only for a
+  // JSON body.
+  const headers: Record<string, string> = {};
+  if (apiKey.trim() !== '') headers.authorization = `Bearer ${apiKey}`;
+  if (formData === undefined && body !== undefined) {
+    headers['content-type'] = 'application/json';
+  }
+
   return getLimiter(lane ?? 'default')(async () => {
     for (let attempt = 1; attempt <= attempts; attempt++) {
       let response: Response;
       try {
         response = await fetch(url, {
           method: verb,
-          headers:
-            formData !== undefined || body === undefined
-              ? { authorization: `Bearer ${apiKey}` }
-              : {
-                  authorization: `Bearer ${apiKey}`,
-                  'content-type': 'application/json',
-                },
+          headers,
           ...(verb === 'POST'
             ? { body: formData ?? JSON.stringify(body) }
             : {}),

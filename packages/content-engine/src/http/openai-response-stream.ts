@@ -7,7 +7,7 @@
 // the provider's, not the feature's, so a second copy of this loop would be a second place to
 // get frame buffering, chunk-boundary splitting and the `[DONE]` sentinel subtly wrong.
 //
-// Deliberately NOT the Chat Completions reader in generation/openai-chat.ts: that endpoint
+// Deliberately NOT the Chat Completions reader in http/openai-chat-stream.ts: that endpoint
 // frames its deltas as `choices[].delta.content`, which is a different shape entirely.
 
 // One frame of the event stream. Every frame carries its own `type`, so the SSE `event:` line

@@ -89,7 +89,13 @@ function attachmentBlock(name: string, text: string): string {
   return `--- ${name} ---\n${text}`;
 }
 
-function textOf(turn: MiscChatTurn): string {
+// Exported so /chat's Qwen provider folds attachments into a turn the same way, rather
+// than growing a second copy that drifts. It is also, for free, the "strip what the
+// provider cannot read" rule that lane needs: only an attachment carrying extracted `text`
+// contributes anything here, so an image (which reaches OpenAI as an `input_image` part)
+// and a PDF (which reaches it through File Search) both fall out of the replayed
+// transcript without a provider test.
+export function textOf(turn: MiscChatTurn): string {
   const extracted = (turn.attachments ?? [])
     .filter((attachment) => attachment.text)
     .map((attachment) =>

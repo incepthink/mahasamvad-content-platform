@@ -17,6 +17,13 @@
 // thumbnail and everything else as a named chip; that split, and why, lives in
 // components/conversation/AttachmentTray, which /new-video-workflow renders too.
 //
+// The fixed/default model gates the tools beside it: a text-only provider takes no picture and no native PDF, so those controls are
+// unavailable rather than silently dropped on the way to a model that would then answer
+// confidently about nothing. The flags come from the API (useChatProvider), never from a copy
+// of the engine's table restated here — and this gating is a courtesy, not the guard: the turn
+// route enforces the same flags, because a browser is never the last word on what reaches a
+// provider.
+//
 // A picture can also be PASTED — Ctrl+V of a screenshot, or of an image copied from a page.
 // Two listeners rather than one: the React handler on this card covers a paste into the text
 // box, and a document listener covers a paste made without clicking into it first, which is
@@ -37,6 +44,7 @@ import {
   AUDIO_FILE_ACCEPT,
   CHAT_MESSAGE_MAX_CHARS,
   IMAGE_FILE_ACCEPT,
+  type ChatProvider,
   type YouTubeVideo,
 } from '@dgipr/schemas';
 // CirclePlay, not a YouTube brand mark: lucide 1.x carries no brand icons — the same
@@ -61,8 +69,11 @@ import { imageFilesFromClipboard, isEditableTarget } from '../lib/pastedImages';
 import { useFilePreviews } from '../lib/useFilePreviews';
 import {
   CHAT_DOCUMENT_ACCEPT,
+  CHAT_TEXT_DOCUMENT_ACCEPT,
+  isPdfFileName,
   type DraftAttachment,
 } from '../lib/useChatAttachments';
+import { useChatProvider } from '../lib/useChatProvider';
 
 const KIND_ICON = {
   image: ImageIcon,
@@ -80,6 +91,29 @@ function stateLabel(attachment: DraftAttachment): string {
   // Nothing has been read yet, and the chip says so rather than claiming to be ready.
   if (attachment.state === 'pending') return STR.chatAttachPending;
   return STR.chatAttachReady;
+}
+
+// What the SELECTED provider could not read, and so must not be sent. The mirror of the turn
+// route's own guard, one step earlier: it keys on the file NAME because a PDF is exactly the
+// document that becomes a documentId, and a name is all a chip has before it is prepared.
+// Audio and YouTube are absent by construction — both arrive as extracted text, which every
+// provider reads. A chip that has already failed is not carried either way.
+function unreadableBy(
+  attachment: DraftAttachment,
+  capabilities: {
+    supportsImages: boolean;
+    supportsTextDocuments: boolean;
+    supportsPdf: boolean;
+  },
+): boolean {
+  if (attachment.state === 'failed') return false;
+  if (attachment.kind === 'image') return !capabilities.supportsImages;
+  if (attachment.kind === 'document') {
+    return isPdfFileName(attachment.name)
+      ? !capabilities.supportsPdf
+      : !capabilities.supportsTextDocuments;
+  }
+  return false;
 }
 
 export function ChatComposer({
@@ -106,7 +140,11 @@ export function ChatComposer({
   onRemove: (key: string) => void;
   // Resolves true once the turn has left. False means nothing was sent — every attachment
   // failed to prepare and there was no question to carry — so the box keeps what was typed.
-  onSend: (content: string) => Promise<boolean>;
+  //
+  // The provider travels UP from here rather than down as a prop: the picker is a composer
+  // control, so its state belongs beside the text box it qualifies, and only the turn needs to
+  // know what was chosen.
+  onSend: (content: string, provider: ChatProvider) => Promise<boolean>;
   onStop: () => void;
 }) {
   const [text, setText] = useState('');
@@ -115,20 +153,39 @@ export function ChatComposer({
   const imageInput = useRef<HTMLInputElement>(null);
   const documentInput = useRef<HTMLInputElement>(null);
   const audioInput = useRef<HTMLInputElement>(null);
+  const { provider, capabilities } = useChatProvider();
+
+  const imagesBlocked = !capabilities.supportsImages;
+  const pdfBlocked = !capabilities.supportsPdf;
+  const documentsBlocked = !capabilities.supportsTextDocuments;
+
+  // Named after the provider, e.g. "Qwen चित्रे वाचू शकत नाही." — the same sentence the turn
+  // route refuses with, so a greyed-out button and a rejected turn read alike. It covers the
+  // two flags that actually differ between the providers a deployment can offer; a provider
+  // that could take no document at all would want a third sentence, and there is none to
+  // check the wording against.
+  const imageBlockedLabel = `${capabilities.label} ${STR.chatProviderNoImages}`;
 
   // A non-PDF file that has not been read yet still counts as something to send — reading it
   // is what pressing पाठवा is for.
   const hasAttachments = attachments.some(
     (attachment) => attachment.state !== 'failed',
   );
-  const canSend = !sending && (text.trim() !== '' || hasAttachments);
+  // A file picked under one provider and still in the tray when another was chosen. The chip
+  // keeps its remove button, so the message below names a fix that is one press away — and
+  // sending anyway would only earn the turn route's refusal.
+  const blocked = attachments.some((attachment) =>
+    unreadableBy(attachment, capabilities),
+  );
+  const canSend =
+    !sending && !blocked && (text.trim() !== '' || hasAttachments);
 
   const submit = () => {
-    if (sending) return;
+    if (sending || blocked) return;
     if (text.trim() === '' && !hasAttachments) return;
     setError(null);
     setShowYouTube(false);
-    void onSend(text).then((sent) => {
+    void onSend(text, provider).then((sent) => {
       // Cleared only once the turn is on its way. False means there was nothing to send —
       // every attachment had already failed and no question was typed — and a box emptied
       // then would leave the officer's words nowhere.
@@ -160,6 +217,12 @@ export function ChatComposer({
         setError(STR.chatPasteUnsupported);
         return true;
       }
+      // The other way in. Disabling the image button closes the file dialog, not Ctrl+V, and a
+      // paste that silently does nothing reads as the feature being broken.
+      if (imagesBlocked) {
+        setError(imageBlockedLabel);
+        return true;
+      }
       if (full) {
         setError(STR.chatAttachTooMany);
         return true;
@@ -168,7 +231,7 @@ export function ChatComposer({
       onAddImages(files);
       return true;
     },
-    [full, onAddImages],
+    [full, imageBlockedLabel, imagesBlocked, onAddImages],
   );
 
   // A paste made with nothing focused, or with the focus on one of the tool buttons. Anything
@@ -259,22 +322,39 @@ export function ChatComposer({
           aria-label={STR.chatPlaceholder}
         />
         <div className="chat-tools">
+          {/* Unavailable rather than hidden when the provider cannot see a picture: a
+              control that vanishes reads as a bug, and the title says which model is the
+              reason. */}
           <button
             type="button"
             className="btn-ghost chat-tool"
             onClick={() => imageInput.current?.click()}
-            disabled={full}
-            title={STR.chatAttachImage}
-            aria-label={STR.chatAttachImage}
+            disabled={full || imagesBlocked}
+            title={imagesBlocked ? imageBlockedLabel : STR.chatAttachImage}
+            aria-label={
+              imagesBlocked
+                ? `${STR.chatAttachImage} — ${imageBlockedLabel}`
+                : STR.chatAttachImage
+            }
           >
             <ImageIcon size={20} aria-hidden="true" />
           </button>
+          {/* Only the PDF HALF of this picker is provider-specific: DOCX and TXT are read
+              here and reach the model as extracted text, so they work everywhere. The button
+              therefore stays live and it is the accept list that narrows — and it is only
+              disabled outright by a provider that could take no document at all. */}
           <button
             type="button"
             className="btn-ghost chat-tool"
             onClick={() => documentInput.current?.click()}
-            disabled={full}
-            title={STR.chatAttachDocument}
+            disabled={full || (documentsBlocked && pdfBlocked)}
+            title={
+              documentsBlocked
+                ? `${capabilities.label} ${STR.chatProviderNoDocuments}`
+                : pdfBlocked
+                  ? `${STR.chatAttachDocument} — ${capabilities.label} ${STR.chatProviderNoPdf}`
+                  : STR.chatAttachDocument
+            }
             aria-label={STR.chatAttachDocument}
           >
             <FileText size={20} aria-hidden="true" />
@@ -337,6 +417,11 @@ export function ChatComposer({
       {preparing ? (
         <p className="chat-composer-note">{STR.chatAttachWorking}</p>
       ) : null}
+      {blocked ? (
+        <p className="chat-composer-error" role="alert">
+          {STR.chatProviderUnreadable}
+        </p>
+      ) : null}
       {error !== null ? (
         <p className="chat-composer-error" role="alert">
           {error}
@@ -355,14 +440,24 @@ export function ChatComposer({
           event.target.value = '';
         }}
       />
+      {/* `accept` is a filter, not a guarantee — every file dialog offers an "all files"
+          escape — so a PDF that gets through is dropped here with the same sentence the
+          button's title carries, rather than attached and then refused by the API. */}
       <input
         ref={documentInput}
         type="file"
-        accept={CHAT_DOCUMENT_ACCEPT}
+        accept={pdfBlocked ? CHAT_TEXT_DOCUMENT_ACCEPT : CHAT_DOCUMENT_ACCEPT}
         multiple
         hidden
         onChange={(event) => {
-          onAddDocuments(Array.from(event.target.files ?? []));
+          const picked = Array.from(event.target.files ?? []);
+          const allowed = pdfBlocked
+            ? picked.filter((file) => !isPdfFileName(file.name))
+            : picked;
+          if (allowed.length < picked.length) {
+            setError(`${capabilities.label} ${STR.chatProviderNoPdf}`);
+          }
+          onAddDocuments(allowed);
           event.target.value = '';
         }}
       />

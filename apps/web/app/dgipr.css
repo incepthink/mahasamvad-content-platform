@@ -7736,6 +7736,14 @@ a.thread-node:hover {
   gap: 10px;
   margin: 0;
   color: var(--muted);
+  animation: chat-thinking-pulse 1.4s infinite ease-in-out;
+}
+
+/* Compact progress state shown while the model is working privately. */
+.chat-thinking-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .chat-dots {
@@ -7766,6 +7774,16 @@ a.thread-node:hover {
     opacity: 0.25;
   }
   35% {
+    opacity: 1;
+  }
+}
+
+@keyframes chat-thinking-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
     opacity: 1;
   }
 }

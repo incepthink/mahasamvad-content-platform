@@ -83,6 +83,20 @@ const TRANSCRIPTION_POLL_MAX_TICKS = 600;
 const DOCUMENT_EXTENSIONS = ['.pdf', '.docx', '.txt'] as const;
 export const CHAT_DOCUMENT_ACCEPT: string = DOCUMENT_EXTENSIONS.join(',');
 
+// The same list minus the one extension a provider without native PDF reading cannot take.
+// Derived rather than written out again, so a fourth document type can never be offered to
+// one provider and not the other by omission.
+export const CHAT_TEXT_DOCUMENT_ACCEPT: string = DOCUMENT_EXTENSIONS.filter(
+  (extension) => extension !== '.pdf',
+).join(',');
+
+// A PDF is exactly the document this hook uploads for native reading (it is the one that
+// comes back with a documentId), so this is the browser-side spelling of the question the
+// turn route asks of a resolved attachment.
+export function isPdfFileName(fileName: string): boolean {
+  return fileName.toLowerCase().endsWith('.pdf');
+}
+
 function isDocumentFileName(fileName: string): boolean {
   const lower = fileName.toLowerCase();
   return DOCUMENT_EXTENSIONS.some((extension) => lower.endsWith(extension));

@@ -377,6 +377,49 @@ export {
   type OpenAiChatFileHandle,
 } from './chat/file-search.js';
 
+// /chat's second provider: a self-hosted Qwen behind vLLM's OpenAI-compatible Chat
+// Completions endpoint. A TWIN of the lane above rather than a branch inside it — stateless
+// where that one chains on a stored response, and with no tool, no vision and no File Search
+// equivalent, which is what the capability table reports and the turn route enforces.
+export {
+  chatProviderCapabilities,
+  chatProviders,
+} from './chat/chat-providers.js';
+export {
+  QWEN_CHAT_SYSTEM_INSTRUCTION,
+  QWEN_DEFAULT_MODEL,
+  buildQwenMessages,
+  buildQwenRequestBody,
+  createThinkingStripper,
+  fitTurnsToBudget,
+  isQwenConfigured,
+  preflightQwen,
+  qwenApiKey,
+  qwenBaseUrl,
+  qwenChatCompletionsUrl,
+  qwenMaxInputChars,
+  qwenModel,
+  qwenModelsUrl,
+  streamQwenChatReply,
+  type QwenChatLifecycleEvent,
+  type QwenChatReply,
+  type QwenChatRequest,
+  type QwenContextFit,
+  type QwenContextReport,
+  type QwenPreflightReport,
+  type ThinkingStripper,
+} from './chat/qwen-chat.js';
+// Every failure `streamQwenChatReply` throws is one of these, and each carries a Marathi
+// `userMessage` written to survive the web's officer-readability whitelist — an
+// engineer-worded diagnosis is not merely ugly there, it is replaced and never seen.
+export {
+  QWEN_USER_MESSAGES,
+  QwenChatError,
+  classifyQwenFailure,
+  isQwenChatError,
+  type QwenErrorKind,
+} from './chat/qwen-errors.js';
+
 // Cost metering — the runner opens a scope per job and reads the accumulator back.
 export {
   createCostAccumulator,

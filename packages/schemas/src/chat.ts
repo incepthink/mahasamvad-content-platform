@@ -12,6 +12,25 @@ import { z } from 'zod';
 export const ChatRoleSchema = z.enum(['user', 'assistant']);
 export type ChatRole = z.infer<typeof ChatRoleSchema>;
 
+// Which model answers one turn.
+//
+// Per TURN rather than per thread, and deliberately NOT a column: `chat_messages.model`
+// already records the model id that answered, which is everything the bubble and /analytics
+// need — so this needed no migration.
+//
+// It is also what makes a MIXED thread safe with no special case. Only the OpenAI lane
+// writes `openai_response_id`, so an OpenAI turn that follows a Qwen one finds a null on the
+// previous assistant row and replays the bounded transcript statelessly — which is exactly
+// right, because the Qwen turn is not in OpenAI's stored response chain and chaining past it
+// would answer with a hole in the conversation.
+//
+// Absent = 'qwen', so every chat uses the self-hosted model unless a caller explicitly names
+// another provider.
+export const ChatProviderSchema = z.enum(['openai', 'qwen']);
+export type ChatProvider = z.infer<typeof ChatProviderSchema>;
+
+export const DEFAULT_CHAT_PROVIDER: ChatProvider = 'qwen';
+
 export const ChatAttachmentKindSchema = z.enum([
   'image',
   'document',
@@ -98,12 +117,40 @@ export const SendChatMessageRequestSchema = z.object({
     .array(ChatAttachmentSchema)
     .max(CHAT_MAX_ATTACHMENTS)
     .optional(),
+  // Omitted = DEFAULT_CHAT_PROVIDER. The browser sends this NAME and nothing else: the
+  // endpoint and key of a self-hosted provider are resolved server-side and never leave it.
+  provider: ChatProviderSchema.optional(),
 });
 export type SendChatMessageRequest = z.infer<
   typeof SendChatMessageRequestSchema
 >;
 
 export const CreateChatThreadResponseSchema = z.object({ id: z.string() });
+
+// What GET /api/chat/providers hands the composer: which providers THIS deployment has
+// configured, and what each one may be given. Ids, labels and capabilities ONLY — never a
+// base URL and never a key, so a self-hosted endpoint stays server-side. The
+// GET /api/canva/accounts precedent, and the reason this is a request rather than a
+// NEXT_PUBLIC_* build-time copy, which would drift the moment .env changed on the box.
+//
+// Capabilities are REPORTED rather than assumed, because they follow what is actually
+// served: a text-only model behind vLLM has no vision and no File Search equivalent, so it
+// takes neither pictures nor native PDFs. Audio and YouTube are deliberately absent from
+// this list — both are reduced to plain text before any model is contacted, so they work
+// everywhere and there is nothing to gate.
+export const ChatProviderInfoSchema = z.object({
+  id: ChatProviderSchema,
+  label: z.string(),
+  supportsImages: z.boolean(),
+  // DOCX and TXT, which reach the model as extracted text like a transcript does.
+  supportsTextDocuments: z.boolean(),
+  // A PDF read natively by the provider. Kept apart from the flag above because the one
+  // दस्तऐवज picker accepts .pdf, .docx and .txt, and only the PDF half is provider-specific.
+  supportsPdf: z.boolean(),
+});
+export type ChatProviderInfo = z.infer<typeof ChatProviderInfoSchema>;
+
+export const ChatProviderListSchema = z.array(ChatProviderInfoSchema);
 
 export const ChatImageUploadResponseSchema = z.object({
   name: z.string(),
@@ -126,17 +173,26 @@ export type ChatDocumentUploadResponse = z.infer<
 // ---------------------------------------------------------------------------
 //
 // Server-sent events over a POST, so the client reads them with fetch + a ReadableStream
-// rather than EventSource (which can only GET). Three event types, all carried in the `data:`
+// rather than EventSource (which can only GET). Four event types, all carried in the `data:`
 // field as JSON so there is exactly one framing to parse:
 //
 //   { type: 'delta', text }   — the next piece of the answer
 //   { type: 'done', messageId, userMessageId, title? } — persisted; title on the first turn
+//   { type: 'reasoning', text } — the model thinking out loud, when it does so visibly
 //   { type: 'error', message } — a Marathi sentence to show in place of the answer
 //
 // A 'done' always follows the last 'delta' on a successful turn. An 'error' may arrive after
 // deltas: the partial answer stays on screen and is stored, because those tokens are paid for.
 export const ChatStreamEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('delta'), text: z.string() }),
+  // A reasoning model's deliberation, streamed so the officer sees progress instead of a
+  // dead pane while it thinks. NOT part of the answer: it is never added to `content` and
+  // never stored, which also keeps us right about multi-turn history — Qwen3's own guidance
+  // is that prior thinking must not be replayed into a later turn.
+  //
+  // Additive to this union on purpose: the reader in apps/web/lib/api.ts skips a frame it
+  // does not recognise, precisely so a new event type cannot break a client mid-answer.
+  z.object({ type: z.literal('reasoning'), text: z.string() }),
   z.object({
     type: z.literal('done'),
     messageId: z.string(),

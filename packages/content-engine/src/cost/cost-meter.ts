@@ -171,9 +171,18 @@ export type ChatUsage = Readonly<{
 }>;
 
 // Record one chat completion's usage into the ambient accumulator (no-op outside a scope).
+//
+// `provider` names WHO BILLED. It picks the rate (see priceText, where a self-hosted provider
+// is priced at zero on every model it serves) and it is the row's provider on the analytics
+// services table — which until now was hardcoded 'openai', so a self-hosted turn would have
+// been reported as OpenAI's work as well as charged at OpenAI's rates. The tokens are counted
+// either way: that a provider is free is a reason to price it at zero, never a reason to stop
+// measuring how much went through it. Defaults to 'openai', which every caller in this
+// package but the Qwen chat lane is.
 export function recordChatUsage(
   model: string,
   usage: ChatUsage | undefined,
+  provider = 'openai',
 ): void {
   const context = storage.getStore();
   if (!context) return;
@@ -185,9 +194,11 @@ export function recordChatUsage(
   acc.inputTokens += input;
   acc.cachedInputTokens += cached;
   acc.outputTokens += output;
-  const costUsd = priceText(model, input, cached, output);
+  const costUsd = priceText(model, input, cached, output, provider);
   acc.textCostUsd += costUsd;
-  bumpTaskUsage('text', 'openai', model, 1, 1, costUsd, false);
+  // costEstimated stays false: the token counts are the provider's own, and a self-hosted
+  // provider's zero is not a guess at a rate — it is the absence of one.
+  bumpTaskUsage('text', provider, model, 1, 1, costUsd, false);
 }
 
 // Shape of the `usage` object OpenAI returns on an embeddings call.

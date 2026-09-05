@@ -1841,7 +1841,7 @@ export const STR = {
   chatPlaceholder: 'इथे लिहा…',
   chatSend: 'पाठवा',
   chatStop: 'थांबवा',
-  chatThinking: 'विचार करत आहे…',
+  chatThinking: 'Thinking',
   // Only read aloud: on screen this is a spinner, which says the same thing faster.
   chatLoading: 'उघडत आहोत…',
   chatFailed: 'उत्तर तयार करता आले नाही. पुन्हा प्रयत्न करा.',
@@ -1881,6 +1881,14 @@ export const STR = {
   chatAttachedImage: 'चित्र',
   chatCopy: 'कॉपी करा',
   chatCopied: 'कॉपी झाले',
+  // Used by disabled attachment controls when the fixed provider cannot read that input.
+  chatProviderNoImages: 'चित्रे वाचू शकत नाही.',
+  chatProviderNoPdf: 'PDF वाचू शकत नाही.',
+  chatProviderNoDocuments: 'दस्तऐवज वाचू शकत नाही.',
+  // A file already in the tray when the provider was switched. The chip keeps its remove
+  // button, so the fix named here is one press away.
+  chatProviderUnreadable:
+    'जोडलेली फाईल हा प्रदाता वाचू शकत नाही. ती काढून टाका, किंवा दुसरा प्रदाता निवडा.',
 
   // ---------- प्रायोगिक: Gemini व्हिडिओ संभाषण (/new-video-workflow) ----------
   //

@@ -28,6 +28,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   ChatAttachment,
   ChatMessage,
+  ChatProvider,
   ChatThreadDetail,
 } from '@dgipr/schemas';
 import { createChatThread, getChatThread, sendChatMessage } from './api';
@@ -44,7 +45,16 @@ export type SendInput = Readonly<{
   // message is on screen — see the header. Resolving to an empty list when nothing was typed
   // means every attachment failed, and the turn is rolled back rather than sent empty.
   prepare: () => Promise<readonly ChatAttachment[]>;
+  // Which model answers, per TURN — a thread may legitimately hold both, and only the name
+  // travels. The endpoint and key of a self-hosted provider are resolved server-side.
+  provider: ChatProvider;
 }>;
+
+// How much of a reasoning model's deliberation is kept on screen. The TAIL, so the line reads
+// as what the model is doing now rather than as an essay that grows the pane while nothing has
+// been answered yet — and bounded, so a long thinking block cannot grow this state without
+// limit as it streams.
+const THINKING_TAIL_CHARS = 240;
 
 // What a chip may show. The extracted text is dropped here, exactly as the API drops it from
 // its own responses: a chip shows a name and a size, never the text.
@@ -76,6 +86,10 @@ export function useChatThread(
   // The answer as it is being written; null when nothing is in flight. An empty string means
   // the turn has been sent and the first token has not arrived.
   streaming: string | null;
+  // A reasoning model thinking out loud, while it is still doing so. NOT the answer: it is
+  // never added to `streaming`, never stored, and never replayed into a later turn (Qwen3's
+  // own guidance). Null unless the provider streams it and the answer has not started.
+  thinking: string | null;
   sending: boolean;
   error: string | null;
   loading: boolean;
@@ -86,6 +100,7 @@ export function useChatThread(
   const [thread, setThread] = useState<ChatThreadDetail | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streaming, setStreaming] = useState<string | null>(null);
+  const [thinking, setThinking] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(initialThreadId !== null);
@@ -100,6 +115,7 @@ export function useChatThread(
     abort.current = null;
     setThreadId(initialThreadId);
     setStreaming(null);
+    setThinking(null);
     setSending(false);
     setError(null);
     setThread(null);
@@ -170,6 +186,7 @@ export function useChatThread(
             current.filter((message) => message.id !== provisionalId),
           );
           setStreaming(null);
+          setThinking(null);
           setSending(false);
           setError(errorMessage(e, STR.chatFailed));
           return;
@@ -181,6 +198,9 @@ export function useChatThread(
       const controller = new AbortController();
       abort.current = controller;
       let answer = '';
+      // Held here rather than read back off state, exactly as `answer` is: several frames can
+      // land inside one React batch.
+      let reasoning = '';
       let failed: string | null = null;
 
       // The wait moved here from in front of the Send button — see the header. The officer's
@@ -200,6 +220,7 @@ export function useChatThread(
           current.filter((message) => message.id !== provisionalId),
         );
         setStreaming(null);
+        setThinking(null);
         setSending(false);
         abort.current = null;
         return;
@@ -212,6 +233,7 @@ export function useChatThread(
           current.filter((message) => message.id !== provisionalId),
         );
         setStreaming(null);
+        setThinking(null);
         setSending(false);
         abort.current = null;
         setError(STR.chatAttachFailed);
@@ -235,11 +257,19 @@ export function useChatThread(
           {
             content: input.content,
             attachments: attachments.map((attachment) => ({ ...attachment })),
+            provider: input.provider,
           },
           (event) => {
             if (event.type === 'delta') {
               answer += event.text;
               setStreaming(answer);
+            } else if (event.type === 'reasoning') {
+              // THINKING, NOT ANSWER. It is deliberately not added to `answer`, so it never
+              // reaches the message list, the stored row or the next turn's history — it exists
+              // only so a reasoning model's long silence reads as progress rather than as a
+              // dead pane. Only the tail is kept: see THINKING_TAIL_CHARS.
+              reasoning = (reasoning + event.text).slice(-THINKING_TAIL_CHARS);
+              setThinking(reasoning);
             } else if (event.type === 'done') {
               setMessages((current) =>
                 current.map((message) =>
@@ -254,9 +284,13 @@ export function useChatThread(
                   current ? { ...current, title } : current,
                 );
               }
-            } else {
+            } else if (event.type === 'error') {
               failed = event.message;
             }
+            // Every arm is matched EXPLICITLY rather than one falling through an else: a bare
+            // else would read `message` off whichever frame type is added next and fail the
+            // turn with `undefined`, which is exactly what a reasoning frame did before it was
+            // given an arm of its own.
           },
           controller.signal,
         );
@@ -289,6 +323,9 @@ export function useChatThread(
         ]);
       }
       setStreaming(null);
+      // The deliberation is over the moment the turn is: it is never part of the reply and is
+      // not kept anywhere, here or on the row.
+      setThinking(null);
       setSending(false);
       if (failed !== null) setError(failed);
     },
@@ -307,6 +344,7 @@ export function useChatThread(
     thread,
     messages,
     streaming,
+    thinking,
     sending,
     error,
     loading,

@@ -15,6 +15,7 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import type { ChatProvider } from '@dgipr/schemas';
 import { ChatConversation } from './ChatConversation';
 import { ConversationWorkspace } from './conversation/ConversationWorkspace';
 import type { ConversationRailGroup } from './conversation/ConversationRail';
@@ -42,7 +43,7 @@ export function ChatWorkspace({ threadId }: { threadId: string | null }) {
   const attachments = useChatAttachments();
 
   const send = useCallback(
-    async (content: string): Promise<boolean> => {
+    async (content: string, provider: ChatProvider): Promise<boolean> => {
       // Nothing is awaited here on purpose. The turn is committed now — box cleared, question
       // on screen — and `prepare` runs inside it, so picking a large PDF and asking about it
       // in the same breath no longer means waiting for the upload before Send will even fire.
@@ -51,7 +52,7 @@ export function ChatWorkspace({ threadId }: { threadId: string | null }) {
       const preview = attachments.preview();
       if (preview.length === 0 && content.trim() === '') return false;
       void chat
-        .send({ content, preview, prepare: attachments.prepare })
+        .send({ content, preview, prepare: attachments.prepare, provider })
         .then(() => {
           // The rail's title and ordering only exist once the turn has landed.
           void list.refresh();
@@ -123,6 +124,7 @@ export function ChatWorkspace({ threadId }: { threadId: string | null }) {
         thread={chat.thread}
         messages={chat.messages}
         streaming={chat.streaming}
+        thinking={chat.thinking}
         sending={chat.sending}
         loading={chat.loading}
         error={chat.error}

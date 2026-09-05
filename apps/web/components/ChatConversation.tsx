@@ -10,6 +10,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type {
   ChatMessage,
+  ChatProvider,
   ChatThreadDetail,
   YouTubeVideo,
 } from '@dgipr/schemas';
@@ -45,6 +46,7 @@ export function ChatConversation({
   thread: ChatThreadDetail | null;
   messages: readonly ChatMessage[];
   streaming: string | null;
+  thinking: string | null;
   sending: boolean;
   loading: boolean;
   error: string | null;
@@ -56,7 +58,7 @@ export function ChatConversation({
   onAddAudio: (files: readonly File[]) => void;
   onAddYouTube: (video: YouTubeVideo) => void;
   onRemoveAttachment: (key: string) => void;
-  onSend: (content: string) => Promise<boolean>;
+  onSend: (content: string, provider: ChatProvider) => Promise<boolean>;
   onStop: () => void;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
@@ -125,16 +127,18 @@ export function ChatConversation({
           {streaming !== null ? (
             <article className="chat-turn chat-turn--assistant">
               {streaming === '' ? (
-                // Before the first token. Gemini may think before it writes, so this window is
-                // real and an empty pane would read as a failure.
-                <p className="chat-thinking">
-                  <span className="chat-dots" aria-hidden="true">
-                    <i />
-                    <i />
-                    <i />
-                  </span>
-                  {STR.chatThinking}
-                </p>
+                // Private reasoning is never rendered. Before the first answer token, show
+                // only a compact progress indicator.
+                <div className="chat-thinking-block">
+                  <p className="chat-thinking">
+                    <span className="chat-dots" aria-hidden="true">
+                      <i />
+                      <i />
+                      <i />
+                    </span>
+                    {STR.chatThinking}
+                  </p>
+                </div>
               ) : (
                 // Markdown WHILE it streams, not plain text that recompiles at the end.
                 // It used to render raw, on the argument that re-parsing half-written

@@ -1,5 +1,7 @@
 // Price tables for OpenAI usage, used to turn measured token counts (text) and
-// fixed render tiers (image) into dollars. Numbers are the official OpenAI prices
+// fixed render tiers (image) into dollars. The one non-OpenAI line in the text half is
+// UNBILLED_TEXT_PROVIDERS, which exists because a provider we host ourselves has no
+// per-token rate to look up at all. Numbers are the official OpenAI prices
 // captured in the cost model (docs/../plans/openai-client-call-sites-merry-newt.md,
 // fetched 2026-07-10). If OpenAI changes prices, edit only this file.
 
@@ -34,18 +36,62 @@ export const TEXT_PRICES_PER_1M: Readonly<Record<string, TextPrice>> = {
 };
 
 // Unknown / future model ids fall back to the default authoring model so cost is never
-// silently $0 — and so an unpriced id errs high rather than low.
+// silently $0 — and so an unpriced id errs high rather than low. That fallback is exactly
+// why a provider we do not pay per token needs a line here rather than needing nothing: an
+// id this file has never heard of does not read as free, it reads as gpt-5.6-terra.
 const FALLBACK_TEXT_PRICE = TEXT_PRICES_PER_1M['gpt-5.6-terra'] as TextPrice;
+
+// Zero on every dimension rather than a short-circuit in the arithmetic below, so the token
+// counts are clamped and summed on the same one path a billed provider's are — and so a
+// self-hosted box that ever does acquire a per-token rate becomes a table entry rather than
+// a new branch.
+const ZERO_TEXT_PRICE: TextPrice = {
+  input: 0,
+  cachedInput: 0,
+  output: 0,
+};
+
+// Providers that do not bill per token AT ALL, so no model of theirs has a rate to look up.
+// `qwen` is the self-hosted Runpod/vLLM pod behind /chat: it is rented by the HOUR and that
+// bill is incurred whether it serves one turn or a thousand, so no arithmetic over a token
+// count can produce a figure that means anything. The tokens are still counted — see
+// recordChatUsage — because how much work went through the pod is a real question; what it
+// cost per turn is not.
+//
+// KEYED ON THE PROVIDER, NOT THE MODEL, and deliberately. The price of a token is a property
+// of who is billing for it, never of which weights answered. QWEN_MODEL is env-overridable
+// and vLLM serves whatever its `--model` argument names — another Qwen size, a fine-tune, a
+// local path — so a literal 'Qwen/Qwen3.8-27B' row would go silently wrong the day the pod is
+// repointed, and bill a free turn at terra rates through the fallback above; a 'Qwen/' prefix
+// would be the same guess one step further out, and still wrong for a local path. The
+// provider is the one thing the call site knows for certain, and it is the thing that is
+// actually true. estimateOcrCostUsd below is per-provider for the same reason: two providers,
+// two billing shapes.
+//
+// Exported so the Qwen chat lane passes THIS string rather than a second copy of it: a
+// literal that has to match a set-membership test in another file is a literal that drifts,
+// and the way it would fail is silent — a free turn quietly billed at terra rates.
+export const QWEN_COST_PROVIDER = 'qwen';
+
+const UNBILLED_TEXT_PROVIDERS: ReadonlySet<string> = new Set([
+  QWEN_COST_PROVIDER,
+]);
 
 // USD for one chat/embedding call given its token usage. OpenAI's prompt_tokens
 // already includes the cached tokens, so the uncached portion is (input - cached).
+//
+// `provider` defaults to 'openai' because the tables above are OpenAI's and every call site
+// in the package outside the Qwen chat lane is OpenAI's too.
 export function priceText(
   model: string,
   inputTokens: number,
   cachedTokens: number,
   outputTokens: number,
+  provider = 'openai',
 ): number {
-  const price = TEXT_PRICES_PER_1M[model] ?? FALLBACK_TEXT_PRICE;
+  const price = UNBILLED_TEXT_PROVIDERS.has(provider)
+    ? ZERO_TEXT_PRICE
+    : (TEXT_PRICES_PER_1M[model] ?? FALLBACK_TEXT_PRICE);
   const cached = Math.min(Math.max(cachedTokens, 0), inputTokens);
   const uncached = Math.max(inputTokens - cached, 0);
   return (
