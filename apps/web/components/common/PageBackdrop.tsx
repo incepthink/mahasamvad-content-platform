@@ -108,7 +108,17 @@ function points(attrs: Readonly<Record<string, string>>): [number, number][] {
 }
 
 let generator: ReturnType<typeof rough.generator> | undefined;
-const sketches = new Map<string, SketchedPath[]>();
+// Keyed by the MARK ITSELF, never by its index. `markKey` is a position inside ONE
+// doodle set, and the five sets are five different arrays — so `35` names a different
+// drawing on /translate than it does on /. Keyed by index, this module-level cache
+// served whichever page sketched first to every page after it, and because the Node
+// process is long-lived while the browser's module is fresh per load, the SERVER drew
+// another lane's marks and the client drew the right ones: a hydration mismatch on
+// every backdrop page except the first one loaded after a restart.
+//
+// A WeakMap rather than a Map so a set that is never rendered again can be collected;
+// the marks are module-level constants, so in practice they live for the process.
+const sketches = new WeakMap<DoodleMark, Map<number, SketchedPath[]>>();
 
 /**
  * Redraw one mark by hand. `markKey` and `variant` are the cache key AND the sketch's
@@ -120,8 +130,12 @@ function sketchMark(
   markKey: number,
   variant: number,
 ): SketchedPath[] {
-  const key = `${markKey}:${variant}`;
-  const cached = sketches.get(key);
+  let byVariant = sketches.get(mark);
+  if (!byVariant) {
+    byVariant = new Map<number, SketchedPath[]>();
+    sketches.set(mark, byVariant);
+  }
+  const cached = byVariant.get(variant);
   if (cached) return cached;
 
   generator ??= rough.generator();
@@ -209,7 +223,7 @@ function sketchMark(
     }
   });
 
-  sketches.set(key, drawn);
+  byVariant.set(variant, drawn);
   return drawn;
 }
 
