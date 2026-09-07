@@ -32,6 +32,8 @@ export type QwenErrorKind =
   // Nothing answered: the pod is stopped, the proxy returned a gateway error, or our own
   // clock ran out before a connection was made. The ordinary state of this provider.
   | 'unreachable'
+  // The request or stream exceeded a deadline. This does not establish that the pod is off.
+  | 'timeout'
   // Something answered, but it is not serving the model we asked for. vLLM matches the
   // `model` field against its own --model argument and 404s on anything else, so a pod
   // restarted with a different checkpoint — or a stale QWEN_MODEL — lands here.
@@ -51,11 +53,13 @@ export const QWEN_USER_MESSAGES: Readonly<Record<QwenErrorKind, string>> = {
   notConfigured:
     'Qwen सेवा अद्याप योग्य प्रकारे सेट केलेली नाही. प्रशासकाला कळवा, किंवा दुसरा प्रदाता निवडून पुन्हा पाठवा.',
   unreachable:
-    'Qwen सर्व्हर सध्या बंद आहे. तो सुरू करण्यास प्रशासकाला सांगा, किंवा दुसरा प्रदाता निवडून पुन्हा पाठवा.',
+    'Qwen सर्व्हरशी संपर्क होऊ शकला नाही. प्रशासकाला सेवा तपासण्यास सांगा, किंवा दुसरा प्रदाता निवडून पुन्हा पाठवा.',
+  timeout:
+    'Qwen कडून पूर्ण उत्तर मिळण्यापूर्वी वेळमर्यादा संपली. प्रशासकाला वेळमर्यादा आणि सर्व्हरवरील भार तपासण्यास सांगा, किंवा पुन्हा प्रयत्न करा.',
   modelMissing:
     'Qwen सर्व्हर सुरू आहे, पण त्यावर हे मॉडेल उपलब्ध नाही. प्रशासकाला मॉडेलचे नाव तपासण्यास सांगा.',
   contextOverflow:
-    'ही चर्चा या मॉडेलच्या मर्यादेपेक्षा मोठी झाली आहे. नवीन चॅट सुरू करा, किंवा कमी मजकूर पाठवा.',
+    'दिलेला मजकूर आणि पूर्ण उत्तरासाठी आवश्यक जागा या मॉडेलच्या मर्यादेत बसत नाही. कमी मजकूर किंवा संदर्भ वापरा, किंवा मर्यादा वाढवण्यासाठी प्रशासकाला कळवा.',
   failed:
     'Qwen कडून उत्तर मिळाले नाही. पुन्हा प्रयत्न करा, किंवा दुसरा प्रदाता निवडा.',
 };
@@ -88,6 +92,23 @@ export function isQwenChatError(error: unknown): error is QwenChatError {
 // own AbortSignal.timeout firing. undici reports every one of them as a TypeError whose
 // message is the unhelpful `fetch failed` and whose real cause hangs off `.cause`, so the
 // name is the reliable signal and the text is only a backstop for other runtimes.
+function isTimeoutFailure(error: unknown): boolean {
+  // undici can wrap a connect/body timeout in TypeError('fetch failed'). Bound the walk
+  // because a malformed cause chain may be cyclic.
+  for (let depth = 0; depth < 5 && error instanceof Error; depth++) {
+    const code = (error as Error & { code?: unknown }).code;
+    if (
+      error.name === 'TimeoutError' ||
+      (typeof code === 'string' && /^(ETIMEDOUT|UND_ERR_.*TIMEOUT)$/.test(code)) ||
+      /timed out|due to timeout/i.test(error.message)
+    ) {
+      return true;
+    }
+    error = error.cause;
+  }
+  return false;
+}
+
 function isTransportFailure(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   if (
@@ -157,12 +178,18 @@ export function classifyQwenFailure(
   if (CONTEXT_OVERFLOW.test(message)) {
     return new QwenChatError('contextOverflow', detail, options);
   }
+  if (isTimeoutFailure(error)) {
+    return new QwenChatError('timeout', detail, options);
+  }
   if (isTransportFailure(error)) {
     return new QwenChatError('unreachable', detail, options);
   }
 
   const status = statusOf(error);
   if (status !== null) {
+    if (status === 408 || status === 504 || status === 524) {
+      return new QwenChatError('timeout', detail, options);
+    }
     // A 404 from an OpenAI-compatible server is about the model, not about the path: the
     // path is fixed and correct, and vLLM's own 404 body names the model it does not have.
     if (status === 404 || UNKNOWN_MODEL.test(message)) {
@@ -176,7 +203,7 @@ export function classifyQwenFailure(
     // A gateway status is the Runpod proxy answering for a pod that is not there. 5xx from
     // vLLM itself lands here too and means much the same to an officer: nothing usable is
     // serving right now.
-    if (status === 502 || status === 503 || status === 504 || status >= 520) {
+    if (status === 502 || status === 503 || status >= 520) {
       return new QwenChatError('unreachable', detail, options);
     }
   }

@@ -1,7 +1,7 @@
 // The SIMPLIFIED Marathi article generator (ARTICLE_GENERATION_MODE=simple, the default).
 //
 //   selectStyleReference()  →  1 embedding, and only on the retrieval tier
-//   chatComplete()          →  1 call on ARTICLE_MODEL, writing the whole article
+//   writeArticleDraft()     →  1 call on the configured provider, writing the whole article
 //   applyDesignations()     →  0 calls, deterministic
 //
 // That is the entire pipeline. The full path (generate-article.ts) makes up to fourteen calls,
@@ -11,6 +11,10 @@
 // note — which is the "mechanical" quality this path exists to remove. The judgement they
 // encoded now happens inside one call, which is why that call runs on a higher tier at a
 // deliberate reasoning effort (see ARTICLE_MODEL / articleReasoningEffort in openai-chat.ts).
+//
+// WHICH MODEL makes that call is article-provider.ts's, read from ARTICLE_PROVIDER: OpenAI by
+// default, or the self-hosted Qwen the /chat lane already talks to. Only the draft moves —
+// the length fit, feedback, translation and every checker stay on OpenAI.
 //
 // What is NOT dropped, and must not be:
 //   - applyDesignations, which is deterministic and is the pipeline's only structural name
@@ -68,11 +72,13 @@ import {
 } from './generate-article.js';
 import {
   ARTICLE_BODY_MAX_TOKENS,
-  ARTICLE_MODEL,
   articleReasoningEffort,
-  chatComplete,
-  chatCompleteStream,
 } from './openai-chat.js';
+import {
+  articleProvider,
+  articleProviderModel,
+  writeArticleDraft,
+} from './article-provider.js';
 import {
   NO_STYLE_REFERENCE,
   selectStyleReference,
@@ -196,10 +202,10 @@ export async function generateArticleSimple(
   const designations = options?.designations ?? [];
   const dloPrompt = options?.promptMode === 'dlo';
 
-  // References are temporarily bypassed by default. The complete existing tier 1 → 2 → 3
-  // selector remains immediately available behind ARTICLE_STYLE_REFERENCES_ENABLED=true for
-  // ordinary articles. /dlo's approved prompt never carries a style reference.
-  const referencesEnabled = !dloPrompt && articleStyleReferencesEnabled();
+  // References are temporarily bypassed by default. ARTICLE_STYLE_REFERENCES_ENABLED=true
+  // restores the complete tier 1 → 2 → 3 selector for every article lane, including
+  // /dlo. The DLO builder fences the resulting exemplars off as style/structure only.
+  const referencesEnabled = articleStyleReferencesEnabled();
   let styleReference = NO_STYLE_REFERENCE;
   if (referencesEnabled) {
     onProgress('retrieve');
@@ -237,6 +243,7 @@ export async function generateArticleSimple(
   const messages = dloPrompt
     ? buildDloArticleMessages({
         sourceInformation: note,
+        styleReferences: styleReference.articles,
         designations,
         heading: options?.heading,
         officerInstructions: options?.instructions,
@@ -246,16 +253,17 @@ export async function generateArticleSimple(
         variant,
         referencesEnabled,
       );
-  const callOptions = {
-    model: ARTICLE_MODEL,
+  // WHO writes it is article-provider.ts's decision, not this function's — the draft is one
+  // call and the model behind it is the whole authoring stage, so the switch belongs at a
+  // seam rather than inside the generator (the clip-provider.ts precedent). Everything below
+  // — the delimiter guard, the length fit, applyDesignations, ensureArticleHeading — is
+  // handed the same string either way and needed no change.
+  const onDelta = options?.onDelta;
+  const raw = await writeArticleDraft(messages, {
     maxTokens: ARTICLE_BODY_MAX_TOKENS,
     reasoningEffort: articleReasoningEffort(),
-  } as const;
-
-  const onDelta = options?.onDelta;
-  const raw = onDelta
-    ? await chatCompleteStream(messages, { ...callOptions, onDelta })
-    : await chatComplete(messages, callOptions);
+    ...(onDelta ? { onDelta } : {}),
+  });
 
   // Defensive: the specification asks for the article alone, but if a draft ever emits the
   // traceability delimiter anyway, keep it out of the stored article — the feedback path
@@ -316,7 +324,8 @@ export async function generateArticleSimple(
       : `${variant}-${NO_REFERENCE_ARTICLE_PROMPT_VERSION}`;
 
   console.log(
-    `[simple-article] ${category} | model=${ARTICLE_MODEL} effort=${articleReasoningEffort()} | ` +
+    `[simple-article] ${category} | provider=${articleProvider()} ` +
+      `model=${articleProviderModel()} effort=${articleReasoningEffort()} | ` +
       `style-ref=${styleReference.source}x${styleReference.articles.length} | ` +
       `prompt=${promptVersion}${
         !dloPrompt && variant === 'minimal'
@@ -348,7 +357,7 @@ export async function generateArticleSimple(
   };
 }
 
-// Run directly (PAID — one article on ARTICLE_MODEL plus one embedding):
+// Run directly (PAID — one article on the configured provider plus one embedding):
 //   tsx --env-file=../../.env src/generation/generate-article-simple.ts [news|scheme] [--file=note.txt]
 // Defaults to data/sample-note.txt, like generate:test. Always prefer --file for a multi-line
 // note: npx on Windows truncates a multi-line argv at the first newline.

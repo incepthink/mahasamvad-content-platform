@@ -1074,6 +1074,19 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
 - **Article generation has TWO pipelines, chosen by `ARTICLE_GENERATION_MODE` (default
   `simple`).** The flag is read in ONE place, `articleGenerationMode()` in
   `apps/api/src/jobs/runner.ts`, beside the `ARTICLE_POSTER_MODE` precedent.
+  - **WHICH MODEL writes the `simple` draft is a second, independent flag**:
+    `ARTICLE_PROVIDER` (`openai` default | `qwen`), read in ONE place,
+    `generation/article-provider.ts` (the `clip-provider.ts` seam). `qwen` sends the draft to
+    the self-hosted pod /chat already uses (`streamQwenCompletion` in `chat/qwen-chat.ts` —
+    the same client, the article's own system message, no preflight and no context fitting;
+    see the 2026-09-05 milestone in AGENTS.md for why). **Only the DRAFT moves** — the length
+    fit, feedback, translation, poster copy and every checker stay on OpenAI — and a run
+    carrying uploaded source files stays on OpenAI too, since `generateArticleFromSources`
+    hands the model `input_file` parts the pod cannot read. When
+    `ARTICLE_STYLE_REFERENCES_ENABLED=true`, `/dlo` now retrieves the existing Mahasamvad
+    style exemplars and includes them in the draft prompt under an explicit style-only factual
+    firewall; this applies to the Qwen draft as well as the OpenAI source-file fallback. Free harness:
+    `tsx src/generation/article-provider.ts`.
   - `simple` (default) → `generation/generate-article-simple.ts`: **one style reference, one
     model call, one article**. `selectStyleReference` (≤1 embedding) → `chatComplete` on
     `ARTICLE_MODEL` → `applyDesignations`. No 5W1H call, no editorial brief, no tier audit, no

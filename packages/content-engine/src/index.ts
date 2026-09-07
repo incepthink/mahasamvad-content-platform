@@ -23,6 +23,15 @@ export {
   type SimpleArticlePhase,
   type StyleReferenceMeta,
 } from './generation/generate-article-simple.js';
+// WHICH model writes that draft. Exported for the API, which reports it in the job log and
+// warns when a run's shape (uploaded source files) cannot go to the configured provider.
+export {
+  articleProvider,
+  articleProviderModel,
+  writeArticleDraft,
+  type ArticleDraftOptions,
+  type ArticleProvider,
+} from './generation/article-provider.js';
 // The new /dlo lane: the officer's documents go to the article call as `input_file` parts,
 // with no page-by-page transcription stage in front of it. Same prompt, same deterministic
 // guarantees, same result shape as generateArticleSimple above — only the source transport
@@ -400,10 +409,14 @@ export {
   qwenMaxInputChars,
   qwenModel,
   qwenModelsUrl,
+  qwenCompletionBody,
+  qwenRequestTimeoutMs,
   streamQwenChatReply,
+  streamQwenCompletion,
   type QwenChatLifecycleEvent,
   type QwenChatReply,
   type QwenChatRequest,
+  type QwenCompletionRequest,
   type QwenContextFit,
   type QwenContextReport,
   type QwenPreflightReport,

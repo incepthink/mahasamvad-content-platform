@@ -1010,7 +1010,17 @@ test('the classifier reads the transport, and is total', () => {
         name: 'TimeoutError',
       }),
     ),
-    'unreachable',
+    'timeout',
+  );
+  assert.equal(
+    kindOf(
+      new TypeError('fetch failed', {
+        cause: Object.assign(new Error('body timed out'), {
+          code: 'UND_ERR_BODY_TIMEOUT',
+        }),
+      }),
+    ),
+    'timeout',
   );
   assert.equal(
     kindOf(new Error('connect ECONNREFUSED 10.0.0.1:8000')),
@@ -1029,7 +1039,9 @@ test('the classifier reads the transport, and is total', () => {
   assert.equal(kindOf(transport(403, 'forbidden')), 'notConfigured');
   assert.equal(kindOf(transport(502, 'Bad Gateway')), 'unreachable');
   assert.equal(kindOf(transport(503, 'unavailable')), 'unreachable');
-  assert.equal(kindOf(transport(524, 'origin timeout')), 'unreachable');
+  assert.equal(kindOf(transport(408, 'request timeout')), 'timeout');
+  assert.equal(kindOf(transport(504, 'gateway timeout')), 'timeout');
+  assert.equal(kindOf(transport(524, 'origin timeout')), 'timeout');
   assert.equal(kindOf(transport(418, 'teapot')), 'failed');
 
   // The context wording wins over the status, because a body naming the window is a

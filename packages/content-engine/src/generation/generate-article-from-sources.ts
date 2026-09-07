@@ -92,11 +92,12 @@ export async function generateArticleFromSources(
   const designations = options?.designations ?? [];
   const dloPrompt = options?.promptMode === 'dlo';
 
-  // References stay behind the same flag as the text lane for ordinary source articles. The
-  // /dlo prompt is complete as approved and never carries one. The embedding is taken from
-  // whatever text the intake has: a run whose sources are entirely files has nothing to match.
+  // References stay behind the same flag as the text lane, including /dlo. The embedding is
+  // taken from whatever text the intake has: a run whose sources are entirely files has
+  // nothing to match, unless the officer supplied a reference directly.
   const referencesEnabled =
-    !dloPrompt && articleStyleReferencesEnabled() && note.trim().length > 0;
+    articleStyleReferencesEnabled() &&
+    (note.trim().length > 0 || Boolean(options?.styleReference?.trim()));
   let styleReference = NO_STYLE_REFERENCE;
   if (referencesEnabled) {
     onProgress('retrieve');
@@ -114,6 +115,7 @@ export async function generateArticleFromSources(
   const messages = dloPrompt
     ? buildDloArticleMessages({
         sourceInformation: note,
+        styleReferences: styleReference.articles,
         designations,
         heading: options?.heading,
         officerInstructions: options?.instructions,
@@ -209,7 +211,9 @@ export async function generateArticleFromSources(
 
   console.log(
     `[source-article] ${category} | model=${ARTICLE_MODEL} effort=${articleReasoningEffort()} | ` +
-      `files=${files.length} note=${note.length} chars | prompt=${promptVersion} | ` +
+      `files=${files.length} note=${note.length} chars | ` +
+      `style-ref=${styleReference.source}x${styleReference.articles.length} | ` +
+      `prompt=${promptVersion} | ` +
       `${article.length} chars`,
   );
 

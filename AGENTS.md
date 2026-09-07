@@ -3111,6 +3111,112 @@ client id/secret — see the milestone below.
 
 ## Latest Implementation Milestone
 
+- **Qwen DLO drafts disable thinking** (2026-09-05, no migration; supersedes the article
+  thinking/headroom behavior below): job `bdac74f8-a247-43cc-b710-9cd24d7083aa` stayed in
+  `draft` with no article events while the pod continued producing ~26 tokens/s. The user
+  selected faster drafts with thinking disabled. `writeArticleDraft` now passes
+  `enableThinking: false`; BOTH `/tokenize` and `/v1/chat/completions` receive
+  `chat_template_kwargs: { enable_thinking: false }`, preserving accurate token measurement.
+  Article output requests only its answer allowance (currently 8,192), with no 16,384-token
+  thinking headroom. The stripper starts in answer mode so untagged article deltas appear
+  immediately instead of being buffered until EOF; unexpected explicit think blocks are
+  still stripped. Chat keeps its existing request shape and thinking behavior. The separate
+  30-minute article deadline remains a backstop, not an expected runtime. Source text, RAG,
+  OpenAI drafting, feedback and translation keep their existing behavior. Before the pod
+  was stopped, tokenizer-only probes confirmed that disabling thinking closes the prefix.
+  The user stopped the pod and deferred live inference testing. Deploy: rebuild engine,
+  restart API, start pod when ready, then retry the failed DLO run.
+  Verified offline: **59/59** Qwen/article tests, engine build, API typecheck, targeted ESLint
+  and diff checks pass. The streaming regression requires the first plain article delta to
+  arrive before the mocked server sends its finish event.
+
+- **Qwen article streaming gets its own deadline** (2026-09-05, no migration): DLO was
+  inheriting the five-minute `QWEN_TIMEOUT_MS` deadline, including the entire response body,
+  so a healthy long generation was aborted mid-stream and mislabeled as a switched-off pod.
+  `QWEN_ARTICLE_TIMEOUT_MS` now defaults to 1,800,000 ms (30 minutes) independently of chat;
+  tokenization retains `QWEN_TIMEOUT_MS`. Read-only live metrics showed ~26 output tokens/s,
+  at which the 24,576-token reasoning + answer ceiling takes ~16 minutes. This is a total
+  deadline, not an idle timeout. Article calls no longer retry automatically before headers,
+  since a timed-out request may already be running. The Qwen error taxonomy distinguishes
+  local/nested/HTTP timeouts from unreachable servers, and Marathi messages no longer infer
+  that the pod is off. Article failures log stage, elapsed time and content/thinking/answer
+  character counts; active streams log progress at most every 30 seconds without logging
+  source or generated text. EOF without a finish reason rejects the incomplete draft.
+  Verified: **57/57** offline Qwen/article tests, engine build, API typecheck, targeted
+  ESLint and diff checks pass. Built runtime reads article=1,800,000 ms and chat=300,000 ms
+  with the current local environment. No live article inference was run.
+  Deploy: rebuild `@dgipr/content-engine` and restart API; no frontend change required.
+
+- **DLO Qwen drafts budget output against the actual prompt** (2026-09-05, no migration):
+  the 32,768-token pod rejected a draft because the fixed 8,192 answer + 16,384 thinking
+  allowance left only 8,192 tokens for source text and RAG references. `streamQwenCompletion`
+  now measures the full messages through vLLM `/tokenize` (beside `/v1`, required on the
+  configured pod), then caps output to `min(answer + thinking, max_model_len - count - 256)`.
+  Source text and references stay intact; insufficient room for the requested answer fails
+  before inference. The error's "at least" input count is never treated as an exact count.
+  A streamed draft ending with `finish_reason: length` also fails instead of accepting a
+  partial article. The shared Marathi overflow message now applies to both articles and chat.
+  This supersedes the no-context-fitting rationale below for OUTPUT only; chat's transcript
+  fitting is unchanged. No web edit is required. Rebuild `@dgipr/content-engine`, restart API,
+  then retry the failed DLO generation. Offline Qwen/article regression tests: **53/53**;
+  engine/API typechecks, engine build and targeted ESLint pass. A live tokenizer-only probe
+  returned HTTP 200 and `max_model_len: 32768`; no article inference was run.
+
+- **The article DRAFT can be written by the self-hosted Qwen, with Mahasamvad RAG**
+  (2026-09-05, no migration, no n8n): `/chat` gained a
+  Qwen provider on 2026-09-05; this puts the same pod behind the one call that writes a
+  `/dlo` article. `ARTICLE_PROVIDER` (`openai` default | `qwen`) is read in ONE place,
+  `generation/article-provider.ts`, the `clip-provider.ts` / `frame-provider.ts` precedent;
+  `generateArticleSimple` now calls its neutral `writeArticleDraft` instead of
+  `chatComplete`/`chatCompleteStream` directly, and every deterministic pass after it
+  (`splitContent`, `fitArticleToLength`, `applyDesignations`, `ensureArticleHeading`) is
+  handed the same string and needed no change.
+  Five things worth knowing. **ONLY THE DRAFT MOVES** — the length-fit rewrite, article
+  feedback (`revise-article.ts`), translation, poster copy, pointers and every checker stay on
+  OpenAI, which is what makes a Qwen article comparable to an OpenAI one on the same note
+  rather than a fork of the product. **The Qwen call reuses the client, not a copy of it**:
+  `streamQwenCompletion` sits in `chat/qwen-chat.ts` beside `streamQwenChatReply` and shares
+  the URL, the optional key, the inline-`<think>` stripper, the token ceiling and
+  `QWEN_COST_PROVIDER` — but sends the ARTICLE's own system message rather than this module's
+  assistant brief, so `qwenCompletionBody` was split out of `buildQwenRequestBody`.
+  **It deliberately runs no PREFLIGHT and does no CONTEXT FITTING.** A generation job is not a
+  watched chat turn (it already has a status the officer is polling, so a probe is a second
+  round trip per article), and a chat transcript may lose its oldest turns harmlessly where
+  silently truncating a source note would drop facts out of a government article — an overflow
+  must reach the officer as vLLM's own refusal, never as a shorter article nobody was told
+  about. **It STREAMS**, so `ARTICLE_STREAMING`'s live draft works on both providers and the
+  officer watches the article appear either way. And **the file lane cannot use it**: a run
+  carrying uploaded source files goes through `generateArticleFromSources` (OpenAI Responses
+  `input_file` parts) and the pod serves a text model, so such a run stays on OpenAI and the
+  runner logs that rather than silently writing from the note alone. `runner.ts`'s
+  `errorMessage` now prefers a `QwenChatError`'s Marathi `userMessage`, or a stopped pod would
+  reach the officer as a canned "something failed" instead of "the server is off".
+  **RAG is now active on `/dlo` when `ARTICLE_STYLE_REFERENCES_ENABLED=true`.** The prior DLO
+  guard discarded `selectStyleReference` even when that flag was enabled. Both text and
+  source-file generators now run the existing officer paste → pgvector retrieval → category
+  fallback hierarchy, and `dlo-article-prompt.ts` places the resulting complete exemplars in a
+  dedicated `MAHASAMVAD STYLE REFERENCES` block. That block explicitly permits style and
+  structure only and forbids taking facts, names, dates, figures, quotes or claims from the
+  references; `SOURCE INFORMATION` remains the factual authority. The DLO prompt version is
+  `dlo-rag-v2`. A file-only run with no officer-supplied style reference has no text query to
+  embed, and therefore correctly skips retrieval; a run carrying source files still uses the
+  OpenAI Responses draft transport because the Qwen pod cannot read file parts.
+  Verified 2026-09-05, all free: workspace typecheck **7/7 green**, full `pnpm build` green,
+  eslint clean on all five touched files, prettier clean on every hunk of mine (four files
+  report whole-file CRLF complaints confirmed content-identical to prettier's own output, and
+  `generate-article-simple.ts`'s one real diff is a pre-existing line at HEAD — do NOT
+  `--write` them); `chat:test` still **62/62**; and a new free harness at **10/10**
+  (`npx tsx src/generation/article-provider.ts` — the default, the trim, the model each
+  provider reports, a typo throwing and listing both options, and an unset `QWEN_BASE_URL`
+  failing BEFORE any request as the typed `notConfigured` kind with a Marathi sentence).
+  The DLO prompt tests are **5/5 green**, including the style-only firewall and the combined
+  source-file + RAG request shape.
+  **Left for a real run**: the pod was answering 404 on `/v1/models` at the time of writing, so
+  one `/dlo` article end to end is unproven — start the pod, then compare the same note on
+  both providers and confirm `style_reference_meta.articleCount` is non-zero. Deploy is
+  `@dgipr/content-engine` dist → API. New env (optional): `ARTICLE_PROVIDER`; enable RAG with
+  the existing `ARTICLE_STYLE_REFERENCES_ENABLED=true`.
+
 - **A Dynamic Poster is no longer cropped to fit its frame** (2026-09-03, no migration, no
   n8n — SUPERSEDES the resolution half of the Dynamic Poster milestone below and the
   two-fixed-frames half of 0053): the lane's first reported defect. A 4:5 poster (हर घर तिरंगा,

@@ -25,6 +25,8 @@ import {
   generateArticle,
   generateArticleSimple,
   generateArticleFromSources,
+  articleProvider,
+  isQwenChatError,
   ensureArticleDateline,
   type SimpleGenerateArticleOptions,
   type ArticleNameEntry,
@@ -495,6 +497,13 @@ function requireCopy(row: GenerationRow): Copy {
 }
 
 function errorMessage(error: unknown): string {
+  // A Qwen failure already carries one Marathi sentence naming the operator's next move
+  // ("the server is off", "that model is not on it"), written to survive the web's
+  // officer-readability whitelist. Its English `message` would not survive it, so the row
+  // would store a real diagnosis and the officer would be shown a canned "something failed"
+  // — which is exactly the wrong sentence for a pod that is normally STOPPED. The technical
+  // half is already in the API log, from runJob's console.error above.
+  if (isQwenChatError(error)) return error.userMessage;
   return error instanceof Error ? error.message : String(error);
 }
 
@@ -873,6 +882,19 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
             // the warnings, the style-reference write, posters, translation) is shared.
             const { files: sourceFiles, nameContext } =
               await sourceContextForGeneration(client, row);
+            // ARTICLE_PROVIDER cannot reach this branch: the file lane hands the documents
+            // to the model as `input_file` parts through the OpenAI Responses API, and the
+            // Qwen pod serves a text model with no file input and no File Search
+            // equivalent. Such a run stays on OpenAI, said out loud rather than silently —
+            // otherwise an operator who switched provider would read a normal-looking
+            // article and have no way to know which model wrote it.
+            if (sourceFiles.length > 0 && articleProvider() !== 'openai') {
+              console.warn(
+                `[job ${id}] ARTICLE_PROVIDER=${articleProvider()}, but this run carries ` +
+                  `${sourceFiles.length} uploaded source file(s); writing on OpenAI, which ` +
+                  'is the only provider here that can read them.',
+              );
+            }
             const writeArticle =
               sourceFiles.length > 0
                 ? (note: string, options: SimpleGenerateArticleOptions) =>

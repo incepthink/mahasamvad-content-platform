@@ -9,7 +9,7 @@ import {
 import { buildSourcesRequest } from './responses-with-sources.js';
 
 test('DLO uses the officer-approved complete prompt', () => {
-  assert.equal(DLO_ARTICLE_PROMPT_VERSION, 'dlo-direct-v1');
+  assert.equal(DLO_ARTICLE_PROMPT_VERSION, 'dlo-rag-v2');
   assert.deepEqual(
     buildDloArticleMessages({
       sourceInformation: 'बैठकीची टिपणी',
@@ -65,10 +65,32 @@ test('DLO drops incomplete reviewed name/designation rows', () => {
   assert.doesNotMatch(messages[1]?.content ?? '', /REVIEWED NAMES/u);
 });
 
+test('DLO carries RAG exemplars as style-only references', () => {
+  const messages = buildDloArticleMessages({
+    sourceInformation: 'नवीन बातमीची माहिती',
+    styleReferences: [
+      { title: 'संदर्भ शीर्षक', text: 'संदर्भ बातमीचा मजकूर.' },
+      { title: null, text: '  ' },
+    ],
+  });
+  const prompt = messages[1]?.content ?? '';
+
+  assert.match(prompt, /### MAHASAMVAD STYLE REFERENCES/u);
+  assert.match(prompt, /STYLE REFERENCE 1: संदर्भ शीर्षक/u);
+  assert.match(prompt, /संदर्भ बातमीचा मजकूर\./u);
+  assert.match(prompt, /only for writing style and structure/u);
+  assert.match(
+    prompt,
+    /Never take facts, names, dates, figures, quotes, or claims/u,
+  );
+  assert.doesNotMatch(prompt, /STYLE REFERENCE 2/u);
+});
+
 test('DLO source files occupy the SOURCE INFORMATION slot in the provider request', () => {
   const body = buildSourcesRequest({
     messages: buildDloArticleMessages({
       sourceInformation: 'टिपणी',
+      styleReferences: [{ title: 'संदर्भ', text: 'शैलीचा नमुना.' }],
       designations: [{ name: 'नाव', designation: 'पदनाम' }],
       attachedSourceFiles: true,
     }),
@@ -93,5 +115,6 @@ test('DLO source files occupy the SOURCE INFORMATION slot in the provider reques
   assert.match(content[0]?.text ?? '', /### SOURCE INFORMATION[\s\S]*टिपणी/u);
   assert.equal(content[1]?.text, '=== स्रोत: source.pdf ===');
   assert.equal(content[2]?.file_id, 'file-1');
+  assert.match(content[3]?.text ?? '', /### MAHASAMVAD STYLE REFERENCES/u);
   assert.match(content[3]?.text ?? '', /### REVIEWED NAMES AND DESIGNATIONS/u);
 });

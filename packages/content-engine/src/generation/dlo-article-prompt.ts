@@ -2,13 +2,14 @@
 //
 // This is deliberately separate from the ordinary simple/minimal article specifications. The
 // officer chose the complete instruction here: one short system message plus the source and the
-// fields reviewed for this run. Keep editorial rules, reference-article guidance, category
-// guidance, output-shape rules and inferred instructions out of this builder.
+// fields reviewed for this run. RAG exemplars are the one optional addition: they demonstrate
+// Mahasamvad style and structure, but are explicitly fenced off from the factual source.
 
 import type { DesignationPair } from './category-prompt.js';
 import type { ChatMessage } from './openai-chat.js';
+import type { StyleReferenceArticle } from './select-style-reference.js';
 
-export const DLO_ARTICLE_PROMPT_VERSION = 'dlo-direct-v1';
+export const DLO_ARTICLE_PROMPT_VERSION = 'dlo-rag-v2';
 
 // An internal transport marker, replaced by the actual Responses input_file/input_image parts.
 // It never reaches the model as text. Keeping it here places attachments inside SOURCE
@@ -17,6 +18,7 @@ export const DLO_SOURCE_FILES_MARKER = '\u0000DLO_SOURCE_FILES\u0000';
 
 export type DloArticlePromptInputs = Readonly<{
   sourceInformation: string;
+  styleReferences?: readonly StyleReferenceArticle[] | undefined;
   designations?: readonly DesignationPair[] | undefined;
   heading?: string | null | undefined;
   officerInstructions?: string | null | undefined;
@@ -33,6 +35,27 @@ export function buildDloArticleUserPrompt(
   const parts = ['### SOURCE INFORMATION', '', clean(inputs.sourceInformation)];
   if (inputs.attachedSourceFiles) {
     parts.push('', DLO_SOURCE_FILES_MARKER);
+  }
+
+  const styleReferences = (inputs.styleReferences ?? []).filter(
+    (reference) => clean(reference.text).length > 0,
+  );
+  if (styleReferences.length > 0) {
+    parts.push(
+      '',
+      '### MAHASAMVAD STYLE REFERENCES',
+      '',
+      'Use these only for writing style and structure. Never take facts, names, dates, figures, quotes, or claims from them.',
+    );
+    for (const [index, reference] of styleReferences.entries()) {
+      const title = clean(reference.title);
+      parts.push(
+        '',
+        `#### STYLE REFERENCE ${index + 1}${title ? `: ${title}` : ''}`,
+        '',
+        clean(reference.text),
+      );
+    }
   }
   const designations = (inputs.designations ?? [])
     .map((pair) => ({

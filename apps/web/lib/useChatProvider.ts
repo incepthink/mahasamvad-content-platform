@@ -48,10 +48,10 @@ export function useChatProvider(): {
   capabilities: Omit<ChatProviderInfo, 'id' | 'label'> & { label: string };
 } {
   const [providers, setProviders] = useState<ChatProviderInfo[]>([]);
-  // This surface is intentionally fixed to Qwen. Keep the explicit wire value here rather
-  // than relying only on the shared fallback: the browser must name Qwen on every request,
+  // This surface is intentionally fixed to OpenAI. Keep the explicit wire value here rather
+  // than relying only on the shared fallback: the browser must name OpenAI on every request,
   // including while API and web processes are being restarted during a rolling deploy.
-  const provider: ChatProvider = 'qwen';
+  const provider: ChatProvider = 'openai';
 
   useEffect(() => {
     let alive = true;

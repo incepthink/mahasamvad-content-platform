@@ -121,11 +121,21 @@ export function qwenModel(): string {
   return configured ? configured : QWEN_DEFAULT_MODEL;
 }
 
-function timeoutMs(): number {
+export function qwenRequestTimeoutMs(): number {
   const configured = Number(process.env.QWEN_TIMEOUT_MS);
   return Number.isFinite(configured) && configured >= 1_000
     ? Math.floor(configured)
     : 300_000;
+}
+
+// The longer ceiling was introduced for long reasoning runs. DLO now disables thinking,
+// but keeps this as a backstop for slow/busy pods, not an expected article duration.
+// This is a TOTAL request/stream deadline, not an idle timeout. Chat's clock is independent.
+export function qwenArticleTimeoutMs(): number {
+  const configured = Number(process.env.QWEN_ARTICLE_TIMEOUT_MS);
+  return Number.isFinite(configured) && configured >= 1_000
+    ? Math.floor(configured)
+    : 1_800_000;
 }
 
 // The reachability probe's own, much shorter clock. It asks one question of a box that is
@@ -619,7 +629,7 @@ export async function preflightQwen(): Promise<QwenPreflightReport> {
 // The request
 // ---------------------------------------------------------------------------
 
-type QwenMessage = Readonly<{
+export type QwenMessage = Readonly<{
   role: 'system' | 'user' | 'assistant';
   content: string;
 }>;
@@ -646,15 +656,43 @@ export function buildQwenMessages(
 export function buildQwenRequestBody(
   turns: readonly MiscChatTurn[],
 ): Record<string, unknown> {
+  return qwenCompletionBody(buildQwenMessages(turns));
+}
+
+/**
+ * The wire body for anything this pod completes, chat turn or not.
+ *
+ * Split out of the builder above because everything below `messages` is a property of the
+ * SERVER — the model id it matches on, the usage option the cost meter needs, the shared
+ * reasoning/answer ceiling — while assembling a chat transcript is one lane's own job. The
+ * article lane sends a prompt it built itself and must not inherit this module's assistant
+ * brief, but it must inherit all of that.
+ *
+ * `answerTokens` means room for the ANSWER, as `maxTokens` does at every call site in this
+ * package: THINKING_HEADROOM is added only when thinking is enabled. Omitted,
+ * QWEN_MAX_OUTPUT_TOKENS decides the answer allowance.
+ */
+export function qwenCompletionBody(
+  messages: readonly QwenMessage[],
+  answerTokens?: number | undefined,
+  enableThinking = true,
+): Record<string, unknown> {
   return {
     model: qwenModel(),
-    messages: buildQwenMessages(turns),
+    messages,
     stream: true,
     // Usage is otherwise absent from a streamed completion, and without it every Qwen turn
     // would be invisible to the cost meter — which counts tokens even though the rate is
     // zero (see pricing.ts).
     stream_options: { include_usage: true },
-    max_tokens: maxAnswerTokens() + THINKING_HEADROOM,
+    max_tokens:
+      (answerTokens ?? maxAnswerTokens()) +
+      (enableThinking ? THINKING_HEADROOM : 0),
+    // Leave chat's existing server defaults alone. Article drafts explicitly close the
+    // thinking prefix through the server template, so generation starts with the answer.
+    ...(!enableThinking
+      ? { chat_template_kwargs: { enable_thinking: false } }
+      : {}),
   };
 }
 
@@ -784,7 +822,7 @@ export async function streamQwenChatReply({
       // The same lane as the OpenAI chat provider: a watched answer must not queue behind an
       // article generation, and an article must not queue behind it.
       lane: 'chat',
-      timeoutMs: timeoutMs(),
+      timeoutMs: qwenRequestTimeoutMs(),
       // ONE retry, not the transport's five. The probe above has just proved the pod is
       // serving, so a failure here is a blip or a short server-requested wait rather than a
       // switched-off box — worth one automatic attempt. Five would put up to six full
@@ -860,6 +898,251 @@ export async function streamQwenChatReply({
       model,
       ...(finishReason !== undefined ? { status: finishReason } : {}),
     });
+  }
+  return { text: answer, model };
+}
+
+// ---------------------------------------------------------------------------
+// A completion that is NOT a chat turn.
+// ---------------------------------------------------------------------------
+//
+// The article lane (generation/article-provider.ts) sends a prompt this module did not
+// build: its own DGIPR system message, one user message, no conversation. It lives here
+// beside the client rather than as a second half-copy of it, because everything except the
+// messages is a property of the SERVER — the pod's URL, its optional key, the token
+// ceiling, the inline-thinking split and the cost provider — and a second copy of those is
+// a second place for them to drift.
+//
+// Unlike chat, this keeps the entire prompt. Tokenize it on the serving pod first, then
+// fit only the output allowance to the measured remaining window. Source notes and style
+// references must never be silently truncated. No separate /models reachability probe or
+// chat lifecycle events are needed.
+
+async function completionTokenBudget(
+  messages: readonly QwenMessage[],
+  answerTokens: number,
+  label: string,
+  enableThinking: boolean,
+): Promise<number> {
+  // vLLM serves /tokenize beside /v1, including behind a proxy path prefix.
+  // It applies the same chat template as Chat Completions and reports both the count and
+  // max_model_len. A 400 saying "at least N input tokens" is only a lower bound, so it
+  // cannot safely be used to subtract N and retry.
+  const response = await openAiFetch(
+    `${qwenBaseUrl().replace(/\/v1$/, '')}/tokenize`,
+    {
+      label: `${label} tokenize`,
+      apiKey: qwenApiKey(),
+      timeoutMs: qwenRequestTimeoutMs(),
+      maxRetries: 0,
+      body: {
+        model: qwenModel(),
+        messages,
+        add_generation_prompt: true,
+        add_special_tokens: false,
+        // Must match the completion template: disabling thinking changes prompt tokens.
+        ...(!enableThinking
+          ? { chat_template_kwargs: { enable_thinking: false } }
+          : {}),
+      },
+    },
+  );
+  const measured = (await response.json()) as {
+    count?: unknown;
+    max_model_len?: unknown;
+  } | null;
+  const inputTokens = measured?.count;
+  const windowTokens = measured?.max_model_len;
+  if (
+    typeof inputTokens !== 'number' ||
+    !Number.isSafeInteger(inputTokens) ||
+    inputTokens < 0 ||
+    typeof windowTokens !== 'number' ||
+    !Number.isSafeInteger(windowTokens) ||
+    windowTokens <= 0
+  ) {
+    throw new QwenChatError(
+      'failed',
+      'Qwen /tokenize returned invalid token counts.',
+    );
+  }
+  // Keep a small margin for server template differences. Reduce the optional thinking
+  // headroom first; if even the requested answer allowance cannot fit, do not generate.
+  const available = windowTokens - inputTokens - 256;
+  if (available < answerTokens) {
+    throw new QwenChatError(
+      'contextOverflow',
+      `Qwen article prompt uses ${inputTokens} of ${windowTokens} tokens; ` +
+        `not enough room for the requested ${answerTokens}-token answer and safety margin. ` +
+        'Reduce source/style reference text or increase the served context window.',
+    );
+  }
+  const outputTokens = Math.min(
+    answerTokens + (enableThinking ? THINKING_HEADROOM : 0),
+    available,
+  );
+  console.info(
+    `[${label}] token budget: input=${inputTokens}, output=${outputTokens}, window=${windowTokens}`,
+  );
+  return outputTokens;
+}
+
+export type QwenCompletionRequest = Readonly<{
+  messages: readonly QwenMessage[];
+  // Room for the ANSWER; thinking headroom is added only as far as the measured window fits.
+  answerTokens?: number | undefined;
+  // Article drafts disable thinking to avoid long reasoning-only runs. Other callers
+  // retain the existing behavior unless they explicitly select this mode.
+  enableThinking?: boolean | undefined;
+  // The live view, for a caller with somewhere to show the text being written.
+  onDelta?: ((chunk: string) => void) | undefined;
+  // What the API log calls this request.
+  label?: string | undefined;
+}>;
+
+export async function streamQwenCompletion({
+  messages,
+  answerTokens,
+  enableThinking = true,
+  onDelta,
+  label = 'qwen completion',
+}: QwenCompletionRequest): Promise<QwenChatReply> {
+  const model = qwenModel();
+  const timeoutMs = qwenArticleTimeoutMs();
+  const startedAt = Date.now();
+  let lastProgressAt = startedAt;
+  let stage = 'tokenize';
+  let answer = '';
+  let thinkingChars = 0;
+  let contentChars = 0;
+  const progress = (): void => {
+    const now = Date.now();
+    if (now - lastProgressAt < 30_000) return;
+    lastProgressAt = now;
+    console.info(
+      `[${label}] streaming: elapsedMs=${now - startedAt}, ` +
+        `contentChars=${contentChars}, thinkingChars=${thinkingChars}, answerChars=${answer.length}`,
+    );
+  };
+  const failure = (error: unknown): QwenChatError => {
+    const classified = classifyQwenFailure(error);
+    return new QwenChatError(
+      classified.kind,
+      `${label} failed during ${stage}: elapsedMs=${Date.now() - startedAt}, ` +
+        `articleTimeoutMs=${timeoutMs}, contentChars=${contentChars}, ` +
+        `thinkingChars=${thinkingChars}, answerChars=${answer.length}. ${classified.message}`,
+      { cause: error },
+    );
+  };
+  // Qwen3 emits its deliberation inline as `<think>…</think>` when the pod runs no
+  // reasoning parser, and an article is PUBLISHED text — the one place that must never
+  // carry it. Same splitter the chat lane uses, for the same reason and across the same
+  // chunk boundaries.
+  const stripper = createThinkingStripper(
+    (chunk) => {
+      answer += chunk;
+      onDelta?.(chunk);
+    },
+    (chunk) => {
+      thinkingChars += chunk.length;
+    },
+  );
+  // The non-thinking template already closed the reasoning block. Do not hold ordinary
+  // article text waiting for a </think> marker that will never arrive. The stripper still
+  // recognizes an unexpected explicit <think> block and keeps it out of the article.
+  if (!enableThinking) stripper.separatedReasoning();
+
+  let response: Response;
+  try {
+    const outputTokens = await completionTokenBudget(
+      messages,
+      answerTokens ?? maxAnswerTokens(),
+      label,
+      enableThinking,
+    );
+    stage = 'request';
+    console.info(
+      `[${label}] generation started: thinking=${enableThinking}, timeoutMs=${timeoutMs}, outputTokens=${outputTokens}`,
+    );
+    response = await openAiFetch(qwenChatCompletionsUrl(), {
+      label,
+      apiKey: qwenApiKey(),
+      // The DEFAULT lane, not the chat one. This is pipeline work, and the chat lane's
+      // wider concurrency exists precisely so a watched answer never queues behind a
+      // minutes-long generation. Keeping it here also preserves exactly the queueing the
+      // OpenAI article call has today, so switching provider changes who writes and not
+      // how the process schedules itself.
+      timeoutMs,
+      // A timed-out request may already be running on the pod. Do not automatically
+      // submit another long generation and add more load. The officer can retry the job.
+      maxRetries: 0,
+      body: {
+        ...qwenCompletionBody(messages, answerTokens, enableThinking),
+        max_tokens: outputTokens,
+      },
+    });
+  } catch (error) {
+    // Typed, like every other failure on this path, so the job's error carries a Marathi
+    // sentence naming the operator's next move rather than a stack trace.
+    throw failure(error);
+  }
+  const body = response.body;
+  if (!body) {
+    throw new QwenChatError(
+      'failed',
+      'Qwen completion response carried no body.',
+    );
+  }
+
+  let result: ChatCompletionStreamResult<ChatUsage>;
+  stage = 'stream';
+  try {
+    result = await readChatCompletionStream<ChatUsage>(
+      body,
+      (chunk) => stripper.push(chunk),
+      // The raw content channel's size, which is what separates "the model said nothing"
+      // from "the model said something, none of it an answer".
+      (chunk) => {
+        contentChars += chunk.length;
+        progress();
+      },
+      {
+        onReasoning: (chunk) => {
+          stripper.separatedReasoning();
+          thinkingChars += chunk.length;
+          progress();
+        },
+        label: 'qwen',
+      },
+    );
+  } catch (error) {
+    throw failure(error);
+  } finally {
+    // Even on a stream that broke part-way: a held-back tail is text nothing has seen.
+    stripper.flush();
+  }
+
+  // Counted, priced at zero — QWEN_COST_PROVIDER is in pricing.ts's UNBILLED_TEXT_PROVIDERS,
+  // where the bare model id would fall through to the unknown-model fallback and bill this
+  // self-hosted article at gpt-5.6-terra rates.
+  recordChatUsage(model, result.usage, QWEN_COST_PROVIDER);
+  if (result.finishReason === undefined) {
+    throw failure(
+      new Error(
+        'Qwen article stream ended without a finish reason; incomplete draft rejected.',
+      ),
+    );
+  }
+  if (result.finishReason === 'length') {
+    throw new QwenChatError(
+      'contextOverflow',
+      'Qwen article exhausted its completion budget (finish_reason: length). ' +
+        'The incomplete draft was not accepted. Reduce source/style reference text ' +
+        'or increase the served context window.',
+    );
+  }
+  if (answer.trim() === '') {
+    throw noAnswerError(result.finishReason, thinkingChars, contentChars);
   }
   return { text: answer, model };
 }
