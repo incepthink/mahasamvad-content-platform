@@ -10,20 +10,29 @@
 // resuming is served first, but the form stays on the same screen so the person starting a
 // second piece of work never has to navigate away to reach it.
 
-import { DloIntakeForm } from '../../components/DloIntakeForm';
+import { DloIntakeForm } from '../../components/dlo/DloIntakeForm';
 import { DloIntakeList } from '../../components/DloIntakeList';
 import { DloResumeCard } from '../../components/DloResumeCard';
+import { PageBackdrop } from '../../components/common/PageBackdrop';
+import { NEWS_DOODLES } from '../../lib/doodleMarks';
 import { useDloIntakeList } from '../../lib/useDloIntakeList';
 import { STR } from '../../lib/strings';
 
 export default function DloPage() {
-  const { mine, others, active, loading, error, refresh } =
-    useDloIntakeList();
+  const { mine, others, active, loading, error, refresh } = useDloIntakeList();
 
   return (
-    // .dlo-page only reserves room at the foot of the page (and of the site footer below it)
-    // for the intake form's pinned action bar — nothing else about the page depends on it.
-    <main className="page dlo-page">
+    // No `.dlo-page` and so no foot clearance: the submit is in the composer card (see
+    // DloIntakeForm), so nothing is pinned over the last block or over the credit line
+    // any more. The class stays in dgipr.css for /transcribe and /translate, which still
+    // carry the pinned bar.
+    <main className="page">
+      {/* Wallpaper for this lane: what an officer makes here is a news report — the
+          meeting, its recordings and its papers, written up. The marks are decorative
+          only, and the vocabulary lives beside the other lanes' in lib/doodleMarks.ts —
+          see components/common/PageBackdrop.tsx. */}
+      <PageBackdrop marks={NEWS_DOODLES} seed={31} />
+
       <header className="page-head">
         <div className="page-head-text">
           <h1 className="page-title">{STR.dloTitle}</h1>
@@ -42,16 +51,6 @@ export default function DloPage() {
         error={error}
         onRetry={() => void refresh()}
       />
-
-      <style jsx global>{`
-        .dlo-page .file-row .file-name {
-          flex: 1;
-          min-width: 0;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-      `}</style>
     </main>
   );
 }

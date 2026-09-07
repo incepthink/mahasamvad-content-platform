@@ -26,6 +26,7 @@ import type { ReactNode } from 'react';
 import { UserCog } from 'lucide-react';
 import type { KnownDesignation, PreparedName } from '@dgipr/schemas';
 import { CardTitle } from './CardTitle';
+import { PromptInput } from './common/PromptInput';
 import { STR } from '../lib/strings';
 import { ErrorNotice } from './ErrorNotice';
 
@@ -125,7 +126,7 @@ export function DesignationReview({
   );
 
   return (
-    <section className="card names-review">
+    <section className="card names-review mt-0 rounded-2xl p-4 shadow-sm sm:p-5">
       <CardTitle icon={UserCog} level={3} className="names-review-title">
         {STR.designationsTitle}
       </CardTitle>
@@ -233,14 +234,11 @@ export function DesignationReview({
               <span className="glossary-field-label">
                 {STR.designationsDesignation}
               </span>
-              <input
-                type="text"
+              <PromptInput
                 list={DATALIST_ID}
                 value={value.designation}
                 placeholder={STR.designationsPlaceholder}
-                onChange={(e) =>
-                  onEditDesignation(term.marathi, e.target.value)
-                }
+                onChange={(next) => onEditDesignation(term.marathi, next)}
                 disabled={busy || inactive}
               />
               {/* Shown only while the note's own wording is still what stands in the field —
@@ -312,11 +310,10 @@ export function DesignationReview({
         <div key={i} className="names-review-row is-extra">
           <div className="glossary-cell">
             <span className="glossary-field-label">{STR.designationsName}</span>
-            <input
-              type="text"
+            <PromptInput
               value={extra.name}
               placeholder={STR.designationsNamePlaceholder}
-              onChange={(e) => onChangeExtra(i, { name: e.target.value })}
+              onChange={(next) => onChangeExtra(i, { name: next })}
               disabled={busy}
             />
           </div>
@@ -324,14 +321,11 @@ export function DesignationReview({
             <span className="glossary-field-label">
               {STR.designationsDesignation}
             </span>
-            <input
-              type="text"
+            <PromptInput
               list={DATALIST_ID}
               value={extra.designation}
               placeholder={STR.designationsPlaceholder}
-              onChange={(e) =>
-                onChangeExtra(i, { designation: e.target.value })
-              }
+              onChange={(next) => onChangeExtra(i, { designation: next })}
               disabled={busy}
             />
           </div>

@@ -15,13 +15,19 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   IMAGE_PROMPT_MAX_CHARS,
+  MOTION_ASPECTS,
   POSTER_HEADING_MAX_CHARS,
   POSTER_TEXT_MIN_CHARS,
   isArticleCategory,
+  isDynamicPosterCategory,
   isSocialCategory,
   referenceCategoryOf,
 } from '@dgipr/schemas';
-import type { DesignMode } from '@dgipr/schemas';
+import type {
+  DesignMode,
+  MotionAspect,
+  MotionSourceResponse,
+} from '@dgipr/schemas';
 import { createGeneration, getGeneration } from '@/lib/api';
 import { useTasks } from '@/lib/TasksProvider';
 import { STR } from '@/lib/strings';
@@ -43,6 +49,25 @@ import {
  * clears it by hand after a submit (see clearDocument), so it is named once.
  */
 export const DOC_STORAGE_KEY = 'dgipr.mediaRoom.document';
+
+// WHAT THE डायनॅमिक पोस्टर FORM OFFERS as the clip's shape — the two frames a department
+// actually publishes into. 'source' (पोस्टरसारखाच, the poster's own ratio) is deliberately
+// NOT offered here: the officer chooses the frame, not the input's shape.
+//
+// Removed from the PICKER only, never from the contract. `MOTION_ASPECTS` still carries it,
+// the route still accepts it, and a row with no stored aspect still falls back to it
+// (DEFAULT_MOTION_ASPECT in @dgipr/schemas) — so every Dynamic Poster made before this keeps
+// rendering exactly as it did. Filtering the shared list rather than hand-writing a second
+// one is what keeps the two from drifting if a third frame is ever added.
+export const OFFERED_MOTION_ASPECTS = MOTION_ASPECTS.filter(
+  (value) => value !== 'source',
+);
+
+// The form's default, now that the poster's own shape is not on offer. Portrait, because that
+// is the frame these clips are made for (a reel or a story); either choice PADS the poster
+// into the frame rather than cropping it (fitImageToAspect on the API side), so neither one
+// can lose a side of the artwork the way the pre-0053 renders did.
+const DEFAULT_OFFERED_MOTION_ASPECT: MotionAspect = '9:16';
 
 export type PrefillState = 'none' | 'loading' | 'applied' | 'failed';
 
@@ -97,6 +122,23 @@ export function useCreateForm() {
   const [posterHeading, setPosterHeading] = useState('');
   const [reference, setReference] = useState<ReferenceSelection | null>(null);
 
+  // डायनॅमिक पोस्टर only (migration 0052). The finished poster this run animates, already
+  // uploaded and normalised by POST /generations/motion-image — the create request names a
+  // storage PATH rather than a URL, which is the one field that points a paid render at an
+  // object.
+  const [motionSource, setMotionSource] = useState<MotionSourceResponse | null>(
+    null,
+  );
+  // The motion brief. Its OWN state rather than the note box above, which this lane does not
+  // render at all: the officer's direction here is optional, where the note is a floor
+  // everywhere else.
+  const [motionDirection, setMotionDirection] = useState('');
+  // The clip's shape. See OFFERED_MOTION_ASPECTS above for why the poster's own ratio is not
+  // one of the choices offered.
+  const [motionAspect, setMotionAspect] = useState<MotionAspect>(
+    DEFAULT_OFFERED_MOTION_ASPECT,
+  );
+
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Arriving from a finished run's "same note, other platform" link (?from=<id>).
@@ -146,13 +188,18 @@ export function useCreateForm() {
   // affect a run that paints nothing.
   const isCaption = format === 'caption';
   const submitCategory = submitCategoryOf(format);
+  // The डायनॅमिक पोस्टर lane. Asked through the shared predicate rather than by comparing
+  // the string, per the rule stated on isDynamicPosterCategory in @dgipr/schemas. Excluded
+  // from every flag below it: its source is a picture, so it renders no note box, no
+  // template picker, no image brief and none of the Creative opt-ins.
+  const isDynamicPoster = isDynamicPosterCategory(submitCategory);
   // The Creative lane (submitted as 'twitter'). Still asked through isSocialCategory so
   // a ?format=facebook handoff, and any future second social entry, behave identically.
-  const isSocial = !isCaption && isSocialCategory(format);
+  const isSocial = !isCaption && !isDynamicPoster && isSocialCategory(format);
   // The Banner lane. Asked positively rather than as !isSocial, which silently swept the
   // YouTube thumbnail in with it — a thumbnail writes no article and locks no poster
   // heading.
-  const isArticle = !isCaption && isArticleCategory(format);
+  const isArticle = !isCaption && !isDynamicPoster && isArticleCategory(format);
   // Has the officer explicitly chosen a template? This is the ONLY design question on
   // the Creative lane: no template means a fully-AI poster, a template means that
   // template is followed. There is no separate "design mode" control.
@@ -232,8 +279,11 @@ export function useCreateForm() {
   // has paid to read them yet, so it contributes no text to combinedNote, and reading it
   // and then submitting is exactly what startSubmit does. Testing the text alone would
   // leave an officer whose only source is a scan with a dead button and no way forward.
-  const canSubmit =
-    combinedNote.length >= POSTER_TEXT_MIN_CHARS || docStatus === 'unread';
+  // On डायनॅमिक पोस्टर the uploaded poster IS the source, and the brief beside it is
+  // optional — so the picture alone is a complete request.
+  const canSubmit = isDynamicPoster
+    ? motionSource !== null
+    : combinedNote.length >= POSTER_TEXT_MIN_CHARS || docStatus === 'unread';
   const submitBusy = submitting || awaitingRead;
   const submitLabel = awaitingRead
     ? STR.docReadingForSubmit
@@ -255,10 +305,17 @@ export function useCreateForm() {
   };
 
   const submit = async () => {
+    // The one field a Dynamic Poster cannot do without. Checked before the note floor,
+    // which does not apply on this lane at all.
+    if (isDynamicPoster && !motionSource) {
+      setError(STR.motionSourceRequired);
+      return;
+    }
     // The box holds the poster's own text now, which can legitimately be a few
     // characters — the old 20-character article minimum would have refused it.
     // POSTER_TEXT_MIN_CHARS is shared with the API's schema, so the two cannot drift.
-    if (combinedNote.length < POSTER_TEXT_MIN_CHARS) {
+    // Not applied on डायनॅमिक पोस्टर, whose source is the uploaded picture.
+    if (!isDynamicPoster && combinedNote.length < POSTER_TEXT_MIN_CHARS) {
       setError(STR.posterTextTooShort);
       return;
     }
@@ -278,7 +335,9 @@ export function useCreateForm() {
         setError(STR.busyError);
         return;
       }
-    } else if (hasActiveArticleTask) {
+    } else if (!isDynamicPoster && hasActiveArticleTask) {
+      // डायनॅमिक पोस्टर runs its own job — neither the serial n8n social workflow nor the
+      // article pipeline — so an article in flight is no reason to refuse it.
       setError(STR.busyError);
       return;
     }
@@ -286,7 +345,10 @@ export function useCreateForm() {
     setError(null);
     try {
       const id = await createGeneration({
-        note: combinedNote,
+        // On डायनॅमिक पोस्टर the note IS the motion direction, and an empty one is a
+        // complete request — the schema drops the floor for this lane and caps it at
+        // MOTION_DIRECTION_MAX_CHARS instead.
+        note: isDynamicPoster ? motionDirection.trim() : combinedNote,
         category: submitCategory,
         // 'article' means "this run renders NO poster" on both lanes — the caption-only
         // entry. Every other format here renders one.
@@ -318,6 +380,12 @@ export function useCreateForm() {
         referenceImageId:
           reference?.kind === 'image' ? reference.id : undefined,
         referenceTypeId: reference?.kind === 'type' ? reference.id : undefined,
+        // डायनॅमिक पोस्टर only. A PATH, not a URL: it is checked against
+        // MOTION_SOURCE_PREFIX by the schema and again by the route, so a browser cannot
+        // point a paid render at an arbitrary object.
+        sourceImagePath:
+          isDynamicPoster && motionSource ? motionSource.path : undefined,
+        motionAspect: isDynamicPoster ? motionAspect : undefined,
       });
       // Every format opens its own progress page. Keep tracking the run so the navbar
       // tasks panel still offers a shortcut, but do not open that panel automatically.
@@ -419,6 +487,15 @@ export function useCreateForm() {
     // Banner option
     posterHeading,
     setPosterHeading,
+
+    // डायनॅमिक पोस्टर lane
+    isDynamicPoster,
+    motionSource,
+    setMotionSource,
+    motionDirection,
+    setMotionDirection,
+    motionAspect,
+    setMotionAspect,
 
     // template
     reference,

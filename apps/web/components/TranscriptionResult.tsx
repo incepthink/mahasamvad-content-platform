@@ -18,7 +18,10 @@ import { seedDraftNotes } from '../lib/dloDraft';
 import { STR, TRANSCRIPTION_STATUS_LABELS } from '../lib/strings';
 import { ErrorNotice } from './ErrorNotice';
 import { FileName } from './FileName';
+import { Button } from './ui/button';
 import { storedErrorMessage } from '../lib/errorMessage';
+
+const RESULT_CARD_CLASS = 'bg-card rounded-2xl border p-4 shadow-sm sm:p-5';
 
 function StatusChip({ status }: { status: TranscriptionDetail['status'] }) {
   const entry = TRANSCRIPTION_STATUS_LABELS[status] ?? {
@@ -31,12 +34,10 @@ function StatusChip({ status }: { status: TranscriptionDetail['status'] }) {
 export function TranscriptionResult({
   detail,
   error,
-  onClose,
   onRetry,
 }: {
   detail: TranscriptionDetail | null;
   error: string | null;
-  onClose: () => void;
   onRetry?: () => void;
 }) {
   const router = useRouter();
@@ -50,7 +51,7 @@ export function TranscriptionResult({
 
   if (error && !detail) {
     return (
-      <section className="card">
+      <section className={RESULT_CARD_CLASS}>
         <ErrorNotice
           message={error}
           fallback={STR.transcribeLoadFailed}
@@ -61,8 +62,10 @@ export function TranscriptionResult({
   }
   if (!detail) {
     return (
-      <section className="card">
-        <p className="hint">{STR.transcribeListLoading}</p>
+      <section className={RESULT_CARD_CLASS}>
+        <p className="text-muted-foreground m-0 text-sm">
+          {STR.transcribeListLoading}
+        </p>
       </section>
     );
   }
@@ -91,20 +94,22 @@ export function TranscriptionResult({
   };
 
   return (
-    <section className="card">
-      <div className="article-head">
-        <h2>{STR.transcribeResultTitle}</h2>
+    <section className={RESULT_CARD_CLASS}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-foreground m-0 text-base font-semibold">
+          {STR.transcribeResultTitle}
+        </h2>
         <StatusChip status={detail.status} />
       </div>
-      <p className="hint">{detail.title}</p>
+      <p className="text-muted-foreground mt-1 text-sm">{detail.title}</p>
 
       {detail.status === 'queued' ? (
-        <p className="hint" style={{ marginTop: 12 }}>
+        <p className="text-muted-foreground mt-3 text-sm">
           {STR.transcribeQueued}
         </p>
       ) : null}
       {detail.status === 'running' ? (
-        <p className="hint" style={{ marginTop: 12 }}>
+        <p className="text-muted-foreground mt-3 text-sm">
           {STR.transcribeRunning}
         </p>
       ) : null}
@@ -168,29 +173,20 @@ export function TranscriptionResult({
             </ul>
           ) : null}
 
-          <p className="social-caption" style={{ marginTop: 14 }}>
-            {text}
-          </p>
-          <p className="hint" style={{ marginTop: 6 }}>
-            {text.length.toLocaleString('mr-IN')} {STR.transcribeCharsSuffix}
-          </p>
+          <div className="article-body mt-4">{text}</div>
 
-          <div className="btn-row" style={{ marginTop: 16 }}>
+          <div className="mt-4 flex flex-wrap items-center gap-2">
             {/* First and primary: reading the transcript is the step before writing the
                 article, so this is what the officer reaches for next. */}
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={toArticle}
-            >
+            <Button type="button" onClick={toArticle}>
               {STR.transcribeToArticle}
-            </button>
-            <button type="button" className="btn" onClick={copy}>
+            </Button>
+            <Button variant="outline" type="button" onClick={copy}>
               {copied ? STR.copied : STR.copyText}
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="outline"
               type="button"
-              className="btn"
               onClick={() =>
                 downloadBlob(
                   `${STR.transcribeDownloadName}-${detail.id.slice(0, 8)}.txt`,
@@ -200,14 +196,12 @@ export function TranscriptionResult({
               }
             >
               {STR.downloadTxt}
-            </button>
-            <button type="button" className="btn" onClick={onClose}>
-              {STR.transcribeClose}
-            </button>
+            </Button>
+            <span className="text-muted-foreground ms-auto text-sm">
+              {text.length.toLocaleString('mr-IN')}{' '}
+              {STR.transcribeCharsSuffix}
+            </span>
           </div>
-          <p className="hint" style={{ marginTop: 8 }}>
-            {STR.transcribeToArticleHint}
-          </p>
         </>
       ) : null}
     </section>

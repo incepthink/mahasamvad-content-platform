@@ -25,7 +25,7 @@ export type Format = Category | 'video' | 'caption';
  */
 export type SelectableFormat = Extract<
   Format,
-  'twitter' | 'scheme' | 'youtube' | 'caption'
+  'twitter' | 'scheme' | 'youtube' | 'caption' | 'dynamic_poster'
 >;
 
 export type FormatOption = {
@@ -65,6 +65,14 @@ export const FORMATS: readonly FormatOption[] = [
     desc: STR.mediaFormatCaptionDesc,
   },
   { value: 'scheme', name: 'बॅनर', desc: STR.mediaFormatArticlePosterDesc },
+  // The one lane whose SOURCE is a picture rather than text (migration 0052). Selecting
+  // it swaps the note box for an upload and a motion brief — see MotionComposer. It is a
+  // real Category, so like the others it needs no mapping on the wire.
+  {
+    value: 'dynamic_poster',
+    name: STR.mediaFormatDynamicPoster,
+    desc: STR.mediaFormatDynamicPosterDesc,
+  },
   {
     value: 'video',
     name: STR.mediaOutputVideo,
@@ -91,7 +99,10 @@ export function selectableFormatOf(
   // and the picker no longer has an entry for it — it folds into the one क्रिएटिव्ह
   // entry, which renders the same poster.
   if (value === 'facebook') return 'twitter';
-  return value === 'twitter' || value === 'scheme' || value === 'youtube'
+  return value === 'twitter' ||
+    value === 'scheme' ||
+    value === 'youtube' ||
+    value === 'dynamic_poster'
     ? value
     : null;
 }

@@ -63,8 +63,13 @@ export function FormatMenu({
         <DropdownMenuGroup>
           {FORMATS.map((option) => {
             const isLink = option.value === 'video';
+            // डायनॅमिक पोस्टर is gated by NEITHER: it runs its own job (no n8n social
+            // workflow, no article pipeline), so an article or social run in flight has
+            // nothing to do with it. Asked as a named question rather than by comparing
+            // the category, per the rule on isDynamicPosterCategory in @dgipr/schemas.
             const busy =
               !isLink &&
+              option.value !== 'dynamic_poster' &&
               (option.value === 'caption' ||
               option.value === 'twitter' ||
               option.value === 'facebook'
