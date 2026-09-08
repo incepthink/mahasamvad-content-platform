@@ -57,6 +57,7 @@ import {
   Send,
   Square,
 } from 'lucide-react';
+import type { AudioTrim } from '@dgipr/schemas';
 import { ComposeSafeTextarea, isComposingEvent } from './ComposeSafeInput';
 import { YouTubeLinkInput, YOUTUBE_INPUT_OFF } from './YouTubeLinkInput';
 import {
@@ -66,6 +67,7 @@ import {
 import { STR } from '../lib/strings';
 import { storedErrorMessage } from '../lib/errorMessage';
 import { imageFilesFromClipboard, isEditableTarget } from '../lib/pastedImages';
+import { AudioTrimDialog } from '@/components/common/AudioTrimDialog';
 import { useFilePreviews } from '../lib/useFilePreviews';
 import {
   CHAT_DOCUMENT_ACCEPT,
@@ -125,6 +127,7 @@ export function ChatComposer({
   onAddDocuments,
   onAddAudio,
   onAddYouTube,
+  onSetTrim,
   onRemove,
   onSend,
   onStop,
@@ -137,6 +140,8 @@ export function ChatComposer({
   onAddDocuments: (files: readonly File[]) => void;
   onAddAudio: (files: readonly File[]) => void;
   onAddYouTube: (video: YouTubeVideo) => void;
+  // Which part of a recording to transcribe; `null` clears it back to the whole thing.
+  onSetTrim: (key: string, trim: AudioTrim | null) => void;
   onRemove: (key: string) => void;
   // Resolves true once the turn has left. False means nothing was sent — every attachment
   // failed to prepare and there was no question to carry — so the box keeps what was typed.
@@ -261,6 +266,7 @@ export function ChatComposer({
     [attachments],
   );
   const previews = useFilePreviews(imageFiles);
+  const [trimming, setTrimming] = useState<string | null>(null);
 
   const trayItems: TrayAttachment[] = attachments.map((attachment) => {
     const preview =
@@ -281,8 +287,23 @@ export function ChatComposer({
       failed: attachment.state === 'failed',
       removeLabel: STR.chatAttachRemove,
       onRemove: () => onRemove(attachment.key),
+      // A recording is the only attachment with a second question — which PART of it to use.
+      // Offered while the file is still in hand: once the run has started there is nothing
+      // left here to trim.
+      ...(attachment.kind === 'audio' && attachment.file
+        ? {
+            onOpen: () => setTrimming(attachment.key),
+            openLabel: STR.audioTrimEditLabel(attachment.name),
+          }
+        : {}),
     };
   });
+
+  // Which recording's trim dialog is open, by the draft's own stable key.
+  const trimmingDraft =
+    trimming === null
+      ? null
+      : (attachments.find((item) => item.key === trimming) ?? null);
 
   return (
     <div className="chat-composer" onPaste={onPaste}>
@@ -304,6 +325,20 @@ export function ChatComposer({
       ) : null}
 
       <AttachmentTray items={trayItems} />
+
+      {/* Mounted once for the whole tray: the dialog is told which recording it is about, so
+          opening it does not build a media element per attachment. */}
+      <AudioTrimDialog
+        file={trimmingDraft?.file ?? null}
+        trim={trimmingDraft?.trim ?? null}
+        open={trimmingDraft !== null}
+        onOpenChange={(next) => {
+          if (!next) setTrimming(null);
+        }}
+        onApply={(trim) => {
+          if (trimming !== null) onSetTrim(trimming, trim);
+        }}
+      />
 
       <div className="chat-input-row">
         {/* Uncontrolled by design — see ComposeSafeInput. Clearing after a successful send

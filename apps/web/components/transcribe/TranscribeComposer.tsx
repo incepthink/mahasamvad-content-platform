@@ -49,8 +49,10 @@ import {
   YouTubeLinkInput,
   YOUTUBE_INPUT_OFF,
 } from '@/components/YouTubeLinkInput';
+import { AudioTrimDialog } from '@/components/common/AudioTrimDialog';
 import { acceptFilePicks } from '@/lib/filePicks';
 import { formatFileSize } from '@/lib/fileSize';
+import { audioCardMeta, type AudioTrimsState } from '@/lib/useAudioTrims';
 import { STR } from '@/lib/strings';
 import { cn } from '@/lib/utils';
 
@@ -58,6 +60,7 @@ const YOUTUBE_PANEL_ID = 'transcribe-youtube-panel';
 
 export function TranscribeComposer({
   files,
+  audioTrims,
   onFilesChange,
   youtube,
   onYoutubeChange,
@@ -70,6 +73,9 @@ export function TranscribeComposer({
   disabled = false,
 }: {
   files: readonly File[];
+  // Which part of each recording is set to be used. Owned by the form, because it has to
+  // reach the submit — this only opens the dialog that edits it.
+  audioTrims: AudioTrimsState;
   // Called with the whole next list, so the form keeps ownership of what it will submit.
   onFilesChange: (files: File[]) => void;
   youtube: readonly YouTubeVideo[];
@@ -91,6 +97,9 @@ export function TranscribeComposer({
   // it counted at submit with no sign of it on screen.
   const [linkOpen, setLinkOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
+  // Which recording's trim dialog is open. The FILE rather than an index, because an index
+  // would point at a different recording the moment one above it is removed.
+  const [trimming, setTrimming] = useState<File | null>(null);
   const showLinks = linkOpen || youtube.length > 0;
   const atLimit = files.length >= TRANSCRIPTION_MAX_FILES;
 
@@ -117,9 +126,15 @@ export function TranscribeComposer({
     id: `audio-${file.name}-${file.size}-${index}`,
     name: file.name,
     icon: Mic,
-    meta: formatFileSize(file.size),
+    // The chosen window once there is one, so a trim is visible without reopening the
+    // dialog; the file's size otherwise, which is what the card always said.
+    meta: audioCardMeta(audioTrims.get(file), formatFileSize(file.size)),
     removeLabel: `${STR.dloRemoveAudio}: ${file.name}`,
     onRemove: () => onFilesChange(files.filter((_, i) => i !== index)),
+    // The one thing a recording's card has to open: which PART of it to use.
+    onOpen: () => setTrimming(file),
+    openLabel: STR.audioTrimEditLabel(file.name),
+    open: trimming === file,
   }));
 
   return (
@@ -229,6 +244,20 @@ export function TranscribeComposer({
         items={attachments}
         disabled={disabled}
         className="mt-4"
+      />
+
+      {/* Mounted once for the whole strip rather than per card: the dialog is told which
+          recording it is about, so opening it does not build a media element per attachment. */}
+      <AudioTrimDialog
+        file={trimming}
+        trim={trimming === null ? null : audioTrims.get(trimming)}
+        open={trimming !== null}
+        onOpenChange={(next) => {
+          if (!next) setTrimming(null);
+        }}
+        onApply={(trim) => {
+          if (trimming !== null) audioTrims.set(trimming, trim);
+        }}
       />
 
       {showLinks ? (

@@ -118,9 +118,11 @@ function CorrectedArticle({
   issues: readonly ProofreadIssue[];
 }) {
   const [highlightsOn, setHighlightsOn] = useState(true);
-  const [active, setActive] = useState<{ index: number; top: number; left: number } | null>(
-    null,
-  );
+  const [active, setActive] = useState<{
+    index: number;
+    top: number;
+    left: number;
+  } | null>(null);
 
   const marks = useMemo(
     () => buildProofreadHighlights(original, corrected, issues),
@@ -324,7 +326,9 @@ export default function ProofreadPage() {
   // so it contributes nothing to combinedText, and reading it and then checking is exactly
   // what startSubmit does. Testing the text alone would leave an officer whose only source
   // is a file with a dead button and no way forward.
-  const canSubmit = combinedText.length > 0 || docStatus === 'unread';
+  const canSubmit =
+    docStatus !== 'failed' &&
+    (combinedText.length > 0 || docStatus === 'unread');
   const busy = checking || awaitingRead;
   const disabled = busy || !canSubmit;
 

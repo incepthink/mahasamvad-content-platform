@@ -39,6 +39,9 @@ export {
   // it over an unbranded scene clip in CSS — the stitch owns the burned-in
   // branding, so this stays the single source of the artwork.
   renderGovernmentLockup,
+  // The department footer band alone, for the same reason — the Dynamic Poster crop preview
+  // lays it over an unbranded clip in CSS, and apps/web must not own a copy of the artwork.
+  renderSocialFooterBand,
   SOCIAL_ARTWORK_HEIGHT,
   SOCIAL_ARTWORK_SIZE,
   SOCIAL_POSTER_HEIGHT,
@@ -97,6 +100,15 @@ export {
   GIF_LONG_EDGE,
   type MotionGifOptions,
 } from './video/motion-gif.js';
+// Crops a rendered clip back to the ratio the officer asked for — the guarantee on the way OUT
+// that fitImageToAspect is on the way in — and trims one to a rectangle they drew over it by
+// hand. See video/crop-video.ts.
+export { cropVideoToAspect, cropVideoToRect } from './video/crop-video.js';
+export type {
+  CropRectOptions,
+  NormalizedRect,
+  VideoCrop,
+} from './video/crop-video.js';
 export { renderHtmlToPng } from './render-html.js';
 export type { RenderOptions } from './render-html.js';
 export { renderHtmlToPdf, ChromiumUnavailableError } from './render-html.js';

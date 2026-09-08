@@ -63,16 +63,71 @@ test('the prompt reaches Gemini verbatim, as the only text we send', () => {
   assert.ok(!('generation_config' in body), 'no generation_config');
   assert.ok(!('safety_settings' in body), 'no safety_settings');
   assert.doesNotMatch(raw, /negative_prompt/i);
+  // The output shape is now the officer's to choose, but it is OPT-IN: a caller that does not
+  // ask for one still gets Gemini's own default, byte for byte as before that control existed.
   assert.doesNotMatch(
     raw,
     /aspect_ratio/i,
-    'no aspect ratio — Gemini defaults, per the brief',
+    'no aspect ratio unless one was asked for',
   );
   assert.doesNotMatch(
     raw,
     /resolution/i,
     'no resolution — Gemini defaults, per the brief',
   );
+});
+
+test('the chosen output shape travels as a request field, never in the prompt', () => {
+  const prompt = 'A marble rolling down a track.';
+
+  for (const aspect of ['16:9', '9:16']) {
+    const body = buildInteractionRequest({ prompt, aspectRatio: aspect });
+
+    assert.equal(body.response_format?.aspect_ratio, aspect);
+    // URI delivery is untouched by it: the two live in the same object and one must not cost
+    // the other.
+    assert.equal(body.response_format?.delivery, 'uri');
+
+    // THE RULE THIS FEATURE HAD TO NOT BREAK. The prompt is still the only text we send, and
+    // still byte for byte the officer's — the ratio is a field, not a sentence.
+    const texts = textPartsOf(body);
+    assert.equal(texts.length, 1, 'still exactly one text part');
+    assert.equal(texts[0]?.text, prompt);
+    assert.doesNotMatch(texts[0]?.text ?? '', /aspect|ratio|16:9|9:16/i);
+  }
+});
+
+test('an aspect ratio can be requested without URI delivery, and vice versa', () => {
+  // The learned-capability ladder drops these independently, so neither may take the other
+  // with it: a model that refuses `delivery` must still render in the shape that was asked
+  // for, and one that refuses `aspect_ratio` must still deliver by URI.
+  const noDelivery = buildInteractionRequest({
+    prompt: 'x',
+    uriDelivery: false,
+    aspectRatio: '9:16',
+  });
+  assert.deepEqual(noDelivery.response_format, {
+    type: 'video',
+    aspect_ratio: '9:16',
+  });
+
+  const noAspect = buildInteractionRequest({
+    prompt: 'x',
+    uriDelivery: true,
+    aspectRatio: null,
+  });
+  assert.deepEqual(noAspect.response_format, {
+    type: 'video',
+    delivery: 'uri',
+  });
+
+  // Neither wanted: no response_format at all rather than an empty object.
+  const neither = buildInteractionRequest({
+    prompt: 'x',
+    uriDelivery: false,
+    aspectRatio: null,
+  });
+  assert.equal(neither.response_format, undefined);
 });
 
 test('Marathi Unicode survives the request builder unchanged', () => {

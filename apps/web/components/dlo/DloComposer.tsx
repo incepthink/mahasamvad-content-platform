@@ -49,6 +49,8 @@ import {
   isImageFileName,
 } from '@dgipr/schemas';
 import { formatFileSize } from '@/lib/fileSize';
+import { audioCardMeta } from '@/lib/useAudioTrims';
+import { AudioTrimDialog } from '@/components/common/AudioTrimDialog';
 import {
   AttachmentStrip,
   type AttachmentItem,
@@ -82,6 +84,9 @@ export function DloComposer({ form }: { form: DloIntakeFormState }) {
   // on its own, exactly as an unfinished document keeps its block open: folding a source
   // away would leave it counted at submit with no sign of it on screen.
   const [linkOpen, setLinkOpen] = useState(false);
+  // Which recording's trim dialog is open. The FILE rather than an index, because an index
+  // would point at a different recording the moment one above it is removed.
+  const [trimming, setTrimming] = useState<File | null>(null);
   const showLinks = linkOpen || form.youtube.length > 0;
   const previews = useFilePreviews(form.images);
 
@@ -145,10 +150,17 @@ export function DloComposer({ form }: { form: DloIntakeFormState }) {
       id: `audio-${file.name}-${file.size}-${index}`,
       name: file.name,
       icon: Mic,
-      meta: formatFileSize(file.size),
+      // The chosen window once there is one, so a trim is visible on the composer without
+      // reopening the dialog; the file's size otherwise, which is what the card always said.
+      meta: audioCardMeta(form.audioTrims.get(file), formatFileSize(file.size)),
       removeLabel: `${STR.dloRemoveAudio}: ${file.name}`,
       onRemove: () =>
         form.changeFiles(form.files.filter((_, i) => i !== index)),
+      // A recording is the one attachment with something to open: which PART of it to use.
+      // Documents and photographs have no such question, so their cards stay inert.
+      onOpen: () => setTrimming(file),
+      openLabel: STR.audioTrimEditLabel(file.name),
+      open: trimming === file,
     })),
     ...form.images.map((file, index) => ({
       id: `image-${file.name}-${file.size}-${index}`,
@@ -315,6 +327,20 @@ export function DloComposer({ form }: { form: DloIntakeFormState }) {
           className="mt-4"
         />
       </div>
+
+      {/* Mounted once for the whole strip rather than per card: the dialog is told which
+          recording it is about, so opening it does not build a media element per attachment. */}
+      <AudioTrimDialog
+        file={trimming}
+        trim={trimming === null ? null : form.audioTrims.get(trimming)}
+        open={trimming !== null}
+        onOpenChange={(next) => {
+          if (!next) setTrimming(null);
+        }}
+        onApply={(trim) => {
+          if (trimming !== null) form.audioTrims.set(trimming, trim);
+        }}
+      />
 
       <DloLostFilesNotice
         message={STR.dloDraftAudioLost}

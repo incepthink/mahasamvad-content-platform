@@ -128,6 +128,10 @@ export const GenerationStepSchema = z.enum([
   // exactly why it is named rather than folded into 'render'.
   'motion_prompt',
   'motion_render',
+  // The hand trim of a finished clip. Local ffmpeg, no model call and nothing billed, so it is
+  // seconds rather than minutes — but it is still a job, so the officer sees why the card is
+  // busy rather than watching an unexplained spinner.
+  'motion_crop',
   'revise_article',
   'revise_copy',
   'revise_scene',

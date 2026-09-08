@@ -21,10 +21,8 @@
 // variable and across a reload only their names survive, and the form asks for them back
 // by name.
 //
-// THE HEADING AND THE STYLE REFERENCE ARE NOT SEPARATE QUESTIONS any more. They were two of
-// the three cards the single AI-prompt box replaced; the same box is shown again on the
-// तपासणी step (DloFileWorkspace), seeded from the intake's saved review state so anything
-// typed here still arrives there.
+// Heading, AI direction and the style reference retain their separate API fields.
+// Their saved values also preserve drafts started in the production form.
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -48,6 +46,7 @@ import {
   writeDraft,
 } from '@/lib/dloDraft';
 import { errorMessage } from '@/lib/errorMessage';
+import { useAudioTrims } from '@/lib/useAudioTrims';
 import { STR } from '@/lib/strings';
 
 // The only article type this lane produces. The picker is gone from this form, so a
@@ -93,8 +92,15 @@ export function useDloIntakeForm() {
   // USED at generate time, so it is handed to the review step through the intake's saved
   // review state rather than being asked for twice.
   const [instructions, setInstructions] = useState(draft.instructions);
+  const [heading, setHeading] = useState(draft.heading);
+  const [styleReference, setStyleReference] = useState(draft.styleReference);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // Which part of each recording the officer chose on the trim slider. Held here rather than
+  // in the composer because it has to reach `submit()` — and it is deliberately NOT drafted to
+  // sessionStorage: it is keyed on the picked `File`, which a reload cannot bring back, so a
+  // restored window would belong to a recording that no longer exists.
+  const audioTrims = useAudioTrims();
 
   // Keep the draft current. Debounced, because this fires on every keystroke.
   useEffect(() => {
@@ -102,10 +108,8 @@ export function useDloIntakeForm() {
       writeDraft({
         notes,
         category: DLO_CATEGORY,
-        // Neither is asked for on this form any more (see the header); the draft shape
-        // still carries them for the review step's sake.
-        heading: '',
-        styleReference: '',
+        heading,
+        styleReference,
         instructions,
         audioNames: files.map((file) => file.name),
         imageNames: images.map((file) => file.name),
@@ -114,7 +118,16 @@ export function useDloIntakeForm() {
       });
     }, 500);
     return () => clearTimeout(timer);
-  }, [notes, instructions, documents, files, images, youtube]);
+  }, [
+    notes,
+    heading,
+    styleReference,
+    instructions,
+    documents,
+    files,
+    images,
+    youtube,
+  ]);
 
   // Picked files ride in a module variable so client-side navigation away and back keeps
   // them.
@@ -134,6 +147,9 @@ export function useDloIntakeForm() {
   // notice that a recording a reload could not keep has been attached again.
   const changeFiles = (next: File[]) => {
     setFiles(next);
+    // A removed recording's window goes with it, or re-attaching that same file later would
+    // silently bring back a selection the officer had already discarded.
+    audioTrims.retain(next);
     setLostAudioNames((prev) =>
       prev.filter((name) => !next.some((file) => file.name === name)),
     );
@@ -151,7 +167,6 @@ export function useDloIntakeForm() {
     setLostDocumentNames((prev) =>
       prev.filter((name) => !next.some((file) => file.name === name)),
     );
-    setError(null);
   };
 
   // What the submit guard below tests, lifted out so the bar's button can be disabled by
@@ -170,6 +185,7 @@ export function useDloIntakeForm() {
   // pickers are emptied and the draft goes with them. Called only after the create
   // succeeds — a failed create must leave everything exactly where it was.
   const clearInputs = () => {
+    audioTrims.clear();
     setDocuments([]);
     setYoutube([]);
     setImages([]);
@@ -201,6 +217,10 @@ export function useDloIntakeForm() {
       const form = new FormData();
       form.append('notes', notes);
       form.append('category', DLO_CATEGORY);
+      form.append('heading', heading);
+      if (styleReference.trim()) {
+        form.append('styleReference', styleReference.trim());
+      }
       // Not used until the article is generated, and it has no column on dlo_intakes —
       // the create route seeds it into the intake's review state, which is what makes the
       // review step open with what was typed here instead of an empty box.
@@ -211,6 +231,11 @@ export function useDloIntakeForm() {
       // second field would only be a second way to say the same thing — and it is a
       // distinction the officer has no reason to make.
       for (const file of files) form.append('files', file, file.name);
+      // The chosen windows, one per TRIMMED recording, keyed by position among the RECORDINGS
+      // — which is why this is built from `files` alone and appended right beside them. The
+      // field is omitted entirely when nothing was trimmed.
+      const trimField = audioTrims.fieldValue(files);
+      if (trimField !== null) form.append('audioTrims', trimField);
       for (const image of images) form.append('files', image, image.name);
       for (const document of documents) {
         form.append('files', document, document.name);
@@ -237,6 +262,7 @@ export function useDloIntakeForm() {
     files,
     changeFiles,
     lostAudioNames,
+    audioTrims,
     images,
     changeImages,
     lostImageNames,
@@ -247,6 +273,10 @@ export function useDloIntakeForm() {
     setYoutube,
     instructions,
     setInstructions,
+    heading,
+    setHeading,
+    styleReference,
+    setStyleReference,
     error,
     setError,
     submitting,

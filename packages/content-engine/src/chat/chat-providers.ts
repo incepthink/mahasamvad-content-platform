@@ -17,8 +17,26 @@
 // Audio and YouTube are absent from the flags on purpose: both are reduced to plain text
 // before any model is contacted, so they work on every provider and there is nothing to gate.
 
-import type { ChatProvider, ChatProviderInfo } from '@dgipr/schemas';
+import {
+  DEFAULT_CHAT_PROVIDER,
+  type ChatProvider,
+  type ChatProviderInfo,
+} from '@dgipr/schemas';
 import { isQwenConfigured } from './qwen-chat.js';
+
+// Older frontends omit provider entirely. Let the API deployment choose their lane
+// without a web rebuild; newer clients retain their explicit per-turn selection.
+export function resolveChatProvider(requested?: ChatProvider): ChatProvider {
+  if (requested !== undefined) return requested;
+  const configured = process.env.CHAT_DEFAULT_PROVIDER?.trim().toLowerCase();
+  if (!configured) return DEFAULT_CHAT_PROVIDER;
+  if (configured === 'openai' || configured === 'qwen') return configured;
+  throw new Error(
+    'Unknown CHAT_DEFAULT_PROVIDER "' +
+      configured +
+      '". Supported: openai, qwen.',
+  );
+}
 
 // The capability half — a property of what each lane's module actually implements, which is
 // why it lives beside them. Labels are the providers' own names and stay in Latin, exactly as

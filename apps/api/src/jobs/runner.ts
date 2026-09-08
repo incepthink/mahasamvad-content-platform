@@ -540,10 +540,17 @@ async function persistCost(
 }
 
 // An edit job's failure is survivable when the run still carries what it produced before the
-// edit: the poster (with every immutable version behind it) or the article. Put the row back to
-// `completed` and report the failure through the transient registry instead, so a poster that
-// exists is never hidden by an edit that did not land. Returns false when there is nothing to
-// go back to — that failure is real and belongs on the row.
+// edit: the poster (with every immutable version behind it), the article, or a Dynamic Poster's
+// clip. Put the row back to `completed` and report the failure through the transient registry
+// instead, so output that exists is never hidden by an edit that did not land. Returns false
+// when there is nothing to go back to — that failure is real and belongs on the row.
+//
+// `motionPath` is the same test the retry route makes for "this run produced nothing", and it
+// has to be here too: a Dynamic Poster writes neither a `posterPath` (its output is an .mp4,
+// deliberately kept out of a column every poster reader treats as a PNG) nor an `article`, so
+// without it BOTH of that lane's edit jobs — the AI follow-up and the hand crop — armed a
+// recovery that could never fire, and a failed edit marked a run failed over a clip the
+// officer could still see. The detail page has always been written for the recovered shape.
 async function recoverEditFailure(
   client: SupabaseClient,
   id: string,
@@ -552,7 +559,9 @@ async function recoverEditFailure(
 ): Promise<boolean> {
   try {
     const row = await getGeneration(client, id);
-    if (!row || (!row.posterPath && !row.article)) return false;
+    if (!row || (!row.posterPath && !row.article && !row.motionPath)) {
+      return false;
+    }
     await updateGeneration(client, id, {
       status: 'completed',
       step: 'done',
@@ -631,6 +640,7 @@ export function runJob(
             task === 'youtube_thumbnail_creation' ||
             task === 'dynamic_poster_creation' ||
             task === 'dynamic_poster_revision' ||
+            task === 'dynamic_poster_crop' ||
             task === 'poster_regeneration' ||
             task === 'poster_content_revision' ||
             task === 'poster_image_revision';

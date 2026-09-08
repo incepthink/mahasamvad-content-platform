@@ -54,6 +54,7 @@ import {
 } from '@dgipr/database';
 import {
   newVideoTitleFrom,
+  type NewVideoAspect,
   type NewVideoConversation,
   type NewVideoConversationSummary,
   type NewVideoImage,
@@ -304,11 +305,19 @@ export async function markTurnFailed(
 // Fire and forget: the route has already answered 202 and the client is polling. Every failure
 // lands on the TURN ROW, never on the process — which is also what makes a failure survive the
 // restart that used to erase it.
+//
+// `aspect` is a JOB ARGUMENT rather than a column, which is the opposite of the choice the
+// Dynamic Poster lane made for `motion_aspect` (0053) — and the difference is that there is no
+// server-side retry here. That column exists because startPosterRegenerateJob re-reads the row,
+// so a shape held only in the request would be lost on the first redo. Nothing re-runs a turn:
+// a failed one is followed by a new turn the officer sends, carrying its own choice. So this
+// needs no migration.
 export function startNewVideoTurn(
   client: SupabaseClient,
   conversation: NewVideoConversationRow,
   turn: NewVideoTurnRow,
   referenceRows: readonly NewVideoImageRow[],
+  aspect: NewVideoAspect,
 ): void {
   void (async () => {
     try {
@@ -335,6 +344,9 @@ export function startNewVideoTurn(
         prompt: turn.prompt,
         images: referenceImages,
         previousInteractionId,
+        // Sent as a request field, never appended to the prompt: the officer's shape must not
+        // cost this lane its verbatim rule.
+        aspectRatio: aspect,
       });
       const interactionId = started.id ?? null;
       if (!interactionId) {

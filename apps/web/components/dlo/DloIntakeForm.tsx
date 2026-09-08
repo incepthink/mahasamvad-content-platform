@@ -1,13 +1,12 @@
 'use client';
 
 /**
- * The /dlo input step: two boxes, the first of which carries the action.
+ * The /dlo input step: the source composer carries the action; direction fields follow.
  *
  *   DloComposer    — WHAT THE NEWS IS MADE OF: the typed note, the recordings, the
  *                    photographs, the documents and the links, in one card — and, at the
  *                    end of its tool row, the run's one submit.
- *   DloAiPromptBox — WHAT THE OFFICER WANTS: heading or angle, emphasis, what to leave
- *                    out, how it should read.
+ *   Heading, DloAiPromptBox and StyleReferenceField keep the officer's production inputs.
  *
  * This page is DELIBERATELY thin, the way app/page.tsx is. Every rule about what a run
  * sends, drafts and refuses lives in `useDloIntakeForm`; the two blocks below are markup,
@@ -25,6 +24,10 @@
  */
 
 import { DloAiPromptBox } from './DloAiPromptBox';
+import { FormCard } from '../common/FormCard';
+import { PromptInput } from '../common/PromptInput';
+import { StyleReferenceField } from '../StyleReferenceField';
+import { STR } from '@/lib/strings';
 import { DloComposer } from './DloComposer';
 import { useDloIntakeForm } from './useDloIntakeForm';
 
@@ -34,10 +37,30 @@ export function DloIntakeForm() {
   return (
     <div className="flex flex-col gap-5">
       <DloComposer form={form} />
+      <FormCard
+        htmlFor="dlo-heading"
+        label={STR.headingLabel}
+        hint={STR.headingHint}
+      >
+        <PromptInput
+          id="dlo-heading"
+          value={form.heading}
+          onChange={form.setHeading}
+          placeholder={STR.headingPlaceholder}
+          disabled={form.submitting}
+          className="mt-3"
+        />
+      </FormCard>
       <DloAiPromptBox
         value={form.instructions}
         onChange={form.setInstructions}
         disabled={form.submitting}
+      />
+      <StyleReferenceField
+        value={form.styleReference}
+        onChange={form.setStyleReference}
+        disabled={form.submitting}
+        className=""
       />
     </div>
   );

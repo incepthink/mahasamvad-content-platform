@@ -17,6 +17,13 @@
 // whole thing (see `.chat-composer.is-expanded`). Re-mounting it would drop the caret and,
 // because ComposeSafeTextarea is uncontrolled, re-seed the field from its mount value.
 //
+// The one control /chat has no use for is THE OUTPUT SHAPE, sitting beside the expand button.
+// It is a per-turn choice held here rather than in the hook, because it belongs to the message
+// being composed — and it deliberately persists between turns, so an officer building a reel
+// picks ९:१६ once and every follow-up edit comes back in the same frame. It reaches Gemini as a
+// request field (`response_format.aspect_ratio`), never as a sentence appended to the prompt,
+// which is what lets this page gain a control over the render without giving up its one rule.
+//
 // A reference picture can also be PASTED, exactly as on /chat and through the same helper:
 // a React handler on this card for a paste into the box, and a document listener for a paste
 // made without clicking into it first. See ChatComposer's header for why both are needed and
@@ -30,8 +37,20 @@ import {
   type ClipboardEvent,
   type KeyboardEvent,
 } from 'react';
-import { Image as ImageIcon, Maximize2, Minimize2, Send } from 'lucide-react';
-import { NEW_VIDEO_IMAGE_ACCEPT, NEW_VIDEO_MAX_IMAGES } from '@dgipr/schemas';
+import {
+  Image as ImageIcon,
+  Maximize2,
+  Minimize2,
+  RectangleHorizontal,
+  RectangleVertical,
+  Send,
+} from 'lucide-react';
+import {
+  DEFAULT_NEW_VIDEO_ASPECT,
+  NEW_VIDEO_IMAGE_ACCEPT,
+  NEW_VIDEO_MAX_IMAGES,
+  type NewVideoAspect,
+} from '@dgipr/schemas';
 import { ComposeSafeTextarea, isComposingEvent } from './ComposeSafeInput';
 import {
   AttachmentTray,
@@ -40,6 +59,21 @@ import {
 import { imageFilesFromClipboard, isEditableTarget } from '../lib/pastedImages';
 import { STR } from '../lib/strings';
 import type { StagedImage } from '../lib/useNewVideoWorkflow';
+
+// Both shapes the API accepts, in the order they are offered. Landscape leads because it is
+// the default — the button that is already pressed when the page opens.
+const ASPECT_OPTIONS: ReadonlyArray<{
+  value: NewVideoAspect;
+  label: string;
+  Icon: typeof RectangleHorizontal;
+}> = [
+  {
+    value: '16:9',
+    label: STR.nvwAspectLandscape,
+    Icon: RectangleHorizontal,
+  },
+  { value: '9:16', label: STR.nvwAspectPortrait, Icon: RectangleVertical },
+];
 
 function stateLabel(image: StagedImage): string {
   if (image.state === 'failed') return image.error ?? STR.nvwImageFailed;
@@ -64,9 +98,12 @@ export function NewVideoComposer({
   onAddImages: (files: readonly File[]) => void;
   onRemoveImage: (key: string) => void;
   /** Resolves true once the turn has left, which is when the box may be cleared. */
-  onSend: (prompt: string) => Promise<boolean>;
+  onSend: (prompt: string, aspect: NewVideoAspect) => Promise<boolean>;
 }) {
   const [text, setText] = useState('');
+  const [aspect, setAspect] = useState<NewVideoAspect>(
+    DEFAULT_NEW_VIDEO_ASPECT,
+  );
   const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const imageInput = useRef<HTMLInputElement>(null);
@@ -107,9 +144,12 @@ export function NewVideoComposer({
 
   const submit = () => {
     if (!canSend) return;
-    void onSend(text).then((sent) => {
+    void onSend(text, aspect).then((sent) => {
       if (!sent) return;
       setText('');
+      // The chosen shape is deliberately NOT reset: the next instruction in a conversation is
+      // an edit of the video just made, and handing it back at a different ratio would undo a
+      // choice nobody changed.
       // The prompt is gone, so a full-screen box is now a full-screen blank sheet over the
       // video the officer just paid for.
       setExpanded(false);
@@ -230,6 +270,37 @@ export function NewVideoComposer({
                 <Maximize2 size={19} aria-hidden="true" />
               )}
             </button>
+            {/* The output shape. A radiogroup rather than two toggles: exactly one is always
+                chosen, and arrow keys move between them for free. Never disabled while a
+                render runs — this belongs to the message being written, not to the one in
+                flight. */}
+            <div
+              className="chat-aspect"
+              role="radiogroup"
+              aria-label={STR.nvwAspectLabel}
+            >
+              {ASPECT_OPTIONS.map(({ value, label, Icon }) => {
+                const active = aspect === value;
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    className={
+                      active
+                        ? 'chat-aspect-option is-active'
+                        : 'chat-aspect-option'
+                    }
+                    onClick={() => setAspect(value)}
+                    title={label}
+                    aria-label={label}
+                  >
+                    <Icon size={17} aria-hidden="true" />
+                  </button>
+                );
+              })}
+            </div>
             <button
               type="button"
               className="btn chat-send"

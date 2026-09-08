@@ -26,6 +26,8 @@ import {
 } from '../../components/HistoryCard';
 import { ErrorNotice } from '../../components/ErrorNotice';
 import { Pagination } from '../../components/Pagination';
+import { PageBackdrop } from '../../components/common/PageBackdrop';
+import { HISTORY_DOODLES } from '../../lib/doodleMarks';
 
 const PAGE_SIZE = 9;
 
@@ -378,6 +380,11 @@ function HistoryPageBody() {
 
   return (
     <main className="page">
+      {/* Wallpaper for this lane: what an officer finds here is everything the
+          department has already made. The marks are decorative only, and the vocabulary
+          lives beside the other lanes’ in lib/doodleMarks.ts. */}
+      <PageBackdrop marks={HISTORY_DOODLES} seed={43} />
+
       <header className="page-head">
         <div className="page-head-text">
           <h1 className="page-title">{STR.historyTitle}</h1>

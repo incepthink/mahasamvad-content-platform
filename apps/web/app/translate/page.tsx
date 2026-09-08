@@ -259,7 +259,9 @@ export default function TranslatePage() {
   // so it contributes nothing to combinedText, and reading it and then translating is
   // exactly what startSubmit does. Testing the text alone would leave an officer whose only
   // source is a file with a dead button and no way forward.
-  const canSubmit = combinedText.length > 0 || docStatus === 'unread';
+  const canSubmit =
+    docStatus !== 'failed' &&
+    (combinedText.length > 0 || docStatus === 'unread');
   // Locks the target menu: an open review card was extracted for one target (its columns
   // and its Hindi lock follow it), so changing the target under it would discard the
   // officer's corrections through resetFlow.

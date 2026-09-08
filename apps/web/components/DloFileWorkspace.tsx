@@ -195,9 +195,13 @@ export function DloFileWorkspace({
   // officer has started editing must not put the form's wording back.
   const seeded = useRef(false);
   const seededInstructions = useRef('');
+  const seededStyleReference = useRef('');
   useEffect(() => {
     if (seeded.current || !intake?.reviewState) return;
     seeded.current = true;
+    if (intake.reviewState.styleReference) {
+      seededStyleReference.current = intake.reviewState.styleReference;
+    }
     if (intake.reviewState.instructions) {
       setInstructions(intake.reviewState.instructions);
       // Also kept in a ref, which is what the auto lane reads. Two reasons the state cannot
@@ -208,6 +212,15 @@ export function DloFileWorkspace({
       seededInstructions.current = intake.reviewState.instructions;
     }
   }, [intake?.reviewState]);
+
+  // Heading is stored separately from reviewState. Keep it through lightweight polls
+  // and read the ref on auto-generation, before a state update has committed.
+  const seededHeading = useRef('');
+  useEffect(() => {
+    if (seededHeading.current || !intake?.heading) return;
+    seededHeading.current = intake.heading;
+    setHeading((current) => (current ? current : (intake.heading ?? '')));
+  }, [intake?.heading]);
 
   // The name lookup is PAID, so it fires exactly once, on the first poll that reports the
   // intake ready. A ref rather than a state flag: both this effect and the poll that triggers
@@ -250,6 +263,9 @@ export function DloFileWorkspace({
         const generationId = await generateFromNewDloIntake(intakeId, {
           ...(wantedHeading ? { heading: wantedHeading } : {}),
           ...(wantedInstructions ? { instructions: wantedInstructions } : {}),
+          ...(seededStyleReference.current
+            ? { styleReference: seededStyleReference.current }
+            : {}),
           // Empty on the auto lane — the review that fills this never ran.
           designations: designations.collect(),
         });
@@ -291,7 +307,10 @@ export function DloFileWorkspace({
       router.replace(`/generations/${existing.id}`);
       return;
     }
-    void generate('sources', { instructions: seededInstructions.current });
+    void generate('sources', {
+      heading: seededHeading.current,
+      instructions: seededInstructions.current,
+    });
   }, [autoGenerate, generate, intake, router]);
 
   if (loading && !intake) {
@@ -398,6 +417,7 @@ export function DloFileWorkspace({
                     className="btn btn-primary btn-small"
                     onClick={() =>
                       void generate('sources', {
+                        heading: seededHeading.current,
                         instructions: seededInstructions.current,
                       })
                     }

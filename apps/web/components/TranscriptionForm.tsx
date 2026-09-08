@@ -33,6 +33,7 @@ import {
 import { createTranscription } from '../lib/api';
 import { consumeSharedAudio } from '../lib/sharedAudio';
 import { TranscribeComposer } from './transcribe/TranscribeComposer';
+import { useAudioTrims } from '@/lib/useAudioTrims';
 import { STR } from '../lib/strings';
 import { errorMessage } from '../lib/errorMessage';
 
@@ -50,6 +51,10 @@ export function TranscriptionForm({
   const [youtube, setYoutube] = useState<readonly YouTubeVideo[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // Which part of each recording the officer chose on the trim slider (lib/useAudioTrims).
+  // Keyed on the picked `File`, so it is deliberately not persisted anywhere: a reload cannot
+  // bring those objects back, and a restored window would belong to a recording that is gone.
+  const audioTrims = useAudioTrims();
   const handledShare = useRef(false);
 
   const submitSources = async (
@@ -67,6 +72,11 @@ export function TranscriptionForm({
       for (const file of selectedFiles) {
         form.append('files', file, file.name);
       }
+      // The chosen windows, keyed by position among the recordings just appended. Omitted
+      // entirely when nothing was trimmed, which is what keeps an ordinary run's request
+      // byte-for-byte what it was.
+      const trimField = audioTrims.fieldValue(selectedFiles);
+      if (trimField !== null) form.append('audioTrims', trimField);
       // Links, not bytes — nothing about the video travels in this request.
       if (selectedYoutube.length > 0) {
         form.append('youtube', JSON.stringify(selectedYoutube));
@@ -76,6 +86,7 @@ export function TranscriptionForm({
       // submit would silently transcribe (and archive) the same ones again.
       setFiles([]);
       setYoutube([]);
+      audioTrims.clear();
       onStarted(id);
     } catch (e) {
       setError(errorMessage(e));
@@ -144,7 +155,13 @@ export function TranscriptionForm({
   return (
     <TranscribeComposer
       files={files}
-      onFilesChange={setFiles}
+      audioTrims={audioTrims}
+      onFilesChange={(next) => {
+        setFiles(next);
+        // A removed recording's window goes with it, or re-attaching that same file later
+        // would bring back a selection the officer had already discarded.
+        audioTrims.retain(next);
+      }}
       youtube={youtube}
       onYoutubeChange={setYoutube}
       onError={setError}

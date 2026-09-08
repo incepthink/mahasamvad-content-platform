@@ -20,6 +20,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { SupabaseClient } from '@dgipr/database';
 import {
+  DEFAULT_NEW_VIDEO_ASPECT,
   NEW_VIDEO_IMAGE_MAX_BYTES,
   NEW_VIDEO_IMAGE_MAX_MB,
   NEW_VIDEO_MAX_IMAGES,
@@ -188,7 +189,16 @@ export function registerNewVideoWorkflowRoutes(
       resolved,
       turns.length,
     );
-    startNewVideoTurn(client, conversation, turn, resolved);
+    // The shape the officer picked on the composer. Defaulted here rather than in the schema so
+    // the wire stays optional — an older client sends no aspect and still gets the landscape
+    // render it has always got.
+    startNewVideoTurn(
+      client,
+      conversation,
+      turn,
+      resolved,
+      body.aspect ?? DEFAULT_NEW_VIDEO_ASPECT,
+    );
 
     return reply
       .code(202)

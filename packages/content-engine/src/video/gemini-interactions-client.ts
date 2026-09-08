@@ -26,10 +26,17 @@
 //   { type: 'video', mime_type: 'video/mp4', uri | data }.
 //
 // PER-MODEL PARAMS ARE LEARNED, NOT DECLARED — the veo-client doctrine, and it matters more
-// here because the model id is a moving preview target. `background` and `response_format`
-// are both sent optimistically; a 400 that names either one is cached against the model id
-// and the call is retried without it. So a model that cannot do URI delivery falls back to
-// inline base64, and one that cannot run in the background is simply awaited.
+// here because the model id is a moving preview target. `background`, `response_format` and
+// the `aspect_ratio` inside it are all sent optimistically; a 400 that names one is cached
+// against the model id and the call is retried without it. So a model that cannot do URI
+// delivery falls back to inline base64, one that cannot run in the background is simply
+// awaited, and one that will not take an aspect ratio renders at its own default.
+//
+// THE ASPECT RATIO IS A REQUEST FIELD, NOT A SENTENCE. The officer picks the shape of the
+// output on the composer and it travels as `response_format.aspect_ratio` — which is how the
+// verbatim rule above survives a feature that changes the render: not one character is added
+// to the prompt, and nothing is cropped after the fact, so no frame that was paid for is
+// discarded to change its shape.
 
 import { pathToFileURL } from 'node:url';
 import { GeminiRequestError, geminiFetch } from '../http/gemini-request.js';
@@ -95,7 +102,13 @@ export type InteractionRequestBody = {
   store: boolean;
   background?: boolean;
   previous_interaction_id?: string;
-  response_format?: { type: 'video'; delivery: 'uri' };
+  // `delivery` and `aspect_ratio` are independent: either alone is a reason to send this
+  // object, and the ladder below can drop one without losing the other.
+  response_format?: {
+    type: 'video';
+    delivery?: 'uri';
+    aspect_ratio?: string;
+  };
 };
 
 export type BuildInteractionRequestInput = Readonly<{
@@ -111,6 +124,10 @@ export type BuildInteractionRequestInput = Readonly<{
   // them; the tests drive them explicitly.
   background?: boolean;
   uriDelivery?: boolean;
+  // The output shape, e.g. '16:9' or '9:16'. Absent/null/'' sends no aspect_ratio at all and
+  // the model renders at its own default — which is what every caller that does not offer the
+  // choice gets, byte for byte as before this field existed.
+  aspectRatio?: string | null | undefined;
 }>;
 
 export class InteractionRequestError extends Error {
@@ -130,6 +147,7 @@ export function buildInteractionRequest({
   model = GEMINI_VIDEO_MODEL,
   background = true,
   uriDelivery = true,
+  aspectRatio = null,
 }: BuildInteractionRequestInput): InteractionRequestBody {
   if (prompt.trim() === '') {
     throw new InteractionRequestError('A prompt is required.');
@@ -185,11 +203,16 @@ export function buildInteractionRequest({
     ...(previousInteractionId
       ? { previous_interaction_id: previousInteractionId }
       : {}),
-    // Delivery only. Deliberately no aspect_ratio and no resolution: the brief is to stay on
-    // Gemini's own defaults so the output is comparable with the chat app.
-    ...(uriDelivery
+    // Delivery, plus the output shape when the officer picked one. Still no `resolution`:
+    // nothing on this surface asks for it, and an unrequested parameter is one more thing a
+    // preview model can reject.
+    ...(uriDelivery || aspectRatio
       ? {
-          response_format: { type: 'video' as const, delivery: 'uri' as const },
+          response_format: {
+            type: 'video' as const,
+            ...(uriDelivery ? { delivery: 'uri' as const } : {}),
+            ...(aspectRatio ? { aspect_ratio: aspectRatio } : {}),
+          },
         }
       : {}),
   };
@@ -297,6 +320,7 @@ export function interactionErrorMessage(
 
 const modelsRejectingBackground = new Set<string>();
 const modelsRejectingResponseFormat = new Set<string>();
+const modelsRejectingAspectRatio = new Set<string>();
 
 function rejectsField(error: unknown, ...needles: readonly string[]): boolean {
   if (!(error instanceof GeminiRequestError) || error.status !== 400)
@@ -335,6 +359,8 @@ export type CreateVideoInteractionInput = Readonly<{
   prompt: string;
   images?: readonly InteractionImage[];
   previousInteractionId?: string | null;
+  // The shape the caller wants back. Omitted leaves the model on its own default.
+  aspectRatio?: string | null;
 }>;
 
 // Starts the interaction. Returns as soon as the API accepts it — which, with `background`,
@@ -351,6 +377,9 @@ export async function createVideoInteraction(
       model,
       background: !modelsRejectingBackground.has(model),
       uriDelivery: !modelsRejectingResponseFormat.has(model),
+      aspectRatio: modelsRejectingAspectRatio.has(model)
+        ? null
+        : input.aspectRatio,
     });
     try {
       const response = await geminiFetch('interactions', {
@@ -372,6 +401,22 @@ export async function createVideoInteraction(
           `[gemini-interactions] ${model} rejected \`background\`; awaiting the render inline.`,
         );
         modelsRejectingBackground.add(model);
+        continue;
+      }
+      // Checked BEFORE the response_format rung below, and that order is load-bearing: a 400
+      // reading "unknown field response_format.aspect_ratio" matches both needles, and taking
+      // the broader rung would drop URI delivery along with the ratio for the rest of the
+      // process.
+      if (
+        body.response_format?.aspect_ratio !== undefined &&
+        rejectsField(error, 'aspect_ratio', 'aspect ratio') &&
+        !modelsRejectingAspectRatio.has(model)
+      ) {
+        console.warn(
+          `[gemini-interactions] ${model} rejected \`aspect_ratio\`; rendering at the ` +
+            "model's own default shape.",
+        );
+        modelsRejectingAspectRatio.add(model);
         continue;
       }
       if (

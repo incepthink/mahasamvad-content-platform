@@ -15,6 +15,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   IMAGE_PROMPT_MAX_CHARS,
+  DEFAULT_MOTION_ASPECT,
   MOTION_ASPECTS,
   POSTER_HEADING_MAX_CHARS,
   POSTER_TEXT_MIN_CHARS,
@@ -50,24 +51,8 @@ import {
  */
 export const DOC_STORAGE_KEY = 'dgipr.mediaRoom.document';
 
-// WHAT THE डायनॅमिक पोस्टर FORM OFFERS as the clip's shape — the two frames a department
-// actually publishes into. 'source' (पोस्टरसारखाच, the poster's own ratio) is deliberately
-// NOT offered here: the officer chooses the frame, not the input's shape.
-//
-// Removed from the PICKER only, never from the contract. `MOTION_ASPECTS` still carries it,
-// the route still accepts it, and a row with no stored aspect still falls back to it
-// (DEFAULT_MOTION_ASPECT in @dgipr/schemas) — so every Dynamic Poster made before this keeps
-// rendering exactly as it did. Filtering the shared list rather than hand-writing a second
-// one is what keeps the two from drifting if a third frame is ever added.
-export const OFFERED_MOTION_ASPECTS = MOTION_ASPECTS.filter(
-  (value) => value !== 'source',
-);
-
-// The form's default, now that the poster's own shape is not on offer. Portrait, because that
-// is the frame these clips are made for (a reel or a story); either choice PADS the poster
-// into the frame rather than cropping it (fitImageToAspect on the API side), so neither one
-// can lose a side of the artwork the way the pre-0053 renders did.
-const DEFAULT_OFFERED_MOTION_ASPECT: MotionAspect = '9:16';
+// Preserve all production shapes, including the poster's original ratio.
+export const OFFERED_MOTION_ASPECTS = MOTION_ASPECTS;
 
 export type PrefillState = 'none' | 'loading' | 'applied' | 'failed';
 
@@ -133,10 +118,9 @@ export function useCreateForm() {
   // render at all: the officer's direction here is optional, where the note is a floor
   // everywhere else.
   const [motionDirection, setMotionDirection] = useState('');
-  // The clip's shape. See OFFERED_MOTION_ASPECTS above for why the poster's own ratio is not
-  // one of the choices offered.
+  // The clip defaults to the poster's own shape; fixed publishing frames are optional.
   const [motionAspect, setMotionAspect] = useState<MotionAspect>(
-    DEFAULT_OFFERED_MOTION_ASPECT,
+    DEFAULT_MOTION_ASPECT,
   );
 
   const [submitting, setSubmitting] = useState(false);
@@ -404,6 +388,11 @@ export function useCreateForm() {
   // ticked but unread is read first, and the submit resumes from the effect below once
   // its text lands.
   const startSubmit = async () => {
+    // A document attached on another format does not belong to an image-only run.
+    if (isDynamicPoster) {
+      await submit();
+      return;
+    }
     if (docStatus === 'unread' || docStatus === 'reading') {
       setAwaitingRead(true);
       if (docStatus === 'unread') {

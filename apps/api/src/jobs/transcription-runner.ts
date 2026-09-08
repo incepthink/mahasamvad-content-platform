@@ -38,6 +38,7 @@ import {
   type SupabaseClient,
   type TranscriptionFileEntry,
 } from '@dgipr/database';
+import { trimmedAudioPath } from './audio-trim.js';
 import { combineTranscripts } from '@dgipr/schemas';
 
 import { batchBySize } from './audio-batches.js';
@@ -135,7 +136,16 @@ export function startTranscriptionJob(
           }
           // An entry without a sourceUrl was uploaded, so it has a storagePath; the
           // fallback is unreachable defence rather than a real case.
-          const storagePath = entry.storagePath ?? '';
+          //
+          // THE OFFICER'S CHOSEN WINDOW IS CUT HERE, in storage, before the provider is
+          // pointed at anything (jobs/audio-trim.ts). It hands back the original's own path
+          // untouched when the whole recording was wanted, so an untrimmed run does exactly
+          // what it did before — and because the cut is an object of its own, a retry finds it
+          // already there and spends no second ffmpeg run.
+          const storagePath =
+            entry.storagePath === undefined
+              ? ''
+              : await trimmedAudioPath(client, DLO_UPLOADS_BUCKET, entry);
           if (handOffUrls) {
             // THE RECORDING IS NEVER LOADED. A presigned GET URL goes to the provider and
             // the audio travels S3 -> transcriber directly. This is what removes the ~480 MB

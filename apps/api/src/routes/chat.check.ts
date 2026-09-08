@@ -6,8 +6,7 @@
 // which is what turns "the vector store was never built" into an assertion rather than a
 // hope: the OpenAI control at the end drives the same history and does hit it.
 //
-// Run from apps/api:  npx tsx --env-file=../../.env src/routes/chat.check.ts
-// (the env file is only for the storage variables registerChatRoutes reads at registration.)
+// Run from apps/api: pnpm exec tsx src/routes/chat.check.ts
 import Fastify from 'fastify';
 import { registerChatRoutes } from './chat.js';
 
@@ -133,6 +132,11 @@ function builder(table: string): unknown {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const client = { from: (table: string) => builder(table) } as any;
 
+process.env.CLOUDFRONT_POSTERS_URL = 'https://example.invalid';
+globalThis.fetch = async () => {
+  throw new Error('Unexpected network request in offline chat routing check');
+};
+
 const app = Fastify();
 registerChatRoutes(app, client);
 
@@ -158,6 +162,7 @@ function frames(text: string): { type: string; [k: string]: unknown }[] {
 }
 
 async function main(): Promise<void> {
+  delete process.env.CHAT_DEFAULT_PROVIDER;
   delete process.env.QWEN_BASE_URL;
 
   console.log('GET /chat/providers');
@@ -225,6 +230,7 @@ async function main(): Promise<void> {
   inserted = [];
   const pdfOnOpenAi = await send({
     content: 'read this',
+    provider: 'openai',
     attachments: [{ kind: 'document', name: 'gr.pdf', documentId: PDF_ID }],
   });
   check(
@@ -281,7 +287,7 @@ async function main(): Promise<void> {
   console.log('\ncontrol: the OpenAI lane DOES prepare documents');
   seedHistory();
   inserted = [];
-  const openaiTurn = await send({ content: 'hello' });
+  const openaiTurn = await send({ content: 'hello', provider: 'openai' });
   const oaErr = frames(openaiTurn.text).find((e) => e.type === 'error');
   const oaRow = inserted.find((r) => r.role === 'assistant');
   check(
@@ -293,6 +299,124 @@ async function main(): Promise<void> {
     'and an untyped failure keeps the generic Marathi fallback',
     oaErr?.message === 'उत्तर तयार करता आले नाही. पुन्हा प्रयत्न करा.',
     oaErr,
+  );
+
+  console.log('\nlegacy frontend: provider omitted');
+  for (const configured of [undefined, '', 'qwen', 'openai', ' OpenAI ']) {
+    if (configured === undefined) delete process.env.CHAT_DEFAULT_PROVIDER;
+    else process.env.CHAT_DEFAULT_PROVIDER = configured;
+    seedHistory();
+    inserted = [];
+    const legacy = await send({ content: 'hello', attachments: [] });
+    const row = inserted.find((entry) => entry.role === 'assistant');
+    const usesOpenAi = configured?.trim().toLowerCase() === 'openai';
+    check(
+      `default ${JSON.stringify(configured)} routes the old request to ${usesOpenAi ? 'OpenAI' : 'Qwen'}`,
+      legacy.status === 200 &&
+        (usesOpenAi ? /STUB_CHAT_FILES_READ/ : /QWEN_BASE_URL/).test(
+          String(row?.error ?? ''),
+        ),
+      row?.error,
+    );
+  }
+
+  // The override must happen before the attachment guard, not just at dispatch.
+  inserted = [];
+  const legacyPdf = await send({
+    content: 'read this',
+    attachments: [{ kind: 'document', name: 'gr.pdf', documentId: PDF_ID }],
+  });
+  check(
+    'OpenAI default allows the old PDF request through to document resolution',
+    legacyPdf.status === 500 && /STUB_CHAT_FILES_READ/.test(legacyPdf.text),
+    legacyPdf,
+  );
+  const explicitQwen = await send({
+    content: 'read this',
+    provider: 'qwen',
+    attachments: [{ kind: 'document', name: 'gr.pdf', documentId: PDF_ID }],
+  });
+  check(
+    'an explicit Qwen request still uses Qwen capabilities under an OpenAI default',
+    explicitQwen.status === 400 && /Qwen/.test(explicitQwen.text),
+    explicitQwen,
+  );
+
+  process.env.CHAT_DEFAULT_PROVIDER = 'gpt';
+  inserted = [];
+  const invalidDefault = await send({ content: 'hello' });
+  check(
+    'an invalid default fails clearly before persisting a turn',
+    invalidDefault.status === 500 &&
+      /Unknown CHAT_DEFAULT_PROVIDER/.test(invalidDefault.text) &&
+      inserted.length === 0,
+    invalidDefault,
+  );
+
+  console.log('\nlegacy text turn completes on OpenAI after a Qwen answer');
+  process.env.CHAT_DEFAULT_PROVIDER = 'openai';
+  process.env.OPENAI_API_KEY = 'offline-test-key';
+  seedHistory();
+  for (const row of messages) {
+    row.attachments = [];
+    row.openai_response_id = null;
+    if (row.role === 'assistant') row.model = 'Qwen/test';
+  }
+  inserted = [];
+  const requests: Record<string, unknown>[] = [];
+  globalThis.fetch = async (url, init) => {
+    if (String(url) !== 'https://api.openai.com/v1/responses') {
+      throw new Error('Unexpected URL in offline OpenAI check');
+    }
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    requests.push(body);
+    const events = [
+      { type: 'response.output_text.delta', delta: 'Test answer' },
+      {
+        type: 'response.completed',
+        response: {
+          id: 'resp_offline',
+          status: 'completed',
+          model: body.model,
+          output: [
+            {
+              type: 'message',
+              content: [{ type: 'output_text', text: 'Test answer' }],
+            },
+          ],
+        },
+      },
+    ];
+    return new Response(
+      events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''),
+      { headers: { 'content-type': 'text/event-stream' } },
+    );
+  };
+  const completed = await send({ content: 'hello', attachments: [] });
+  const completedEvents = frames(completed.text);
+  const completedRow = inserted.find((row) => row.role === 'assistant');
+  check('exactly one OpenAI Responses call was made', requests.length === 1);
+  check(
+    'the previous Qwen conversation is replayed without an OpenAI response chain',
+    requests[0]?.previous_response_id === undefined &&
+      JSON.stringify(requests[0]?.input).includes('earlier answer'),
+    requests[0],
+  );
+  check(
+    'the old client receives its supported delta and terminal done events',
+    completed.status === 200 &&
+      completedEvents.some((event) => event.type === 'delta') &&
+      completedEvents.some((event) => event.type === 'done') &&
+      !completedEvents.some((event) => event.type === 'error'),
+    completedEvents,
+  );
+  check(
+    'the GPT answer and response ID are persisted',
+    completedRow?.content === 'Test answer' &&
+      completedRow?.model === requests[0]?.model &&
+      completedRow?.openai_response_id === 'resp_offline' &&
+      completedRow?.error === null,
+    completedRow,
   );
 
   console.log(failed === 0 ? '\nAll checks passed.' : `\n${failed} FAILED`);

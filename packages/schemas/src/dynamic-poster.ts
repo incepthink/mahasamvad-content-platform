@@ -163,3 +163,90 @@ export const MotionFeedbackRequestSchema = z.object({
   feedback: z.string().trim().min(1).max(MOTION_DIRECTION_MAX_CHARS),
 });
 export type MotionFeedbackRequest = z.infer<typeof MotionFeedbackRequestSchema>;
+
+// THE HAND TRIM — POST /api/generations/:id/motion/crop.
+//
+// A finished clip, cut down to a rectangle the officer drew over it. Unlike everything else on
+// this lane it is a LOCAL operation: ffmpeg on the API box, no model call, nothing billed — so
+// it can be repeated as often as they like, and each attempt still writes its own version so
+// the clip they already have survives a trim they turn out not to want.
+//
+// The rectangle is stated as FRACTIONS of the clip's own width and height, because the officer
+// draws it over a `<video>` the browser has scaled to fit the card and its displayed size has
+// nothing to do with the real frame. Same 0..1 convention FeedbackRegionSchema uses on a
+// poster, and deliberately its own shape rather than an import of it: that one is a pointing
+// gesture whose minimum is a few pixels, and this one is a cut whose minimum has to be big
+// enough to still be a video.
+//
+// One thing this does NOT do, and the UI says so: it does not follow the clip into the Gemini
+// conversation. The chain point still names the model's own last video, so a later AI follow-up
+// comes back at full frame and has to be trimmed again.
+
+// The smallest share of a side a trim may keep. Generous enough for a genuine strip — a ticker
+// along the foot of a poster — while refusing the accidental flick of a drag that would
+// otherwise cost a job to produce a few unusable pixels.
+export const MOTION_CROP_MIN_SIDE = 0.05;
+
+// At or above this on BOTH axes the rectangle is the whole clip, and re-encoding it would cost
+// a generation of quality to produce the picture the officer is already looking at.
+export const MOTION_CROP_MAX_KEPT = 0.995;
+
+export const MotionCropSchema = z
+  .object({
+    x: z.number().min(0).max(1),
+    y: z.number().min(0).max(1),
+    width: z.number().min(MOTION_CROP_MIN_SIDE).max(1),
+    height: z.number().min(MOTION_CROP_MIN_SIDE).max(1),
+  })
+  .superRefine((rect, ctx) => {
+    // Small epsilon on both edges: a box dragged to the very edge of a scaled video lands on
+    // 1.0000001 as often as on 1, and refusing that would refuse the most ordinary gesture
+    // there is. FeedbackRegionSchema makes the same allowance for the same reason.
+    if (rect.x + rect.width > 1.0001) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'The selection runs past the right edge of the clip.',
+        path: ['width'],
+      });
+    }
+    if (rect.y + rect.height > 1.0001) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'The selection runs past the bottom edge of the clip.',
+        path: ['height'],
+      });
+    }
+  });
+export type MotionCrop = z.infer<typeof MotionCropSchema>;
+
+/** True when the rectangle keeps effectively the whole clip, so trimming it would do nothing. */
+export function isWholeClipCrop(rect: MotionCrop): boolean {
+  return (
+    rect.width >= MOTION_CROP_MAX_KEPT && rect.height >= MOTION_CROP_MAX_KEPT
+  );
+}
+
+export const MotionCropRequestSchema = z.object({
+  crop: MotionCropSchema,
+  // WHICH version the rectangle was drawn over, 1-based in the order the detail payload lists
+  // them. An INDEX rather than a storage path, for the reason every other path on this lane is
+  // checked before use: an index can only ever name something this run already produced, while
+  // a path is a string anyone can type. Omitted means the run's current clip, which is what an
+  // older web build sends and what the officer is looking at in the common case.
+  //
+  // A trim of an older version still writes a NEW version at the end of the strip — versions
+  // are immutable here, and the newest is always the current one — so nothing is overwritten
+  // by going back to re-cut a clip the officer preferred.
+  sourceVersion: z.number().int().min(1).optional(),
+  // Stamp the department's badge and footer band onto the trimmed clip.
+  //
+  // A trim is the one thing on this lane that can legitimately need them: the source is
+  // finished artwork that already carries its own branding, and cutting one panel out of it
+  // leaves that branding outside the rectangle. So the crop tool previews where they would sit
+  // and this carries the officer's answer through to the encode, where they are composited at
+  // the SAME fractions of the frame the preview used (SOCIAL_LOCKUP_*_RATIO).
+  //
+  // Defaulted false so an older web build's request means exactly what it meant before.
+  chrome: z.boolean().default(false),
+});
+export type MotionCropRequest = z.infer<typeof MotionCropRequestSchema>;

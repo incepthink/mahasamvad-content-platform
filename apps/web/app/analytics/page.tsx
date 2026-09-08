@@ -32,6 +32,8 @@ import { ANALYTICS_FEATURE_LABELS } from '../../lib/analytics';
 import { useAnalytics } from '../../lib/useAnalytics';
 import { STR } from '../../lib/strings';
 import { ErrorNotice } from '../../components/ErrorNotice';
+import { PageBackdrop } from '../../components/common/PageBackdrop';
+import { ANALYTICS_DOODLES } from '../../lib/doodleMarks';
 
 function AnalyticsPageBody() {
   const router = useRouter();
@@ -53,6 +55,11 @@ function AnalyticsPageBody() {
 
   return (
     <main className="page">
+      {/* Wallpaper for this lane: what an officer reads here is how much the department
+          has used the platform. The marks are decorative only, and the vocabulary lives
+          beside the other lanes’ in lib/doodleMarks.ts. */}
+      <PageBackdrop marks={ANALYTICS_DOODLES} seed={47} />
+
       <header className="page-head">
         <div className="page-head-text">
           <h1 className="page-title">{STR.analyticsTitle}</h1>

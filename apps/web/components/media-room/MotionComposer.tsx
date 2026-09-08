@@ -121,19 +121,17 @@ export function MotionComposer({ form }: { form: Form }) {
  * one thing an officer cannot see until the clip comes back, and bars nobody warned them
  * about read as a defect.
  *
- * The poster's own ratio is not on offer — see OFFERED_MOTION_ASPECTS in useCreateForm for
- * why, and why it is filtered off the shared list rather than written out a second time.
+ * All production shapes are available, including the poster's own ratio.
  */
 function MotionAspectField({ form }: { form: Form }) {
   return (
     <div className="mt-4 border-t pt-4">
-      <label
+      <p
         className="text-foreground flex items-center gap-2 text-sm font-semibold"
-        htmlFor="motion-aspect-9-16"
       >
         <Ratio size={16} aria-hidden="true" />
         {STR.motionAspectLabel}
-      </label>
+      </p>
       <p className="text-muted-foreground mt-1 text-sm">
         {STR.motionAspectHint}
       </p>
@@ -160,9 +158,11 @@ function MotionAspectField({ form }: { form: Form }) {
                 form.submitting && 'pointer-events-none opacity-50',
               )}
             >
-              {value === '9:16'
-                ? STR.motionAspectPortrait
-                : STR.motionAspectLandscape}
+              {value === 'source'
+                ? STR.motionAspectSource
+                : value === '9:16'
+                  ? STR.motionAspectPortrait
+                  : STR.motionAspectLandscape}
             </button>
           );
         })}

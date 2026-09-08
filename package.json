@@ -12,7 +12,8 @@
     "format": "prettier . --write",
     "format:check": "prettier . --check",
     "n8n:push": "node --env-file-if-exists=.env n8n/push-workflows.mjs",
-    "db:tunnel": "bash scripts/db-tunnel.sh"
+    "db:tunnel": "bash scripts/db-tunnel.sh",
+    "finetune:export": "pnpm --filter @dgipr/content-engine finetune:export"
   },
   "devDependencies": {
     "@eslint/js": "^9.30.1",

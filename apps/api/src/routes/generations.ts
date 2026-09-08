@@ -61,8 +61,10 @@ import {
   MOTION_SOURCE_MAX_BYTES,
   MOTION_SOURCE_MAX_MB,
   MOTION_SOURCE_PREFIX,
+  MotionCropRequestSchema,
   MotionFeedbackRequestSchema,
   GenerationStepSchema,
+  isWholeClipCrop,
   PosterFeedbackRequestSchema,
   PosterImageFeedbackRequestSchema,
   RegeneratePosterRequestSchema,
@@ -121,6 +123,7 @@ import {
 import {
   motionVersionsOf,
   startDynamicPosterJob,
+  startMotionCropJob,
   startMotionFeedbackJob,
 } from '../jobs/dynamic-poster.js';
 import { rememberDesignations } from '../jobs/designation-writeback.js';
@@ -1731,6 +1734,66 @@ export function registerGenerationRoutes(
           .send({ error: { message: 'This run is already busy.' } });
       }
       startMotionFeedbackJob(client, row.id, body.feedback);
+      return reply.code(202).send({ ok: true });
+    },
+  );
+
+  // The hand trim beside it: cut the finished clip down to a rectangle the officer drew over
+  // it. Local ffmpeg, no model call and nothing billed — but the same guards, because it writes
+  // a new version onto the same row and two writers would race for the same version number.
+  app.post<{ Params: { id: string } }>(
+    '/generations/:id/motion/crop',
+    async (request, reply) => {
+      const body = MotionCropRequestSchema.parse(request.body);
+      const row = await getGeneration(client, request.params.id);
+      if (!row) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'Generation not found.' } });
+      }
+      if (!isDynamicPosterCategory(row.category)) {
+        return reply
+          .code(400)
+          .send({ error: { message: 'This run is not a Dynamic Poster.' } });
+      }
+      if (!row.motionPath) {
+        return reply
+          .code(409)
+          .send({ error: { message: 'This run has no clip to crop yet.' } });
+      }
+      // Refused HERE rather than in the job, so a selection that would change nothing never
+      // costs an encode or a version — and the officer is told why in a language they read,
+      // this being one of the few 4xx a person actually sees on this card.
+      if (isWholeClipCrop(body.crop)) {
+        return reply.code(400).send({
+          error: {
+            message:
+              'निवडलेला भाग संपूर्ण व्हिडिओइतकाच आहे. कृपया त्याहून लहान भाग निवडा.',
+          },
+        });
+      }
+      // An index into this run's OWN version list, so a crop can never be pointed at another
+      // run's object — and refused here rather than in the job, where an out-of-range one would
+      // surface as a failed row instead of a bad request.
+      if (body.sourceVersion !== undefined) {
+        const revisions = await listRevisions(client, row.id);
+        if (body.sourceVersion > motionVersionsOf(row, revisions).length) {
+          return reply.code(400).send({
+            error: { message: 'That version of the clip does not exist.' },
+          });
+        }
+      }
+      if (isJobRunning(row.id) || row.status === 'running') {
+        return reply
+          .code(409)
+          .send({ error: { message: 'This run is already busy.' } });
+      }
+      startMotionCropJob(client, row.id, body.crop, {
+        chrome: body.chrome,
+        ...(body.sourceVersion === undefined
+          ? {}
+          : { sourceVersion: body.sourceVersion }),
+      });
       return reply.code(202).send({ ok: true });
     },
   );

@@ -22,11 +22,12 @@
  * attached in order to be read whole and the officer was answering a question with no
  * consequence.
  *
- * Each file is read by its own headless <DocumentIntake>, which is where the upload, the
+ * Each file is read by its own <DocumentIntake>, which is where the upload, the
  * poll, the whole-document selection, the OCR read and the HTML→prose conversion already
  * live. Nothing about reading a document is reimplemented here. This owns the LIST, and the
  * reasons a list needs owning are that the page needs one combined string, one aggregate
- * status to gate its submit on, and one row of cards.
+ * status to gate its submit on, and one row of cards. Opening a card exposes the existing
+ * page selection, text correction and OCR retry controls. Uploaded jobs survive refresh.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -45,7 +46,13 @@ import { formatFileSize } from '@/lib/fileSize';
 import { STR } from '@/lib/strings';
 import type { AttachmentItem } from './AttachmentStrip';
 
-type Slot = Readonly<{ id: string; file: File }>;
+type Slot = Readonly<{
+  id: string;
+  name: string;
+  size: number;
+  storageKey: string;
+  file?: File;
+}>;
 
 export type DocumentAttachments = Readonly<{
   // Every attached document's text, blank-line separated, in the order they were attached.
@@ -72,8 +79,7 @@ export type DocumentAttachments = Readonly<{
   // one waiting, so this is safe to call over a mixed list.
   requestRead: () => void;
   clear: () => void;
-  // The hidden file input plus one headless reader per file. Renders nothing visible, so it
-  // can sit anywhere inside the caller's card.
+  // The hidden picker and each document reader; opening an attachment reveals its reader.
   readers: ReactNode;
 }>;
 
@@ -110,11 +116,62 @@ export function useDocumentAttachments({
   // — the rule <DocumentIntake> already applies to its own `readRequest`.
   const [readRequest, setReadRequest] = useState(0);
   const fileInput = useRef<HTMLInputElement>(null);
-  const nextId = useRef(0);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [restored, setRestored] = useState(false);
   // What `add` compares a new pick against. A ref rather than the state itself so the
   // acceptance check (which reports refusals) stays out of a state updater, where React may
   // legitimately run it twice.
   const slotsRef = useRef<readonly Slot[]>(slots);
+
+  // Restore uploaded jobs, including the single-document key used by the old form.
+  // Unique slot IDs prevent a new pick from adopting a different file's cached job.
+  useEffect(() => {
+    let saved: Slot[] = [];
+    try {
+      const parsed: unknown = JSON.parse(
+        window.sessionStorage.getItem(`${storagePrefix}.attachments`) ?? '[]',
+      );
+      if (Array.isArray(parsed)) {
+        saved = parsed.filter(
+          (slot): slot is Slot =>
+            typeof slot?.id === 'string' &&
+            typeof slot?.name === 'string' &&
+            typeof slot?.size === 'number' &&
+            typeof slot?.storageKey === 'string' &&
+            slot.storageKey.startsWith(`${storagePrefix}.`) &&
+            !!window.sessionStorage.getItem(slot.storageKey),
+        );
+      }
+    } catch {
+      // A stale local manifest does not prevent attaching a fresh document.
+    }
+    const legacyJob = window.sessionStorage.getItem(storagePrefix);
+    if (legacyJob && saved.length === 0) {
+      const id = crypto.randomUUID();
+      const storageKey = `${storagePrefix}.${id}`;
+      window.sessionStorage.setItem(storageKey, legacyJob);
+      window.sessionStorage.removeItem(storagePrefix);
+      saved = [{ id, name: STR.docUploadTitle, size: 0, storageKey }];
+    }
+    slotsRef.current = saved;
+    setSlots(saved);
+    setRestored(true);
+  }, [storagePrefix]);
+
+  useEffect(() => {
+    if (!restored) return;
+    window.sessionStorage.setItem(
+      `${storagePrefix}.attachments`,
+      JSON.stringify(
+        slots.map(({ id, name, size, storageKey }) => ({
+          id,
+          name,
+          size,
+          storageKey,
+        })),
+      ),
+    );
+  }, [slots, restored, storagePrefix]);
 
   const text = useMemo(
     () =>
@@ -132,8 +189,8 @@ export function useDocumentAttachments({
     const list = slots.map((slot) => statuses[slot.id] ?? 'reading');
     if (list.includes('unread')) return 'unread';
     if (list.includes('reading')) return 'reading';
-    if (text.length > 0) return 'ready';
     if (list.includes('failed')) return 'failed';
+    if (text.length > 0) return 'ready';
     return 'empty';
   }, [slots, statuses, text]);
 
@@ -159,7 +216,8 @@ export function useDocumentAttachments({
     (id: string) => {
       // A reader adopts a job from sessionStorage before it looks at its file, so a key left
       // behind would re-attach a document the officer has just dropped.
-      window.sessionStorage.removeItem(`${storagePrefix}.${id}`);
+      const slot = slotsRef.current.find((item) => item.id === id);
+      if (slot) window.sessionStorage.removeItem(slot.storageKey);
       write(slotsRef.current.filter((slot) => slot.id !== id));
       const drop = <T,>(map: Readonly<Record<string, T>>) => {
         const next = { ...map };
@@ -175,7 +233,7 @@ export function useDocumentAttachments({
 
   const clear = useCallback(() => {
     for (const slot of slotsRef.current) {
-      window.sessionStorage.removeItem(`${storagePrefix}.${slot.id}`);
+      window.sessionStorage.removeItem(slot.storageKey);
     }
     write([]);
     setTexts({});
@@ -188,8 +246,13 @@ export function useDocumentAttachments({
       if (!list || list.length === 0) return;
       const current = slotsRef.current;
       const { files, added, error } = acceptFilePicks({
-        current: current.map((slot) => slot.file),
-        picked: Array.from(list),
+        current: [],
+        picked: Array.from(list).filter(
+          (file) =>
+            !current.some(
+              (slot) => slot.name === file.name && slot.size === file.size,
+            ),
+        ),
         isAllowedName: isDocumentFileName,
         typeError: STR.docUnsupported,
         // The reading backend's own per-file ceiling, so an over-size scan is refused here
@@ -200,13 +263,19 @@ export function useDocumentAttachments({
       if (added === 0) return;
       write([
         ...current,
-        ...files.slice(current.length).map((file) => ({
-          id: `doc-${nextId.current++}`,
-          file,
-        })),
+        ...files.map((file) => {
+          const id = crypto.randomUUID();
+          return {
+            id,
+            file,
+            name: file.name,
+            size: file.size,
+            storageKey: `${storagePrefix}.${id}`,
+          };
+        }),
       ]);
     },
-    [onError, write],
+    [onError, write, storagePrefix],
   );
 
   const items = useMemo<AttachmentItem[]>(
@@ -216,7 +285,7 @@ export function useDocumentAttachments({
         const info = infos[slot.id] ?? null;
         return {
           id: slot.id,
-          name: info?.fileName ?? slot.file.name,
+          name: info?.fileName ?? slot.name,
           icon: FileText,
           meta:
             slotStatus === 'reading'
@@ -227,14 +296,19 @@ export function useDocumentAttachments({
                   ? STR.attachmentFailed
                   : info?.pageCount != null
                     ? `${info.pageCount.toLocaleString('mr-IN')} ${STR.attachmentPagesSuffix}`
-                    : formatFileSize(slot.file.size),
+                    : formatFileSize(slot.size),
           busy: slotStatus === 'reading',
           failed: slotStatus === 'failed',
-          removeLabel: `${STR.docRemove}: ${slot.file.name}`,
+          removeLabel: `${STR.docRemove}: ${info?.fileName ?? slot.name}`,
           onRemove: () => forget(slot.id),
+          open: openId === slot.id,
+          openLabel:
+            openId === slot.id ? STR.attachmentClose : STR.attachmentOpen,
+          onOpen: () =>
+            setOpenId((current) => (current === slot.id ? null : slot.id)),
         };
       }),
-    [slots, statuses, infos, forget],
+    [slots, statuses, infos, forget, openId],
   );
 
   const readers = (
@@ -254,10 +328,12 @@ export function useDocumentAttachments({
       {slots.map((slot) => (
         <DocumentIntake
           key={slot.id}
-          headless
-          storageKey={`${storagePrefix}.${slot.id}`}
+          headless={openId !== slot.id}
+          embedded
+          storageKey={slot.storageKey}
           feature={feature}
           file={slot.file}
+          onRemove={() => forget(slot.id)}
           readRequest={readRequest}
           onTextChange={(value) =>
             setTexts((prev) =>
@@ -265,6 +341,8 @@ export function useDocumentAttachments({
             )
           }
           onStatusChange={(slotStatus, info) => {
+            // Until an upload has produced a job, empty is still pending work.
+            if (slotStatus === 'empty' && !info) slotStatus = 'reading';
             setStatuses((prev) =>
               prev[slot.id] === slotStatus
                 ? prev
@@ -278,7 +356,11 @@ export function useDocumentAttachments({
             );
           }}
           onError={(message) => {
-            if (message) onError(message);
+            if (message) {
+              setStatuses((prev) => ({ ...prev, [slot.id]: 'failed' }));
+              setOpenId(slot.id);
+              onError(message);
+            }
           }}
         />
       ))}

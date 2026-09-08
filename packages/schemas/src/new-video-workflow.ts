@@ -33,6 +33,24 @@ export const NEW_VIDEO_IMAGE_MAX_BYTES = NEW_VIDEO_IMAGE_MAX_MB * 1024 * 1024;
 export const NEW_VIDEO_IMAGE_ACCEPT =
   'image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp';
 
+// THE SHAPE OF THE OUTPUT VIDEO, CHOSEN BY THE OFFICER, PER TURN.
+//
+// The Interactions API takes this natively as `response_format.aspect_ratio` ('16:9' | '9:16',
+// 16:9 being its own documented default), so the officer's choice is rendered rather than asked
+// for in words: nothing is appended to the prompt, which keeps this lane's one hard rule — the
+// prompt reaches Gemini VERBATIM — intact, and nothing is cropped afterwards, so no frame the
+// department paid for is thrown away to change its shape.
+//
+// Only the two the API names. There is deliberately no 'source' option as on the Dynamic
+// Poster lane (MOTION_ASPECTS): there the source is a poster with a shape of its own, and here
+// a turn may be text alone.
+export const NEW_VIDEO_ASPECTS = ['16:9', '9:16'] as const;
+export const NewVideoAspectSchema = z.enum(NEW_VIDEO_ASPECTS);
+export type NewVideoAspect = z.infer<typeof NewVideoAspectSchema>;
+
+// Landscape, matching both the API's own default and what a department publishes most of.
+export const DEFAULT_NEW_VIDEO_ASPECT: NewVideoAspect = '16:9';
+
 // How a turn is progressing, exactly as the brief asks. `queued` is set by the ROUTE before
 // it answers 202 — the client refreshes the moment the 202 lands, and a turn with no status
 // yet would read as finished (the /dlo re-extract rule).
@@ -126,6 +144,10 @@ export const NewVideoTurnRequestSchema = z.object({
   conversationId: z.string().uuid().optional(),
   prompt: z.string().min(1).max(NEW_VIDEO_PROMPT_MAX_CHARS),
   imageIds: z.array(z.string().uuid()).max(NEW_VIDEO_MAX_IMAGES).optional(),
+  // Optional so an older client — or a request written by hand — still sends a valid turn;
+  // the route supplies DEFAULT_NEW_VIDEO_ASPECT in its place rather than leaving the shape to
+  // whatever the model feels like.
+  aspect: NewVideoAspectSchema.optional(),
 });
 export type NewVideoTurnRequest = z.infer<typeof NewVideoTurnRequestSchema>;
 

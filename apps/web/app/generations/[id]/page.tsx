@@ -28,7 +28,11 @@ import { PosterPanel } from '../../../components/PosterPanel';
 import { PosterSkeleton } from '../../../components/PosterSkeleton';
 import { SocialPostView } from '../../../components/SocialPostView';
 import { PageBackdrop } from '../../../components/common/PageBackdrop';
-import { CREATIVE_DOODLES, NEWS_DOODLES } from '../../../lib/doodleMarks';
+import {
+  CREATIVE_ARTWORK,
+  PageArtwork,
+} from '../../../components/common/PageArtwork';
+import { NEWS_DOODLES } from '../../../lib/doodleMarks';
 
 // The API persists the provider's complete failure so the server keeps the request id and
 // coarse moderation diagnostics. That blob is useful in logs, not to an officer. OpenAI says
@@ -345,10 +349,14 @@ export default function GenerationDetailPage({
 
   return (
     <main className="page">
-      <PageBackdrop
-        marks={isDloArticle ? NEWS_DOODLES : CREATIVE_DOODLES}
-        seed={isDloArticle ? 31 : 19}
-      />
+      {/* The two lanes carry different KINDS of wallpaper, not two sets of the same
+          marks: Creative has its own drawing (PageArtwork), DLO keeps the sketched
+          newspaper marks (PageBackdrop). */}
+      {isDloArticle ? (
+        <PageBackdrop marks={NEWS_DOODLES} seed={31} />
+      ) : (
+        <PageArtwork src={CREATIVE_ARTWORK} />
+      )}
 
       <div
         className="btn-row"

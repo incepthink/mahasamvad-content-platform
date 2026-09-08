@@ -35,6 +35,8 @@ import { useCallback, useRef, useState } from 'react';
 import {
   CHAT_MAX_ATTACHMENTS,
   isImageFileName,
+  isPartialTrim,
+  type AudioTrim,
   type ChatAttachment,
   type YouTubeVideo,
 } from '@dgipr/schemas';
@@ -71,6 +73,11 @@ export type DraftAttachment = Readonly<{
   sourceUrl?: string;
   // The transcription run backing a recording or link, once one has been started.
   transcriptionId?: string;
+  // For a RECORDING: which part of it the officer chose on the trim slider. Absent means the
+  // whole thing, which is every attachment made before this feature and most made after it.
+  // Held on the draft rather than in a map beside it because a chat attachment already has a
+  // stable key of its own, which is exactly what a trim needs to survive a list edit.
+  trim?: AudioTrim;
 }>;
 
 const TRANSCRIPTION_POLL_INTERVAL_MS = 4000;
@@ -200,6 +207,8 @@ export function useChatAttachments(): {
   addDocuments: (files: readonly File[]) => void;
   addAudio: (files: readonly File[]) => void;
   addYouTube: (video: YouTubeVideo) => void;
+  // Which part of a recording to transcribe. `null` clears it back to the whole thing.
+  setTrim: (key: string, trim: AudioTrim | null) => void;
   remove: (key: string) => void;
   // The chips to put under the officer's turn the moment it is sent: kinds and names only,
   // because nothing has been read yet. Exactly what `prepare()` is about to work on, since
@@ -338,6 +347,23 @@ export function useChatAttachments(): {
     [add],
   );
 
+  const setTrim = useCallback((key: string, trim: AudioTrim | null) => {
+    setAttachments((current) =>
+      current.map((attachment) => {
+        if (attachment.key !== key) return attachment;
+        if (trim === null) {
+          // The KEY is removed rather than set to undefined: `preview()` and the turn's own
+          // chips spread these objects, and an explicit `trim: undefined` would travel with
+          // them and read as a field that is present.
+          const next: { trim?: AudioTrim } = { ...attachment };
+          delete next.trim;
+          return next as DraftAttachment;
+        }
+        return { ...attachment, trim };
+      }),
+    );
+  }, []);
+
   const remove = useCallback((key: string) => {
     setAttachments((current) =>
       current.filter((attachment) => attachment.key !== key),
@@ -407,6 +433,25 @@ export function useChatAttachments(): {
           if (draft.kind === 'audio') {
             if (!draft.file) throw new Error(STR.chatAttachFailed);
             form.append('files', draft.file);
+            // One recording per run here, so its position among the audio files is always 0.
+            // Omitted unless a genuine part was chosen — a window covering the whole
+            // recording would spend an ffmpeg run to reproduce the original.
+            if (draft.trim !== undefined && isPartialTrim(draft.trim)) {
+              form.append(
+                'audioTrims',
+                JSON.stringify([
+                  {
+                    index: 0,
+                    name: draft.file.name,
+                    startSeconds: draft.trim.startSeconds,
+                    endSeconds: draft.trim.endSeconds,
+                    ...(draft.trim.durationSeconds !== undefined
+                      ? { durationSeconds: draft.trim.durationSeconds }
+                      : {}),
+                  },
+                ]),
+              );
+            }
           } else {
             if (!draft.video) throw new Error(STR.chatAttachFailed);
             form.append('youtube', JSON.stringify([draft.video]));
@@ -509,6 +554,7 @@ export function useChatAttachments(): {
     addDocuments,
     addAudio,
     addYouTube,
+    setTrim,
     remove,
     preview,
     prepare,

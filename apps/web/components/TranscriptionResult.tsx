@@ -34,10 +34,12 @@ function StatusChip({ status }: { status: TranscriptionDetail['status'] }) {
 export function TranscriptionResult({
   detail,
   error,
+  onClose,
   onRetry,
 }: {
   detail: TranscriptionDetail | null;
   error: string | null;
+  onClose: () => void;
   onRetry?: () => void;
 }) {
   const router = useRouter();
@@ -197,9 +199,11 @@ export function TranscriptionResult({
             >
               {STR.downloadTxt}
             </Button>
+            <Button variant="outline" type="button" onClick={onClose}>
+              {STR.transcribeClose}
+            </Button>
             <span className="text-muted-foreground ms-auto text-sm">
-              {text.length.toLocaleString('mr-IN')}{' '}
-              {STR.transcribeCharsSuffix}
+              {text.length.toLocaleString('mr-IN')} {STR.transcribeCharsSuffix}
             </span>
           </div>
         </>

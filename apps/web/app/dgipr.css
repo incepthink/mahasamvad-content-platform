@@ -585,10 +585,39 @@ a {
   line-height: 0;
 }
 
+/* ---------- page artwork ----------
+   The other kind of wallpaper: one supplied illustration instead of a field of
+   sketched marks (see components/common/PageArtwork.tsx). A lane uses this OR
+   .page-backdrop, never both — two grounds at once read as noise — so this repeats
+   that layer's placement contract exactly: fixed to the viewport, spanning the CONTENT
+   COLUMN via --sidebar-w, z-index: -1 to sit above the canvas gradient and below every
+   in-flow element, and pointer-events: none.
+
+   THE OPACITY IS LOWER THAN THE DOODLE CEILING ON PURPOSE. A saturated drawing covers
+   most of its canvas where thin marks cover almost none of theirs, so the same value
+   would compete with running Devanagari. Every card on top is opaque white, so the
+   drawing reads only in the gutters and behind the page head.
+
+   `cover` with the image's own aspect ratio, so it fills the column without stretching
+   — the file itself carries preserveAspectRatio="none" and would distort to any box it
+   is given. */
+.page-artwork {
+  position: fixed;
+  inset-block: 0;
+  inset-inline: var(--sidebar-w, 0) 0;
+  z-index: -1;
+  pointer-events: none;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  opacity: 0.16;
+}
+
 /* Wallpaper is the one thing on the page that carries no meaning at all, so a reader
    who has asked for less motion and less visual noise gets a plain canvas. */
 @media (prefers-reduced-motion: reduce) {
-  .page-backdrop {
+  .page-backdrop,
+  .page-artwork {
     display: none;
   }
 }
@@ -2756,6 +2785,198 @@ details.fold[aria-disabled='true'] summary {
   background: #000;
 }
 
+/* ---------- the brand-chrome preview ---------- */
+
+/* The badge and footer band laid over the part of the clip being kept — shown only while the
+   crop tool is armed, since this lane's source poster already carries its own chrome and an
+   always-on overlay would duplicate it rather than preview it. Purely a preview: nothing here
+   reaches the stored file, so it never takes a pointer event — the surface below it is the
+   crop tool's, and a decoration that swallowed a drag would cost the officer the gesture.
+   Sized and placed by the component from the crop rectangle, whose corners are square, so this
+   deliberately carries no border radius.
+
+   `overflow: hidden` keeps the badge inside the selection on a very short rectangle (a trim
+   may keep as little as 5% of a side), where it would otherwise spill into the dimmed area and
+   read as a rendering fault. */
+.motion-chrome {
+  position: absolute;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* Both graphics carry their own aspect: the component sets a width and the height follows, so
+   the badge's proportions and the band's stay in the artwork rather than in this file. */
+.motion-chrome-logo {
+  position: absolute;
+  top: 0;
+  height: auto;
+  display: block;
+}
+
+.motion-chrome-footer {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* ---------- the hand trim (MotionCropBox) ---------- */
+
+/* The surface the rectangle is drawn on: the video's own box. `overflow: hidden` is
+   load-bearing rather than tidy — the scrim below is painted as one enormous spread shadow
+   around the selection, and without a clip it would darken the whole page. The radius matches
+   .motion-video so the dimmed area follows the clip's rounded corners. */
+.motion-crop {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: 14px;
+  cursor: crosshair;
+  /* The gestures here are drags. Without this a touch drag scrolls the page instead. */
+  touch-action: none;
+}
+
+.motion-crop.is-disabled {
+  pointer-events: none;
+}
+
+/* A locked rectangle cannot be drawn, only moved and scaled, so the dimmed area stops
+   advertising a gesture it will not accept. */
+.motion-crop.is-locked {
+  cursor: default;
+}
+
+/* The selection. Everything outside it is dimmed by the spread shadow rather than by four
+   positioned panels — one property, and it can never leave a seam between them. */
+.motion-crop-box {
+  position: absolute;
+  border: 2px solid #fff;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.45),
+    0 0 0 9999px rgba(0, 0, 0, 0.5);
+  cursor: move;
+}
+
+.motion-crop-box:focus-visible {
+  outline: 3px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* Rule-of-thirds guides, drawn as two gradients on one element so they cost no extra markup.
+   Pointer-transparent: they sit over the whole box and would otherwise swallow the drag. */
+.motion-crop-thirds {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(
+      to right,
+      transparent calc(33.333% - 1px),
+      rgba(255, 255, 255, 0.35) calc(33.333% - 1px),
+      rgba(255, 255, 255, 0.35) 33.333%,
+      transparent 33.333%,
+      transparent calc(66.666% - 1px),
+      rgba(255, 255, 255, 0.35) calc(66.666% - 1px),
+      rgba(255, 255, 255, 0.35) 66.666%,
+      transparent 66.666%
+    ),
+    linear-gradient(
+      to bottom,
+      transparent calc(33.333% - 1px),
+      rgba(255, 255, 255, 0.35) calc(33.333% - 1px),
+      rgba(255, 255, 255, 0.35) 33.333%,
+      transparent 33.333%,
+      transparent calc(66.666% - 1px),
+      rgba(255, 255, 255, 0.35) calc(66.666% - 1px),
+      rgba(255, 255, 255, 0.35) 66.666%,
+      transparent 66.666%
+    );
+}
+
+/* The eight grips. 22px square and centred ON the edge they move, which is what makes them
+   reachable with a fingertip on a phone without the drawn mark growing to match — the visible
+   dot is the ::after inside. */
+.motion-crop-handle {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+  display: block;
+  touch-action: none;
+}
+
+.motion-crop-handle::after {
+  content: '';
+  position: absolute;
+  inset: 6px;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.45);
+  border-radius: 2px;
+}
+
+.motion-crop-handle-nw {
+  left: 0;
+  top: 0;
+  cursor: nwse-resize;
+}
+.motion-crop-handle-n {
+  left: 50%;
+  top: 0;
+  cursor: ns-resize;
+}
+.motion-crop-handle-ne {
+  left: 100%;
+  top: 0;
+  cursor: nesw-resize;
+}
+.motion-crop-handle-e {
+  left: 100%;
+  top: 50%;
+  cursor: ew-resize;
+}
+.motion-crop-handle-se {
+  left: 100%;
+  top: 100%;
+  cursor: nwse-resize;
+}
+.motion-crop-handle-s {
+  left: 50%;
+  top: 100%;
+  cursor: ns-resize;
+}
+.motion-crop-handle-sw {
+  left: 0;
+  top: 100%;
+  cursor: nesw-resize;
+}
+.motion-crop-handle-w {
+  left: 0;
+  top: 50%;
+  cursor: ew-resize;
+}
+
+/* The controls under the clip while the tool is armed. Tinted rather than bordered, so it
+   reads as a mode the card is in rather than as a second card inside it. */
+.motion-crop-panel {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+}
+
+.motion-crop-panel .btn-row {
+  margin-top: 12px;
+}
+
+.motion-crop-size {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--text);
+}
+
 .motion-versions {
   margin-top: 18px;
 }
@@ -3153,6 +3374,21 @@ details.fold[aria-disabled='true'] summary {
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 12px;
+}
+
+/* The ratio presets beside the crop button. A ratio has no icon that could stand for it — the
+   two numbers ARE the label — so this is the one control in that row whose meaning is on its
+   face rather than only on its title, and it widens to hold them (the .canva-link idiom, for
+   the same reason). Tabular figures so ४:५ and ९:१६ do not set at different rhythms. */
+.motion-ratio-btn {
+  width: auto;
+  min-width: 46px;
+  padding: 0 10px;
+  font-size: 0.84rem;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 /* Canva requires its mark to be accompanied by visible action text. This keeps the control
@@ -5400,6 +5636,22 @@ a.thread-node:hover {
   font-size: 0.85rem;
   white-space: nowrap;
   flex: none;
+}
+
+/* A source that could not be read, said in the row's own status slot rather than as a
+   separate notice: the list is the account of what was attached, so the failure belongs
+   on the line it happened to. Colour is not carrying the meaning on its own — the text
+   says what went wrong (see the rule at the top of this file). */
+.file-row .file-size--failed {
+  color: var(--err);
+}
+
+/* The status slot doubles as a "still working" line, so it has to lay a spinner beside
+   its text without becoming a flex container in the two cases that are just text. */
+.file-row .file-size .spinner {
+  display: inline-block;
+  vertical-align: -2px;
+  margin-inline-end: 6px;
 }
 
 /* Pages landing one by one while a scanned PDF is read (PageReadProgress).
@@ -7924,6 +8176,14 @@ a.thread-node:hover {
   color: var(--err);
 }
 
+/* The chip's SECOND action — "which part of this recording?" — sharing the remove button's
+   geometry so the two read as one pair rather than two sizes of round button. It takes the
+   accent on hover rather than the error red: it opens something, it does not destroy
+   anything, and colour is the only thing distinguishing them at 26px. */
+.chat-tray-action:hover {
+  color: var(--accent);
+}
+
 /* ----- a picked picture -----
 
    A photograph is recognised by what it SHOWS, so it is drawn at a size that can
@@ -8063,6 +8323,51 @@ a.thread-node:hover {
 .chat-tool--off {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* THE OUTPUT SHAPE (/new-video-workflow only). A segmented pair on its own tinted track, so
+   the two read as one either/or control rather than as two more tools — the .segmented idiom
+   at the size the composer bar has room for. Icon-only like the tools beside it, with the
+   ratio itself on title + aria-label. */
+.chat-aspect {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  margin-left: 4px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.chat-aspect-option {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.chat-aspect-option:hover:not(.is-active) {
+  color: var(--accent-dark);
+  background: var(--accent-soft);
+}
+
+/* The chosen shape is filled rather than merely tinted: this control has no label of its own
+   on screen, so which one is selected has to be legible at a glance and without relying on
+   colour alone — the filled pill is a shape difference too. */
+.chat-aspect-option.is-active {
+  background: var(--accent);
+  color: #fff;
 }
 
 /* The one primary action on this screen, so it is filled rather than outlined —

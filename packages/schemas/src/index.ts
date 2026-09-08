@@ -14,11 +14,21 @@ export type ApiHealthResponse = Readonly<{
 // two modules never form an import cycle through this index.
 export * from './copy.js';
 
+// Where the DGIPR social poster's emblem badge and department footer sit, as fractions of the
+// poster width. Shared by poster-renderer (which stamps them) and apps/web (which lays the same
+// artwork over a Dynamic Poster clip in CSS), so the two cannot place them differently.
+export * from './poster-chrome.js';
+
 // Person → designation (पदनाम): the official title printed before a person's name, reviewed
 // before generating and applied to the Marathi article (both translations inherit it).
 // Exported BEFORE api.js and dlo.js, which import from it, so each name has exactly one
 // definition in this barrel (the copy.js/document.js precedent).
 export * from './designations.js';
+
+// The slice of a recording an officer chose to transcribe. Exported BEFORE dlo.js and
+// transcription.js, whose file entries carry it, so each name has exactly one definition in
+// this barrel (the copy.js/document.js precedent).
+export * from './audio-trim.js';
 
 // Dynamic Posters (/generations lane, migration 0052): a still poster uploaded by the
 // officer, motionised into a looping clip. Exported BEFORE api.js, which imports its version

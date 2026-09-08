@@ -252,6 +252,30 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
     refreshes the instant the 202 lands, and a row still reading `ready` stops its poll
     and sits there through the whole OCR. DLO can afford this where `/translate` cannot
     because the original file is still in the private bucket.
+- **A recording can be trimmed to the part that matters (2026-09-09, no migration).** Clicking a
+  recording's card on `/dlo`, `/transcribe` or `/chat` opens a waveform with two handles; the
+  window is cut with ffmpeg before the audio reaches the STT provider. Shapes + helpers →
+  `packages/schemas/src/audio-trim.ts` (`AudioTrim`, the sparse positional `audioTrims` wire
+  format, `isPartialTrim`, `formatTimecode`); the cut → `content-engine/src/intake/trim-audio.ts`;
+  the path swap both runners call → `apps/api/src/jobs/audio-trim.ts`; request parsing shared by
+  both create routes → `apps/api/src/routes/audio-trims.ts`; web → `components/common/
+AudioTrimDialog.tsx` + `AudioTrimRange.tsx` over `lib/audioWaveform.ts` and `lib/useAudioTrims.ts`,
+  with `components/ui/dialog.tsx` (the product's first modal, over Radix).
+  Six things to know. **THE AUDIO NEVER ENTERS THE API**: ffmpeg is handed the PRESIGNED S3 URL as
+  its input (its https protocol seeks with Range requests) and writes a temp file, so the
+  2026-08-30 no-bytes-in-memory arrangement is preserved — never "download then cut". **The helper
+  swaps a storage PATH**, which is why neither transcribe phase changed shape, and the window is
+  encoded in the object name so a retry is free and a re-trim can never serve a stale cut. `-ss`
+  and `-to` go BEFORE `-i` (input seeking; after it, ffmpeg decodes and discards everything ahead
+  of the start), with `-c copy` and `-avoid_negative_ts make_zero`. **The trim is a reading, not an
+  edit** — the original stays archived, and the window is kept on the file entry (`trim`, jsonb, no
+  migration) because a retry must reproduce it. **The `audioTrims` field is sparse and keyed by
+  POSITION** among the audio files, with the name as a check: a mismatch is a Marathi 400, because
+  applying one recording's window to another silently destroys the source. And **the waveform is
+  best-effort** — the duration is free from an `<audio>` element, the picture needs a full decode,
+  so it is capped at 50 MB and skipped above that (a bigger decode hangs the tab rather than
+  failing). Free harnesses: `npx tsx src/intake/trim-audio.ts --check` (18) and, from
+  content-engine, `npx tsx ../../apps/api/src/routes/audio-trims.ts` (18).
 - **Transcription (`/transcribe`) — recordings in, Marathi text out, nothing else.** The DLO
   intake job's transcribe phase as a product of its own: routes →
   `apps/api/src/routes/transcriptions.ts` (create/list/detail only — no review contract, no
@@ -585,9 +609,10 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   proving the lastFrame shape). No n8n anywhere on this path.
 - **Dynamic Posters (`category: 'dynamic_poster'`, migration 0052) — a finished still poster,
   motionised.** The one format on क्रिएटिव्ह आणि सोशल whose SOURCE is a picture rather than
-  text. Upload route + feedback route + two download proxies →
+  text. Upload route + feedback route + crop route + two download proxies →
   `apps/api/src/routes/generations.ts` (`POST /generations/motion-image`,
-  `POST /generations/:id/motion/feedback`, `GET /generations/:id/motion.{mp4,gif}`); job →
+  `POST /generations/:id/motion/feedback`, `POST /generations/:id/motion/crop`,
+  `GET /generations/:id/motion.{mp4,gif}`); jobs →
   `apps/api/src/jobs/dynamic-poster.ts`; step 1's prompt →
   `packages/content-engine/src/generation/motion-prompt.ts`; step 2 reuses
   `video/gemini-interactions-client.ts` (the /new-video-workflow client, unchanged); the GIF →
@@ -596,8 +621,22 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   `normalizeReferenceImage`); limits + wire shapes + the storage-path guard →
   `packages/schemas/src/dynamic-poster.ts`; web → the `dynamic_poster` card in
   `apps/web/app/page.tsx` (which swaps the note card for `MotionSourcePicker` + an AI प्रॉम्प्ट
-  box) and `components/DynamicPosterView.tsx` on the detail page.
-  Six things to know before changing it. **THE OUTPUT SHAPE IS AN ASPECT RATIO, AND THE
+  box) and `components/DynamicPosterView.tsx` + `components/MotionCropBox.tsx` on the detail
+  page.
+  **THE FINISHED CLIP CAN BE TRIMMED BY HAND** (2026-09-07, no migration): a rectangle the
+  officer drags over it, `cropVideoToRect` in `poster-renderer/src/video/crop-video.ts` beside
+  the `cropVideoToAspect` that already reframes a render on the way out, sharing its probe,
+  even-pixel rules and encoder. It is LOCAL ffmpeg — no model call, nothing billed — so it is
+  the one control here that can be pressed as often as the officer likes, but it is still a JOB
+  (`startMotionCropJob`, step `motion_crop`) because it re-encodes, re-derives the GIF and
+  uploads two objects. Three things not to undo: the trim is **not** best-effort where the
+  automatic reframe is (there the framing corrects something already paid for; here the trim IS
+  the request); it does **not** advance `motion_interaction_id`, so a later AI follow-up
+  legitimately returns at full frame and the panel says so; and sizes are evened BEFORE offsets
+  are pulled back inside the frame, or a corner-pinned rectangle lands a pixel past the source
+  and ffmpeg refuses it outright. Free harness — and the only thing that proves what ffmpeg
+  accepts: `pnpm --filter @dgipr/poster-renderer video:check:crop`.
+  Six more things to know before changing it. **THE OUTPUT SHAPE IS AN ASPECT RATIO, AND THE
   DEFAULT IS THE POSTER'S OWN** (`motion_aspect`, 0053; `'source'` | `'9:16'` | `'16:9'`, with
   null = `'source'`). It began as the poster's exact pixel RESOLUTION measured by sharp and
   demanded back — which a video model does not deliver, so the loudest requirement in the

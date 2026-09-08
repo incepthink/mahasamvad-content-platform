@@ -32,8 +32,10 @@
 // Banner and YouTube ignore designMode entirely.
 
 import { STR } from '../lib/strings';
-import { CREATIVE_DOODLES } from '../lib/doodleMarks';
-import { PageBackdrop } from '../components/common/PageBackdrop';
+import {
+  CREATIVE_ARTWORK,
+  PageArtwork,
+} from '../components/common/PageArtwork';
 import { ImagePromptBox } from '../components/media-room/ImagePromptBox';
 import { MotionComposer } from '../components/media-room/MotionComposer';
 import { NoteComposer } from '../components/media-room/NoteComposer';
@@ -47,10 +49,10 @@ export default function NewGenerationPage() {
     // No foot clearance: the submit is in the composer card (see NoteComposer), so
     // nothing is pinned over the last block or over the credit line any more.
     <main className="page">
-      {/* Wallpaper for this lane: what an officer makes here is a picture. The
-          marks are decorative only, and the vocabulary lives beside the other lanes'
-          in lib/doodleMarks.ts — see components/common/PageBackdrop.tsx. */}
-      <PageBackdrop marks={CREATIVE_DOODLES} seed={19} />
+      {/* Wallpaper for this lane: what an officer makes here is a picture, so this
+          lane carries its own drawing rather than the sketched marks the other lanes
+          scatter — see components/common/PageArtwork.tsx. Decorative only. */}
+      <PageArtwork src={CREATIVE_ARTWORK} />
 
       <header className="page-head">
         <div className="page-head-text">

@@ -121,15 +121,18 @@ export const STR = {
   // frame the officer publishes into, with the ratio kept beside it because that is what
   // they are used to reading on a design tool.
   motionAspectLabel: 'व्हिडिओचा आकार',
-  // The two frames the form offers. पोस्टरसारखाच (the poster's own ratio) was a third option
-  // here and is deliberately gone from the picker — it remains a valid stored value and the
-  // fallback for a row that carries none, so nothing already rendered changes.
+  // The three shapes the form offers. पोस्टरसारखाच is the DEFAULT and the only one that adds
+  // no bars at all: the poster goes to the model in its own shape and the clip is cropped back
+  // to it. The two fixed frames are for a department publishing into a reel or a landscape
+  // post, and they pad rather than crop.
+  motionAspectSource: 'पोस्टरसारखाच',
   motionAspectPortrait: 'उभा ९:१६',
   motionAspectLandscape: 'आडवा १६:९',
   // "The poster is padded" is the one thing they cannot see until the clip comes back, and bars
-  // nobody warned them about read as a defect — so the hint says it before the render.
+  // nobody warned them about read as a defect — so the hint says it before the render. It names
+  // the default's behaviour first, because that is the one where nothing is added.
   motionAspectHint:
-    'निवडलेल्या चौकटीत पोस्टर बसवले जाते आणि गरज असल्यास वर-खाली किंवा दोन्ही बाजूंना पोस्टरच्याच रंगाच्या पट्ट्या येतात — पोस्टरचा कोणताही भाग कापला जात नाही.',
+    'पोस्टरसारखाच निवडल्यास व्हिडिओ पोस्टरच्याच आकारात येतो. उभा किंवा आडवा निवडल्यास त्या चौकटीत पोस्टर बसवले जाते आणि गरज असल्यास वर-खाली किंवा दोन्ही बाजूंना पोस्टरच्याच रंगाच्या पट्ट्या येतात — पोस्टरचा कोणताही भाग कापला जात नाही.',
   // ---- the detail page ----
   motionOutputTitle: 'तयार झालेला डायनॅमिक पोस्टर',
   motionSourceCaption: 'मूळ पोस्टर',
@@ -148,6 +151,53 @@ export const STR = {
   motionVersionsLabel: 'आवृत्त्या',
   motionVersionInitial: 'पहिली आवृत्ती',
   motionPromptLabel: 'वापरलेला AI प्रॉम्प्ट',
+  // ---- the brand chrome on a trim ----
+  // The badge and footer drawn over the part being kept — and, since they are also what the
+  // trimmed clip is stamped with, this is a SETTING rather than a view control. Its labels say
+  // what pressing it does to the output, not what it does to the screen, because the officer
+  // judges the rectangle by where the branding lands on it and the two must agree.
+  motionChromeShow: 'लोगो व फूटर जोडा',
+  motionChromeHide: 'लोगो व फूटर नको',
+  motionChromeHint:
+    'निवडलेल्या भागावर शासनाचा लोगो व फूटर इथे दिसत आहेत — क्रॉप केल्यावर ते नेमक्या याच जागी व्हिडिओत जोडले जातील. नको असल्यास वरील बटणाने बंद करा.',
+  // ---- the hand trim ----
+  // A local ffmpeg cut, not a render: free, and repeatable as often as the officer likes. The
+  // hint says both of the things they cannot see — that it costs nothing, and that a later AI
+  // change comes back at full frame because the model knows nothing about a trim made here.
+  motionCropStart: 'व्हिडिओचा भाग निवडा (क्रॉप)',
+  motionCropStartOn: 'क्रॉप करणे बंद करा',
+  motionCropLabel: 'क्रॉप करायचा भाग',
+  motionCropHint:
+    'चौकट ओढून हवा तेवढा भाग निवडा. यात AI वापरले जात नाही, त्यामुळे खर्च नाही — नवीन आवृत्ती तयार होईल आणि जुनी तशीच राहील. यानंतर AI प्रॉम्प्टने बदल केल्यास व्हिडिओ पुन्हा पूर्ण आकारात येतो.',
+  motionCropRegionLabel:
+    'क्रॉप चौकट — ओढून हलवा, कोपऱ्यांतून आकार बदला, किंवा बाणांच्या कळांनी सरकवा',
+  motionCropRegionLockedLabel:
+    'ठरलेल्या आकाराची क्रॉप चौकट — ओढून हलवा, कोपऱ्यांतून लहान-मोठी करा; प्रमाण तेच राहील',
+  // ---- the ratio presets ----
+  // An exact 4:5 or 9:16 cannot be reached by dragging four edges, and that is the commonest
+  // thing this tool is used for — a poster that has to drop into an Instagram or X frame with
+  // no strip left over. These pills arm the tool with the shape already right, so the officer
+  // is left only with where over the poster it sits.
+  motionCropRatio: (label: string) => `${label} आकाराची चौकट`,
+  motionCropRatioOn: (label: string) => `${label} चौकट बंद करा`,
+  // Said on the disabled pill rather than left to a failed press: a 4:5 crop of a 4:5 clip is
+  // the whole clip, which the API refuses — and re-encoding it would cost a generation of
+  // quality to produce the picture already on screen.
+  motionCropRatioSame: (label: string) =>
+    `हा व्हिडिओ आधीच ${label} आकाराचा आहे — क्रॉप करण्याची गरज नाही`,
+  motionCropRatioLocked: (label: string) =>
+    `${label} प्रमाण निश्चित आहे. चौकट ओढून हवा तो भाग निवडा; कोपऱ्यांतून लहान-मोठी करता येईल, पण आकार तोच राहील.`,
+  motionCropApply: 'क्रॉप करा',
+  motionCropCancel: 'रद्द करा',
+  motionCropReset: 'पूर्ण व्हिडिओ',
+  motionCropResetRatio: 'सर्वात मोठी चौकट',
+  motionCropBusy: 'व्हिडिओ क्रॉप होत आहे…',
+  motionCropWholeClip: 'संपूर्ण व्हिडिओ निवडला आहे — त्याहून लहान भाग निवडा.',
+  // Read as "62% wide, 48% tall of the clip". Percentages rather than pixels because the
+  // officer is looking at a video the browser has scaled, and its displayed size is not the
+  // clip's own; the API maps the same fractions back onto the real frame.
+  motionCropSize: (width: number, height: number) =>
+    `निवडलेला भाग: रुंदी ${width.toLocaleString('mr-IN')}%, उंची ${height.toLocaleString('mr-IN')}%`,
   notePlaceholder:
     'उदा. शासन निर्णय, बैठकीची टिपणी, योजनेची माहिती… ही टिपणीच लेखाचा एकमेव आधार असेल.',
   headingLabel: 'शीर्षक किंवा बातमीचा रोख (ऐच्छिक)',
@@ -267,6 +317,46 @@ export const STR = {
   dloComposerNoteAria: 'बैठकीतील टिपणी',
   dloRemoveAudio: 'ध्वनिफीत काढा',
 
+  // ---------- the trim window on a recording (components/common/AudioTrimDialog) ----------
+  //
+  // A meeting recording is one file and the news is usually a few minutes of it. Every
+  // surface that attaches a recording — /dlo, /transcribe and /chat — opens the same dialog
+  // from the recording's own card, so the wording is written once here.
+  //
+  // TIMECODES ARE NOT PART OF THIS. `formatTimecode` (@dgipr/schemas) writes them, in Latin
+  // numerals, because they are positions in a media file sitting beside a browser's own
+  // audio controls — which count that way whatever the page's language.
+  audioTrimOpen: 'भाग निवडा',
+  audioTrimTitle: 'ध्वनिमुद्रणाचा कोणता भाग वापरायचा?',
+  audioTrimReading: 'ध्वनिमुद्रण वाचत आहोत…',
+  // The browser could not open the container at all. Not a failure of the upload — the
+  // recording will still be transcribed whole — so it says what is lost, not what broke.
+  audioTrimUnreadable:
+    'या ध्वनिमुद्रणाची लांबी वाचता आली नाही, त्यामुळे भाग निवडता येणार नाही. पूर्ण ध्वनिमुद्रण वापरले जाईल.',
+  audioTrimTooShort: 'हे ध्वनिमुद्रण खूप लहान आहे — ते पूर्णच वापरले जाईल.',
+  audioTrimStartLabel: 'सुरुवात',
+  audioTrimEndLabel: 'शेवट',
+  audioTrimWindowLabel: 'निवडलेला भाग',
+  audioTrimSelected: 'निवडलेला भाग:',
+  audioTrimPlay: 'निवडलेला भाग ऐका',
+  audioTrimPause: 'थांबवा',
+  audioTrimWhole: 'पूर्ण ध्वनिमुद्रण',
+  audioTrimHint: 'कडा ओढा, किंवा मधला भाग सरकवा.',
+  audioTrimApply: 'हाच भाग वापरा',
+  // What the same button says when nothing has been narrowed: pressing it stores no window
+  // at all, so promising a "part" would be untrue.
+  audioTrimUseWhole: 'पूर्ण ध्वनिमुद्रण वापरा',
+  audioTrimCancel: 'रद्द करा',
+  audioTrimClose: 'बंद करा',
+  // The recording's card in the composer, once a window has been chosen — the officer's own
+  // answer read back, so a trim is visible without reopening the dialog.
+  // Kept SHORT: the card is 240px wide and this is its second line, so a longer phrasing
+  // ("… निवडले · एकूण …") truncated away the total — which is the half that gives the window
+  // any meaning. The range itself already says a part was chosen, so the word for it went.
+  audioTrimCardMeta: (window: string, total: string) =>
+    `${window} · एकूण ${total}`,
+  audioTrimEditLabel: (name: string) => `भाग निवडा: ${name}`,
+
   // /dlo's ONE direction box (components/dlo/DloAiPromptBox). It replaces three separate
   // cards — शीर्षक, तुमची विनंती and नमुना बातमी — which asked the officer three questions
   // before they had seen a single line of the article. All three remain on the तपासणी step,
@@ -279,10 +369,10 @@ export const STR = {
   dloAiPromptPlaceholder: 'उदा. ५० कोटींच्या निधीवर भर द्या; भाषा सोपी ठेवा…',
   // All three file sources are attached from ONE card (components/DloSourcesCard) — the
   // question "what do you want to add?" is the same for each, and three cards asking it made
-  // the officer scroll past two they were not using. The hint carries the difference that is
-  // real: a recording and a photograph are read during प्रक्रिया, while a document is read
-  // here and now, page by page, with a scan stopping to ask which pages are worth OCR'ing
-  // before a single credit is spent.
+  // the officer scroll past two they were not using. Nothing is read at this step at all:
+  // every source is uploaded with the intake, and a document reaches the article model as a
+  // file rather than as text somebody extracted first — which is why there is no page
+  // picker here and the hint promises only that the reading happens during प्रक्रिया.
   dloAttachTitle: 'स्रोत जोडा',
   dloAttachHint:
     'बैठकीचे ध्वनिमुद्रण, कागदपत्रांचे फोटो आणि PDF / DOCX / TXT फाईल — एकावेळी अनेक जोडता येतील, फाईलच्या आकाराची मर्यादा नाही. ध्वनिमुद्रण, प्रतिमा आणि कागदपत्रांमधील मजकूर प्रक्रियेदरम्यान वाचला जाईल आणि तपासणी टप्प्यावर दुरुस्त करता येईल.',
@@ -312,6 +402,12 @@ export const STR = {
   // file button and its own [+] went with the page picker, so this button opens the file
   // dialog itself and everything attached is a card in the strip.
   dloDocsUpload: 'कागदपत्र जोडा',
+  dloDocsFilesTitle: 'जोडलेली कागदपत्रे',
+  // Per-source status in /dlo's workspace list. A document is 'ready' the moment it is
+  // attached — uploading it IS the whole of preparing it — so only a recording ever sits
+  // on the second one for long.
+  dloFileReady: 'तयार',
+  dloFileWorking: 'सुरू आहे…',
   dloRemoveFile: 'फाईल काढा',
 
   // YouTube links as a source, shared by /dlo and /transcribe (components/YouTubeLinkInput).
@@ -1481,10 +1577,13 @@ export const STR = {
   // hiding — how many RUNS there are, which is not the same count as the recordings above.
   transcribeRunCountSuffix: 'ध्वनिलेखने',
   transcribeOpen: 'उघडा',
+  transcribeClose: 'बंद करा',
   transcribeDownloadName: 'ध्वनिलेखन',
   // Carries this transcript to /dlo as the note of a new intake. Named for what the officer
   // gets at the end of that flow, not for what the button does to the text.
   transcribeToArticle: 'बातमी तयार करा',
+  transcribeToArticleHint:
+    'हा मजकूर लेखाच्या टिपणीत जाईल. तिथे तो तपासून व दुरुस्त करून बातमी तयार करता येईल.',
 
   // Errors
   // Said at the picker, before the upload starts — the whole point of checking the size in
@@ -1903,6 +2002,11 @@ export const STR = {
   // how it is read whole.
   nvwExpand: 'पूर्ण स्क्रीनवर लिहा',
   nvwCollapse: 'लहान करा',
+  // The shape of the finished video. The two the Interactions API itself names, so the labels
+  // carry the ratio as well as the word — an officer publishing a reel looks for ९:१६.
+  nvwAspectLabel: 'व्हिडिओचा आकार',
+  nvwAspectLandscape: 'आडवा १६:९',
+  nvwAspectPortrait: 'उभा ९:१६',
   nvwRemoveImage: 'काढून टाका',
   nvwImageUploading: 'चढवत आहोत…',
   nvwImageReady: 'तयार',
@@ -2232,6 +2336,7 @@ export const STEP_LABELS: Record<GenerationStep, string> = {
   // named rather than folded into a generic "तयार करत आहोत".
   motion_prompt: 'पोस्टर वाचून सूचना तयार करत आहोत…',
   motion_render: 'पोस्टरला हालचाल देत आहोत…',
+  motion_crop: 'व्हिडिओ क्रॉप करत आहोत…',
   translate: 'भाषांतर',
   done: 'पूर्ण झाले',
 };

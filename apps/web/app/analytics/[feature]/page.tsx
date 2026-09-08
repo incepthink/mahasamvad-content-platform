@@ -47,6 +47,8 @@ import {
   analyticsRateLine,
   STR,
 } from '../../../lib/strings';
+import { PageBackdrop } from '../../../components/common/PageBackdrop';
+import { ANALYTICS_DOODLES } from '../../../lib/doodleMarks';
 
 function FeaturePageBody() {
   const router = useRouter();
@@ -74,6 +76,10 @@ function FeaturePageBody() {
 
   return (
     <main className="page">
+      {/* The landing page’s wallpaper, unchanged — a drill-down is the same lane, so
+          the same marks in the same arrangement carry through it. */}
+      <PageBackdrop marks={ANALYTICS_DOODLES} seed={47} />
+
       <Link href={`/analytics?range=${range}`} className="back-link">
         <ArrowLeft size={18} aria-hidden="true" />
         {STR.analyticsBack}
