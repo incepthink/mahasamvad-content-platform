@@ -45,6 +45,8 @@ import {
   type SupabaseClient,
 } from '@dgipr/database';
 import {
+  cropVideoToAspect,
+  cropVideoToRect,
   fitImageToAspect,
   mp4ToGif,
   normalizeSourceImage,
@@ -55,7 +57,7 @@ import {
   aspectRatioLabel,
   motionAspectRatio,
 } from '@dgipr/schemas';
-import type { MotionAspect } from '@dgipr/schemas';
+import type { MotionAspect, MotionCrop } from '@dgipr/schemas';
 import { armEditRetry, runJob } from './runner.js';
 
 // The shape this run's clip is rendered in (migration 0053). PARSED rather than cast: the
@@ -82,7 +84,7 @@ function motionAspectOf(row: GenerationRow): MotionAspect {
 async function frameSourceForAspect(
   source: Readonly<{ png: Buffer; width: number; height: number }>,
   aspect: MotionAspect,
-): Promise<{ png: Buffer; label: string }> {
+): Promise<{ png: Buffer; label: string; ratio: number }> {
   const ratio = motionAspectRatio(aspect, source.width, source.height);
   const framed = await fitImageToAspect(source.png, ratio);
   return {
@@ -90,7 +92,39 @@ async function frameSourceForAspect(
     // Named from the FRAMED image, so the ratio the prompt states and the ratio the model is
     // looking at are the same number by construction.
     label: aspectRatioLabel(framed.width, framed.height),
+    // Carried out so the crop on the way back uses the very number the prompt asked for. See
+    // cropRenderedClip below.
+    ratio,
   };
+}
+
+// THE SAME FRAME, TAKEN BACK ON THE WAY OUT.
+//
+// The padding above settles the shape of the image the model is HANDED, and the prompt tells it
+// so in as many words. It renders 9:16 anyway — a real 4:5 poster came back with ~190px of
+// invented sky above it and a smeared strip below its footer, the model outpainting the artwork
+// to fill a frame it had already been told not to change. So the ratio is measured and cropped
+// back rather than requested twice.
+//
+// BEST EFFORT, exactly like the GIF below and for the same reason: the clip is the paid
+// artifact. A framing fix that fails must hand back a badly-framed video, never no video.
+async function cropRenderedClip(
+  id: string,
+  bytes: Buffer,
+  ratio: number,
+): Promise<Buffer> {
+  try {
+    const crop = await cropVideoToAspect(bytes, ratio);
+    if (crop.cropped) {
+      console.log(
+        `[job ${id}] cropped the clip to ${crop.width}x${crop.height} for the requested ratio.`,
+      );
+    }
+    return crop.mp4;
+  } catch (error) {
+    console.error(`[job ${id}] clip crop failed, storing it uncropped:`, error);
+    return bytes;
+  }
 }
 
 // Versioned per render, because the public buckets are CDN-cached and a reused path serves the
@@ -114,6 +148,39 @@ async function nextMotionVersion(
   return (
     revisions.filter((revision) => revision.target === 'motion').length + 2
   );
+}
+
+// One finished clip, written as version N: the MP4 first, then its GIF.
+//
+// Shared by the two things that produce a version — a model render and the officer's hand trim
+// — so both land on the same versioned paths under the same GIF policy. It deliberately does
+// NOT touch the row: only the caller knows whether what it just made should also advance the
+// Gemini chain point, and a trim must not.
+//
+// THE GIF IS BEST EFFORT, and deliberately derived after the MP4 is safely stored. The clip is
+// the artifact the department paid for; the GIF is a convenience copy, and an ffmpeg failure
+// must never cost a render they have already been billed for.
+async function storeMotionClip(
+  client: SupabaseClient,
+  id: string,
+  version: number,
+  clip: Buffer,
+): Promise<{ motionPath: string; motionGifPath: string | null }> {
+  const videoPath = motionPath(id, version);
+  await uploadFile(client, VIDEOS_BUCKET, videoPath, clip, 'video/mp4');
+
+  let gifPath: string | null = null;
+  try {
+    // From the stored clip itself, so the two artifacts are always the same picture.
+    const gif = await mp4ToGif(clip);
+    gifPath = motionGifPath(id, version);
+    await uploadFile(client, VIDEOS_BUCKET, gifPath, gif, 'image/gif');
+  } catch (error) {
+    gifPath = null;
+    console.error(`[job ${id}] GIF conversion failed:`, error);
+  }
+
+  return { motionPath: videoPath, motionGifPath: gifPath };
 }
 
 // One render, initial or follow-up. Returns nothing — everything it produced is on the row.
@@ -197,30 +264,17 @@ async function renderAndStoreMotion(
     );
   }
 
-  const videoPath = motionPath(id, input.version);
-  await uploadFile(client, VIDEOS_BUCKET, videoPath, bytes, 'video/mp4');
-
-  // BEST EFFORT, and deliberately after the MP4 is safely stored. The clip is the paid
-  // artifact; the GIF is a convenience copy, and an ffmpeg failure must never cost a render
-  // the department has already been billed for.
-  let gifPath: string | null = null;
-  try {
-    const gif = await mp4ToGif(bytes);
-    gifPath = motionGifPath(id, input.version);
-    await uploadFile(client, VIDEOS_BUCKET, gifPath, gif, 'image/gif');
-  } catch (error) {
-    gifPath = null;
-    console.error(`[job ${id}] GIF conversion failed:`, error);
-  }
+  const clip = await cropRenderedClip(id, bytes, framed.ratio);
+  const written = await storeMotionClip(client, id, input.version, clip);
 
   await updateGeneration(client, id, {
-    motionPath: videoPath,
-    motionGifPath: gifPath,
+    motionPath: written.motionPath,
+    motionGifPath: written.motionGifPath,
     // THE CHAIN POINT, advanced only now — after a clip exists. See the header.
     motionInteractionId: finished.id ?? interactionId,
   });
 
-  return { motionPath: videoPath, motionGifPath: gifPath };
+  return written;
 }
 
 // The initial run: the officer's uploaded poster plus their optional direction.
@@ -289,6 +343,107 @@ export function startMotionFeedbackJob(
       feedback,
       motionPath: rendered.motionPath,
       motionGifPath: rendered.motionGifPath,
+    });
+  });
+}
+
+// Devanagari digits, for the one piece of text this file writes that an officer READS: the
+// label under a trimmed version in the strip. Everything else here is a machine key.
+function devanagariNumber(value: number): string {
+  return String(value).replace(
+    /[0-9]/g,
+    (digit) => '०१२३४५६७८९'[Number(digit)] ?? digit,
+  );
+}
+
+// What the version strip shows beside a trimmed version. It has to say something — the strip
+// falls back to "पहिली आवृत्ती" on a null direction, which would be plainly wrong here — and
+// the share of each side that was kept is the only thing about a trim worth recording: it is
+// what tells the officer, weeks later, which of three versions is the close crop.
+function motionCropLabel(crop: MotionCrop): string {
+  const width = devanagariNumber(Math.round(crop.width * 100));
+  const height = devanagariNumber(Math.round(crop.height * 100));
+  return `क्रॉप — रुंदी ${width}%, उंची ${height}%`;
+}
+
+// THE HAND TRIM: cut the finished clip down to a rectangle the officer drew over it.
+//
+// Local ffmpeg and nothing else — no model call, nothing billed — so unlike every other button
+// on this card it can be pressed as often as they like. It is still a JOB rather than a
+// synchronous route because it downloads, re-encodes, re-derives the GIF and uploads two
+// objects: seconds, not milliseconds, and the card already knows how to show a busy row.
+//
+// TWO DIFFERENCES FROM A FOLLOW-UP RENDER, both deliberate:
+//
+//   The crop is NOT best effort. `cropRenderedClip` above swallows a failure because framing is
+//   a correction applied to something the department has already paid for; here the trim IS the
+//   request, so a failure must be reported rather than quietly handing back the untrimmed clip
+//   as though it had been honoured. `armEditRetry` keeps the previous version on screen either
+//   way, so the officer loses nothing but the attempt.
+//
+//   It does NOT advance `motionInteractionId`. The chain point names the model's own last
+//   video, and the model knows nothing about a trim performed on our side — so a later AI
+//   follow-up legitimately continues from the untrimmed clip and comes back at full frame. That
+//   is a property of the conversation, not a bug to route around, and the crop panel says so.
+export function startMotionCropJob(
+  client: SupabaseClient,
+  id: string,
+  crop: MotionCrop,
+): void {
+  // An EDIT of a run that has already produced something: a failure must leave the existing
+  // clip and every earlier version in place and reportable, not mark the row failed and hide
+  // the lot.
+  armEditRetry(id, () => startMotionCropJob(client, id, crop));
+  runJob(client, id, 'dynamic_poster_crop', async () => {
+    const row = await getGeneration(client, id);
+    if (!row) throw new Error(`Generation ${id} not found.`);
+    if (!row.motionPath) {
+      throw new Error(`Generation ${id} has no clip to crop yet.`);
+    }
+
+    await updateGeneration(client, id, {
+      status: 'running',
+      step: 'motion_crop',
+      error: null,
+    });
+
+    // The row's CURRENT clip, read back from Storage: the officer drew their box over whatever
+    // is on screen, and that is what `motionPath` points at. Read here rather than passed in
+    // because a trim queued behind a follow-up must cut whatever that follow-up produced.
+    const currentClip = await downloadFile(
+      client,
+      VIDEOS_BUCKET,
+      row.motionPath,
+    );
+    const trimmed = await cropVideoToRect(currentClip, crop);
+    if (!trimmed.cropped) {
+      // Unreachable through the route, which refuses a whole-clip selection before starting a
+      // job at all. Reported rather than written as an identical version, because a version
+      // that changed nothing is noise in a history the officer has to read.
+      throw new Error(
+        `Generation ${id}: the selection covers the whole clip, so there was nothing to crop.`,
+      );
+    }
+    console.log(
+      `[job ${id}] trimmed the clip to ${trimmed.width}x${trimmed.height}.`,
+    );
+
+    const version = await nextMotionVersion(client, id);
+    const stored = await storeMotionClip(client, id, version, trimmed.mp4);
+
+    await updateGeneration(client, id, {
+      motionPath: stored.motionPath,
+      motionGifPath: stored.motionGifPath,
+    });
+
+    // Logged AFTER the objects exist, so a failed trim adds no version — the log is the history
+    // the detail page lists, and an entry with no object behind it would be a dead thumbnail.
+    await insertRevision(client, {
+      generationId: id,
+      target: 'motion',
+      feedback: motionCropLabel(crop),
+      motionPath: stored.motionPath,
+      motionGifPath: stored.motionGifPath,
     });
   });
 }

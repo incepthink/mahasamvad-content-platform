@@ -3111,6 +3111,71 @@ client id/secret — see the milestone below.
 
 ## Latest Implementation Milestone
 
+- **A Dynamic Poster can be trimmed by hand** (2026-09-07, no migration, no n8n): the lane
+  could choose its output SHAPE before the render (`motion_aspect`, 0053) and nothing after it.
+  A department often wants one panel of a poster — the headline block, a single announcement
+  card — moving on its own, and no aspect ratio names that rectangle. The finished clip now
+  takes a box the officer drags over it.
+  - **It is LOCAL ffmpeg, and that is what makes it a different kind of control from everything
+    else on the card.** No model call, nothing billed, seconds rather than minutes — so it can
+    be pressed as often as they like. `cropVideoToRect` (`poster-renderer/src/video/
+crop-video.ts`) sits beside the automatic `cropVideoToAspect` that already reframes a render
+    on the way out, sharing its probe, its even-pixel rules and its encoder through a new
+    `encodeCrop`, so a hand-trimmed clip is the same kind of file as a reframed one and needs no
+    second set of rules to reach `mp4ToGif` and the versioned storage path.
+  - **THE STANCE IS THE OPPOSITE OF THE AUTOMATIC ONE, deliberately.** `cropRenderedClip`
+    swallows a failure because framing is a correction applied to something already paid for;
+    here the trim IS the request, so a failure is reported rather than quietly handing back the
+    untrimmed clip as though it had been honoured.
+  - **Rounding is where the silent bug lives.** Evening a size UP and an offset DOWN can put the
+    right edge one or two pixels past the source, which ffmpeg refuses outright — a job that
+    fails after the officer has already drawn their box. Sizes are computed first and offsets
+    then pulled back inside the frame. The free harness (`pnpm --filter @dgipr/poster-renderer
+video:check:crop`) builds a real MP4 and MEASURES what came out, because arithmetic on paper
+    does not prove what ffmpeg accepts; a corner-pinned rectangle is one of its cases.
+  - **It writes a version like any other render** — `generation_revisions` with target
+    `'motion'`, so `nextMotionVersion`, `motionVersionsOf` and the strip needed no changes — and
+    the officer's clip survives a trim they turn out not to want. `storeMotionClip` is factored
+    out of `renderAndStoreMotion` so both producers land on the same paths under the same
+    best-effort GIF policy; it deliberately does not touch the row, because only the caller
+    knows whether what it made should advance the Gemini chain point.
+  - **A trim does NOT advance `motion_interaction_id`.** The chain point names the model's own
+    last video and the model knows nothing about a cut made on our side, so a later AI follow-up
+    legitimately comes back at full frame. That is a property of the conversation, not a bug to
+    route around, and the crop panel says so in Marathi rather than letting it surprise anyone.
+  - **A pre-existing bug in the lane, found on the way and fixed:** `recoverEditFailure` gated
+    on `posterPath || article`, and a Dynamic Poster writes neither — so BOTH of that lane's
+    edit jobs armed a recovery that could never fire, and a failed AI follow-up marked a run
+    failed over a clip the officer could still see. It now also tests `motionPath`, the same
+    test the retry route already made, which is what makes "तीच सुधारणा पुन्हा करा" re-run a
+    failed trim with the same rectangle. The detail page had always been written for the
+    recovered shape.
+  - Web: the two downloads become `.icon-btn` controls in a `.poster-icon-actions` row — the
+    social poster card's own idiom, which this card had been the exception to — with the crop
+    toggle beside them carrying `aria-pressed` like the poster's marking gesture.
+    `MotionCropBox` is the overlay: fractions of the clip rather than pixels (the browser has
+    scaled the video), a scrim as one spread shadow rather than four panels that could seam,
+    eight grips, arrow-key equivalents, and every update through one `clampRect` so the value is
+    always valid — a crop tool that stops moving is understood, one that accepts a gesture and
+    then rejects it is not. The native controls step aside while it is armed, since a scrub bar
+    under a crop handle is a fight neither control wins.
+  Verified 2026-09-07, all free: workspace typecheck **7/7 green**, eslint clean on all 13
+  touched files, prettier clean on every hunk of mine (seven files report whole-file CRLF
+  complaints confirmed to have ZERO content diff, and `routes/generations.ts`'s one real diff is
+  a pre-existing block at line 1213 — do NOT `--write` them); the new harness green; the five
+  route guards exercised against the live API (unknown id, wrong lane, whole-clip selection,
+  below the minimum side, past the right edge — the last three answering in Marathi); the trim
+  run against a REAL stored gemini-omni clip's bytes without touching its row (720x1280 →
+  484x346, the corner case legal, the whole-frame case handing the same bytes back, the GIF
+  deriving with its loop block); the rectangle proven to land where it was drawn by comparing
+  the cropped frame against the same region of the source frame — **2.00/255 mean difference
+  versus 72.82 against the mirrored corner**, which is what rules out a flipped axis; and 46
+  browser assertions at 1360 and 390 with no page errors and no overflow. **Left for a real
+  run**: one trim submitted end to end from the page, which writes a version. Deploy is
+  `@dgipr/schemas` → `@dgipr/poster-renderer` dists → API + web, shipped **together** — the
+  `motion_crop` step value is a shared contract and an old web build would fail to parse a
+  detail payload carrying it.
+
 - **Qwen DLO drafts disable thinking** (2026-09-05, no migration; supersedes the article
   thinking/headroom behavior below): job `bdac74f8-a247-43cc-b710-9cd24d7083aa` stayed in
   `draft` with no article events while the pod continued producing ~26 tokens/s. The user

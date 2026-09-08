@@ -9,7 +9,10 @@
 // line inside the turn (NewVideoTurnView) rather than text arriving token by token.
 
 import { useEffect, useRef, useState } from 'react';
-import type { NewVideoConversation as Conversation } from '@dgipr/schemas';
+import type {
+  NewVideoAspect,
+  NewVideoConversation as Conversation,
+} from '@dgipr/schemas';
 import { ErrorNotice } from './ErrorNotice';
 import { NewVideoComposer } from './NewVideoComposer';
 import { NewVideoTurnView } from './NewVideoTurnView';
@@ -41,7 +44,7 @@ export function NewVideoConversationView({
   onRetry?: () => void;
   onAddImages: (files: readonly File[]) => void;
   onRemoveImage: (key: string) => void;
-  onSend: (prompt: string) => Promise<boolean>;
+  onSend: (prompt: string, aspect: NewVideoAspect) => Promise<boolean>;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const [stick, setStick] = useState(true);

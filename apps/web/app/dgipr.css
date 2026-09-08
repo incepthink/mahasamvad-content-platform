@@ -2756,6 +2756,161 @@ details.fold[aria-disabled='true'] summary {
   background: #000;
 }
 
+/* ---------- the hand trim (MotionCropBox) ---------- */
+
+/* The surface the rectangle is drawn on: the video's own box. `overflow: hidden` is
+   load-bearing rather than tidy — the scrim below is painted as one enormous spread shadow
+   around the selection, and without a clip it would darken the whole page. The radius matches
+   .motion-video so the dimmed area follows the clip's rounded corners. */
+.motion-crop {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: 14px;
+  cursor: crosshair;
+  /* The gestures here are drags. Without this a touch drag scrolls the page instead. */
+  touch-action: none;
+}
+
+.motion-crop.is-disabled {
+  pointer-events: none;
+}
+
+/* A locked rectangle cannot be drawn, only moved and scaled, so the dimmed area stops
+   advertising a gesture it will not accept. */
+.motion-crop.is-locked {
+  cursor: default;
+}
+
+/* The selection. Everything outside it is dimmed by the spread shadow rather than by four
+   positioned panels — one property, and it can never leave a seam between them. */
+.motion-crop-box {
+  position: absolute;
+  border: 2px solid #fff;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.45),
+    0 0 0 9999px rgba(0, 0, 0, 0.5);
+  cursor: move;
+}
+
+.motion-crop-box:focus-visible {
+  outline: 3px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* Rule-of-thirds guides, drawn as two gradients on one element so they cost no extra markup.
+   Pointer-transparent: they sit over the whole box and would otherwise swallow the drag. */
+.motion-crop-thirds {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(
+      to right,
+      transparent calc(33.333% - 1px),
+      rgba(255, 255, 255, 0.35) calc(33.333% - 1px),
+      rgba(255, 255, 255, 0.35) 33.333%,
+      transparent 33.333%,
+      transparent calc(66.666% - 1px),
+      rgba(255, 255, 255, 0.35) calc(66.666% - 1px),
+      rgba(255, 255, 255, 0.35) 66.666%,
+      transparent 66.666%
+    ),
+    linear-gradient(
+      to bottom,
+      transparent calc(33.333% - 1px),
+      rgba(255, 255, 255, 0.35) calc(33.333% - 1px),
+      rgba(255, 255, 255, 0.35) 33.333%,
+      transparent 33.333%,
+      transparent calc(66.666% - 1px),
+      rgba(255, 255, 255, 0.35) calc(66.666% - 1px),
+      rgba(255, 255, 255, 0.35) 66.666%,
+      transparent 66.666%
+    );
+}
+
+/* The eight grips. 22px square and centred ON the edge they move, which is what makes them
+   reachable with a fingertip on a phone without the drawn mark growing to match — the visible
+   dot is the ::after inside. */
+.motion-crop-handle {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+  display: block;
+  touch-action: none;
+}
+
+.motion-crop-handle::after {
+  content: '';
+  position: absolute;
+  inset: 6px;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.45);
+  border-radius: 2px;
+}
+
+.motion-crop-handle-nw {
+  left: 0;
+  top: 0;
+  cursor: nwse-resize;
+}
+.motion-crop-handle-n {
+  left: 50%;
+  top: 0;
+  cursor: ns-resize;
+}
+.motion-crop-handle-ne {
+  left: 100%;
+  top: 0;
+  cursor: nesw-resize;
+}
+.motion-crop-handle-e {
+  left: 100%;
+  top: 50%;
+  cursor: ew-resize;
+}
+.motion-crop-handle-se {
+  left: 100%;
+  top: 100%;
+  cursor: nwse-resize;
+}
+.motion-crop-handle-s {
+  left: 50%;
+  top: 100%;
+  cursor: ns-resize;
+}
+.motion-crop-handle-sw {
+  left: 0;
+  top: 100%;
+  cursor: nesw-resize;
+}
+.motion-crop-handle-w {
+  left: 0;
+  top: 50%;
+  cursor: ew-resize;
+}
+
+/* The controls under the clip while the tool is armed. Tinted rather than bordered, so it
+   reads as a mode the card is in rather than as a second card inside it. */
+.motion-crop-panel {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+}
+
+.motion-crop-panel .btn-row {
+  margin-top: 12px;
+}
+
+.motion-crop-size {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--text);
+}
+
 .motion-versions {
   margin-top: 18px;
 }
@@ -3153,6 +3308,21 @@ details.fold[aria-disabled='true'] summary {
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 12px;
+}
+
+/* The ratio presets beside the crop button. A ratio has no icon that could stand for it — the
+   two numbers ARE the label — so this is the one control in that row whose meaning is on its
+   face rather than only on its title, and it widens to hold them (the .canva-link idiom, for
+   the same reason). Tabular figures so ४:५ and ९:१६ do not set at different rhythms. */
+.motion-ratio-btn {
+  width: auto;
+  min-width: 46px;
+  padding: 0 10px;
+  font-size: 0.84rem;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 /* Canva requires its mark to be accompanied by visible action text. This keeps the control
@@ -8079,6 +8249,51 @@ a.thread-node:hover {
 .chat-tool--off {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* THE OUTPUT SHAPE (/new-video-workflow only). A segmented pair on its own tinted track, so
+   the two read as one either/or control rather than as two more tools — the .segmented idiom
+   at the size the composer bar has room for. Icon-only like the tools beside it, with the
+   ratio itself on title + aria-label. */
+.chat-aspect {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  margin-left: 4px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.chat-aspect-option {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.chat-aspect-option:hover:not(.is-active) {
+  color: var(--accent-dark);
+  background: var(--accent-soft);
+}
+
+/* The chosen shape is filled rather than merely tinted: this control has no label of its own
+   on screen, so which one is selected has to be legible at a glance and without relying on
+   colour alone — the filled pill is a shape difference too. */
+.chat-aspect-option.is-active {
+  background: var(--accent);
+  color: #fff;
 }
 
 /* The one primary action on this screen, so it is filled rather than outlined —

@@ -12,6 +12,7 @@ import {
   GenerationDetailSchema,
   GenerationSourceFilesResponseSchema,
   MotionSourceResponseSchema,
+  type MotionCrop,
   type MotionSourceResponse,
   RestoreArticleVersionResponseSchema,
   GenerationSummarySchema,
@@ -571,6 +572,20 @@ export async function sendMotionFeedback(
   await requestJson(`/api/generations/${id}/motion/feedback`, {
     method: 'POST',
     body: JSON.stringify({ feedback }),
+  });
+}
+
+// The hand trim. Free and local on the API box — no model call — but still a job, because it
+// re-encodes the clip and writes a new version; the caller polls exactly as it does for a
+// follow-up render. The rectangle is fractions of the clip's own size, so it survives the
+// browser having scaled the video to fit the card.
+export async function cropMotionVideo(
+  id: string,
+  crop: MotionCrop,
+): Promise<void> {
+  await requestJson(`/api/generations/${id}/motion/crop`, {
+    method: 'POST',
+    body: JSON.stringify({ crop }),
   });
 }
 

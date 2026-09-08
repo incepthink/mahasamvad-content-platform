@@ -14,7 +14,7 @@
 // navigation would remount the tree in the middle of a generation the officer is watching.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { NewVideoConversation } from '@dgipr/schemas';
+import type { NewVideoAspect, NewVideoConversation } from '@dgipr/schemas';
 import {
   getNewVideoConversation,
   sendNewVideoTurn,
@@ -52,7 +52,7 @@ export function useNewVideoWorkflow(
   error: string | null;
   addImages: (files: readonly File[]) => void;
   removeImage: (key: string) => void;
-  send: (prompt: string) => Promise<boolean>;
+  send: (prompt: string, aspect: NewVideoAspect) => Promise<boolean>;
   refresh: () => Promise<void>;
 } {
   // Seeded from the URL and then owned locally, so a conversation created by the first turn
@@ -173,7 +173,7 @@ export function useNewVideoWorkflow(
   }, []);
 
   const send = useCallback(
-    async (prompt: string): Promise<boolean> => {
+    async (prompt: string, aspect: NewVideoAspect): Promise<boolean> => {
       if (prompt.trim() === '') return false;
       setSending(true);
       setError(null);
@@ -198,6 +198,9 @@ export function useNewVideoWorkflow(
           // Verbatim. Not trimmed here either — the API sends exactly this string to Gemini,
           // and the contract of this lane is that nothing on our side edits it.
           prompt,
+          // The output shape, always sent: it travels as a request field, so it never touches
+          // the prompt above.
+          aspect,
           ...(activeId ? { conversationId: activeId } : {}),
           ...(imageIds.length > 0 ? { imageIds } : {}),
         });

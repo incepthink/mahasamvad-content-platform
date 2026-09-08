@@ -97,6 +97,11 @@ export {
   GIF_LONG_EDGE,
   type MotionGifOptions,
 } from './video/motion-gif.js';
+// Crops a rendered clip back to the ratio the officer asked for — the guarantee on the way OUT
+// that fitImageToAspect is on the way in — and trims one to a rectangle they drew over it by
+// hand. See video/crop-video.ts.
+export { cropVideoToAspect, cropVideoToRect } from './video/crop-video.js';
+export type { NormalizedRect, VideoCrop } from './video/crop-video.js';
 export { renderHtmlToPng } from './render-html.js';
 export type { RenderOptions } from './render-html.js';
 export { renderHtmlToPdf, ChromiumUnavailableError } from './render-html.js';

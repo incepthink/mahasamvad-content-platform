@@ -47,6 +47,7 @@ import {
 } from 'lucide-react';
 import {
   IMAGE_PROMPT_MAX_CHARS,
+  DEFAULT_MOTION_ASPECT,
   MOTION_ASPECTS,
   MOTION_DIRECTION_MAX_CHARS,
   POSTER_HEADING_MAX_CHARS,
@@ -92,24 +93,22 @@ import { ErrorNotice } from '../components/ErrorNotice';
 // submitCategory below for why that platform and not the other.
 type Format = Category | 'video' | 'caption';
 
-// WHAT THE डायनॅमिक पोस्टर FORM OFFERS as the clip's shape — the two frames a department
-// actually publishes into. 'source' (पोस्टरसारखाच, the poster's own ratio) is deliberately
-// NOT offered here any more: the officer chooses the frame, not the input's shape.
+// WHAT THE डायनॅमिक पोस्टर FORM OFFERS as the clip's shape: all three, in the shared list's
+// own order, so the picker cannot drift from the contract if a fourth frame is ever added.
 //
-// It is removed from the PICKER only, never from the contract. `MOTION_ASPECTS` still carries
-// it, the route still accepts it, and a row with no stored aspect still falls back to it
-// (DEFAULT_MOTION_ASPECT in @dgipr/schemas) — so every Dynamic Poster made before this change
-// keeps rendering exactly as it did. Filtering the shared list rather than hand-writing a
-// second one is what keeps the two from drifting if a third frame is ever added.
-const OFFERED_MOTION_ASPECTS = MOTION_ASPECTS.filter(
-  (value) => value !== 'source',
-);
+// 'source' (पोस्टरसारखाच) was filtered off here on the argument that the officer chooses the
+// frame rather than the input's shape. That reasoning left the form unable to ask for the one
+// thing a DGIPR poster usually needs: a 4:5 poster in a 9:16 frame is padded top and bottom
+// (fitImageToAspect on the API side), and an officer who wanted the poster's own shape back
+// had no way to say so — the request simply was not expressible.
+const OFFERED_MOTION_ASPECTS = MOTION_ASPECTS;
 
-// The form's default, now that the poster's own shape is not on offer. Portrait, because that
-// is the frame these clips are made for (a reel or a story); either choice PADS the poster
-// into the frame rather than cropping it (fitImageToAspect on the API side), so neither one
-// can lose a side of the artwork the way the pre-0053 renders did.
-const DEFAULT_OFFERED_MOTION_ASPECT: MotionAspect = '9:16';
+// The form's default: the poster's own shape, which is also the schema's (DEFAULT_MOTION_ASPECT
+// in @dgipr/schemas, and what every row carrying no stored aspect falls back to). It is the only
+// choice that adds nothing — nothing is padded on the way in, and cropVideoToAspect takes the
+// ratio back on the way out if the model returns a frame of its own. The two fixed frames stay
+// for a department publishing into a reel or a landscape post.
+const DEFAULT_OFFERED_MOTION_ASPECT: MotionAspect = DEFAULT_MOTION_ASPECT;
 
 type FormatIcon = ComponentType<{
   size?: number;
@@ -267,10 +266,9 @@ export default function NewGenerationPage() {
   // demanded it back, which a video model does not deliver — so the loudest requirement in the
   // prompt was the one thing the render could never honour.
   //
-  // The form offers the two published FRAMES only (see OFFERED_MOTION_ASPECTS above) — the
-  // poster's own ratio is still a valid value everywhere else, it is simply not a question the
-  // officer is asked here. Choosing a frame is safe because the source is PADDED into it
-  // before the render (fitImageToAspect), which is what closed the lane's first reported
+  // All three shapes are offered (see OFFERED_MOTION_ASPECTS above), with the poster's own as
+  // the default. Choosing one of the two fixed FRAMES is safe because the source is PADDED into
+  // it before the render (fitImageToAspect), which is what closed the lane's first reported
   // defect: a 4:5 poster asked for a 9:16 clip used to come back with ~15% cut off each side,
   // the prompt having demanded both that ratio and the whole poster when only 70% of its
   // width fits.
@@ -632,7 +630,10 @@ export default function NewGenerationPage() {
               is the one thing they cannot see until the clip comes back, and bars nobody
               warned them about read as a defect. */}
           <div className="option-field">
-            <label className="field-label" htmlFor="motion-aspect-9-16">
+            <label
+              className="field-label"
+              htmlFor={`motion-aspect-${OFFERED_MOTION_ASPECTS[0]!.replace(':', '-')}`}
+            >
               <Ratio size={18} className="label-icon" aria-hidden="true" />
               {STR.motionAspectLabel}
             </label>
@@ -653,9 +654,11 @@ export default function NewGenerationPage() {
                   disabled={submitting}
                   onClick={() => setMotionAspect(value)}
                 >
-                  {value === '9:16'
-                    ? STR.motionAspectPortrait
-                    : STR.motionAspectLandscape}
+                  {value === 'source'
+                    ? STR.motionAspectSource
+                    : value === '9:16'
+                      ? STR.motionAspectPortrait
+                      : STR.motionAspectLandscape}
                 </button>
               ))}
             </div>

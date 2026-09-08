@@ -585,9 +585,10 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   proving the lastFrame shape). No n8n anywhere on this path.
 - **Dynamic Posters (`category: 'dynamic_poster'`, migration 0052) — a finished still poster,
   motionised.** The one format on क्रिएटिव्ह आणि सोशल whose SOURCE is a picture rather than
-  text. Upload route + feedback route + two download proxies →
+  text. Upload route + feedback route + crop route + two download proxies →
   `apps/api/src/routes/generations.ts` (`POST /generations/motion-image`,
-  `POST /generations/:id/motion/feedback`, `GET /generations/:id/motion.{mp4,gif}`); job →
+  `POST /generations/:id/motion/feedback`, `POST /generations/:id/motion/crop`,
+  `GET /generations/:id/motion.{mp4,gif}`); jobs →
   `apps/api/src/jobs/dynamic-poster.ts`; step 1's prompt →
   `packages/content-engine/src/generation/motion-prompt.ts`; step 2 reuses
   `video/gemini-interactions-client.ts` (the /new-video-workflow client, unchanged); the GIF →
@@ -596,8 +597,22 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   `normalizeReferenceImage`); limits + wire shapes + the storage-path guard →
   `packages/schemas/src/dynamic-poster.ts`; web → the `dynamic_poster` card in
   `apps/web/app/page.tsx` (which swaps the note card for `MotionSourcePicker` + an AI प्रॉम्प्ट
-  box) and `components/DynamicPosterView.tsx` on the detail page.
-  Six things to know before changing it. **THE OUTPUT SHAPE IS AN ASPECT RATIO, AND THE
+  box) and `components/DynamicPosterView.tsx` + `components/MotionCropBox.tsx` on the detail
+  page.
+  **THE FINISHED CLIP CAN BE TRIMMED BY HAND** (2026-09-07, no migration): a rectangle the
+  officer drags over it, `cropVideoToRect` in `poster-renderer/src/video/crop-video.ts` beside
+  the `cropVideoToAspect` that already reframes a render on the way out, sharing its probe,
+  even-pixel rules and encoder. It is LOCAL ffmpeg — no model call, nothing billed — so it is
+  the one control here that can be pressed as often as the officer likes, but it is still a JOB
+  (`startMotionCropJob`, step `motion_crop`) because it re-encodes, re-derives the GIF and
+  uploads two objects. Three things not to undo: the trim is **not** best-effort where the
+  automatic reframe is (there the framing corrects something already paid for; here the trim IS
+  the request); it does **not** advance `motion_interaction_id`, so a later AI follow-up
+  legitimately returns at full frame and the panel says so; and sizes are evened BEFORE offsets
+  are pulled back inside the frame, or a corner-pinned rectangle lands a pixel past the source
+  and ffmpeg refuses it outright. Free harness — and the only thing that proves what ffmpeg
+  accepts: `pnpm --filter @dgipr/poster-renderer video:check:crop`.
+  Six more things to know before changing it. **THE OUTPUT SHAPE IS AN ASPECT RATIO, AND THE
   DEFAULT IS THE POSTER'S OWN** (`motion_aspect`, 0053; `'source'` | `'9:16'` | `'16:9'`, with
   null = `'source'`). It began as the poster's exact pixel RESOLUTION measured by sharp and
   demanded back — which a video model does not deliver, so the loudest requirement in the

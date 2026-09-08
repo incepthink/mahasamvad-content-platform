@@ -15,6 +15,7 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import type { NewVideoAspect } from '@dgipr/schemas';
 import { ConversationWorkspace } from './conversation/ConversationWorkspace';
 import type { ConversationRailGroup } from './conversation/ConversationRail';
 import { NewVideoConversationView } from './NewVideoConversation';
@@ -44,8 +45,8 @@ export function NewVideoWorkspace({
   const workflow = useNewVideoWorkflow(conversationId, onConversationCreated);
 
   const send = useCallback(
-    async (prompt: string): Promise<boolean> => {
-      const sent = await workflow.send(prompt);
+    async (prompt: string, aspect: NewVideoAspect): Promise<boolean> => {
+      const sent = await workflow.send(prompt, aspect);
       // The rail's title and ordering only exist once the turn has landed.
       if (sent) void list.refresh();
       return sent;

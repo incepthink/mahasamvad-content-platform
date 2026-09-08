@@ -121,15 +121,18 @@ export const STR = {
   // frame the officer publishes into, with the ratio kept beside it because that is what
   // they are used to reading on a design tool.
   motionAspectLabel: 'व्हिडिओचा आकार',
-  // The two frames the form offers. पोस्टरसारखाच (the poster's own ratio) was a third option
-  // here and is deliberately gone from the picker — it remains a valid stored value and the
-  // fallback for a row that carries none, so nothing already rendered changes.
+  // The three shapes the form offers. पोस्टरसारखाच is the DEFAULT and the only one that adds
+  // no bars at all: the poster goes to the model in its own shape and the clip is cropped back
+  // to it. The two fixed frames are for a department publishing into a reel or a landscape
+  // post, and they pad rather than crop.
+  motionAspectSource: 'पोस्टरसारखाच',
   motionAspectPortrait: 'उभा ९:१६',
   motionAspectLandscape: 'आडवा १६:९',
   // "The poster is padded" is the one thing they cannot see until the clip comes back, and bars
-  // nobody warned them about read as a defect — so the hint says it before the render.
+  // nobody warned them about read as a defect — so the hint says it before the render. It names
+  // the default's behaviour first, because that is the one where nothing is added.
   motionAspectHint:
-    'निवडलेल्या चौकटीत पोस्टर बसवले जाते आणि गरज असल्यास वर-खाली किंवा दोन्ही बाजूंना पोस्टरच्याच रंगाच्या पट्ट्या येतात — पोस्टरचा कोणताही भाग कापला जात नाही.',
+    'पोस्टरसारखाच निवडल्यास व्हिडिओ पोस्टरच्याच आकारात येतो. उभा किंवा आडवा निवडल्यास त्या चौकटीत पोस्टर बसवले जाते आणि गरज असल्यास वर-खाली किंवा दोन्ही बाजूंना पोस्टरच्याच रंगाच्या पट्ट्या येतात — पोस्टरचा कोणताही भाग कापला जात नाही.',
   // ---- the detail page ----
   motionOutputTitle: 'तयार झालेला डायनॅमिक पोस्टर',
   motionSourceCaption: 'मूळ पोस्टर',
@@ -148,6 +151,44 @@ export const STR = {
   motionVersionsLabel: 'आवृत्त्या',
   motionVersionInitial: 'पहिली आवृत्ती',
   motionPromptLabel: 'वापरलेला AI प्रॉम्प्ट',
+  // ---- the hand trim ----
+  // A local ffmpeg cut, not a render: free, and repeatable as often as the officer likes. The
+  // hint says both of the things they cannot see — that it costs nothing, and that a later AI
+  // change comes back at full frame because the model knows nothing about a trim made here.
+  motionCropStart: 'व्हिडिओचा भाग निवडा (क्रॉप)',
+  motionCropStartOn: 'क्रॉप करणे बंद करा',
+  motionCropLabel: 'क्रॉप करायचा भाग',
+  motionCropHint:
+    'चौकट ओढून हवा तेवढा भाग निवडा. यात AI वापरले जात नाही, त्यामुळे खर्च नाही — नवीन आवृत्ती तयार होईल आणि जुनी तशीच राहील. यानंतर AI प्रॉम्प्टने बदल केल्यास व्हिडिओ पुन्हा पूर्ण आकारात येतो.',
+  motionCropRegionLabel:
+    'क्रॉप चौकट — ओढून हलवा, कोपऱ्यांतून आकार बदला, किंवा बाणांच्या कळांनी सरकवा',
+  motionCropRegionLockedLabel:
+    'ठरलेल्या आकाराची क्रॉप चौकट — ओढून हलवा, कोपऱ्यांतून लहान-मोठी करा; प्रमाण तेच राहील',
+  // ---- the ratio presets ----
+  // An exact 4:5 or 9:16 cannot be reached by dragging four edges, and that is the commonest
+  // thing this tool is used for — a poster that has to drop into an Instagram or X frame with
+  // no strip left over. These pills arm the tool with the shape already right, so the officer
+  // is left only with where over the poster it sits.
+  motionCropRatio: (label: string) => `${label} आकाराची चौकट`,
+  motionCropRatioOn: (label: string) => `${label} चौकट बंद करा`,
+  // Said on the disabled pill rather than left to a failed press: a 4:5 crop of a 4:5 clip is
+  // the whole clip, which the API refuses — and re-encoding it would cost a generation of
+  // quality to produce the picture already on screen.
+  motionCropRatioSame: (label: string) =>
+    `हा व्हिडिओ आधीच ${label} आकाराचा आहे — क्रॉप करण्याची गरज नाही`,
+  motionCropRatioLocked: (label: string) =>
+    `${label} प्रमाण निश्चित आहे. चौकट ओढून हवा तो भाग निवडा; कोपऱ्यांतून लहान-मोठी करता येईल, पण आकार तोच राहील.`,
+  motionCropApply: 'क्रॉप करा',
+  motionCropCancel: 'रद्द करा',
+  motionCropReset: 'पूर्ण व्हिडिओ',
+  motionCropResetRatio: 'सर्वात मोठी चौकट',
+  motionCropBusy: 'व्हिडिओ क्रॉप होत आहे…',
+  motionCropWholeClip: 'संपूर्ण व्हिडिओ निवडला आहे — त्याहून लहान भाग निवडा.',
+  // Read as "62% wide, 48% tall of the clip". Percentages rather than pixels because the
+  // officer is looking at a video the browser has scaled, and its displayed size is not the
+  // clip's own; the API maps the same fractions back onto the real frame.
+  motionCropSize: (width: number, height: number) =>
+    `निवडलेला भाग: रुंदी ${width.toLocaleString('mr-IN')}%, उंची ${height.toLocaleString('mr-IN')}%`,
   notePlaceholder:
     'उदा. शासन निर्णय, बैठकीची टिपणी, योजनेची माहिती… ही टिपणीच लेखाचा एकमेव आधार असेल.',
   headingLabel: 'शीर्षक किंवा बातमीचा रोख (ऐच्छिक)',
@@ -1912,6 +1953,11 @@ export const STR = {
   // how it is read whole.
   nvwExpand: 'पूर्ण स्क्रीनवर लिहा',
   nvwCollapse: 'लहान करा',
+  // The shape of the finished video. The two the Interactions API itself names, so the labels
+  // carry the ratio as well as the word — an officer publishing a reel looks for ९:१६.
+  nvwAspectLabel: 'व्हिडिओचा आकार',
+  nvwAspectLandscape: 'आडवा १६:९',
+  nvwAspectPortrait: 'उभा ९:१६',
   nvwRemoveImage: 'काढून टाका',
   nvwImageUploading: 'चढवत आहोत…',
   nvwImageReady: 'तयार',
@@ -2241,6 +2287,7 @@ export const STEP_LABELS: Record<GenerationStep, string> = {
   // named rather than folded into a generic "तयार करत आहोत".
   motion_prompt: 'पोस्टर वाचून सूचना तयार करत आहोत…',
   motion_render: 'पोस्टरला हालचाल देत आहोत…',
+  motion_crop: 'व्हिडिओ क्रॉप करत आहोत…',
   translate: 'भाषांतर',
   done: 'पूर्ण झाले',
 };
