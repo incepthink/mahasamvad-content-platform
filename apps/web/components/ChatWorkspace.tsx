@@ -135,6 +135,7 @@ export function ChatWorkspace({ threadId }: { threadId: string | null }) {
         onAddDocuments={attachments.addDocuments}
         onAddAudio={attachments.addAudio}
         onAddYouTube={attachments.addYouTube}
+        onSetTrim={attachments.setTrim}
         onRemoveAttachment={attachments.remove}
         onSend={send}
         onStop={chat.stop}

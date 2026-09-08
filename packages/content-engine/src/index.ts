@@ -188,6 +188,15 @@ export {
   type AudioTranscription,
   type AudioUrlInput,
 } from './intake/audio-input.js';
+// Cutting a recording down to the window the officer selected, before it reaches the
+// transcriber. Reads a presigned URL and writes a temp file, so the audio never enters the
+// API's memory — see intake/trim-audio.ts.
+export {
+  trimAudio,
+  trimmedFileName,
+  type AudioTrimWindow,
+  type TrimmedAudio,
+} from './intake/trim-audio.js';
 export { transcribeAudioFilesViaElevenLabs } from './intake/elevenlabs-stt.js';
 export {
   extractPdfPages,

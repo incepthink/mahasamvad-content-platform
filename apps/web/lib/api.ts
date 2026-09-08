@@ -546,6 +546,13 @@ export function plainPosterDownloadUrl(id: string): string {
   return `${API_URL}/api/generations/${id}/poster-plain.png`;
 }
 
+// The social poster's brand chrome as bare artwork, for a page that wants to lay it over
+// something unbranded — today the Dynamic Poster crop preview. From the API rather than
+// apps/web/public so renderGovernmentLockup and footer-new-poster.png stay the one source of
+// it; both keep their own aspect, so a caller sets a width and lets the height follow.
+export const socialLogoUrl = `${API_URL}/api/chrome/social-logo.png`;
+export const socialFooterUrl = `${API_URL}/api/chrome/social-footer.png`;
+
 // ---------- Dynamic Poster (migration 0052) ----------
 
 // Uploading the officer's still poster. Multipart with no content-type header — the browser
@@ -582,10 +589,20 @@ export async function sendMotionFeedback(
 export async function cropMotionVideo(
   id: string,
   crop: MotionCrop,
+  options: Readonly<{ chrome?: boolean; sourceVersion?: number }> = {},
 ): Promise<void> {
   await requestJson(`/api/generations/${id}/motion/crop`, {
     method: 'POST',
-    body: JSON.stringify({ crop }),
+    // `sourceVersion` is an INDEX into the version strip, 1-based, never a storage path: the
+    // API accepts only something this run already produced. Omitted means the current clip,
+    // which is the common case and what the field defaults to server-side.
+    body: JSON.stringify({
+      crop,
+      chrome: options.chrome === true,
+      ...(options.sourceVersion === undefined
+        ? {}
+        : { sourceVersion: options.sourceVersion }),
+    }),
   });
 }
 

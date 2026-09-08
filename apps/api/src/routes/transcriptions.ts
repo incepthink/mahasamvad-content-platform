@@ -26,6 +26,7 @@ import {
   parseYouTubeVideoId,
   TRANSCRIPTION_MAX_FILES,
   YouTubeSourcesSchema,
+  type AudioTrimEntry,
   type TranscriptionDetail,
   type TranscriptionSummary,
   type YouTubeVideo,
@@ -34,6 +35,7 @@ import {
   isTranscriptionJobRunning,
   startTranscriptionJob,
 } from '../jobs/transcription-runner.js';
+import { parseAudioTrimsField, resolveAudioTrims } from './audio-trims.js';
 
 // Meeting recordings are big, so this route overrides the conservative global multipart
 // limits per request, exactly as /dlo/intakes does — and, since 2026-08-24, to the same
@@ -137,6 +139,9 @@ export function registerTranscriptionRoutes(
     // Pasted YouTube links, already probed by the form. Nothing is downloaded here or ever:
     // the transcriber fetches the media itself (@dgipr/schemas' youtube.ts).
     let youtube: YouTubeVideo[] = [];
+    // The trim slider's answers, as sent. Held raw until every part has arrived, because a
+    // window can only be matched to a recording once the full list of recordings is known.
+    let trimEntries: readonly AudioTrimEntry[] = [];
 
     // Everything already written to the private bucket for a row that may still never be
     // inserted. Best-effort on every path that gives up: an abandoned recording is invisible
@@ -163,6 +168,23 @@ export function registerTranscriptionRoutes(
     try {
       for await (const part of parts) {
         if (part.type === 'field') {
+          // The windows the officer selected on the trim slider, one per TRIMMED recording.
+          // Read here but RESOLVED after the loop, because matching a window to a recording
+          // needs the full list of what arrived and multipart makes no promise that this
+          // field precedes the files.
+          if (part.fieldname === 'audioTrims') {
+            const parsed = parseAudioTrimsField(
+              typeof part.value === 'string' ? part.value : '',
+            );
+            if (!parsed.ok) {
+              await discardStaged();
+              return reply
+                .code(400)
+                .send({ error: { message: parsed.message } });
+            }
+            trimEntries = parsed.entries;
+            continue;
+          }
           // Any other field is ignored rather than rejected, so adding one later cannot
           // break an older client.
           if (part.fieldname !== 'youtube') continue;
@@ -253,6 +275,19 @@ export function registerTranscriptionRoutes(
       });
     }
 
+    // Now that every part has arrived, each selected window can be checked against the
+    // recording it names. A mismatch is refused rather than applied to whichever recording
+    // happens to be at that position — see routes/audio-trims.ts.
+    const resolved = resolveAudioTrims(
+      uploads.map((upload) => upload.name),
+      trimEntries,
+    );
+    if (!resolved.ok) {
+      await discardStaged();
+      return reply.code(400).send({ error: { message: resolved.message } });
+    }
+    const trims = resolved.byPosition;
+
     // The recordings are already archived — they were streamed there as they arrived, under
     // keys built from `runId`, which is why this insert can carry that id rather than take
     // one from the database. Everything else is unchanged: the row is still written before
@@ -266,13 +301,17 @@ export function registerTranscriptionRoutes(
       ]),
       files: [],
     });
-    const entries: TranscriptionFileEntry[] = uploads.map((upload) => ({
+    const entries: TranscriptionFileEntry[] = uploads.map((upload, index) => ({
       name: upload.name,
       storagePath: upload.storagePath,
       // What the upload actually weighed. The job reads it to decide how many recordings it
       // may hold at once, so it is a memory bound rather than a display figure.
       bytes: upload.bytes,
       status: 'pending',
+      // Every upload on this route is a recording, so its position among the audio files IS
+      // its position here. Omitted unless a window was actually selected, which keeps an
+      // untrimmed row identical to what it was before this feature.
+      ...(trims[index] !== undefined ? { trim: trims[index] } : {}),
     }));
 
     // Then the links, beside the recordings — the job transcribes both in one pass. No

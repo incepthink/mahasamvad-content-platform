@@ -7,6 +7,7 @@
 // API would refuse (the same two-lists-drift argument that put them there).
 
 import { z } from 'zod';
+import { AudioTrimSchema } from './audio-trim.js';
 
 export const TranscriptionStatusSchema = z.enum([
   'queued',
@@ -34,6 +35,13 @@ export const TranscriptionFileSchema = z.object({
   // This transcript was reused from the content-addressed cache (migration 0031) rather than
   // transcribed afresh — worth surfacing, since it is the difference between minutes and none.
   cached: z.boolean().optional(),
+  // The slice of this recording the officer asked for, in seconds. Absent means the whole
+  // recording, which is every run made before this feature and most runs after it.
+  //
+  // Additive on a jsonb column, so NO MIGRATION. It is kept on the entry rather than consumed
+  // and discarded by the job because it is the answer to "why is this transcript short?" — the
+  // result card states the window, and a re-run reproduces the same one.
+  trim: AudioTrimSchema.optional(),
   // A pasted YouTube link, and what the probe knew about it. Present instead of an archived
   // upload — the transcriber fetches the media itself, so nothing was ever downloaded. Its
   // presence is what makes the result card render a video chip rather than a file name.

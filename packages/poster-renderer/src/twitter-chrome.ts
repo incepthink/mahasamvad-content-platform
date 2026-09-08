@@ -43,6 +43,10 @@
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
+import {
+  SOCIAL_LOCKUP_MARGIN_RATIO,
+  SOCIAL_LOCKUP_WIDTH_RATIO,
+} from '@dgipr/schemas';
 import { loadScaled } from './article-chrome.js';
 import { joinFooterStrip, type FooterJoinSpec } from './footer-extension.js';
 
@@ -55,10 +59,14 @@ const ASSETS_DIR = resolve(
 // (MASTER_DIMENSIONS in content-engine) and so is every render, so the scale factor is
 // normally 1 — it only kicks in if the model ever returns another width.
 const ASSET_BASE_WIDTH = 1280;
-const LOCKUP_WIDTH = 160;
+// The badge's PLACEMENT comes from @dgipr/schemas rather than living here, because a
+// browser needs it too: the Dynamic Poster crop preview lays this same artwork over an
+// unbranded clip in CSS, and apps/web cannot import this package. The ratios are exact
+// binary fractions of the 1280px canvas, so these are still precisely 160 and 6.
+const LOCKUP_WIDTH = ASSET_BASE_WIDTH * SOCIAL_LOCKUP_WIDTH_RATIO;
 const LOCKUP_HEIGHT = 154;
 const LOCKUP_CORNER_RADIUS = 12;
-const LOCKUP_MARGIN = 6;
+const LOCKUP_MARGIN = ASSET_BASE_WIDTH * SOCIAL_LOCKUP_MARGIN_RATIO;
 const EMBLEM_TARGET_WIDTH = 96;
 const EMBLEM_TOP = 8;
 const LABEL_TOP = 119;
@@ -272,6 +280,64 @@ async function loadSocialFooter(targetWidth: number): Promise<Raster> {
     .png()
     .toBuffer();
   return { data, width, height };
+}
+
+/**
+ * The department footer band on its own — footer-new-poster.png cropped to its artwork and
+ * resized to `targetWidth`, transparent above it.
+ *
+ * Exported for exactly the reason renderGovernmentLockup is: apps/api serves it to a browser
+ * that lays it over an UNBRANDED clip in CSS (the Dynamic Poster crop preview), so this stays
+ * the one source of the artwork instead of a copy under apps/web/public. Only the bytes are
+ * returned — the band keeps its own aspect, so a caller places it by width alone and lets the
+ * height follow, which is also what stops a second copy of 239:3376 existing anywhere.
+ */
+export async function renderSocialFooterBand(
+  targetWidth: number,
+): Promise<Buffer> {
+  if (!Number.isFinite(targetWidth) || targetWidth <= 0) {
+    throw new Error('Social footer band target width must be positive.');
+  }
+  return (await loadSocialFooter(targetWidth)).data;
+}
+
+export type SocialChromeLayers = Readonly<{
+  logo: Readonly<{ png: Buffer; width: number; height: number }>;
+  footer: Readonly<{ png: Buffer; width: number; height: number }>;
+  /** The badge's inset from the top and right edges, in pixels of this frame. */
+  margin: number;
+}>;
+
+/**
+ * Both chrome graphics rendered for a frame `frameWidth` pixels wide, with the badge's inset
+ * already resolved to pixels — everything a caller needs to composite them itself.
+ *
+ * WHY THIS IS SEPARATE FROM overlayTwitterChrome. That function stamps the chrome onto a still
+ * poster with sharp, and it also EXTENDS the canvas so the band sits below the artwork rather
+ * than over it. Neither is available to a caller compositing onto video, where ffmpeg does the
+ * drawing and the frame size is fixed by the crop. So this returns the layers and the offsets
+ * and leaves the drawing to whoever asked — while keeping the placement in ONE place, derived
+ * from the same SOCIAL_LOCKUP_* ratios the poster and the crop preview use.
+ *
+ * Placed by WIDTH on both axes, top margin included: that is what makes one number serve a
+ * 4:5 poster and a clip of any shape alike, and it is the rule the browser preview follows
+ * with a percentage `margin-top`. See poster-chrome.ts.
+ */
+export async function socialChromeLayers(
+  frameWidth: number,
+): Promise<SocialChromeLayers> {
+  if (!Number.isFinite(frameWidth) || frameWidth <= 0) {
+    throw new Error('Social chrome frame width must be positive.');
+  }
+  const [lockup, footer] = await Promise.all([
+    renderGovernmentLockup(frameWidth * SOCIAL_LOCKUP_WIDTH_RATIO),
+    loadSocialFooter(frameWidth),
+  ]);
+  return {
+    logo: { png: lockup.data, width: lockup.width, height: lockup.height },
+    footer: { png: footer.data, width: footer.width, height: footer.height },
+    margin: Math.round(frameWidth * SOCIAL_LOCKUP_MARGIN_RATIO),
+  };
 }
 
 // Canva's Magic Layers is useful for the model-painted body of a poster, but it also tries to

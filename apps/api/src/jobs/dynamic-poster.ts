@@ -19,9 +19,12 @@
 // video the officer can still see, so their next instruction edits that rather than something
 // that never existed.
 //
-// WHAT IS DELIBERATELY NOT HERE: no reference library, no poster copy call, no chrome overlay,
-// no caption, no publishing. The officer's poster is finished artwork — it already carries the
-// department's branding, and stamping a second lockup onto it would be a defect.
+// WHAT IS DELIBERATELY NOT HERE: no reference library, no poster copy call, no caption, no
+// publishing — and no chrome on a RENDER. The officer's poster is finished artwork; it already
+// carries the department's branding, and stamping a second lockup onto it would be a defect.
+// The one exception is the hand TRIM, where the officer may ask for it: cutting one panel out
+// of a poster leaves that poster's own branding outside the rectangle, so there is nothing left
+// to duplicate. See startMotionCropJob.
 
 import {
   awaitInteraction,
@@ -360,10 +363,54 @@ function devanagariNumber(value: number): string {
 // falls back to "पहिली आवृत्ती" on a null direction, which would be plainly wrong here — and
 // the share of each side that was kept is the only thing about a trim worth recording: it is
 // what tells the officer, weeks later, which of three versions is the close crop.
-function motionCropLabel(crop: MotionCrop): string {
+//
+// The branding is named too, when it was stamped: two trims of the same rectangle, one branded
+// and one not, are otherwise indistinguishable in a list the officer has to read.
+function motionCropLabel(
+  crop: MotionCrop,
+  options: Readonly<{ chrome: boolean; sourceVersion: number | null }>,
+): string {
   const width = devanagariNumber(Math.round(crop.width * 100));
   const height = devanagariNumber(Math.round(crop.height * 100));
-  return `क्रॉप — रुंदी ${width}%, उंची ${height}%`;
+  const parts = [`क्रॉप — रुंदी ${width}%, उंची ${height}%`];
+  if (options.chrome) parts.push('लोगो व फूटरसह');
+  // Only when it is NOT the current clip: on the ordinary trim it would say the obvious, and
+  // on a re-cut of an older version it is the one thing the strip cannot otherwise show.
+  if (options.sourceVersion !== null) {
+    parts.push(`आवृत्ती ${devanagariNumber(options.sourceVersion)} वरून`);
+  }
+  return parts.join(' · ');
+}
+
+// Which stored clip the officer drew their rectangle over.
+//
+// An INDEX into this run's own version list, never a path off the wire: it can only ever name
+// something this run already produced. Out of range is a genuine 4xx and is refused by the
+// route, so reaching this with one is a bug rather than an officer's mistake — it throws
+// rather than quietly cutting whatever the current clip happens to be, which would hand back
+// a trim of the wrong picture.
+async function motionSourcePath(
+  client: SupabaseClient,
+  row: GenerationRow,
+  sourceVersion: number | undefined,
+): Promise<string> {
+  // The row's CURRENT clip. Read off the row rather than the list so a trim queued behind a
+  // follow-up cuts whatever that follow-up produced.
+  if (sourceVersion === undefined) {
+    if (!row.motionPath) {
+      throw new Error(`Generation ${row.id} has no clip to crop yet.`);
+    }
+    return row.motionPath;
+  }
+  const revisions = await listRevisions(client, row.id);
+  const versions = motionVersionsOf(row, revisions);
+  const chosen = versions[sourceVersion - 1];
+  if (!chosen) {
+    throw new Error(
+      `Generation ${row.id} has no version ${sourceVersion} to crop.`,
+    );
+  }
+  return chosen.path;
 }
 
 // THE HAND TRIM: cut the finished clip down to a rectangle the officer drew over it.
@@ -372,6 +419,17 @@ function motionCropLabel(crop: MotionCrop): string {
 // on this card it can be pressed as often as they like. It is still a JOB rather than a
 // synchronous route because it downloads, re-encodes, re-derives the GIF and uploads two
 // objects: seconds, not milliseconds, and the card already knows how to show a busy row.
+//
+// IT MAY CUT ANY VERSION, not only the current one: a rectangle is drawn over whatever clip is
+// on screen, and the strip lets the officer go back to one. The result is still appended as a
+// NEW version — versions here are immutable and the newest is always current — so re-cutting an
+// older clip costs nothing that already exists.
+//
+// AND IT MAY STAMP THE BRANDING, which no other path on this lane does. See the header: a trim
+// is the one operation that removes the source poster's own chrome, so what would be a
+// duplicate everywhere else is a replacement here. The officer decides, in the crop selector,
+// by looking at the preview — and the stamp lands at the very fractions of the frame that
+// preview drew them at, or their judgement about the rectangle would have been worthless.
 //
 // TWO DIFFERENCES FROM A FOLLOW-UP RENDER, both deliberate:
 //
@@ -389,11 +447,12 @@ export function startMotionCropJob(
   client: SupabaseClient,
   id: string,
   crop: MotionCrop,
+  options: Readonly<{ chrome?: boolean; sourceVersion?: number }> = {},
 ): void {
   // An EDIT of a run that has already produced something: a failure must leave the existing
   // clip and every earlier version in place and reportable, not mark the row failed and hide
   // the lot.
-  armEditRetry(id, () => startMotionCropJob(client, id, crop));
+  armEditRetry(id, () => startMotionCropJob(client, id, crop, options));
   runJob(client, id, 'dynamic_poster_crop', async () => {
     const row = await getGeneration(client, id);
     if (!row) throw new Error(`Generation ${id} not found.`);
@@ -407,15 +466,22 @@ export function startMotionCropJob(
       error: null,
     });
 
-    // The row's CURRENT clip, read back from Storage: the officer drew their box over whatever
-    // is on screen, and that is what `motionPath` points at. Read here rather than passed in
-    // because a trim queued behind a follow-up must cut whatever that follow-up produced.
-    const currentClip = await downloadFile(
+    // WHICHEVER version the officer drew the box over — the current clip unless they had gone
+    // back through the strip. Read from Storage here rather than passed in because a trim
+    // queued behind a follow-up must resolve against the row as it stands when it runs.
+    const sourcePath = await motionSourcePath(
       client,
-      VIDEOS_BUCKET,
-      row.motionPath,
+      row,
+      options.sourceVersion,
     );
-    const trimmed = await cropVideoToRect(currentClip, crop);
+    const currentClip = await downloadFile(client, VIDEOS_BUCKET, sourcePath);
+    const trimmed = await cropVideoToRect(currentClip, crop, {
+      // The officer's own answer, taken while they were looking at the preview. Stamping it
+      // here rather than leaving the clip bare is what makes the crop selector's overlay a
+      // decision instead of a picture: a trim cuts the source poster's own branding away, and
+      // the rectangle they chose was chosen against where this lands.
+      chrome: options.chrome === true,
+    });
     if (!trimmed.cropped) {
       // Unreachable through the route, which refuses a whole-clip selection before starting a
       // job at all. Reported rather than written as an identical version, because a version
@@ -441,7 +507,13 @@ export function startMotionCropJob(
     await insertRevision(client, {
       generationId: id,
       target: 'motion',
-      feedback: motionCropLabel(crop),
+      feedback: motionCropLabel(crop, {
+        chrome: options.chrome === true,
+        sourceVersion:
+          sourcePath === row.motionPath
+            ? null
+            : (options.sourceVersion ?? null),
+      }),
       motionPath: stored.motionPath,
       motionGifPath: stored.motionGifPath,
     });

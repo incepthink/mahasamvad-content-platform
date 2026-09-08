@@ -42,6 +42,13 @@ export type TranscriptionFileEntry = Readonly<{
   // Sarvam job. Shown on the result card, because "instant" is otherwise indistinguishable
   // from "suspiciously fast".
   cached?: boolean;
+  // The slice of this recording the officer chose to transcribe, in seconds. Absent means
+  // the whole thing. Additive on a jsonb column, so NO MIGRATION.
+  //
+  // Structural rather than imported: this package does not depend on @dgipr/schemas (see
+  // DloIntakeRow.reviewState for the same boundary), and AudioTrimSchema there is what the
+  // API validates it with before it is ever written here.
+  trim?: Readonly<{ startSeconds: number; endSeconds: number }>;
 }>;
 
 export type TranscriptionRow = Readonly<{

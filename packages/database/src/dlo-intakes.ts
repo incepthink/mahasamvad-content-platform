@@ -57,6 +57,13 @@ export type DloIntakeFileEntry = Readonly<{
   // transcribe phase uses it to decide how many recordings it may hold in memory at once, so
   // an unknown size is treated as "big".
   bytes?: number;
+  // An 'audio' entry's chosen window, in seconds — the slice the officer picked before
+  // submitting. Absent means the whole recording. Additive on a jsonb column, so NO MIGRATION.
+  //
+  // Structural rather than imported: this package does not depend on @dgipr/schemas (see
+  // DloIntakeRow.reviewState for the same boundary), and AudioTrimSchema there is what the
+  // API validates it with before it is ever written here.
+  trim?: Readonly<{ startSeconds: number; endSeconds: number }>;
   chars?: number;
   error?: string;
   // Audio/DOCX carry their whole text; PDFs carry `pages` instead. A PDF's `pages`

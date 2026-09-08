@@ -151,6 +151,15 @@ export const STR = {
   motionVersionsLabel: 'आवृत्त्या',
   motionVersionInitial: 'पहिली आवृत्ती',
   motionPromptLabel: 'वापरलेला AI प्रॉम्प्ट',
+  // ---- the brand chrome on a trim ----
+  // The badge and footer drawn over the part being kept — and, since they are also what the
+  // trimmed clip is stamped with, this is a SETTING rather than a view control. Its labels say
+  // what pressing it does to the output, not what it does to the screen, because the officer
+  // judges the rectangle by where the branding lands on it and the two must agree.
+  motionChromeShow: 'लोगो व फूटर जोडा',
+  motionChromeHide: 'लोगो व फूटर नको',
+  motionChromeHint:
+    'निवडलेल्या भागावर शासनाचा लोगो व फूटर इथे दिसत आहेत — क्रॉप केल्यावर ते नेमक्या याच जागी व्हिडिओत जोडले जातील. नको असल्यास वरील बटणाने बंद करा.',
   // ---- the hand trim ----
   // A local ffmpeg cut, not a render: free, and repeatable as often as the officer likes. The
   // hint says both of the things they cannot see — that it costs nothing, and that a later AI
@@ -307,6 +316,46 @@ export const STR = {
     'बैठकीत जे ऐकले व ठरले ते लिहा. ध्वनिमुद्रण, फोटो, फाईल किंवा लिंकही जोडता येईल — यापैकी काहीही एक पुरे.',
   dloComposerNoteAria: 'बैठकीतील टिपणी',
   dloRemoveAudio: 'ध्वनिफीत काढा',
+
+  // ---------- the trim window on a recording (components/common/AudioTrimDialog) ----------
+  //
+  // A meeting recording is one file and the news is usually a few minutes of it. Every
+  // surface that attaches a recording — /dlo, /transcribe and /chat — opens the same dialog
+  // from the recording's own card, so the wording is written once here.
+  //
+  // TIMECODES ARE NOT PART OF THIS. `formatTimecode` (@dgipr/schemas) writes them, in Latin
+  // numerals, because they are positions in a media file sitting beside a browser's own
+  // audio controls — which count that way whatever the page's language.
+  audioTrimOpen: 'भाग निवडा',
+  audioTrimTitle: 'ध्वनिमुद्रणाचा कोणता भाग वापरायचा?',
+  audioTrimReading: 'ध्वनिमुद्रण वाचत आहोत…',
+  // The browser could not open the container at all. Not a failure of the upload — the
+  // recording will still be transcribed whole — so it says what is lost, not what broke.
+  audioTrimUnreadable:
+    'या ध्वनिमुद्रणाची लांबी वाचता आली नाही, त्यामुळे भाग निवडता येणार नाही. पूर्ण ध्वनिमुद्रण वापरले जाईल.',
+  audioTrimTooShort: 'हे ध्वनिमुद्रण खूप लहान आहे — ते पूर्णच वापरले जाईल.',
+  audioTrimStartLabel: 'सुरुवात',
+  audioTrimEndLabel: 'शेवट',
+  audioTrimWindowLabel: 'निवडलेला भाग',
+  audioTrimSelected: 'निवडलेला भाग:',
+  audioTrimPlay: 'निवडलेला भाग ऐका',
+  audioTrimPause: 'थांबवा',
+  audioTrimWhole: 'पूर्ण ध्वनिमुद्रण',
+  audioTrimHint: 'कडा ओढा, किंवा मधला भाग सरकवा.',
+  audioTrimApply: 'हाच भाग वापरा',
+  // What the same button says when nothing has been narrowed: pressing it stores no window
+  // at all, so promising a "part" would be untrue.
+  audioTrimUseWhole: 'पूर्ण ध्वनिमुद्रण वापरा',
+  audioTrimCancel: 'रद्द करा',
+  audioTrimClose: 'बंद करा',
+  // The recording's card in the composer, once a window has been chosen — the officer's own
+  // answer read back, so a trim is visible without reopening the dialog.
+  // Kept SHORT: the card is 240px wide and this is its second line, so a longer phrasing
+  // ("… निवडले · एकूण …") truncated away the total — which is the half that gives the window
+  // any meaning. The range itself already says a part was chosen, so the word for it went.
+  audioTrimCardMeta: (window: string, total: string) =>
+    `${window} · एकूण ${total}`,
+  audioTrimEditLabel: (name: string) => `भाग निवडा: ${name}`,
 
   // /dlo's ONE direction box (components/dlo/DloAiPromptBox). It replaces three separate
   // cards — शीर्षक, तुमची विनंती and नमुना बातमी — which asked the officer three questions

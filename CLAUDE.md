@@ -252,6 +252,30 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
     refreshes the instant the 202 lands, and a row still reading `ready` stops its poll
     and sits there through the whole OCR. DLO can afford this where `/translate` cannot
     because the original file is still in the private bucket.
+- **A recording can be trimmed to the part that matters (2026-09-09, no migration).** Clicking a
+  recording's card on `/dlo`, `/transcribe` or `/chat` opens a waveform with two handles; the
+  window is cut with ffmpeg before the audio reaches the STT provider. Shapes + helpers →
+  `packages/schemas/src/audio-trim.ts` (`AudioTrim`, the sparse positional `audioTrims` wire
+  format, `isPartialTrim`, `formatTimecode`); the cut → `content-engine/src/intake/trim-audio.ts`;
+  the path swap both runners call → `apps/api/src/jobs/audio-trim.ts`; request parsing shared by
+  both create routes → `apps/api/src/routes/audio-trims.ts`; web → `components/common/
+AudioTrimDialog.tsx` + `AudioTrimRange.tsx` over `lib/audioWaveform.ts` and `lib/useAudioTrims.ts`,
+  with `components/ui/dialog.tsx` (the product's first modal, over Radix).
+  Six things to know. **THE AUDIO NEVER ENTERS THE API**: ffmpeg is handed the PRESIGNED S3 URL as
+  its input (its https protocol seeks with Range requests) and writes a temp file, so the
+  2026-08-30 no-bytes-in-memory arrangement is preserved — never "download then cut". **The helper
+  swaps a storage PATH**, which is why neither transcribe phase changed shape, and the window is
+  encoded in the object name so a retry is free and a re-trim can never serve a stale cut. `-ss`
+  and `-to` go BEFORE `-i` (input seeking; after it, ffmpeg decodes and discards everything ahead
+  of the start), with `-c copy` and `-avoid_negative_ts make_zero`. **The trim is a reading, not an
+  edit** — the original stays archived, and the window is kept on the file entry (`trim`, jsonb, no
+  migration) because a retry must reproduce it. **The `audioTrims` field is sparse and keyed by
+  POSITION** among the audio files, with the name as a check: a mismatch is a Marathi 400, because
+  applying one recording's window to another silently destroys the source. And **the waveform is
+  best-effort** — the duration is free from an `<audio>` element, the picture needs a full decode,
+  so it is capped at 50 MB and skipped above that (a bigger decode hangs the tab rather than
+  failing). Free harnesses: `npx tsx src/intake/trim-audio.ts --check` (18) and, from
+  content-engine, `npx tsx ../../apps/api/src/routes/audio-trims.ts` (18).
 - **Transcription (`/transcribe`) — recordings in, Marathi text out, nothing else.** The DLO
   intake job's transcribe phase as a product of its own: routes →
   `apps/api/src/routes/transcriptions.ts` (create/list/detail only — no review contract, no

@@ -36,6 +36,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
+import sharp from 'sharp';
+import { socialChromeLayers } from '../twitter-chrome.js';
 import { resolveFfmpeg } from './assemble.js';
 
 const execFileAsync = promisify(execFile);
@@ -71,6 +73,16 @@ export type NormalizedRect = Readonly<{
   height: number;
 }>;
 
+/** Options for the hand trim. */
+export type CropRectOptions = Readonly<{
+  /**
+   * Burn the DGIPR badge and footer band onto the trimmed frame, where the crop preview showed
+   * them. Off by default: a Dynamic Poster is deliberately unbranded, its source being a poster
+   * that already carries the department's chrome.
+   */
+  chrome?: boolean;
+}>;
+
 /** A rectangle in real pixels, already even on every side. */
 type PixelCrop = Readonly<{
   width: number;
@@ -101,7 +113,7 @@ function evenOffset(n: number): number {
 // which is worse than not cropping at all.
 async function probeVideoSize(
   path: string,
-): Promise<{ width: number; height: number }> {
+): Promise<{ width: number; height: number; durationSeconds: number | null }> {
   const { stderr } = await execFileAsync(
     resolveFfmpeg(),
     [
@@ -126,17 +138,77 @@ async function probeVideoSize(
   if (!(width > 0) || !(height > 0)) {
     throw new Error('Could not read the clip’s dimensions from ffmpeg.');
   }
-  return { width, height };
+  // The container's own duration, off the same log. Only ever used to BOUND a looped still
+  // (below), so an unreadable one is not fatal — it costs the bound, never the crop.
+  const duration = String(stderr).match(
+    /Duration:\s*(\d+):(\d{2}):(\d{2}(?:\.\d+)?)/,
+  );
+  const durationSeconds = duration
+    ? Number(duration[1]) * 3600 +
+      Number(duration[2]) * 60 +
+      Number(duration[3])
+    : Number.NaN;
+  return {
+    width,
+    height,
+    durationSeconds:
+      Number.isFinite(durationSeconds) && durationSeconds > 0
+        ? durationSeconds
+        : null,
+  };
 }
+
+// One still to burn onto every frame of the cropped clip, already placed in its pixels.
+type CropOverlay = Readonly<{ path: string; x: number; y: number }>;
 
 // The one place the crop is actually performed, shared by both entry points below so the two
 // cannot drift in encode settings — a clip cropped to a ratio on the way out of a render and
 // one an officer trimmed by hand afterwards must be the same kind of file.
+//
+// The overlays are composited IN THE SAME PASS as the crop rather than by a second ffmpeg run
+// over the trimmed file. Two encodes would cost a generation of quality for a picture one
+// encode can produce, and they are placed against the CROPPED frame, which this is the only
+// place that knows the size of.
 async function encodeCrop(
   inputPath: string,
   outputPath: string,
   crop: PixelCrop,
+  overlays: readonly CropOverlay[] = [],
+  clipSeconds: number | null = null,
 ): Promise<Buffer> {
+  const inputArgs: string[] = ['-i', inputPath];
+  const chains: string[] = [
+    `[0:v]crop=${crop.width}:${crop.height}:${crop.left}:${crop.top}[base]`,
+  ];
+  let stage = 'base';
+
+  for (const [index, overlay] of overlays.entries()) {
+    // LOOPED, and that is load-bearing rather than tidy. A PNG handed to ffmpeg as a plain
+    // `-i` is a video stream of exactly ONE frame, so `shortest=1` ends the overlay — and
+    // therefore the whole graph — after that frame. The audio is mapped separately and copied
+    // in full, so the result is a clip of the right duration, with sound, frozen on its first
+    // frame: valid, playable, and wrong in the one way nothing here was measuring. `-loop 1`
+    // makes the still last, `-t` bounds it (longer than the footage, so `shortest=1` still ends
+    // the output on the FOOTAGE), and `-framerate 25` stops it being decoded at 1 fps. This is
+    // exactly the input assemble.ts builds for its caption stills, for the same reason.
+    inputArgs.push(
+      '-framerate',
+      '25',
+      '-loop',
+      '1',
+      // Omitted when the container would not say how long it is: an infinite still is ended by
+      // `shortest=1` anyway, whereas a `-t` guessed too short would TRUNCATE the officer's clip.
+      ...(clipSeconds !== null ? ['-t', clipSeconds.toFixed(3)] : []),
+      '-i',
+      overlay.path,
+    );
+    const next = `o${index}`;
+    chains.push(
+      `[${stage}][${index + 1}:v]overlay=${overlay.x}:${overlay.y}:shortest=1[${next}]`,
+    );
+    stage = next;
+  }
+
   await execFileAsync(
     resolveFfmpeg(),
     [
@@ -144,10 +216,16 @@ async function encodeCrop(
       '-loglevel',
       'error',
       '-y',
-      '-i',
-      inputPath,
-      '-vf',
-      `crop=${crop.width}:${crop.height}:${crop.left}:${crop.top}`,
+      ...inputArgs,
+      '-filter_complex',
+      chains.join(';'),
+      '-map',
+      `[${stage}]`,
+      // Optional: a provider clip need not carry an audio track, and `-map 0:a` on one that
+      // does not is a hard failure rather than a silent skip. With a filter graph in play
+      // there is no implicit stream selection left to fall back on.
+      '-map',
+      '0:a?',
       '-c:v',
       'libx264',
       '-preset',
@@ -174,6 +252,60 @@ async function encodeCrop(
     throw new Error('ffmpeg produced an empty clip.');
   }
   return cropped;
+}
+
+/**
+ * The department's badge and footer band, written to `dir` and placed against a cropped frame
+ * of `width` x `height`, ready to hand to `encodeCrop`.
+ *
+ * THE PLACEMENT IS THE CROP PREVIEW'S, and it has to stay that way: the officer decides whether
+ * a rectangle is the right one by looking at where the branding lands on it, so a stamp that
+ * sat anywhere else would make that judgement worthless. Both graphics come from
+ * socialChromeLayers, which derives them from the SOCIAL_LOCKUP_* ratios the browser overlay
+ * reads out of the same module — the badge inset from the top and right by a fraction of the
+ * WIDTH on both axes, the band flush along the bottom at full width.
+ *
+ * The band is clamped rather than allowed to overhang: a very short trim (a strip along the
+ * foot of a poster) can be shorter than the band is tall, and the preview clips it to the
+ * selection with `overflow: hidden`, so this crops it to what fits from its own bottom edge.
+ */
+async function writeChromeOverlays(
+  dir: string,
+  width: number,
+  height: number,
+): Promise<CropOverlay[]> {
+  const chrome = await socialChromeLayers(width);
+  const overlays: CropOverlay[] = [];
+
+  const bandHeight = Math.min(chrome.footer.height, height);
+  const footerPath = join(dir, 'chrome-footer.png');
+  await writeFile(
+    footerPath,
+    bandHeight === chrome.footer.height
+      ? chrome.footer.png
+      : await sharp(chrome.footer.png)
+          .extract({
+            left: 0,
+            top: chrome.footer.height - bandHeight,
+            width: chrome.footer.width,
+            height: bandHeight,
+          })
+          .png()
+          .toBuffer(),
+  );
+  overlays.push({ path: footerPath, x: 0, y: height - bandHeight });
+
+  // Only when it fits. A badge wider or taller than the rectangle would be drawn clipped at
+  // the frame edge and read as a rendering fault, where the preview simply hides it.
+  const logoLeft = width - chrome.logo.width - chrome.margin;
+  const logoTop = chrome.margin;
+  if (logoLeft >= 0 && logoTop + chrome.logo.height <= height) {
+    const logoPath = join(dir, 'chrome-logo.png');
+    await writeFile(logoPath, chrome.logo.png);
+    overlays.push({ path: logoPath, x: logoLeft, y: logoTop });
+  }
+
+  return overlays;
 }
 
 /**
@@ -253,10 +385,17 @@ function assertFraction(value: number, name: string): void {
  * Nothing is scaled and nothing is padded: the output is exactly the pixels inside the
  * rectangle, so the officer's artwork is never resampled by a trim. The audio track is copied
  * through untouched.
+ *
+ * With `chrome`, the department's badge and footer band are burned onto the trimmed frame in
+ * the same encode, at the fractions of it the crop preview drew them at. That is the officer's
+ * own answer to a question only a trim raises: this lane's source is finished artwork that
+ * already carries its branding, and cutting one panel out of it leaves that branding outside
+ * the rectangle.
  */
 export async function cropVideoToRect(
   mp4: Buffer,
   rect: NormalizedRect,
+  options: CropRectOptions = {},
 ): Promise<VideoCrop> {
   assertFraction(rect.x, 'x');
   assertFraction(rect.y, 'y');
@@ -278,7 +417,7 @@ export async function cropVideoToRect(
     const outputPath = join(dir, 'cropped.mp4');
     await writeFile(inputPath, mp4);
 
-    const { width, height } = await probeVideoSize(inputPath);
+    const { width, height, durationSeconds } = await probeVideoSize(inputPath);
     // The frame's own usable extent: yuv420p subsamples chroma, so an odd-sized source (rare,
     // but not impossible from a provider) can only be cropped to the even size inside it.
     const frameWidth = evenSize(width);
@@ -296,16 +435,33 @@ export async function cropVideoToRect(
 
     // The whole frame: re-encoding here would cost a generation of quality to produce the same
     // picture. The caller is told nothing happened rather than being handed a silent no-op.
-    if (cropWidth === frameWidth && cropHeight === frameHeight) {
+    // Chrome is the exception — stamping it IS a change to the picture, so a full-frame
+    // rectangle still has work to do.
+    const overlays = options.chrome
+      ? await writeChromeOverlays(dir, cropWidth, cropHeight)
+      : [];
+    if (
+      cropWidth === frameWidth &&
+      cropHeight === frameHeight &&
+      overlays.length === 0
+    ) {
       return { mp4, width, height, cropped: false };
     }
 
-    const cropped = await encodeCrop(inputPath, outputPath, {
-      width: cropWidth,
-      height: cropHeight,
-      left,
-      top,
-    });
+    const cropped = await encodeCrop(
+      inputPath,
+      outputPath,
+      {
+        width: cropWidth,
+        height: cropHeight,
+        left,
+        top,
+      },
+      overlays,
+      // Two seconds of slack, so the still always outlasts the footage and `shortest=1` ends
+      // the output on the footage rather than on the still.
+      durationSeconds === null ? null : durationSeconds + 2,
+    );
     return {
       mp4: cropped,
       width: cropWidth,
@@ -363,6 +519,87 @@ if (
     { timeout: 120_000, maxBuffer: CROP_MAX_BUFFER },
   );
   const source = await readFile(sourcePath);
+
+  // One row of the first frame, as raw pixels. The only way to show that an overlay actually
+  // landed rather than that ffmpeg merely accepted the filter graph.
+  const sampleRow = async (
+    mp4: Buffer,
+    at: Readonly<{ fromTop?: number; fromBottom?: number }>,
+  ): Promise<Buffer> => {
+    const out = await mkdtemp(join(tmpdir(), 'dgipr-crop-frame-'));
+    try {
+      const clipPath = join(out, 'clip.mp4');
+      const framePath = join(out, 'frame.png');
+      await writeFile(clipPath, mp4);
+      await execFileAsync(
+        resolveFfmpeg(),
+        [
+          '-hide_banner',
+          '-loglevel',
+          'error',
+          '-y',
+          '-i',
+          clipPath,
+          '-frames:v',
+          '1',
+          framePath,
+        ],
+        { timeout: 60_000, maxBuffer: CROP_MAX_BUFFER },
+      );
+      const png = await readFile(framePath);
+      const meta = await sharp(png).metadata();
+      const height = meta.height ?? 0;
+      const width = meta.width ?? 0;
+      const top =
+        at.fromTop !== undefined
+          ? Math.min(at.fromTop, Math.max(0, height - 1))
+          : Math.max(0, height - (at.fromBottom ?? 1));
+      return await sharp(png)
+        .extract({ left: 0, top, width, height: 1 })
+        .raw()
+        .toBuffer();
+    } finally {
+      await rm(out, { recursive: true, force: true });
+    }
+  };
+
+  // How many frames actually MOVE in what came back. Size alone cannot tell a cropped clip
+  // from one frozen on its first frame, which is exactly the shape the branded trim shipped
+  // in when its still was a single un-looped `-i` and `shortest=1` ended the graph on it.
+  const countFrames = async (mp4: Buffer): Promise<number> => {
+    const out = await mkdtemp(join(tmpdir(), 'dgipr-crop-frames-'));
+    try {
+      const path = join(out, 'clip.mp4');
+      await writeFile(path, mp4);
+      const { stdout } = await execFileAsync(
+        resolveFfmpeg(),
+        [
+          '-hide_banner',
+          '-loglevel',
+          'error',
+          '-i',
+          path,
+          '-map',
+          '0:v:0',
+          '-an',
+          '-f',
+          'null',
+          '-',
+          '-progress',
+          'pipe:1',
+          '-nostats',
+        ],
+        { timeout: 120_000, maxBuffer: CROP_MAX_BUFFER },
+      );
+      const frames = String(stdout)
+        .split(/[\r\n]+/)
+        .filter((line) => line.startsWith('frame='))
+        .pop();
+      return Number(frames?.slice('frame='.length)) || 0;
+    } finally {
+      await rm(out, { recursive: true, force: true });
+    }
+  };
 
   // What ffmpeg actually wrote, which is the only thing that proves a crop is legal.
   const measure = async (mp4: Buffer) => {
@@ -461,6 +698,78 @@ if (
       }
       check(refused, `a rectangle ${name} was accepted`);
     }
+
+    // THE BRANDED TRIM. The filter graph is the thing worth proving here — a crop plus two
+    // overlays plus an optional audio map is where ffmpeg refuses, not in the arithmetic — and
+    // that the stamp changes the picture WITHOUT changing its size, since the officer chose the
+    // rectangle by where the branding landed inside it.
+    const branded = await cropVideoToRect(
+      source,
+      { x: 0.213, y: 0.157, width: 0.337, height: 0.412 },
+      { chrome: true },
+    );
+    check(branded.cropped, 'the branded trim reported itself as uncropped');
+    check(
+      branded.width === panel.width && branded.height === panel.height,
+      `stamping the chrome changed the frame size: ${branded.width}x${branded.height} vs ${panel.width}x${panel.height}`,
+    );
+    const brandedSize = await measure(branded.mp4);
+    check(
+      brandedSize.width === branded.width &&
+        brandedSize.height === branded.height,
+      `the branded clip encoded as ${brandedSize.width}x${brandedSize.height}`,
+    );
+
+    // THE REGRESSION THIS FILE SHIPPED ONCE. The source is 25 frames; a branded trim must
+    // still be 25. Before the still was looped it was ONE, and because the audio is mapped
+    // and copied separately the officer got a clip of the full duration, with sound, stuck on
+    // its first frame — which every size assertion above passes happily.
+    const plainFrames = await countFrames(panel.mp4);
+    const brandedFrames = await countFrames(branded.mp4);
+    check(
+      plainFrames >= 20,
+      `the unbranded trim decoded only ${plainFrames} frames`,
+    );
+    check(
+      brandedFrames === plainFrames,
+      `stamping the chrome froze the clip: ${brandedFrames} frames vs ${plainFrames}`,
+    );
+
+    // MEASURED, not assumed. The band runs the full width along the bottom, so the bottom rows
+    // of a branded frame must differ from the same rows of the unbranded one — and the top
+    // rows, above the badge's own inset, must NOT.
+    const [plainFoot, brandedFoot, plainHead, brandedHead] = await Promise.all([
+      sampleRow(panel.mp4, { fromBottom: 8 }),
+      sampleRow(branded.mp4, { fromBottom: 8 }),
+      sampleRow(panel.mp4, { fromTop: 8 }),
+      sampleRow(branded.mp4, { fromTop: 8 }),
+    ]);
+    check(
+      !plainFoot.equals(brandedFoot),
+      'the footer band did not change the bottom of the frame',
+    );
+    // The badge sits inset from the top and right by a fraction of the WIDTH, so a row eight
+    // pixels down crosses it — this is what proves the lockup is drawn and not merely asked
+    // for. (Its being on the RIGHT is placement, and placement is socialChromeLayers'.)
+    check(
+      !plainHead.equals(brandedHead),
+      'the badge did not change the top of the frame',
+    );
+
+    // A rectangle SHORTER than the band is tall: the band is cropped to what fits rather than
+    // overhanging, which ffmpeg would refuse outright.
+    const strip2 = await cropVideoToRect(
+      source,
+      { x: 0, y: 0.9, width: 1, height: 0.06 },
+      { chrome: true },
+    );
+    const stripSize = await measure(strip2.mp4);
+    check(
+      strip2.cropped &&
+        stripSize.width === strip2.width &&
+        stripSize.height === strip2.height,
+      `a branded strip shorter than the band encoded as ${stripSize.width}x${stripSize.height}`,
+    );
 
     // And the automatic reframe still behaves, now that it shares the encoder.
     const reframed = await cropVideoToAspect(source, 9 / 16);
