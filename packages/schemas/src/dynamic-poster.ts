@@ -228,5 +228,25 @@ export function isWholeClipCrop(rect: MotionCrop): boolean {
 
 export const MotionCropRequestSchema = z.object({
   crop: MotionCropSchema,
+  // WHICH version the rectangle was drawn over, 1-based in the order the detail payload lists
+  // them. An INDEX rather than a storage path, for the reason every other path on this lane is
+  // checked before use: an index can only ever name something this run already produced, while
+  // a path is a string anyone can type. Omitted means the run's current clip, which is what an
+  // older web build sends and what the officer is looking at in the common case.
+  //
+  // A trim of an older version still writes a NEW version at the end of the strip — versions
+  // are immutable here, and the newest is always the current one — so nothing is overwritten
+  // by going back to re-cut a clip the officer preferred.
+  sourceVersion: z.number().int().min(1).optional(),
+  // Stamp the department's badge and footer band onto the trimmed clip.
+  //
+  // A trim is the one thing on this lane that can legitimately need them: the source is
+  // finished artwork that already carries its own branding, and cutting one panel out of it
+  // leaves that branding outside the rectangle. So the crop tool previews where they would sit
+  // and this carries the officer's answer through to the encode, where they are composited at
+  // the SAME fractions of the frame the preview used (SOCIAL_LOCKUP_*_RATIO).
+  //
+  // Defaulted false so an older web build's request means exactly what it meant before.
+  chrome: z.boolean().default(false),
 });
 export type MotionCropRequest = z.infer<typeof MotionCropRequestSchema>;

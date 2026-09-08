@@ -3,6 +3,7 @@
 // combined text → (after the officer's review) a normal generation.
 
 import { z } from 'zod';
+import { AudioTrimSchema } from './audio-trim.js';
 import { PdfTextSourceSchema } from './document.js';
 import {
   KnownDesignationSchema,
@@ -106,6 +107,14 @@ export const DloIntakeFileSchema = z.object({
   // separate flag rather than an inference from `kind` because the bytes are what decide:
   // without them the card has nothing to display and must not render a broken thumbnail.
   canPreview: z.boolean().optional(),
+  // An 'audio' source's chosen window, in seconds — the slice the officer picked on the trim
+  // slider before submitting. Absent means the whole recording, which is every intake made
+  // before this feature and most made after it. Additive on jsonb, so NO MIGRATION.
+  //
+  // Kept on the entry rather than consumed and discarded by the job, because it is the answer
+  // to "why does this transcript start in the middle?": the review card states the window
+  // beside the transcript, and a retry reproduces exactly the same one.
+  trim: AudioTrimSchema.optional(),
   // A 'youtube' source's link and what the probe knew about it, so the review card can name
   // and link the video instead of showing a bare URL. Absent on every other kind.
   sourceUrl: z.string().optional(),

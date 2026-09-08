@@ -51,6 +51,7 @@ import {
 import { combineIntakeSources, type IntakeSource } from '@dgipr/schemas';
 
 import { batchBySize } from './audio-batches.js';
+import { trimmedAudioPath } from './audio-trim.js';
 import { recordTasksFromCost } from './service-usage.js';
 import { transcriptCacheMode } from './transcript-cache-mode.js';
 
@@ -384,23 +385,29 @@ export function startDloIntakeJob(client: SupabaseClient, id: string): void {
               });
               continue;
             }
+            // THE OFFICER'S CHOSEN WINDOW IS CUT HERE, in storage, before the provider is
+            // pointed at anything (jobs/audio-trim.ts). It hands back the original's own path
+            // untouched when the whole recording was wanted, so an untrimmed intake does
+            // exactly what it did before — and because the cut is an object of its own, a
+            // retry finds it already there and spends no second ffmpeg run. It carries the
+            // same missing-original guard downloadEntry has, a document whose ephemeral
+            // upload expired having no bytes to sign.
+            const audioPath = await trimmedAudioPath(
+              client,
+              DLO_UPLOADS_BUCKET,
+              entry,
+            );
             if (handOffUrls) {
               // THE RECORDING IS NEVER LOADED: a presigned GET URL goes to the provider and
               // the audio travels S3 -> transcriber directly, removing the ~480 MB spike (a
               // whole download plus the copy `new Blob([bytes])` makes) that OOM-killed the
-              // container on meeting recordings. Same storagePath guard as downloadEntry —
-              // a document whose ephemeral upload expired has no bytes to sign.
-              if (!entry.storagePath) {
-                throw new Error(
-                  `या फाईलची मूळ प्रत उपलब्ध नाही: ${entry.name}`,
-                );
-              }
+              // container on meeting recordings.
               inputs.push({
                 name: entry.name,
                 sourceUrl: await signedDownloadUrl(
                   client,
                   DLO_UPLOADS_BUCKET,
-                  entry.storagePath,
+                  audioPath,
                 ),
                 providerFetches: true,
               });
@@ -408,7 +415,7 @@ export function startDloIntakeJob(client: SupabaseClient, id: string): void {
             }
             inputs.push({
               name: entry.name,
-              data: await downloadEntry(client, entry),
+              data: await downloadFile(client, DLO_UPLOADS_BUCKET, audioPath),
             });
           }
           // A URL source has no bytes, so it has no cache key. The empty string is never

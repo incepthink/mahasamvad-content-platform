@@ -2756,6 +2756,43 @@ details.fold[aria-disabled='true'] summary {
   background: #000;
 }
 
+/* ---------- the brand-chrome preview ---------- */
+
+/* The badge and footer band laid over the part of the clip being kept — shown only while the
+   crop tool is armed, since this lane's source poster already carries its own chrome and an
+   always-on overlay would duplicate it rather than preview it. Purely a preview: nothing here
+   reaches the stored file, so it never takes a pointer event — the surface below it is the
+   crop tool's, and a decoration that swallowed a drag would cost the officer the gesture.
+   Sized and placed by the component from the crop rectangle, whose corners are square, so this
+   deliberately carries no border radius.
+
+   `overflow: hidden` keeps the badge inside the selection on a very short rectangle (a trim
+   may keep as little as 5% of a side), where it would otherwise spill into the dimmed area and
+   read as a rendering fault. */
+.motion-chrome {
+  position: absolute;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* Both graphics carry their own aspect: the component sets a width and the height follows, so
+   the badge's proportions and the band's stay in the artwork rather than in this file. */
+.motion-chrome-logo {
+  position: absolute;
+  top: 0;
+  height: auto;
+  display: block;
+}
+
+.motion-chrome-footer {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
 /* ---------- the hand trim (MotionCropBox) ---------- */
 
 /* The surface the rectangle is drawn on: the video's own box. `overflow: hidden` is
@@ -8108,6 +8145,14 @@ a.thread-node:hover {
 
 .chat-tray-remove:hover {
   color: var(--err);
+}
+
+/* The chip's SECOND action — "which part of this recording?" — sharing the remove button's
+   geometry so the two read as one pair rather than two sizes of round button. It takes the
+   accent on hover rather than the error red: it opens something, it does not destroy
+   anything, and colour is the only thing distinguishing them at 26px. */
+.chat-tray-action:hover {
+  color: var(--accent);
 }
 
 /* ----- a picked picture -----

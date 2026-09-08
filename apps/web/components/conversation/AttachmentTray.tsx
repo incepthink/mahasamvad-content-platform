@@ -20,7 +20,13 @@
 // icon, its name and its state. That is not an inconsistency: a document's name is the only
 // thing distinguishing it from the next document, and there is no picture to put in its place.
 
-import { AlertTriangle, Paperclip, X, type LucideIcon } from 'lucide-react';
+import {
+  AlertTriangle,
+  Paperclip,
+  Scissors,
+  X,
+  type LucideIcon,
+} from 'lucide-react';
 import { FileName } from '../FileName';
 
 export type TrayAttachment = Readonly<{
@@ -39,6 +45,11 @@ export type TrayAttachment = Readonly<{
   failed?: boolean | undefined;
   removeLabel: string;
   onRemove: () => void;
+  // A second action on the chip, for an item with something to decide about it — today only
+  // a recording, whose question is which PART of it to use. Chips only: a tile is a picture
+  // at the size you recognise it by and has no room for a control that is not `remove`.
+  onOpen?: (() => void) | undefined;
+  openLabel?: string | undefined;
 }>;
 
 export function AttachmentTray({
@@ -128,6 +139,17 @@ function TrayChip({ item }: { item: TrayAttachment }) {
       <Icon size={16} aria-hidden="true" />
       <FileName name={name} className="chat-tray-name" max={28} />
       <span className="chat-tray-state">{status}</span>
+      {item.onOpen ? (
+        <button
+          type="button"
+          className="chat-tray-remove chat-tray-action"
+          onClick={item.onOpen}
+          aria-label={item.openLabel ?? ''}
+          title={item.openLabel ?? ''}
+        >
+          <Scissors size={14} aria-hidden="true" />
+        </button>
+      ) : null}
       <button
         type="button"
         className="chat-tray-remove"

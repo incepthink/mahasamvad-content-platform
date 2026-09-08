@@ -1772,12 +1772,28 @@ export function registerGenerationRoutes(
           },
         });
       }
+      // An index into this run's OWN version list, so a crop can never be pointed at another
+      // run's object — and refused here rather than in the job, where an out-of-range one would
+      // surface as a failed row instead of a bad request.
+      if (body.sourceVersion !== undefined) {
+        const revisions = await listRevisions(client, row.id);
+        if (body.sourceVersion > motionVersionsOf(row, revisions).length) {
+          return reply.code(400).send({
+            error: { message: 'That version of the clip does not exist.' },
+          });
+        }
+      }
       if (isJobRunning(row.id) || row.status === 'running') {
         return reply
           .code(409)
           .send({ error: { message: 'This run is already busy.' } });
       }
-      startMotionCropJob(client, row.id, body.crop);
+      startMotionCropJob(client, row.id, body.crop, {
+        chrome: body.chrome,
+        ...(body.sourceVersion === undefined
+          ? {}
+          : { sourceVersion: body.sourceVersion }),
+      });
       return reply.code(202).send({ ok: true });
     },
   );

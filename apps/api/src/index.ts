@@ -7,6 +7,7 @@ import { createServiceRoleClient } from '@dgipr/database';
 import { isAllowedOrigin } from './cors-origins.js';
 import { registerAnalyticsRoutes } from './routes/analytics.js';
 import { registerCanvaRoutes } from './routes/canva.js';
+import { registerChromeRoutes } from './routes/chrome.js';
 import { registerChatRoutes } from './routes/chat.js';
 import { registerDloRoutes } from './routes/dlo.js';
 import { registerNewDloRoutes } from './routes/new-dlo.js';
@@ -126,6 +127,9 @@ export async function createServer() {
     async (instance) => {
       registerGenerationRoutes(instance, client);
       registerCanvaRoutes(instance, client);
+      // The social poster's emblem badge and footer band as plain PNGs. Persists nothing
+      // and reads nothing — the Dynamic Poster crop preview lays them over an unbranded clip.
+      registerChromeRoutes(instance);
       registerGlossaryRoutes(instance, client);
       registerTranslateRoutes(instance, client);
       // Generic file upload → pages of text. It still persists no document and no text;

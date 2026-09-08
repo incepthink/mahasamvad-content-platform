@@ -3111,6 +3111,89 @@ client id/secret — see the milestone below.
 
 ## Latest Implementation Milestone
 
+- **A recording is trimmed to the part the officer wants** (2026-09-09, no migration, no n8n):
+  a meeting recording is one file and the news is usually a few minutes of it. Every recording
+  went to the transcriber whole, so an officer paid for two hours of speech to read four minutes
+  of it and then had to find those four minutes inside the transcript. Clicking a recording's
+  card on `/dlo`, `/transcribe` or `/chat` now opens a waveform with two handles; what they
+  select is cut with ffmpeg before the audio reaches the STT provider.
+  - **THE CUT CANNOT HAPPEN IN THE BROWSER AND MUST NOT HAPPEN IN MEMORY.** A two-hour MP3
+    decoded to PCM is gigabytes of `Float32Array`, and the containers this product accepts
+    (m4a/aac/ogg/opus/flac/webm) cannot be sliced by byte offset — so the page carries two
+    numbers rather than bytes. Server-side, the constraint is the 2026-08-30 arrangement that
+    hands the provider a PRESIGNED S3 URL so the audio travels S3 -> transcriber without
+    entering the API at all (the fix for the OOM that killed the container on a 239.6 MB
+    upload). A trim must not undo that, so **ffmpeg is given the presigned URL as its INPUT**
+    — its https protocol seeks with Range requests, verified present in the shipped
+    `ffmpeg-static` — and writes the cut to a temp file which `uploadStream` sends back. Peak
+    memory is ffmpeg's own working set whatever the recording's length.
+  - **The helper swaps a PATH, which is what makes the diff small**
+    (`apps/api/src/jobs/audio-trim.ts`): `trimmedAudioPath` returns either the original's
+    storage key or a cut one, and both runners' transcribe phases carry on doing exactly what
+    they did with `entry.storagePath`. Neither the `handOffUrls` branch nor the Sarvam
+    download branch changed shape. The **window is encoded in the object name**, so a retry
+    finds the cut already there and spends no second ffmpeg run while a re-trim can never
+    serve a stale one. `-ss`/`-to` go BEFORE `-i` (input seeking — after it, ffmpeg decodes
+    and discards the first hour), `-c copy` keeps it lossless and fast, and
+    `-avoid_negative_ts make_zero` stops a copied stream keeping timestamps some providers
+    read as a file that starts an hour in.
+  - **A trim is a READING of the recording, never an edit to it.** The original is what stays
+    archived, so the window can be widened later and a mistake costs an ffmpeg run rather than
+    a meeting. It is kept on the file entry (`trim`, jsonb — **no migration** on either table)
+    rather than consumed by the job, because it is the answer to "why does this transcript
+    start in the middle?" and a retry must reproduce the same one.
+  - **The wire format is SPARSE and POSITIONAL** (`apps/api/src/routes/audio-trims.ts`): one
+    entry per TRIMMED recording, so an untrimmed run appends no field and its request is
+    byte-for-byte what it was. The key is the position among the audio files and the NAME
+    rides along as a check — a name is not unique (two takes arrive as `recording.m4a` twice)
+    and a mismatch is a **400 rather than a shrug**, because applying somebody's four-minute
+    window to a different two-hour meeting discards the source they came for and leaves a
+    plausible-looking transcript behind.
+  - **`durationSeconds` is carried on the trim, and it earns its place twice**: it makes the
+    stored entry self-describing ("0:08–0:21 of 0:30") and it is the only way the API can tell
+    a genuine trim from a window spanning the whole file — which decides whether an ffmpeg run
+    and a second stored object are spent at all (`isPartialTrim`).
+  - **The waveform is BEST-EFFORT and size-capped** (`apps/web/lib/audioWaveform.ts`). The
+    DURATION is free (an `<audio>` element reports it from a header) and the picture needs the
+    file decoded, so they are separate calls: the dialog opens on the first and everything
+    except the picture works without the second. `decodeAudioData` holds the whole signal at
+    once, so the context is created at 8 kHz and anything past 50 MB is not attempted — it
+    does not fail politely, it hangs the tab and loses the pick.
+  - **The design is the crop tool's, deliberately** (`AudioTrimRange`, the `MotionCropBox`
+    counterpart): fractions of the track rather than pixels, every update through one
+    `clampWindow` so the value is always valid as it is dragged rather than refused at the
+    button, and full keyboard equivalents (each handle is a real `role="slider"`; the band
+    moves with arrows and resizes with Shift). Unlike `MotionCropBox` it is EDITED THEN
+    COMMITTED, so Escape genuinely cancels. The dialog is the product's first modal and added
+    `components/ui/dialog.tsx` over Radix — no new package, `radix-ui` was already a
+    dependency.
+  - **One real UI bug found by driving it rather than reading it**: `overflow-hidden` on the
+    track clipped the handles, which overhang the ends by half their width — so at its DEFAULT
+    position (the far right) the end handle's grab area lay outside the element and the
+    commonest gesture on the control was silently impossible. The picture and the shrouds are
+    clipped by an inner wrapper now; the track is not. A second pass fixed the selection
+    reading as DIMMER than the excluded audio: the waveform is drawn once and the shroud does
+    all the dimming, so the band's own tint had to come down to almost nothing.
+    Verified 2026-09-09: workspace typecheck **7/7 green**, eslint clean on all 21 touched
+    files, prettier clean on every hunk of mine (seven pre-existing files fail identically at
+    HEAD — CRLF — so do NOT `--write` them). Three free harnesses: `trim-audio --check` 18/18,
+    `audio-trims` 18/18 and the existing `audio-batches` 13/13 unchanged. A REAL cut proved end
+    to end offline — a 30.04s MP3 cut to **12.02s**, same codec, timestamps rebased. Browser,
+    against the running app at **1360 and 390**: 18/18 on `/dlo` at each width (duration read
+    off the file, both handles draggable, arrows moving, a handle unable to cross its partner,
+    no overflow, no page errors) and 16/16 across `/transcribe` and `/chat`; the create request
+    intercepted and confirmed to carry exactly
+    `[{"index":1,"name":"src.mp3","startSeconds":11.99…,"endSeconds":30,"durationSeconds":30}]`
+    for the second of two recordings with the untrimmed one absent. Offline checks on the job
+    helper confirm no trim and a whole-file window both return the original path **without
+    touching storage**, and that a genuine window does proceed to the cut.
+    **Left for a real run** (needs the database, S3 and STT spend): one trimmed recording end
+    to end, confirming the cut object lands beside the original and the transcript covers only
+    the chosen window. Deploy is `@dgipr/schemas` -> `@dgipr/database` ->
+    `@dgipr/content-engine` dists -> API + web, shipped **together** (the `audioTrims` field is
+    a shared contract, though it is optional so a half-deploy simply ignores it). No migration,
+    no n8n. New env (optional): `AUDIO_TRIM_TIMEOUT_MS`.
+
 - **Backend-selectable default for legacy chat clients** (2026-09-08, no migration):
   frontend `11bb6c2` omits `provider`, so backend `b379910` sends its turns to the shared
   Qwen fallback. The API now resolves `CHAT_DEFAULT_PROVIDER=openai|qwen` before both

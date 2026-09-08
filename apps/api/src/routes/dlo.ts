@@ -41,6 +41,7 @@ import {
   parseYouTubeVideoId,
   serializeDloReviewState,
   YouTubeSourcesSchema,
+  type AudioTrimEntry,
   type DloIntakeDetail,
   type DloIntakeGeneration,
   type DloIntakeSummary,
@@ -55,6 +56,7 @@ import {
 } from '../jobs/dlo-runner.js';
 import { uploadSourceFile } from '@dgipr/content-engine';
 import { getDocumentIntakeJob } from '../jobs/document-intake.js';
+import { parseAudioTrimsField, resolveAudioTrims } from './audio-trims.js';
 import { startGenerationJob } from '../jobs/runner.js';
 import { rememberDesignations } from '../jobs/designation-writeback.js';
 
@@ -308,6 +310,11 @@ export function registerDloRoutes(
     // the transcriber fetches the media itself (@dgipr/schemas' youtube.ts), so these become
     // entries with a URL and no archive.
     let youtube: YouTubeVideo[] = [];
+    // The windows the officer selected on the trim slider, one per TRIMMED recording. Held
+    // raw until every part has arrived, because a window can only be matched to a recording
+    // once the full list of recordings is known — and multipart makes no promise that this
+    // field precedes the files.
+    let trimEntries: readonly AudioTrimEntry[] = [];
 
     // Recordings already written to the private bucket for an intake that may still never be
     // inserted. Best-effort on every path that gives up.
@@ -342,6 +349,16 @@ export function registerDloRoutes(
           if (part.fieldname === 'heading') heading = value;
           if (part.fieldname === 'instructions') instructions = value;
           if (part.fieldname === 'styleReference') styleReference = value;
+          if (part.fieldname === 'audioTrims') {
+            const parsed = parseAudioTrimsField(value);
+            if (!parsed.ok) {
+              await discardStaged();
+              return reply
+                .code(400)
+                .send({ error: { message: parsed.message } });
+            }
+            trimEntries = parsed.entries;
+          }
           if (part.fieldname === 'documents' && value.trim().length > 0) {
             try {
               documents = DloCreateDocumentsSchema.parse(JSON.parse(value));
@@ -451,6 +468,24 @@ export function registerDloRoutes(
       });
     }
 
+    // Now that every part has arrived, each selected window can be checked against the
+    // recording it names. A mismatch is refused rather than applied to whichever recording
+    // happens to sit at that position — see routes/audio-trims.ts for why that is a 400 and
+    // not a shrug.
+    const resolvedTrims = resolveAudioTrims(
+      uploads.flatMap((upload) =>
+        upload.kind === 'audio' ? [upload.name] : [],
+      ),
+      trimEntries,
+    );
+    if (!resolvedTrims.ok) {
+      await discardStaged();
+      return reply
+        .code(400)
+        .send({ error: { message: resolvedTrims.message } });
+    }
+    const audioTrims = resolvedTrims.byPosition;
+
     // The recordings are already archived — streamed there as they arrived, under keys built
     // from `intakeId`, which is why this insert carries that id rather than taking one from
     // the database. Documents are uploaded just below, from the bytes still in hand. The row
@@ -463,6 +498,9 @@ export function registerDloRoutes(
       files: [],
     });
     const entries: DloIntakeFileEntry[] = [];
+    // Recordings share the `files` field with photographs and documents, so a trim's position
+    // counts only the AUDIO uploads — which is exactly the order the composer appended them in.
+    let audioPosition = 0;
     for (const [index, upload] of uploads.entries()) {
       // A recording was written during parsing and carries its key; a document's bytes are
       // still in memory and go up now.
@@ -482,12 +520,17 @@ export function registerDloRoutes(
       // the intake job's transcribe phase, with its content-addressed cache (0031) and its
       // per-file failure handling — nothing about audio changed.
       if (upload.kind === 'audio') {
+        const trim = audioTrims[audioPosition];
+        audioPosition += 1;
         entries.push({
           name: upload.name,
           storagePath,
           ...(upload.bytes !== undefined ? { bytes: upload.bytes } : {}),
           kind: upload.kind,
           status: 'pending',
+          // Omitted unless a window was actually selected, so an untrimmed intake's row is
+          // identical to what it was before this feature.
+          ...(trim !== undefined ? { trim } : {}),
         });
         continue;
       }

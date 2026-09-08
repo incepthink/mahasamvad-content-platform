@@ -34,11 +34,14 @@ import {
   FileImage,
   Maximize,
   Send,
+  Stamp,
   Wand2,
   X,
 } from 'lucide-react';
 import {
   MOTION_DIRECTION_MAX_CHARS,
+  SOCIAL_LOCKUP_MARGIN_RATIO,
+  SOCIAL_LOCKUP_WIDTH_RATIO,
   isWholeClipCrop,
   type GenerationDetail,
   type MotionCrop,
@@ -48,6 +51,8 @@ import {
   motionGifDownloadUrl,
   motionVideoDownloadUrl,
   sendMotionFeedback,
+  socialFooterUrl,
+  socialLogoUrl,
 } from '../lib/api';
 import { errorMessage } from '../lib/errorMessage';
 import { STR, formatDate } from '../lib/strings';
@@ -67,6 +72,63 @@ const RATIO_PRESETS = [
   { id: '9:16', label: '९:१६', ratio: 9 / 16 },
 ] as const;
 type RatioId = (typeof RATIO_PRESETS)[number]['id'];
+
+// The department's brand chrome, drawn over the part of the clip the officer is keeping.
+//
+// A PREVIEW OF WHAT THE TRIM WILL PRODUCE, not a decoration: while it is showing, the crop is
+// submitted with `chrome` and ffmpeg composites the same two graphics at the same fractions of
+// the frame. That is the only arrangement in which the overlay is worth looking at — the
+// officer decides whether a rectangle is the right one BY where the branding lands on it, so a
+// preview the output did not honour would make that judgement worthless.
+//
+// A Dynamic Poster's RENDER is still deliberately unbranded, its source being finished artwork
+// that already carries the department's branding; stamping a second lockup onto a full-frame
+// clip would be a defect. A trim is the case that inverts that: cutting one panel out of a
+// poster leaves the poster's own chrome outside the rectangle, so there is nothing left to
+// duplicate. Hence the toggle, and hence its being offered only with the crop tool.
+//
+// IT BELONGS TO THE CROP SELECTOR, and only shows while that is armed. Drawn over the whole
+// clip instead it would DUPLICATE branding rather than preview it: this lane's source is a
+// finished poster that already carries the badge and the band (verified on a real run — both
+// appear twice, the second set being this overlay). A trim is the case that genuinely needs it,
+// because cutting one panel out of a poster leaves the source's own chrome outside the
+// rectangle, and where the department's branding would then sit is what decides whether the
+// rectangle is the right one.
+//
+// Both graphics are placed by WIDTH alone and left to keep their own aspect (`height: auto`),
+// so the badge's 154:160 and the band's 239:3376 stay properties of the artwork instead of two
+// more numbers written down here. The offsets come from @dgipr/schemas, shared with
+// overlayTwitterChrome so the preview and the real stamp cannot disagree — and the top one is a
+// percentage `margin-top`, NOT `top`: a percentage margin resolves against the containing
+// block's WIDTH, `top` against its HEIGHT, so `top` would drop the badge too far down on any
+// frame taller than it is wide (the /video lockup preview's finding).
+function MotionChromeOverlay({ rect }: { rect: MotionCrop }) {
+  const margin = `${SOCIAL_LOCKUP_MARGIN_RATIO * 100}%`;
+  return (
+    <div
+      className="motion-chrome"
+      aria-hidden="true"
+      style={{
+        left: `${rect.x * 100}%`,
+        top: `${rect.y * 100}%`,
+        width: `${rect.width * 100}%`,
+        height: `${rect.height * 100}%`,
+      }}
+    >
+      <img
+        className="motion-chrome-logo"
+        src={socialLogoUrl}
+        alt=""
+        style={{
+          right: margin,
+          marginTop: margin,
+          width: `${SOCIAL_LOCKUP_WIDTH_RATIO * 100}%`,
+        }}
+      />
+      <img className="motion-chrome-footer" src={socialFooterUrl} alt="" />
+    </div>
+  );
+}
 
 export function DynamicPosterView({
   detail,
@@ -104,6 +166,10 @@ export function DynamicPosterView({
     null,
   );
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  // The brand-chrome preview. ON by default, because the officer trimming a panel out of a
+  // poster is cutting its branding away, and where the badge and band would land is exactly
+  // what decides whether the rectangle they have drawn is the right one.
+  const [showChrome, setShowChrome] = useState(true);
 
   // A finished follow-up — or a finished trim — must bring the officer back to the newest clip,
   // or they would sit watching the old one wondering whether anything happened. Disarming the
@@ -173,7 +239,16 @@ export function DynamicPosterView({
     setApplyingCrop(true);
     setCropError(null);
     try {
-      await cropMotionVideo(detail.id, crop);
+      await cropMotionVideo(detail.id, crop, {
+        // What the officer is looking at is what they get: the overlay showing means the
+        // badge and band are burned into the trimmed clip, at the same fractions of it.
+        chrome: showChrome,
+        // Named only when it is NOT the current clip. Sending it always would look tidier and
+        // be worse: the job resolves the row when it RUNS, so a trim queued behind a follow-up
+        // must be free to cut whatever that follow-up produced rather than an index frozen at
+        // the moment the button was pressed.
+        ...(viewingLatest ? {} : { sourceVersion: (selected ?? 0) + 1 }),
+      });
       // The row is now running; the poll picks up the new version and the effect above brings
       // the officer to it and puts the tool away. `onImageWorkStarted` is what makes the tasks
       // panel show this run as busy, exactly as a follow-up render does.
@@ -186,7 +261,12 @@ export function DynamicPosterView({
     }
   };
 
-  const cropDisabled = !videoUrl || !viewingLatest || busy || applyingCrop;
+  // Deliberately NOT gated on `viewingLatest`. A trim names the version it cut, and every
+  // version is an immutable object of its own, so going back through the strip to re-cut an
+  // earlier clip takes nothing away from the officer — the result is appended as the newest
+  // version like any other. Only the DOWNLOADS stay latest-only, because those name the row's
+  // current objects rather than the one on screen.
+  const cropDisabled = !videoUrl || busy || applyingCrop;
   // The free rectangle and each preset arm the same tool, so exactly one of the controls in
   // that row reads as pressed at a time.
   const freeCropArmed = cropping && lockedRatio === null;
@@ -222,6 +302,14 @@ export function DynamicPosterView({
                 // loops on its own, so nothing is lost for the seconds this takes.
                 controls={!cropping}
               />
+            ) : null}
+            {/* Painted BEFORE the crop box so the box's own handles and guides stay on top of
+                it — the badge sits in the top-right corner, which is where the `ne` grip is,
+                and a preview that swallowed a grip would cost the officer the gesture. The
+                dimming outside the selection is a spread shadow on the box, drawn outside its
+                border, so the chrome inside the rectangle stays bright either way. */}
+            {showChrome && cropping && videoUrl ? (
+              <MotionChromeOverlay rect={crop} />
             ) : null}
             {cropping && videoUrl ? (
               <MotionCropBox
@@ -338,6 +426,25 @@ export function DynamicPosterView({
                 </button>
               );
             })}
+            {/* Appears WITH the crop tools, because a trim is the only operation on this lane
+                that can legitimately carry the branding — the source poster already has its
+                own everywhere else. It is the crop's own setting rather than a view control:
+                what it shows is what the trimmed clip will contain. Not gated on
+                `cropDisabled`, since it changes nothing until क्रॉप करा is pressed. */}
+            {cropping ? (
+              <button
+                type="button"
+                className="icon-btn"
+                aria-pressed={showChrome}
+                title={showChrome ? STR.motionChromeHide : STR.motionChromeShow}
+                aria-label={
+                  showChrome ? STR.motionChromeHide : STR.motionChromeShow
+                }
+                onClick={() => setShowChrome((on) => !on)}
+              >
+                <Stamp size={18} strokeWidth={1.9} aria-hidden="true" />
+              </button>
+            ) : null}
           </div>
           {!gifUrl ? (
             // Stated rather than left blank: the GIF conversion is best-effort so that a
@@ -350,6 +457,11 @@ export function DynamicPosterView({
             <div className="motion-crop-panel">
               <p className="field-label">{STR.motionCropLabel}</p>
               <p className="hint">{STR.motionCropHint}</p>
+              {/* Said wherever the overlay is showing, never left to be inferred: the officer
+                  is looking at branding that is not in the file. */}
+              {showChrome ? (
+                <p className="hint">{STR.motionChromeHint}</p>
+              ) : null}
               {/* Under a lock, what the officer may and may not change is not visible from the
                   box alone — the edge grips are simply absent — so it is said. */}
               {activePreset ? (
@@ -441,13 +553,15 @@ export function DynamicPosterView({
                       aria-pressed={active}
                       onClick={() => {
                         setSelected(index);
-                        // The trim always cuts the run's CURRENT clip, so a box drawn while
-                        // an older version is on screen would cut something else. Put the
-                        // tool away rather than let the two disagree — the ratio with it,
-                        // since a preset is a rectangle measured against a frame that is
-                        // about to be replaced.
-                        setCropping(false);
+                        // The tool STAYS armed — a trim names the version it was drawn over,
+                        // so an older clip is as cuttable as the newest one. What cannot
+                        // survive the switch is the rectangle: the next clip need not be the
+                        // shape or the size of this one, and a preset is a rectangle measured
+                        // against a frame that is about to be replaced. So both are reset and
+                        // the officer draws again on what they are now looking at.
+                        setCrop(FULL_CROP);
                         setLockedRatio(null);
+                        setCropError(null);
                       }}
                       title={version.direction ?? STR.motionVersionInitial}
                     >

@@ -9,6 +9,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type {
+  AudioTrim,
   ChatMessage,
   ChatProvider,
   ChatThreadDetail,
@@ -39,6 +40,7 @@ export function ChatConversation({
   onAddDocuments,
   onAddAudio,
   onAddYouTube,
+  onSetTrim,
   onRemoveAttachment,
   onSend,
   onStop,
@@ -57,6 +59,7 @@ export function ChatConversation({
   onAddDocuments: (files: readonly File[]) => void;
   onAddAudio: (files: readonly File[]) => void;
   onAddYouTube: (video: YouTubeVideo) => void;
+  onSetTrim: (key: string, trim: AudioTrim | null) => void;
   onRemoveAttachment: (key: string) => void;
   onSend: (content: string, provider: ChatProvider) => Promise<boolean>;
   onStop: () => void;
@@ -170,6 +173,7 @@ export function ChatConversation({
             onAddDocuments={onAddDocuments}
             onAddAudio={onAddAudio}
             onAddYouTube={onAddYouTube}
+            onSetTrim={onSetTrim}
             onRemove={onRemoveAttachment}
             onSend={onSend}
             onStop={onStop}
