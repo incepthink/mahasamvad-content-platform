@@ -393,6 +393,7 @@ export {
 export {
   chatProviderCapabilities,
   chatProviders,
+  resolveChatProvider,
 } from './chat/chat-providers.js';
 export {
   QWEN_CHAT_SYSTEM_INSTRUCTION,

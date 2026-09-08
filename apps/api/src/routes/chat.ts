@@ -38,7 +38,6 @@ import {
   CHAT_ATTACHMENT_TEXT_MAX_CHARS,
   CHAT_HISTORY_TURNS,
   CHAT_MAX_ATTACHMENTS,
-  DEFAULT_CHAT_PROVIDER,
   SendChatMessageRequestSchema,
   chatTitleFrom,
   imageMimeForFileName,
@@ -60,6 +59,7 @@ import {
   deleteChatVectorStore,
   isQwenChatError,
   MISC_CHAT_PDF_MAX_BYTES,
+  resolveChatProvider,
   runInCostScope,
   streamMiscChatReply,
   streamQwenChatReply,
@@ -655,10 +655,9 @@ export function registerChatRoutes(
 
       const body = SendChatMessageRequestSchema.parse(request.body);
       const content = body.content.trim();
-      // Absent = Qwen. Whether this
-      // deployment has the named provider SET UP is deliberately not asked here — see the
-      // guard below and chat-providers.ts.
-      const provider = body.provider ?? DEFAULT_CHAT_PROVIDER;
+      // Legacy clients omit provider: use the API's CHAT_DEFAULT_PROVIDER, then the
+      // shared fallback. Resolve before checking attachments so the guard and model agree.
+      const provider = resolveChatProvider(body.provider);
       const capabilities = chatProviderCapabilities(provider);
       const submitted = body.attachments ?? [];
 

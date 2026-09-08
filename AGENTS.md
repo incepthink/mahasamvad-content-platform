@@ -3111,6 +3111,19 @@ client id/secret — see the milestone below.
 
 ## Latest Implementation Milestone
 
+- **Backend-selectable default for legacy chat clients** (2026-09-08, no migration):
+  frontend `11bb6c2` omits `provider`, so backend `b379910` sends its turns to the shared
+  Qwen fallback. The API now resolves `CHAT_DEFAULT_PROVIDER=openai|qwen` before both
+  attachment validation and model dispatch. Explicit request providers win; unset/blank
+  retains the existing Qwen fallback, while an invalid nonblank default fails before a
+  message is saved. `OPENAI_MISC_CHAT_MODEL` still chooses the GPT model. This changes only
+  general chat, not `ARTICLE_PROVIDER`. Deploy rebuilt content-engine + API, set the variable
+  in EC2's `deploy/.env.prod`, and recreate the API container; the old web build can stay.
+  See `docs/chat-provider-switch.md` for image tagging and rollout instructions.
+  Verified offline: 30 routing checks, including a completed mocked OpenAI turn after Qwen
+  history; content-engine and dependencies + API builds, API typecheck, targeted ESLint,
+  and `git diff --check` pass. No live model call or production deployment performed.
+
 - **Read-only DLO SFT export** (2026-09-08, no migration): `pnpm finetune:export
   <generation-uuid>` writes one conversational JSONL example plus a separate review record
   under the gitignored `packages/content-engine/data/finetune/dlo/`. It pairs the generation's
