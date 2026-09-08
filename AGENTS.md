@@ -3111,6 +3111,17 @@ client id/secret — see the milestone below.
 
 ## Latest Implementation Milestone
 
+- **Read-only DLO SFT export** (2026-09-08, no migration): `pnpm finetune:export
+  <generation-uuid>` writes one conversational JSONL example plus a separate review record
+  under the gitignored `packages/content-engine/data/finetune/dlo/`. It pairs the generation's
+  original intake note and stored source text, saved reviewed note, all officer instructions,
+  pasted style reference and article feedback with its latest saved Marathi article. Earlier
+  drafts contextualize feedback inside the user message; only the final article is an assistant
+  target. Internal historical model prompts/RAG are not reconstructed. Completed is not treated
+  as human approval. Native-file runs require `--source-file` containing complete factual inputs
+  because their note alone omits document contents. No model calls, uploads or database writes.
+  Existing exports are not overwritten. See `docs/dlo-finetuning-export.md` for usage and limits.
+
 - **A Dynamic Poster can be trimmed by hand** (2026-09-07, no migration, no n8n): the lane
   could choose its output SHAPE before the render (`motion_aspect`, 0053) and nothing after it.
   A department often wants one panel of a poster — the headline block, a single announcement
