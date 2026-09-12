@@ -26,7 +26,7 @@
  */
 
 /** The क्रिएटिव्ह आणि सोशल lane's drawing, shared by the form and its result page. */
-export const CREATIVE_ARTWORK = '/cretive-and-social.svg';
+export const CREATIVE_ARTWORK = '/backgrounds/creative.png';
 
 type PageArtworkProps = {
   /** Public-path URL of the drawing, e.g. CREATIVE_ARTWORK. */

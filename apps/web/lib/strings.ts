@@ -52,7 +52,7 @@ export const STR = {
   // The one text box on this page is now the POSTER'S OWN TEXT, not a finished article:
   // क्रिएटिव्ह and यूट्यूब थंबनेल print everything typed here. बॅनर is the one exception —
   // there the text is kept as the article and only the main name / heading is picked out of
-  // it — so the label stays single and the HINT carries that difference, rather than a
+  // it — so the label stays single and its info tooltip carries that difference, rather than a
   // label that changes below the fold (the format cards sit under this card, not above it).
   articlePasteLabel: 'पोस्टरवर जो मजकूर हवा आहे तो येथे लिहा',
   articlePasteHint:
@@ -70,7 +70,7 @@ export const STR = {
   posterSourceVerbatim: 'जसाच्या तसा मजकूर',
   posterSourceVerbatimDesc:
     'वर लिहिलेला मजकूर जसाच्या तसा पोस्टरवर छापला जातो — एकही शब्द बदलला जात नाही. निवडले नाही तर त्यातून पोस्टरचा मजकूर AI तयार करते.',
-  // The text box's own label/hint follow that checkbox: unticked, the box holds a
+  // The text box's own label/info tooltip follow that checkbox: unticked, the box holds a
   // finished article, not the poster's words, so promising "सर्व मजकूर पोस्टरवर छापला जातो"
   // there would be false.
   articleSourceLabel: 'तयार लेख येथे चिकटवा',

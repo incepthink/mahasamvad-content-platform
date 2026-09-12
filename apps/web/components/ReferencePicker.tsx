@@ -53,6 +53,7 @@ import {
 import { STR } from '../lib/strings';
 import { errorMessage } from '../lib/errorMessage';
 import { ErrorNotice } from './ErrorNotice';
+import { cn } from '../lib/utils';
 
 // A band opens on two rows' worth of thumbnails. Count-based rather than measured (the
 // library page measures its resolved grid tracks): this gallery sits inside a fold on a
@@ -240,6 +241,7 @@ export default function ReferencePicker({
   variant = 'card',
   noneLabel,
   noneHint,
+  hideTitle = false,
 }: {
   category: PickerCategory;
   // Which template brand family to show. The DGIPR flow excludes CMO types and vice
@@ -261,6 +263,10 @@ export default function ReferencePicker({
   // already means "let the platform choose", so the आपोआप / स्वतः निवडा card pair would
   // be asking a question the fold has answered.
   variant?: 'card' | 'inline' | 'disclosure';
+  // 'disclosure' only: the surrounding card already prints this question as its own
+  // label (and carries the hint behind its ⓘ), so the fold must not repeat either —
+  // the row is then just the current answer plus the chevron that opens the gallery.
+  hideTitle?: boolean;
 }) {
   const isDisclosure = variant === 'disclosure';
   const [open, setOpen] = useState(isDisclosure && value !== null);
@@ -551,33 +557,56 @@ export default function ReferencePicker({
       <div className="ref-picker ref-picker-disclosure">
         <button
           type="button"
-          className="ref-picker-disclosure-head"
+          className={
+            hideTitle
+              ? 'ref-picker-disclosure-head border-input hover:bg-accent/40 w-full rounded-lg border px-3 py-2.5 transition-colors'
+              : 'ref-picker-disclosure-head'
+          }
           aria-expanded={open}
+          aria-label={hideTitle ? STR.refPickerDisclosureTitle : undefined}
           onClick={toggleOpen}
         >
-          <span className="ref-picker-disclosure-chevron" aria-hidden="true">
-            {open ? (
-              <ChevronDown size={18} strokeWidth={2} />
-            ) : (
-              <ChevronRight size={18} strokeWidth={2} />
-            )}
-          </span>
-          <span className="ref-picker-disclosure-label">
-            {STR.refPickerDisclosureTitle}
-          </span>
+          {hideTitle ? null : (
+            <span className="ref-picker-disclosure-chevron" aria-hidden="true">
+              {open ? (
+                <ChevronDown size={18} strokeWidth={2} />
+              ) : (
+                <ChevronRight size={18} strokeWidth={2} />
+              )}
+            </span>
+          )}
+          {hideTitle ? null : (
+            <span className="ref-picker-disclosure-label">
+              {STR.refPickerDisclosureTitle}
+            </span>
+          )}
           <span
-            className={
+            className={cn(
               value
                 ? 'ref-picker-disclosure-summary ref-picker-disclosure-summary-set'
-                : 'ref-picker-disclosure-summary'
-            }
+                : 'ref-picker-disclosure-summary',
+              // Bordered, the row reads as the control it is: the answer sits at the
+              // start like a field's value and the chevron closes the row at the end.
+              hideTitle && 'ms-0! min-w-0 flex-1 text-start',
+            )}
           >
             {summary}
           </span>
+          {hideTitle ? (
+            <span className="ref-picker-disclosure-chevron" aria-hidden="true">
+              {open ? (
+                <ChevronDown size={18} strokeWidth={2} />
+              ) : (
+                <ChevronRight size={18} strokeWidth={2} />
+              )}
+            </span>
+          ) : null}
         </button>
         {open ? (
           <div className="ref-picker-disclosure-body">
-            <p className="hint">{noneHint ?? STR.refPickerDisclosureHint}</p>
+            {hideTitle ? null : (
+              <p className="hint">{noneHint ?? STR.refPickerDisclosureHint}</p>
+            )}
             {value ? (
               <div className="ref-picker-disclosure-actions">
                 <button

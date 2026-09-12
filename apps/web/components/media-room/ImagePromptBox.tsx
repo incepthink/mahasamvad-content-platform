@@ -24,6 +24,7 @@
  */
 
 import { IMAGE_PROMPT_MAX_CHARS } from '@dgipr/schemas';
+import { FieldLabel } from '@/components/common/FieldLabel';
 import { FormCard } from '@/components/common/FormCard';
 import { PromptTextarea } from '@/components/common/PromptTextarea';
 import { STR } from '@/lib/strings';
@@ -35,8 +36,13 @@ export function ImagePromptBox({ form }: { form: Form }) {
   return (
     <FormCard
       htmlFor="image-prompt"
-      label={STR.imagePromptLabel}
-      hint={STR.imagePromptHint}
+      label={
+        <FieldLabel
+          helpId="image-prompt-help"
+          label={STR.imagePromptLabel}
+          hint={STR.imagePromptHint}
+        />
+      }
     >
       <PromptTextarea
         id="image-prompt"
@@ -45,7 +51,7 @@ export function ImagePromptBox({ form }: { form: Form }) {
         value={form.imagePrompt}
         disabled={form.submitting}
         onChange={form.setImagePrompt}
-        className="mt-3 max-h-60 min-h-20 w-full"
+        className="mt-4 max-h-60 min-h-20 w-full"
       />
     </FormCard>
   );

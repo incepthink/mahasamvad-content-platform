@@ -20,6 +20,7 @@ import ReferencePicker, {
   type ReferenceSelection,
 } from '@/components/ReferencePicker';
 import type { ReferenceCategory } from '@dgipr/schemas';
+import { FieldLabel } from '@/components/common/FieldLabel';
 import { FormCard } from '@/components/common/FormCard';
 import { STR } from '@/lib/strings';
 
@@ -35,25 +36,43 @@ export function TemplateSelect({
   isSocial: boolean;
 }) {
   return (
-    <FormCard>
-      <ReferencePicker
-        key={category}
-        category={category}
-        brand="dgipr"
-        variant="disclosure"
-        value={value}
-        onChange={onChange}
-        {...(isSocial
-          ? {
-              // On the Creative lane an empty selection means NO template is used and
-              // the poster is designed from scratch — the opposite of the default
-              // wording, which promises the platform will pick one. Banner and YouTube
-              // still auto-select, so they keep it.
-              noneLabel: STR.refPickerDisclosureNoneSocial,
-              noneHint: STR.refPickerDisclosureHintSocial,
-            }
-          : {})}
-      />
+    <FormCard
+      label={
+        <FieldLabel
+          helpId="template-select-help"
+          label={STR.refPickerDisclosureTitle}
+          hint={
+            isSocial
+              ? STR.refPickerDisclosureHintSocial
+              : STR.refPickerDisclosureHint
+          }
+        />
+      }
+    >
+      {/* The card is the question; the fold below it is only the answer, so its own
+          title and hint are suppressed (hideTitle) and it carries the same faint field
+          border as the text boxes above — one form, not three shapes of card. */}
+      <div className="mt-4">
+        <ReferencePicker
+          key={category}
+          category={category}
+          brand="dgipr"
+          variant="disclosure"
+          hideTitle
+          value={value}
+          onChange={onChange}
+          {...(isSocial
+            ? {
+                // On the Creative lane an empty selection means NO template is used and
+                // the poster is designed from scratch — the opposite of the default
+                // wording, which promises the platform will pick one. Banner and YouTube
+                // still auto-select, so they keep it.
+                noneLabel: STR.refPickerDisclosureNoneSocial,
+                noneHint: STR.refPickerDisclosureHintSocial,
+              }
+            : {})}
+        />
+      </div>
     </FormCard>
   );
 }

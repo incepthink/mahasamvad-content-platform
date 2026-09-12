@@ -36,6 +36,7 @@ import {
   AttachmentStrip,
   type AttachmentItem,
 } from '@/components/common/AttachmentStrip';
+import { FieldLabel } from '@/components/common/FieldLabel';
 import { FormCard } from '@/components/common/FormCard';
 import { PromptTextarea } from '@/components/common/PromptTextarea';
 import { DocumentIntake } from '@/components/DocumentIntake';
@@ -101,9 +102,19 @@ export function NoteComposer({ form }: { form: Form }) {
 
   return (
     <FormCard
+      className="mr-note-composer"
       htmlFor="note"
-      label={form.fromArticle ? STR.articleSourceLabel : STR.articlePasteLabel}
-      hint={form.fromArticle ? STR.articleSourceHint : STR.articlePasteHint}
+      label={
+        <FieldLabel
+          helpId="note-source-help"
+          label={
+            form.fromArticle ? STR.articleSourceLabel : STR.articlePasteLabel
+          }
+          hint={
+            form.fromArticle ? STR.articleSourceHint : STR.articlePasteHint
+          }
+        />
+      }
     >
       {/* Handoff from a finished run's cross-format link. The failure is stated rather
           than silent — an empty box with no explanation reads as the link not working. */}
@@ -257,7 +268,7 @@ export function NoteComposer({ form }: { form: Form }) {
           onClick={() => void form.startSubmit()}
           disabled={form.submitBusy || !form.canSubmit}
           className={cn(
-            'text-primary-foreground ml-auto inline-flex h-9 shrink-0 items-center rounded-md px-5 text-sm font-bold transition-[filter]',
+            'mr-submit-button text-primary-foreground ml-auto inline-flex h-9 shrink-0 items-center rounded-md px-5 text-sm font-bold transition-[filter]',
             'focus-visible:ring-ring/50 outline-none focus-visible:ring-[3px]',
             'disabled:cursor-not-allowed disabled:opacity-60',
             form.submitBusy || !form.canSubmit
@@ -320,7 +331,7 @@ function CheckOption({
     <label
       title={title}
       className={cn(
-        'inline-flex h-9 shrink-0 cursor-pointer select-none items-center gap-2 rounded-md border px-3 text-sm transition-colors',
+        'mr-check-option inline-flex h-9 shrink-0 cursor-pointer select-none items-center gap-2 rounded-md border px-3 text-sm transition-colors',
         'bg-background hover:bg-accent hover:text-accent-foreground',
         checked && 'border-primary/40 bg-accent',
         disabled && 'pointer-events-none opacity-50',
