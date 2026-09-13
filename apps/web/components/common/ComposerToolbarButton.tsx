@@ -46,7 +46,10 @@ export function ComposerToolbarButton({
       {...(controls
         ? { 'aria-controls': controls, 'aria-expanded': active }
         : {})}
-      className={cn('shrink-0', active && 'bg-accent')}
+      className={cn(
+        'shrink-0',
+        active && 'bg-[var(--chrome-800)]',
+      )}
     >
       <Icon />
     </Button>

@@ -37,9 +37,8 @@
      literals live here rather than being back-ported into dgipr.css. */
   --chrome-700: #4d5961;
   --chrome-800: #343f47;
-  /* shadcn's --primary. Deliberately NOT --accent: a shadcn Button is a
-     secondary action in this product, and painting it green would put two
-     competing primaries on every form. */
+  /* Available as a lighter slate step; shared secondary controls intentionally
+     use --chrome-700 below so they match the sidebar exactly. */
   --chrome-600: #5b666e;
   --rail-bg: linear-gradient(
     180deg,
@@ -86,23 +85,22 @@
   --glass-chip-border: rgba(255, 255, 255, 0.72);
   --glass-chip-bg: rgba(229, 233, 236, 0.68);
 
-  /* Outline buttons on glass. */
-  --glass-outline-bg: rgba(220, 232, 238, 0.8);
-  --glass-outline-bg-hover: rgba(204, 224, 234, 0.86);
-  --glass-outline-border-hover: rgba(36, 79, 104, 0.48);
-  --glass-outline-fg: #244f68;
-
-  /* Solid slate controls, so a button never competes with the glass it sits on. */
-  --glass-control-bg: rgba(76, 89, 98, 0.96);
-  --glass-control-border: rgba(76, 89, 98, 0.84);
-  --glass-control-bg-hover: rgba(61, 73, 81, 0.96);
-  --glass-control-border-hover: rgba(61, 73, 81, 0.92);
-  --glass-toggle-bg: rgba(84, 102, 113, 0.94);
-  --glass-toggle-border: rgba(84, 102, 113, 0.8);
-  --glass-toggle-bg-hover: rgba(65, 80, 89, 0.96);
-  --glass-toggle-border-hover: rgba(65, 80, 89, 0.9);
-  --glass-toggle-bg-checked: rgba(55, 68, 76, 0.98);
-  --glass-toggle-border-checked: rgba(55, 68, 76, 0.94);
+  /* Secondary, icon and checkbox controls use the sidebar's slate family on
+     glass, with the same white foreground. */
+  --glass-outline-bg: var(--chrome-700);
+  --glass-outline-bg-hover: var(--chrome-800);
+  --glass-outline-border-hover: var(--chrome-800);
+  --glass-outline-fg: var(--rail-fg-strong);
+  --glass-control-bg: var(--chrome-700);
+  --glass-control-border: var(--chrome-700);
+  --glass-control-bg-hover: var(--chrome-800);
+  --glass-control-border-hover: var(--chrome-800);
+  --glass-toggle-bg: var(--chrome-700);
+  --glass-toggle-border: var(--chrome-700);
+  --glass-toggle-bg-hover: var(--chrome-800);
+  --glass-toggle-border-hover: var(--chrome-800);
+  --glass-toggle-bg-checked: var(--chrome-800);
+  --glass-toggle-border-checked: var(--chrome-800);
 
   /* ---- the ground ---------------------------------------------------------- */
   --page-bg-overlay: linear-gradient(
@@ -292,8 +290,8 @@ body:not(:has(.sidebar)) {
   background: var(--glass-outline-bg-hover);
 }
 
-/* Solid slate, so a composer's tool buttons never compete with the glass they
-   sit on. The submit is excluded — it is the one primary action on the screen. */
+/* The composer's secondary controls match the sidebar. The submit is excluded
+   because it is the one primary action on the screen. */
 .page:not(.page-plain) .mr-note-composer button:not(.mr-submit-button) {
   border-color: var(--glass-control-border);
   background: var(--glass-control-bg);

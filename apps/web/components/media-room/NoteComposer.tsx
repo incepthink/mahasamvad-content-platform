@@ -222,7 +222,10 @@ export function NoteComposer({ form }: { form: Form }) {
           aria-label={STR.docUpload}
           disabled={form.submitting}
           onClick={() => form.setDocOpen((open) => !open)}
-          className={cn('shrink-0', showDoc && 'bg-accent')}
+          className={cn(
+            'shrink-0',
+            showDoc && 'bg-[var(--chrome-800)]',
+          )}
         >
           <Paperclip />
         </Button>
@@ -332,8 +335,9 @@ function CheckOption({
       title={title}
       className={cn(
         'mr-check-option inline-flex h-9 shrink-0 cursor-pointer select-none items-center gap-2 rounded-md border px-3 text-sm transition-colors',
-        'bg-background hover:bg-accent hover:text-accent-foreground',
-        checked && 'border-primary/40 bg-accent',
+        'bg-secondary text-secondary-foreground hover:bg-[var(--chrome-800)]',
+        checked &&
+          'border-[var(--chrome-800)] bg-[var(--chrome-800)]',
         disabled && 'pointer-events-none opacity-50',
       )}
     >
