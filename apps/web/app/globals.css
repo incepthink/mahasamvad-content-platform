@@ -66,18 +66,20 @@
      duplicated hex values with a trailing comment naming the token they had
      been copied from, which is exactly the drift this arrangement exists to
      stop: one palette change then had to be made twice, and the second copy
-     was the one that got missed. --popover, --secondary and --muted-bg are the
-     only values with no dgipr or theme twin. */
+     was the one that got missed. --popover and --muted-bg are the only values
+     with no dgipr or theme twin. */
   --background: var(--bg);
   --foreground: var(--text);
   --card-bg: var(--card); /* `--card` itself is taken by dgipr.css */
   --card-foreground: var(--text);
   --popover: #f8fafb;
   --popover-foreground: var(--text);
-  --primary: var(--chrome-600); /* slate, not --accent: see theme.css */
+  --primary: var(--chrome-700); /* sidebar slate, not --accent: see theme.css */
   --primary-foreground: #ffffff;
-  --secondary: #dce8ee;
-  --secondary-foreground: var(--glass-outline-fg);
+  /* Secondary and icon controls match the sidebar's slate grey; green stays
+     reserved for the page's primary action and white keeps labels legible. */
+  --secondary: var(--chrome-700);
+  --secondary-foreground: var(--rail-fg-strong);
   --muted-bg: #e5e9ec; /* `--muted` is dgipr's muted TEXT colour */
   --muted-foreground: var(--muted);
   --accent-bg: var(--accent-soft);

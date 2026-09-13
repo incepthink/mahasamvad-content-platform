@@ -1058,8 +1058,8 @@ textarea.note-input {
   font-weight: 700;
   border-radius: var(--r-md);
   border: 1.5px solid var(--border-strong);
-  background: var(--card);
-  color: var(--text);
+  background: var(--chrome-700);
+  color: var(--rail-fg-strong);
   padding: 12px 22px;
   cursor: pointer;
   min-height: 48px;
@@ -1072,9 +1072,9 @@ textarea.note-input {
 }
 
 .btn:hover:not(:disabled) {
-  background: var(--accent-tint);
-  border-color: var(--accent);
-  color: var(--accent-dark);
+  background: var(--chrome-800);
+  border-color: var(--chrome-800);
+  color: var(--rail-fg-strong);
 }
 
 /* A 1px press keeps the control feeling physical without moving layout. */
@@ -3294,8 +3294,8 @@ details.fold[aria-disabled='true'] summary {
   padding: 0;
   border: 1px solid var(--border);
   border-radius: 11px;
-  background: #fff;
-  color: var(--text);
+  background: var(--chrome-700);
+  color: var(--rail-fg-strong);
   cursor: pointer;
   /* The download control is an <a> (only the server can force a cross-origin
      download), so it must not inherit the global link underline. */
@@ -3307,9 +3307,9 @@ details.fold[aria-disabled='true'] summary {
 }
 
 .icon-btn:hover:not(:disabled) {
-  background: var(--accent-soft);
-  border-color: var(--accent);
-  color: var(--accent-dark);
+  background: var(--chrome-800);
+  border-color: var(--chrome-800);
+  color: var(--rail-fg-strong);
 }
 
 .icon-btn:disabled {
@@ -8300,13 +8300,15 @@ a.thread-node:hover {
   width: 42px;
   height: 42px;
   padding: 0;
+  border: 1px solid var(--border);
   border-radius: 50%;
-  color: var(--muted);
+  background: var(--chrome-700);
+  color: var(--rail-fg-strong);
 }
 
 .chat-tool:hover:not(:disabled) {
-  color: var(--accent-dark);
-  background: var(--accent-soft);
+  color: var(--rail-fg-strong);
+  background: var(--chrome-800);
 }
 
 /* These are .btn-ghost without .btn, so `.btn:disabled` above never reaches them and a
@@ -8828,8 +8830,8 @@ a.file-row-link > svg:last-child {
    because a cast is invisible in the prompt: an officer who has picked two characters sees
    nothing in the box that says so, and would otherwise have to open the panel to find out. */
 .chat-tool.is-active {
-  color: var(--accent-dark);
-  background: var(--accent-soft);
+  color: var(--rail-fg-strong);
+  background: var(--chrome-800);
 }
 
 /* Sits inside the 42px round tool, so it is placed rather than laid out — a badge that took
