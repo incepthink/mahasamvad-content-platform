@@ -32,10 +32,11 @@
    existing routes.
    --------------------------------------------------------------------------- */
 
-@layer theme, base, dgipr, components, utilities;
+@layer theme, base, dgipr, dgipr-theme, components, utilities;
 
 @import 'tailwindcss/theme.css' layer(theme);
 @import './dgipr.css' layer(dgipr);
+@import './theme.css' layer(dgipr-theme);
 @import 'tailwindcss/utilities.css' layer(utilities);
 @import 'tw-animate-css';
 
@@ -55,32 +56,39 @@
    shadcn/ui tokens, mapped onto the existing DGIPR palette rather than to
    shadcn's default neutral greys — so a shadcn Button reads as part of this
    product and not as a bolted-on library. Every value here resolves to a token
-   defined in dgipr.css; change a colour there and both systems follow.
+   defined in dgipr.css or theme.css; change a colour there and both systems
+   follow.
    --------------------------------------------------------------------------- */
 :root {
   --radius: 0.875rem; /* = --r-md, 14px */
 
-  --background: #f4eee5; /* --bg */
-  --foreground: #1c1611; /* --text */
-  --card-bg: #ffffff; /* --card; `--card` itself is taken by dgipr.css */
-  --card-foreground: #1c1611;
-  --popover: #ffffff;
-  --popover-foreground: #1c1611;
-  --primary: #8c3f20; /* --accent */
+  /* EVERY VALUE HERE IS A REFERENCE, never a literal. These used to be
+     duplicated hex values with a trailing comment naming the token they had
+     been copied from, which is exactly the drift this arrangement exists to
+     stop: one palette change then had to be made twice, and the second copy
+     was the one that got missed. --popover, --secondary and --muted-bg are the
+     only values with no dgipr or theme twin. */
+  --background: var(--bg);
+  --foreground: var(--text);
+  --card-bg: var(--card); /* `--card` itself is taken by dgipr.css */
+  --card-foreground: var(--text);
+  --popover: #f8fafb;
+  --popover-foreground: var(--text);
+  --primary: var(--chrome-600); /* slate, not --accent: see theme.css */
   --primary-foreground: #ffffff;
-  --secondary: #faf7f2; /* --surface */
-  --secondary-foreground: #1c1611;
-  --muted-bg: #faf7f2; /* `--muted` is dgipr's muted TEXT colour */
-  --muted-foreground: #6b6057; /* --muted */
-  --accent-bg: #f7eae3; /* --accent-soft */
-  --accent-foreground: #6f3016; /* --accent-dark */
-  --destructive: #a03123; /* --err */
+  --secondary: #dce8ee;
+  --secondary-foreground: var(--glass-outline-fg);
+  --muted-bg: #e5e9ec; /* `--muted` is dgipr's muted TEXT colour */
+  --muted-foreground: var(--muted);
+  --accent-bg: var(--accent-soft);
+  --accent-foreground: var(--accent-dark);
+  --destructive: var(--err);
   --destructive-foreground: #ffffff;
-  --success: #1f6f43; /* --ok */
-  --warning: #8a6d1a; /* --warn */
-  --border-color: rgba(63, 45, 30, 0.13); /* --border */
-  --input: rgba(63, 45, 30, 0.24); /* --border-strong */
-  --ring-color: rgba(140, 63, 32, 0.28); /* --ring */
+  --success: var(--ok);
+  --warning: var(--warn);
+  --border-color: var(--border);
+  --input: var(--border-strong);
+  --ring-color: var(--ring);
 }
 
 /* `@theme inline` publishes those variables as Tailwind utilities
@@ -210,7 +218,7 @@
    (components/media-room/NoteComposer.tsx) and nothing is out of flow.
    --------------------------------------------------------------------------- */
 
-/* Enabled, the submit carries a slow warm sheen travelling across it — the only
+/* Enabled, the submit carries a slow green sheen travelling across it — the only
    moving thing on the page, so "there is something to press now" reads without a
    label. The gradient is declared here rather than as a Tailwind utility because
    `background-size` + `animation` + a five-stop gradient is one visual idea, and
@@ -220,15 +228,16 @@
     100deg,
     var(--accent-dark) 0%,
     var(--accent) 24%,
-    #c26a3f 46%,
+    var(--accent-lift) 46%,
     var(--accent) 68%,
     var(--accent-dark) 100%
   );
   background-size: 220% 100%;
   animation: mr-submit-flow 5s linear infinite;
+  border: 1px solid var(--accent-dark);
   box-shadow:
     var(--shadow-md),
-    0 6px 22px rgba(140, 63, 32, 0.28);
+    0 6px 22px var(--accent-glow);
 }
 
 @keyframes mr-submit-flow {

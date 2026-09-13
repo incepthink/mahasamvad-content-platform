@@ -109,13 +109,12 @@ import { AttachmentStrip } from '@/components/common/AttachmentStrip';
 import { ComposerToolbarButton } from '@/components/common/ComposerToolbarButton';
 import { useDocumentAttachments } from '@/components/common/DocumentAttachments';
 import { FormCard } from '@/components/common/FormCard';
-import { PageBackdrop } from '@/components/common/PageBackdrop';
+import { PageShell } from '@/components/common/PageShell';
 import { PromptTextarea } from '@/components/common/PromptTextarea';
 import { ErrorNotice } from '@/components/ErrorNotice';
 import { cn } from '@/lib/utils';
 import { prepareTextTranslation, translateText } from '../../lib/api';
 import { downloadBlob } from '../../lib/download';
-import { TRANSLATE_DOODLES } from '../../lib/doodleMarks';
 import { STR } from '../../lib/strings';
 import { errorMessage } from '../../lib/errorMessage';
 import { TranslationTermsReview } from '../../components/TranslationTermsReview';
@@ -416,20 +415,11 @@ export default function TranslatePage() {
   return (
     // No foot clearance and so no `.translate-page`: the submit is in the composer card
     // below, so nothing is pinned over the last block or over the credit line any more.
-    <main className="page">
-      {/* Wallpaper for this lane: what an officer brings here is one language and takes
-          away another — books, letters, a globe, an exchange. The marks are decorative
-          only, and the vocabulary lives beside the other lanes' in lib/doodleMarks.ts —
-          see components/common/PageBackdrop.tsx. */}
-      <PageBackdrop marks={TRANSLATE_DOODLES} seed={23} />
-
-      <header className="page-head">
-        <div className="page-head-text">
-          <h1 className="page-title">{STR.translatePageTitle}</h1>
-          <p className="page-sub">{STR.translatePageIntro}</p>
-        </div>
-      </header>
-
+    <PageShell
+      background="translate"
+      title={STR.translatePageTitle}
+      subtitle={STR.translatePageIntro}
+    >
       <div className="flex flex-col gap-5">
         {/* The one input. Everything that decides WHAT is translated lives in this card:
             the typed text, the file behind [+], and which language it goes into. */}
@@ -603,7 +593,7 @@ export default function TranslatePage() {
           // The same box shape as the composer above it (see FormCard), written out
           // because this one is headed by an <h2> rather than by a label pointing at a
           // control.
-          <section className="bg-card rounded-2xl border p-4 shadow-sm sm:p-5">
+          <section className="glass-card rounded-2xl p-4 sm:p-5">
             <h2 className="text-foreground m-0 text-base font-semibold">
               {OUTPUT_TITLES[result.language]}
             </h2>
@@ -645,6 +635,6 @@ export default function TranslatePage() {
           </section>
         ) : null}
       </div>
-    </main>
+    </PageShell>
   );
 }

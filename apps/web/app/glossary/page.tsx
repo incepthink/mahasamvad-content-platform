@@ -16,8 +16,7 @@ import {
 import { STR, TERM_TYPE_LABELS } from '../../lib/strings';
 import { errorMessage } from '../../lib/errorMessage';
 import { ErrorNotice } from '../../components/ErrorNotice';
-import { PageBackdrop } from '../../components/common/PageBackdrop';
-import { GLOSSARY_DOODLES } from '../../lib/doodleMarks';
+import { PageShell } from '../../components/common/PageShell';
 
 const PAGE_SIZE = 20;
 const TERM_TYPES: TermType[] = [
@@ -726,20 +725,11 @@ export default function GlossaryPage() {
     search.trim().length > 0 || typeFilter !== '' || statusFilter !== 'all';
 
   return (
-    <main className="page">
-      {/* Wallpaper for this lane: what an officer keeps here is the dictionary of
-          names — people, designations, places and schemes — every translation has to
-          spell the same way. The marks are decorative only, and the vocabulary lives
-          beside the other lanes’ in lib/doodleMarks.ts. */}
-      <PageBackdrop marks={GLOSSARY_DOODLES} seed={37} />
-
-      <header className="page-head">
-        <div className="page-head-text">
-          <h1 className="page-title">{STR.glossaryTitle}</h1>
-          <p className="page-sub">{STR.glossaryIntro}</p>
-        </div>
-      </header>
-
+    <PageShell
+      background="glossary"
+      title={STR.glossaryTitle}
+      subtitle={STR.glossaryIntro}
+    >
       <AddTermFold onAdded={afterMutation} />
 
       <div className="card gl-card">
@@ -804,6 +794,6 @@ export default function GlossaryPage() {
           <Pagination page={page} pageCount={pageCount} onChange={setPage} />
         ) : null}
       </div>
-    </main>
+    </PageShell>
   );
 }

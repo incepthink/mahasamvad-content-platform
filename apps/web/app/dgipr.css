@@ -4,26 +4,31 @@
 
 :root {
   color-scheme: light;
-  /* Surfaces. The canvas is a calm warm sand so white cards read as raised;
-     the old #e9dcc9 -> #d8c3a8 gradient was dark enough to muddy them. */
-  --bg: #f4eee5;
-  --bg-accent: #ebe1d3;
-  --text: #1c1611;
-  --muted: #6b6057;
-  --card: #ffffff;
-  /* A second, tinted surface for rows/wells nested inside a white card —
+  /* Surfaces. The canvas is a cool slate so the glass panels above it read as
+     lifted; the photographic page ground (see theme.css) shows through them.
+     --card and --surface stay OPAQUE on purpose: ~36 rules in this file resolve
+     var(--card) and ~25 resolve var(--surface), so making the token translucent
+     would split every legacy surface in the product into a see-through half and
+     an opaque half. Translucency is expressed only by the --glass-* family in
+     theme.css, applied to three named surfaces. */
+  --bg: #eef1f3;
+  --bg-accent: #dce3e7;
+  --text: #303b42;
+  --muted: #68747b;
+  --card: #f7f9fa;
+  /* A second, tinted surface for rows/wells nested inside a card —
      use this instead of reaching for --bg, which is the page canvas. */
-  --surface: #faf7f2;
-  --border: rgba(63, 45, 30, 0.13);
-  --border-strong: rgba(63, 45, 30, 0.24);
+  --surface: #e4e9ec;
+  --border: rgba(47, 69, 80, 0.18);
+  --border-strong: rgba(39, 77, 96, 0.38);
 
   /* Elevation is layered (a tight contact shadow + a wide ambient one) rather
      than one large blur — that is what stops cards looking like they float. */
-  --shadow-sm: 0 1px 2px rgba(61, 42, 26, 0.06);
+  --shadow-sm: 0 1px 2px rgba(17, 48, 59, 0.08);
   --shadow-md:
-    0 1px 2px rgba(61, 42, 26, 0.05), 0 4px 14px rgba(61, 42, 26, 0.07);
+    0 1px 2px rgba(17, 48, 59, 0.07), 0 5px 16px rgba(17, 48, 59, 0.1);
   --shadow-lg:
-    0 2px 4px rgba(61, 42, 26, 0.05), 0 12px 32px rgba(61, 42, 26, 0.09);
+    0 2px 4px rgba(17, 48, 59, 0.08), 0 14px 36px rgba(17, 48, 59, 0.15);
   --shadow: var(--shadow-md);
 
   /* One radius scale. Everything rounded picks a rung; nothing invents a value. */
@@ -32,11 +37,11 @@
   --r-lg: 18px;
   --r-xl: 24px;
 
-  --accent: #8c3f20;
-  --accent-dark: #6f3016;
-  --accent-soft: #f7eae3;
-  --accent-tint: #fdf7f4;
-  --ring: rgba(140, 63, 32, 0.28);
+  --accent: #23866b;
+  --accent-dark: #16634f;
+  --accent-soft: #dcefe8;
+  --accent-tint: #f2faf7;
+  --ring: rgba(42, 111, 145, 0.4);
 
   --ok: #1f6f43;
   --ok-soft: #e4f3ea;
@@ -150,13 +155,24 @@ a {
   text-decoration: none;
   display: flex;
   align-items: center;
+  gap: 9px;
   min-width: 0;
 }
 
 .site-logo {
-  height: 48px;
-  width: auto;
+  width: 46px;
+  height: 46px;
+  object-fit: contain;
   display: block;
+  flex-shrink: 0;
+}
+
+.site-brand-name {
+  color: var(--accent-dark);
+  font-size: 1.5rem;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .sidebar {
@@ -193,6 +209,7 @@ a {
 }
 
 .sidebar-logo .site-logo {
+  width: 44px;
   height: 44px;
 }
 
@@ -385,7 +402,12 @@ a {
   }
 
   .mobile-topbar .site-logo {
+    width: 40px;
     height: 40px;
+  }
+
+  .mobile-topbar .site-brand-name {
+    font-size: 1.35rem;
   }
 
   /* Off-canvas drawer. Always full width with labels: the desktop collapsed
@@ -585,39 +607,10 @@ a {
   line-height: 0;
 }
 
-/* ---------- page artwork ----------
-   The other kind of wallpaper: one supplied illustration instead of a field of
-   sketched marks (see components/common/PageArtwork.tsx). A lane uses this OR
-   .page-backdrop, never both — two grounds at once read as noise — so this repeats
-   that layer's placement contract exactly: fixed to the viewport, spanning the CONTENT
-   COLUMN via --sidebar-w, z-index: -1 to sit above the canvas gradient and below every
-   in-flow element, and pointer-events: none.
-
-   THE OPACITY IS LOWER THAN THE DOODLE CEILING ON PURPOSE. A saturated drawing covers
-   most of its canvas where thin marks cover almost none of theirs, so the same value
-   would compete with running Devanagari. Every card on top is opaque white, so the
-   drawing reads only in the gutters and behind the page head.
-
-   `cover` with the image's own aspect ratio, so it fills the column without stretching
-   — the file itself carries preserveAspectRatio="none" and would distort to any box it
-   is given. */
-.page-artwork {
-  position: fixed;
-  inset-block: 0;
-  inset-inline: var(--sidebar-w, 0) 0;
-  z-index: -1;
-  pointer-events: none;
-  background-position: center;
-  background-repeat: no-repeat;
-  background-size: cover;
-  opacity: 0.16;
-}
-
 /* Wallpaper is the one thing on the page that carries no meaning at all, so a reader
    who has asked for less motion and less visual noise gets a plain canvas. */
 @media (prefers-reduced-motion: reduce) {
-  .page-backdrop,
-  .page-artwork {
+  .page-backdrop {
     display: none;
   }
 }
@@ -8830,6 +8823,168 @@ a.file-row-link > svg:last-child {
    the box can be thrown full-screen instead. It is the SAME element, moved by
    position: fixed and nothing else — re-mounting it in a portal would drop the
    caret and, with ComposeSafeTextarea, re-seed the field from its mount value. */
+/* ---- the character & voice registry (migration 0054) ------------------------
+   The cast picker's tool button, and the panel behind it. The button carries a COUNT
+   because a cast is invisible in the prompt: an officer who has picked two characters sees
+   nothing in the box that says so, and would otherwise have to open the panel to find out. */
+.chat-tool.is-active {
+  color: var(--accent-dark);
+  background: var(--accent-soft);
+}
+
+/* Sits inside the 42px round tool, so it is placed rather than laid out — a badge that took
+   part in the grid would push the icon off centre. */
+.chat-tool-count {
+  position: absolute;
+  transform: translate(12px, -12px);
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 17px;
+  text-align: center;
+}
+
+.chat-tool.is-active,
+.chat-tool:has(.chat-tool-count) {
+  position: relative;
+}
+
+/* The panel is a list that can run long (the registry is department-wide), so it scrolls
+   inside the dialog's own cap rather than growing past the bottom of a phone. */
+.nvw-cast-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+
+.nvw-cast-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+
+.nvw-cast-portrait {
+  width: 54px;
+  height: 54px;
+  flex: none;
+  border-radius: var(--r-sm);
+  object-fit: cover;
+  border: 1px solid var(--border);
+  background: #fff;
+}
+
+/* A character described in words alone still gets a slot, so the rows do not jump about
+   depending on who has a picture. */
+.nvw-cast-portrait.is-empty {
+  display: block;
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--bg),
+    var(--bg) 5px,
+    #fff 5px,
+    #fff 10px
+  );
+}
+
+/* overflow: hidden is what lets a flex item shrink below its content — min-width alone does
+   not (the .page-row-name lesson), and an appearance description is long prose. */
+.nvw-cast-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.nvw-cast-name {
+  margin: 0 0 2px;
+  font-weight: 700;
+}
+
+.nvw-cast-line {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+  overflow-wrap: break-word;
+}
+
+.nvw-cast-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* The whole label is the target, not just the box — a 14px checkbox is not a tap target. */
+.nvw-cast-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.nvw-cast-pick:hover:has(input:not(:disabled)) {
+  background: var(--accent-soft);
+}
+
+.nvw-cast-pick input {
+  width: 20px;
+  height: 20px;
+  cursor: pointer;
+}
+
+.nvw-cast-pick:has(input:disabled) {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.nvw-cast-form {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.nvw-cast-portrait-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 6px 0;
+}
+
+/* A <label> wrapping a hidden file input, so it needs the button's own layout back. */
+.nvw-cast-upload {
+  cursor: pointer;
+}
+
+.nvw-cast-foot {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
 .nvw-backdrop {
   position: fixed;
   inset: 0;
@@ -8899,6 +9054,72 @@ a.file-row-link > svg:last-child {
 .nvw-model-text {
   margin: 12px 0 0;
   color: var(--muted);
+}
+
+/* FORKING (Step 4) — "carry on from this video instead of the newest one".
+   Quiet by default: it is an occasional recovery from drift, not part of the ordinary flow,
+   so it must not compete with the video above it. Armed, it takes the accent so an officer
+   who has scrolled back down to the box can still find which video is selected. */
+.nvw-fork {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 10px 0 0;
+  padding: 7px 12px;
+  border-radius: var(--r-md);
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.nvw-fork:hover {
+  color: var(--text);
+}
+
+.nvw-fork.is-active {
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+  font-weight: 600;
+}
+
+/* Above the textarea, inside the composer card, so it is met before the writing starts. */
+.nvw-fork-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--accent);
+  border-radius: var(--r-md);
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+}
+
+.nvw-fork-banner > svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+/* min-width: 0 is what lets this shrink inside the flex row — the hint is a full sentence
+   and on a phone it has to wrap rather than widen the composer. */
+.nvw-fork-banner-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.88rem;
+}
+
+.nvw-fork-banner-hint {
+  color: var(--text);
+  opacity: 0.75;
+}
+
+.nvw-fork-clear {
+  flex: none;
+  padding: 4px;
+  border-radius: var(--r-sm);
+  color: var(--accent-dark);
 }
 
 .nvw-model-label {

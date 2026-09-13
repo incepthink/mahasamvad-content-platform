@@ -133,6 +133,21 @@ export const STR = {
   // the default's behaviour first, because that is the one where nothing is added.
   motionAspectHint:
     'पोस्टरसारखाच निवडल्यास व्हिडिओ पोस्टरच्याच आकारात येतो. उभा किंवा आडवा निवडल्यास त्या चौकटीत पोस्टर बसवले जाते आणि गरज असल्यास वर-खाली किंवा दोन्ही बाजूंना पोस्टरच्याच रंगाच्या पट्ट्या येतात — पोस्टरचा कोणताही भाग कापला जात नाही.',
+  // ---- the moving region, under the shape control (migration 0055) ----
+  // THE HINT IS THE FEATURE. An officer marking a rectangle has no way to know why they are
+  // being asked — the reason is that a video model redraws every pixel, including their
+  // Devanagari, and this is what stops it. So the hint states the consequence in both
+  // directions: only the marked part moves, and everything else stays exactly as uploaded.
+  // Without that it reads as an optional crop and nobody uses it.
+  motionRegionLabel: 'कोणता भाग हलवायचा?',
+  motionRegionHint:
+    'पोस्टरवर चौकट काढा. फक्त त्या भागात हालचाल होईल; बाकीचा भाग — मजकूर, आकडे, लोगो, तळटीप — जसा अपलोड केला होता तसाच राहील. चौकट काढली नाही तर संपूर्ण पोस्टर AI पुन्हा रंगवते आणि त्यात मजकूर बदलू शकतो.',
+  // The opt-in. Off by default, because marking nothing is a complete request and the lane
+  // behaved this way before the control existed.
+  motionRegionAdd: 'हलणारा भाग निवडा',
+  motionRegionClear: 'निवड काढून टाका',
+  // Shown while the rectangle is on screen, so the officer knows the two halves apart.
+  motionRegionActiveNote: 'चौकटीतला भाग हलेल · बाहेरचा भाग जसाच्या तसा राहील',
   // ---- the detail page ----
   motionOutputTitle: 'तयार झालेला डायनॅमिक पोस्टर',
   motionSourceCaption: 'मूळ पोस्टर',
@@ -2023,6 +2038,22 @@ export const STR = {
   nvwBusy: 'आधीचा व्हिडिओ तयार होईपर्यंत थांबा.',
   nvwVideoUnsupported: 'तुमचा ब्राउझर हा व्हिडिओ दाखवू शकत नाही.',
   nvwModelSaid: 'Gemini चा संदेश:',
+
+  // FORKING (Step 4). A long chain of edits drifts — characters stop looking like themselves
+  // somewhere past the fourth change — and the answer is to go back to a video that was still
+  // right and carry on from there. The button says what it DOES; the hint says when to reach
+  // for it, because an officer has no reason to guess that drift is a thing that happens.
+  nvwForkFrom: 'इथून पुढे बदल करा',
+  nvwForkFromHint:
+    'बरेच बदल केल्यावर पात्रे व दृश्य बदलू लागतात. तसे झाल्यास जो व्हिडिओ बरोबर होता त्यावरून पुन्हा सुरू करा.',
+  nvwForkActive: 'जुन्या व्हिडिओवरून बदल',
+  nvwForkActiveHint:
+    'नवीनतम व्हिडिओऐवजी निवडलेल्या व्हिडिओवरून पुढचा बदल केला जाईल.',
+  nvwForkCancel: 'रद्द करा',
+  // Turns are not numbered anywhere else on this page, so the ordinal exists for this one
+  // job: naming which video a pending change will continue from.
+  nvwForkTurn: 'सूचना',
+
   // The rail (migration 0050). Its own labels rather than the chat ones: an officer scanning
   // this list is looking for a video they made, not for a chat.
   nvwYours: 'तुमची संभाषणे',
@@ -2032,6 +2063,52 @@ export const STR = {
   nvwDelete: 'संभाषण काढून टाका',
   nvwDeleteConfirm: 'हे संभाषण कायमचे काढून टाकायचे?',
   nvwOpenList: 'संभाषणांची यादी',
+
+  // The character & voice registry (migration 0054). A stored cast is what makes a NEW
+  // conversation produce the same person with the same voice — the officer picks them again
+  // instead of re-uploading a portrait and retyping a description.
+  nvwCharacters: 'पात्रे',
+  nvwCharactersTitle: 'पात्रे व आवाज',
+  nvwCharactersIntro:
+    'इथे साठवलेली पात्रे प्रत्येक नव्या संभाषणात पुन्हा वापरता येतात. निवडलेल्या पात्रांचे वर्णन व आवाज प्रत्येक सूचनेसोबत Gemini ला पाठवले जातात, त्यामुळे तीच व्यक्ती तशीच दिसते व तशीच बोलते.',
+  nvwCharactersEmpty: 'अजून एकही पात्र साठवलेले नाही.',
+  nvwCharactersFailed: 'पात्रांची यादी उघडता आली नाही.',
+  nvwCharacterName: 'नाव',
+  nvwCharacterNamePlaceholder: 'उदा. प्रिया देशमुख',
+  nvwCharacterAppearance: 'दिसणे',
+  nvwCharacterAppearancePlaceholder:
+    'उदा. तिशीतील महिला, हिरवी सुती साडी, केस बांधलेले',
+  nvwCharacterVoice: 'आवाज',
+  nvwCharacterVoicePlaceholder: 'उदा. शांत, स्थिर आणि मृदू मराठी उच्चार',
+  // Said plainly because it is a real limit of the model, not a preference: Gemini cannot
+  // edit a voice in a later turn, so a wrong voice can only be prevented.
+  nvwCharacterVoiceHint:
+    'आवाज नंतरच्या सूचनेने बदलता येत नाही, म्हणून तो सुरुवातीलाच नीट लिहा.',
+  nvwCharacterPortrait: 'संदर्भ-छायाचित्र',
+  nvwCharacterPortraitHint:
+    'चेहरा स्पष्ट दिसणारा, कंबरेपर्यंतचा साधा फोटो सर्वात चांगला चालतो.',
+  nvwCharacterPortraitAdd: 'छायाचित्र निवडा',
+  nvwCharacterPortraitRemove: 'छायाचित्र काढून टाका',
+  nvwCharacterAdd: 'नवीन पात्र जोडा',
+  nvwCharacterSave: 'पात्र जतन करा',
+  nvwCharacterSaving: 'जतन करत आहोत…',
+  nvwCharacterCancel: 'रद्द करा',
+  nvwCharacterEdit: 'बदल करा',
+  nvwCharacterDelete: 'पात्र काढून टाका',
+  nvwCharacterDeleteConfirm:
+    'हे पात्र कायमचे काढून टाकायचे? ते ज्या संभाषणांत निवडले आहे तिथूनही निघून जाईल.',
+  nvwCharacterNameRequired: 'कृपया पात्राचे नाव लिहा.',
+  nvwCharacterSaveFailed: 'हे पात्र जतन करता आले नाही.',
+  nvwCharacterNoPortrait: 'छायाचित्र नाही',
+  nvwCastPick: 'या संभाषणासाठी निवडा',
+  nvwCastSelected: 'निवडलेली पात्रे',
+  nvwCastNone: 'कोणतेही पात्र निवडलेले नाही.',
+  // The cast is fixed once the first video exists, and the reason is worth saying rather than
+  // just greying the control out.
+  nvwCastLocked:
+    'या संभाषणातील पात्रे आता बदलता येत नाहीत. वेगळी पात्रे हवी असल्यास नवीन संभाषण सुरू करा — साठवलेली पात्रे तिथे पुन्हा निवडता येतील.',
+  nvwCastFull: 'एका संभाषणात कमाल ४ पात्रे निवडता येतात.',
+  nvwCastDone: 'पूर्ण झाले',
 
   // ---------- वापर विश्लेषण (/analytics) ----------
   navAnalytics: 'वापर विश्लेषण',

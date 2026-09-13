@@ -14,7 +14,11 @@
 // navigation would remount the tree in the middle of a generation the officer is watching.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { NewVideoAspect, NewVideoConversation } from '@dgipr/schemas';
+import type {
+  NewVideoAspect,
+  NewVideoCharacter,
+  NewVideoConversation,
+} from '@dgipr/schemas';
 import {
   getNewVideoConversation,
   sendNewVideoTurn,
@@ -50,6 +54,17 @@ export function useNewVideoWorkflow(
   sending: boolean;
   busy: boolean;
   error: string | null;
+  // The cast (migration 0054). `castIds` is what the composer's picker edits BEFORE the first
+  // turn and what the server reports after it — see `castLocked`.
+  characters: readonly NewVideoCharacter[];
+  castIds: readonly string[];
+  setCastIds: (ids: readonly string[]) => void;
+  castLocked: boolean;
+  // FORKING (Step 4). Which earlier turn the NEXT instruction continues from, or null for
+  // the ordinary case — whatever last succeeded. A turn id rather than anything the provider
+  // would recognise: the interaction handle never leaves the API.
+  forkFromTurnId: string | null;
+  setForkFromTurnId: (turnId: string | null) => void;
   addImages: (files: readonly File[]) => void;
   removeImage: (key: string) => void;
   send: (prompt: string, aspect: NewVideoAspect) => Promise<boolean>;
@@ -63,6 +78,16 @@ export function useNewVideoWorkflow(
   );
   const [images, setImages] = useState<StagedImage[]>([]);
   const [sending, setSending] = useState(false);
+  // The cast the officer is picking for a conversation that has not started yet. Once it has,
+  // the server's stored cast is the answer and this is not consulted — a conversation's cast
+  // is fixed on its first turn, because a character's portrait is attached on the turn that
+  // establishes them and stacking a reference into the middle of an edit chain is a
+  // documented failure mode.
+  const [pickedCastIds, setPickedCastIds] = useState<readonly string[]>([]);
+  // Armed by clicking a turn, cleared once the instruction it applied to has left. Held here
+  // rather than in the composer because it belongs to the CONVERSATION being read — the
+  // officer arms it by pressing a button on a turn well above the box.
+  const [forkFromTurnId, setForkFromTurnId] = useState<string | null>(null);
   const [loading, setLoading] = useState(conversationId !== null);
   const [error, setError] = useState<string | null>(null);
   // Read inside `send` without making it depend on the list — a picked file must not
@@ -80,6 +105,12 @@ export function useNewVideoWorkflow(
     setConversation(null);
     setError(null);
     setLoading(conversationId !== null);
+    // A cast picked for a conversation that was never started must not follow the officer
+    // into a different one.
+    setPickedCastIds([]);
+    // Nor a fork point: a turn id belongs to one conversation, and carrying it across would
+    // send the next request an id the server would rightly refuse.
+    setForkFromTurnId(null);
   }, [conversationId]);
 
   const refresh = useCallback(async () => {
@@ -100,6 +131,23 @@ export function useNewVideoWorkflow(
   }, [refresh]);
 
   const busy = conversation?.busy ?? false;
+  // Locked once there is a video to edit. Read off the TURNS rather than off the cast itself:
+  // a conversation that started with nobody in it must not become pickable later, or the
+  // picker would offer to add a character to a chain that cannot receive one.
+  const castLocked = (conversation?.turns.length ?? 0) > 0;
+  const characters = conversation?.characters ?? [];
+  const castIds = castLocked
+    ? characters.map((character) => character.id)
+    : pickedCastIds;
+  // Held in a ref for the same reason the staged images are: picking a character must not
+  // re-create the callback the composer is holding.
+  const castRef = useRef<readonly string[]>(pickedCastIds);
+  castRef.current = pickedCastIds;
+  const lockedRef = useRef(castLocked);
+  lockedRef.current = castLocked;
+  // Same reason again: arming a fork must not re-create the callback the composer holds.
+  const forkRef = useRef<string | null>(forkFromTurnId);
+  forkRef.current = forkFromTurnId;
 
   // Polls only while something is actually generating. A finished conversation is static —
   // nothing on the server can change it — so an idle page makes no requests at all.
@@ -194,6 +242,11 @@ export function useNewVideoWorkflow(
         }
         const imageIds = ready.map((image) => image.id as string);
 
+        // Sent only while the cast is still being set. A follow-up omits it: the server
+        // already holds the cast and would refuse a DIFFERENT one, so there is nothing for a
+        // client to add by echoing it back.
+        const castToSend = lockedRef.current ? [] : castRef.current;
+
         const result = await sendNewVideoTurn({
           // Verbatim. Not trimmed here either — the API sends exactly this string to Gemini,
           // and the contract of this lane is that nothing on our side edits it.
@@ -203,13 +256,20 @@ export function useNewVideoWorkflow(
           aspect,
           ...(activeId ? { conversationId: activeId } : {}),
           ...(imageIds.length > 0 ? { imageIds } : {}),
+          ...(castToSend.length > 0 ? { characterIds: [...castToSend] } : {}),
+          // Omitted unless armed, so the ordinary turn's request is byte-for-byte what it
+          // has always been.
+          ...(forkRef.current !== null ? { fromTurnId: forkRef.current } : {}),
         });
 
-        // Only cleared once the turn is on its way.
+        // Only cleared once the turn is on its way — the fork with it, since it described
+        // this one instruction and the next one starts from what this produces. A FAILED
+        // send keeps it armed, so re-pressing send does what the officer meant.
         setImages((prev) => {
           prev.forEach((item) => URL.revokeObjectURL(item.previewUrl));
           return [];
         });
+        setForkFromTurnId(null);
 
         const isNew = activeId === null;
         setActiveId(result.conversationId);
@@ -251,6 +311,12 @@ export function useNewVideoWorkflow(
     sending,
     busy,
     error,
+    characters,
+    castIds,
+    setCastIds: setPickedCastIds,
+    castLocked,
+    forkFromTurnId,
+    setForkFromTurnId,
     addImages,
     removeImage,
     send,

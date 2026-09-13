@@ -59,12 +59,11 @@ import { AttachmentStrip } from '@/components/common/AttachmentStrip';
 import { ComposerToolbarButton } from '@/components/common/ComposerToolbarButton';
 import { useDocumentAttachments } from '@/components/common/DocumentAttachments';
 import { FormCard } from '@/components/common/FormCard';
-import { PageBackdrop } from '@/components/common/PageBackdrop';
+import { PageShell } from '@/components/common/PageShell';
 import { PromptTextarea } from '@/components/common/PromptTextarea';
 import { cn } from '@/lib/utils';
 import { proofreadText } from '../../lib/api';
 import { downloadBlob } from '../../lib/download';
-import { PROOFREAD_DOODLES } from '../../lib/doodleMarks';
 import { PROOFREAD_TYPE_LABELS, STR } from '../../lib/strings';
 import { errorMessage } from '../../lib/errorMessage';
 import { ErrorNotice } from '../../components/ErrorNotice';
@@ -438,20 +437,11 @@ export default function ProofreadPage() {
   return (
     // No foot clearance and so no pinned bar: the submit is in the composer card below,
     // so nothing sits over the last block or over the credit line.
-    <main className="page">
-      {/* Wallpaper for this lane: what an officer brings here is a draft to be corrected —
-          pens and proof marks, dictionaries, ticks and warnings. The marks are decorative
-          only, and the vocabulary lives beside the other lanes' in lib/doodleMarks.ts —
-          see components/common/PageBackdrop.tsx. */}
-      <PageBackdrop marks={PROOFREAD_DOODLES} seed={29} />
-
-      <header className="page-head">
-        <div className="page-head-text">
-          <h1 className="page-title">{STR.proofreadPageTitle}</h1>
-          <p className="page-sub">{STR.proofreadPageIntro}</p>
-        </div>
-      </header>
-
+    <PageShell
+      background="proofread"
+      title={STR.proofreadPageTitle}
+      subtitle={STR.proofreadPageIntro}
+    >
       <div className="flex flex-col gap-5">
         {/* The one input. Everything that decides WHAT is checked lives in this card: the
             typed text and the file behind the paperclip. */}
@@ -571,7 +561,7 @@ export default function ProofreadPage() {
             FormCard), written out because these are headed by an h2 rather than by a label
             pointing at a control. */}
         {clean ? (
-          <section className="bg-card rounded-2xl border p-4 shadow-sm sm:p-5">
+          <section className="glass-card rounded-2xl p-4 sm:p-5">
             <p className="m-0">
               <span className="chip chip-completed">
                 {STR.proofreadNoIssues}
@@ -581,7 +571,7 @@ export default function ProofreadPage() {
         ) : null}
 
         {result && errorIssues.length > 0 ? (
-          <section className="bg-card rounded-2xl border p-4 shadow-sm sm:p-5">
+          <section className="glass-card rounded-2xl p-4 sm:p-5">
             <h2 className="text-foreground m-0 text-base font-semibold">
               {STR.proofreadIssuesTitle}
             </h2>
@@ -592,7 +582,7 @@ export default function ProofreadPage() {
         ) : null}
 
         {result && styleIssues.length > 0 ? (
-          <section className="bg-card rounded-2xl border p-4 shadow-sm sm:p-5">
+          <section className="glass-card rounded-2xl p-4 sm:p-5">
             <h2 className="text-foreground m-0 text-base font-semibold">
               {STR.proofreadStyleAdvisoryTitle}
             </h2>
@@ -606,7 +596,7 @@ export default function ProofreadPage() {
         ) : null}
 
         {result && result.unverifiedNames.length > 0 ? (
-          <section className="bg-card rounded-2xl border p-4 shadow-sm sm:p-5">
+          <section className="glass-card rounded-2xl p-4 sm:p-5">
             <h2 className="text-foreground m-0 text-base font-semibold">
               {STR.proofreadUnverifiedTitle}
             </h2>
@@ -624,7 +614,7 @@ export default function ProofreadPage() {
         ) : null}
 
         {result ? (
-          <section className="bg-card rounded-2xl border p-4 shadow-sm sm:p-5">
+          <section className="glass-card rounded-2xl p-4 sm:p-5">
             <h2 className="text-foreground m-0 text-base font-semibold">
               {STR.proofreadCorrectedTitle}
             </h2>
@@ -688,6 +678,6 @@ export default function ProofreadPage() {
           </section>
         ) : null}
       </div>
-    </main>
+    </PageShell>
   );
 }

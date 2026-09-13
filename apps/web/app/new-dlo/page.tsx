@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { FileName } from '@/components/FileName';
 import { createNewDloIntake } from '@/lib/newDlo';
 import { errorMessage } from '@/lib/errorMessage';
+import { PageBackground } from '@/components/common/PageBackground';
 
 /**
  * The DLO lane. The composer sits at the bottom of the page, where the cursor already is.
@@ -72,7 +73,11 @@ const Page = () => {
 
   return (
     <div className="relative h-screen overflow-hidden">
-      <div className="absolute bottom-4 left-1/2 w-full max-w-6xl -translate-x-1/2 rounded-2xl bg-white p-4 shadow-md">
+      {/* This lane is not a `.page`, so the ground is placed by hand. It still reaches
+          x=0: the page renders no <AppSidebar>, and theme.css zeroes --sidebar-w for a
+          body with no rail rather than threading a prop down to here. */}
+      <PageBackground name="newDlo" />
+      <div className="glass-panel absolute bottom-4 left-1/2 w-full max-w-6xl -translate-x-1/2 rounded-2xl p-4">
         {error ? (
           <p
             role="alert"

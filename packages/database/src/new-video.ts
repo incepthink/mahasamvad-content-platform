@@ -391,3 +391,264 @@ export async function listNewVideoImagesByIds(
     imageFromDbRow(row as unknown as ImageDbRow),
   );
 }
+
+// ---------------------------------------------------------------------------
+// The character & voice registry (migration 0054)
+// ---------------------------------------------------------------------------
+//
+// Reusable across conversations by definition, which is why a character is its own row and
+// not a blob on the conversation that happened to introduce it. Both tables are new and
+// nothing above reads them, so an un-applied 0054 disables the registry and leaves every
+// conversation, turn and render working.
+
+export const NEW_VIDEO_CHARACTERS_TABLE = 'new_video_characters';
+export const NEW_VIDEO_CONVERSATION_CHARACTERS_TABLE =
+  'new_video_conversation_characters';
+
+export type NewVideoCharacterRow = Readonly<{
+  id: string;
+  name: string;
+  appearance: string;
+  voice: string;
+  // Null together: a character may be described in words alone. `portraitPath` and
+  // `portraitMime` are what the JOB needs to fetch the bytes and never reach a payload.
+  portraitUrl: string | null;
+  portraitPath: string | null;
+  portraitMime: string | null;
+  createdAt: string;
+  updatedAt: string;
+}>;
+
+type CharacterDbRow = {
+  id: string;
+  name: string | null;
+  appearance: string | null;
+  voice: string | null;
+  portrait_url: string | null;
+  portrait_path: string | null;
+  portrait_mime: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type CastDbRow = {
+  conversation_id: string;
+  character_id: string;
+  position: number | null;
+};
+
+function characterFromDbRow(row: CharacterDbRow): NewVideoCharacterRow {
+  return {
+    id: row.id,
+    name: row.name ?? '',
+    appearance: row.appearance ?? '',
+    voice: row.voice ?? '',
+    portraitUrl: row.portrait_url ?? null,
+    portraitPath: row.portrait_path ?? null,
+    portraitMime: row.portrait_mime ?? null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+const CHARACTER_COLUMNS =
+  'id,name,appearance,voice,portrait_url,portrait_path,portrait_mime,created_at,updated_at';
+
+export type NewNewVideoCharacter = Readonly<{
+  name: string;
+  appearance?: string;
+  voice?: string;
+  portraitUrl?: string | null;
+  portraitPath?: string | null;
+  portraitMime?: string | null;
+}>;
+
+export async function insertNewVideoCharacter(
+  client: SupabaseClient,
+  character: NewNewVideoCharacter,
+): Promise<NewVideoCharacterRow> {
+  const { data, error } = await client
+    .from(NEW_VIDEO_CHARACTERS_TABLE)
+    .insert({
+      name: character.name,
+      appearance: character.appearance ?? '',
+      voice: character.voice ?? '',
+      portrait_url: character.portraitUrl ?? null,
+      portrait_path: character.portraitPath ?? null,
+      portrait_mime: character.portraitMime ?? null,
+    })
+    .select(CHARACTER_COLUMNS)
+    .single();
+  if (error) {
+    throw new Error(`Failed to insert video character: ${error.message}`);
+  }
+  return characterFromDbRow(data as unknown as CharacterDbRow);
+}
+
+// The three portrait columns move together or not at all — a half-set portrait would be a URL
+// the page can show and bytes the job cannot fetch.
+export type NewVideoCharacterDbPatch = Partial<
+  Pick<NewVideoCharacterRow, 'name' | 'appearance' | 'voice'>
+> &
+  Readonly<{
+    portrait?: Readonly<{
+      url: string;
+      path: string;
+      mimeType: string;
+    }> | null;
+  }>;
+
+export async function updateNewVideoCharacter(
+  client: SupabaseClient,
+  id: string,
+  patch: NewVideoCharacterDbPatch,
+): Promise<NewVideoCharacterRow | null> {
+  const row: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  if (patch.name !== undefined) row.name = patch.name;
+  if (patch.appearance !== undefined) row.appearance = patch.appearance;
+  if (patch.voice !== undefined) row.voice = patch.voice;
+  if (patch.portrait !== undefined) {
+    row.portrait_url = patch.portrait?.url ?? null;
+    row.portrait_path = patch.portrait?.path ?? null;
+    row.portrait_mime = patch.portrait?.mimeType ?? null;
+  }
+  const { data, error } = await client
+    .from(NEW_VIDEO_CHARACTERS_TABLE)
+    .update(row)
+    .eq('id', id)
+    .select(CHARACTER_COLUMNS)
+    .maybeSingle();
+  if (error) {
+    throw new Error(`Failed to update video character ${id}: ${error.message}`);
+  }
+  return data ? characterFromDbRow(data as unknown as CharacterDbRow) : null;
+}
+
+export async function getNewVideoCharacterRow(
+  client: SupabaseClient,
+  id: string,
+): Promise<NewVideoCharacterRow | null> {
+  const { data, error } = await client
+    .from(NEW_VIDEO_CHARACTERS_TABLE)
+    .select(CHARACTER_COLUMNS)
+    .eq('id', id)
+    .maybeSingle();
+  if (error) {
+    throw new Error(`Failed to fetch video character ${id}: ${error.message}`);
+  }
+  return data ? characterFromDbRow(data as unknown as CharacterDbRow) : null;
+}
+
+// The registry, newest first. There is no auth and no owner column, so this is deliberately
+// every character — a department library, which is what makes it reusable at all.
+export async function listNewVideoCharacters(
+  client: SupabaseClient,
+  limit = 200,
+): Promise<NewVideoCharacterRow[]> {
+  const { data, error } = await client
+    .from(NEW_VIDEO_CHARACTERS_TABLE)
+    .select(CHARACTER_COLUMNS)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) {
+    throw new Error(`Failed to list video characters: ${error.message}`);
+  }
+  return (data ?? []).map((row) =>
+    characterFromDbRow(row as unknown as CharacterDbRow),
+  );
+}
+
+// Resolves ids to rows PRESERVING THE ORDER THEY WERE ASKED FOR — the listNewVideoImagesByIds
+// rule, and it matters more here: the order a cast is listed in is the order its portraits are
+// attached in, so a database-chosen order would bind a picture to the wrong name.
+export async function listNewVideoCharactersByIds(
+  client: SupabaseClient,
+  ids: readonly string[],
+): Promise<NewVideoCharacterRow[]> {
+  if (ids.length === 0) return [];
+  const { data, error } = await client
+    .from(NEW_VIDEO_CHARACTERS_TABLE)
+    .select(CHARACTER_COLUMNS)
+    .in('id', [...ids]);
+  if (error) {
+    throw new Error(`Failed to fetch video characters: ${error.message}`);
+  }
+  const byId = new Map(
+    (data ?? []).map((row) => {
+      const mapped = characterFromDbRow(row as unknown as CharacterDbRow);
+      return [mapped.id, mapped] as const;
+    }),
+  );
+  const resolved: NewVideoCharacterRow[] = [];
+  for (const id of ids) {
+    const row = byId.get(id);
+    if (row) resolved.push(row);
+  }
+  return resolved;
+}
+
+// Deleting a registry entry cascades out of every cast (0054's foreign key). That is
+// deliberate rather than a refusal: a character nobody can describe any more must not keep
+// being re-emitted into future turns, and the videos already rendered are untouched.
+export async function deleteNewVideoCharacter(
+  client: SupabaseClient,
+  id: string,
+): Promise<void> {
+  const { error } = await client
+    .from(NEW_VIDEO_CHARACTERS_TABLE)
+    .delete()
+    .eq('id', id);
+  if (error) {
+    throw new Error(`Failed to delete video character ${id}: ${error.message}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// A conversation's cast
+// ---------------------------------------------------------------------------
+
+// Written once, on a conversation's first turn. There is no update path on purpose: the cast
+// is fixed for a conversation, and changing it is what starting a new one is for.
+export async function setNewVideoConversationCast(
+  client: SupabaseClient,
+  conversationId: string,
+  characterIds: readonly string[],
+): Promise<void> {
+  if (characterIds.length === 0) return;
+  const { error } = await client
+    .from(NEW_VIDEO_CONVERSATION_CHARACTERS_TABLE)
+    .insert(
+      characterIds.map((characterId, position) => ({
+        conversation_id: conversationId,
+        character_id: characterId,
+        position,
+      })),
+    );
+  if (error) {
+    throw new Error(
+      `Failed to set the cast of video conversation ${conversationId}: ${error.message}`,
+    );
+  }
+}
+
+// The cast's character ids, in the order the officer picked them. Ids only: the caller
+// resolves the rows, so an edit made to a character between the two reads cannot leave a cast
+// describing one thing and the registry another.
+export async function listNewVideoConversationCastIds(
+  client: SupabaseClient,
+  conversationId: string,
+): Promise<string[]> {
+  const { data, error } = await client
+    .from(NEW_VIDEO_CONVERSATION_CHARACTERS_TABLE)
+    .select('conversation_id,character_id,position')
+    .eq('conversation_id', conversationId)
+    .order('position', { ascending: true });
+  if (error) {
+    throw new Error(
+      `Failed to list the cast of video conversation ${conversationId}: ${error.message}`,
+    );
+  }
+  return ((data ?? []) as unknown as CastDbRow[]).map(
+    (row) => row.character_id,
+  );
+}

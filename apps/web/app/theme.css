@@ -1,0 +1,433 @@
+/* ---------------------------------------------------------------------------
+   theme.css — everything the slate-teal redesign introduces, and the one file
+   to read when changing how the product looks.
+
+   It is imported into its OWN cascade layer (`dgipr-theme`, declared in
+   globals.css) which sits directly above `dgipr` and below `components` /
+   `utilities`. Two things follow from that, and both are the point:
+
+     - a rule here beats the matching rule in dgipr.css BY LAYER ORDER, not by
+       specificity, so `.page-head` needs no selector inflation and does not
+       care where in dgipr.css the original sits;
+     - devtools prints the layer name beside every rule, so "why is this panel
+       translucent" is one grep.
+
+   Tailwind utilities and shadcn still win over everything here, which is the
+   reason dgipr was quarantined in the first place (globals.css:12-22). That is
+   also why FormCard renders `glass-card` rather than `bg-card border shadow-sm`:
+   a glass rule must never have to fight a utility it cannot beat.
+
+   TOKENS. This file declares ONLY families that do not exist in dgipr.css:
+   the glass set, the rail and chrome set, the page-ground pair, and
+   --tooltip-bg. Anything dgipr already names (--text, --accent, --card, --r-lg
+   and so on) is referenced with var(), never retyped. Custom properties resolve
+   at use time and across layers, so reading a dgipr token from here is safe and
+   order-independent.
+
+   ONE EDITING TRAP, and it has already bitten once: a token family written as
+   `--rail-` followed by a star and a slash CLOSES THIS COMMENT. The rest of the
+   header is then parsed as CSS, prettier reflows the wreckage, and the build
+   reports `Unexpected token Delim` from a line that looks like prose. Name a
+   family in words here rather than with a wildcard.
+   --------------------------------------------------------------------------- */
+
+:root {
+  /* ---- chrome: the dark slate rail and footer -------------------------------
+     No dgipr equivalent exists (the old rail was the warm sand canvas), so the
+     literals live here rather than being back-ported into dgipr.css. */
+  --chrome-700: #4d5961;
+  --chrome-800: #343f47;
+  /* shadcn's --primary. Deliberately NOT --accent: a shadcn Button is a
+     secondary action in this product, and painting it green would put two
+     competing primaries on every form. */
+  --chrome-600: #5b666e;
+  --rail-bg: linear-gradient(
+    180deg,
+    var(--chrome-700) 0%,
+    var(--chrome-800) 100%
+  );
+  --rail-edge: rgba(38, 48, 54, 0.38);
+  --rail-hairline: rgba(255, 255, 255, 0.12);
+  --rail-fg: rgba(255, 255, 255, 0.72);
+  --rail-fg-strong: #ffffff;
+  --rail-hover-bg: rgba(255, 255, 255, 0.1);
+  --rail-active-bg: rgba(42, 111, 145, 0.3);
+  --rail-active-mark: #65cfaa; /* the inset 3px rule on the active row */
+  --rail-icon-active: #71d4b1;
+  --rail-control-border: rgba(255, 255, 255, 0.16);
+  --rail-control-bg: rgba(255, 255, 255, 0.08);
+  --footer-bg: var(--chrome-800);
+  --tooltip-bg: var(--text);
+
+  /* ---- glass: the translucent panel the photograph shows through ------------ */
+  --glass-bg: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.78),
+    rgba(231, 235, 238, 0.64)
+  );
+  --glass-border: rgba(255, 255, 255, 0.78);
+  --glass-shadow:
+    0 16px 38px rgba(31, 55, 68, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.88);
+  --glass-filter: blur(0.5px) saturate(104%);
+  --glass-label: #3d4951;
+
+  /* A FIELD takes the dark line. The light glass edge disappears against the
+     panel, and an edgeless text box reads as prose rather than as the thing to
+     type in. */
+  --glass-field-border: rgba(39, 77, 96, 0.4);
+  --glass-field-bg: rgba(242, 245, 247, 0.72);
+  --glass-field-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 1px 2px rgba(17, 48, 59, 0.07);
+  /* The template fold holds the answer to its card's question, so it is a field
+     too. Background only — the border comes from --glass-field-border. */
+  --glass-fold-bg: rgba(232, 237, 240, 0.72);
+
+  /* A CHIP / opt-in reads as part of the glass, so it takes the light edge. */
+  --glass-chip-border: rgba(255, 255, 255, 0.72);
+  --glass-chip-bg: rgba(229, 233, 236, 0.68);
+
+  /* Outline buttons on glass. */
+  --glass-outline-bg: rgba(220, 232, 238, 0.8);
+  --glass-outline-bg-hover: rgba(204, 224, 234, 0.86);
+  --glass-outline-border-hover: rgba(36, 79, 104, 0.48);
+  --glass-outline-fg: #244f68;
+
+  /* Solid slate controls, so a button never competes with the glass it sits on. */
+  --glass-control-bg: rgba(76, 89, 98, 0.96);
+  --glass-control-border: rgba(76, 89, 98, 0.84);
+  --glass-control-bg-hover: rgba(61, 73, 81, 0.96);
+  --glass-control-border-hover: rgba(61, 73, 81, 0.92);
+  --glass-toggle-bg: rgba(84, 102, 113, 0.94);
+  --glass-toggle-border: rgba(84, 102, 113, 0.8);
+  --glass-toggle-bg-hover: rgba(65, 80, 89, 0.96);
+  --glass-toggle-border-hover: rgba(65, 80, 89, 0.9);
+  --glass-toggle-bg-checked: rgba(55, 68, 76, 0.98);
+  --glass-toggle-border-checked: rgba(55, 68, 76, 0.94);
+
+  /* ---- the ground ---------------------------------------------------------- */
+  --page-bg-overlay: linear-gradient(
+    135deg,
+    rgba(245, 249, 247, 0.42),
+    rgba(232, 239, 243, 0.3)
+  );
+  /* Safety net only: PageBackground sets this inline, per route, from
+     lib/pageBackgrounds.ts. */
+  --page-bg-image: url('/backgrounds/background-new.png');
+
+  /* The submit sheen's mid stop and glow — see .mr-submit-flow in globals.css. */
+  --accent-lift: #45aa86;
+  --accent-glow: rgba(35, 112, 91, 0.28);
+}
+
+/* ---------------------------------------------------------------------------
+   2. CANVAS
+
+   dgipr paints its gradient on <html> ALONE, never on <body>, and that is
+   load-bearing rather than tidiness: a root-element background paints as the
+   canvas, underneath everything including negative-z-index layers, while a
+   <body> background is an ordinary box background and would paint OVER the
+   ground layers below. Same contract here, flat — the photograph IS the
+   gradient now, so the linear-gradient is switched off rather than retinted.
+   --------------------------------------------------------------------------- */
+
+html {
+  background: var(--bg);
+  background-image: none;
+}
+
+/* ---------------------------------------------------------------------------
+   3. THE GROUND
+
+   The photograph a route sits on (components/common/PageBackground.tsx). It
+   spans the CONTENT COLUMN rather than the window — --sidebar-w, the same idiom
+   .page-backdrop and .dlo-submitbar use — so it starts exactly at the rail's
+   right edge in both of the rail's widths.
+
+   THE IMAGE ARRIVES AS --page-bg-image, set inline per route by PageBackground
+   from lib/pageBackgrounds.ts. So giving a route its own photo is a registry
+   edit and never a CSS edit, while the overlay gradient stays here with the rest
+   of the look.
+   --------------------------------------------------------------------------- */
+
+.page-background {
+  position: fixed;
+  inset-block: 0;
+  inset-inline: var(--sidebar-w, 0) 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image: var(--page-bg-overlay), var(--page-bg-image);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+}
+
+/* /new-dlo and /media-room render no <AppSidebar> (RouteAwareLayout.tsx) but
+   <body> still declares --sidebar-w: 260px, so a fixed layer inset by it would
+   leave a 260px band of bare canvas down the left. Reading the DOM beats
+   threading a prop through every component: this fixes the ground,
+   .page-backdrop AND .dlo-submitbar on every present and future rail-less route
+   at once. :has() is already assumed by dgipr's body:has(.sidebar.collapsed)
+   rule, so this adds no new browser requirement. */
+body:not(:has(.sidebar)) {
+  --sidebar-w: 0px;
+}
+
+/* ---------------------------------------------------------------------------
+   4. GLASS — the translucent panels the photograph shows through
+
+   Scoped to `.page` rather than to an opt-in class, so a hand-written one-off
+   head still gets the design and `.page-head` keeps working exactly as it did.
+   `.page-plain` opts out.
+
+   NOTE THE `>` ON `.card`: a card nested inside another card must not stack
+   translucency, which reads as a smudge rather than as glass.
+   --------------------------------------------------------------------------- */
+
+.page:not(.page-plain) .page-head,
+.page:not(.page-plain) .glass-card,
+.page:not(.page-plain) > .card {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+}
+
+/* dgipr's `.page-head` draws a `border-bottom` hairline under a head with no
+   panel behind it. That is already gone here: the `border` SHORTHAND in the
+   block above resets all four edges to the light glass line, so the bottom edge
+   is the panel's own edge rather than the hairline. Do not add
+   `border-bottom: 0` "to remove the hairline" — it is not there, and zeroing the
+   bottom leaves the panel with three sides. */
+.page:not(.page-plain) .page-head {
+  padding: 20px;
+  border-radius: var(--r-lg);
+  border-left: 4px solid var(--accent);
+}
+
+.page:not(.page-plain) .page-title {
+  color: var(--accent);
+}
+
+.page:not(.page-plain) .glass-card > label {
+  color: var(--glass-label);
+}
+
+/* THIS ONE SELECTOR IS WHAT GREENS THE ⓘ. It needs the icon inside a
+   DIRECT-CHILD <label> of a .glass-card — i.e. a FieldLabel passed to FormCard's
+   `label` prop. Put the icon anywhere else and it stays --muted-foreground. */
+.page:not(.page-plain) .glass-card > label svg {
+  color: var(--accent);
+}
+
+/* The crash cards must stay readable over an image that may not have decoded —
+   they are what the reader sees when something has already gone wrong.
+
+   THE SELECTOR HAS TO REPEAT THE GLASS RULE'S SHAPE, not just name the class. Both
+   app/error.tsx and app/not-found.tsx render `<section class="card crash-card">` as
+   a DIRECT child of the page, so the rule above matches them at (0,3,0) while a bare
+   `.crash-card` is (0,1,0) — it loses, silently, and the crash card renders glass.
+   Every declaration the glass rule sets is put back here, or the card keeps the
+   glass border and shadow over an opaque background. */
+.page:not(.page-plain) > .crash-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-md);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* A reusable panel for surfaces that are not a `.page` (today: /new-dlo's
+   floating composer), so there is one definition of the look rather than two. */
+.glass-panel {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+}
+
+/* ---------------------------------------------------------------------------
+   5. FIELDS AND CONTROLS ON GLASS
+
+   A FIELD takes the dark line and a CHIP takes the light one — the reasoning is
+   on the tokens in section 1. Everything here was proved on the reference page
+   before it was generalised; only the scope and the literals changed.
+   --------------------------------------------------------------------------- */
+
+/* A chip or an opt-in reads as part of the glass, so its edge is the light one. */
+.page:not(.page-plain) label.border {
+  border-color: var(--glass-chip-border);
+  background: var(--glass-chip-bg);
+}
+
+/* Every field on a glass page takes the dark line. Scoping this to one composer
+   is what once made the AI प्रॉम्प्ट box look borderless beside a bordered note
+   box on the same screen. */
+.page:not(.page-plain) textarea,
+.page:not(.page-plain) input[type='text'] {
+  border-color: var(--glass-field-border);
+  background: var(--glass-field-bg);
+  box-shadow: var(--glass-field-shadow);
+}
+
+/* The template fold is a field too — it holds the answer to its card's question
+   — so its row takes the same line rather than the fainter --input one. */
+.page:not(.page-plain) .ref-picker-disclosure-head {
+  border-color: var(--glass-field-border);
+  background: var(--glass-fold-bg);
+}
+
+.page:not(.page-plain) [data-slot='button'][data-variant='outline'] {
+  border-color: var(--glass-chip-border);
+  background: var(--glass-outline-bg);
+}
+
+.page:not(.page-plain) [data-slot='button'][data-variant='outline'] svg {
+  color: var(--glass-outline-fg);
+}
+
+.page:not(.page-plain) [data-slot='button'][data-variant='outline']:hover {
+  border-color: var(--glass-outline-border-hover);
+  background: var(--glass-outline-bg-hover);
+}
+
+/* Solid slate, so a composer's tool buttons never compete with the glass they
+   sit on. The submit is excluded — it is the one primary action on the screen. */
+.page:not(.page-plain) .mr-note-composer button:not(.mr-submit-button) {
+  border-color: var(--glass-control-border);
+  background: var(--glass-control-bg);
+  color: var(--rail-fg-strong);
+}
+
+.page:not(.page-plain) .mr-note-composer button:not(.mr-submit-button) svg {
+  color: var(--rail-fg-strong);
+}
+
+.page:not(.page-plain) .mr-note-composer button:not(.mr-submit-button):hover {
+  border-color: var(--glass-control-border-hover);
+  background: var(--glass-control-bg-hover);
+  color: var(--rail-fg-strong);
+}
+
+.page:not(.page-plain) .mr-note-composer .mr-check-option {
+  border-color: var(--glass-toggle-border);
+  background: var(--glass-toggle-bg);
+  color: var(--rail-fg-strong);
+}
+
+.page:not(.page-plain) .mr-note-composer .mr-check-option:hover {
+  border-color: var(--glass-toggle-border-hover);
+  background: var(--glass-toggle-bg-hover);
+  color: var(--rail-fg-strong);
+}
+
+.page:not(.page-plain) .mr-note-composer .mr-check-option:has(input:checked) {
+  border-color: var(--glass-toggle-border-checked);
+  background: var(--glass-toggle-bg-checked);
+  color: var(--rail-fg-strong);
+}
+
+/* ---------------------------------------------------------------------------
+   6. CHROME — the dark slate rail and footer
+   --------------------------------------------------------------------------- */
+
+.sidebar {
+  background: var(--rail-bg);
+  border-right-color: var(--chrome-700);
+  box-shadow: 1px 0 0 var(--rail-edge);
+}
+
+.sidebar-head {
+  border-bottom-color: var(--rail-hairline);
+}
+
+.sidebar-logo .site-brand-name {
+  color: var(--rail-fg-strong);
+}
+
+.sidebar-collapse {
+  border-color: var(--rail-control-border);
+  background: var(--rail-control-bg);
+  color: var(--rail-fg);
+}
+
+.sidebar-collapse:hover,
+.sidebar-link:hover,
+.sidebar .tasks-button:hover {
+  background: var(--rail-hover-bg);
+  color: var(--rail-fg-strong);
+}
+
+.sidebar-link,
+.sidebar .tasks-button,
+.sidebar-link svg,
+.sidebar .tasks-button svg {
+  color: var(--rail-fg);
+}
+
+.sidebar-link.active {
+  background: var(--rail-active-bg);
+  color: var(--rail-fg-strong);
+  box-shadow: inset 3px 0 0 var(--rail-active-mark);
+}
+
+.sidebar-link.active svg,
+.sidebar-link:hover svg,
+.sidebar .tasks-button:hover svg {
+  color: var(--rail-icon-active);
+}
+
+.site-footer {
+  background: var(--footer-bg);
+}
+
+/* ---------------------------------------------------------------------------
+   7. THE CONVERSATION BRIDGE (/chat and /new-video-workflow)
+
+   `.conv-page` is not a `.page` — it is `height: 100dvh` with its own 296px
+   grid, and it carried a LOCAL warm palette of its own (dgipr.css, the two
+   --conv-* tokens). Two token overrides are all it takes to put it on the same
+   ground as everything else.
+
+   --conv-canvas goes TRANSPARENT rather than being retinted, so the ordinary
+   fixed `.page-background` shows through. The rail then takes the glass chip
+   tint, which is what keeps it a step deeper than the pane beside it — the
+   relationship the warm pair expressed, in the new palette.
+
+   The --sidebar-w inset on the ground is CORRECT here and is not an oversight:
+   on /chat the app sidebar IS present, and the conversation's own 296px rail
+   lives inside the content column to the right of it.
+   --------------------------------------------------------------------------- */
+
+.conv-page {
+  --conv-canvas: transparent;
+  --conv-rail-bg: var(--glass-chip-bg);
+}
+
+/* ---------------------------------------------------------------------------
+   8. THE ESCAPE HATCH
+
+   Translucency is not motion, so prefers-reduced-motion is the wrong query for
+   it — and the photograph is now the product's ground rather than decoration, so
+   it does not belong under that query either. Both drop out here instead, and
+   the panels fall back to the opaque --card they were tuned against.
+   `.page-backdrop`'s existing reduced-motion rule is untouched.
+   --------------------------------------------------------------------------- */
+
+@media (prefers-reduced-transparency: reduce) {
+  .page-background {
+    display: none;
+  }
+
+  .page:not(.page-plain) .page-head,
+  .page:not(.page-plain) .glass-card,
+  .page:not(.page-plain) > .card,
+  .glass-panel {
+    background: var(--card);
+    border-color: var(--border);
+    box-shadow: var(--shadow-md);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}

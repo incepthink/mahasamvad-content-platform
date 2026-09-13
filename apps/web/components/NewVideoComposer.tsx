@@ -38,24 +38,29 @@ import {
   type KeyboardEvent,
 } from 'react';
 import {
+  CornerDownRight,
   Image as ImageIcon,
   Maximize2,
   Minimize2,
   RectangleHorizontal,
   RectangleVertical,
   Send,
+  Users,
+  X,
 } from 'lucide-react';
 import {
   DEFAULT_NEW_VIDEO_ASPECT,
   NEW_VIDEO_IMAGE_ACCEPT,
   NEW_VIDEO_MAX_IMAGES,
   type NewVideoAspect,
+  type NewVideoCharacter,
 } from '@dgipr/schemas';
 import { ComposeSafeTextarea, isComposingEvent } from './ComposeSafeInput';
 import {
   AttachmentTray,
   type TrayAttachment,
 } from './conversation/AttachmentTray';
+import { NewVideoCharacters } from './NewVideoCharacters';
 import { imageFilesFromClipboard, isEditableTarget } from '../lib/pastedImages';
 import { STR } from '../lib/strings';
 import type { StagedImage } from '../lib/useNewVideoWorkflow';
@@ -86,6 +91,12 @@ export function NewVideoComposer({
   busy,
   sending,
   isFollowUp,
+  characters,
+  castIds,
+  castLocked,
+  onCastIdsChange,
+  forkOrdinal,
+  onClearFork,
   onAddImages,
   onRemoveImage,
   onSend,
@@ -95,6 +106,19 @@ export function NewVideoComposer({
   busy: boolean;
   sending: boolean;
   isFollowUp: boolean;
+  /** This conversation's cast, once the server holds one. Empty before the first turn. */
+  characters: readonly NewVideoCharacter[];
+  castIds: readonly string[];
+  /** The cast is fixed once there is a video to edit; the panel says why rather than hiding. */
+  castLocked: boolean;
+  onCastIdsChange: (ids: readonly string[]) => void;
+  /**
+   * FORKING (Step 4): the 1-based number of the turn this instruction will continue from, or
+   * null for the ordinary case. A number rather than a turn id, because all this component
+   * does with it is name the video — the id belongs to the pane that owns the list.
+   */
+  forkOrdinal: number | null;
+  onClearFork: () => void;
   onAddImages: (files: readonly File[]) => void;
   onRemoveImage: (key: string) => void;
   /** Resolves true once the turn has left, which is when the box may be cleared. */
@@ -106,6 +130,7 @@ export function NewVideoComposer({
   );
   const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [castOpen, setCastOpen] = useState(false);
   const imageInput = useRef<HTMLInputElement>(null);
   // The card, so the textarea inside it can be found without a ref of its own —
   // ComposeSafeTextarea owns that ref (it is what keeps the field uncontrolled) and does not
@@ -233,6 +258,34 @@ export function NewVideoComposer({
         className={expanded ? 'chat-composer is-expanded' : 'chat-composer'}
         onPaste={onPaste}
       >
+        {/* FORKING (Step 4). ABOVE the box, not under it: it changes what the words about to
+            be typed will apply to, so an officer must meet it before writing rather than
+            after. Dismissible in place as well as by re-pressing the turn's own button —
+            scrolling back up to disarm something is not a thing to make anyone do. */}
+        {forkOrdinal !== null ? (
+          <div className="nvw-fork-banner" role="status">
+            <CornerDownRight size={16} aria-hidden="true" />
+            <span className="nvw-fork-banner-text">
+              <strong>
+                {STR.nvwForkActive} · {STR.nvwForkTurn}{' '}
+                {forkOrdinal.toLocaleString('mr-IN')}
+              </strong>
+              <span className="nvw-fork-banner-hint">
+                {STR.nvwForkActiveHint}
+              </span>
+            </span>
+            <button
+              type="button"
+              className="btn-ghost nvw-fork-clear"
+              onClick={onClearFork}
+              title={STR.nvwForkCancel}
+              aria-label={STR.nvwForkCancel}
+            >
+              <X size={16} aria-hidden="true" />
+            </button>
+          </div>
+        ) : null}
+
         <AttachmentTray items={trayItems} />
 
         <div className="chat-input-row">
@@ -255,6 +308,33 @@ export function NewVideoComposer({
               aria-label={STR.nvwAttachImage}
             >
               <ImageIcon size={20} aria-hidden="true" />
+            </button>
+            {/* The cast (migration 0054) — the control that makes a character and their voice
+                the same in a NEW conversation without re-uploading a portrait or retyping a
+                description. Never disabled: the panel is also the registry's editor, and an
+                officer may be tidying it up while a render is in flight. The count is on the
+                button because a cast is invisible in the prompt and is easy to forget. */}
+            <button
+              type="button"
+              className={
+                castIds.length > 0
+                  ? 'btn-ghost chat-tool is-active'
+                  : 'btn-ghost chat-tool'
+              }
+              onClick={() => setCastOpen(true)}
+              title={STR.nvwCharactersTitle}
+              aria-label={
+                castIds.length > 0
+                  ? `${STR.nvwCharactersTitle} (${castIds.length.toLocaleString('mr-IN')})`
+                  : STR.nvwCharactersTitle
+              }
+            >
+              <Users size={20} aria-hidden="true" />
+              {castIds.length > 0 ? (
+                <span className="chat-tool-count">
+                  {castIds.length.toLocaleString('mr-IN')}
+                </span>
+              ) : null}
             </button>
             <button
               type="button"
@@ -318,12 +398,28 @@ export function NewVideoComposer({
           </div>
         </div>
 
+        {/* Who is in this video, named under the box: a cast is invisible in the prompt, and
+            an officer who cannot see it cannot tell whether the model was told about it. */}
+        {castLocked && characters.length > 0 ? (
+          <p className="chat-composer-note">
+            {STR.nvwCastSelected}: {characters.map((c) => c.name).join(', ')}
+          </p>
+        ) : null}
+
         {busy ? <p className="chat-composer-note">{STR.nvwBusy}</p> : null}
         {error !== null ? (
           <p className="chat-composer-error" role="alert">
             {error}
           </p>
         ) : null}
+
+        <NewVideoCharacters
+          open={castOpen}
+          onOpenChange={setCastOpen}
+          selectedIds={castIds}
+          onSelectedIdsChange={onCastIdsChange}
+          castLocked={castLocked}
+        />
 
         <input
           ref={imageInput}

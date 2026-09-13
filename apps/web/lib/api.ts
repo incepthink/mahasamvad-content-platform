@@ -102,10 +102,15 @@ import {
   type VideoReferenceImageUploadResponse,
   type CreateVideoProjectInput,
   type RegenerateStillRequest,
+  NewVideoCharacterListSchema,
+  NewVideoCharacterSchema,
   NewVideoConversationListSchema,
   NewVideoConversationSchema,
   NewVideoImageUploadResponseSchema,
   NewVideoTurnResponseSchema,
+  type NewVideoCharacter,
+  type NewVideoCharacterPatch,
+  type NewVideoCharacterRequest,
   type NewVideoConversation,
   type NewVideoConversationSummary,
   type NewVideoImage,
@@ -1492,5 +1497,42 @@ export async function deleteNewVideoConversation(id: string): Promise<void> {
     { method: 'DELETE' },
   );
   // 204, so there is no body to read — but a failure still carries one.
+  if (!response.ok) await readJsonResponse(response);
+}
+
+// The character & voice registry (migration 0054). Department-wide and reusable across
+// conversations, which is what a fresh conversation is seeded from — the officer does not
+// re-upload a portrait or retype a voice description to get the same person back.
+export async function listNewVideoCharacters(): Promise<NewVideoCharacter[]> {
+  const body = await requestJson('/api/new-video-workflow/characters');
+  return NewVideoCharacterListSchema.parse(body);
+}
+
+export async function createNewVideoCharacter(
+  input: NewVideoCharacterRequest,
+): Promise<NewVideoCharacter> {
+  const body = await requestJson('/api/new-video-workflow/characters', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  return NewVideoCharacterSchema.parse(body);
+}
+
+export async function updateNewVideoCharacter(
+  id: string,
+  patch: NewVideoCharacterPatch,
+): Promise<NewVideoCharacter> {
+  const body = await requestJson(`/api/new-video-workflow/characters/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+  return NewVideoCharacterSchema.parse(body);
+}
+
+export async function deleteNewVideoCharacter(id: string): Promise<void> {
+  const response = await fetch(
+    `${API_URL}/api/new-video-workflow/characters/${id}`,
+    { method: 'DELETE' },
+  );
   if (!response.ok) await readJsonResponse(response);
 }

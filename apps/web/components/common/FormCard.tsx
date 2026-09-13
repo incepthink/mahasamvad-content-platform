@@ -8,6 +8,14 @@
  * decided once, here, rather than by a class string copied between them. That copy is
  * what let the two pages drift apart in the first place.
  *
+ * IT RENDERS `glass-card`, NOT `bg-card border shadow-sm`, AND THAT IS A CASCADE
+ * DECISION rather than a naming one. Those three are genuine Tailwind utilities, and
+ * utilities are the LAST cascade layer — so a theme rule trying to give the card a
+ * translucent background would lose to `bg-card` regardless of specificity, and the
+ * card would render opaque with no error anywhere. `.glass-card` in app/theme.css
+ * owns background, border and shadow instead, so no theme rule ever has to fight a
+ * utility it cannot beat.
+ *
  * The optional label/hint pair is part of the card rather than left to each caller,
  * because the relationship between the three (label, then hint, then the control) is
  * exactly what a caller gets subtly wrong: a hint set as a sibling of the label reads
@@ -32,12 +40,7 @@ export function FormCard({
   className?: string | undefined;
 }) {
   return (
-    <section
-      className={cn(
-        'bg-card rounded-2xl border p-4 shadow-sm sm:p-5',
-        className,
-      )}
-    >
+    <section className={cn('glass-card rounded-2xl p-4 sm:p-5', className)}>
       {label ? (
         <label
           className="text-foreground block text-base font-semibold"

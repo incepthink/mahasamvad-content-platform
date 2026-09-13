@@ -30,8 +30,20 @@ import {
 } from 'lucide-react';
 import { STR } from '../lib/strings';
 import { TasksMenu } from './TasksMenu';
+import mahasamvadEmblem from '../../../packages/poster-renderer/assets/poster-logo-new.png';
 
 const COLLAPSED_KEY = 'sidebar-collapsed';
+
+function MahasamvadBrand() {
+  return (
+    <>
+      <img src={mahasamvadEmblem.src} alt="" className="site-logo" />
+      <span className="site-brand-name" lang="mr">
+        महासंवाद
+      </span>
+    </>
+  );
+}
 
 const NAV_LINKS = [
   { href: '/', label: STR.navNew, Icon: ImagePlus },
@@ -104,11 +116,7 @@ export function AppSidebar() {
           aria-label={STR.appName}
           onClick={closeMobile}
         >
-          <img
-            src="/mahasamvad-logo.png"
-            alt={STR.appName}
-            className="site-logo"
-          />
+          <MahasamvadBrand />
         </Link>
         <button
           type="button"
@@ -147,11 +155,7 @@ export function AppSidebar() {
             aria-label={STR.appName}
             onClick={closeMobile}
           >
-            <img
-              src="/mahasamvad-logo.png"
-              alt={STR.appName}
-              className="site-logo"
-            />
+            <MahasamvadBrand />
           </Link>
           <button
             type="button"

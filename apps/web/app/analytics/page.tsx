@@ -32,8 +32,7 @@ import { ANALYTICS_FEATURE_LABELS } from '../../lib/analytics';
 import { useAnalytics } from '../../lib/useAnalytics';
 import { STR } from '../../lib/strings';
 import { ErrorNotice } from '../../components/ErrorNotice';
-import { PageBackdrop } from '../../components/common/PageBackdrop';
-import { ANALYTICS_DOODLES } from '../../lib/doodleMarks';
+import { PageShell } from '../../components/common/PageShell';
 
 function AnalyticsPageBody() {
   const router = useRouter();
@@ -54,26 +53,18 @@ function AnalyticsPageBody() {
   );
 
   return (
-    <main className="page">
-      {/* Wallpaper for this lane: what an officer reads here is how much the department
-          has used the platform. The marks are decorative only, and the vocabulary lives
-          beside the other lanes’ in lib/doodleMarks.ts. */}
-      <PageBackdrop marks={ANALYTICS_DOODLES} seed={47} />
-
-      <header className="page-head">
-        <div className="page-head-text">
-          <h1 className="page-title">{STR.analyticsTitle}</h1>
-          <p className="page-sub">{STR.analyticsIntro}</p>
-        </div>
-        <div className="page-head-actions">
-          <AnalyticsRangePicker
-            value={range}
-            onChange={setRange}
-            busy={loading}
-          />
-        </div>
-      </header>
-
+    <PageShell
+      background="analytics"
+      title={STR.analyticsTitle}
+      subtitle={STR.analyticsIntro}
+      actions={
+        <AnalyticsRangePicker
+          value={range}
+          onChange={setRange}
+          busy={loading}
+        />
+      }
+    >
       {error ? (
         <ErrorNotice
           message={error}
@@ -154,7 +145,7 @@ function AnalyticsPageBody() {
           </section>
         </>
       ) : null}
-    </main>
+    </PageShell>
   );
 }
 
@@ -178,7 +169,7 @@ function shareRows(
 // useSearchParams needs a suspense boundary in the app router.
 export default function AnalyticsPage() {
   return (
-    <Suspense fallback={<main className="page" />}>
+    <Suspense fallback={<PageShell background="analytics" />}>
       <AnalyticsPageBody />
     </Suspense>
   );

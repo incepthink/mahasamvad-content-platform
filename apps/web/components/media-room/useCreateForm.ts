@@ -27,6 +27,7 @@ import {
 import type {
   DesignMode,
   MotionAspect,
+  MotionCrop,
   MotionSourceResponse,
 } from '@dgipr/schemas';
 import { createGeneration, getGeneration } from '@/lib/api';
@@ -122,6 +123,12 @@ export function useCreateForm() {
   const [motionAspect, setMotionAspect] = useState<MotionAspect>(
     DEFAULT_MOTION_ASPECT,
   );
+  // The part of the poster allowed to MOVE (migration 0055). Null is the default and a
+  // complete request: with no region the clip is stored exactly as the model returned it,
+  // which is how this lane behaved before the control existed. Marking one turns on the
+  // restore — everything outside it is composited back from the uploaded poster, so the
+  // officer's Devanagari is their own rather than the model's redrawing of it.
+  const [motionRegion, setMotionRegion] = useState<MotionCrop | null>(null);
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -370,6 +377,10 @@ export function useCreateForm() {
         sourceImagePath:
           isDynamicPoster && motionSource ? motionSource.path : undefined,
         motionAspect: isDynamicPoster ? motionAspect : undefined,
+        // Only when they actually marked one: absent means "do not restore", and sending a
+        // full-frame rectangle instead would cost an encode to produce the same picture.
+        motionRegion:
+          isDynamicPoster && motionRegion ? motionRegion : undefined,
       });
       // Every format opens its own progress page. Keep tracking the run so the navbar
       // tasks panel still offers a shortcut, but do not open that panel automatically.
@@ -485,6 +496,8 @@ export function useCreateForm() {
     setMotionDirection,
     motionAspect,
     setMotionAspect,
+    motionRegion,
+    setMotionRegion,
 
     // template
     reference,

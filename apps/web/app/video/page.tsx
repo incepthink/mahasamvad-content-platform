@@ -29,8 +29,7 @@ import { errorMessage } from '../../lib/errorMessage';
 import { VideoStatusChip } from '../../components/VideoStatusChip';
 import { ErrorNotice } from '../../components/ErrorNotice';
 import { FileName } from '../../components/FileName';
-import { PageBackdrop } from '../../components/common/PageBackdrop';
-import { VIDEO_DOODLES } from '../../lib/doodleMarks';
+import { PageShell } from '../../components/common/PageShell';
 
 const NOTE_MIN = 20;
 
@@ -253,19 +252,11 @@ export default function VideoPage() {
   };
 
   return (
-    <main className="page">
-      {/* Wallpaper for this lane: what an officer makes here is a film. The marks are
-          decorative only, and the vocabulary lives beside the other lanes’ in
-          lib/doodleMarks.ts. */}
-      <PageBackdrop marks={VIDEO_DOODLES} seed={53} />
-
-      <header className="page-head">
-        <div className="page-head-text">
-          <h1 className="page-title">{STR.videoTitle}</h1>
-          <p className="page-sub">{STR.videoIntro}</p>
-        </div>
-      </header>
-
+    <PageShell
+      background="video"
+      title={STR.videoTitle}
+      subtitle={STR.videoIntro}
+    >
       <section className="card">
         {activeProject ? (
           <div className="info-callout" style={{ marginBottom: 20 }}>
@@ -548,6 +539,6 @@ export default function VideoPage() {
           </ul>
         </section>
       ) : null}
-    </main>
+    </PageShell>
   );
 }

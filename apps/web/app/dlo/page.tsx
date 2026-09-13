@@ -13,8 +13,7 @@
 import { DloIntakeForm } from '../../components/dlo/DloIntakeForm';
 import { DloIntakeList } from '../../components/DloIntakeList';
 import { DloResumeCard } from '../../components/DloResumeCard';
-import { PageBackdrop } from '../../components/common/PageBackdrop';
-import { NEWS_DOODLES } from '../../lib/doodleMarks';
+import { PageShell } from '../../components/common/PageShell';
 import { useDloIntakeList } from '../../lib/useDloIntakeList';
 import { STR } from '../../lib/strings';
 
@@ -26,20 +25,11 @@ export default function DloPage() {
     // DloIntakeForm), so nothing is pinned over the last block or over the credit line
     // any more. The class stays in dgipr.css for /transcribe and /translate, which still
     // carry the pinned bar.
-    <main className="page">
-      {/* Wallpaper for this lane: what an officer makes here is a news report — the
-          meeting, its recordings and its papers, written up. The marks are decorative
-          only, and the vocabulary lives beside the other lanes' in lib/doodleMarks.ts —
-          see components/common/PageBackdrop.tsx. */}
-      <PageBackdrop marks={NEWS_DOODLES} seed={31} />
-
-      <header className="page-head">
-        <div className="page-head-text">
-          <h1 className="page-title">{STR.dloTitle}</h1>
-          <p className="page-sub">{STR.dloPageIntro}</p>
-        </div>
-      </header>
-
+    <PageShell
+      background="dlo"
+      title={STR.dloTitle}
+      subtitle={STR.dloPageIntro}
+    >
       {active ? <DloResumeCard intake={active} /> : null}
 
       <DloIntakeForm />
@@ -51,6 +41,6 @@ export default function DloPage() {
         error={error}
         onRetry={() => void refresh()}
       />
-    </main>
+    </PageShell>
   );
 }

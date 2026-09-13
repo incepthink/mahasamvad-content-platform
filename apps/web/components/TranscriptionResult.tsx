@@ -21,7 +21,7 @@ import { FileName } from './FileName';
 import { Button } from './ui/button';
 import { storedErrorMessage } from '../lib/errorMessage';
 
-const RESULT_CARD_CLASS = 'bg-card rounded-2xl border p-4 shadow-sm sm:p-5';
+const RESULT_CARD_CLASS = 'glass-card rounded-2xl p-4 sm:p-5';
 
 function StatusChip({ status }: { status: TranscriptionDetail['status'] }) {
   const entry = TRANSCRIPTION_STATUS_LABELS[status] ?? {

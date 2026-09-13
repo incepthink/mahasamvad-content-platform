@@ -11,7 +11,9 @@
 import { useEffect, useRef, useState } from 'react';
 import type {
   NewVideoAspect,
+  NewVideoCharacter,
   NewVideoConversation as Conversation,
+  NewVideoTurn,
 } from '@dgipr/schemas';
 import { ErrorNotice } from './ErrorNotice';
 import { NewVideoComposer } from './NewVideoComposer';
@@ -23,6 +25,25 @@ import type { StagedImage } from '../lib/useNewVideoWorkflow';
 // wheel nudge does not stop the view following a new turn.
 const STICK_THRESHOLD_PX = 120;
 
+// WHICH TURN THE NEXT INSTRUCTION ALREADY CONTINUES FROM, derived rather than told.
+//
+// The server's chain point is the interaction of the most recently COMPLETED turn — only a
+// completed turn advances it, and this surface renders one generation at a time, so the last
+// completed turn in the list is it. That derivation is what lets the page know the answer
+// without the provider handle ever crossing the boundary, which it must not.
+//
+// The turn it names is the one place forking is NOT offered: continuing from it is what
+// pressing send plainly already does.
+function chainPointIdOf(turns: readonly NewVideoTurn[]): string | null {
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    const turn = turns[index];
+    if (turn && turn.status === 'completed' && turn.videoUrl !== null) {
+      return turn.id;
+    }
+  }
+  return null;
+}
+
 export function NewVideoConversationView({
   conversation,
   images,
@@ -30,6 +51,12 @@ export function NewVideoConversationView({
   sending,
   busy,
   error,
+  characters,
+  castIds,
+  castLocked,
+  onCastIdsChange,
+  forkFromTurnId,
+  onForkFromTurnIdChange,
   onRetry,
   onAddImages,
   onRemoveImage,
@@ -41,6 +68,12 @@ export function NewVideoConversationView({
   sending: boolean;
   busy: boolean;
   error: string | null;
+  characters: readonly NewVideoCharacter[];
+  castIds: readonly string[];
+  castLocked: boolean;
+  onCastIdsChange: (ids: readonly string[]) => void;
+  forkFromTurnId: string | null;
+  onForkFromTurnIdChange: (turnId: string | null) => void;
   onRetry?: () => void;
   onAddImages: (files: readonly File[]) => void;
   onRemoveImage: (key: string) => void;
@@ -58,6 +91,13 @@ export function NewVideoConversationView({
   };
 
   const turns = conversation?.turns ?? [];
+  const chainPointId = chainPointIdOf(turns);
+  // The ordinal of the armed turn, for the composer's banner. Derived here, where the list
+  // is, so the banner and the button cannot disagree about which video is meant.
+  const forkOrdinal =
+    forkFromTurnId === null
+      ? null
+      : turns.findIndex((turn) => turn.id === forkFromTurnId) + 1 || null;
 
   // Guarded by `stick` rather than scrolling unconditionally: an officer who has scrolled up
   // to re-watch an earlier video must not be yanked down when a poll lands.
@@ -106,8 +146,19 @@ export function NewVideoConversationView({
             </div>
           ) : null}
 
-          {turns.map((turn) => (
-            <NewVideoTurnView key={turn.id} turn={turn} />
+          {turns.map((turn, index) => (
+            <NewVideoTurnView
+              key={turn.id}
+              turn={turn}
+              ordinal={index + 1}
+              canFork={
+                turn.status === 'completed' &&
+                turn.videoUrl !== null &&
+                turn.id !== chainPointId
+              }
+              forkArmed={turn.id === forkFromTurnId}
+              onFork={onForkFromTurnIdChange}
+            />
           ))}
 
           {error !== null && !sending ? (
@@ -127,6 +178,12 @@ export function NewVideoConversationView({
             busy={busy}
             sending={sending}
             isFollowUp={!empty}
+            characters={characters}
+            castIds={castIds}
+            castLocked={castLocked}
+            onCastIdsChange={onCastIdsChange}
+            forkOrdinal={forkOrdinal}
+            onClearFork={() => onForkFromTurnIdChange(null)}
             onAddImages={onAddImages}
             onRemoveImage={onRemoveImage}
             onSend={onSend}

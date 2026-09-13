@@ -145,6 +145,17 @@ export type GenerationRow = Readonly<{
   // no CHECK, which is why a third value needed no migration; the job PARSES it rather than
   // casting, so a hand-edited row cannot put an arbitrary string into a paid render's prompt.
   motionAspect: string | null;
+  // Dynamic Poster only (migration 0055): the part of the poster allowed to MOVE, as
+  // {x, y, width, height} fractions of its own size. Everything outside it is composited back
+  // from the uploaded poster after the render, so the officer's Devanagari is their own glyphs
+  // rather than a video model's redrawing of them.
+  //
+  // `unknown`, like every other jsonb column here, and PARSED at the job rather than cast: this
+  // one field points a paid render's encode at a rectangle, so a hand-edited row must not be
+  // able to put an arbitrary object into it. Null on every other lane and on every Dynamic
+  // Poster made before the control existed, where it means "no restore" — see the column
+  // comment in 0055 for why there is no defensible default.
+  motionRegion: unknown;
   // Total USD this generation has cost so far (text measured from OpenAI usage + a fixed
   // per-render image tier price), accumulated across the initial run and any feedback
   // jobs. Null for pre-feature rows. `costBreakdown` holds the token/split audit detail.
@@ -227,6 +238,7 @@ type GenerationDbRow = {
   motion_prompt: string | null;
   motion_interaction_id: string | null;
   motion_aspect: string | null;
+  motion_region: unknown;
   // PostgREST may serialise numeric as a string; fromDbRow coerces to number.
   cost_usd: number | string | null;
   cost_breakdown: unknown;
@@ -311,6 +323,9 @@ function fromDbRow(row: GenerationDbRow): GenerationRow {
     // ?? null for the 0052 reason one line up: a database without 0053 returns no such
     // column, and an undefined here would be dropped from the detail payload.
     motionAspect: row.motion_aspect ?? null,
+    // ?? null for the same reason: a database without 0055 returns no such column, and an
+    // undefined here would be dropped from the detail payload rather than reported as absent.
+    motionRegion: row.motion_region ?? null,
     costUsd:
       row.cost_usd === null || row.cost_usd === undefined
         ? null
@@ -457,6 +472,11 @@ export async function insertGeneration(
     // follow-up path regenerates the motion prompt, so the shape must be on the row.
     // Pass it ONLY when it is not the default; see the insert below.
     motionAspect?: string | undefined;
+    // Insert-only (migration 0055): the moving region. Same reason a third time — the
+    // follow-up path re-reads the row and regenerates the motion prompt, so a region held only
+    // in the create request would be lost on the first follow-up, and the retry button could
+    // not reproduce the same hole after a failed render.
+    motionRegion?: unknown;
     // Insert-only: the note is a finished article; the runner skips generation.
     articleProvided?: boolean | undefined;
   }>,
@@ -523,6 +543,12 @@ export async function insertGeneration(
       // ratio — which is what confines an un-applied 0053 to landscape requests instead of
       // failing every Dynamic Poster create. The job reads null as the portrait default.
       ...(input.motionAspect ? { motion_aspect: input.motionAspect } : {}),
+      // MANDATORY SPREAD, not an unconditional null (migration 0055). PostgREST refuses an
+      // insert that NAMES a column the database does not have, so writing motion_region
+      // unconditionally would fail EVERY create on EVERY lane on a database without 0055 —
+      // where omitting it confines the damage to a Dynamic Poster create that actually carries
+      // a region. The 0028 principle, and the reason every column above it is spread too.
+      ...(input.motionRegion ? { motion_region: input.motionRegion } : {}),
       article_provided: input.articleProvided ?? false,
     })
     .select()

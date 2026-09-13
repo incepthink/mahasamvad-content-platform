@@ -20,6 +20,7 @@ import {
 } from './ConversationRail';
 import { STR } from '../../lib/strings';
 import { useRailCollapse } from '../../lib/useRailCollapse';
+import { PageBackground } from '../common/PageBackground';
 
 export function ConversationWorkspace({
   groups,
@@ -73,6 +74,11 @@ export function ConversationWorkspace({
 
   return (
     <main className={collapsed ? 'conv-page rail-collapsed' : 'conv-page'}>
+      {/* A conversation is not a `.page`, so it places its own ground. theme.css
+          section 7 makes --conv-canvas transparent, which is what lets this show
+          through; the --sidebar-w inset is correct here because the APP sidebar is
+          present and the 296px conversation rail sits inside the content column. */}
+      <PageBackground name="conversation" />
       {railOpen ? (
         <button
           type="button"

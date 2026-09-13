@@ -51,6 +51,74 @@ export type NewVideoAspect = z.infer<typeof NewVideoAspectSchema>;
 // Landscape, matching both the API's own default and what a department publishes most of.
 export const DEFAULT_NEW_VIDEO_ASPECT: NewVideoAspect = '16:9';
 
+// ---------------------------------------------------------------------------
+// The character & voice registry (migration 0054)
+// ---------------------------------------------------------------------------
+//
+// Reusable ACROSS conversations, which is the whole point: a new conversation seeded from the
+// same entry is what reproduces the Gemini app's good case, where consistency comes from the
+// user re-supplying the same picture and the same description by hand.
+
+// A name is one line and is reproduced into a prompt block that carries <IMAGE_REF_n> syntax,
+// so the four characters that syntax is made of are refused outright. A person's name contains
+// none of them, and letting one through would let a registry entry point the model at a
+// picture the officer never attached.
+export const NEW_VIDEO_CHARACTER_NAME_MAX_CHARS = 80;
+export const NEW_VIDEO_CHARACTER_APPEARANCE_MAX_CHARS = 600;
+export const NEW_VIDEO_CHARACTER_VOICE_MAX_CHARS = 400;
+
+// Characters per conversation. Capped at the per-turn image limit because a character WITH a
+// portrait spends one of those slots on the turn that establishes it; the route enforces the
+// combined total, which is the rule that actually binds.
+export const NEW_VIDEO_MAX_CAST = NEW_VIDEO_MAX_IMAGES;
+
+const NAME_SYNTAX_CHARACTERS = /[<>[\]]/;
+
+export const NewVideoCharacterSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  appearance: z.string(),
+  voice: z.string(),
+  // The public portrait URL, or null for a character described in words alone. The storage
+  // path and mime type stay in the API — a browser never sees either.
+  portraitUrl: z.string().url().nullable(),
+  createdAt: z.string(),
+});
+export type NewVideoCharacter = z.infer<typeof NewVideoCharacterSchema>;
+
+export const NewVideoCharacterListSchema = z.array(NewVideoCharacterSchema);
+
+// `portraitImageId` is an id this API minted at upload, exactly as a turn's `imageIds` are:
+// the browser never supplies a storage path or a URL for something a paid render will read.
+// Explicit `null` CLEARS the portrait; omitting the field leaves it alone — the three-state
+// rule /video's scene reference image already follows.
+export const NewVideoCharacterRequestSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1)
+    .max(NEW_VIDEO_CHARACTER_NAME_MAX_CHARS)
+    .refine((value) => !NAME_SYNTAX_CHARACTERS.test(value), {
+      message: 'A character name may not contain < > [ or ].',
+    }),
+  appearance: z
+    .string()
+    .max(NEW_VIDEO_CHARACTER_APPEARANCE_MAX_CHARS)
+    .optional(),
+  voice: z.string().max(NEW_VIDEO_CHARACTER_VOICE_MAX_CHARS).optional(),
+  portraitImageId: z.string().uuid().nullable().optional(),
+});
+export type NewVideoCharacterRequest = z.infer<
+  typeof NewVideoCharacterRequestSchema
+>;
+
+// Every field optional: an edit may change one of them without restating the rest.
+export const NewVideoCharacterPatchSchema =
+  NewVideoCharacterRequestSchema.partial();
+export type NewVideoCharacterPatch = z.infer<
+  typeof NewVideoCharacterPatchSchema
+>;
+
 // How a turn is progressing, exactly as the brief asks. `queued` is set by the ROUTE before
 // it answers 202 — the client refreshes the moment the 202 lands, and a turn with no status
 // yet would read as finished (the /dlo re-extract rule).
@@ -94,6 +162,10 @@ export const NewVideoConversationSchema = z.object({
   // conversation again. Empty until the first turn lands.
   title: z.string(),
   turns: z.array(NewVideoTurnSchema),
+  // The cast, resolved from the registry. Present on every read so the page can name who is
+  // in this conversation and stop offering to change it — the cast is fixed once the first
+  // turn has landed.
+  characters: z.array(NewVideoCharacterSchema),
   // True while any turn is queued or generating — what the poll and the composer gate on.
   busy: z.boolean(),
   createdAt: z.string(),
@@ -144,6 +216,24 @@ export const NewVideoTurnRequestSchema = z.object({
   conversationId: z.string().uuid().optional(),
   prompt: z.string().min(1).max(NEW_VIDEO_PROMPT_MAX_CHARS),
   imageIds: z.array(z.string().uuid()).max(NEW_VIDEO_MAX_IMAGES).optional(),
+  // The CAST, from the registry. Meaningful only on a conversation's FIRST turn: a character's
+  // portrait is attached on the turn that establishes them, and stacking a new reference into
+  // the middle of an edit chain is a documented failure mode. A follow-up may echo the stored
+  // cast (a well-behaved client does) but may not change it — the route answers a Marathi 400
+  // rather than rendering a different character than the one the officer can see.
+  characterIds: z.array(z.string().uuid()).max(NEW_VIDEO_MAX_CAST).optional(),
+  // FORKING (Step 4). Continue from THIS turn's video instead of from the latest one — the
+  // API's own documented "reference an older interaction id with a different prompt", which
+  // is what answers drift past the reported turn-4 editing ceiling.
+  //
+  // A TURN ID, never an interaction id: the provider handle stays inside the API (the rule
+  // this whole surface is built around), so the browser names a turn it can see and the
+  // route resolves it. Meaningful only on a FOLLOW-UP, and only for a turn of this very
+  // conversation that actually produced a video — anything else is a Marathi 400 rather than
+  // a paid render continuing from somewhere nobody chose.
+  //
+  // Omitted means the ordinary case: continue from whatever last succeeded.
+  fromTurnId: z.string().uuid().optional(),
   // Optional so an older client — or a request written by hand — still sends a valid turn;
   // the route supplies DEFAULT_NEW_VIDEO_ASPECT in its place rather than leaving the shape to
   // whatever the model feels like.

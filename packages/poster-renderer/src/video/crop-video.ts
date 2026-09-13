@@ -39,6 +39,7 @@ import { promisify } from 'node:util';
 import sharp from 'sharp';
 import { socialChromeLayers } from '../twitter-chrome.js';
 import { resolveFfmpeg } from './assemble.js';
+import { buildFrozenSourceOverlay } from './source-overlay.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -59,6 +60,16 @@ export type VideoCrop = Readonly<{
   height: number;
   /** False when the clip already had the target shape and the bytes came back untouched. */
   cropped: boolean;
+  /**
+   * What came IN — the probed size of the clip before anything here touched it.
+   *
+   * Reported because on the Dynamic Poster lane it is the one number that says whether the
+   * render was asked for at a useful size and got it: a video model repaints every pixel, so
+   * pixels it never rendered are resolution the officer's Devanagari cannot get back. Without
+   * this, a clip that arrived small and was merely cropped is indistinguishable from one that
+   * arrived large — and the lane's logging only ever spoke when it cropped.
+   */
+  source: { width: number; height: number };
 }>;
 
 /**
@@ -175,12 +186,40 @@ async function encodeCrop(
   crop: PixelCrop,
   overlays: readonly CropOverlay[] = [],
   clipSeconds: number | null = null,
+  scale: Readonly<{ width: number; height: number }> | null = null,
 ): Promise<Buffer> {
   const inputArgs: string[] = ['-i', inputPath];
+  // The base chain: crop, then optionally resize to the size the overlays were built at. The
+  // scale lives HERE, inside the one pass, for the same reason the overlays do — a second
+  // ffmpeg run would mean decode, scale, ENCODE, decode, overlay, ENCODE, spending two libx264
+  // generations over exactly the small Devanagari the resize is being done to save.
+  //
+  // `lanczos` matches motion-gif.ts's downscale and `setsar=1` matches assemble.ts: a provider
+  // clip can carry a non-square sample aspect, and an overlay composited onto a frame whose
+  // pixels are not square lands stretched relative to it.
+  const resize =
+    scale === null
+      ? ''
+      : `,scale=${scale.width}:${scale.height}:flags=lanczos,setsar=1`;
   const chains: string[] = [
-    `[0:v]crop=${crop.width}:${crop.height}:${crop.left}:${crop.top}[base]`,
+    `[0:v]crop=${crop.width}:${crop.height}:${crop.left}:${crop.top}${resize}[base]`,
   ];
   let stage = 'base';
+
+  // A SCALE MAY NEVER CHANGE THE SHAPE. Stretching a poster by a couple of percent does not
+  // read as a bug — it reads as a slightly different typeface — so it would ship, and it would
+  // ship on the one lane whose entire promise is the officer's artwork intact. Checked before
+  // the exec, so nothing is spent finding out.
+  if (scale !== null) {
+    const cropRatio = crop.width / crop.height;
+    const scaleRatio = scale.width / scale.height;
+    if (Math.abs(scaleRatio - cropRatio) / cropRatio > ASPECT_TOLERANCE) {
+      throw new Error(
+        `Refusing to scale ${crop.width}x${crop.height} to ${scale.width}x${scale.height}: ` +
+          `that would stretch the picture (${cropRatio.toFixed(4)} to ${scaleRatio.toFixed(4)}).`,
+      );
+    }
+  }
 
   for (const [index, overlay] of overlays.entries()) {
     // LOOPED, and that is load-bearing rather than tidy. A PNG handed to ffmpeg as a plain
@@ -309,6 +348,34 @@ async function writeChromeOverlays(
 }
 
 /**
+ * The centred rectangle of `targetRatio` inside a `width` x `height` frame, even on every side.
+ *
+ * Shared by the automatic reframe and the source restore below so the two cannot drift: they
+ * must take the SAME pixels out of the same clip, or a restore would composite the officer's
+ * poster over a differently-framed picture and every frozen pixel would land a few pixels off
+ * what the model rendered under it.
+ *
+ * It crops the dimension that is too generous and never enlarges one that is already short.
+ */
+function centredCropForRatio(
+  width: number,
+  height: number,
+  targetRatio: number,
+): PixelCrop {
+  const ratio = width / height;
+  const cropWidth =
+    ratio > targetRatio ? evenSize(height * targetRatio) : evenSize(width);
+  const cropHeight =
+    ratio > targetRatio ? evenSize(height) : evenSize(width / targetRatio);
+  return {
+    width: cropWidth,
+    height: cropHeight,
+    left: evenOffset((width - cropWidth) / 2),
+    top: evenOffset((height - cropHeight) / 2),
+  };
+}
+
+/**
  * Returns the clip cropped to `targetRatio` (width / height), centred. Throws on an ffmpeg
  * failure — the CALLER decides whether that is fatal; in the Dynamic Poster job it is not,
  * because the MP4 is the paid artifact and a framing fix must never lose a render.
@@ -330,29 +397,28 @@ export async function cropVideoToAspect(
     const { width, height } = await probeVideoSize(inputPath);
     const ratio = width / height;
     if (Math.abs(ratio - targetRatio) / targetRatio <= ASPECT_TOLERANCE) {
-      return { mp4, width, height, cropped: false };
+      return {
+        mp4,
+        width,
+        height,
+        cropped: false,
+        source: { width, height },
+      };
     }
 
-    // Crop the dimension that is too generous; never scale, and never enlarge one that is
-    // already short — the whole promise of this lane is the officer's artwork intact.
-    const cropWidth =
-      ratio > targetRatio ? evenSize(height * targetRatio) : evenSize(width);
-    const cropHeight =
-      ratio > targetRatio ? evenSize(height) : evenSize(width / targetRatio);
-    const left = evenOffset((width - cropWidth) / 2);
-    const top = evenOffset((height - cropHeight) / 2);
+    // Crop the dimension that is too generous; NEVER SCALE, and never enlarge one that is
+    // already short — the whole promise of this lane is the officer's artwork intact. (The
+    // restore below does scale, deliberately and under a stretch guard; this one does not, and
+    // that difference is the contract callers rely on.)
+    const crop = centredCropForRatio(width, height, targetRatio);
 
-    const cropped = await encodeCrop(inputPath, outputPath, {
-      width: cropWidth,
-      height: cropHeight,
-      left,
-      top,
-    });
+    const cropped = await encodeCrop(inputPath, outputPath, crop);
     return {
       mp4: cropped,
-      width: cropWidth,
-      height: cropHeight,
+      width: crop.width,
+      height: crop.height,
       cropped: true,
+      source: { width, height },
     };
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -445,7 +511,13 @@ export async function cropVideoToRect(
       cropHeight === frameHeight &&
       overlays.length === 0
     ) {
-      return { mp4, width, height, cropped: false };
+      return {
+        mp4,
+        width,
+        height,
+        cropped: false,
+        source: { width, height },
+      };
     }
 
     const cropped = await encodeCrop(
@@ -467,6 +539,122 @@ export async function cropVideoToRect(
       width: cropWidth,
       height: cropHeight,
       cropped: true,
+      source: { width, height },
+    };
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * What the officer's own poster looks like and where it is allowed to move, for
+ * `restoreSourceOverClip`.
+ */
+export type FrozenSource = Readonly<{
+  /** The poster EXACTLY as it was sent to the model — padded bars and all. */
+  png: Buffer;
+  /**
+   * Its real pixel size.
+   *
+   * THIS IS `fitImageToAspect`'S OWN WIDTH/HEIGHT, NEVER `normalizeSourceImage`'S. That
+   * function deliberately reports the officer's PRE-BOUND dimensions alongside bytes whose long
+   * edge it has capped at 2048, so on a 4000px export the two differ by 1.95x — and a 1.95x
+   * mis-scale is exactly the kind of error that looks plausible in a thumbnail and is only
+   * obvious against the text it was meant to save. `buildFrozenSourceOverlay` re-measures the
+   * bytes and throws on a mismatch rather than trusting this.
+   */
+  width: number;
+  height: number;
+  /** The part of the poster that may MOVE, as fractions of its own width and height. */
+  hole: NormalizedRect;
+}>;
+
+/**
+ * Returns the clip reframed to `targetRatio`, scaled back up to the poster's own size, with that
+ * poster composited over every frame except a feathered hole where the motion shows through.
+ *
+ * WHY. A video model repaints every pixel it returns, so the officer's Devanagari comes back
+ * redrawn rather than preserved — legible on a headline, garbled on a 26px card line. Cropping
+ * and asking nicely cannot fix that (see the header); putting their own pixels back can. After
+ * this, everything outside the marked rectangle is the officer's own artwork rather than the
+ * model's rendering of it — to within one h.264 generation, which is a measured 3 levels out of
+ * 255 and is not the same claim as byte equality. See source-overlay.ts.
+ *
+ * ONE PASS: crop, scale, overlay, encode. See `encodeCrop`.
+ *
+ * BEST EFFORT AT THE CALL SITE, like `cropVideoToAspect` and unlike `cropVideoToRect`: this is a
+ * correction applied on the way out of a paid render, so a failure must hand back the
+ * un-restored clip rather than no clip. This function itself throws; the caller swallows.
+ */
+export async function restoreSourceOverClip(
+  mp4: Buffer,
+  targetRatio: number,
+  source: FrozenSource,
+): Promise<VideoCrop> {
+  if (!(targetRatio > 0) || !Number.isFinite(targetRatio)) {
+    throw new Error(`Invalid target aspect ratio: ${targetRatio}`);
+  }
+
+  const dir = await mkdtemp(join(tmpdir(), 'dgipr-motion-restore-'));
+  try {
+    const inputPath = join(dir, 'clip.mp4');
+    const outputPath = join(dir, 'restored.mp4');
+    await writeFile(inputPath, mp4);
+
+    const { width, height, durationSeconds } = await probeVideoSize(inputPath);
+    const crop = centredCropForRatio(width, height, targetRatio);
+
+    // The output size: the poster's own, evened for yuv420p. Where evening moves it, the
+    // POSTER is trimmed by that one row or column rather than resampled to fit — losing a pixel
+    // off an edge is nothing, and resizing the whole poster to gain it would resample every
+    // glyph on it, which is the exact thing this function exists to avoid.
+    const outWidth = evenSize(source.width);
+    const outHeight = evenSize(source.height);
+    const overlayPng =
+      outWidth === source.width && outHeight === source.height
+        ? source.png
+        : await sharp(source.png)
+            .extract({ left: 0, top: 0, width: outWidth, height: outHeight })
+            .png()
+            .toBuffer();
+
+    const overlayPath = join(dir, 'frozen-source.png');
+    await writeFile(
+      overlayPath,
+      await buildFrozenSourceOverlay(
+        overlayPng,
+        { width: outWidth, height: outHeight },
+        source.hole,
+      ),
+    );
+
+    // NO NO-OP SHORTCUT HERE, and that is the point rather than an omission. `cropVideoToAspect`
+    // returns the input untouched when the ratio already matches — which, now that the render is
+    // asked for the right shape, is the NORMAL case. Taking that path with an overlay pending
+    // would skip the restore entirely and report success: the officer's text still garbled,
+    // nothing in the log, and a job that says it worked. `cropVideoToRect` already refuses the
+    // same shortcut whenever it has chrome to stamp, for the same reason.
+    const restored = await encodeCrop(
+      inputPath,
+      outputPath,
+      crop,
+      // Placed at the origin: the overlay is the full output frame, built at exactly the size
+      // the scale produces.
+      [{ path: overlayPath, x: 0, y: 0 }],
+      // Two seconds of slack so the LOOPED still always outlasts the footage and `shortest=1`
+      // ends the output on the footage. Without the loop this is a one-frame stream and the
+      // whole graph ends on it — a clip of the right duration, with sound, frozen on frame 1.
+      // This file has shipped that bug once; see encodeCrop.
+      durationSeconds === null ? null : durationSeconds + 2,
+      { width: outWidth, height: outHeight },
+    );
+
+    return {
+      mp4: restored,
+      width: outWidth,
+      height: outHeight,
+      cropped: true,
+      source: { width, height },
     };
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -524,7 +712,7 @@ if (
   // landed rather than that ffmpeg merely accepted the filter graph.
   const sampleRow = async (
     mp4: Buffer,
-    at: Readonly<{ fromTop?: number; fromBottom?: number }>,
+    at: Readonly<{ fromTop?: number; fromBottom?: number; late?: boolean }>,
   ): Promise<Buffer> => {
     const out = await mkdtemp(join(tmpdir(), 'dgipr-crop-frame-'));
     try {
@@ -538,6 +726,9 @@ if (
           '-loglevel',
           'error',
           '-y',
+          // `late` seeks past the start, which is what tells a still composited onto EVERY
+          // frame from one composited onto the first — the two are identical on frame 1.
+          ...(at.late ? ['-ss', '0.6'] : []),
           '-i',
           clipPath,
           '-frames:v',
@@ -785,6 +976,276 @@ if (
     check(
       !unchanged.cropped && unchanged.mp4 === source,
       'reframing to the clip’s own ratio re-encoded it',
+    );
+
+    // WHAT CAME IN, reported on every path including the ones that change nothing. On the
+    // Dynamic Poster lane this is the only number that says whether the render was asked for at
+    // a useful size and got it — a clip that arrived small and was merely cropped otherwise
+    // looks exactly like one that arrived large, and the un-cropped paths used to report nothing
+    // at all.
+    for (const [name, crop] of [
+      ['the 9:16 reframe', reframed],
+      ['an unchanged reframe', unchanged],
+      ['a middle panel', panel],
+      ['a whole-frame rectangle', whole],
+    ] as const) {
+      check(
+        crop.source.width === SOURCE_WIDTH &&
+          crop.source.height === SOURCE_HEIGHT,
+        `${name} reported the source as ${crop.source.width}x${crop.source.height}`,
+      );
+    }
+    // And it is the SOURCE, not the output: the reframe genuinely changed the size, so these
+    // two pairs must differ — otherwise `source` is just the answer echoed back.
+    check(
+      reframed.width !== reframed.source.width ||
+        reframed.height !== reframed.source.height,
+      'the reframe reported its own output size as the source',
+    );
+
+    // -----------------------------------------------------------------------
+    // THE SOURCE RESTORE. The officer's own poster put back over every frame except the part
+    // they marked as moving. These are the reason this harness encodes real files: every one of
+    // the ways this can be wrong produces a clip that plays perfectly.
+    // -----------------------------------------------------------------------
+
+    // A poster stand-in with a hard structure in it, so a row sampled out of a frame either is
+    // it or provably is not. Built at the size a real DGIPR poster is.
+    const posterPng = await sharp({
+      create: {
+        width: SOURCE_WIDTH,
+        height: SOURCE_HEIGHT,
+        channels: 3,
+        background: { r: 220, g: 40, b: 30 },
+      },
+    })
+      .composite([
+        {
+          input: await sharp({
+            create: {
+              width: SOURCE_WIDTH,
+              height: 120,
+              channels: 3,
+              background: { r: 250, g: 250, b: 245 },
+            },
+          })
+            .png()
+            .toBuffer(),
+          left: 0,
+          top: 40,
+        },
+      ])
+      .png()
+      .toBuffer();
+
+    // The clip that comes back from the model: 9:16, as gemini-omni returns whatever it is
+    // given. Reframing it to 4:5 and scaling back up to the poster is the whole journey.
+    const renderPath = join(dir, 'render.mp4');
+    await execFileAsync(
+      resolveFfmpeg(),
+      [
+        '-hide_banner',
+        '-loglevel',
+        'error',
+        '-y',
+        '-f',
+        'lavfi',
+        '-i',
+        'testsrc=size=720x1280:rate=25:duration=1',
+        '-c:v',
+        'libx264',
+        '-pix_fmt',
+        'yuv420p',
+        renderPath,
+      ],
+      { timeout: 120_000, maxBuffer: CROP_MAX_BUFFER },
+    );
+    const render = await readFile(renderPath);
+
+    // The photograph area, low in the poster and well clear of its top band.
+    const hole = { x: 0.18, y: 0.55, width: 0.64, height: 0.3 };
+    const restored = await restoreSourceOverClip(render, 4 / 5, {
+      png: posterPng,
+      width: SOURCE_WIDTH,
+      height: SOURCE_HEIGHT,
+      hole,
+    });
+
+    // 1. THE SCALE IS EXACT AND DOES NOT STRETCH.
+    const restoredSize = await measure(restored.mp4);
+    check(
+      restoredSize.width === SOURCE_WIDTH &&
+        restoredSize.height === SOURCE_HEIGHT,
+      `the restored clip encoded as ${restoredSize.width}x${restoredSize.height}, not ${SOURCE_WIDTH}x${SOURCE_HEIGHT}`,
+    );
+    check(
+      Math.abs(
+        restoredSize.width / restoredSize.height - SOURCE_WIDTH / SOURCE_HEIGHT,
+      ) /
+        (SOURCE_WIDTH / SOURCE_HEIGHT) <=
+        ASPECT_TOLERANCE,
+      'the restore changed the aspect ratio',
+    );
+
+    // 2. THE CLIP STILL MOVES. A full-frame overlay is the likeliest thing in this file to
+    // freeze a clip on frame 1, and EVERY size assertion above passes when it does.
+    const renderFrames = await countFrames(render);
+    const restoredFrames = await countFrames(restored.mp4);
+    check(
+      renderFrames >= 20,
+      `the stand-in render decoded only ${renderFrames} frames`,
+    );
+    check(
+      restoredFrames === renderFrames,
+      `the restore froze the clip: ${restoredFrames} frames vs ${renderFrames}`,
+    );
+
+    // 3 AND 4 TOGETHER ARE WHAT RULE OUT AN INVERTED MASK. Either one alone passes on a mask
+    // the wrong way round, which is why neither is allowed to stand on its own.
+
+    // 3. OUTSIDE THE HOLE IS THE OFFICER'S POSTER — to within one video encode, which is the
+    // strongest claim this can honestly make and is NOT byte equality.
+    //
+    // MEASURED, and worth not re-deriving: an h.264 clip at crf 20 in yuv420p is lossy, and the
+    // RGB -> YUV 4:2:0 -> RGB round trip alone is, so a frozen pixel comes back within a level
+    // or three of the source and never exactly on it. Real numbers off this very clip: a frozen
+    // row differs by mean 0.33 and at most 3 out of 255 — invisible — while a row through the
+    // hole differs by mean 84 and at most 225. The separation is ~64x, so a threshold anywhere
+    // between them distinguishes the two cases unambiguously, and 8 is deliberately far above
+    // the noise and far below the signal. Asserting equality here would be asserting something
+    // the codec cannot deliver, and the harness would have to be weakened later under pressure.
+    const meanDiff = (a: Buffer, b: Buffer): number => {
+      const n = Math.min(a.length, b.length);
+      let sum = 0;
+      for (let i = 0; i < n; i += 1) sum += Math.abs((a[i] ?? 0) - (b[i] ?? 0));
+      return n === 0 ? Number.POSITIVE_INFINITY : sum / n;
+    };
+    const ENCODE_NOISE = 8;
+
+    const posterRow = await sharp(posterPng)
+      .extract({ left: 0, top: 80, width: SOURCE_WIDTH, height: 1 })
+      .removeAlpha()
+      .raw()
+      .toBuffer();
+    const frozenRow = await sampleRow(restored.mp4, { fromTop: 80 });
+    const frozenDrift = meanDiff(frozenRow, posterRow);
+    check(
+      frozenDrift <= ENCODE_NOISE,
+      `a row outside the marked region differs from the officer\u2019s poster by ${frozenDrift.toFixed(1)}/255`,
+    );
+    // And LATE in the clip, not only on frame 1: a still composited once at the start would
+    // pass every check above.
+    const lateFrozen = await sampleRow(restored.mp4, {
+      fromTop: 80,
+      late: true,
+    });
+    const lateDrift = meanDiff(lateFrozen, posterRow);
+    check(
+      lateDrift <= ENCODE_NOISE,
+      `a late frame's frozen row drifted by ${lateDrift.toFixed(1)}/255 — the overlay is not on every frame`,
+    );
+
+    // 4. INSIDE THE HOLE IS THE VIDEO. It must differ from the poster — otherwise the mask is
+    // inverted and the whole frame is frozen — and the check above proves the same overlay did
+    // land elsewhere, so this cannot be passing merely because nothing was composited at all.
+    const holeMidY = Math.round((hole.y + hole.height / 2) * SOURCE_HEIGHT);
+    const posterHoleRow = await sharp(posterPng)
+      .extract({ left: 0, top: holeMidY, width: SOURCE_WIDTH, height: 1 })
+      .removeAlpha()
+      .raw()
+      .toBuffer();
+    const motionRow = await sampleRow(restored.mp4, { fromTop: holeMidY });
+    const motionDrift = meanDiff(motionRow, posterHoleRow);
+    check(
+      motionDrift > ENCODE_NOISE * 4,
+      `the marked region differs from the poster by only ${motionDrift.toFixed(1)}/255 — the mask is inverted`,
+    );
+
+    // 5. ALIGNMENT. The top-left 8x8 of the restored frame is the poster's own top-left 8x8, so
+    // the overlay is placed at the origin rather than centred or offset by the crop.
+    const cornerOf = async (mp4: Buffer): Promise<Buffer> => {
+      const out = await mkdtemp(join(tmpdir(), 'dgipr-restore-corner-'));
+      try {
+        const clipPath = join(out, 'clip.mp4');
+        const framePath = join(out, 'frame.png');
+        await writeFile(clipPath, mp4);
+        await execFileAsync(
+          resolveFfmpeg(),
+          [
+            '-hide_banner',
+            '-loglevel',
+            'error',
+            '-y',
+            '-i',
+            clipPath,
+            '-frames:v',
+            '1',
+            framePath,
+          ],
+          { timeout: 60_000, maxBuffer: CROP_MAX_BUFFER },
+        );
+        return await sharp(await readFile(framePath))
+          .extract({ left: 0, top: 0, width: 8, height: 8 })
+          .removeAlpha()
+          .raw()
+          .toBuffer();
+      } finally {
+        await rm(out, { recursive: true, force: true });
+      }
+    };
+    const posterCorner = await sharp(posterPng)
+      .extract({ left: 0, top: 0, width: 8, height: 8 })
+      .removeAlpha()
+      .raw()
+      .toBuffer();
+    const cornerDrift = meanDiff(await cornerOf(restored.mp4), posterCorner);
+    check(
+      cornerDrift <= ENCODE_NOISE,
+      `the frame\u2019s top-left 8x8 differs from the poster\u2019s by ${cornerDrift.toFixed(1)}/255 — the overlay is not aligned to the origin`,
+    );
+
+    // 6. THE STRETCH GUARD REFUSES BEFORE SPENDING AN ENCODE. A 16:9 crop with a 4:5 poster
+    // over it would squash the artwork into the frame, and a 2% squash of Devanagari reads as
+    // a font choice rather than a defect — so it would ship.
+    let stretchRefused = false;
+    try {
+      await restoreSourceOverClip(render, 16 / 9, {
+        png: posterPng,
+        width: SOURCE_WIDTH,
+        height: SOURCE_HEIGHT,
+        hole,
+      });
+    } catch {
+      stretchRefused = true;
+    }
+    check(
+      stretchRefused,
+      'a restore that would stretch the poster was accepted',
+    );
+
+    // AND THE NO-OP SHORTCUT DOES NOT FIRE. Once the render comes back at the ratio that was
+    // asked for — the normal case now — cropVideoToAspect hands the input straight back. Taking
+    // that path here would skip the restore and report success: the text still garbled, nothing
+    // in the log, a job that says it worked.
+    const alreadyRight = await restoreSourceOverClip(
+      source,
+      SOURCE_WIDTH / SOURCE_HEIGHT,
+      {
+        png: posterPng,
+        width: SOURCE_WIDTH,
+        height: SOURCE_HEIGHT,
+        hole,
+      },
+    );
+    check(
+      alreadyRight.mp4 !== source,
+      'a clip already at the right ratio skipped the restore entirely',
+    );
+    const shortcutRow = await sampleRow(alreadyRight.mp4, { fromTop: 80 });
+    const shortcutDrift = meanDiff(shortcutRow, posterRow);
+    check(
+      shortcutDrift <= ENCODE_NOISE,
+      `a clip already at the right ratio came back without the poster over it (${shortcutDrift.toFixed(1)}/255)`,
     );
   } finally {
     await rm(dir, { recursive: true, force: true });

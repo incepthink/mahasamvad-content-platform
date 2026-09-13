@@ -604,6 +604,13 @@ export function registerGenerationRoutes(
         body.motionAspect !== DEFAULT_MOTION_ASPECT
           ? body.motionAspect
           : undefined,
+      // The moving region (migration 0055), scoped the same way and omitted the same way.
+      // There is no default to compare against here — absent simply means the restore does not
+      // run — so the omission is the presence check itself, and an un-applied 0055 costs
+      // exactly a Dynamic Poster create that carries a region.
+      motionRegion: isDynamicPosterCategory(body.category)
+        ? body.motionRegion
+        : undefined,
     });
     // Twitter/Facebook → external n8n social-post job; news/scheme → in-process
     // article pipeline. A social run is poster-only unless the caller asked for a

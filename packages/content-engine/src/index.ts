@@ -312,13 +312,15 @@ export {
 } from './video/gemini-image-client.js';
 // The /new-video-workflow EXPERIMENT (Gemini Interactions API). Nothing above or below this
 // block uses it: the production pipeline plans, narrates, captions and brands, and this one
-// deliberately does none of that — it sends the officer's prompt to one model verbatim.
+// deliberately does none of that — one prompt to one model, with only the scaffolding the
+// lane asked for (see video/new-video-prompt-mode.ts).
 export {
   GEMINI_VIDEO_MODEL,
   INTERACTION_IMAGE_MAX_BYTES,
   INTERACTION_IMAGE_MIME_TYPES,
   INTERACTION_MAX_IMAGES,
   INTERACTION_PROMPT_MAX_CHARS,
+  INTERACTION_VIDEO_TASKS,
   InteractionRequestError,
   awaitInteraction,
   buildInteractionRequest,
@@ -331,8 +333,35 @@ export {
   type Interaction,
   type InteractionImage,
   type InteractionOutput,
+  type InteractionPromptMode,
+  type InteractionScaffold,
   type InteractionStatus,
+  type InteractionVideoTask,
 } from './video/gemini-interactions-client.js';
+export {
+  interactionModeFor,
+  newVideoPromptMode,
+  promptModeAuthors,
+  type NewVideoPromptMode,
+} from './video/new-video-prompt-mode.js';
+export {
+  authorNewVideoPrompt,
+  buildNewVideoAuthoringRequest,
+  parseAuthoredPrompt,
+  NEW_VIDEO_PROMPT_MODEL,
+  type AuthoringCharacter,
+  type NewVideoAuthoringInput,
+} from './video/new-video-prompt.js';
+export {
+  buildNewVideoScaffold,
+  referenceDeclaration,
+  type NewVideoScaffoldInput,
+  type ScaffoldCharacter,
+} from './video/new-video-scaffold.js';
+export {
+  newVideoTaskFor,
+  type NewVideoTaskInput,
+} from './video/new-video-task.js';
 export {
   renderFrame,
   frameProviderApiKeyEnv,

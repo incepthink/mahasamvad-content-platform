@@ -27,12 +27,7 @@ import { NextActions } from '../../../components/NextActions';
 import { PosterPanel } from '../../../components/PosterPanel';
 import { PosterSkeleton } from '../../../components/PosterSkeleton';
 import { SocialPostView } from '../../../components/SocialPostView';
-import { PageBackdrop } from '../../../components/common/PageBackdrop';
-import {
-  CREATIVE_ARTWORK,
-  PageArtwork,
-} from '../../../components/common/PageArtwork';
-import { NEWS_DOODLES } from '../../../lib/doodleMarks';
+import { PageShell } from '../../../components/common/PageShell';
 
 // The API persists the provider's complete failure so the server keeps the request id and
 // coarse moderation diagnostics. That blob is useful in logs, not to an officer. OpenAI says
@@ -249,21 +244,21 @@ export default function GenerationDetailPage({
   // the product, since the run itself is untouched and one refresh recovers it.
   if (error && !detail) {
     return (
-      <main className="page">
+      <PageShell background="generations">
         <ErrorNotice
           message={error}
           onRetry={() => void refresh()}
           fallback={STR.genLoadFailed}
         />
-      </main>
+      </PageShell>
     );
   }
 
   if (!detail) {
     return (
-      <main className="page">
+      <PageShell background="generations">
         <p className="hint">{STR.progressTitle}</p>
-      </main>
+      </PageShell>
     );
   }
 
@@ -348,28 +343,14 @@ export default function GenerationDetailPage({
     isArticleCategory(detail.category) && detail.outputType === 'article';
 
   return (
-    <main className="page">
-      {/* The two lanes carry different KINDS of wallpaper, not two sets of the same
-          marks: Creative has its own drawing (PageArtwork), DLO keeps the sketched
-          newspaper marks (PageBackdrop). */}
-      {isDloArticle ? (
-        <PageBackdrop marks={NEWS_DOODLES} seed={31} />
-      ) : (
-        <PageArtwork src={CREATIVE_ARTWORK} />
-      )}
-
-      <div
-        className="btn-row"
-        style={{ justifyContent: 'space-between', marginBottom: 20 }}
-      >
-        <h1 className="page-title" style={{ margin: 0 }}>
-          {STR.newTitle}
-        </h1>
-        <div className="btn-row" style={{ gap: 10, alignItems: 'center' }}>
-          <StatusChip status={detail.status} />
-        </div>
-      </div>
-
+    <PageShell
+      // The two lanes sit on different photographs: लेख / बातमी continues DLO's
+      // ground, and every poster, thumbnail and caption result continues the
+      // Creative lane's. Which file each names is one line in lib/pageBackgrounds.ts.
+      background={isDloArticle ? 'dlo' : 'creative'}
+      title={STR.newTitle}
+      statusChip={<StatusChip status={detail.status} />}
+    >
       {(detail.status === 'queued' || detail.status === 'running') &&
         !posterBusy &&
         !posterPending &&
@@ -553,6 +534,6 @@ export default function GenerationDetailPage({
         onPosterStarted={() => void refresh()}
         onImageWorkStarted={trackImageWork}
       />
-    </main>
+    </PageShell>
   );
 }

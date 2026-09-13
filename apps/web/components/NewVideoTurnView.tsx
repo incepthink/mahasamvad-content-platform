@@ -9,6 +9,7 @@
 // the Gemini API says (a safety-filter reason, a rejected parameter, a quota wall), and
 // normalising that away would defeat the whole experiment.
 
+import { CornerDownRight } from 'lucide-react';
 import type { NewVideoTurn } from '@dgipr/schemas';
 import { STR } from '../lib/strings';
 
@@ -33,7 +34,27 @@ function StatusLine({ status }: { status: NewVideoTurn['status'] }) {
   );
 }
 
-export function NewVideoTurnView({ turn }: { turn: NewVideoTurn }) {
+export function NewVideoTurnView({
+  turn,
+  ordinal,
+  canFork,
+  forkArmed,
+  onFork,
+}: {
+  turn: NewVideoTurn;
+  /** 1-based, shown only when naming which video a pending change continues from. */
+  ordinal: number;
+  /**
+   * Whether this turn can be continued from. FALSE on the newest completed turn, which the
+   * next instruction already continues from — offering it there would be a button that
+   * changes nothing. Also false without a video at all.
+   */
+  canFork: boolean;
+  forkArmed: boolean;
+  onFork?: (turnId: string | null) => void;
+}) {
+  const forkable = canFork && onFork !== undefined;
+
   return (
     <>
       <article className="chat-turn chat-turn--user">
@@ -80,6 +101,29 @@ export function NewVideoTurnView({ turn }: { turn: NewVideoTurn }) {
             <span className="nvw-model-label">{STR.nvwModelSaid}</span>{' '}
             {turn.modelText}
           </p>
+        ) : null}
+
+        {/* FORKING (Step 4). Sits under the video rather than beside the prompt because it is
+            about the VIDEO — "carry on from this one" — and because it is an occasional
+            recovery, not part of the ordinary flow. aria-pressed, so an officer who has
+            scrolled away can still see which video the box is now pointed at. */}
+        {forkable ? (
+          <button
+            type="button"
+            className={
+              forkArmed ? 'btn-ghost nvw-fork is-active' : 'btn-ghost nvw-fork'
+            }
+            onClick={() => onFork?.(forkArmed ? null : turn.id)}
+            aria-pressed={forkArmed}
+            title={STR.nvwForkFromHint}
+          >
+            <CornerDownRight size={16} aria-hidden="true" />
+            {forkArmed ? STR.nvwForkCancel : STR.nvwForkFrom}
+            <span className="visually-hidden">
+              {' '}
+              ({STR.nvwForkTurn} {ordinal.toLocaleString('mr-IN')})
+            </span>
+          </button>
         ) : null}
 
         {turn.status === 'failed' ? (

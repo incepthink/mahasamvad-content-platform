@@ -18,6 +18,7 @@ import { useEffect } from 'react';
 import Link from 'next/link';
 import { AlertTriangle, Home, RefreshCw } from 'lucide-react';
 import { STR } from '../lib/strings';
+import { PageShell } from '../components/common/PageShell';
 
 export default function RouteError({
   error,
@@ -34,7 +35,7 @@ export default function RouteError({
   }, [error]);
 
   return (
-    <main className="page">
+    <PageShell background="default">
       <section className="card crash-card" role="alert">
         <AlertTriangle
           className="crash-icon"
@@ -55,6 +56,6 @@ export default function RouteError({
           </Link>
         </div>
       </section>
-    </main>
+    </PageShell>
   );
 }

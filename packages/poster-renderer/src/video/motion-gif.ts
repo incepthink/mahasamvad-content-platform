@@ -33,9 +33,24 @@ const GIF_MAX_BUFFER = 16 * 1024 * 1024;
 
 // Bounds on the output, not on the source. A GIF is uncompressed between frames, so its size
 // grows with BOTH of these: a full-resolution 24fps poster clip is tens of megabytes and no
-// messaging app will carry it. 720px on the long edge at 12fps keeps a 5-second clip in the
-// low single-digit megabytes while the motion still reads as motion.
-export const GIF_LONG_EDGE = 720;
+// messaging app will carry it.
+//
+// 1080px on the long edge, RAISED FROM 720 because the officer's Devanagari is what this lane
+// exists to preserve and 720 was destroying it: a 1280x1600 poster reached the GIF at 576x720
+// (0.45 linear, 20% of the pixels), which takes a ~26px card line to ~12px and a matra or
+// anusvara to two or three pixels — after a video model has already redrawn them and before
+// 192-colour quantisation. That is why the headline survives a Dynamic Poster and the card text
+// does not.
+//
+// THE BYTE COST IS MEASURED, NOT ESTIMATED. 2.25x the pixels per frame is not 2.25x the file,
+// because the palette and the inter-frame redundancy do not scale with it: on a poster-shaped
+// 5-second clip (1280x1600, flat ground, one moving inset) 0.46 MB became 0.91 MB — 2.00x, and
+// still a file that forwards. Re-measure if fps or the palette ever changes; a GIF that no
+// messaging app will carry is no GIF at all, which is the only reason there is a bound here.
+//
+// 12fps and the 192-colour sierra2_4a palette are UNCHANGED: that reasoning (see the header) is
+// about Devanagari edge crawl and flat-area banding, and neither depends on the frame size.
+export const GIF_LONG_EDGE = 1080;
 export const GIF_FPS = 12;
 
 export type MotionGifOptions = Readonly<{

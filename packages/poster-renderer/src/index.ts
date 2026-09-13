@@ -103,12 +103,25 @@ export {
 // Crops a rendered clip back to the ratio the officer asked for — the guarantee on the way OUT
 // that fitImageToAspect is on the way in — and trims one to a rectangle they drew over it by
 // hand. See video/crop-video.ts.
-export { cropVideoToAspect, cropVideoToRect } from './video/crop-video.js';
+export {
+  cropVideoToAspect,
+  cropVideoToRect,
+  restoreSourceOverClip,
+} from './video/crop-video.js';
 export type {
   CropRectOptions,
+  FrozenSource,
   NormalizedRect,
   VideoCrop,
 } from './video/crop-video.js';
+// The officer's own poster as a full-frame overlay with a feathered hole in it — what makes
+// their Devanagari survive a render by a model that repaints every pixel. See
+// video/source-overlay.ts.
+export { buildFrozenSourceOverlay } from './video/source-overlay.js';
+export type {
+  OverlayHole,
+  SourceOverlayOptions,
+} from './video/source-overlay.js';
 export { renderHtmlToPng } from './render-html.js';
 export type { RenderOptions } from './render-html.js';
 export { renderHtmlToPdf, ChromiumUnavailableError } from './render-html.js';

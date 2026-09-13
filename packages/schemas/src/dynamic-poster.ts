@@ -83,6 +83,59 @@ export type MotionAspect = z.infer<typeof MotionAspectSchema>;
 // faithfully reproduce the defect.
 export const DEFAULT_MOTION_ASPECT: MotionAspect = 'source';
 
+// WHAT MAY BE NAMED ON THE WIRE, which is a narrower question than what a poster may BE.
+//
+// The clip request now carries `response_format.aspect_ratio` (see the Dynamic Poster job), and
+// that field is the one place an odd number is genuinely dangerous: a hand-cropped 1237x1600
+// scan is labelled `15:19` by aspectRatioLabel below, a preview model may well answer 400 to it,
+// and that 400 is cached against the model for the LIFE OF THE PROCESS
+// (modelsRejectingAspectRatio, gemini-interactions-client.ts). So one unusual poster would
+// silently strip the aspect ratio from every later render in that worker — the field working for
+// nobody because it was asked for badly once.
+//
+// Hence a SHORT list of labels a video model can be expected to know, and a snap onto the
+// nearest of them. This is deliberately not aspectRatioLabel's job: that names an image for a
+// SENTENCE, where an approximation beside a correctly-shaped input image costs nothing.
+export const MOTION_REQUEST_ASPECTS: readonly string[] = [
+  '9:16',
+  '3:4',
+  '4:5',
+  '1:1',
+  '5:4',
+  '4:3',
+  '16:9',
+];
+
+// How far off the nearest listed label a poster may be and still be named by it. 8% relative —
+// loose enough that an export a few pixels off a standard frame still gets its familiar name,
+// tight enough that a banner or a panorama gets no label at all rather than a wrong one.
+export const MOTION_ASPECT_SNAP_TOLERANCE = 0.08;
+
+// The listed label nearest this pixel size, or NULL when nothing is within tolerance.
+//
+// NULL IS A FULL ANSWER, not a failure: it means send no `aspect_ratio` and pad the poster into
+// its own ratio, which is today's behaviour byte for byte. A 1:3 ticker banner takes that path
+// and, crucially, does not poison the learned-capability rung for every poster after it.
+export function snapMotionAspect(
+  width: number,
+  height: number,
+): { label: string; ratio: number } | null {
+  if (!(width > 0) || !(height > 0)) return null;
+  const ratio = width / height;
+
+  let best: { label: string; ratio: number; error: number } | null = null;
+  for (const label of MOTION_REQUEST_ASPECTS) {
+    const [w, h] = label.split(':').map(Number);
+    if (!w || !h) continue;
+    const candidate = w / h;
+    const error = Math.abs(candidate - ratio) / ratio;
+    if (best === null || error < best.error)
+      best = { label, ratio: candidate, error };
+  }
+  if (best === null || best.error > MOTION_ASPECT_SNAP_TOLERANCE) return null;
+  return { label: best.label, ratio: best.ratio };
+}
+
 // The numeric width/height ratio a chosen aspect asks for. 'source' has none of its own — it
 // means "whatever the uploaded poster is" — so the caller supplies the measured size and gets
 // it straight back.
@@ -250,3 +303,38 @@ export const MotionCropRequestSchema = z.object({
   chrome: z.boolean().default(false),
 });
 export type MotionCropRequest = z.infer<typeof MotionCropRequestSchema>;
+
+// THE MOVING REGION — the rectangle the officer marks on the poster before the render.
+//
+// WHAT IT IS FOR. A video model repaints every pixel of every frame; it does not preserve the
+// officer's Devanagari, it redraws it. That is the root cause of this lane's text garbling and
+// no sentence in the brief can fix it — MOTION_BRIEF already asks for the text to be left
+// unchanged, and a stronger one was tried here once and ignored. So the text is put back
+// afterwards instead: the poster that was SENT is composited over every frame of what comes
+// back, with a feathered hole where this rectangle is. Outside the hole the artwork is the
+// officer's own — Devanagari, logos, icons, footer — rather than the model's redrawing of it.
+// Instruct, then guarantee, the same move fitImageToAspect makes on the way in.
+//
+// NOT literally byte-identical, and the difference is worth stating honestly: the composited
+// frame is still encoded as h.264, which is lossy, so a frozen pixel lands within a measured 3
+// levels out of 255 of the upload. What IS exact is the letterforms — every matra and conjunct
+// is the officer's own glyph rather than a video model's guess at one, which is the whole of the
+// difference between legible and garbled.
+//
+// AN ALIAS OF MotionCropSchema, NOT A COPY. The fraction-space convention, the 0.05 minimum
+// side and the 1.0001 edge epsilon all apply here unchanged, and MotionCropBox is reusable with
+// no prop changes — a second validator could only drift from this one. What differs is MEANING:
+// a trim is a CUT, taking the pixels inside the rectangle and discarding the rest, while a
+// region is a HOLE, keeping the pixels outside it frozen. That distinction lives in this
+// comment, in the column comment on migration 0055 and in the Marathi copy the officer reads.
+//
+// OPT-IN, AND THE RECTANGLE IS ITS OWN TOGGLE — there is deliberately no separate boolean. With
+// no region there is no defensible default: a full-frame hole composites nothing and costs an
+// encode, a default centre box invents an intent nobody expressed, and a default full-frame
+// FREEZE would replace the clip with a still that plays perfectly. So absent means the restore
+// does not run and the lane behaves exactly as it did before.
+//
+// isWholeClipCrop above is the "this marks everything, so there is nothing left to freeze" test
+// and reads correctly on a region too.
+export const MotionRegionSchema = MotionCropSchema;
+export type MotionRegion = MotionCrop;

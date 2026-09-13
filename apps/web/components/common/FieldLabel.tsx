@@ -41,7 +41,7 @@ export function FieldLabel({
       <span
         id={helpId}
         role="tooltip"
-        className="invisible absolute top-full left-0 z-30 mt-2 w-[min(24rem,100%)] rounded-md bg-[#19171d] px-3 py-2 text-left text-xs leading-5 font-normal text-white opacity-0 shadow-lg transition-opacity peer-hover:visible peer-hover:opacity-100 peer-focus-visible:visible peer-focus-visible:opacity-100"
+        className="invisible absolute top-full left-0 z-30 mt-2 w-[min(24rem,100%)] rounded-md bg-[var(--tooltip-bg)] px-3 py-2 text-left text-xs leading-5 font-normal text-white opacity-0 shadow-lg transition-opacity peer-hover:visible peer-hover:opacity-100 peer-focus-visible:visible peer-focus-visible:opacity-100"
       >
         {hint}
       </span>

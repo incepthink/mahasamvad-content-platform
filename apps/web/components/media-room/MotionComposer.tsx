@@ -26,11 +26,12 @@
  *                        it wrapped onto two rows over the officer's own text.
  */
 
-import { Ratio } from 'lucide-react';
+import { Ratio, Sparkles } from 'lucide-react';
 import { MOTION_DIRECTION_MAX_CHARS } from '@dgipr/schemas';
 import { FormCard } from '@/components/common/FormCard';
 import { PromptTextarea } from '@/components/common/PromptTextarea';
 import { MotionSourcePicker } from '@/components/MotionSourcePicker';
+import { MotionCropBox } from '@/components/MotionCropBox';
 import { ErrorNotice } from '@/components/ErrorNotice';
 import { STR } from '@/lib/strings';
 import { cn } from '@/lib/utils';
@@ -112,7 +113,105 @@ export function MotionComposer({ form }: { form: Form }) {
       ) : null}
 
       <MotionAspectField form={form} />
+      <MotionRegionField form={form} />
     </FormCard>
+  );
+}
+
+/**
+ * THE PART OF THE POSTER THAT MAY MOVE — and the reason it is worth asking.
+ *
+ * A video model repaints every pixel of every frame it returns. It does not preserve the
+ * officer's Devanagari; it redraws it, which is survivable on a headline and garbled on a
+ * card line. Marking a rectangle here is what stops that: everything outside it is
+ * composited back from the poster they uploaded after the render, so the letterforms are
+ * their own rather than the model's guess at them.
+ *
+ * ONLY ONCE A POSTER IS ATTACHED, because there is nothing to draw on before that — and the
+ * rectangle is meaningless without the picture it names.
+ *
+ * OPT-IN, AND THE RECTANGLE IS ITS OWN TOGGLE — no separate checkbox. With nothing marked
+ * there is no defensible default: a full-frame hole composites nothing and costs an encode, a
+ * default centre box invents an intent nobody expressed, and a default full-frame freeze would
+ * replace the clip with a still that plays perfectly. So no region means the lane behaves
+ * exactly as it did before this control existed.
+ *
+ * `MotionCropBox` is REUSED UNCHANGED, with `aspect={null}`: a moving region is free-form, and
+ * that component's ratio lock exists for a different job (getting a trim to an exact publishing
+ * frame). What differs between a trim and a region is MEANING — a cut versus a hole — and that
+ * lives in the copy, not in a second component.
+ */
+function MotionRegionField({ form }: { form: Form }) {
+  const source = form.motionSource;
+  if (!source) return null;
+  const region = form.motionRegion;
+
+  return (
+    <div className="mt-4 border-t pt-4">
+      <p className="text-foreground flex items-center gap-2 text-sm font-semibold">
+        <Sparkles size={16} aria-hidden="true" />
+        {STR.motionRegionLabel}
+      </p>
+      <p className="text-muted-foreground mt-1 text-sm">
+        {STR.motionRegionHint}
+      </p>
+
+      {region ? (
+        <>
+          {/* `relative` is load-bearing: MotionCropBox positions itself `absolute; inset: 0`,
+              so it needs a positioned box that is exactly the picture. `w-fit` keeps that box
+              on the image rather than on the card, or the rectangle's fractions would be read
+              against whitespace beside it. */}
+          <div className="relative mt-3 w-fit">
+            {/* A plain <img> for the reason MotionSourcePicker uses one: the URL is a
+                public bucket object this very form just uploaded. */}
+            <img
+              src={source.url}
+              alt={source.name}
+              className="block max-h-[420px] w-auto rounded-[14px]"
+            />
+            <MotionCropBox
+              value={region}
+              onChange={form.setMotionRegion}
+              aspect={null}
+              disabled={form.submitting}
+            />
+          </div>
+          <p className="text-muted-foreground mt-2 text-sm">
+            {STR.motionRegionActiveNote}
+          </p>
+          <button
+            type="button"
+            disabled={form.submitting}
+            onClick={() => form.setMotionRegion(null)}
+            className={cn(
+              'mt-2 inline-flex h-9 shrink-0 items-center rounded-md border px-3 text-sm transition-colors',
+              'bg-background hover:bg-accent hover:text-accent-foreground',
+              form.submitting && 'pointer-events-none opacity-50',
+            )}
+          >
+            {STR.motionRegionClear}
+          </button>
+        </>
+      ) : (
+        <button
+          type="button"
+          disabled={form.submitting}
+          // A centred rectangle over the middle of the poster: somewhere to start dragging
+          // from, which is the one thing a free-form box cannot offer as an empty state.
+          onClick={() =>
+            form.setMotionRegion({ x: 0.15, y: 0.3, width: 0.7, height: 0.4 })
+          }
+          className={cn(
+            'mt-3 inline-flex h-9 shrink-0 items-center rounded-md border px-3 text-sm transition-colors',
+            'bg-background hover:bg-accent hover:text-accent-foreground',
+            form.submitting && 'pointer-events-none opacity-50',
+          )}
+        >
+          {STR.motionRegionAdd}
+        </button>
+      )}
+    </div>
   );
 }
 

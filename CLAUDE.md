@@ -636,6 +636,48 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   are pulled back inside the frame, or a corner-pinned rectangle lands a pixel past the source
   and ffmpeg refuses it outright. Free harness — and the only thing that proves what ffmpeg
   accepts: `pnpm --filter @dgipr/poster-renderer video:check:crop`.
+  **THE OFFICER'S OWN DEVANAGARI IS PUT BACK AFTER THE RENDER** (2026-09-12, migration 0055): a
+  video model REPAINTS every pixel, so it redraws the poster's text rather than preserving it —
+  legible on a headline, garbled on a card line, and unfixable by prompt (a stronger sentence was
+  tried here once). So the officer marks the one rectangle that may MOVE (`motion_region`, jsonb,
+  reusing `MotionCropSchema` as `MotionRegionSchema` so `MotionCropBox` needs no prop change) and
+  `restoreSourceOverClip` composites the uploaded poster back over every frame outside it —
+  crop, scale, overlay and encode in ONE ffmpeg pass (`encodeCrop`'s new `scale`), with the
+  overlay built by `buildFrozenSourceOverlay` (`poster-renderer/src/video/source-overlay.ts`).
+  Seven things not to undo. **It is NOT byte-identical and must not be described as such**: h.264
+  at crf 20 in yuv420p is lossy, measured at 3 levels out of 255 on a frozen pixel against mean 84
+  inside the hole — what is exact is the GLYPH SHAPING, which is the whole of the difference
+  between legible and garbled. **The alpha is raw bytes joined onto decoded RGB**, because
+  `removeAlpha().joinChannel()` chained returns a THREE-channel PNG with no error — every pixel
+  opaque, the whole poster frozen, a clip that plays perfectly and does not move. **The two axis
+  ramps combine with MAX, not min** (min is an inverted mask in disguise). **Alpha is 0 strictly
+  INSIDE the officer's rectangle**, so the feather — 0.025 of the short edge, sized against the
+  model's measured ~17px drift — eats only frozen artwork. **There is no no-op shortcut**, which
+  matters because a render that already has the right ratio is now the normal case and taking
+  `cropVideoToAspect`'s early return would skip the restore and report success. **The still is
+  LOOPED** (`-loop 1 -t duration+2`), or `shortest=1` ends the graph on frame 1. And **the size
+  passed in is `fitImageToAspect`'s, never `normalizeSourceImage`'s** pre-bound pair, which would
+  mis-scale a 4000px export by 1.95x. Opt-in — the rectangle IS the toggle, null means the lane
+  behaves exactly as before — insert-only on the row, omit-unless-set, and best-effort on the way
+  out of a paid render. Free harnesses: `npx tsx src/video/source-overlay.ts` and
+  `pnpm --filter @dgipr/poster-renderer video:check:crop`.
+    **THE FRAME SIZE AND THE SHAPE ARE BOTH REQUEST FIELDS NOW** (2026-09-12, no migration): the
+  lane passes `resolution` (`motionResolutionSetting()`, `GEMINI_VIDEO_RESOLUTION`, default
+  `1080p`; `default`/`none` sends nothing) and an `aspect_ratio` snapped to a label the wire can
+  carry (`snapMotionAspect`, `@dgipr/schemas` — `aspectRatioLabel` may emit `15:19`, and a 400 on
+  that field is cached against the model for the life of the process, so one odd poster would
+  strip the ratio from every later render in that worker; **null is a full answer** and means
+  today's behaviour). Both matter because a video model REPAINTS every pixel it returns, so the
+  frame size is the ceiling on how much of the officer's Devanagari can survive — this lane was
+  taking gemini-omni's own 720x1280 default and cropping it to 720x900, then a 576x720 GIF, which
+  is why the headline reads and the card text does not. A fifth learned-capability rung drops
+  `resolution`, and it sits IMMEDIATELY BEFORE the `aspect_ratio` rung because a resolution
+  rejection can name the ratio it is unsupported for — with aspect first, such a 400 drops the
+  wrong field. The order is asserted offline through the pure `rejectedCapability`. **The
+  measurement that says whether any of this worked is `cropRenderedClip`'s now-unconditional log
+  line** (`gemini returned WxH; stored WxH`), fed by `VideoCrop.source`; it used to speak only
+  when it cropped. `GIF_LONG_EDGE` is 1080 (measured: 2.00x the bytes, not 2.25x). A resolution
+  must NEVER go back into the brief — see below.
   Six more things to know before changing it. **THE OUTPUT SHAPE IS AN ASPECT RATIO, AND THE
   DEFAULT IS THE POSTER'S OWN** (`motion_aspect`, 0053; `'source'` | `'9:16'` | `'16:9'`, with
   null = `'source'`). It began as the poster's exact pixel RESOLUTION measured by sharp and
@@ -1434,6 +1476,19 @@ untouched. The picture paths are written in a SEPARATE update right after the in
 storage key needs the row id) and that write is deliberately NOT best-effort: losing the
 references would plan a storyboard without the thing they were attached for, so a failure fails
 the row with a readable Marathi reason. Apply before the API deploy.
+`0054` — `new_video_characters` + `new_video_conversation_characters` (the character & voice
+registry behind `/new-video-workflow`, Step 3 of closing the gap with the Gemini app). Its
+own two tables and **not a column on `new_video_conversations`**, decided by blast radius: a
+`character_ids` column would have to be named in `CONVERSATION_COLUMNS`, so an un-applied
+migration would fail every read of that table and take the whole page down. Nothing here
+touches an existing table, so an un-applied 0054 disables the registry ALONE — **verified
+live**: the rail lists, an existing conversation opens with `characters: []`, its turns are
+intact, and only the two registry queries 500. That degradation is deliberate code, not luck
+— the cast read is best-effort on the polled detail route and on a follow-up that names
+nobody, while a turn that actually names a character is refused rather than rendered without
+its voice description. The cast is set on a conversation's FIRST turn and fixed thereafter
+(changing it is what a new conversation is for); a follow-up may echo it but not change it,
+and a mismatch is a Marathi 400. Apply before the API deploy.
 `0050` — `new_video_conversations` + `new_video_turns` + `new_video_images` (the Gemini
 conversational video at `/new-video-workflow`, promoted off an in-process Map). TWO tables for
 0044's reason — a conversation grows a turn at a time, so a `turns` jsonb array would be read

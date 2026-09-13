@@ -15,19 +15,30 @@
 // Run from apps/api:  npx tsx src/jobs/new-video-workflow.check.ts
 
 import { randomUUID } from 'node:crypto';
-import type { SupabaseClient } from '@dgipr/database';
+import type { NewVideoTurnRow, SupabaseClient } from '@dgipr/database';
 import { newVideoTitleFrom } from '@dgipr/schemas';
 import {
   appendTurn,
+  castPortraitCount,
   conversationIsBusy,
   conversationIsFull,
   createConversation,
   getConversation,
   getConversationTurns,
   listConversationSummaries,
+  createCharacter,
+  editCharacter,
+  getConversationCharacters,
+  listCharacters,
   markTurnCompleted,
   markTurnFailed,
+  removeCharacter,
+  resolveCharacters,
+  resolveForkPoint,
+  resolvePortrait,
   resolveReferenceImages,
+  setConversationCast,
+  toCharacterPayload,
   toConversationDetail,
 } from './new-video-workflow.js';
 
@@ -69,12 +80,16 @@ class Query implements PromiseLike<{ data: unknown; error: null }> {
   private orders: { column: string; ascending: boolean }[] = [];
   private op: 'select' | 'insert' | 'update' | 'delete' = 'select';
   private payload: Row = {};
+  private rows: Row[] = [];
 
   constructor(private readonly table: string) {}
 
-  insert(row: Row): this {
+  insert(row: Row | Row[]): this {
     this.op = 'insert';
-    this.payload = row;
+    // The cast is written as one statement, so the fake has to take a list — a fake that
+    // silently accepted only the first row would pass a test the real driver would fail.
+    this.rows = Array.isArray(row) ? row : [row];
+    this.payload = Array.isArray(row) ? (row[0] ?? {}) : row;
     return this;
   }
 
@@ -129,15 +144,14 @@ class Query implements PromiseLike<{ data: unknown; error: null }> {
     const now = new Date().toISOString();
 
     if (this.op === 'insert') {
-      const id = randomUUID();
-      const row: Row = {
-        id,
-        created_at: now,
-        updated_at: now,
-        ...this.payload,
-      };
-      store.set(id, row);
-      return [row];
+      const written: Row[] = [];
+      for (const payload of this.rows) {
+        const id = randomUUID();
+        const row: Row = { id, created_at: now, updated_at: now, ...payload };
+        store.set(id, row);
+        written.push(row);
+      }
+      return written;
     }
 
     const hits = [...store.values()].filter((row) => this.matches(row));
@@ -148,12 +162,28 @@ class Query implements PromiseLike<{ data: unknown; error: null }> {
     }
     if (this.op === 'delete') {
       for (const row of hits) store.delete(row.id as string);
-      // The real table cascades; the fake does it by hand so a deletion test is honest.
+      // The real tables cascade; the fake does it by hand so a deletion test is honest.
       if (this.table === 'new_video_conversations') {
         const turns = tableOf('new_video_turns');
         for (const [key, turn] of turns) {
           if (hits.some((row) => row.id === turn.conversation_id)) {
             turns.delete(key);
+          }
+        }
+        const cast = tableOf('new_video_conversation_characters');
+        for (const [key, entry] of cast) {
+          if (hits.some((row) => row.id === entry.conversation_id)) {
+            cast.delete(key);
+          }
+        }
+      }
+      // 0054's other foreign key: a deleted character leaves every cast it was in, so it
+      // cannot keep being re-emitted into future turns of a conversation.
+      if (this.table === 'new_video_characters') {
+        const cast = tableOf('new_video_conversation_characters');
+        for (const [key, entry] of cast) {
+          if (hits.some((row) => row.id === entry.character_id)) {
+            cast.delete(key);
           }
         }
       }
@@ -163,11 +193,16 @@ class Query implements PromiseLike<{ data: unknown; error: null }> {
     const sorted = [...hits];
     for (const order of [...this.orders].reverse()) {
       sorted.sort((a, b) => {
-        const left = String(a[order.column] ?? '');
-        const right = String(b[order.column] ?? '');
-        return order.ascending
-          ? left.localeCompare(right)
-          : right.localeCompare(left);
+        const left = a[order.column];
+        const right = b[order.column];
+        // Numbers compare as numbers: `position` is an integer, and a string sort would put
+        // cast member 10 ahead of cast member 2 — which would re-bind a portrait to the
+        // wrong name, the one thing the ordering exists to prevent.
+        const delta =
+          typeof left === 'number' && typeof right === 'number'
+            ? left - right
+            : String(left ?? '').localeCompare(String(right ?? ''));
+        return order.ascending ? delta : -delta;
       });
     }
     return sorted;
@@ -303,6 +338,121 @@ async function main(): Promise<void> {
     (await conversationIsBusy(client, first.id)) === false,
   );
 
+  // --- FORKING (Step 4) -----------------------------------------------------
+  //
+  // Where a paid render starts from. Every one of these is a silent failure if it is wrong:
+  // continuing from another conversation's video, or from a render that has not finished,
+  // both produce a plausible-looking clip that answers a question nobody asked.
+
+  const forkTurns = await getConversationTurns(client, first.id);
+
+  const forkToFirst = resolveForkPoint(forkTurns, turn1.id);
+  check(
+    'a completed turn resolves to the interaction that produced it',
+    forkToFirst.ok && forkToFirst.interactionId === 'interactions/one',
+    forkToFirst,
+  );
+
+  const forkToFailed = resolveForkPoint(forkTurns, turn2.id);
+  check(
+    'a FAILED turn cannot be forked from — it produced no video',
+    !forkToFailed.ok && forkToFailed.reason === 'unfinished',
+    forkToFailed,
+  );
+
+  check(
+    'an id that is not a turn of this conversation is unknown, never a guess',
+    (() => {
+      const answer = resolveForkPoint(forkTurns, randomUUID());
+      return !answer.ok && answer.reason === 'unknown';
+    })(),
+  );
+
+  // A turn of a DIFFERENT conversation is the dangerous case: it is a real turn with a real
+  // interaction behind it, so nothing but the conversation filter stops it editing a video
+  // the officer is not looking at.
+  const elsewhere = await createConversation(client);
+  const elsewhereTurn = await appendTurn(
+    client,
+    elsewhere,
+    'वेगळे संभाषण',
+    [],
+    0,
+  );
+  await markTurnCompleted(client, elsewhere.id, elsewhereTurn.id, {
+    interactionId: 'interactions/elsewhere',
+    videoUrl: 'https://example.test/elsewhere.mp4',
+  });
+  check(
+    "another conversation's turn is refused, real interaction and all",
+    (() => {
+      const answer = resolveForkPoint(forkTurns, elsewhereTurn.id);
+      return !answer.ok && answer.reason === 'unknown';
+    })(),
+  );
+
+  // Handed rows directly: these two shapes are what the STATUS check exists for, and both
+  // are states the database passes through rather than settles on.
+  const rowShape = (
+    over: Partial<NewVideoTurnRow>,
+  ): readonly NewVideoTurnRow[] => [
+    {
+      id: 'turn-under-test',
+      conversationId: first.id,
+      prompt: '',
+      images: [],
+      status: 'completed',
+      videoUrl: null,
+      interactionId: 'interactions/whatever',
+      modelText: null,
+      error: null,
+      createdAt: '',
+      updatedAt: '',
+      ...over,
+    },
+  ];
+  check(
+    'a turn still GENERATING cannot be forked from, though it already has an interaction',
+    (() => {
+      const answer = resolveForkPoint(
+        rowShape({ status: 'generating' }),
+        'turn-under-test',
+      );
+      return !answer.ok && answer.reason === 'unfinished';
+    })(),
+  );
+  check(
+    'and a completed turn with no interaction id is unfinished too',
+    (() => {
+      const answer = resolveForkPoint(
+        rowShape({ interactionId: null }),
+        'turn-under-test',
+      );
+      return !answer.ok && answer.reason === 'unfinished';
+    })(),
+  );
+
+  // Forking from the current chain point is a no-op rather than an error: it resolves to the
+  // very interaction the ordinary path would have used. The page does not offer it; refusing
+  // a client that echoed it back would buy nothing.
+  check(
+    'forking from the latest completed turn resolves to the ordinary chain point',
+    (() => {
+      const answer = resolveForkPoint(forkTurns, turn1.id);
+      return (
+        answer.ok && answer.interactionId === afterFailure?.lastInteractionId
+      );
+    })(),
+  );
+
+  check(
+    'a conversation with no turns has nothing to fork from',
+    (() => {
+      const answer = resolveForkPoint([], turn1.id);
+      return !answer.ok && answer.reason === 'unknown';
+    })(),
+  );
+
   // --- the boundary ---------------------------------------------------------
 
   const detail = toConversationDetail(
@@ -381,6 +531,158 @@ async function main(): Promise<void> {
   check(
     'the rail carries no interaction id',
     !summarySerialized.includes('interactions/one'),
+  );
+
+  // --- the character & voice registry (0054) --------------------------------
+
+  const portraitId = await seedImage('priya.png');
+  // Narrowed rather than cast: `resolvePortrait` answers 'missing' for an id this API did not
+  // mint, and the route turns that into a Marathi 400 instead of storing half a portrait.
+  const seededPortrait = await resolvePortrait(client, portraitId);
+  check(
+    'an uploaded id resolves to a portrait rather than to nothing',
+    seededPortrait !== 'missing' && seededPortrait !== null,
+  );
+  const priya = await createCharacter(client, {
+    name: 'प्रिया देशमुख',
+    appearance: 'A woman in her early thirties in a green cotton saree.',
+    voice: 'warm and measured, with a gentle Marathi accent',
+    portrait: seededPortrait === 'missing' ? null : seededPortrait,
+  });
+  const rahul = await createCharacter(client, {
+    name: 'Rahul Kale',
+    appearance: 'A man in his fifties.',
+    voice: 'low and gravelly',
+    // Described in words alone: a registry entry does not require a picture.
+    portrait: null,
+  });
+
+  check(
+    'an uploaded picture becomes a portrait the job can fetch',
+    priya.portraitUrl === 'https://example.test/priya.png' &&
+      priya.portraitPath === 'new-video-workflow/priya.png' &&
+      priya.portraitMime === 'image/png',
+    priya,
+  );
+  check(
+    'a character may be described in words alone',
+    rahul.portraitUrl === null && rahul.portraitPath === null,
+  );
+  check(
+    'an id this API did not mint is reported, never silently dropped',
+    (await resolvePortrait(client, randomUUID())) === 'missing',
+  );
+  check(
+    'no portrait asked about resolves to none',
+    (await resolvePortrait(client, null)) === null &&
+      (await resolvePortrait(client, undefined)) === null,
+  );
+  check(
+    'the registry is one shared library',
+    (await listCharacters(client)).length === 2,
+  );
+
+  // THE BOUNDARY, for the registry: the storage path and mime type are what the job needs to
+  // fetch the bytes, and neither may reach a browser — the same rule an image row follows.
+  const characterPayload = JSON.stringify(toCharacterPayload(priya));
+  check(
+    'a character payload carries the public URL and the words',
+    characterPayload.includes('https://example.test/priya.png') &&
+      characterPayload.includes('gentle Marathi accent'),
+  );
+  check(
+    'and never the storage path or the mime type',
+    !characterPayload.includes('new-video-workflow/priya.png') &&
+      !characterPayload.includes('image/png'),
+    characterPayload,
+  );
+
+  // --- a conversation's cast ------------------------------------------------
+
+  const cast = await createConversation(client);
+  await setConversationCast(client, cast.id, [rahul.id, priya.id]);
+  const storedCast = await getConversationCharacters(client, cast.id);
+  check(
+    'a cast comes back in the order it was picked',
+    storedCast.map((character) => character.name).join(' | ') ===
+      'Rahul Kale | प्रिया देशमुख',
+    storedCast.map((character) => character.name),
+  );
+  // The order is what binds a portrait to a name, so it must survive a database that answers
+  // in whatever order it likes.
+  check(
+    'a cast of ten keeps its order rather than sorting like text',
+    await (async () => {
+      const many = await createConversation(client);
+      const ids: string[] = [];
+      for (let i = 0; i < 11; i += 1) {
+        const row = await createCharacter(client, {
+          name: `Extra ${i}`,
+          appearance: '',
+          voice: '',
+          portrait: null,
+        });
+        ids.push(row.id);
+      }
+      await setConversationCast(client, many.id, ids);
+      const back = await getConversationCharacters(client, many.id);
+      return back.map((row) => row.id).join(',') === ids.join(',');
+    })(),
+  );
+  check(
+    'a conversation with no cast is not an error',
+    (await getConversationCharacters(client, first.id)).length === 0,
+  );
+
+  // Only a character with a picture spends one of the turn's reference-image slots — the
+  // number the route's combined budget is computed from.
+  check(
+    'the portrait count is what a cast costs in image slots',
+    castPortraitCount(storedCast) === 1 && castPortraitCount([]) === 0,
+  );
+
+  // Resolved fresh from the registry on every read, so an edit reaches every FUTURE turn of a
+  // conversation that already started — which is what a stored voice description is for.
+  await editCharacter(client, priya.id, { voice: 'brisk and formal' });
+  check(
+    'editing a voice reaches a conversation already under way',
+    (await getConversationCharacters(client, cast.id))
+      .map((character) => character.voice)
+      .includes('brisk and formal'),
+  );
+
+  check(
+    'a cast reaches the polled payload',
+    JSON.stringify(
+      toConversationDetail(
+        cast,
+        [],
+        await getConversationCharacters(client, cast.id),
+      ),
+    ).includes('brisk and formal'),
+  );
+  check(
+    'and a conversation with no cast carries an empty one rather than nothing',
+    JSON.stringify(toConversationDetail(first, [])).includes('"characters":[]'),
+  );
+
+  const { resolved: pickedCast, missing: missingCast } =
+    await resolveCharacters(client, [priya.id, randomUUID()]);
+  check(
+    'a cast id we did not mint is reported so the turn can be refused',
+    pickedCast.length === 1 && missingCast.length === 1,
+  );
+
+  // Deleting a registry entry leaves every cast it was in (0054's foreign key): a character
+  // nobody can describe any more must not keep being re-emitted into future turns.
+  await removeCharacter(client, rahul.id);
+  check(
+    'deleting a character removes them from the casts they were in',
+    (await getConversationCharacters(client, cast.id)).length === 1,
+  );
+  check(
+    'and the videos already rendered are untouched',
+    (await getConversationTurns(client, cast.id)).length === 0,
   );
 
   // --- guards ---------------------------------------------------------------

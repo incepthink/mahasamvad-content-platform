@@ -6,6 +6,7 @@ import { CopySchema, DesignModeSchema } from './copy.js';
 import {
   MOTION_DIRECTION_MAX_CHARS,
   MotionAspectSchema,
+  MotionRegionSchema,
   MotionVersionSchema,
   isMotionSourcePath,
 } from './dynamic-poster.js';
@@ -379,6 +380,13 @@ export const CreateGenerationRequestSchema = z
     // having replaced the poster's exact pixel resolution. Absent ⇒ DEFAULT_MOTION_ASPECT,
     // which is also what a row created before the control existed falls back to.
     motionAspect: MotionAspectSchema.optional(),
+    // Dynamic Poster runs only (migration 0055): the part of the poster that is allowed to
+    // MOVE, as fractions of its own width and height. A video model repaints every pixel it
+    // returns, so outside this rectangle the poster that was sent is composited back over every
+    // frame and the officer's own Devanagari survives rather than being redrawn. Absent ⇒ the restore does not
+    // run at all and the clip is stored exactly as it is today — see MotionRegionSchema for why
+    // there is no defensible default.
+    motionRegion: MotionRegionSchema.optional(),
     // Article runs only (news/scheme): the officer's trusted request for this article — writing
     // direction plus facts or corrections supplied directly here. Absent/empty ⇒ the article
     // the pipeline writes today.
@@ -440,6 +448,15 @@ export const CreateGenerationRequestSchema = z
           code: z.ZodIssueCode.custom,
           message: 'motionAspect is only accepted on a Dynamic Poster run.',
           path: ['motionAspect'],
+        });
+      }
+      // And the moving region, for the same reason again: no other lane renders a clip, so a
+      // stored region there would name a hole in a video that is never made.
+      if (value.motionRegion) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'motionRegion is only accepted on a Dynamic Poster run.',
+          path: ['motionRegion'],
         });
       }
     }

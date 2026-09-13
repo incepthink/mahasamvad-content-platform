@@ -53,14 +53,18 @@ import {
   fitImageToAspect,
   mp4ToGif,
   normalizeSourceImage,
+  restoreSourceOverClip,
 } from '@dgipr/poster-renderer';
 import {
   DEFAULT_MOTION_ASPECT,
   MotionAspectSchema,
+  MotionRegionSchema,
   aspectRatioLabel,
+  isWholeClipCrop,
   motionAspectRatio,
+  snapMotionAspect,
 } from '@dgipr/schemas';
-import type { MotionAspect, MotionCrop } from '@dgipr/schemas';
+import type { MotionAspect, MotionCrop, MotionRegion } from '@dgipr/schemas';
 import { armEditRetry, runJob } from './runner.js';
 
 // The shape this run's clip is rendered in (migration 0053). PARSED rather than cast: the
@@ -70,6 +74,55 @@ import { armEditRetry, runJob } from './runner.js';
 function motionAspectOf(row: GenerationRow): MotionAspect {
   const parsed = MotionAspectSchema.safeParse(row.motionAspect);
   return parsed.success ? parsed.data : DEFAULT_MOTION_ASPECT;
+}
+
+// THE PART OF THE POSTER ALLOWED TO MOVE (migration 0055), or null for "all of it, and put
+// none of it back".
+//
+// PARSED, NOT CAST, and here that matters more than anywhere else on this lane: the rectangle
+// is handed to ffmpeg's encode and to a full-frame alpha build, so an arbitrary object in a
+// hand-edited row would reach a paid render rather than being refused at the door. Null — every
+// other lane, every run made before the control existed, and every officer who simply did not
+// mark one — means the restore does not run at all and the clip is stored exactly as it has
+// always been. See MotionRegionSchema for why there is no defensible default.
+function motionRegionOf(row: GenerationRow): MotionRegion | null {
+  if (row.motionRegion === null || row.motionRegion === undefined) return null;
+  const parsed = MotionRegionSchema.safeParse(row.motionRegion);
+  if (!parsed.success) {
+    console.warn(
+      `[job ${row.id}] ignoring an unreadable motion_region on the row:`,
+      parsed.error.issues,
+    );
+    return null;
+  }
+  // A rectangle covering the whole poster marks everything as moving, which leaves nothing to
+  // freeze — so it is the same request as no region, and doing it the long way would cost an
+  // encode to produce the picture that already came back.
+  return isWholeClipCrop(parsed.data) ? null : parsed.data;
+}
+
+// HOW BIG THE FRAME COMES BACK, asked for rather than accepted.
+//
+// A video model REPAINTS every pixel it returns — it does not preserve the officer's Devanagari,
+// it redraws it — so the number of pixels it renders is the ceiling on how much of their text can
+// survive. This lane had been sending no resolution at all and taking the model's own default,
+// which on a 4:5 poster meant a 720-wide render: a ~26px card line arrives at ~15px, and a matra
+// at two or three. That is why the headline reads and the small print does not.
+//
+// A REQUEST FIELD, not a sentence. The brief once carried a pixel size and it was the one thing
+// the render could never honour (the 2026-09-03 milestone), so it belongs in the body where the
+// learned-capability ladder can drop it if the model refuses — and say so in the log.
+//
+// Read in ONE place, here, because it is this lane's decision: /new-video-workflow deliberately
+// passes nothing and is unchanged. Unset means 1080p, mirroring veo-client's resolutionSetting;
+// `default` or `none` sends no resolution at all, which is the one-line rollback to this lane's
+// behaviour before today and does not need a code change on a day it is already misbehaving.
+function motionResolutionSetting(): string | null {
+  const raw = process.env.GEMINI_VIDEO_RESOLUTION?.trim();
+  if (raw === undefined || raw === '') return '1080p';
+  return raw.toLowerCase() === 'default' || raw.toLowerCase() === 'none'
+    ? null
+    : raw;
 }
 
 // THE FRAME, SETTLED IN CODE RATHER THAN ASKED FOR.
@@ -87,17 +140,47 @@ function motionAspectOf(row: GenerationRow): MotionAspect {
 async function frameSourceForAspect(
   source: Readonly<{ png: Buffer; width: number; height: number }>,
   aspect: MotionAspect,
-): Promise<{ png: Buffer; label: string; ratio: number }> {
-  const ratio = motionAspectRatio(aspect, source.width, source.height);
+): Promise<{
+  png: Buffer;
+  width: number;
+  height: number;
+  label: string;
+  ratio: number;
+  requestLabel: string | null;
+}> {
+  // THE POSTER'S OWN RATIO, SNAPPED TO A NAME THE WIRE CAN CARRY.
+  //
+  // Only on 'source', because the two fixed frames already ARE listed labels. A poster designed
+  // to a standard frame (1280x1600) snaps to 4:5 exactly, so nothing is padded and the request
+  // names the shape the officer designed in. A hand-cropped scan snaps to the nearest listed
+  // label and is padded the last percent into it, which is strictly better than either sending
+  // `15:19` — one 400 poisons the aspect-ratio rung for every later render in this worker — or
+  // sending nothing and letting the model outpaint.
+  //
+  // NULL is a full answer: a banner or a panorama snaps to nothing, pads to its own ratio and
+  // sends no label, which is this lane's behaviour byte for byte before today.
+  const snapped =
+    aspect === 'source' ? snapMotionAspect(source.width, source.height) : null;
+  const ratio = snapped
+    ? snapped.ratio
+    : motionAspectRatio(aspect, source.width, source.height);
   const framed = await fitImageToAspect(source.png, ratio);
   return {
     png: framed.png,
+    // The size of the image the model is actually handed — which is NOT source.width/height
+    // whenever normalizeSourceImage bound the long edge, since it returns pre-bound dimensions
+    // with bound bytes. Carried out because it is the size everything downstream must measure
+    // against.
+    width: framed.width,
+    height: framed.height,
     // Named from the FRAMED image, so the ratio the prompt states and the ratio the model is
     // looking at are the same number by construction.
     label: aspectRatioLabel(framed.width, framed.height),
     // Carried out so the crop on the way back uses the very number the prompt asked for. See
     // cropRenderedClip below.
     ratio,
+    // What goes on the wire, or null for "ask for no particular shape".
+    requestLabel: snapped ? snapped.label : aspect === 'source' ? null : aspect,
   };
 }
 
@@ -111,21 +194,61 @@ async function frameSourceForAspect(
 //
 // BEST EFFORT, exactly like the GIF below and for the same reason: the clip is the paid
 // artifact. A framing fix that fails must hand back a badly-framed video, never no video.
+//
+// AND, WHEN THE OFFICER MARKED A MOVING REGION, THE TEXT IS PUT BACK IN THE SAME PASS.
+//
+// A video model repaints every pixel it returns — it does not preserve their Devanagari, it
+// redraws it — which is legible on a headline and garbled on a 26px card line. That is this
+// lane's reported defect and no sentence fixes it; MOTION_BRIEF already asks for the text to be
+// left alone. So with a region marked, the clip is reframed, scaled back to the poster's own
+// size and the poster itself composited over every frame except that rectangle. See
+// restoreSourceOverClip.
 async function cropRenderedClip(
   id: string,
   bytes: Buffer,
   ratio: number,
+  framed: Readonly<{ png: Buffer; width: number; height: number }>,
+  region: MotionRegion | null,
 ): Promise<Buffer> {
   try {
-    const crop = await cropVideoToAspect(bytes, ratio);
-    if (crop.cropped) {
-      console.log(
-        `[job ${id}] cropped the clip to ${crop.width}x${crop.height} for the requested ratio.`,
-      );
-    }
+    const crop =
+      region === null
+        ? await cropVideoToAspect(bytes, ratio)
+        : await restoreSourceOverClip(bytes, ratio, {
+            png: framed.png,
+            // THE FRAMED SIZE, NEVER normalizeSourceImage's. That function reports the
+            // officer's PRE-BOUND dimensions beside bytes whose long edge it capped at 2048, so
+            // on a 4000px export the two differ by ~1.95x — a mis-scale that looks perfectly
+            // plausible in a thumbnail and is only obvious against the text it was meant to
+            // save. The overlay builder re-measures the bytes and refuses a mismatch, but the
+            // right number is this one.
+            width: framed.width,
+            height: framed.height,
+            hole: region,
+          });
+    // UNCONDITIONAL, and this is the line that says whether asking for a resolution worked. It
+    // used to speak only when it cropped, so a render that came back at the model's own shape —
+    // the case where the officer's text is being lost — logged nothing at all. `source` is what
+    // the model returned; the second pair is what was stored.
+    console.log(
+      `[job ${id}] gemini returned ${crop.source.width}x${crop.source.height}; ` +
+        `stored ${crop.width}x${crop.height} (${crop.cropped ? 'cropped' : 'as returned'}` +
+        `${region === null ? '' : ', poster restored outside the marked region'}).`,
+    );
     return crop.mp4;
   } catch (error) {
-    console.error(`[job ${id}] clip crop failed, storing it uncropped:`, error);
+    // Named with the byte length, so a clip ffmpeg could not read stays attributable: a
+    // truncated download and a clip in an unexpected container fail the same way otherwise.
+    //
+    // BEST EFFORT ON BOTH BRANCHES, including the restore — this is a correction applied on the
+    // way out of a render the department has already been billed for, so a failure hands back a
+    // clip whose text is garbled rather than no clip at all. Loud in the log, because a silently
+    // un-restored render looks exactly like the defect this phase exists to remove.
+    console.error(
+      `[job ${id}] clip ${region === null ? 'crop' : 'restore'} failed on ` +
+        `${bytes.length} bytes, storing it unchanged:`,
+      error,
+    );
     return bytes;
   }
 }
@@ -240,6 +363,15 @@ async function renderAndStoreMotion(
     // inline image against a render measured in minutes.
     images: [{ data: framed.png, mimeType: 'image/png' }],
     previousInteractionId: input.previousInteractionId,
+    // FIELDS, NOT SENTENCES. The prompt already says the frame is to be used as it is and the
+    // model outpaints anyway; these are the same two requests made where the API can answer
+    // them, and where the ladder can drop either one and log which. Both null send nothing,
+    // which is this lane's request exactly as before.
+    aspectRatio: framed.requestLabel,
+    resolution: motionResolutionSetting(),
+    // No `videoTask`, deliberately: this lane's source image genuinely IS the thing being
+    // animated, so the inferred task is the right one, and declaring it would put a second
+    // variable into a paid comparison.
   });
   const interactionId = started.id ?? null;
   if (!interactionId) {
@@ -267,7 +399,15 @@ async function renderAndStoreMotion(
     );
   }
 
-  const clip = await cropRenderedClip(id, bytes, framed.ratio);
+  const clip = await cropRenderedClip(
+    id,
+    bytes,
+    framed.ratio,
+    framed,
+    // Off the ROW, like the aspect above and for the same reason: a follow-up writes a fresh
+    // prompt but must not quietly stop protecting the text the officer already approved.
+    motionRegionOf(row),
+  );
   const written = await storeMotionClip(client, id, input.version, clip);
 
   await updateGeneration(client, id, {

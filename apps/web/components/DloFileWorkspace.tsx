@@ -45,11 +45,10 @@ import { DesignationReview } from '@/components/DesignationReview';
 import { ErrorNotice } from '@/components/ErrorNotice';
 import { FileName } from '@/components/FileName';
 import { FormCard } from '@/components/common/FormCard';
-import { PageBackdrop } from '@/components/common/PageBackdrop';
+import { PageShell } from '@/components/common/PageShell';
 import { PromptInput } from '@/components/common/PromptInput';
 import { DloAiPromptBox } from '@/components/dlo/DloAiPromptBox';
 import { DloSubmitButton } from '@/components/dlo/DloSubmitButton';
-import { NEWS_DOODLES } from '@/lib/doodleMarks';
 import { errorMessage, storedErrorMessage } from '@/lib/errorMessage';
 import { generateFromNewDloIntake, prepareNewDloNames } from '@/lib/newDlo';
 import { STR } from '@/lib/strings';
@@ -145,8 +144,6 @@ export type DloFileWorkspaceProps = Readonly<{
   startOverHref: string;
   /** Use the same single direction box as /dlo's intake form. */
   unifiedInstructions?: boolean;
-  /** Carry /dlo's news-doodle wallpaper onto its review workspace. */
-  showBackdrop?: boolean;
   /**
    * Skip the name-confirm step entirely: write the article as soon as the sources are ready
    * and hand the officer straight to it.
@@ -169,7 +166,6 @@ export function DloFileWorkspace({
   intakeId,
   startOverHref,
   unifiedInstructions = false,
-  showBackdrop = false,
   autoGenerate = false,
 }: DloFileWorkspaceProps) {
   const router = useRouter();
@@ -315,24 +311,22 @@ export function DloFileWorkspace({
 
   if (loading && !intake) {
     return (
-      <main className="page">
-        {showBackdrop ? <PageBackdrop marks={NEWS_DOODLES} seed={31} /> : null}
+      <PageShell background="dlo">
         <WorkspaceBackLink href={startOverHref} />
         <p className="translating-note">
           <span className="spinner" aria-hidden="true" />
           उघडत आहे…
         </p>
-      </main>
+      </PageShell>
     );
   }
 
   if (error && !intake) {
     return (
-      <main className="page">
-        {showBackdrop ? <PageBackdrop marks={NEWS_DOODLES} seed={31} /> : null}
+      <PageShell background="dlo">
         <WorkspaceBackLink href={startOverHref} />
         <ErrorNotice message={error} onRetry={() => void refresh()} />
-      </main>
+      </PageShell>
     );
   }
 
@@ -347,23 +341,18 @@ export function DloFileWorkspace({
   const awaitingAuto = autoGenerate && intake.status !== 'failed';
 
   return (
-    <main className="page">
-      {showBackdrop ? <PageBackdrop marks={NEWS_DOODLES} seed={31} /> : null}
-      <WorkspaceBackLink href={startOverHref} />
-
-      <header className="page-head">
-        <div className="page-head-text">
-          <h1 className="page-title">{intake.heading || 'नवीन काम'}</h1>
-          <p className="page-sub">
-            {awaitingAuto
-              ? 'स्रोत तयार होताच बातमी लिहिली जाईल. हे पान आपोआप पुढे जाईल.'
-              : ready
-                ? 'नावे तपासा आणि लेख तयार करा. जोडलेली कागदपत्रे लेख लिहिताना थेट वाचली जातील.'
-                : 'जोडलेल्या ध्वनिमुद्रणांवर प्रक्रिया सुरू आहे. कागदपत्रे आधीच तयार आहेत.'}
-          </p>
-        </div>
-      </header>
-
+    <PageShell
+      background="dlo"
+      breadcrumb={<WorkspaceBackLink href={startOverHref} />}
+      title={intake.heading || 'नवीन काम'}
+      subtitle={
+        awaitingAuto
+          ? 'स्रोत तयार होताच बातमी लिहिली जाईल. हे पान आपोआप पुढे जाईल.'
+          : ready
+            ? 'नावे तपासा आणि लेख तयार करा. जोडलेली कागदपत्रे लेख लिहिताना थेट वाचली जातील.'
+            : 'जोडलेल्या ध्वनिमुद्रणांवर प्रक्रिया सुरू आहे. कागदपत्रे आधीच तयार आहेत.'
+      }
+    >
       <div className="flex flex-col gap-5">
         {intake.status === 'failed' ? (
           <FormCard>
@@ -502,6 +491,6 @@ export function DloFileWorkspace({
           </FormCard>
         ) : null}
       </div>
-    </main>
+    </PageShell>
   );
 }

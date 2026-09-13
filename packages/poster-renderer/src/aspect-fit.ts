@@ -28,7 +28,13 @@
 // falloff. Black bars would read as a mistake; these read as the poster's own ground.
 
 import { pathToFileURL } from 'node:url';
-import { aspectRatioLabel, motionAspectRatio } from '@dgipr/schemas';
+import {
+  MOTION_ASPECT_SNAP_TOLERANCE,
+  MOTION_REQUEST_ASPECTS,
+  aspectRatioLabel,
+  motionAspectRatio,
+  snapMotionAspect,
+} from '@dgipr/schemas';
 import sharp from 'sharp';
 
 /** How deep into an edge to look when deciding flat vs. textured. */
@@ -399,6 +405,117 @@ if (
       `${name}: the poster's own pixels did not survive padding intact`,
     );
   }
+
+  // ---------------------------------------------------------------------------
+  // THE LABEL THAT GOES ON THE WIRE, which is a different question from the one above.
+  //
+  // The clip request now carries `response_format.aspect_ratio`, and a 400 on it is cached
+  // against the model for the life of the process — so ONE odd poster sending `15:19` would
+  // silently strip the aspect ratio from every later render in that worker. snapMotionAspect is
+  // what stops that, and the case that protects it is the LAST one here: a shape no listed label
+  // is near must snap to nothing at all rather than to the closest wrong thing.
+  // ---------------------------------------------------------------------------
+
+  const exact = snapMotionAspect(1280, 1600);
+  check(
+    exact?.label === '4:5' && exact.ratio === 0.8,
+    `1280x1600 should snap exactly to 4:5, got ${JSON.stringify(exact)}`,
+  );
+  // And snapping it changes nothing about the image: the ratio it snapped to IS the poster's
+  // own, so this is still the untouched path and still the same bytes.
+  const snappedFit = await fitImageToAspect(poster, exact?.ratio ?? 0);
+  check(
+    !snappedFit.padded && snappedFit.png === poster,
+    'snapping 1280x1600 to 4:5 padded or re-encoded the poster',
+  );
+
+  // TWO HAND-CROPPED SCANS, one either side of the label they snap to, because which way
+  // fitImageToAspect pads is decided by that sign and both branches must keep every pixel.
+  //
+  // 1237x1600 is 0.773: aspectRatioLabel calls it 15:19 — accurate, and exactly the kind of
+  // label a preview model can refuse — and it snaps to 3:4 (0.750, 3.1% off) rather than to the
+  // 4:5 it looks like at a glance, which is 3.4% off. Being WIDER than 3:4 it is letterboxed.
+  // 1180x1600 is 0.738, narrower than the same label, so it is pillarboxed instead.
+  check(
+    !MOTION_REQUEST_ASPECTS.includes(aspectRatioLabel(1237, 1600)),
+    `the sentence label for 1237x1600 is already a wire label (${aspectRatioLabel(1237, 1600)}), so this case proves nothing`,
+  );
+  for (const scanWidth of [1237, 1180]) {
+    const snap = snapMotionAspect(scanWidth, height);
+    check(
+      snap !== null && MOTION_REQUEST_ASPECTS.includes(snap.label),
+      `${scanWidth}x${height} snapped to ${JSON.stringify(snap)}`,
+    );
+    if (snap === null) continue;
+    // Whatever it snapped to has to be the NEAREST listed label, and within tolerance.
+    const error =
+      Math.abs(snap.ratio - scanWidth / height) / (scanWidth / height);
+    check(
+      error <= MOTION_ASPECT_SNAP_TOLERANCE,
+      `${scanWidth}x${height} snapped to ${snap.label}, which is ${(error * 100).toFixed(1)}% off`,
+    );
+
+    const scan = await sharp(poster)
+      .extract({ left: 0, top: 0, width: scanWidth, height })
+      .png()
+      .toBuffer();
+    const scanFit = await fitImageToAspect(scan, snap.ratio);
+    check(
+      scanFit.padded,
+      `${scanWidth}x${height} was not padded into ${snap.label}`,
+    );
+    check(
+      scanFit.width >= scanWidth && scanFit.height >= height,
+      `padding ${scanWidth}x${height} into ${snap.label} SHRANK it to ${scanFit.width}x${scanFit.height}`,
+    );
+    // The thin bar is thin: snapping is a small correction, not a reframe. Under a tenth of
+    // either side, or the label was too far away to be worth using.
+    check(
+      (scanFit.width - scanWidth) / scanWidth < 0.1 &&
+        (scanFit.height - height) / height < 0.1,
+      `padding into ${snap.label} added more than a tenth: ${scanFit.width}x${scanFit.height}`,
+    );
+
+    // AND THE PIXELS. Cut the scan's own region back out of the padded canvas and compare it
+    // byte for byte — the one assertion that proves the snap cropped nothing.
+    const scanRgb = await rgb(scan);
+    const scanInner = await rgb(
+      await sharp(scanFit.png)
+        .extract({
+          left: Math.floor((scanFit.width - scanWidth) / 2),
+          top: Math.floor((scanFit.height - height) / 2),
+          width: scanWidth,
+          height,
+        })
+        .png()
+        .toBuffer(),
+    );
+    check(
+      scanInner.data.equals(scanRgb.data),
+      `${scanWidth}x${height}: the scan’s own pixels did not survive the snap-and-pad intact`,
+    );
+  }
+
+  // THE ASSERTION THAT PROTECTS THE LADDER. A 1:3 ticker banner is near no listed label, so it
+  // must snap to NOTHING — the lane then sends no aspect_ratio and pads to the banner's own
+  // ratio, which is its behaviour before the field existed. Snapping it to 9:16 instead would
+  // pad away a third of the frame, and sending `1:3` would poison the rung for every poster
+  // after it.
+  check(
+    snapMotionAspect(600, 1800) === null,
+    'a 1:3 banner snapped to a label',
+  );
+  check(
+    snapMotionAspect(3600, 1200) === null,
+    'a 3:1 panorama snapped to a label',
+  );
+  // Degenerate sizes are a null, not a throw: the caller's fallback is "send no label".
+  check(snapMotionAspect(0, 1600) === null, 'a zero width snapped to a label');
+  // Inside tolerance, though: a poster a few pixels off a standard frame keeps its name.
+  check(
+    snapMotionAspect(1284, 1600)?.label === '4:5',
+    'a poster four pixels off 4:5 lost its label',
+  );
 
   if (failures.length > 0) {
     console.error(`\n${failures.length} FAILURE(S):`);

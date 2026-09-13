@@ -6,13 +6,30 @@
 // to one model, one video comes back, and a follow-up edits it through
 // `previous_interaction_id`.
 //
-// THE ONE RULE THIS FILE EXISTS TO KEEP: the officer's prompt reaches Gemini VERBATIM.
-// The whole point of the experiment is to compare this API's output against the Gemini chat
-// app, so a system instruction, a house style, a translation, a rewrite or a negative prompt
-// would make the comparison meaningless. `buildInteractionRequest` therefore sends
-// `system_instruction` never, and the prompt as a single unmodified text part — asserted in
-// gemini-interactions-client.test.ts, including for Marathi, which must survive byte for byte
-// (a normalisation pass would silently recompose Devanagari matras).
+// THE PROMPT IS EITHER UNTOUCHED OR EXPLICITLY WRAPPED — never quietly edited.
+// This file used to carry one absolute rule: the officer's prompt reaches Gemini VERBATIM,
+// because /new-video-workflow existed to compare this API against the Gemini chat app and
+// anything of ours would have made that comparison meaningless. That comparison has been run,
+// and its finding is that the app's advantage IS the scaffolding — role-tagged reference
+// images, a dialogue form that does not burn in subtitles, a voice description re-stated every
+// turn. So the rule that kept the comparison fair is the rule that keeps the output worse.
+//
+// `mode` is that decision, made per call rather than assumed:
+//
+//   'verbatim'   (the DEFAULT here) — the prompt is the single text part, byte for byte, and a
+//                scaffold is REFUSED rather than ignored. Nothing of ours rides along.
+//   'scaffolded' — an optional `scaffold` prefix/suffix is composed around that same prompt,
+//                which still appears inside the result unchanged.
+//
+// Two things the mode does NOT mean. It is about what THIS FUNCTION adds, not about what the
+// caller was handed: the Dynamic Poster lane's prompt is written by an LLM pass of its own
+// (generation/motion-prompt.ts) and is still `verbatim` here, correctly — nothing is added to
+// what it composed. And which stance /new-video-workflow takes is that lane's to choose, in
+// new-video-prompt-mode.ts, not this file's.
+//
+// In BOTH modes the officer's own characters survive byte for byte — asserted in
+// gemini-interactions-client.test.ts, including for Marathi, where a normalisation pass would
+// silently recompose Devanagari matras while looking identical in a terminal.
 //
 // Raw REST through geminiFetch, the same no-SDK policy as veo-client.ts and
 // gemini-image-client.ts: the transport rules (per-lane serialization, retry-after backoff)
@@ -92,6 +109,22 @@ export type InteractionImage = Readonly<{
   mimeType: string;
 }>;
 
+// The task Omni is told to perform, per
+// https://ai.google.dev/gemini-api/docs/omni . Sent as
+// `generation_config.video_config.task`. Without it the task is INFERRED from the request's
+// shape, and an inference is exactly what goes wrong here: a turn attaching a picture is read
+// as image-to-video — that picture becoming the literal opening frame — when what this lane
+// means is reference-to-video, a character to hold steady across the whole clip. Saying it in
+// the request is the field half of what new-video-scaffold.ts says in prose.
+export const INTERACTION_VIDEO_TASKS = [
+  'text_to_video',
+  'image_to_video',
+  'reference_to_video',
+  'edit',
+  'extend',
+] as const;
+export type InteractionVideoTask = (typeof INTERACTION_VIDEO_TASKS)[number];
+
 type TextPart = { type: 'text'; text: string };
 type ImagePart = { type: 'image'; data: string; mime_type: string };
 export type InteractionInputPart = TextPart | ImagePart;
@@ -102,14 +135,36 @@ export type InteractionRequestBody = {
   store: boolean;
   background?: boolean;
   previous_interaction_id?: string;
-  // `delivery` and `aspect_ratio` are independent: either alone is a reason to send this
-  // object, and the ladder below can drop one without losing the other.
+  // `delivery`, `aspect_ratio` and `resolution` are independent: any one alone is a reason to
+  // send this object, and the ladder below can drop one without losing the others.
   response_format?: {
     type: 'video';
     delivery?: 'uri';
     aspect_ratio?: string;
+    resolution?: string;
+  };
+  // The only thing this repo ever puts under `generation_config`, which is what lets the
+  // learned-capability rung for it be matched on the container's own name.
+  generation_config?: {
+    video_config: { task: InteractionVideoTask };
   };
 };
+
+// Whether this builder may put text of its own around the prompt it was handed. See the
+// header: 'verbatim' is the comparison stance and refuses a scaffold outright, so a scaffold
+// that arrives under it is a bug reported rather than a rule silently broken.
+export type InteractionPromptMode = 'verbatim' | 'scaffolded';
+
+// Text of ours, around the officer's. Kept to a prefix and a suffix on purpose: that is
+// enough to carry every scaffolding element the Omni docs call for — the
+// `[# References <IMAGE_REF_0>@Image1 ...]` block and a voice description ahead of the
+// instruction, the "not literal initial frames" boilerplate and "Keep everything else the
+// same." after it — without this file pre-deciding what any of them say. What goes in them is
+// the lane's business.
+export type InteractionScaffold = Readonly<{
+  prefix?: string | null | undefined;
+  suffix?: string | null | undefined;
+}>;
 
 export type BuildInteractionRequestInput = Readonly<{
   prompt: string;
@@ -128,6 +183,29 @@ export type BuildInteractionRequestInput = Readonly<{
   // the model renders at its own default — which is what every caller that does not offer the
   // choice gets, byte for byte as before this field existed.
   aspectRatio?: string | null | undefined;
+  // How big the frame comes back, e.g. '1080p'. Absent/null/'' sends no resolution at all, so
+  // a caller that does not ask gets the model's own default exactly as before.
+  //
+  // It matters here because a video model REPAINTS every pixel it returns: pixels it never
+  // rendered are resolution the officer's Devanagari cannot get back, and small card text is
+  // where that is lost first. A REQUEST FIELD, not a sentence — the aspect-ratio precedent; a
+  // brief demanding a pixel size is the defect the 2026-09-03 milestone removed.
+  resolution?: string | null | undefined;
+  // Defaults to 'verbatim', so every existing caller is byte-for-byte unchanged and a new one
+  // has to ask for scaffolding in as many words.
+  mode?: InteractionPromptMode | undefined;
+  scaffold?: InteractionScaffold | null | undefined;
+  // What the model is told it is doing. OPT-IN: absent/null sends no `generation_config` at
+  // all and the task is inferred exactly as it always has been, which is what keeps every
+  // existing caller — the Dynamic Poster lane included, where the source image genuinely IS
+  // the thing being animated — byte for byte unchanged.
+  //
+  // IT IS DROPPED ON A FOLLOW-UP, and that is the reason this field cannot simply be set once
+  // per conversation: combining a task with `previous_interaction_id` is reported to BREAK
+  // EDIT CHAINS, so it belongs to first turns only. Dropped rather than refused because the
+  // consequence of the drop is nil — the turn renders as a follow-up always has — where
+  // refusing would fail a turn the officer typed over a field they never asked for.
+  videoTask?: InteractionVideoTask | null | undefined;
 }>;
 
 export class InteractionRequestError extends Error {
@@ -148,6 +226,10 @@ export function buildInteractionRequest({
   background = true,
   uriDelivery = true,
   aspectRatio = null,
+  resolution = null,
+  mode = 'verbatim',
+  scaffold = null,
+  videoTask = null,
 }: BuildInteractionRequestInput): InteractionRequestBody {
   if (prompt.trim() === '') {
     throw new InteractionRequestError('A prompt is required.');
@@ -180,18 +262,56 @@ export function buildInteractionRequest({
     }
   }
 
+  // ONE text part in both modes — the prompt, with anything the lane asked to put around it.
+  // The officer's own string is inserted UNTOUCHED: not trimmed, not normalised, not reworded,
+  // so it survives here character for character exactly as it did before this mode existed.
+  // The blocks are joined by a blank line because that is how the Omni docs separate a
+  // reference declaration from the instruction that uses it.
+  //
+  // Only `prompt` is measured against INTERACTION_PROMPT_MAX_CHARS, above: that cap is the
+  // officer-facing limit the route mirrors in Marathi, and a scaffold of ours is not the
+  // officer's to shorten.
+  const prefix = scaffold?.prefix?.trim() ?? '';
+  const suffix = scaffold?.suffix?.trim() ?? '';
+  if (mode === 'verbatim' && (prefix !== '' || suffix !== '')) {
+    // Refused, not dropped. Silently ignoring it would run a scaffolded turn's prompt
+    // through the comparison stance and report the result as if the scaffolding had been
+    // tried.
+    throw new InteractionRequestError(
+      "A scaffold was supplied in verbatim mode. Pass mode: 'scaffolded' to wrap " +
+        'the prompt, or drop the scaffold.',
+    );
+  }
+  const text =
+    prefix === '' && suffix === ''
+      ? prompt
+      : [prefix, prompt, suffix].filter((block) => block !== '').join('\n\n');
+
   // Images FIRST, then the text — the order the docs' image-to-video example uses, so the
   // instruction reads as being about the pictures above it.
+  //
+  // KEPT ON PURPOSE, and the reasoning is worth not re-deriving. That ordering does signal
+  // FIRST-FRAME semantics, which is the opposite of what a character reference wants — but
+  // the documented remedy for exactly that misreading is a sentence, not a reordering: the
+  // `[# References <IMAGE_REF_n>@ImageN]` block binds each picture to a ROLE by index, and
+  // the "should not be used as literal initial frames" boilerplate says so outright. Both
+  // now travel (video/new-video-scaffold.ts). Flipping the part order on top of them would
+  // change two variables at once in a paid A/B while resting on a guess about how the tags
+  // index the parts; if tagging turns out not to be enough, that is the next thing to try,
+  // on its own.
   const input: InteractionInputPart[] = [
     ...images.map((image): ImagePart => ({
       type: 'image',
       data: image.data.toString('base64'),
       mime_type: image.mimeType,
     })),
-    // NOT trimmed, NOT normalised, NOT wrapped in any instruction of ours. This is the line
-    // the whole experiment is measuring.
-    { type: 'text', text: prompt },
+    { type: 'text', text },
   ];
+
+  // Never alongside `previous_interaction_id` — see the field's own note. Enforced here as
+  // well as at the call site so the invariant holds for every caller by construction rather
+  // than by each one remembering it.
+  const task = previousInteractionId ? null : videoTask;
 
   return {
     model,
@@ -203,18 +323,21 @@ export function buildInteractionRequest({
     ...(previousInteractionId
       ? { previous_interaction_id: previousInteractionId }
       : {}),
-    // Delivery, plus the output shape when the officer picked one. Still no `resolution`:
-    // nothing on this surface asks for it, and an unrequested parameter is one more thing a
-    // preview model can reject.
-    ...(uriDelivery || aspectRatio
+    // Delivery, the output shape when the officer picked one, and the frame size when the lane
+    // asked for one. Each is independently optional and each is dropped on its own rung below.
+    ...(uriDelivery || aspectRatio || resolution
       ? {
           response_format: {
             type: 'video' as const,
             ...(uriDelivery ? { delivery: 'uri' as const } : {}),
             ...(aspectRatio ? { aspect_ratio: aspectRatio } : {}),
+            ...(resolution ? { resolution } : {}),
           },
         }
       : {}),
+    // Stated rather than inferred, on a first turn. A field, not a sentence: the prompt is
+    // untouched by it, the aspect-ratio precedent above.
+    ...(task ? { generation_config: { video_config: { task } } } : {}),
   };
 }
 
@@ -321,12 +444,99 @@ export function interactionErrorMessage(
 const modelsRejectingBackground = new Set<string>();
 const modelsRejectingResponseFormat = new Set<string>();
 const modelsRejectingAspectRatio = new Set<string>();
+const modelsRejectingVideoTask = new Set<string>();
+const modelsRejectingResolution = new Set<string>();
+
+/** One optional request field this client can learn a given model will not accept. */
+export type InteractionCapability =
+  'videoTask' | 'background' | 'resolution' | 'aspectRatio' | 'responseFormat';
 
 function rejectsField(error: unknown, ...needles: readonly string[]): boolean {
   if (!(error instanceof GeminiRequestError) || error.status !== 400)
     return false;
   const detail = error.detail.toLowerCase();
   return needles.some((needle) => detail.includes(needle));
+}
+
+// THE RUNGS, AND THEIR ORDER IS LOAD-BEARING TWICE OVER.
+//
+// Each rung is guarded on the BODY'S OWN FIELD, so a false needle match can only ever cost one
+// retry that then falls through the rungs below it. `videoTask` is checked first because its
+// needles are the narrowest — `generation_config` is the only container this repo sends a task
+// inside, so nothing else we put in a body can match them.
+//
+// `resolution` sits IMMEDIATELY BEFORE `aspectRatio`, and that is not tidiness. A resolution
+// rejection can read "unsupported resolution for aspect ratio 9:16", which matches the aspect
+// rung's needles as well. With the aspect rung first, such a 400 would drop the ASPECT RATIO and
+// keep the resolution — the field that matters discarded, the field that caused it kept. It goes
+// first because it is the strictly more optional of the two (the veo-client stance: silence and
+// 1080p are improvements, not requirements).
+//
+// `aspectRatio` in turn sits before `responseFormat` for the same reason: a 400 reading "unknown
+// field response_format.aspect_ratio" matches both, and taking the broader rung would drop URI
+// delivery along with the ratio for the rest of the process.
+const CAPABILITY_RUNGS: readonly Readonly<{
+  capability: InteractionCapability;
+  sent: (body: InteractionRequestBody) => boolean;
+  needles: readonly string[];
+}>[] = [
+  {
+    capability: 'videoTask',
+    sent: (body) => body.generation_config !== undefined,
+    needles: ['generation_config', 'video_config', 'task'],
+  },
+  {
+    capability: 'background',
+    sent: (body) => body.background !== undefined,
+    needles: ['background'],
+  },
+  {
+    capability: 'resolution',
+    sent: (body) => body.response_format?.resolution !== undefined,
+    needles: ['resolution'],
+  },
+  {
+    capability: 'aspectRatio',
+    sent: (body) => body.response_format?.aspect_ratio !== undefined,
+    needles: ['aspect_ratio', 'aspect ratio'],
+  },
+  {
+    capability: 'responseFormat',
+    sent: (body) => body.response_format !== undefined,
+    needles: ['response_format', 'delivery'],
+  },
+];
+
+/**
+ * Which optional field this 400 is about — the first rung whose field this body actually carried
+ * and whose wording the error matches, skipping anything already learned so the fall-through is
+ * preserved. Null means nothing here explains it and the error belongs to the caller.
+ *
+ * Pure and exported so the ORDER above can be asserted offline, with no key and no network: the
+ * ordering bug it guards against fails silently, by dropping the wrong field.
+ */
+export function rejectedCapability(
+  error: unknown,
+  body: InteractionRequestBody,
+  learned: ReadonlySet<InteractionCapability> = new Set(),
+): InteractionCapability | null {
+  for (const rung of CAPABILITY_RUNGS) {
+    if (learned.has(rung.capability)) continue;
+    if (!rung.sent(body)) continue;
+    if (rejectsField(error, ...rung.needles)) return rung.capability;
+  }
+  return null;
+}
+
+/** What this model has already been learned to refuse, as one set for the classifier. */
+function learnedFor(model: string): ReadonlySet<InteractionCapability> {
+  const learned = new Set<InteractionCapability>();
+  if (modelsRejectingVideoTask.has(model)) learned.add('videoTask');
+  if (modelsRejectingBackground.has(model)) learned.add('background');
+  if (modelsRejectingResolution.has(model)) learned.add('resolution');
+  if (modelsRejectingAspectRatio.has(model)) learned.add('aspectRatio');
+  if (modelsRejectingResponseFormat.has(model)) learned.add('responseFormat');
+  return learned;
 }
 
 function requireApiKey(): string {
@@ -361,6 +571,17 @@ export type CreateVideoInteractionInput = Readonly<{
   previousInteractionId?: string | null;
   // The shape the caller wants back. Omitted leaves the model on its own default.
   aspectRatio?: string | null;
+  // The frame size the caller wants back, e.g. '1080p'. Omitted leaves the model on its own
+  // default, which is what every caller that does not ask for one gets.
+  resolution?: string | null;
+  // Defaults to 'verbatim' in the builder; a lane that scaffolds passes its own stance and
+  // the text to wrap the prompt in.
+  mode?: InteractionPromptMode;
+  scaffold?: InteractionScaffold | null;
+  // What the model is told it is doing, on a FIRST turn only — the builder drops it when a
+  // previous interaction is being continued. Omitted leaves the task inferred, as it always
+  // was.
+  videoTask?: InteractionVideoTask | null;
 }>;
 
 // Starts the interaction. Returns as soon as the API accepts it — which, with `background`,
@@ -380,6 +601,10 @@ export async function createVideoInteraction(
       aspectRatio: modelsRejectingAspectRatio.has(model)
         ? null
         : input.aspectRatio,
+      resolution: modelsRejectingResolution.has(model)
+        ? null
+        : input.resolution,
+      videoTask: modelsRejectingVideoTask.has(model) ? null : input.videoTask,
     });
     try {
       const response = await geminiFetch('interactions', {
@@ -390,28 +615,37 @@ export async function createVideoInteraction(
       });
       return (await response.json()) as Interaction;
     } catch (error) {
-      // Learned, then retried once per capability — never a per-model table, because the id
-      // is env-overridable and a table goes stale the moment it is repointed.
-      if (
-        body.background !== undefined &&
-        rejectsField(error, 'background') &&
-        !modelsRejectingBackground.has(model)
-      ) {
+      // Learned, then retried once per capability — never a per-model table, because the id is
+      // env-overridable and a table goes stale the moment it is repointed. WHICH field a 400 is
+      // about, and in what order that is decided, lives in CAPABILITY_RUNGS above with the
+      // reasoning beside it.
+      const rejected = rejectedCapability(error, body, learnedFor(model));
+      if (rejected === 'videoTask') {
+        console.warn(
+          `[gemini-interactions] ${model} rejected \`generation_config.video_config.task\`; ` +
+            'letting the model infer the task.',
+        );
+        modelsRejectingVideoTask.add(model);
+        continue;
+      }
+      if (rejected === 'background') {
         console.warn(
           `[gemini-interactions] ${model} rejected \`background\`; awaiting the render inline.`,
         );
         modelsRejectingBackground.add(model);
         continue;
       }
-      // Checked BEFORE the response_format rung below, and that order is load-bearing: a 400
-      // reading "unknown field response_format.aspect_ratio" matches both needles, and taking
-      // the broader rung would drop URI delivery along with the ratio for the rest of the
-      // process.
-      if (
-        body.response_format?.aspect_ratio !== undefined &&
-        rejectsField(error, 'aspect_ratio', 'aspect ratio') &&
-        !modelsRejectingAspectRatio.has(model)
-      ) {
+      if (rejected === 'resolution') {
+        // THE LINE TO LOOK FOR when a Dynamic Poster still comes back small: it says the frame
+        // size was asked for and refused, which is a different answer from never asking.
+        console.warn(
+          `[gemini-interactions] ${model} rejected \`resolution\`; rendering at the model's ` +
+            'own default frame size.',
+        );
+        modelsRejectingResolution.add(model);
+        continue;
+      }
+      if (rejected === 'aspectRatio') {
         console.warn(
           `[gemini-interactions] ${model} rejected \`aspect_ratio\`; rendering at the ` +
             "model's own default shape.",
@@ -419,11 +653,7 @@ export async function createVideoInteraction(
         modelsRejectingAspectRatio.add(model);
         continue;
       }
-      if (
-        body.response_format !== undefined &&
-        rejectsField(error, 'response_format', 'delivery') &&
-        !modelsRejectingResponseFormat.has(model)
-      ) {
+      if (rejected === 'responseFormat') {
         console.warn(
           `[gemini-interactions] ${model} rejected \`response_format\`; falling back to ` +
             'inline video delivery.',

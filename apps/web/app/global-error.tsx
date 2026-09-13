@@ -38,8 +38,11 @@ export default function GlobalError({
           alignItems: 'center',
           justifyContent: 'center',
           padding: 24,
-          background: '#f4eee5',
-          color: '#2b2320',
+          // The palette's literals, not its tokens: this page gets no stylesheet,
+          // so --bg and --text do not exist here. Keep them in step with the
+          // :root block in app/dgipr.css by hand — there is no other way.
+          background: '#eef1f3',
+          color: '#303b42',
           fontFamily:
             "'Mukta', 'Nirmala UI', 'Noto Sans Devanagari', system-ui, sans-serif",
           fontSize: 18,
@@ -51,12 +54,12 @@ export default function GlobalError({
           style={{
             maxWidth: 520,
             width: '100%',
-            background: '#fff',
-            border: '1px solid rgba(0, 0, 0, 0.12)',
+            background: '#f7f9fa',
+            border: '1px solid rgba(47, 69, 80, 0.18)',
             borderRadius: 12,
             padding: '28px 24px',
             textAlign: 'center',
-            boxShadow: '0 2px 10px rgba(0, 0, 0, 0.08)',
+            boxShadow: '0 2px 10px rgba(17, 48, 59, 0.12)',
           }}
         >
           <h1 style={{ margin: '0 0 12px', fontSize: '1.4rem' }}>
@@ -70,7 +73,7 @@ export default function GlobalError({
               font: 'inherit',
               fontWeight: 700,
               color: '#fff',
-              background: '#9f1d20',
+              background: '#23866b',
               border: 'none',
               borderRadius: 10,
               // Keeps the product's 56px primary-button target: this is the one

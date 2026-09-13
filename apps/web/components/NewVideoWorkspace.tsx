@@ -121,6 +121,12 @@ export function NewVideoWorkspace({
         sending={workflow.sending}
         busy={workflow.busy}
         error={workflow.error}
+        characters={workflow.characters}
+        castIds={workflow.castIds}
+        castLocked={workflow.castLocked}
+        onCastIdsChange={workflow.setCastIds}
+        forkFromTurnId={workflow.forkFromTurnId}
+        onForkFromTurnIdChange={workflow.setForkFromTurnId}
         {...(workflow.conversationId
           ? { onRetry: () => void workflow.refresh() }
           : {})}

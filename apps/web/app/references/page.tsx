@@ -68,8 +68,7 @@ import {
 import { STR } from '../../lib/strings';
 import { errorMessage } from '../../lib/errorMessage';
 import { ErrorNotice } from '../../components/ErrorNotice';
-import { PageBackdrop } from '../../components/common/PageBackdrop';
-import { TEMPLATE_DOODLES } from '../../lib/doodleMarks';
+import { PageShell } from '../../components/common/PageShell';
 
 const ACCEPTED_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 // A band opens on one row and grows by this many rows per press.
@@ -714,29 +713,21 @@ export default function ReferencesPage() {
   };
 
   return (
-    <main className="page">
-      {/* Wallpaper for this lane: what an officer keeps here is the library a poster is
-          laid out from. The marks are decorative only, and the vocabulary lives beside
-          the other lanes’ in lib/doodleMarks.ts. */}
-      <PageBackdrop marks={TEMPLATE_DOODLES} seed={41} />
-
-      <header className="page-head">
-        <div className="page-head-text">
-          <h1 className="page-title">{STR.refTitle}</h1>
-          <p className="page-sub">{STR.refIntro}</p>
-        </div>
-        <div className="page-head-actions">
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={() => setAdding((open) => !open)}
-          >
-            <Plus size={18} strokeWidth={2.25} aria-hidden="true" />
-            {STR.refAddOpen}
-          </button>
-        </div>
-      </header>
-
+    <PageShell
+      background="references"
+      title={STR.refTitle}
+      subtitle={STR.refIntro}
+      actions={
+        <button
+          type="button"
+          className="btn btn-primary"
+          onClick={() => setAdding((open) => !open)}
+        >
+          <Plus size={18} strokeWidth={2.25} aria-hidden="true" />
+          {STR.refAddOpen}
+        </button>
+      }
+    >
       {error ? (
         <ErrorNotice
           message={error}
@@ -862,6 +853,6 @@ export default function ReferencesPage() {
           <p>{STR.refEmpty}</p>
         </div>
       ) : null}
-    </main>
+    </PageShell>
   );
 }

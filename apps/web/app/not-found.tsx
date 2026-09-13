@@ -6,10 +6,11 @@
 import Link from 'next/link';
 import { Home, SearchX } from 'lucide-react';
 import { STR } from '../lib/strings';
+import { PageShell } from '../components/common/PageShell';
 
 export default function NotFound() {
   return (
-    <main className="page">
+    <PageShell background="default">
       <section className="card crash-card">
         <SearchX
           className="crash-icon"
@@ -26,6 +27,6 @@ export default function NotFound() {
           </Link>
         </div>
       </section>
-    </main>
+    </PageShell>
   );
 }

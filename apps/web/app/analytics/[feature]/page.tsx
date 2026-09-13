@@ -47,8 +47,7 @@ import {
   analyticsRateLine,
   STR,
 } from '../../../lib/strings';
-import { PageBackdrop } from '../../../components/common/PageBackdrop';
-import { ANALYTICS_DOODLES } from '../../../lib/doodleMarks';
+import { PageShell } from '../../../components/common/PageShell';
 
 function FeaturePageBody() {
   const router = useRouter();
@@ -75,29 +74,23 @@ function FeaturePageBody() {
   );
 
   return (
-    <main className="page">
-      {/* The landing page’s wallpaper, unchanged — a drill-down is the same lane, so
-          the same marks in the same arrangement carry through it. */}
-      <PageBackdrop marks={ANALYTICS_DOODLES} seed={47} />
-
-      <Link href={`/analytics?range=${range}`} className="back-link">
-        <ArrowLeft size={18} aria-hidden="true" />
-        {STR.analyticsBack}
-      </Link>
-
-      <header className="page-head">
-        <div className="page-head-text">
-          <h1 className="page-title">{ANALYTICS_FEATURE_LABELS[key]}</h1>
-        </div>
-        <div className="page-head-actions">
-          <AnalyticsRangePicker
-            value={range}
-            onChange={setRange}
-            busy={loading}
-          />
-        </div>
-      </header>
-
+    <PageShell
+      background="analytics"
+      title={ANALYTICS_FEATURE_LABELS[key]}
+      actions={
+        <AnalyticsRangePicker
+          value={range}
+          onChange={setRange}
+          busy={loading}
+        />
+      }
+      breadcrumb={
+        <Link href={`/analytics?range=${range}`} className="back-link">
+          <ArrowLeft size={18} aria-hidden="true" />
+          {STR.analyticsBack}
+        </Link>
+      }
+    >
       {error ? (
         <ErrorNotice
           message={error}
@@ -251,13 +244,13 @@ function FeaturePageBody() {
           </Link>
         </>
       ) : null}
-    </main>
+    </PageShell>
   );
 }
 
 export default function AnalyticsFeaturePage() {
   return (
-    <Suspense fallback={<main className="page" />}>
+    <Suspense fallback={<PageShell background="analytics" />}>
       <FeaturePageBody />
     </Suspense>
   );

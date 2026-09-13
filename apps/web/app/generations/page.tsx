@@ -26,8 +26,7 @@ import {
 } from '../../components/HistoryCard';
 import { ErrorNotice } from '../../components/ErrorNotice';
 import { Pagination } from '../../components/Pagination';
-import { PageBackdrop } from '../../components/common/PageBackdrop';
-import { HISTORY_DOODLES } from '../../lib/doodleMarks';
+import { PageShell } from '../../components/common/PageShell';
 
 const PAGE_SIZE = 9;
 
@@ -379,24 +378,16 @@ function HistoryPageBody() {
   const showStatusFacet = statusOptions.length > 1;
 
   return (
-    <main className="page">
-      {/* Wallpaper for this lane: what an officer finds here is everything the
-          department has already made. The marks are decorative only, and the vocabulary
-          lives beside the other lanes’ in lib/doodleMarks.ts. */}
-      <PageBackdrop marks={HISTORY_DOODLES} seed={43} />
-
-      <header className="page-head">
-        <div className="page-head-text">
-          <h1 className="page-title">{STR.historyTitle}</h1>
-          <p className="page-sub">{STR.historyIntro}</p>
-        </div>
-        <div className="page-head-actions">
-          <Link href="/" className="btn btn-small">
-            {STR.historyNew}
-          </Link>
-        </div>
-      </header>
-
+    <PageShell
+      background="generations"
+      title={STR.historyTitle}
+      subtitle={STR.historyIntro}
+      actions={
+        <Link href="/" className="btn btn-small">
+          {STR.historyNew}
+        </Link>
+      }
+    >
       {error ? (
         <ErrorNotice
           message={error}
@@ -498,14 +489,14 @@ function HistoryPageBody() {
       {pageCount > 1 ? (
         <Pagination page={safePage} pageCount={pageCount} onChange={setPage} />
       ) : null}
-    </main>
+    </PageShell>
   );
 }
 
 // useSearchParams needs a suspense boundary in the app router.
 export default function HistoryPage() {
   return (
-    <Suspense fallback={<main className="page" />}>
+    <Suspense fallback={<PageShell background="generations" />}>
       <HistoryPageBody />
     </Suspense>
   );

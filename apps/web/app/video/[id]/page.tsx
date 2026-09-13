@@ -57,8 +57,7 @@ import { VideoSceneCard } from '../../../components/VideoSceneCard';
 import { InlineEditableField } from '../../../components/InlineEditableField';
 import { VideoStatusChip } from '../../../components/VideoStatusChip';
 import { VideoResultView } from '../../../components/VideoResultView';
-import { PageBackdrop } from '../../../components/common/PageBackdrop';
-import { VIDEO_DOODLES } from '../../../lib/doodleMarks';
+import { PageShell } from '../../../components/common/PageShell';
 
 type SceneDraft = {
   // React's key, and it must NOT be the array position. With key={index},
@@ -328,31 +327,26 @@ export default function VideoProjectPage({
   // clips already paid for are all still on the row.
   if (error && !detail) {
     return (
-      <main className="page">
-        {/* The lane’s wallpaper, carried onto the project workspace — including the
-            loading and error branches, so the ground does not change while the page
-            settles. */}
-        <PageBackdrop marks={VIDEO_DOODLES} seed={53} />
-
+      /* The lane's ground is carried onto the project workspace — including the
+         loading and error branches, so it does not change while the page settles. */
+      <PageShell background="video">
         <ErrorNotice
           message={error}
           onRetry={() => void refresh()}
           fallback={STR.videoLoadFailed}
         />
-      </main>
+      </PageShell>
     );
   }
   if (!detail) {
     return (
-      <main className="page">
-        <PageBackdrop marks={VIDEO_DOODLES} seed={53} />
-
+      <PageShell background="video">
         <section className="card">
           <div className="dlo-processing">
             <span className="spinner spinner-lg" aria-hidden="true" />
           </div>
         </section>
-      </main>
+      </PageShell>
     );
   }
 
@@ -717,14 +711,11 @@ export default function VideoProjectPage({
     });
 
   return (
-    <main className="page">
-      <PageBackdrop marks={VIDEO_DOODLES} seed={53} />
-
-      <div className="article-head">
-        <h1 className="page-title">{detail.title ?? STR.videoTitle}</h1>
-        <VideoStatusChip status={detail.status} />
-      </div>
-
+    <PageShell
+      background="video"
+      title={detail.title ?? STR.videoTitle}
+      statusChip={<VideoStatusChip status={detail.status} />}
+    >
       {detail.status === 'scripting' ||
       detail.status === 'storyboarding' ||
       (detail.status === 'animating' && !reRendering) ? (
@@ -1306,6 +1297,6 @@ export default function VideoProjectPage({
           />
         </section>
       ) : null}
-    </main>
+    </PageShell>
   );
 }

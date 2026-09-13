@@ -3111,6 +3111,632 @@ client id/secret — see the milestone below.
 
 ## Latest Implementation Milestone
 
+- **A Dynamic Poster keeps the officer's OWN Devanagari** (2026-09-12, migration 0055, no n8n;
+  Phase 2 of `~/.claude/plans/warm-doodling-diffie.md`, on Phase 1 below): Phase 1 bought the
+  render more pixels to garble. This stops it garbling them. The officer marks the one rectangle
+  that should MOVE, and everything outside it is composited back over every frame from the poster
+  they uploaded — so the letterforms in the finished clip are their own glyphs rather than a
+  video model's redrawing of them.
+  - **THE ROOT CAUSE IS ABSOLUTE AND UNARGUABLE, so it is worked around rather than asked about.**
+    A video model repaints every pixel of every frame; it does not preserve text, it redraws it.
+    `MOTION_BRIEF` already says the text must remain unchanged and `crop-video.ts` records that a
+    stronger sentence was tried on this lane once and ignored. This is the house move for exactly
+    that situation — Chromium typesets the posters rather than a model spelling Devanagari,
+    `/video` burns its Marathi key points on with ffmpeg *after* the clip renders,
+    `extendCanvasForFooter` adds the branding band rather than asking for space. Instruct, then
+    guarantee.
+  - **"BYTE-IDENTICAL" WAS THE PLAN'S CLAIM AND IT IS NOT ACHIEVABLE — do not restore it.** The
+    composited frame is still encoded as h.264 at crf 20 in yuv420p, and both the codec and the
+    RGB→YUV 4:2:0→RGB round trip are lossy. Measured on a real encoded clip: a frozen pixel comes
+    back within **3 levels out of 255** (mean 0.33) of its source, while a pixel inside the hole
+    differs by mean 84 / max 225 — a ~64x separation, which is what the harness thresholds sit
+    between. What IS exact is the SHAPING: every matra, conjunct and anusvara is the officer's own
+    glyph geometry, which is the whole of the difference between legible and garbled. Claim that,
+    not equality. The harness would otherwise have had to be weakened later under pressure.
+  - **THE ALPHA IS BUILT AS RAW BYTES AND JOINED — and the plan's own recommended one-liner is a
+    silent defect.** `sharp(png).removeAlpha().joinChannel(alpha).png()` returns a **THREE**-channel
+    PNG: the joined channel is discarded with no error and no warning, because sharp resolves
+    joinChannel against the pipeline's input rather than against removeAlpha's output. Every pixel
+    then reads alpha 255 — the whole poster frozen, a clip that plays perfectly and does not move.
+    Caught by the new harness on its first run; the fix is to decode to raw RGB first, so
+    joinChannel has three real channels to attach a fourth to. `source-overlay.ts`.
+  - **The ramp is separable and combined with MAX, not min.** Inside the hole both axis factors
+    are 0 and the overlay must be transparent; directly beside it the horizontal distance is
+    positive while the vertical one is still 0, and that pixel is frozen artwork — `min` there
+    leaves the whole band beside the hole transparent, which is the inverted mask wearing a
+    different hat. Max of two monotone ramps is the Chebyshev ramp: square-cornered, invisible at
+    these radii, O(W+H) of `Math` instead of O(W*H) of `hypot`.
+  - **Feather = 0.025 of the short edge, floored at 8px, DERIVED not picked**: the model's own
+    positional drift measures ~17px on a 720x1280 frame, which is ~30px on a 1280x1600 canvas, and
+    `0.025 * 1280 = 32` covers it. The feather is the only thing between that drift and a hard
+    seam. **Alpha is 0 strictly INSIDE the officer's rectangle** and ramps outward, so the feather
+    eats only into frozen artwork — shrinking their rectangle to make room would betray the
+    gesture, invisibly, by half-freezing the thing they asked to move.
+  - **ONE ffmpeg PASS: crop, scale, overlay, encode.** `encodeCrop` gains an optional `scale`
+    (`scale=w:h:flags=lanczos,setsar=1`, matching `motion-gif.ts` and `assemble.ts`) rather than a
+    second run, which would spend two libx264 generations over exactly the small Devanagari being
+    saved. A **stretch guard** throws before the exec if the scale would change the shape by more
+    than `ASPECT_TOLERANCE` — a 2% squash of Devanagari reads as a font choice rather than a
+    defect, so it would ship.
+  - **THE NO-OP SHORTCUT MUST NOT FIRE WITH AN OVERLAY PENDING**, and post-Phase-1 that is the
+    NORMAL case: `cropVideoToAspect` returns the input untouched when the ratio already matches,
+    which here would skip the restore and report success — text still garbled, nothing in the log,
+    a job that says it worked. `restoreSourceOverClip` has no such shortcut, the way
+    `cropVideoToRect` already refuses one whenever it has chrome to stamp. Asserted.
+  - **The looped still is inherited verbatim** (`-loop 1`, `-framerate 25`, `-t duration+2`). A PNG
+    passed as a plain `-i` is a ONE-FRAME stream and `shortest=1` ends the whole graph on it: right
+    duration, right size, audio present, frozen on frame 1. This file has shipped that bug once.
+    The harness therefore counts frames AND samples a LATE frame, since a still composited only at
+    the start passes every other check.
+  - **`framed.width/height`, NEVER `normalizeSourceImage`'s.** That function returns the officer's
+    PRE-BOUND dimensions beside bytes whose long edge it capped at 2048, so a 4000px export would
+    be mis-scaled 1.95x — plausible in a thumbnail, obvious only against the text it was meant to
+    save. `buildFrozenSourceOverlay` re-measures the bytes and refuses a mismatch.
+  - **OPT-IN, AND THE RECTANGLE IS ITS OWN TOGGLE — no separate boolean.** With no region there is
+    no defensible default: a full-frame hole composites nothing and costs an encode, a default
+    centre box invents intent, and a default full-frame FREEZE replaces the clip with a still.
+    `motion_region IS NULL` ⇒ the restore does not run and the lane behaves exactly as before,
+    which is also what keeps Phase 1 measurable on its own. `isWholeClipCrop` folds a
+    marks-everything rectangle back into that same path.
+  - **Migration 0055 is one additive nullable jsonb column on the ROW**, not a job parameter:
+    `renderAndStoreMotion` re-reads the row on every render and a follow-up regenerates the prompt,
+    so a region held only in the create request would be lost on the first follow-up — and it is
+    what makes the retry button reproduce the same hole. `insertGeneration` **spreads** it
+    omit-unless-set: PostgREST refuses an insert NAMING a missing column, so writing it
+    unconditionally would fail every create on every lane, where omitting confines an un-applied
+    0055 to a Dynamic Poster create that actually carries a region. Parsed, not cast, at the job —
+    this field points a paid render's encode at a rectangle.
+  - **Best effort, loudly.** A restore failure is a correction on the way out of a *paid* render,
+    the `cropRenderedClip` stance: it logs and stores the un-restored clip rather than losing one.
+  - **`MotionRegionSchema` is an ALIAS of `MotionCropSchema`**, so `MotionCropBox` is reused with
+    no prop changes (`aspect={null}` — a region is free-form) and a second validator cannot drift.
+    What differs is meaning — a trim is a CUT, a region is a HOLE — and that lives in the comments,
+    the 0055 column comment and the Marathi copy, whose hint states both halves because "only the
+    marked part moves, everything else stays as uploaded" is the one thing the officer cannot
+    otherwise know.
+  Verified 2026-09-12, all free: workspace typecheck **7/7 green**, the complete production build
+  green, eslint clean on all 11 touched files, `git diff --check` clean; prettier clean on every
+  hunk of mine (the four whole-file complaints are pre-existing — `MotionComposer.tsx`'s `<p>` is
+  byte-identical at HEAD, and `generations.ts`/`routes/generations.ts` fail at lines 445/687/750
+  and 1223, none of them mine — so do NOT `--write` them). New
+  `npx tsx src/video/source-overlay.ts` at **17/17** (corner and hole-centre alpha, which together
+  are what rule out an inverted mask; nothing inside the marked rectangle even partially frozen;
+  a monotone in-range feather; RGB byte-identical under every opaque pixel, which is the one place
+  equality IS the right assertion since no codec sits between; every guard, including the
+  pre-bound-dimension mistake). `video:check:crop` extended and green, each case measured out of a
+  real encoded file: the scale is exact and does not stretch; **the clip still moves**
+  (frame counts equal — a full-frame overlay is the likeliest thing here to freeze a clip, and
+  every size assertion passes when it does); outside the hole is the poster on an early AND a late
+  frame; inside the hole is the video; top-left alignment; the stretch guard refusing before an
+  encode; and the no-op shortcut not firing. `aspect-fit`, `motion-prompt` and the 32-test
+  interactions suite unchanged and green.
+  **Left for a real run** (0055 applied + model spend): the officer's own check — mark the
+  photograph area on the reported सर्पदंश poster, confirm every white card's Devanagari matches the
+  upload and that there is no visible seam at the hole edge. **Deploy: 0055 → `@dgipr/schemas` →
+  `@dgipr/database` → `@dgipr/poster-renderer` dists → API + web, shipped together** (the region is
+  one contract across the create request, the row and the job). No n8n, no new env.
+
+- **A Dynamic Poster asks for its frame SIZE, and the returned size is now observable**
+  (2026-09-12, no migration, no web, no n8n; Phase 1 of
+  `~/.claude/plans/warm-doodling-diffie.md`): the lane's reported defect is garbled Marathi —
+  worst on the small card text of the सर्पदंश poster, clean on the headline. Three compounding
+  causes, measured rather than guessed, and only the first is the model's:
+  - **A video model REPAINTS every pixel of every frame.** It does not preserve the officer's
+    Devanagari, it redraws it. That is the root cause and it is absolute — the whole repo is
+    built on never letting a model render Devanagari (Chromium typesets the posters; /video
+    burns its Marathi key points on with ffmpeg AFTER the clip renders, under a `NO_TEXT_RULE`
+    forbidding painted words), and this lane is the one place that opts out. **Prompt wording
+    cannot fix it**: `MOTION_BRIEF` already says the text must remain unchanged, and
+    `crop-video.ts` records that a stronger sentence was tried here once and ignored. Phase 2 is
+    what makes the text byte-identical, by compositing the officer's own poster back over every
+    frame with a hole where the motion shows through.
+  - **~68% of the poster's pixels were gone before the model drew anything.** gemini-omni
+    returns 720x1280 whatever it is given and OUTPAINTS a 4:5 poster, so the trace for a
+    1280x1600 upload at the default aspect ran: pad (no-op) → render 720x1280 →
+    `cropVideoToAspect` to **720x900**, which never scales → `mp4ToGif` to **576x720**. That is
+    0.5625 linear in the MP4 (32% of the pixels) and 0.45 in the GIF (20%). A ~26px card line
+    arrives at ~15px and ~12px; a matra is a fifth of that, i.e. **2-3 pixels**, redrawn by a
+    model and then put through crf 20 and a 192-colour quantisation. Which is exactly why the
+    headline survives and the card text does not.
+  - **The lane threw away the two request fields that would have helped.** It passed neither
+    `aspectRatio` nor any resolution, so the model rendered at its own default shape and
+    outpainted — while the client's own comment said *"Still no `resolution`: nothing on this
+    surface asks for it."* **A comment that contradicts what the code should be doing is this
+    repo's own definition of a silent defect**, and it is deleted in the same commit.
+  What Phase 1 changes, all of it cheap and none of it a promise about the text:
+  - **`resolution` is a REQUEST FIELD inside `response_format`**, beside `delivery` and
+    `aspect_ratio`, from `motionResolutionSetting()` (`GEMINI_VIDEO_RESOLUTION`, default
+    `1080p`, `default`/`none` to send nothing — the one-line rollback). Read in ONE place, the
+    Dynamic Poster job, because it is that lane's decision: **/new-video-workflow passes nothing
+    and is byte-for-byte unchanged**. A field and not a sentence — the brief once carried a pixel
+    size and it was the one thing the render could never honour (the 2026-09-03 milestone), so a
+    resolution sentence must never come back; the motion-prompt harness asserts it has not.
+  - **A fifth ladder rung, and its POSITION is load-bearing.** It sits IMMEDIATELY BEFORE the
+    `aspect_ratio` rung because a resolution rejection can read *"unsupported resolution for
+    aspect ratio 9:16"*, which matches the aspect rung's needles too — with aspect first, that
+    400 would drop the ASPECT RATIO and keep the resolution, discarding the field that matters,
+    keeping the field that caused it, and undoing Phase 1 silently. Resolution goes first because
+    it is the strictly more optional of the two (the veo-client stance). To make that order
+    assertable without a key or a network — the ordering bug fails by dropping the *wrong* field,
+    so nothing else would catch it — the five rungs became a table and the matcher a pure
+    exported `rejectedCapability(error, body, learned)`; the loop keeps its five per-model Sets
+    and its warn-per-capability wording, including the `rejected 'resolution'` line that is
+    what to look for when a poster still comes back small.
+  - **`snapMotionAspect` snaps the poster's own ratio to a label the wire can carry**
+    (`MOTION_REQUEST_ASPECTS`, 8% tolerance, `@dgipr/schemas`). `aspectRatioLabel` may emit
+    anything — a 1237x1600 scan reads `15:19` — and a 400 on `aspect_ratio` is cached against
+    the model for the LIFE OF THE PROCESS, so one odd poster would strip the aspect ratio from
+    every later render in that worker: the field working for nobody because it was asked for
+    badly once. **NULL is a full answer** and means "send no label, pad to the poster's own
+    ratio", i.e. today's behaviour byte for byte — which is what a 1:3 banner gets, and the
+    assertion that protects the rung. 1280x1600 snaps exactly to `4:5` with zero padding, so the
+    common case is free. **Corrected against the plan by measurement: 1237x1600 snaps to `3:4`
+    (0.773 is 3.1% off 0.750 and 3.4% off 0.800), not to the 4:5 it looks like** — the harness
+    asserts the nearest listed label and the byte-identical extraction either side of it, rather
+    than a guessed name.
+  - **`VideoCrop` reports `source: {width, height}`** — the probed size of the clip that came in
+    — and the lane logs it UNCONDITIONALLY: `gemini returned <w>x<h>; stored <w>x<h>
+    (cropped|as returned)`. It used to speak only inside `if (crop.cropped)`, so a 9:16 render —
+    the case where the officer's text is being lost — logged **nothing at all**. This one line is
+    how anyone tells whether Phase 1 worked.
+  - **`GIF_LONG_EDGE` 720 → 1080**, as the constant, since `mp4ToGif` has one production caller.
+    The byte cost is MEASURED, not estimated: 2.25x the pixels is **2.00x the file** (0.46 →
+    0.91 MB on a poster-shaped 5-second clip), because the palette and the inter-frame redundancy
+    do not scale with the frame. 12fps and the 192-colour `sierra2_4a` palette are unchanged —
+    that reasoning is about Devanagari edge crawl and does not depend on size.
+  Verified 2026-09-12, all free: workspace typecheck **7/7 green**, all three dists rebuilt,
+  eslint clean and prettier clean on every one of the seven touched files (the four real
+  complaints were mine and are fixed; `crop-video.ts` and `motion-gif.ts` report CRLF alone —
+  proved by diffing prettier's own output against the CR-stripped content — so do NOT `--write`
+  them), `git diff --check` clean. The interactions suite is at **32/32** (28 before, plus the
+  field's own invariants, the resolution-only 400, **the both-fields 400 that proves the
+  ordering**, and the fall-through once resolution is learned); `npx tsx src/aspect-fit.ts` gains
+  the snap cases including the banner that must snap to nothing; `video:check:crop` gains the
+  `source` report on all four paths plus the check that it is the SOURCE and not the output
+  echoed back; and the motion-prompt, scaffold, task, authoring and clip-provider harnesses are
+  unchanged and green.
+  **Left for a real run, and it is the measurement this phase exists to produce:** one Dynamic
+  Poster on the reported सर्पदंश poster, then READ THE NEW LOG LINE. `gemini returned 1080x1350`
+  (or anything above 720x900) means the field landed; still `720x1280` means the ladder refused
+  it, and the API log's `rejected 'resolution'` warning is the answer — at which point
+  padding the source to the model's native 9:16 becomes the live contingency. Phase 1 alone
+  should take the small card text from garbled to legible; **it cannot make it exact**, which is
+  Phase 2's job. Deploy: `@dgipr/schemas` → `@dgipr/poster-renderer` → `@dgipr/content-engine`
+  dists → restart API. No migration, no web, no n8n. New env (optional):
+  `GEMINI_VIDEO_RESOLUTION`.
+
+- **/new-video-workflow writes the Omni prompt from the officer's intent** (2026-09-12, no
+  migration, no n8n, no web change; Step 5 and the last of
+  `~/.claude/plans/video-is-not-following-scalable-wilkinson.md`, on Steps 1-4 below): Steps 1-3
+  put blocks AROUND the officer's prompt from a count, a boolean and registry rows — which is
+  what made them pure, free to verify and impossible to get wrong on Marathi. Two of the
+  documented remedies cannot be expressed that way, because they are about the SENTENCE, so
+  this is the first thing on the lane that reads the prompt.
+  - **The two it exists for.** Omni burns a spoken line onto the screen as a subtitle when it
+    is QUOTED; the documented form is `Name says: line` with no quotation marks — which is the
+    "adding or removing text does not work" complaint, and the exact opposite of Veo 3's
+    guidance, so Veo-era instinct gets it wrong. And **a blind quote-stripper would be actively
+    wrong on this product's input**: Marathi press-note prose marks a SCHEME NAME with ‘…’
+    (‘भारत टॅक्सी’), so a regex aimed at dialogue mangles the one string that must survive
+    verbatim. Step 1 refused the regex and named this pass as where the remedy belongs; a model
+    with the whole sentence in front of it can tell the two apart, a pattern match cannot.
+  - **IT WRITES THE MIDDLE AND NOTHING ELSE**, and that division is what keeps the step safe.
+    `video/new-video-prompt.ts` produces the instruction; `new-video-scaffold.ts` still composes
+    the reference declaration, the character block with its voices, the on-screen-text rule and
+    the edit discipline around it, unchanged. Three things are deliberately never handed to a
+    model: the `<IMAGE_REF_n>` tags are ARITHMETIC over the image parts the job is about to
+    send, and a miscount binds a picture to the wrong person while looking exactly like the
+    model ignoring a reference; a VOICE DESCRIPTION must be verbatim, since this model cannot
+    edit a voice at all, so a paraphrase is a defect nothing can repair; and the rules are the
+    platform's constants, which a model can drop. A `WHAT IS ADDED AROUND YOUR TEXT` block names
+    all of them — without it the pass helpfully writes its own declaration and its own "keep
+    everything else the same", and the turn arrives carrying each twice.
+  - **BEST-EFFORT, NEVER A GATE.** A failure falls back to the officer's own words, which IS the
+    known-good `scaffolded` turn, so the worst case of this step is the behaviour of the step
+    before it. That is the opposite call from the client's refusal of a scaffold under
+    `verbatim`, and the difference is whether the silence could misreport an A/B: here it cannot,
+    because the job's log line says which text was actually sent. The parser is tolerant of a
+    fenced or bare answer for the `motion-prompt.ts` reason, with ONE departure — an answer in
+    the right shape with a blank `prompt` throws instead of falling through to the raw text,
+    since sending a fragment of JSON to the video model is strictly worse than the officer's
+    own sentence.
+  - **`authored` is a stance of the LANE, not of the client** (`NewVideoPromptMode`, a third
+    value beside `scaffolded`/`verbatim`; `interactionModeFor` maps it down). The client's mode
+    has only ever meant "does the builder add text", and an authored turn is still wrapped in
+    exactly the same blocks — the same reason the Dynamic Poster lane, whose prompt is written by
+    an LLM pass of its own, is correctly `verbatim` there.
+  - **IT IS NOT THE DEFAULT, deliberately.** It is the only stance in which the officer's own
+    sentence is not what reaches the model, and it adds a paid call to every turn. Nothing in
+    Steps 1-4 has been proven on a real render yet, so switching this on at the same time would
+    make the first honest comparison unattributable — which is the whole reason `verbatim` was
+    kept in the first place. `NEW_VIDEO_PROMPT_MODE=authored` is the one-line flip, and the
+    comparison to run is one note through `scaffolded` and `authored` back to back.
+  - **The authored prompt is LOGGED, not stored**, so a reopened conversation shows the
+    officer's own words (which is what they typed and what names the conversation). Storing it
+    would mean a column named in `TURN_COLUMNS`, read on every poll — so an un-applied migration
+    would take the page down, the blast radius Step 4 declined for the same reason. The named
+    follow-up if the authored text ever needs to explain itself on screen.
+  - Runs on `ARTICLE_MODEL`'s tier — `OPENAI_NEW_VIDEO_PROMPT_MODEL` (gpt-5.6-sol) at high
+    effort — because nothing re-checks it and the video model sees only what it wrote. Not
+    metered: this lane has no cost scope, which is a pre-existing gap rather than one introduced
+    here.
+  Verified 2026-09-12, all free: workspace typecheck **7/7 green**, eslint clean and prettier
+  clean on every touched file, `git diff --check` clean; the new
+  `npx tsx src/video/new-video-prompt.ts` at **33/33**, `new-video-prompt-mode` at 7/7 (4 before),
+  the interactions suite at **28/28** (27 before, plus a seam test that composes one real request
+  and asserts the authored text is the middle while each scaffold block appears EXACTLY ONCE —
+  the check that catches the pass writing its own), and `new-video-scaffold` (37),
+  `new-video-task` (7), `video-prompts`, `clip-provider` and the job registry check (63) all
+  unchanged and green. A composed authoring request was printed and read by eye. **Nothing paid
+  was run, and the paid proof is the same one Steps 1-4 still owe**: four turns with a tagged
+  portrait, confirming the character and voice hold, and an add/remove-text turn doing what was
+  asked without burning in subtitles — now with `authored` and `scaffolded` compared on the same
+  note. Deploy is `@dgipr/content-engine` dist → API. New env, all optional:
+  `NEW_VIDEO_PROMPT_MODE=authored`, `OPENAI_NEW_VIDEO_PROMPT_MODEL`,
+  `OPENAI_NEW_VIDEO_PROMPT_REASONING_EFFORT`.
+
+- **/new-video-workflow can carry on from an OLDER video** (2026-09-12, no migration, no n8n,
+  Step 4 of `~/.claude/plans/video-is-not-following-scalable-wilkinson.md`, on the registry from
+  [[new-video-character-registry-step-3]]): a long chain of edits drifts — independent testing
+  reports characters coming apart by turn 5, with turn 4 the reliable editing ceiling, and the
+  model card lists consistency-through-edits as an open limitation — while we allow
+  `MAX_TURNS_PER_CONVERSATION = 60`. The API's own answer is to reference an OLDER interaction
+  id with a new prompt, and every turn has stored the interaction that produced it since 0050,
+  so the whole feature is choosing which one the next instruction continues from. A button
+  under each finished video arms it; the composer then says which video the words about to be
+  typed will apply to.
+  - **BE CLEAR WHAT THIS IS AND IS NOT FOR.** The officers' reported complaint was characters
+    drifting *"when chats are switched"*, and that is **Step 3's** job, not this one — a new
+    chat in the Gemini app carries nothing over, so what reproduces its good case is a registry
+    a fresh conversation is re-seeded from. This solves the narrower problem the plan named:
+    drift *within* one conversation that has already run long. The plan rates it optional for
+    that reason, and nothing here changes the ordinary turn — verified, an unforked request is
+    byte-for-byte what it has always been.
+  - **A FORK IS NAMED BY A TURN ID, NEVER AN INTERACTION ID.** The provider handle not crossing
+    the boundary is the rule this whole surface is built on, so the browser names a turn it can
+    see and the route resolves it. `resolveForkPoint` is pure and resolves against the turns of
+    THAT conversation, out of the list the route has already fetched — no extra query, and its
+    two ways of being wrong are both silent: another conversation's turn would edit a video the
+    officer is not looking at, and an unfinished one would continue from a render that has no
+    video yet. The dangerous case is the first, because it is a real turn with a real
+    interaction behind it and nothing but the conversation filter stops it.
+  - **IT CHECKS THE STATUS *AND* THE INTERACTION ID, and the second half is not
+    belt-and-braces:** the job records an interaction id BEFORE it waits for the render, so a
+    turn that is still generating already has one with nothing behind it. The two refusals are
+    told apart (`unknown` / `unfinished`) because the officer's next action differs — re-open
+    the page, versus wait.
+  - **The job's re-read of the chain point is OVERRIDDEN, deliberately.** That re-read exists so
+    a turn queued while an earlier one was still generating continues from whatever that one
+    produced; left in front of a fork it would faithfully undo the one thing the officer asked
+    for. Everything downstream keys off the RESULT rather than off how it was chosen, so
+    `isEdit` stays true automatically — the cast's portraits are not re-attached (the character
+    is already in the older video) and no `task` field is sent (it breaks edit chains). Neither
+    needed a line of its own.
+  - **A FORK IS NO EXCEPTION TO THE CHAIN RULE.** A fork that succeeds becomes the chain point,
+    so the next plain instruction edits what it produced — the officer went back, made a change,
+    and is on that branch now. Leaving the chain on the abandoned turn would make every
+    subsequent edit silently ignore the fork, which is the drift they were escaping.
+  - **The web DERIVES where the box already points** rather than being told: only a completed
+    turn advances the chain point and this surface renders one generation at a time, so the last
+    completed turn in the list IS it. That derivation is what lets the page know the answer with
+    the provider handle still inside the API — and that turn is the one place the button is not
+    offered, since continuing from it is what pressing send plainly already does. A failed send
+    keeps the fork armed, so pressing send again does what was meant.
+  - **A fork with no conversation is refused BEFORE one is created**, or a request that was
+    never going to run would leave an empty conversation row behind.
+  - **NO MIGRATION AND NO STORED LINEAGE, and the cost is named rather than hidden:** a reopened
+    conversation reads as linear when it was not — turn 6 edits turn 2's video and nothing on
+    screen says so. Recording it would mean naming a new column in `TURN_COLUMNS`, which is read
+    on every poll, so an un-applied migration would take the whole page down — the exact blast
+    radius 0054's link table was shaped to avoid. The officer sees the answer anyway, because
+    the video they forked from is in the same scroller. This is the click-to-point
+    marker-regions trade, made the same way and for the same reason, and it is the named
+    follow-up if a long conversation's history ever needs to explain itself.
+  Verified 2026-09-12, all free: workspace typecheck **7/7 green**, the complete production
+  build green (only the pre-existing analytics/layout unused warnings), eslint clean on all 11
+  touched files, `git diff --check` clean; prettier clean on every hunk of mine — two files
+  report whole-file complaints that are **CRLF alone** (proved by re-checking them with the
+  carriage returns stripped, and by untouched CRLF siblings in the same directories failing
+  identically), so do NOT `--write` them. The job registry check is at **63** (55 before, plus
+  8 fork checks: a completed turn resolving to its own interaction, a failed one refused, an
+  unminted id, another conversation's REAL completed turn refused, a turn still generating, a
+  completed turn with no interaction id, the chain-point no-op, and an empty conversation);
+  `new-video-scaffold`, `new-video-task`, `new-video-prompt-mode` and the 27-test interactions
+  suite all unchanged and green. **Live against the running API, on real rows and billing
+  nothing** — all five refusals answer in Marathi (no conversation, an unknown id, another
+  conversation's completed turn, a genuinely failed turn, a non-uuid) and both probed
+  conversations still hold exactly the turns they did, so nothing was stored. **50 browser
+  assertions** at 1360 and 390 with no page errors and no overflow: exactly one button on a
+  two-completed-turn conversation and it is on turn 1 rather than the chain point,
+  `aria-pressed` both ways, the banner inside the composer card and above the textarea naming
+  `सूचना १`, disarming from either control, a failed turn offering nothing — and the intercepted
+  request carrying `fromTurnId` equal to turn 1's id exactly, with the prompt verbatim, while an
+  unforked send carries no such field at all.
+  **Left for a real run, and it is the only thing that proves the step:** take a conversation
+  past four turns until a character visibly drifts, fork back to the turn that was still right,
+  and confirm the new video continues from THAT one — then send an ordinary follow-up and
+  confirm it continues from the fork rather than from the abandoned branch. Deploy is
+  `@dgipr/schemas` dist → API + web (ship together — `fromTurnId` is one contract, though it is
+  optional, so a half-deploy simply never forks). No migration, no n8n, no new env.
+
+- **/new-video-workflow remembers its characters and their voices** (2026-09-12, migration
+  0054, no n8n, Step 3 of `~/.claude/plans/video-is-not-following-scalable-wilkinson.md`, on
+  the scaffold from [[new-video-scaffold-step-1]] and the declared task of Step 2): the
+  officers' remaining complaint was that characters and their voices drift, *"especially when
+  chats are switched"*. The first half of that is now a stored registry; the second half is a
+  block re-emitted on every turn.
+  - **WHY A VOICE NEEDED A TABLE AT ALL.** Google's documented technique for voice consistency
+    is to repeat the ENTIRE voice description, unchanged, on every turn — and **voice editing
+    is not supported by this model**, so a wrong voice can never be corrected afterwards, only
+    prevented. Our follow-ups send only the new instruction, which is the whole point of
+    `previous_interaction_id`, so the description was stated once and never again. That is
+    exactly the reported symptom, and it cannot be fixed by a better sentence: it needs
+    somewhere to keep the description.
+  - **AND "SWITCHING CHATS" IS NOT A BUG TO FIX — it is how the app works.** A new chat in the
+    Gemini app carries nothing over; consistency there comes from the user re-supplying the
+    same portrait and the same description by hand, or from Flow's saved Ingredients doing it
+    for them. So the thing that reproduces the good case here is a cast a FRESH conversation
+    can be seeded from, which is why the plan puts this ahead of forking an interaction and
+    why the registry is department-wide rather than per conversation.
+  - **The portrait is attached on the turn that ESTABLISHES a character; the voice rides every
+    turn.** On a follow-up the character is already in the video being edited, and re-sending
+    their picture is the documented "stacking references in one edit" failure — it would also
+    re-index every `<IMAGE_REF_n>` tag mid-chain. The APPEARANCE is dropped from a follow-up
+    for the same documented reason ("overly descriptive prompts can lead to unintended
+    changes"), and the edit-discipline rule already says the face, build and clothing must not
+    move. The VOICE is the one thing restated unconditionally, because it is the one thing
+    that cannot be repaired.
+  - **The cast is fixed on a conversation's first turn.** Changing who is in a video is what
+    starting a new conversation is for — cheap precisely because the registry re-seeds it. A
+    follow-up may ECHO the stored cast (equality passes silently) but may not change it: a
+    mismatch is a Marathi 400, the `audioTrims` rule, because a paid render carrying a
+    different character than the one on screen is worse than a refusal.
+  - **The tag arithmetic is the seam, and neither half can prove it alone.**
+    `new-video-scaffold.ts` assigns `<IMAGE_REF_n>` by counting the cast's portraits from 0
+    and binds each to a NAME in prose (the docs' own form — the `[# References …]` block stays
+    pure syntax, so an officer-typed name can never enter it); the job puts those portraits
+    FIRST among the image parts, in cast order. A tag pointing at the wrong picture would look
+    exactly like the model ignoring a reference, so the client's test composes one real
+    request and reads the two ends against each other.
+  - **A registry field is collapsed to one line and otherwise untouched.** These are the
+    officer's words, but they are REGISTRY DATA rather than the prompt — typed into named
+    boxes and reproduced into a block of ours that carries syntax — so `flatten` protects that
+    block's line structure and nothing else. The around-never-through invariant is unchanged:
+    the scaffold still cannot see the prompt. The NAME additionally may not contain
+    `< > [ ]`, which a person's name does not and which would otherwise let a registry entry
+    point the model at a picture nobody attached.
+  - **TWO NEW TABLES AND NOT ONE COLUMN ON AN EXISTING ONE**, and that was decided by blast
+    radius rather than tidiness: a `character_ids` column on `new_video_conversations` would
+    have to be named in `CONVERSATION_COLUMNS`, so every read of that table would fail on a
+    database without 0054 and the whole page would go down. **Verified live against exactly
+    that database**: the rail lists, an existing conversation opens with `characters: []`, its
+    turns are intact, an unknown id is still a Marathi 404, every input guard answers before a
+    query, and the registry's own two queries are the only things that fail. Getting there
+    took fixing a real regression found by that probe — the cast read is BEST-EFFORT on the
+    polled detail route (a cast it cannot read costs a line under the composer) and on a
+    follow-up that names nobody, but a turn that actually names a character is REFUSED rather
+    than rendered without its voice description.
+  - Web: a `Users` tool on the composer opens one panel that is both the registry's editor and
+    this conversation's picker, with the count on the button because a cast is invisible in
+    the prompt. Portraits go through the SAME upload route a turn's reference picture uses, so
+    the browser only ever hands the API an id it minted.
+  Verified 2026-09-12, all free: workspace typecheck **7/7 green**, the complete production
+  build green (only the pre-existing analytics/layout unused warnings), eslint clean on all 17
+  touched files, prettier clean on every hunk of mine (the whole-file complaints that remain
+  are pre-existing CRLF — check one by piping the blob through `--parser typescript` on stdin,
+  never by writing it to a temp file outside the repo, which resolves no `.prettierrc`),
+  `git diff --check` clean; the scaffold harness at **37/37** (20 before), the interactions
+  suite at **27/27** (22 before), the job registry check at **44** (27 before), and
+  `new-video-task`, `new-video-prompt-mode` and `video-prompts` unchanged and green; plus **20
+  live probes** against the running API, above. **Nothing paid was run deliberately** — though
+  one probe of mine did send a real turn before the database turned out to be reachable, which
+  started one Gemini render; the orphaned conversation was deleted.
+  **Left for a real run, and it is the only thing that proves the step:** apply 0054, store a
+  character with a portrait and a voice, run four turns, and confirm the character and the
+  voice hold to turn 4 — then start a SECOND, fresh conversation seeded from the same entry
+  and confirm the same person comes back. That last one is the "switching chats" case the
+  officers actually reported. Deploy: **0054 → `@dgipr/schemas` → `@dgipr/database` →
+  `@dgipr/content-engine` dists → API + web** (ship together — the cast on the turn request
+  and on the detail payload is one contract). No n8n, no new env.
+
+- **/new-video-workflow STATES the task instead of letting Omni infer it** (2026-09-12, no
+  migration, no n8n, no web change; Step 2 of
+  `~/.claude/plans/video-is-not-following-scalable-wilkinson.md`, on top of Step 1's scaffold):
+  Omni takes an explicit `generation_config.video_config.task`
+  (`text_to_video|image_to_video|reference_to_video|edit|extend`) and we had never sent one, so
+  the task was inferred from the request's shape — and the inference is wrong in precisely the
+  case the officers reported. A turn attaching a picture looks like **image-to-video**, i.e.
+  that picture becoming the literal opening frame, while what this lane attaches a picture for
+  is a character to hold steady across the whole clip.
+  - **It is the SAME decision as Step 1's reference tagging, said in the one place the model
+    cannot read past.** The `[# References <IMAGE_REF_0>@Image1]` block and the documented
+    "should not be used as literal initial frames" boilerplate say it in prose;
+    `reference_to_video` says it as a field. So the two are derived from the same two facts
+    about a turn (`imageCount`, `isEdit`) in `video/new-video-task.ts` — pure, prompt-blind,
+    free to verify — and cannot describe different requests.
+  - **A FOLLOW-UP DECLARES NOTHING, and that is the constraint the whole shape is built
+    around.** Combining a task with `previous_interaction_id` is reported to BREAK EDIT CHAINS,
+    so the field belongs to first turns only; `edit` and `extend` exist in the enum and are
+    deliberately never returned, because the turn they would describe is exactly the turn that
+    must not carry one. Enforced TWICE — the deriver returns null on a chained turn, and
+    `buildInteractionRequest` drops the field whenever `previousInteractionId` is present — so
+    neither layer alone can get it wrong. **Dropped, not refused**: the consequence of the drop
+    is nil (the turn renders as a follow-up always has), where refusing would fail a turn the
+    officer typed over a field they never asked for. That is the opposite call from the
+    scaffold-under-verbatim refusal, and the difference is whether the silence could
+    MISREPORT an A/B — here it cannot.
+  - **Opt-in per caller, so the Dynamic Poster lane is byte-for-byte unchanged.** A blanket
+    derivation inside the client would have been tempting (it already knows the image count and
+    the chain point) and would have silently re-shaped a working, paid production lane, whose
+    source poster genuinely IS the thing being animated — closer to `image_to_video` than to a
+    reference. Absent/null sends no `generation_config` at all.
+  - **Sent in BOTH prompt modes**, which is the aspect-ratio precedent doing its second day of
+    work: `verbatim`'s rule is about the officer's PROMPT reaching Gemini untouched, and a
+    request field adds not one character to it (the client header's "THE ASPECT RATIO IS A
+    REQUEST FIELD, NOT A SENTENCE"). Keeping the task out of the A/B is what leaves the
+    scaffolded-vs-verbatim comparison about the text alone.
+  - **Through the learned-capability ladder**, the veo-client doctrine, because the model id is
+    a moving preview target: a 400 naming the field is cached against the model and the call is
+    retried without it, so a model that cannot take a task infers one exactly as today rather
+    than failing the turn. Its rung is checked FIRST and its needles are the narrowest of the
+    four (`generation_config`, `video_config`, `task`) — nothing else this repo sends lives
+    under that container — and the rung is guarded on the body's own field, so a false match
+    can only ever cost ONE retry that then falls through the remaining rungs.
+  Verified 2026-09-12, all free: workspace typecheck **7/7 green** (after rebuilding the
+  `@dgipr/content-engine` dist — `apps/api` reads the built types), eslint clean on all five
+  touched files, prettier clean, `git diff --check` clean; the new
+  `npx tsx src/video/new-video-task.ts` at **7/7**, the interactions suite at **22/22** (20
+  before, plus the field's own invariants and a seam test asserting the declared task and the
+  `<IMAGE_REF_n>` tags agree in one assembled request), `new-video-scaffold` 20/20,
+  `new-video-prompt-mode` 4/4 and the job registry check all green. Three composed requests
+  were printed and read by eye: a first turn with a picture carries
+  `{"video_config":{"task":"reference_to_video"}}` beside the tag block, a first turn without
+  one carries `text_to_video`, and a follow-up carries no `generation_config` while gaining the
+  edit-discipline block — with the Marathi, ‘भारत टॅक्सी’ quotes included, untouched in all
+  three. **Nothing paid was run, and the real proof is still the paid one**: four turns with a
+  tagged character portrait, confirming the character and voice hold to turn 4 and that an
+  add/remove-text turn does what was asked without burning in subtitles. Deploy is
+  `@dgipr/content-engine` dist → API; no migration, no n8n, no new env.
+
+- **/new-video-workflow's prompt is scaffolded — the free half of the gap with the Gemini app**
+  (2026-09-12, no migration, no n8n, no web change; Step 1 of
+  `~/.claude/plans/video-is-not-following-scalable-wilkinson.md`, standing on the Step 0 seam in
+  the milestone below): the seam carved that morning was empty on purpose. It now carries the
+  three prompt-construction blocks the Omni docs call for, each answering one of the officers'
+  four reported complaints, and each costing nothing to send.
+  - **`video/new-video-scaffold.ts` (new) is the only place that decides what goes around a
+    turn's prompt**, and it is pure: `buildNewVideoScaffold({ imageCount, isEdit })` takes a
+    count and a boolean and **cannot see the prompt at all**. That is the structural half of the
+    around-never-through invariant — no quote, numeral or scheme name can have been rewritten by
+    a function that never received the string. It also makes the whole of Step 1 verifiable
+    offline, free, without a paid render.
+  - **Reference images are role-TAGGED** (`[# References <IMAGE_REF_0>@Image1 …]` leading, plus
+    the documented "should not be used as literal initial frames" boilerplate trailing) — the
+    likeliest cause of "characters are not consistent". We had been sending bare, untagged image
+    parts, so nothing said the picture was a character to hold steady. The tags are 0-indexed
+    while the labels beside them are 1-indexed; that looks like a typo and is the docs' own form.
+    One tag per image part actually sent, asserted, since a declaration naming a picture the
+    request does not carry points the model at nothing.
+  - **IMAGES-FIRST PART ORDERING IS KEPT, deliberately.** It does signal FIRST-FRAME semantics,
+    which is the opposite of what a character reference wants — but the documented remedy for
+    exactly that misreading is a sentence, not a reordering, and both the tag block and the
+    boilerplate now travel. Flipping the order on top of them would change two variables at once
+    in a paid A/B while resting on a guess about how the tags index the parts. If tagging turns
+    out not to be enough, that is the next thing to try, on its own.
+  - **The quote-stripping remedy is an INSTRUCTION, not a rewrite, and that is not fastidiousness
+    about the invariant — a stripper would be actively wrong on this product's input.** Marathi
+    press-note prose marks SCHEME NAMES with ‘…’ (‘भारत टॅक्सी’ — `resolve-poster-subject.ts`
+    strips exactly those), so a regex aimed at dialogue would silently mangle the one string that
+    must survive verbatim. Rewriting the officer's intent into well-formed Omni prompt language
+    belongs to Step 5's LLM pass, with the whole sentence in front of it.
+  - **The on-screen-text rule is RANKED BELOW the officer**, which is the whole difficulty: one
+    of the four complaints is that asking to ADD text does not work, so a blanket "no text" would
+    be the wrong rule here. It forbids only words *the instruction above did not ask for*, and
+    says what to show INSTEAD for signage that merely furnishes a scene (plain painted panels,
+    blank sheets, switched-off displays) — the repo's hardest-won image-prompt lesson, since a
+    bare prohibition contradicts a scene containing a form and the model paints gibberish
+    (`मरी रूटूम`).
+  - **Edit turns carry the documented sentence STANDING ALONE.** The harness caught this as a
+    real defect on the first run: `Keep everything else the same, including …` is a paraphrase,
+    and folding the tested sentence into a longer clause quietly stops being the thing that was
+    tested. It is now its own sentence, with the elaboration after it naming the VOICE among what
+    must hold — voice cannot be repaired by a later turn (the model does not support voice
+    editing), so an edit turn is where it drifts and the only remedy is prevention.
+  - `isEdit` is read off the **chain point**, not the turn's position: a turn whose predecessor
+    failed continues from whatever last succeeded, and a turn following only failures is a fresh
+    start that must not be told to preserve a video nobody has seen.
+  - **The scaffold is composed under `verbatim` too**, and is then REFUSED by the builder rather
+    than dropped — that refusal is the point. The only way to run this lane verbatim is to mean
+    it in the env, and then there is nothing here to compare against.
+  **Still deliberately missing: the voice description re-stated on every turn.** It needs
+  somewhere to keep the description, which is the Step 3 character/voice registry;
+  `new-video-scaffold.ts` is where its block will be emitted from. **§4's two production-`/video`
+  items are NOT touched** — `buildKeyframePrompt` returning a literal storyboard string and the
+  absent `NO_TEXT_RULE` were made deliberately in commit `5c6dd81` ("replace the assembled
+  keyframe prompt with the plain storyboard instruction"), whose harness was updated to ASSERT
+  the new behaviour rather than to catch a slip. Undoing a deliberate product decision on a paid
+  lane is a separate call; the finding stands open, and the cost of leaving it is that a scene's
+  `referenceImagePath` is still attached with no sentence explaining what it is for.
+  Verified 2026-09-12, all free: workspace typecheck **7/7 green**, eslint clean on all five
+  touched files, prettier clean (the two it rewrote were mine — `gemini-interactions-client.test.ts`
+  was confirmed prettier-clean at HEAD by piping the blob through `--stdin-filepath`, so the
+  complaint was my hunk, not the repo's CRLF); `git diff --check` clean; the new
+  `npx tsx src/video/new-video-scaffold.ts` at **20/20**, the interactions suite at **20/20**
+  (18 before, plus the composition seam and the first-turn shape), `new-video-prompt-mode` 4/4,
+  `video-prompts` and `clip-provider` still green, and the job registry check
+  (`npx tsx ../../apps/api/src/jobs/new-video-workflow.check.ts` from `packages/content-engine`)
+  all green. A composed turn was printed end to end and read by eye: the tag block leads, the
+  three rules trail, and the Marathi prompt — ‘भारत टॅक्सी’ quotes and all — sits between them
+  untouched. **Nothing paid was run, and the real proof is still the paid one**: four turns with
+  a tagged character portrait, confirming the character and voice hold to turn 4 and that an
+  add/remove-text turn does what was asked without burning in subtitles. Deploy is
+  `@dgipr/content-engine` dist → API; no migration, no n8n, no new env.
+
+- **/new-video-workflow stops being a comparison harness** (2026-09-12, no migration, no n8n,
+  and deliberately NO change to any output yet): officers report this lane produces worse video
+  than the Gemini app for the same intent — voiceover not following the prompt, characters and
+  their voices drifting "when chats are switched", add/remove-text turns doing nothing. The
+  working hypothesis was "we just call the API while the app does a lot more", and it is
+  correct. The app's advantage IS the scaffolding: reference images bound to roles with inline
+  `<IMAGE_REF_0>` tags, dialogue written as `Speaker says: line` (quotation marks are what make
+  Omni burn in subtitles — the opposite of Veo 3's guidance), the voice description re-stated
+  verbatim on every turn, and `Keep everything else the same.` on edits.
+  **The blocker was our own founding rule**, stated at the top of
+  `video/gemini-interactions-client.ts` as "THE ONE RULE THIS FILE EXISTS TO KEEP: the officer's
+  prompt reaches Gemini VERBATIM", and enforced by DENY assertions in its test. That rule is
+  what made the comparison fair, and it is the same rule that keeps the output worse; the two
+  goals are mutually exclusive. **The decision is that this is a PRODUCT LANE now**, and this
+  change is only that decision made structural — every scaffolding block is a later step.
+  - **`NEW_VIDEO_PROMPT_MODE` (`scaffolded` default | `verbatim`)**, read in ONE place,
+    `newVideoPromptMode()` in `video/new-video-prompt-mode.ts` — the `articleProvider()` /
+    `clipProviderName()` precedent, including throwing on a typo rather than falling back,
+    which here would look exactly like the scaffolding simply not working. `verbatim` is kept
+    so a scaffolding change can be shown to have HELPED rather than merely differed, on the
+    same prompt.
+  - **The client gained a mode of its own**, defaulting to `verbatim` so every existing caller
+    is byte-for-byte unchanged, plus an `InteractionScaffold` of a `prefix` and a `suffix`.
+    Prefix/suffix is enough to carry every block the Omni docs call for without this file
+    pre-deciding what any of them say. **The invariant that replaces the old rule: our text
+    goes AROUND the officer's, never through it** — the prompt is inserted untouched, so
+    Marathi still survives code point for code point (a normalisation pass would recompose
+    Devanagari matras while looking identical in a terminal). Asserted in both modes.
+  - **A scaffold under `verbatim` is REFUSED, not dropped.** Ignoring it would run a scaffolded
+    turn's prompt through the comparison stance and report the result as though the scaffolding
+    had been tried, which is the one way an A/B can lie.
+  - **The mode is about what THAT FUNCTION adds, not about what the caller was handed** — a
+    distinction the old header conflated and that matters because the client is shared: the
+    Dynamic Poster lane's prompt is written by an LLM pass of its own (`motion-prompt.ts`) and
+    is correctly `verbatim` here. Nothing about that lane is governed by the new flag.
+  - **Nothing fills the seam yet, and that is asserted**: a scaffolded turn with no scaffold is
+    byte-identical to a verbatim one, which is what proves this decision changed no output and
+    keeps an empty scaffold from becoming a third behaviour between the two stances.
+  Known and still open, in the order they are worth doing (the free ones first): tag reference
+  images and drop the images-first ordering, which currently signals FIRST-FRAME semantics
+  rather than "this is a character"; rewrite dialogue quote-free; re-state the voice description
+  every turn (voice editing is not supported at all by the model, so a wrong voice can only be
+  prevented, never fixed); append the edit-discipline line. Then `generation_config.video_config.task`
+  on FIRST turns only (combining it with `previous_interaction_id` breaks edit chains), through
+  the existing learned-capability ladder. Then a character/voice registry — that, not forking,
+  is what reproduces "switching chats" in the app, since a new chat there carries nothing over
+  and consistency comes from the user re-supplying the same reference and description.
+  **Not closable by prompting**: voice-reference upload and Flow's saved Ingredients are app
+  layers with no API, there is no seed, and Marathi is not on Omni's lip-sync list — audio
+  pronunciation is an accepted trade on this lane, and reliable burned-in Devanagari remains
+  Chromium's job (`poster-renderer/src/video/caption-overlay.ts`), never the model's.
+  Verified 2026-09-12, all free: workspace typecheck **7/7 green**, eslint clean on all five
+  touched files, prettier clean on every one of them (**note for the next agent: AGENTS.md's
+  standing advice to check a prettier complaint against `git show HEAD:` by writing the blob
+  to a temp file OUTSIDE the repo is wrong** — prettier then resolves no `.prettierrc` and
+  reports every single-quoted file as unformatted. Pipe it through stdin with `--parser
+  typescript`, or diff inside the repo); the interactions suite at **18/18** (14 before, plus
+  the four new mode tests) and the new `npx tsx src/video/new-video-prompt-mode.ts` at 4/4,
+  with `video-prompts.ts` and `clip-provider.ts` still green. **Nothing paid was run, because
+  there is nothing yet to see** — the first real proof belongs to the next step: four turns
+  with a tagged character portrait, confirming the character and voice hold to turn 4 and that
+  an add/remove-text turn does what was asked without burning in subtitles. Deploy is
+  `@dgipr/content-engine` dist → API; no migration, no n8n, no web change. New env (optional):
+  `NEW_VIDEO_PROMPT_MODE`.
+
 - **A recording is trimmed to the part the officer wants** (2026-09-09, no migration, no n8n):
   a meeting recording is one file and the news is usually a few minutes of it. Every recording
   went to the transcriber whole, so an officer paid for two hours of speech to read four minutes
