@@ -59,10 +59,9 @@ import {
   DEFAULT_MOTION_ASPECT,
   MotionAspectSchema,
   MotionRegionSchema,
-  aspectRatioLabel,
   isWholeClipCrop,
   motionAspectRatio,
-  snapMotionAspect,
+  motionWireAspect,
 } from '@dgipr/schemas';
 import type { MotionAspect, MotionCrop, MotionRegion } from '@dgipr/schemas';
 import { armEditRetry, runJob } from './runner.js';
@@ -114,12 +113,20 @@ function motionRegionOf(row: GenerationRow): MotionRegion | null {
 // learned-capability ladder can drop it if the model refuses — and say so in the log.
 //
 // Read in ONE place, here, because it is this lane's decision: /new-video-workflow deliberately
-// passes nothing and is unchanged. Unset means 1080p, mirroring veo-client's resolutionSetting;
-// `default` or `none` sends no resolution at all, which is the one-line rollback to this lane's
-// behaviour before today and does not need a code change on a day it is already misbehaving.
+// passes nothing and is unchanged.
+//
+// UNSET SENDS NOTHING — DO NOT DEFAULT THIS BACK TO 1080p (2026-09-13). Asking gemini-omni for
+// 1080p makes every detail the model draws BOIL: re-drawn slightly differently on every frame,
+// which an officer sees as the whole poster shaking from ~1s in. Measured on one poster + one
+// prompt, same cells, compared at 720: frame-to-frame change 13-15/255 at 1080p and the same at
+// 1, 2 and 4 frames apart (jitter, not motion), against 0.6-0.7 growing to ~2 at 4 frames apart
+// (smooth motion) with no resolution sent. `aspect_ratio` made no difference either way. The
+// likeliest mechanism is a per-frame upscale behind the 1080p output. Legible text is the
+// source restore's job (restoreSourceOverClip), not the render size's. `GEMINI_VIDEO_RESOLUTION`
+// still forces a size for an experiment; `default`/`none` also send nothing.
 function motionResolutionSetting(): string | null {
   const raw = process.env.GEMINI_VIDEO_RESOLUTION?.trim();
-  if (raw === undefined || raw === '') return '1080p';
+  if (raw === undefined || raw === '') return null;
   return raw.toLowerCase() === 'default' || raw.toLowerCase() === 'none'
     ? null
     : raw;
@@ -134,9 +141,9 @@ function motionResolutionSetting(): string | null {
 // sent, and the model receives an image that already IS the requested shape with all of the
 // artwork inside it. Nothing is left to crop, and the prompt's two demands stop competing.
 //
-// On the default aspect ('source') the target IS the poster's own ratio, so this is a no-op
-// returning the same bytes — which is the common case and the reason the officer usually sees
-// no bars at all.
+// On the default aspect ('source') the poster frame IS the poster's own ratio, so the first pad
+// is a no-op. The second pad, into the wire frame, is not — and it never reaches the officer,
+// because the render is cropped back to the poster frame on the way out.
 async function frameSourceForAspect(
   source: Readonly<{ png: Buffer; width: number; height: number }>,
   aspect: MotionAspect,
@@ -146,41 +153,38 @@ async function frameSourceForAspect(
   height: number;
   label: string;
   ratio: number;
-  requestLabel: string | null;
+  requestLabel: string;
+  poster: { png: Buffer; width: number; height: number };
 }> {
-  // THE POSTER'S OWN RATIO, SNAPPED TO A NAME THE WIRE CAN CARRY.
+  // TWO FRAMES, and confusing them is what produced generation 7b966b06.
   //
-  // Only on 'source', because the two fixed frames already ARE listed labels. A poster designed
-  // to a standard frame (1280x1600) snaps to 4:5 exactly, so nothing is padded and the request
-  // names the shape the officer designed in. A hand-cropped scan snaps to the nearest listed
-  // label and is padded the last percent into it, which is strictly better than either sending
-  // `15:19` — one 400 poisons the aspect-ratio rung for every later render in this worker — or
-  // sending nothing and letting the model outpaint.
-  //
-  // NULL is a full answer: a banner or a panorama snaps to nothing, pads to its own ratio and
-  // sends no label, which is this lane's behaviour byte for byte before today.
-  const snapped =
-    aspect === 'source' ? snapMotionAspect(source.width, source.height) : null;
-  const ratio = snapped
-    ? snapped.ratio
-    : motionAspectRatio(aspect, source.width, source.height);
-  const framed = await fitImageToAspect(source.png, ratio);
+  // THE POSTER FRAME is the shape the officer asked for — the poster's own, or one of the two
+  // fixed frames — and it is what the stored clip must come back as. THE WIRE FRAME is the shape
+  // the model can actually render, which is only ever 9:16 or 16:9 (MOTION_REQUEST_ASPECTS). A
+  // poster frame the model cannot render is padded a SECOND time into the wire frame, so the
+  // image it is handed already has the shape it will return, with the whole poster centred
+  // inside it. Cropping the render back to the poster frame then removes that padding and
+  // nothing else — where asking for `4:5` got the field refused, a landscape render, and a crop
+  // of a zoom.
+  const ratio = motionAspectRatio(aspect, source.width, source.height);
+  const poster = await fitImageToAspect(source.png, ratio);
+  const wire = motionWireAspect(ratio);
+  const framed = await fitImageToAspect(poster.png, wire.ratio);
   return {
+    // What the model — and the prompt writer describing it — is handed: the wire frame.
     png: framed.png,
-    // The size of the image the model is actually handed — which is NOT source.width/height
-    // whenever normalizeSourceImage bound the long edge, since it returns pre-bound dimensions
-    // with bound bytes. Carried out because it is the size everything downstream must measure
-    // against.
     width: framed.width,
     height: framed.height,
-    // Named from the FRAMED image, so the ratio the prompt states and the ratio the model is
+    // Named from the wire image, so the ratio the prompt states and the ratio the model is
     // looking at are the same number by construction.
-    label: aspectRatioLabel(framed.width, framed.height),
-    // Carried out so the crop on the way back uses the very number the prompt asked for. See
-    // cropRenderedClip below.
+    label: wire.label,
+    // The POSTER frame's ratio: what the render is cropped back to on the way out.
     ratio,
-    // What goes on the wire, or null for "ask for no particular shape".
-    requestLabel: snapped ? snapped.label : aspect === 'source' ? null : aspect,
+    // Always a label the API accepts, so the aspect-ratio rung is never tripped.
+    requestLabel: wire.label,
+    // The poster frame itself. The restore composites THIS over the cropped clip, which is
+    // why it must not be the padded wire image.
+    poster: { png: poster.png, width: poster.width, height: poster.height },
   };
 }
 
@@ -403,7 +407,7 @@ async function renderAndStoreMotion(
     id,
     bytes,
     framed.ratio,
-    framed,
+    framed.poster,
     // Off the ROW, like the aspect above and for the same reason: a follow-up writes a fresh
     // prompt but must not quietly stop protecting the text the officer already approved.
     motionRegionOf(row),

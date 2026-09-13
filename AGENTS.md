@@ -3111,6 +3111,47 @@ client id/secret — see the milestone below.
 
 ## Latest Implementation Milestone
 
+- **A Dynamic Poster asks for NO resolution again — 1080p made the clip shake** (2026-09-13, no
+  migration — REVERSES the `resolution` default of the 2026-09-12 Phase 1 milestone below):
+  officers reported every Dynamic Poster "shaking" from ~1s in (generations 354f88d1 with a marked
+  region — only the region shook — and 05f7d97c without one — the whole frame shook), a
+  regression they did not have before that commit. Measured, not guessed: nothing TRANSLATES (block
+  matching finds no shift), the model re-draws fine detail differently on every frame — frame-to-
+  frame change 13-15/255 and identical at 1, 2 and 4 frames apart, which is jitter, not motion.
+  Re-rendering the same poster and the exact same prompt through gemini-omni with `resolution`
+  unset returned 720x1280 at 0.6-0.7, growing to ~2 at 4 frames apart — smooth motion — with and
+  without `aspect_ratio`, which is therefore not involved. `motionResolutionSetting()` now returns
+  null when `GEMINI_VIDEO_RESOLUTION` is unset (the env still forces a size for an experiment).
+  **Do not default it back to 1080p**: legible Devanagari is the source restore's job (0055), not
+  the render size's. A local `tmix` smoothing pass also fixed it (21.7 → 3.5) but was rejected —
+  the output should need no repair. Deploy is API only.
+
+- **Gemini renders only 9:16 or 16:9, so a Dynamic Poster is PADDED into one and cropped back**
+  (2026-09-13, no migration — CORRECTS the `snapMotionAspect` half of the resolution milestone
+  below): generation 7b966b06 (a 1280x1504 poster, पोस्टरसारखाच) came back as the centre ~45% of
+  the poster, zoomed. Measured, not guessed: gemini-omni answers `aspect_ratio: '4:5'` with
+  `Supported values: '16:9', '9:16'`. The old seven-label list was never verified, so the 4:5
+  request was refused, the client cached that as "this model rejects aspect_ratio" for the life
+  of the process (so a later ९:१६ run in the same worker also went out with no ratio), the model
+  rendered its default LANDSCAPE frame by zooming the poster to fill it, and `cropVideoToAspect`
+  then took the middle of that zoom. Fixes: `MOTION_REQUEST_ASPECTS` is now exactly
+  `['9:16','16:9']` and `snapMotionAspect` is deleted for `motionWireAspect(ratio)`;
+  `frameSourceForAspect` pads twice — into the POSTER frame (what the clip must come back as,
+  and what the restore composites) and then into the WIRE frame (what the model and the prompt
+  writer are handed, always an accepted label) — and the render is cropped back to the poster
+  frame, removing only the padding. And `rejectsValueOnly` in the interactions client: a 400
+  refusing a field's VALUE drops the field for that one call and learns nothing. Harness:
+  `npx tsx src/aspect-fit.ts` round-trips 1280x1504/1280x1600/1600x900/600x1800 through the wire
+  pad and back byte for byte. **Left for a real run**: one पोस्टरसारखाच render confirming the log
+  line reads `gemini returned 1080x1920; stored 1080x1270`-ish (whole poster). Restart the API —
+  a running worker still holds the poisoned cache.
+- **Local API behind Kaspersky: `--use-system-ca`** (2026-09-13): `SELF_SIGNED_CERT_IN_CHAIN`
+  on every OpenAI call from a dev machine was Kaspersky Anti-Virus re-signing api.openai.com
+  with its own root, which Windows trusts and Node's bundled CA list does not (Gemini was
+  unaffected only because Kaspersky does not scan that host). `apps/api`'s `dev`/`start` scripts
+  now pass `--use-system-ca` (Node ≥22.15), which ADDS the OS store and keeps verification on.
+  Never "fix" this with `NODE_TLS_REJECT_UNAUTHORIZED=0`. The Docker CMD is untouched.
+
 - **A Dynamic Poster keeps the officer's OWN Devanagari** (2026-09-12, migration 0055, no n8n;
   Phase 2 of `~/.claude/plans/warm-doodling-diffie.md`, on Phase 1 below): Phase 1 bought the
   render more pixels to garble. This stops it garbling them. The officer marks the one rectangle

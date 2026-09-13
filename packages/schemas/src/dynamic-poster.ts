@@ -85,55 +85,30 @@ export const DEFAULT_MOTION_ASPECT: MotionAspect = 'source';
 
 // WHAT MAY BE NAMED ON THE WIRE, which is a narrower question than what a poster may BE.
 //
-// The clip request now carries `response_format.aspect_ratio` (see the Dynamic Poster job), and
-// that field is the one place an odd number is genuinely dangerous: a hand-cropped 1237x1600
-// scan is labelled `15:19` by aspectRatioLabel below, a preview model may well answer 400 to it,
-// and that 400 is cached against the model for the LIFE OF THE PROCESS
-// (modelsRejectingAspectRatio, gemini-interactions-client.ts). So one unusual poster would
-// silently strip the aspect ratio from every later render in that worker — the field working for
-// nobody because it was asked for badly once.
+// MEASURED, not assumed (2026-09-13): gemini-omni answers any other `aspect_ratio` with
+// `The value '4:5' is not supported for 'response_format.aspect_ratio'. Supported values:
+// '16:9', '9:16'.` This list used to hold seven labels nobody had checked, and a 4:5 poster
+// snapped onto `4:5` exactly — so the request was refused, the refusal was cached against the
+// model for the life of the process, and every later render in that worker (a 9:16 one
+// included) went out with no aspect ratio at all. The model then rendered its default
+// LANDSCAPE frame, filled it by ZOOMING the poster, and the crop back to 4:5 took the middle of
+// that zoom: generation 7b966b06 kept roughly the centre 45% of its poster.
 //
-// Hence a SHORT list of labels a video model can be expected to know, and a snap onto the
-// nearest of them. This is deliberately not aspectRatioLabel's job: that names an image for a
-// SENTENCE, where an approximation beside a correctly-shaped input image costs nothing.
-export const MOTION_REQUEST_ASPECTS: readonly string[] = [
-  '9:16',
-  '3:4',
-  '4:5',
-  '1:1',
-  '5:4',
-  '4:3',
-  '16:9',
-];
+// So the poster is never sent at its own shape. It is padded into whichever of the two frames
+// the model can actually render (motionWireAspect) and cropped back to its own shape on the
+// way out, which removes the padding and nothing else.
+export const MOTION_REQUEST_ASPECTS: readonly string[] = ['9:16', '16:9'];
 
-// How far off the nearest listed label a poster may be and still be named by it. 8% relative —
-// loose enough that an export a few pixels off a standard frame still gets its familiar name,
-// tight enough that a banner or a panorama gets no label at all rather than a wrong one.
-export const MOTION_ASPECT_SNAP_TOLERANCE = 0.08;
-
-// The listed label nearest this pixel size, or NULL when nothing is within tolerance.
-//
-// NULL IS A FULL ANSWER, not a failure: it means send no `aspect_ratio` and pad the poster into
-// its own ratio, which is today's behaviour byte for byte. A 1:3 ticker banner takes that path
-// and, crucially, does not poison the learned-capability rung for every poster after it.
-export function snapMotionAspect(
-  width: number,
-  height: number,
-): { label: string; ratio: number } | null {
-  if (!(width > 0) || !(height > 0)) return null;
-  const ratio = width / height;
-
-  let best: { label: string; ratio: number; error: number } | null = null;
-  for (const label of MOTION_REQUEST_ASPECTS) {
-    const [w, h] = label.split(':').map(Number);
-    if (!w || !h) continue;
-    const candidate = w / h;
-    const error = Math.abs(candidate - ratio) / ratio;
-    if (best === null || error < best.error)
-      best = { label, ratio: candidate, error };
-  }
-  if (best === null || best.error > MOTION_ASPECT_SNAP_TOLERANCE) return null;
-  return { label: best.label, ratio: best.ratio };
+// The frame a poster of this width/height ratio is rendered in: portrait (and square) posters
+// go into 9:16, landscape ones into 16:9 — whichever needs the LESS padding, so the model spends
+// as much of its frame as possible on the artwork.
+export function motionWireAspect(ratio: number): {
+  label: '9:16' | '16:9';
+  ratio: number;
+} {
+  return ratio > 1
+    ? { label: '16:9', ratio: 16 / 9 }
+    : { label: '9:16', ratio: 9 / 16 };
 }
 
 // The numeric width/height ratio a chosen aspect asks for. 'source' has none of its own — it

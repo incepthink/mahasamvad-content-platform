@@ -451,6 +451,21 @@ const modelsRejectingResolution = new Set<string>();
 export type InteractionCapability =
   'videoTask' | 'background' | 'resolution' | 'aspectRatio' | 'responseFormat';
 
+// A 400 that refuses a field's VALUE ("The value '4:5' is not supported for
+// 'response_format.aspect_ratio'. Supported values: '16:9', '9:16'.") says the model takes the
+// field. Caching that as "this model rejects aspect_ratio" is what stripped the aspect ratio from
+// every later render in a worker after one poster asked for `4:5` — a 9:16 request included. So
+// such a refusal drops the field for the one call that sent the bad value and learns nothing.
+export function rejectsValueOnly(error: unknown): boolean {
+  if (!(error instanceof GeminiRequestError) || error.status !== 400)
+    return false;
+  const detail = error.detail.toLowerCase();
+  return (
+    detail.includes('supported values') ||
+    detail.includes('is not supported for')
+  );
+}
+
 function rejectsField(error: unknown, ...needles: readonly string[]): boolean {
   if (!(error instanceof GeminiRequestError) || error.status !== 400)
     return false;
@@ -591,6 +606,9 @@ export async function createVideoInteraction(
 ): Promise<Interaction> {
   const apiKey = requireApiKey();
   const model = GEMINI_VIDEO_MODEL;
+  // Fields refused for their VALUE on this call only — see rejectsValueOnly.
+  let dropAspectRatio = false;
+  let dropResolution = false;
 
   for (;;) {
     const body = buildInteractionRequest({
@@ -598,12 +616,14 @@ export async function createVideoInteraction(
       model,
       background: !modelsRejectingBackground.has(model),
       uriDelivery: !modelsRejectingResponseFormat.has(model),
-      aspectRatio: modelsRejectingAspectRatio.has(model)
-        ? null
-        : input.aspectRatio,
-      resolution: modelsRejectingResolution.has(model)
-        ? null
-        : input.resolution,
+      aspectRatio:
+        dropAspectRatio || modelsRejectingAspectRatio.has(model)
+          ? null
+          : input.aspectRatio,
+      resolution:
+        dropResolution || modelsRejectingResolution.has(model)
+          ? null
+          : input.resolution,
       videoTask: modelsRejectingVideoTask.has(model) ? null : input.videoTask,
     });
     try {
@@ -642,7 +662,8 @@ export async function createVideoInteraction(
           `[gemini-interactions] ${model} rejected \`resolution\`; rendering at the model's ` +
             'own default frame size.',
         );
-        modelsRejectingResolution.add(model);
+        if (rejectsValueOnly(error)) dropResolution = true;
+        else modelsRejectingResolution.add(model);
         continue;
       }
       if (rejected === 'aspectRatio') {
@@ -650,7 +671,8 @@ export async function createVideoInteraction(
           `[gemini-interactions] ${model} rejected \`aspect_ratio\`; rendering at the ` +
             "model's own default shape.",
         );
-        modelsRejectingAspectRatio.add(model);
+        if (rejectsValueOnly(error)) dropAspectRatio = true;
+        else modelsRejectingAspectRatio.add(model);
         continue;
       }
       if (rejected === 'responseFormat') {
