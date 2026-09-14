@@ -20,6 +20,10 @@
  * because the relationship between the three (label, then hint, then the control) is
  * exactly what a caller gets subtly wrong: a hint set as a sibling of the label reads
  * as a second label, and a label with no `htmlFor` is not a label at all.
+ *
+ * `info` is the ⓘ that opens the field's full explanation. It is rendered BESIDE the
+ * label rather than inside it, because a button nested in a `<label htmlFor=…>` also
+ * focuses that label's control — so asking what a box is for would type into it.
  */
 
 import type { ReactNode } from 'react';
@@ -29,6 +33,7 @@ export function FormCard({
   label,
   htmlFor,
   hint,
+  info,
   children,
   className,
 }: {
@@ -36,18 +41,26 @@ export function FormCard({
   // Omit only when the card holds no single control to point at (the template picker).
   htmlFor?: string | undefined;
   hint?: ReactNode | undefined;
+  /** An `<InfoHint>` for this card's one question. */
+  info?: ReactNode | undefined;
   children: ReactNode;
   className?: string | undefined;
 }) {
   return (
     <section className={cn('glass-card rounded-2xl p-4 sm:p-5', className)}>
       {label ? (
-        <label
-          className="text-foreground block text-base font-semibold"
-          htmlFor={htmlFor}
-        >
-          {label}
-        </label>
+        // -my-1 keeps the 28px button from adding height to the label row: the icon is
+        // taller than the text it sits beside, and without this every card with one grew
+        // by a few pixels against every card without.
+        <div className="-my-1 flex items-center gap-1">
+          <label
+            className="text-foreground block text-base font-semibold"
+            htmlFor={htmlFor}
+          >
+            {label}
+          </label>
+          {info}
+        </div>
       ) : null}
       {hint ? (
         <p className="text-muted-foreground mt-1 text-sm">{hint}</p>

@@ -4,15 +4,15 @@ import { formatDate, runFormatLabel, STR } from '../lib/strings';
 import { StatusChip } from './StatusChip';
 
 export function HistoryCard({ item }: { item: GenerationSummary }) {
+  // A Dynamic Poster run never writes a posterPath — its output is an .mp4, which an
+  // <img> cannot show — so it falls back to the picture it was made FROM. That is the
+  // one thing about such a run an officer recognises at a glance, and without it this
+  // lane was the only format whose cards were all identical gradient banners.
+  const mediaUrl = item.posterUrl ?? item.sourceImageUrl;
   return (
     <Link href={`/generations/${item.id}`} className="history-card">
-      {item.posterUrl ? (
-        <img
-          src={item.posterUrl}
-          alt=""
-          className="history-media"
-          loading="lazy"
-        />
+      {mediaUrl ? (
+        <img src={mediaUrl} alt="" className="history-media" loading="lazy" />
       ) : (
         // No poster: a brand-gradient banner keeps every card the same shape.
         <div className="history-media history-banner" aria-hidden>

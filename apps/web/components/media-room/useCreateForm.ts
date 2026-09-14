@@ -27,7 +27,7 @@ import {
 import type {
   DesignMode,
   MotionAspect,
-  MotionCrop,
+  MotionRegion,
   MotionSourceResponse,
 } from '@dgipr/schemas';
 import { createGeneration, getGeneration } from '@/lib/api';
@@ -128,7 +128,8 @@ export function useCreateForm() {
   // which is how this lane behaved before the control existed. Marking one turns on the
   // restore — everything outside it is composited back from the uploaded poster, so the
   // officer's Devanagari is their own rather than the model's redrawing of it.
-  const [motionRegion, setMotionRegion] = useState<MotionCrop | null>(null);
+  // A rectangle from the box tool or a freehand polygon from the lasso.
+  const [motionRegion, setMotionRegion] = useState<MotionRegion | null>(null);
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -162,10 +163,23 @@ export function useCreateForm() {
     void (async () => {
       try {
         const detail = await getGeneration(from);
-        // The source run's note, which for a run created here already CONTAINS any
+        // WHICH text comes across is the caller's choice, named in the URL.
+        //
+        // `use=article` is the लेख result's "क्रिएटिव्ह" link: the officer is looking at
+        // the finished article and wants a poster made FROM IT, so the article is what
+        // belongs in the box — arriving with the raw note instead would silently hand
+        // the poster lane the meeting transcript the article was written from.
+        //
+        // Anything else (the default) is the old "same note, other platform" handoff:
+        // the source run's note, which for a run created here already CONTAINS any
         // uploaded file's text (this form joins the two at submit), so nothing is lost
         // by arriving as text in the box rather than as a document card.
-        setNote(detail.note);
+        //
+        // A run with no article falls back to the note rather than to an empty box.
+        const wantsArticle = params.get('use') === 'article';
+        setNote(
+          wantsArticle && detail.article?.trim() ? detail.article : detail.note,
+        );
         setPrefill('applied');
       } catch {
         setPrefill('failed');

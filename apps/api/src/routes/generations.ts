@@ -18,7 +18,10 @@ import {
   getReferenceTypeRow,
   insertGeneration,
   insertRevision,
-  listGenerations,
+  listGenerationsPage,
+  countGenerations,
+  type GenerationCardRow,
+  type GenerationListFilter,
   listRevisions,
   listThreadGenerations,
   publicUrl,
@@ -57,6 +60,14 @@ import {
   CreateArticlePosterRequestSchema,
   CreateGenerationRequestSchema,
   FiveWOneHSchema,
+  GENERATION_PAGE_SIZE_MAX,
+  RunDateFilterSchema,
+  RunFormatKeySchema,
+  RunStatusFilterSchema,
+  type GenerationFacetCounts,
+  type RunDateFilter,
+  type RunFormatKey,
+  type RunStatusFilter,
   DEFAULT_MOTION_ASPECT,
   MOTION_SOURCE_MAX_BYTES,
   MOTION_SOURCE_MAX_MB,
@@ -210,6 +221,182 @@ function toSummary(
     noteExcerpt: row.note.slice(0, 160),
     headline: copyHeadline ?? articleHeadline(row.article),
     posterUrl: row.posterPath ? publicUrl(client, row.posterPath) : null,
+    // Only a Dynamic Poster run carries one (the create route scopes the column to that
+    // lane), and that lane never writes posterPath — its output is an .mp4 — so this is
+    // what gives its history card a picture instead of a bare banner.
+    sourceImageUrl: row.sourceImagePath
+      ? publicUrl(client, row.sourceImagePath)
+      : null,
+    costUsd: row.costUsd,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// The history list's query, its filters and its facet counts.
+// ---------------------------------------------------------------------------
+
+// Every field `.catch()`es back to its default rather than failing the request. A history
+// URL is bookmarked, shared and hand-edited, and the facets in it are a VIEW — a stale or
+// mistyped one should show the officer the unfiltered list, not a dead end where the only
+// way back is to know to delete the query string. (The web itself can never send one of
+// these: it builds the URL from the same closed sets.)
+export const GenerationListQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).catch(1),
+  pageSize: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(GENERATION_PAGE_SIZE_MAX)
+    .catch(12),
+  q: z.string().trim().max(200).optional().catch(undefined),
+  format: RunFormatKeySchema.optional().catch(undefined),
+  status: RunStatusFilterSchema.optional().catch(undefined),
+  date: RunDateFilterSchema.optional().catch(undefined),
+  sort: z.enum(['newest', 'oldest']).catch('newest'),
+  // The browser's own offset from UTC, in the sign `Date#getTimezoneOffset` uses. "आज" is
+  // one officer narrowing a list in front of them, so it has to break where THEIR day
+  // breaks — the rolling week/month windows need no offset, only the midnight does.
+  tzOffset: z.coerce.number().int().min(-900).max(900).catch(-330),
+  // `?facets=1`. Off by default: the counts cost a head-only COUNT per option and cannot
+  // change while only the page number moves.
+  //
+  // Written out rather than `z.coerce.boolean()`, which reads the STRING "0" as true (it is
+  // non-empty) — on a query string that is the opposite of what was asked for.
+  facets: z
+    .enum(['0', '1', 'true', 'false'])
+    .catch('0')
+    .transform((v) => v === '1' || v === 'true'),
+});
+
+// A format is a category, except that a social run rendering no poster is caption-only and
+// is its own format — so the two social categories have to be split by output type, in both
+// directions. `article` on a social row means "this run renders no poster" (it is where the
+// caption is stored), which is why the exclusion is expressed against that one value.
+function formatFilter(format: RunFormatKey | undefined): GenerationListFilter {
+  if (!format) return {};
+  if (format === 'caption') {
+    return {
+      categories: ['twitter', 'facebook'],
+      outputTypes: ['article'],
+    };
+  }
+  if (format === 'twitter' || format === 'facebook') {
+    return { categories: [format], excludeOutputTypes: ['article'] };
+  }
+  return { categories: [format] };
+}
+
+function statusFilter(
+  status: RunStatusFilter | undefined,
+): GenerationListFilter {
+  if (!status) return {};
+  if (status === 'working') return { statuses: ['queued', 'running'] };
+  return { statuses: [status] };
+}
+
+// The oldest `created_at` a row may carry to be inside the window, or undefined for "any
+// time". `today` is the officer's local midnight, reconstructed from the offset their
+// browser reported; the other two are rolling windows and need no such care.
+function dateBoundary(
+  date: RunDateFilter | undefined,
+  tzOffsetMinutes: number,
+  now: number,
+): string | undefined {
+  if (!date) return undefined;
+  if (date === 'today') {
+    const localMs = now - tzOffsetMinutes * 60_000;
+    const sinceLocalMidnight = localMs % 86_400_000;
+    return new Date(now - sinceLocalMidnight).toISOString();
+  }
+  const days = date === 'week' ? 7 : 30;
+  return new Date(now - days * 86_400_000).toISOString();
+}
+
+const FACET_FORMATS: readonly RunFormatKey[] = [
+  'scheme',
+  'news',
+  'twitter',
+  'facebook',
+  'youtube',
+  'dynamic_poster',
+  'caption',
+];
+const FACET_STATUSES: readonly RunStatusFilter[] = [
+  'working',
+  'completed',
+  'failed',
+];
+const FACET_DATES: readonly RunDateFilter[] = ['today', 'week', 'month'];
+
+// Thirteen head-only COUNTs, issued together. No row is read: PostgREST answers each from
+// the Content-Range header, so this stays the same size of request whether the department
+// has made a hundred runs or a hundred thousand — which is exactly what tallying the rows
+// in the API would not do.
+async function computeFacets(
+  client: SupabaseClient,
+  filterFor: (skip?: 'format' | 'status' | 'date') => GenerationListFilter,
+  q: z.infer<typeof GenerationListQuerySchema>,
+): Promise<GenerationFacetCounts> {
+  const now = Date.now();
+  const [formatCounts, statusCounts, dateCounts] = await Promise.all([
+    Promise.all(
+      FACET_FORMATS.map((key) =>
+        countGenerations(client, {
+          ...filterFor('format'),
+          ...formatFilter(key),
+        }),
+      ),
+    ),
+    Promise.all(
+      FACET_STATUSES.map((key) =>
+        countGenerations(client, {
+          ...filterFor('status'),
+          ...statusFilter(key),
+        }),
+      ),
+    ),
+    Promise.all(
+      FACET_DATES.map((key) =>
+        countGenerations(client, {
+          ...filterFor('date'),
+          createdAfter: dateBoundary(key, q.tzOffset, now),
+        }),
+      ),
+    ),
+  ]);
+  const zip = <T extends string>(keys: readonly T[], counts: number[]) =>
+    Object.fromEntries(keys.map((key, i) => [key, counts[i] ?? 0]));
+  return {
+    format: zip(FACET_FORMATS, formatCounts),
+    status: zip(FACET_STATUSES, statusCounts),
+    date: zip(FACET_DATES, dateCounts),
+  };
+}
+
+// The lean card row → the wire shape. The twin of `toSummary`, which takes a whole
+// GenerationRow; they must agree field for field, and this one exists because the list
+// never reads a whole row any more.
+function cardToSummary(
+  client: SupabaseClient,
+  row: GenerationCardRow,
+): GenerationSummary {
+  const copy = CopySchema.safeParse(row.copy);
+  const copyHeadline = copy.success
+    ? ((copy.data as { headline?: string }).headline ?? null)
+    : null;
+  return {
+    id: row.id,
+    createdAt: row.createdAt,
+    outputType: row.outputType,
+    category: row.category,
+    status: row.status,
+    step: (row.step as GenerationStep | null) ?? null,
+    noteExcerpt: row.note.slice(0, 160),
+    headline: copyHeadline ?? articleHeadline(row.article),
+    posterUrl: row.posterPath ? publicUrl(client, row.posterPath) : null,
+    sourceImageUrl: row.sourceImagePath
+      ? publicUrl(client, row.sourceImagePath)
+      : null,
     costUsd: row.costUsd,
   };
 }
@@ -648,10 +835,60 @@ export function registerGenerationRoutes(
     },
   );
 
-  app.get('/generations', async () => {
-    // Cap at 100 so the client-side history search/pagination has more to work with.
-    const rows = await listGenerations(client, 100);
-    return rows.map((row) => toSummary(client, row));
+  // The history list. Filtering, sorting, paging and the facet counts all happen in the
+  // database; the response carries exactly one screen of cards plus the numbers the page
+  // needs to draw its pager and its dropdowns.
+  //
+  // It replaced a bare `select()` of the newest 100 rows — every column of every row, which
+  // on this table means the note, the article, both translations, the fact-check appendix
+  // and a dozen jsonb blobs, for a card that reads eight fields. That request was the
+  // reason the page could never show more than 100 runs, and the reason it was slow.
+  app.get('/generations', async (request, reply) => {
+    const parsed = GenerationListQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      return reply
+        .code(400)
+        .send({ error: { message: 'मागील कामाची यादी मागणी चुकीची आहे.' } });
+    }
+    const q = parsed.data;
+    const pageSize = Math.min(q.pageSize, GENERATION_PAGE_SIZE_MAX);
+    const now = Date.now();
+
+    // Every filter EXCEPT the one named — which is what makes a facet count say "this is
+    // what pressing it would give you" rather than "this many exist".
+    const filterFor = (
+      skip?: 'format' | 'status' | 'date',
+    ): GenerationListFilter => ({
+      ...(skip === 'format' ? {} : formatFilter(q.format)),
+      ...(skip === 'status' ? {} : statusFilter(q.status)),
+      ...(skip === 'date'
+        ? {}
+        : { createdAfter: dateBoundary(q.date, q.tzOffset, now) }),
+      ...(q.q ? { search: q.q } : {}),
+    });
+
+    const [{ rows, total }, totalUnfiltered] = await Promise.all([
+      listGenerationsPage(client, {
+        ...filterFor(),
+        offset: (q.page - 1) * pageSize,
+        limit: pageSize,
+        ascending: q.sort === 'oldest',
+      }),
+      countGenerations(client),
+    ]);
+
+    // Only when asked: paging within one filter set cannot change a count, so the client
+    // keeps the set it already has and this stays off the common request.
+    const facets = q.facets ? await computeFacets(client, filterFor, q) : null;
+
+    return {
+      items: rows.map((row) => cardToSummary(client, row)),
+      total,
+      page: q.page,
+      pageSize,
+      totalUnfiltered,
+      facets,
+    };
   });
 
   app.get<{ Params: { id: string } }>(

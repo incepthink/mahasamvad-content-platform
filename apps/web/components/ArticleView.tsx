@@ -1,40 +1,53 @@
 'use client';
 
 // Read-only article display + copy/download actions + the article feedback loop.
-// Every translation starts with the in-page name check (TranslationTermsReview):
-// "Translate to English" / "Translate to Hindi" first fetches the article's proper
-// nouns for the user to confirm/correct, and only the confirmed names — locked — reach
-// the Sarvam translation (as English spellings for English, as frozen Devanagari forms
-// for Hindi). English and Hindi are stored independently on the row: a मराठी | English |
-// हिंदी toggle shows whichever exist, copy/download follow the shown language, and each
-// translation has its own re-translate fold running the same name check (a wrong
-// spelling noticed late is fixed right here, not on /glossary).
+//
+// THE ACTION ROW IS FOUR COMMANDS, NOT SEVEN. It used to carry three download buttons,
+// two cross-format links and two translate buttons side by side; it is now copy, one
+// डाउनलोड menu (.txt / .md / PDF), one क्रिएटिव्ह link and one भाषांतर करा link.
+//
+// TRANSLATION IS NO LONGER STARTED HERE. It was a second, parallel translation flow —
+// this page ran its own name check and stored the result on the row — while /translate
+// exists to do exactly that and is where the target language is chosen. भाषांतर करा now
+// opens that page with this article already in its box (`?from=<id>&lang=<shown>`), so
+// the question is asked in one place. Rows that ALREADY carry a stored English or Hindi
+// translation keep their मराठी | English | हिंदी toggle, and copy/download follow
+// whichever is on screen — nothing made before this is lost, it simply cannot be
+// remade from here.
 
 import { useState } from 'react';
+import Link from 'next/link';
 import {
+  ArrowRight,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   CirclePlay,
+  Download,
   ExternalLink,
   FileText,
   Image as ImageIcon,
+  Languages,
   Music,
+  Sparkles,
 } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import type {
   ArticleVersionText,
   GenerationDetail,
   GenerationSourceFile,
-  PrepareTranslationResponse,
   TranslationLanguage,
-  TranslationTermInput,
 } from '@dgipr/schemas';
 import {
   articlePdfDownloadUrl,
   generationSourceFileUrl,
   getArticleVersions,
   getGenerationSourceFiles,
-  prepareGenerationTranslation,
-  requestTranslation,
   restoreArticleVersion,
   sendArticleFeedback,
 } from '../lib/api';
@@ -42,10 +55,8 @@ import { FileName } from './FileName';
 import { STR } from '../lib/strings';
 import { errorMessage } from '../lib/errorMessage';
 import { downloadBlob } from '../lib/download';
-import { CrossFormatLinks } from './CrossFormatLinks';
 import { FeedbackBox } from './FeedbackBox';
 import { MarkdownText } from './MarkdownText';
-import { TranslationTermsReview } from './TranslationTermsReview';
 import { ErrorNotice } from './ErrorNotice';
 
 // How each kind of source is drawn inside the note fold. The icon is the only kind marker:
@@ -72,16 +83,6 @@ export function ArticleView({
 }) {
   const [copied, setCopied] = useState(false);
   const [lang, setLang] = useState<'mr' | TranslationLanguage>('mr');
-  // Name-check flow: idle → preparing (extracting names) → review (card shown);
-  // confirming covers the translate POST fired from the review card. `pendingLang`
-  // is the language that flow will translate into once confirmed.
-  const [prep, setPrep] = useState<'idle' | 'preparing' | 'review'>('idle');
-  const [pendingLang, setPendingLang] = useState<TranslationLanguage>('en');
-  const [prepared, setPrepared] = useState<
-    PrepareTranslationResponse['terms'] | null
-  >(null);
-  const [confirming, setConfirming] = useState(false);
-  const [translateError, setTranslateError] = useState<string | null>(null);
   // The intake's own uploads, loaded the first time the note fold is opened rather than with
   // the run: they come off the intake's `files` jsonb, which carries every transcript and
   // OCR'd page, and the detail poll behind this page runs every 2.5 s. A run with nothing
@@ -215,14 +216,10 @@ export function ArticleView({
       ? marathi
       : (translations[shownLang] ?? '');
 
-  // The translate job runs beside whatever else is in flight and reports itself on
-  // the detail payload rather than through status/step, so this stays accurate while
-  // the poster is still rendering. A background failure arrives the same way.
-  // Only one translation runs at a time, and `translatingLanguage` names which — so a
-  // reload mid-run still puts the spinner on the right button.
-  const translating = detail.translating;
-  const translatingLang = detail.translatingLanguage;
-  const error = translateError ?? detail.translateError;
+  // A translation started before this page stopped starting them (or by an older build)
+  // still reports itself on the detail payload rather than through status/step, so the
+  // line stays accurate while the poster is still rendering.
+  const error = detail.translateError;
 
   // Article feedback is offered as soon as the article is on screen — including while
   // the poster still renders. The revision runs beside the poster job and reports
@@ -238,98 +235,10 @@ export function ArticleView({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // Step 1 of translating: fetch the article's names for review. The prepare call is
-  // language-independent (the same confirmed rows serve both targets), so only the
-  // remembered `pendingLang` differs. On failure the flow returns to idle with a
-  // Marathi error — never silently translating with unchecked names.
-  const startNameCheck = async (language: TranslationLanguage) => {
-    setPendingLang(language);
-    setPrep('preparing');
-    setTranslateError(null);
-    try {
-      const result = await prepareGenerationTranslation(detail.id);
-      setPrepared(result.terms);
-      setPrep('review');
-    } catch {
-      setTranslateError(STR.namesPrepareError);
-      setPrep('idle');
-    }
-  };
-
-  // Step 2: the user confirmed the names — start the translation with them locked,
-  // into whichever language started this check. The job reports itself through
-  // detail.translating, so after the refresh the existing spinner takes over.
-  const confirmTranslate = async (terms: TranslationTermInput[]) => {
-    setConfirming(true);
-    setTranslateError(null);
-    try {
-      await requestTranslation(detail.id, pendingLang, terms);
-      setPrep('idle');
-      setPrepared(null);
-      await onFeedbackSent();
-    } catch (e) {
-      setTranslateError(errorMessage(e));
-    } finally {
-      setConfirming(false);
-    }
-  };
-
-  const cancelNameCheck = () => {
-    setPrep('idle');
-    setPrepared(null);
-  };
-
-  // Shared body for the name-check flow (initial translate and the re-translate
-  // folds): spinner while extracting, then the review card. Rendered in one place at
-  // a time — `pendingLang` decides where, so two folds can't both show it.
-  const nameCheckBody =
-    prep === 'preparing' ? (
-      <span className="translating-note">
-        <span className="spinner" aria-hidden="true" />
-        {STR.namesChecking}
-      </span>
-    ) : prep === 'review' && prepared ? (
-      <TranslationTermsReview
-        terms={prepared}
-        busy={confirming}
-        language={pendingLang}
-        onConfirm={confirmTranslate}
-        onCancel={cancelNameCheck}
-      />
-    ) : null;
-
-  const translatingNote = (language: TranslationLanguage) => (
-    <span className="translating-note">
-      <span className="spinner" aria-hidden="true" />
-      {language === 'hi' ? STR.translatingHindi : STR.translatingEnglish}
-    </span>
-  );
-
-  // The re-translate fold shown under an existing translation: same name check, run
-  // again for that one language.
-  const retranslateFold = (language: TranslationLanguage) => (
-    <details className="fold" key={language}>
-      <summary>
-        {language === 'hi' ? STR.retranslateFoldHindi : STR.retranslateFold}
-      </summary>
-      <div className="fold-body">
-        {translating && translatingLang === language ? (
-          translatingNote(language)
-        ) : prep !== 'idle' && pendingLang === language ? (
-          nameCheckBody
-        ) : (
-          <button
-            type="button"
-            className="btn btn-small"
-            disabled={translating || prep !== 'idle'}
-            onClick={() => startNameCheck(language)}
-          >
-            {STR.namesStartCheck}
-          </button>
-        )}
-      </div>
-    </details>
-  );
+  // The link that replaced the two translate buttons. It carries the run's id and which
+  // language is on screen, and /translate fetches the text from there — an article is
+  // thousands of characters and a URL is not where a government press note belongs.
+  const translateHref = `/translate?from=${encodeURIComponent(detail.id)}&lang=${shownLang}`;
 
   return (
     <section
@@ -525,87 +434,93 @@ export function ArticleView({
         <button type="button" className="btn" onClick={copyToClipboard}>
           {copied ? STR.copied : STR.copyText}
         </button>
-        <button
-          type="button"
-          className="btn"
-          onClick={() =>
-            downloadBlob(
-              `lekh-${detail.id}-${shownLang}.txt`,
-              shown,
-              'text/plain',
-            )
-          }
-        >
-          {STR.downloadTxt}
-        </button>
-        <button
-          type="button"
-          className="btn"
-          onClick={() =>
-            downloadBlob(
-              `lekh-${detail.id}-${shownLang}.md`,
-              shown,
-              'text/markdown',
-            )
-          }
-        >
-          {STR.downloadMd}
-        </button>
-        {/* Rendered server-side by Chromium — a browser-side PDF library cannot shape
-            Devanagari matras — so this is a link, not a downloadBlob: only the API can force
-            a cross-origin download. It follows the language toggle, and because shownLang
-            already falls back to 'mr' when a language has no text, it can never hit the
-            route's "translation not ready" 404. */}
-        {/* Rendered from the ROW, so it cannot show the wording being previewed. Hidden
-            rather than left to hand the officer a PDF of different text than the one on
-            screen. Copy and the two downloads above read `shown` and so follow the preview. */}
-        {viewingOlder ? null : (
-          <a className="btn" href={articlePdfDownloadUrl(detail.id, shownLang)}>
-            {STR.downloadPdf}
-          </a>
-        )}
+        {/* THREE FORMATS, ONE BUTTON. .txt and .md are written in the browser from the
+            text on screen, so they follow the language toggle AND a version preview; the
+            PDF is a LINK because it is rendered server-side by Chromium (a browser-side
+            PDF library cannot shape Devanagari matras) and only the API can force a
+            cross-origin download. That is why the PDF item is the one that disappears
+            while an older wording is being previewed: it is rendered from the ROW, and
+            handing the officer a PDF of different text than the one on screen is the one
+            thing this control must not do. */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button type="button" className="btn">
+              <Download size={16} strokeWidth={2} aria-hidden="true" />
+              <span>{STR.downloadMenu}</span>
+              <ChevronDown size={15} strokeWidth={2.2} aria-hidden="true" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-56">
+            <DropdownMenuItem
+              onSelect={() =>
+                downloadBlob(
+                  `lekh-${detail.id}-${shownLang}.txt`,
+                  shown,
+                  'text/plain',
+                )
+              }
+            >
+              {STR.downloadTxt}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() =>
+                downloadBlob(
+                  `lekh-${detail.id}-${shownLang}.md`,
+                  shown,
+                  'text/markdown',
+                )
+              }
+            >
+              {STR.downloadMd}
+            </DropdownMenuItem>
+            {viewingOlder ? null : (
+              <DropdownMenuItem asChild>
+                <a href={articlePdfDownloadUrl(detail.id, shownLang)}>
+                  {STR.downloadPdf}
+                </a>
+              </DropdownMenuItem>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
 
-        {/* "Same note, other platform". Only when this run has NO poster — article-only
-            and DLO runs, which never render PosterPanel and would otherwise have no way
-            across since the cross-format folds left पुढील पाऊल. With a poster the links
-            live in PosterPanel's row instead, beside the poster they belong to. */}
-        {!detail.posterUrl ? (
-          <CrossFormatLinks
-            generationId={detail.id}
-            category={detail.category}
-          />
+        {/* "Make a poster out of THIS ARTICLE" — one link, not one per platform. It opens
+            Creative and Social with the article in the box (`use=article`, see
+            useCreateForm) and the poster lane preselected; the officer still chooses the
+            template and presses तयार करा there, which is where those questions live.
+            Only when this run has NO poster — article-only and DLO runs. With a poster the
+            cross-format links live in PosterPanel's row instead, beside the poster they
+            belong to. Hidden while an older wording is on screen, like the PDF: the fetch
+            on the other side reads the ROW. */}
+        {!detail.posterUrl && !viewingOlder ? (
+          <Link
+            className="btn"
+            href={`/?from=${encodeURIComponent(detail.id)}&format=twitter&use=article`}
+            title={STR.crossFormatToCreative}
+            aria-label={STR.crossFormatToCreative}
+          >
+            <Sparkles size={16} strokeWidth={1.9} aria-hidden="true" />
+            <span>{STR.crossFormatCreativeShort}</span>
+            <ArrowRight size={15} strokeWidth={2.2} aria-hidden="true" />
+          </Link>
         ) : null}
 
-        {/* One button per language that has no translation yet; the one being
-            translated right now shows the spinner in its place. */}
-        {/* Translation reads the row too — same reason as the PDF link. */}
-        {(viewingOlder ? [] : (['en', 'hi'] as const)).map((language) =>
-          has(language) ? null : translating && translatingLang === language ? (
-            <span key={language}>{translatingNote(language)}</span>
-          ) : prep === 'idle' && !translating ? (
-            <button
-              key={language}
-              type="button"
-              className="btn"
-              onClick={() => startNameCheck(language)}
-            >
-              {language === 'hi'
-                ? STR.translateToHindi
-                : STR.translateToEnglish}
-            </button>
-          ) : null,
+        {/* Opens /translate with this article in its box. Hidden while an older wording is
+            previewed for the same reason as the two above: that page fetches the ROW. */}
+        {viewingOlder ? null : (
+          <Link
+            className="btn"
+            href={translateHref}
+            title={STR.articleTranslateLinkTitle}
+            aria-label={STR.articleTranslateLinkTitle}
+          >
+            <Languages size={16} strokeWidth={1.9} aria-hidden="true" />
+            <span>{STR.articleTranslateLink}</span>
+            <ArrowRight size={15} strokeWidth={2.2} aria-hidden="true" />
+          </Link>
         )}
       </div>
 
-      {/* The name check for a not-yet-made translation sits directly under the
-          buttons; for an existing one it lives inside that language's fold below. */}
-      {!has(pendingLang) && !translating ? nameCheckBody : null}
-
       {error ? <ErrorNotice message={error} /> : null}
-
-      {(['en', 'hi'] as const).map((language) =>
-        has(language) ? retranslateFold(language) : null,
-      )}
 
       {detail.factCheck ? (
         <details className="fold">

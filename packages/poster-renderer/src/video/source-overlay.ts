@@ -57,12 +57,28 @@ import sharp from 'sharp';
  * officer's crop box, `NormalizedRect` and `FeedbackRegion` all use, and the only one a box
  * drawn over a browser-scaled picture can speak.
  */
-export type OverlayHole = Readonly<{
+export type OverlayRect = Readonly<{
   x: number;
   y: number;
   width: number;
   height: number;
 }>;
+
+/**
+ * A freehand outline — the lasso — in the same 0..1 fraction space. Filled with the NONZERO
+ * winding rule, so a self-crossing outline moves both of its loops rather than leaving the
+ * crossing frozen.
+ */
+export type OverlayPolygon = Readonly<{
+  type: 'polygon';
+  points: ReadonlyArray<Readonly<{ x: number; y: number }>>;
+}>;
+
+export type OverlayHole = OverlayRect | OverlayPolygon;
+
+function isPolygonHole(hole: OverlayHole): hole is OverlayPolygon {
+  return 'type' in hole && hole.type === 'polygon';
+}
 
 export type SourceOverlayOptions = Readonly<{
   /** Feather width in pixels. Omitted ⇒ derived from the frame; see FEATHER_SHARE. */
@@ -120,6 +136,60 @@ export async function buildFrozenSourceOverlay(
     throw new Error(`Overlay size has no area: ${width}x${height}`);
   }
 
+  validateHole(hole);
+
+  const meta = await sharp(framedPng).metadata();
+  if (meta.width !== width || meta.height !== height) {
+    throw new Error(
+      `The overlay image is ${meta.width}x${meta.height} but was described as ` +
+        `${width}x${height}. Pass the size of the image that was actually sent to the ` +
+        `model (fitImageToAspect's own width/height), never normalizeSourceImage's ` +
+        `pre-bound dimensions.`,
+    );
+  }
+
+  const feather = Math.max(
+    FEATHER_MIN_PX,
+    options.feather ?? Math.round(FEATHER_SHARE * Math.min(width, height)),
+  );
+
+  const alpha = isPolygonHole(hole)
+    ? polygonAlpha(hole, width, height, feather)
+    : rectangleAlpha(hole, width, height, feather);
+
+  // THE RGB IS MATERIALISED BEFORE THE JOIN, AND THAT IS NOT TIDINESS — IT IS THE BUG.
+  //
+  // The obvious one-liner, `sharp(png).removeAlpha().joinChannel(alpha).png()`, returns a
+  // THREE-channel PNG: the joined channel is discarded, with no error and no warning, because
+  // sharp resolves joinChannel against the pipeline's input rather than against the output of
+  // removeAlpha. Every pixel then reads alpha 255 — the whole poster frozen, a clip that plays
+  // perfectly and does not move. Measured, not guessed; it is the first thing this file's
+  // harness caught. Decoding to raw RGB first gives joinChannel three real channels to attach a
+  // fourth to, and the bytes are copied rather than resampled, so under any fully-opaque pixel
+  // they are still the officer's own.
+  const rgb = await sharp(framedPng).removeAlpha().raw().toBuffer();
+  return await sharp(rgb, { raw: { width, height, channels: 3 } })
+    .joinChannel(alpha, { raw: { width, height, channels: 1 } })
+    .png()
+    .toBuffer();
+}
+
+function validateHole(hole: OverlayHole): void {
+  if (isPolygonHole(hole)) {
+    if (!Array.isArray(hole.points) || hole.points.length < 3) {
+      throw new Error('Motion lasso needs at least three points.');
+    }
+    for (const point of hole.points) {
+      for (const value of [point.x, point.y]) {
+        if (!Number.isFinite(value) || value < 0 || value > 1) {
+          throw new Error(
+            `Motion lasso point must be a fraction between 0 and 1: ${value}`,
+          );
+        }
+      }
+    }
+    return;
+  }
   for (const [name, value] of [
     ['x', hole.x],
     ['y', hole.y],
@@ -140,22 +210,15 @@ export async function buildFrozenSourceOverlay(
   if (hole.x + hole.width > 1.001 || hole.y + hole.height > 1.001) {
     throw new Error('Motion region falls outside the frame.');
   }
+}
 
-  const meta = await sharp(framedPng).metadata();
-  if (meta.width !== width || meta.height !== height) {
-    throw new Error(
-      `The overlay image is ${meta.width}x${meta.height} but was described as ` +
-        `${width}x${height}. Pass the size of the image that was actually sent to the ` +
-        `model (fitImageToAspect's own width/height), never normalizeSourceImage's ` +
-        `pre-bound dimensions.`,
-    );
-  }
-
-  const feather = Math.max(
-    FEATHER_MIN_PX,
-    options.feather ?? Math.round(FEATHER_SHARE * Math.min(width, height)),
-  );
-
+// The rectangle's alpha, separable — see the header.
+function rectangleAlpha(
+  hole: OverlayRect,
+  width: number,
+  height: number,
+  feather: number,
+): Buffer {
   // The hole in real pixels. Rounded so the transparent extent lands exactly where a caller can
   // predict it — `round(x * width)` — which is what the harness measures.
   const left = Math.round(hole.x * width);
@@ -188,22 +251,144 @@ export async function buildFrozenSourceOverlay(
       alpha[row + x] = Math.round(255 * factor);
     }
   }
+  return alpha;
+}
 
-  // THE RGB IS MATERIALISED BEFORE THE JOIN, AND THAT IS NOT TIDINESS — IT IS THE BUG.
-  //
-  // The obvious one-liner, `sharp(png).removeAlpha().joinChannel(alpha).png()`, returns a
-  // THREE-channel PNG: the joined channel is discarded, with no error and no warning, because
-  // sharp resolves joinChannel against the pipeline's input rather than against the output of
-  // removeAlpha. Every pixel then reads alpha 255 — the whole poster frozen, a clip that plays
-  // perfectly and does not move. Measured, not guessed; it is the first thing this file's
-  // harness caught. Decoding to raw RGB first gives joinChannel three real channels to attach a
-  // fourth to, and the bytes are copied rather than resampled, so under any fully-opaque pixel
-  // they are still the officer's own.
-  const rgb = await sharp(framedPng).removeAlpha().raw().toBuffer();
-  return await sharp(rgb, { raw: { width, height, channels: 3 } })
-    .joinChannel(alpha, { raw: { width, height, channels: 1 } })
-    .png()
-    .toBuffer();
+// THE LASSO'S ALPHA. Two steps, both exact, both plain arithmetic for the reason the header
+// gives against blur-and-mask:
+//
+//   1. Scan-fill the outline into an inside/outside mask, sampled at pixel CENTRES with the
+//      nonzero winding rule — the same test an SVG `fill-rule="nonzero"` makes, without handing
+//      the question to a rasteriser whose antialiasing would then need thresholding.
+//   2. An exact Euclidean distance transform (Felzenszwalb & Huttenlocher, two separable 1-D
+//      passes, linear time) gives every outside pixel its distance to the nearest inside one,
+//      and the SAME smoothstep the rectangle uses turns that into the ramp.
+//
+// So the contract is the rectangle's, unchanged: alpha is 0 on every pixel inside the officer's
+// outline and ramps up to 255 outside it — the feather eats only frozen artwork.
+function polygonAlpha(
+  hole: OverlayPolygon,
+  width: number,
+  height: number,
+  feather: number,
+): Buffer {
+  const xs = hole.points.map((p) => p.x * width);
+  const ys = hole.points.map((p) => p.y * height);
+  const n = xs.length;
+
+  const inside = new Uint8Array(width * height);
+  const crossings: Array<{ x: number; dir: number }> = [];
+  for (let y = 0; y < height; y += 1) {
+    const cy = y + 0.5;
+    crossings.length = 0;
+    for (let i = 0; i < n; i += 1) {
+      const j = (i + 1) % n;
+      const y0 = ys[i]!;
+      const y1 = ys[j]!;
+      if (y0 === y1) continue;
+      // Half-open in y, so a vertex exactly on the scanline is counted once, not twice.
+      const up = y0 < y1;
+      const lo = up ? y0 : y1;
+      const hi = up ? y1 : y0;
+      if (cy < lo || cy >= hi) continue;
+      const t = (cy - y0) / (y1 - y0);
+      crossings.push({ x: xs[i]! + t * (xs[j]! - xs[i]!), dir: up ? 1 : -1 });
+    }
+    if (crossings.length === 0) continue;
+    crossings.sort((a, b) => a.x - b.x);
+    let winding = 0;
+    const row = y * width;
+    for (let k = 0; k < crossings.length - 1; k += 1) {
+      winding += crossings[k]!.dir;
+      if (winding === 0) continue;
+      // Pixel centres strictly between this crossing and the next.
+      const from = Math.max(0, Math.ceil(crossings[k]!.x - 0.5));
+      const to = Math.min(width - 1, Math.ceil(crossings[k + 1]!.x - 0.5) - 1);
+      for (let x = from; x <= to; x += 1) inside[row + x] = 1;
+    }
+  }
+
+  const squared = squaredDistanceToInside(inside, width, height);
+  const alpha = Buffer.allocUnsafe(width * height);
+  for (let i = 0; i < width * height; i += 1) {
+    alpha[i] =
+      inside[i] === 1
+        ? 0
+        : Math.round(255 * smoothstep(Math.sqrt(squared[i]!) / feather));
+  }
+  return alpha;
+}
+
+// A distance well past any feather: pixels this far from the outline are simply opaque, and a
+// finite value keeps the envelope arithmetic below free of Infinity - Infinity.
+const FAR = 1e12;
+
+// Squared Euclidean distance from every pixel to the nearest `inside` pixel. Column pass, then
+// row pass over its result — exact, because squared Euclidean distance is separable.
+function squaredDistanceToInside(
+  inside: Uint8Array,
+  width: number,
+  height: number,
+): Float64Array {
+  const grid = new Float64Array(width * height);
+  for (let i = 0; i < grid.length; i += 1) grid[i] = inside[i] === 1 ? 0 : FAR;
+
+  const longest = Math.max(width, height);
+  const f = new Float64Array(longest);
+  const d = new Float64Array(longest);
+  const v = new Int32Array(longest);
+  const z = new Float64Array(longest + 1);
+
+  for (let x = 0; x < width; x += 1) {
+    for (let y = 0; y < height; y += 1) f[y] = grid[y * width + x]!;
+    lowerEnvelope(f, height, d, v, z);
+    for (let y = 0; y < height; y += 1) grid[y * width + x] = d[y]!;
+  }
+  for (let y = 0; y < height; y += 1) {
+    const row = y * width;
+    for (let x = 0; x < width; x += 1) f[x] = grid[row + x]!;
+    lowerEnvelope(f, width, d, v, z);
+    for (let x = 0; x < width; x += 1) grid[row + x] = d[x]!;
+  }
+  return grid;
+}
+
+// Where the parabola rooted at q overtakes the one rooted at p.
+function intersection(f: Float64Array, q: number, p: number): number {
+  return (f[q]! + q * q - (f[p]! + p * p)) / (2 * q - 2 * p);
+}
+
+// The 1-D distance transform of sampled function `f` over [0, n): the lower envelope of the
+// parabolas rooted at each sample. Writes the result into `d`; `v` and `z` are scratch.
+function lowerEnvelope(
+  f: Float64Array,
+  n: number,
+  d: Float64Array,
+  v: Int32Array,
+  z: Float64Array,
+): void {
+  let k = 0;
+  v[0] = 0;
+  z[0] = -Infinity;
+  z[1] = Infinity;
+  for (let q = 1; q < n; q += 1) {
+    // z[0] is -Infinity, so this walk back always stops at k === 0.
+    let s = intersection(f, q, v[k]!);
+    while (s <= z[k]!) {
+      k -= 1;
+      s = intersection(f, q, v[k]!);
+    }
+    k += 1;
+    v[k] = q;
+    z[k] = s;
+    z[k + 1] = Infinity;
+  }
+  k = 0;
+  for (let q = 0; q < n; q += 1) {
+    while (z[k + 1]! < q) k += 1;
+    const p = v[k]!;
+    d[q] = (q - p) * (q - p) + f[p]!;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -397,6 +582,118 @@ if (
     sizeRefused = true;
   }
   check(sizeRefused, 'a wrong declared size was accepted');
+
+  // THE LASSO. A diamond plus a self-crossing bow-tie, read out of real PNGs like the
+  // rectangle: inside transparent, outside opaque, the ramp monotone, and the crossing FILLED
+  // (nonzero winding) rather than left frozen between the two loops.
+  const diamond = {
+    type: 'polygon' as const,
+    points: [
+      { x: 0.5, y: 0.2 },
+      { x: 0.8, y: 0.5 },
+      { x: 0.5, y: 0.8 },
+      { x: 0.2, y: 0.5 },
+    ],
+  };
+  const lassoRaw = await sharp(
+    await buildFrozenSourceOverlay(
+      poster,
+      { width: WIDTH, height: HEIGHT },
+      diamond,
+    ),
+  )
+    .ensureAlpha()
+    .raw()
+    .toBuffer();
+  const lassoAt = (x: number, y: number) =>
+    lassoRaw[(y * WIDTH + x) * 4 + 3] ?? -1;
+  check(lassoAt(640, 800) === 0, 'the lasso centre is not transparent');
+  check(lassoAt(0, 0) === 255, 'the lasso overlay corner is not opaque');
+  // Just inside the diamond's left tip, and just outside its bounding box's corner — a pixel a
+  // rectangle would have unfrozen and a lasso must not.
+  check(
+    lassoAt(Math.round(0.23 * WIDTH), 800) === 0,
+    'inside the lasso tip is frozen',
+  );
+  check(
+    lassoAt(Math.round(0.24 * WIDTH), Math.round(0.24 * HEIGHT)) === 255,
+    'the corner of the lasso bounding box was unfrozen',
+  );
+  let lassoPrev = -1;
+  let lassoMonotone = true;
+  for (let x = Math.round(0.2 * WIDTH) - 1; x >= 0; x -= 1) {
+    const a = lassoAt(x, 800);
+    if (a < lassoPrev) lassoMonotone = false;
+    lassoPrev = a;
+  }
+  check(lassoMonotone, 'the lasso feather is not monotone');
+  check(
+    lassoAt(Math.round(0.2 * WIDTH) - 80, 800) === 255,
+    'the lasso feather had not reached fully opaque 80px out',
+  );
+
+  const bowTie = {
+    type: 'polygon' as const,
+    points: [
+      { x: 0.2, y: 0.2 },
+      { x: 0.8, y: 0.8 },
+      { x: 0.8, y: 0.2 },
+      { x: 0.2, y: 0.8 },
+    ],
+  };
+  const bowRaw = await sharp(
+    await buildFrozenSourceOverlay(
+      poster,
+      { width: WIDTH, height: HEIGHT },
+      bowTie,
+    ),
+  )
+    .ensureAlpha()
+    .raw()
+    .toBuffer();
+  const bowAt = (x: number, y: number) => bowRaw[(y * WIDTH + x) * 4 + 3] ?? -1;
+  // This outline is a bow-tie with its loops LEFT and RIGHT of the crossing at the centre.
+  check(
+    bowAt(Math.round(0.3 * WIDTH), 800) === 0 &&
+      bowAt(Math.round(0.7 * WIDTH), 800) === 0,
+    'a loop of the self-crossing lasso was left frozen',
+  );
+  check(
+    bowAt(640, Math.round(0.25 * HEIGHT)) === 255,
+    'outside the bow-tie (between its loops) was unfrozen',
+  );
+
+  const tooFew = {
+    type: 'polygon' as const,
+    points: [
+      { x: 0, y: 0 },
+      { x: 1, y: 1 },
+    ],
+  };
+  const offFrame = {
+    type: 'polygon' as const,
+    points: [
+      { x: 0, y: 0 },
+      { x: 1.4, y: 0 },
+      { x: 0, y: 1 },
+    ],
+  };
+  for (const [name, bad] of [
+    ['with two points', tooFew],
+    ['with a point off the frame', offFrame],
+  ] as const) {
+    let refused = false;
+    try {
+      await buildFrozenSourceOverlay(
+        poster,
+        { width: WIDTH, height: HEIGHT },
+        bad,
+      );
+    } catch {
+      refused = true;
+    }
+    check(refused, `a lasso ${name} was accepted`);
+  }
 
   if (failures.length > 0) {
     console.error(`\n${failures.length} FAILURE(S):`);

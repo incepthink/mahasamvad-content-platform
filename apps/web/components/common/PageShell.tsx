@@ -16,7 +16,7 @@
  * (app/not-found.tsx) and from a client one alike.
  */
 
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import type { DoodleMark } from '../../lib/doodleMarks';
 import { PageBackdrop } from './PageBackdrop';
@@ -69,6 +69,7 @@ export type PageShellProps = {
   plain?: boolean;
 
   className?: string;
+  style?: CSSProperties;
   children?: ReactNode;
 };
 
@@ -82,12 +83,16 @@ export function PageShell({
   doodles,
   plain,
   className,
+  style,
   children,
 }: PageShellProps) {
   const hasHead = Boolean(title || subtitle || actions || statusChip);
 
   return (
-    <main className={cn('page', plain && 'page-plain', className)}>
+    <main
+      className={cn('page', plain && 'page-plain', className)}
+      style={style}
+    >
       {background ? <PageBackground name={background} /> : null}
       {doodles ? (
         <PageBackdrop marks={doodles.marks} seed={doodles.seed} />

@@ -12,6 +12,7 @@
 // way; the storage only spares the officer having to look for it.
 
 import { useEffect, useState } from 'react';
+import { InfoHint } from '../../components/common/InfoHint';
 import { PageShell } from '../../components/common/PageShell';
 import { TranscriptionForm } from '../../components/TranscriptionForm';
 import { TranscriptionList } from '../../components/TranscriptionList';
@@ -65,7 +66,11 @@ export default function TranscribePage() {
     // app/page.tsx already uses.
     <PageShell
       background="transcribe"
-      title={STR.transcribeTitle}
+      title={
+        <>
+          {STR.transcribeTitle} <InfoHint text={STR.infoTranscribePage} />
+        </>
+      }
       subtitle={STR.transcribeIntro}
     >
       {/* The input and its output use the same compact card system. Keeping them in one

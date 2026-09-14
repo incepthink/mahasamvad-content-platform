@@ -18,7 +18,9 @@
  * The three fields are the officer's whole input:
  *
  *   MotionSourcePicker — the finished poster, uploaded and normalised before the form is
- *                        submitted. The create request names its storage PATH.
+ *                        submitted. The create request names its storage PATH. The moving
+ *                        region is drawn ON that preview rather than in a section of its
+ *                        own — see DEFAULT_MOTION_REGION below.
  *   मोशन ब्रीफ          — OPTIONAL. The poster alone is a complete request; this is where
  *                        an officer says which part of it should move.
  *   क्लिपचा आकार         — the frame the clip is published into. Its own field rather than
@@ -26,13 +28,27 @@
  *                        it wrapped onto two rows over the officer's own text.
  */
 
-import { Ratio, Sparkles } from 'lucide-react';
-import { MOTION_DIRECTION_MAX_CHARS } from '@dgipr/schemas';
+import { useRef, useState, type ReactNode } from 'react';
+import { Lasso, Maximize2, Ratio, SquareDashed } from 'lucide-react';
+import {
+  MOTION_DIRECTION_MAX_CHARS,
+  isMotionPolygon,
+  type MotionCrop,
+} from '@dgipr/schemas';
 import { FormCard } from '@/components/common/FormCard';
+import { FieldLabel } from '@/components/common/FieldLabel';
 import { PromptTextarea } from '@/components/common/PromptTextarea';
 import { MotionSourcePicker } from '@/components/MotionSourcePicker';
 import { MotionCropBox } from '@/components/MotionCropBox';
+import { MotionLassoBox } from '@/components/MotionLassoBox';
 import { ErrorNotice } from '@/components/ErrorNotice';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { STR } from '@/lib/strings';
 import { cn } from '@/lib/utils';
 import { FormatMenu } from './FormatMenu';
@@ -41,11 +57,111 @@ import { OFFERED_MOTION_ASPECTS, type useCreateForm } from './useCreateForm';
 type Form = ReturnType<typeof useCreateForm>;
 
 export function MotionComposer({ form }: { form: Form }) {
+  // Which selection tool draws the region. Local rather than on the form: the request only
+  // carries the SHAPE, and the shape already says which tool made it.
+  const [tool, setTool] = useState<'box' | 'lasso'>('box');
+  // The rectangle the officer last had, so trying the lasso and coming back does not throw
+  // away a box they had already placed.
+  const lastBox = useRef<MotionCrop>({ ...DEFAULT_MOTION_REGION });
+
+  const chooseBox = () => {
+    if (tool === 'box') return;
+    setTool('box');
+    form.setMotionRegion({ ...lastBox.current });
+  };
+
+  const chooseLasso = () => {
+    if (tool === 'lasso') return;
+    setTool('lasso');
+    // Nothing is selected until an outline is drawn. Keeping the old rectangle live but
+    // invisible under the lasso tool would submit a region the officer can no longer see.
+    form.setMotionRegion(null);
+  };
+
+  // The maximise dialog: the same poster, much larger, with the same selection tools. Both
+  // copies of the overlay read and write the one region on the form, so whatever is drawn in
+  // the dialog is already on the inline preview when it closes.
+  const [expanded, setExpanded] = useState(false);
+
+  const renderOverlay = () =>
+    !form.motionSource ? null : tool === 'lasso' ? (
+      <MotionLassoBox
+        value={
+          form.motionRegion && isMotionPolygon(form.motionRegion)
+            ? form.motionRegion
+            : null
+        }
+        onChange={form.setMotionRegion}
+        disabled={form.submitting}
+      />
+    ) : form.motionRegion && !isMotionPolygon(form.motionRegion) ? (
+      <MotionCropBox
+        value={form.motionRegion}
+        onChange={(rect) => {
+          lastBox.current = rect;
+          form.setMotionRegion(rect);
+        }}
+        // A moving region is free-form: MotionCropBox's ratio lock exists for a
+        // different job (getting a trim to an exact publishing frame). What differs
+        // between a trim and a region is MEANING — a cut versus a hole — and that
+        // lives in the copy, not in a second component.
+        aspect={null}
+        disabled={form.submitting}
+      />
+    ) : null;
+
+  const renderTools = (withExpand: boolean) => (
+    <div
+      className="motion-region-tools"
+      role="group"
+      aria-label={STR.motionRegionToolsLabel}
+    >
+      <div role="radiogroup" className="contents">
+        <RegionToolButton
+          active={tool === 'box'}
+          disabled={form.submitting}
+          label={STR.motionRegionToolBox}
+          onClick={chooseBox}
+        >
+          <SquareDashed size={18} aria-hidden="true" />
+        </RegionToolButton>
+        <RegionToolButton
+          active={tool === 'lasso'}
+          disabled={form.submitting}
+          label={STR.motionRegionToolLasso}
+          onClick={chooseLasso}
+        >
+          <Lasso size={18} aria-hidden="true" />
+        </RegionToolButton>
+      </div>
+      {withExpand ? (
+        <>
+          <span className="motion-region-divider" aria-hidden="true" />
+          <button
+            type="button"
+            className="motion-region-tool"
+            aria-label={STR.motionSourceExpand}
+            title={STR.motionSourceExpand}
+            disabled={form.submitting}
+            onClick={() => setExpanded(true)}
+          >
+            <Maximize2 size={18} aria-hidden="true" />
+          </button>
+        </>
+      ) : null}
+    </div>
+  );
+
   return (
     <FormCard
       htmlFor="motion-direction"
-      label={STR.motionDirectionLabel}
-      hint={STR.motionDirectionHint}
+      label={
+        <FieldLabel
+          helpId="motion-direction-help"
+          label={STR.motionDirectionLabel}
+          hint={STR.motionDirectionHint}
+        />
+      }
     >
       {/* The upload comes FIRST: without it there is no run, and the brief below is a
           question about a poster the officer should already be looking at. */}
@@ -55,8 +171,31 @@ export function MotionComposer({ form }: { form: Form }) {
         onChange={(next) => {
           form.setMotionSource(next);
           if (next) form.setError(null);
+          // THE RECTANGLE IS ARMED WITH THE POSTER, not by a button under it. A video model
+          // repaints every pixel it returns — it redraws the officer's Devanagari rather than
+          // preserving it — so marking the one part that may move is what this lane wants in
+          // the overwhelming majority of runs, and an opt-in nobody presses protects nobody.
+          // Dragging it out to the full frame is how they say "repaint everything"; removing
+          // the poster clears it, or the rectangle would outlive the picture it names.
+          form.setMotionRegion(next ? { ...DEFAULT_MOTION_REGION } : null);
+          // A new poster starts on the box again; a lasso drawn round the old one would name
+          // a shape on a picture that is no longer there.
+          setTool('box');
+          lastBox.current = { ...DEFAULT_MOTION_REGION };
         }}
+        overlay={renderOverlay()}
+        tools={renderTools(true)}
       />
+
+      {/* The two halves of what the rectangle means, said once, under the picture it is
+          drawn on. Without it the box reads as an optional crop. */}
+      {form.motionSource ? (
+        <p className="text-muted-foreground mt-2 text-sm">
+          {tool === 'lasso'
+            ? STR.motionLassoActiveNote
+            : STR.motionRegionActiveNote}
+        </p>
+      ) : null}
 
       <div className="mt-4">
         <PromptTextarea
@@ -113,8 +252,64 @@ export function MotionComposer({ form }: { form: Form }) {
       ) : null}
 
       <MotionAspectField form={form} />
-      <MotionRegionField form={form} />
+
+      {form.motionSource ? (
+        <Dialog open={expanded} onOpenChange={setExpanded}>
+          <DialogContent className="max-w-[min(96vw,1400px)] items-center">
+            <DialogHeader className="self-stretch">
+              <DialogTitle>{STR.motionSourceExpandTitle}</DialogTitle>
+              <DialogDescription>
+                {tool === 'lasso'
+                  ? STR.motionLassoActiveNote
+                  : STR.motionRegionActiveNote}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="motion-expand-frame">
+              <img
+                className="motion-expand-preview"
+                src={form.motionSource.url}
+                alt={form.motionSource.name}
+              />
+              {renderOverlay()}
+            </div>
+            {renderTools(false)}
+          </DialogContent>
+        </Dialog>
+      ) : null}
     </FormCard>
+  );
+}
+
+/**
+ * One of the two selection tools under the poster. Icon-only, so `aria-label` and `title`
+ * carry the wording; a radio because exactly one tool draws the region at a time.
+ */
+function RegionToolButton({
+  active,
+  disabled,
+  label,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  disabled: boolean;
+  label: string;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={active}
+      aria-label={label}
+      title={label}
+      disabled={disabled}
+      onClick={onClick}
+      className={cn('motion-region-tool', active && 'is-active')}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -123,97 +318,25 @@ export function MotionComposer({ form }: { form: Form }) {
  *
  * A video model repaints every pixel of every frame it returns. It does not preserve the
  * officer's Devanagari; it redraws it, which is survivable on a headline and garbled on a
- * card line. Marking a rectangle here is what stops that: everything outside it is
- * composited back from the poster they uploaded after the render, so the letterforms are
- * their own rather than the model's guess at them.
+ * card line. Marking a rectangle is what stops that: everything outside it is composited
+ * back from the poster they uploaded after the render, so the letterforms are their own
+ * rather than the model's guess at them.
  *
- * ONLY ONCE A POSTER IS ATTACHED, because there is nothing to draw on before that — and the
- * rectangle is meaningless without the picture it names.
+ * IT USED TO BE A SECTION OF ITS OWN, under the shape control, behind a
+ * "हलणारा भाग निवडा" button — and an opt-in nobody presses protects nobody. It is now drawn
+ * straight onto the preview and armed the moment a poster is attached: the rectangle is a
+ * gesture over a picture, so the picture is where it belongs, and the question the old
+ * heading asked is answered by the box already being there.
  *
- * OPT-IN, AND THE RECTANGLE IS ITS OWN TOGGLE — no separate checkbox. With nothing marked
- * there is no defensible default: a full-frame hole composites nothing and costs an encode, a
- * default centre box invents an intent nobody expressed, and a default full-frame freeze would
- * replace the clip with a still that plays perfectly. So no region means the lane behaves
- * exactly as it did before this control existed.
- *
- * `MotionCropBox` is REUSED UNCHANGED, with `aspect={null}`: a moving region is free-form, and
- * that component's ratio lock exists for a different job (getting a trim to an exact publishing
- * frame). What differs between a trim and a region is MEANING — a cut versus a hole — and that
- * lives in the copy, not in a second component.
+ * A centred starting rectangle rather than an empty frame, because somewhere to start
+ * dragging from is the one thing a free-form box cannot offer as an empty state.
  */
-function MotionRegionField({ form }: { form: Form }) {
-  const source = form.motionSource;
-  if (!source) return null;
-  const region = form.motionRegion;
-
-  return (
-    <div className="mt-4 border-t pt-4">
-      <p className="text-foreground flex items-center gap-2 text-sm font-semibold">
-        <Sparkles size={16} aria-hidden="true" />
-        {STR.motionRegionLabel}
-      </p>
-      <p className="text-muted-foreground mt-1 text-sm">
-        {STR.motionRegionHint}
-      </p>
-
-      {region ? (
-        <>
-          {/* `relative` is load-bearing: MotionCropBox positions itself `absolute; inset: 0`,
-              so it needs a positioned box that is exactly the picture. `w-fit` keeps that box
-              on the image rather than on the card, or the rectangle's fractions would be read
-              against whitespace beside it. */}
-          <div className="relative mt-3 w-fit">
-            {/* A plain <img> for the reason MotionSourcePicker uses one: the URL is a
-                public bucket object this very form just uploaded. */}
-            <img
-              src={source.url}
-              alt={source.name}
-              className="block max-h-[420px] w-auto rounded-[14px]"
-            />
-            <MotionCropBox
-              value={region}
-              onChange={form.setMotionRegion}
-              aspect={null}
-              disabled={form.submitting}
-            />
-          </div>
-          <p className="text-muted-foreground mt-2 text-sm">
-            {STR.motionRegionActiveNote}
-          </p>
-          <button
-            type="button"
-            disabled={form.submitting}
-            onClick={() => form.setMotionRegion(null)}
-            className={cn(
-              'mt-2 inline-flex h-9 shrink-0 items-center rounded-md border px-3 text-sm transition-colors',
-              'bg-background hover:bg-accent hover:text-accent-foreground',
-              form.submitting && 'pointer-events-none opacity-50',
-            )}
-          >
-            {STR.motionRegionClear}
-          </button>
-        </>
-      ) : (
-        <button
-          type="button"
-          disabled={form.submitting}
-          // A centred rectangle over the middle of the poster: somewhere to start dragging
-          // from, which is the one thing a free-form box cannot offer as an empty state.
-          onClick={() =>
-            form.setMotionRegion({ x: 0.15, y: 0.3, width: 0.7, height: 0.4 })
-          }
-          className={cn(
-            'mt-3 inline-flex h-9 shrink-0 items-center rounded-md border px-3 text-sm transition-colors',
-            'bg-background hover:bg-accent hover:text-accent-foreground',
-            form.submitting && 'pointer-events-none opacity-50',
-          )}
-        >
-          {STR.motionRegionAdd}
-        </button>
-      )}
-    </div>
-  );
-}
+const DEFAULT_MOTION_REGION = {
+  x: 0.15,
+  y: 0.3,
+  width: 0.7,
+  height: 0.4,
+} as const;
 
 /**
  * THE SHAPE OF THE CLIP. It earns its hint: "the poster is padded into the frame" is the
@@ -225,14 +348,13 @@ function MotionRegionField({ form }: { form: Form }) {
 function MotionAspectField({ form }: { form: Form }) {
   return (
     <div className="mt-4 border-t pt-4">
-      <p
-        className="text-foreground flex items-center gap-2 text-sm font-semibold"
-      >
+      <p className="text-foreground flex items-center gap-2 text-sm font-semibold">
         <Ratio size={16} aria-hidden="true" />
-        {STR.motionAspectLabel}
-      </p>
-      <p className="text-muted-foreground mt-1 text-sm">
-        {STR.motionAspectHint}
+        <FieldLabel
+          helpId="motion-aspect-help"
+          label={STR.motionAspectLabel}
+          hint={STR.motionAspectHint}
+        />
       </p>
       <div
         className="mt-2 flex flex-wrap gap-2"

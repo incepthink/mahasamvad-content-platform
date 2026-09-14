@@ -120,6 +120,8 @@ export type {
 export { buildFrozenSourceOverlay } from './video/source-overlay.js';
 export type {
   OverlayHole,
+  OverlayPolygon,
+  OverlayRect,
   SourceOverlayOptions,
 } from './video/source-overlay.js';
 export { renderHtmlToPng } from './render-html.js';

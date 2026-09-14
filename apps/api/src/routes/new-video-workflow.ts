@@ -208,6 +208,18 @@ export function registerNewVideoWorkflowRoutes(
       });
     }
 
+    // A fork names the video to continue from, which is by definition an edit of it. Asking
+    // for a NEW clip in the same breath is two contradictory instructions, so it is refused
+    // before anything is created rather than guessed at.
+    if (body.fromTurnId !== undefined && body.intent === 'new') {
+      return reply.code(400).send({
+        error: {
+          message:
+            'जुन्या व्हिडिओवरून बदल करताना "नवीन क्लिप" निवडता येत नाही. एकच पर्याय निवडा.',
+        },
+      });
+    }
+
     // Omitting conversationId starts a new, independent conversation.
     const conversation = body.conversationId
       ? await getConversation(client, body.conversationId)
@@ -367,6 +379,9 @@ export function registerNewVideoWorkflowRoutes(
       cast,
       // Null on the ordinary path, where the job reads the conversation's own chain point.
       forkFromInteractionId,
+      // Edit the video on screen or make a new clip. `auto` is decided in the job, from the
+      // instruction itself, because it is a model call and must not hold this request open.
+      body.intent ?? 'auto',
     );
 
     return reply

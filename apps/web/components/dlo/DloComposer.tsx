@@ -62,6 +62,7 @@ import {
   isDocumentFileName,
 } from '@/components/DocumentIntake';
 import { FormCard } from '@/components/common/FormCard';
+import { InfoHint } from '@/components/common/InfoHint';
 import { PromptTextarea } from '@/components/common/PromptTextarea';
 import {
   YouTubeLinkInput,
@@ -188,6 +189,7 @@ export function DloComposer({ form }: { form: DloIntakeFormState }) {
       htmlFor="dlo-notes"
       label={STR.dloNotesLabel}
       hint={STR.dloComposerHint}
+      info={<InfoHint text={STR.infoDloSources} />}
     >
       <div className="mt-4">
         <PromptTextarea

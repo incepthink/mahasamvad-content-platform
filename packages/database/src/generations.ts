@@ -699,6 +699,10 @@ export async function listGenerationsForDloIntakes(
     }));
 }
 
+// WHOLE rows — every column, including the note, the article, both translations and every
+// jsonb blob. It has no caller left: the history list is `listGenerationsPage` below, which
+// reads the twelve columns a card actually draws. Do not reach for this one to build a list
+// view; it is here for a caller that genuinely needs complete rows.
 export async function listGenerations(
   client: SupabaseClient,
   limit = 50,
@@ -873,4 +877,186 @@ export async function listRevisions(
     motionGifPath: row.motion_gif_path ?? null,
     createdAt: row.created_at,
   }));
+}
+
+// ---------------------------------------------------------------------------
+// The history list, paged and filtered in the DATABASE.
+//
+// `listGenerations` above selects EVERY column, which for this table means `note` (up to
+// 60,000 characters), `article`, both translations, `fact_check`, `style_reference` and a
+// dozen jsonb blobs — while a history card draws eight fields. At the 100-row cap the old
+// list endpoint used, that was megabytes on the wire to render nine cards, and it is also
+// why the history page could only ever reach 100 runs: filtering and paging both happened
+// in the browser over whatever that one request returned.
+//
+// This is the lean counterpart. Two rules it must keep:
+//
+//   * NEVER widen the select to `*`. The whole point is the columns that are absent.
+//     `note` and `article` are here only because a card shows an excerpt of one and the
+//     first line of the other, and PostgREST cannot substring — bounded instead by the page
+//     size, which is what makes that affordable.
+//   * The count is `exact` and comes back in the SAME round trip as the rows (PostgREST's
+//     Content-Range header), so paging costs one query, not two.
+// ---------------------------------------------------------------------------
+
+// Exactly the columns `toSummary` reads. Adding one here is a deliberate act.
+const GENERATION_CARD_COLUMNS =
+  'id,created_at,output_type,category,status,step,note,article,copy,poster_path,source_image_path,cost_usd';
+
+export type GenerationCardRow = Readonly<{
+  id: string;
+  createdAt: string;
+  outputType: OutputType;
+  category: Category;
+  status: GenerationStatus;
+  step: string | null;
+  note: string;
+  article: string | null;
+  copy: unknown;
+  posterPath: string | null;
+  sourceImagePath: string | null;
+  costUsd: number | null;
+}>;
+
+export type GenerationListFilter = Readonly<{
+  // Restrict to these categories (OR'd). Undefined = every category.
+  categories?: readonly Category[] | undefined;
+  // Restrict to these output types (OR'd). Undefined = every output type. Paired with
+  // `categories` this is what separates a caption-only social run from a poster one.
+  outputTypes?: readonly OutputType[] | undefined;
+  // ...and what EXCLUDES the caption lane from a poster format, which `outputTypes` cannot
+  // express on its own (a poster run may be 'poster' or 'both').
+  excludeOutputTypes?: readonly OutputType[] | undefined;
+  statuses?: readonly GenerationStatus[] | undefined;
+  // ISO timestamp; rows created strictly before it are dropped.
+  createdAfter?: string | undefined;
+  // Case-insensitive substring over the note and the article. Already sanitised by the
+  // caller for PostgREST's `or` grammar — see `escapeForPostgrestOr`.
+  search?: string | undefined;
+}>;
+
+// PostgREST parses `or=(a.ilike.*x*,b.ilike.*y*)` as a grammar, so a comma, parenthesis or
+// backslash typed into the search box would not merely fail to match — it would change the
+// shape of the filter, and a malformed one is a 400 on an ordinary keystroke. Marathi search
+// terms carry none of these, so dropping them costs nothing real; escaping them would mean
+// reimplementing that grammar's quoting rules against a moving target.
+export function escapeForPostgrestOr(term: string): string {
+  return term.replace(/[,()\\%*"']/g, ' ').trim();
+}
+
+function applyGenerationFilter<T>(query: T, filter: GenerationListFilter): T {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let q = query as any;
+  if (filter.categories && filter.categories.length > 0) {
+    q = q.in('category', [...filter.categories]);
+  }
+  if (filter.outputTypes && filter.outputTypes.length > 0) {
+    q = q.in('output_type', [...filter.outputTypes]);
+  }
+  if (filter.excludeOutputTypes && filter.excludeOutputTypes.length > 0) {
+    q = q.not('output_type', 'in', `(${filter.excludeOutputTypes.join(',')})`);
+  }
+  if (filter.statuses && filter.statuses.length > 0) {
+    q = q.in('status', [...filter.statuses]);
+  }
+  if (filter.createdAfter) {
+    q = q.gte('created_at', filter.createdAfter);
+  }
+  const search = filter.search ? escapeForPostgrestOr(filter.search) : '';
+  if (search) {
+    q = q.or(`note.ilike.%${search}%,article.ilike.%${search}%`);
+  }
+  return q as T;
+}
+
+// PostgREST's 416 body names the size of the set it could not satisfy, e.g.
+// "an offset of 600 was requested, but there are only 87 rows". Read rather than re-queried:
+// the count is already in hand, and a second round trip to learn it would be the same work
+// the failed request had already done.
+function rangeTotal(error: { message?: string; details?: string }): number | null {
+  const text = `${error.details ?? ''} ${error.message ?? ''}`;
+  const match = /there are only (\d+) rows/.exec(text);
+  return match ? Number(match[1]) : null;
+}
+
+export async function listGenerationsPage(
+  client: SupabaseClient,
+  options: GenerationListFilter & {
+    offset: number;
+    limit: number;
+    ascending?: boolean;
+  },
+): Promise<{ rows: GenerationCardRow[]; total: number }> {
+  const query = applyGenerationFilter(
+    client
+      .from(GENERATIONS_TABLE)
+      .select(GENERATION_CARD_COLUMNS, { count: 'exact' }),
+    options,
+  )
+    .order('created_at', { ascending: options.ascending ?? false })
+    // Ties on created_at would otherwise be ordered arbitrarily per request, which can
+    // duplicate a row onto two pages and drop another entirely.
+    .order('id', { ascending: options.ascending ?? false })
+    .range(options.offset, options.offset + options.limit - 1);
+
+  const { data, error, count } = await query;
+  if (error) {
+    // PostgREST answers a range that starts past the end of the result set with 416
+    // `Requested range not satisfiable` rather than an empty page. That is reachable from
+    // an ordinary stale link — a bookmarked page 40 of a list that has since been filtered
+    // down — so it is an EMPTY PAGE here, not a 500. The caller still gets the true count,
+    // which is what lets it clamp the pager back into range.
+    if (error.code === 'PGRST103') {
+      return { rows: [], total: rangeTotal(error) ?? 0 };
+    }
+    throw new Error(`Failed to list generations: ${error.message}`);
+  }
+  const rows = ((data ?? []) as unknown as Array<{
+    id: string;
+    created_at: string;
+    output_type: OutputType;
+    category: Category;
+    status: GenerationStatus;
+    step: string | null;
+    note: string | null;
+    article: string | null;
+    copy: unknown;
+    poster_path: string | null;
+    source_image_path: string | null;
+    cost_usd: number | string | null;
+  }>).map((row) => ({
+    id: row.id,
+    createdAt: row.created_at,
+    outputType: row.output_type,
+    category: row.category,
+    status: row.status,
+    step: row.step,
+    note: row.note ?? '',
+    article: row.article,
+    copy: row.copy,
+    posterPath: row.poster_path,
+    sourceImagePath: row.source_image_path,
+    costUsd: row.cost_usd === null ? null : Number(row.cost_usd),
+  }));
+  return { rows, total: count ?? rows.length };
+}
+
+// How many rows match, with NO row returned — PostgREST answers a `head` request from the
+// Content-Range header alone. This is what makes the facet counts exact at any table size:
+// the alternative, scanning every row into the API to tally them, gets slower as the
+// department does more work, which is the opposite of the point.
+export async function countGenerations(
+  client: SupabaseClient,
+  filter: GenerationListFilter = {},
+): Promise<number> {
+  const { count, error } = await applyGenerationFilter(
+    client
+      .from(GENERATIONS_TABLE)
+      .select('id', { count: 'exact', head: true }),
+    filter,
+  );
+  if (error) {
+    throw new Error(`Failed to count generations: ${error.message}`);
+  }
+  return count ?? 0;
 }

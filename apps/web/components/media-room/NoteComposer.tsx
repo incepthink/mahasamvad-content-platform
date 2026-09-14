@@ -38,6 +38,7 @@ import {
 } from '@/components/common/AttachmentStrip';
 import { FieldLabel } from '@/components/common/FieldLabel';
 import { FormCard } from '@/components/common/FormCard';
+import { InfoHint } from '@/components/common/InfoHint';
 import { PromptTextarea } from '@/components/common/PromptTextarea';
 import { DocumentIntake } from '@/components/DocumentIntake';
 import { ErrorNotice } from '@/components/ErrorNotice';
@@ -356,12 +357,18 @@ function CheckOption({
 function PosterHeadingField({ form }: { form: Form }) {
   return (
     <div className="mt-4 border-t pt-4">
-      <label
-        className="text-foreground block text-sm font-semibold"
-        htmlFor="poster-heading"
-      >
-        {STR.posterHeadingLabel}
-      </label>
+      {/* The ⓘ sits BESIDE the label, not inside it: a button nested in a
+          `<label htmlFor=…>` also focuses that label's input, so asking what the
+          field is for would put the cursor in it. */}
+      <div className="-my-1 flex items-center gap-1">
+        <label
+          className="text-foreground block text-sm font-semibold"
+          htmlFor="poster-heading"
+        >
+          {STR.posterHeadingLabel}
+        </label>
+        <InfoHint text={STR.infoPosterHeading} />
+      </div>
       <p className="text-muted-foreground mt-1 text-sm">
         {STR.posterHeadingCreateHint}
       </p>

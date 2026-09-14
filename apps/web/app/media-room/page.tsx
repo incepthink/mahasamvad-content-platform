@@ -117,6 +117,9 @@ function optimisticSummary(
     noteExcerpt: request.note.slice(0, 160),
     headline: null,
     posterUrl: null,
+    // The request names a storage PATH, not a public URL, so an optimistic card cannot
+    // show the uploaded picture; the first poll after the row lands supplies it.
+    sourceImageUrl: null,
     costUsd: null,
   };
 }
@@ -147,7 +150,12 @@ const Page = () => {
     if (!quiet) setLoadError(null);
 
     try {
-      const rows = (await listGenerations()).filter(isMediaRoomGeneration);
+      // One page of the newest runs, not the whole history: this polls every few seconds
+      // and the gallery below shows a strip of recent work. Asking for no facet counts is
+      // what keeps a poll to a single lean query.
+      const rows = (await listGenerations({ pageSize: 40 })).items.filter(
+        isMediaRoomGeneration,
+      );
       const serverIds = new Set(rows.map((item) => item.id));
       serverIds.forEach((id) => optimisticIds.current.delete(id));
 

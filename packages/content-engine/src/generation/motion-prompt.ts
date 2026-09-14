@@ -79,6 +79,7 @@ export const MOTION_BRIEF = [
   'The uploaded image is already exactly {{ASPECT}}, so say in the prompt that the frame is to be used as it is: no zooming, re-framing, cropping or panning.',
   'Nothing from the uploaded image must be left out in the output video.',
   'The video must have all the elements of the Poster with the full poster visible full-screen and nothing cut off.',
+  'When the uploaded image contains people or illustrated characters, make the animation feel active and interactive by having those existing characters interact naturally with one another and with elements already present in the scene. The Gemini prompt must explicitly describe these character interactions.',
   'I want you to make a gemini-omni-1.1-flash prompt for this image.',
 ].join(' ');
 
@@ -239,14 +240,23 @@ if (
     plain.includes('motionized, loopable GIF'),
     'the brief lost the loop wording',
   );
+  check(
+    plain.includes(
+      'existing characters interact naturally with one another and with elements already present in the scene',
+    ) &&
+      plain.includes(
+        'The Gemini prompt must explicitly describe these character interactions.',
+      ),
+    'the brief lost the character-interaction requirement',
+  );
 
   // KEEP IT SMALL. The officer's complaint was the size of this request; the rule blocks it
   // used to carry are gone and must not creep back without them asking.
-  // Raised from 900 by exactly one sentence: the "already exactly {{ASPECT}}" line, which is
-  // what closes the crop. Still a cap, and still there so "just one more rule" has to be a
-  // deliberate decision.
+  // Raised only for the two deliberately requested additions: the "already exactly
+  // {{ASPECT}}" sentence that closes the crop, and the character-interaction requirement.
+  // Still a cap, so "just one more rule" has to be a deliberate decision.
   check(
-    plain.length < 1_050,
+    plain.length < 1_350,
     `the request has grown back (${plain.length} chars) — see the header`,
   );
   check(

@@ -25,6 +25,7 @@ import {
   authorNewVideoPrompt,
   awaitInteraction,
   buildNewVideoScaffold,
+  classifyNewVideoIntent,
   createVideoInteraction,
   downloadInteractionVideo,
   interactionErrorMessage,
@@ -35,6 +36,7 @@ import {
   newVideoTaskFor,
   promptModeAuthors,
   type InteractionImage,
+  type NewVideoIntentDecision,
   type ScaffoldCharacter,
 } from '@dgipr/content-engine';
 import {
@@ -69,6 +71,7 @@ import {
   type SupabaseClient,
 } from '@dgipr/database';
 import {
+  NEW_VIDEO_MAX_IMAGES,
   newVideoTitleFrom,
   type NewVideoAspect,
   type NewVideoCharacter,
@@ -76,6 +79,7 @@ import {
   type NewVideoConversationSummary,
   type NewVideoImage,
   type NewVideoTurn,
+  type NewVideoTurnIntentChoice,
 } from '@dgipr/schemas';
 
 // A conversation is a chain of edits on one video; past this it is a new subject and a new
@@ -524,6 +528,49 @@ export async function markTurnCompleted(
   });
 }
 
+// Edit the video on screen, or a new clip — see video/new-video-intent.ts. Exported so the
+// offline check can drive the non-model branches. Never throws: the classifier degrades to a
+// deterministic fallback, and the turn-list read that feeds it is best-effort.
+export async function decideTurnIntent(
+  client: SupabaseClient,
+  input: Readonly<{
+    conversationId: string;
+    turn: NewVideoTurnRow;
+    chainPoint: string | null;
+    forked: boolean;
+    choice: NewVideoTurnIntentChoice;
+    imageCount: number;
+  }>,
+): Promise<NewVideoIntentDecision> {
+  if (input.chainPoint === null) {
+    // Nothing on screen to edit: every such turn is a first turn, whatever was chosen.
+    return { intent: 'new', source: 'first-turn', reason: '' };
+  }
+  if (input.forked) {
+    return { intent: 'edit', source: 'fork', reason: '' };
+  }
+  if (input.choice !== 'auto') {
+    return { intent: input.choice, source: 'officer', reason: '' };
+  }
+  // The instruction that produced the video on screen, so the classifier can tell "change
+  // this" from "and now a different scene". Best-effort: the call still runs without it.
+  let previousPrompt: string | null = null;
+  try {
+    const turns = await listNewVideoTurns(client, input.conversationId);
+    previousPrompt =
+      turns.find(
+        (t) => t.status === 'completed' && t.interactionId === input.chainPoint,
+      )?.prompt ?? null;
+  } catch {
+    previousPrompt = null;
+  }
+  return classifyNewVideoIntent({
+    prompt: input.turn.prompt,
+    previousPrompt,
+    imageCount: input.imageCount,
+  });
+}
+
 export async function markTurnFailed(
   client: SupabaseClient,
   turnId: string,
@@ -563,6 +610,9 @@ export function startNewVideoTurn(
   // a turn, so there is no redo that would have to re-read it, and a fork is a choice about
   // ONE instruction rather than a property of the conversation.
   forkFromInteractionId: string | null = null,
+  // Edit the video on screen, or make a NEW clip. `auto` is decided below, per turn; see
+  // video/new-video-intent.ts for why every follow-up can no longer be assumed to be an edit.
+  intentChoice: NewVideoTurnIntentChoice = 'auto',
 ): void {
   void (async () => {
     try {
@@ -585,8 +635,23 @@ export function startNewVideoTurn(
       // downstream follows from the result rather than from how it was chosen — a fork is
       // still an edit, so the cast's portraits stay unattached and no task field is sent.
       const current = await getNewVideoConversationRow(client, conversation.id);
-      const previousInteractionId =
+      const chainPoint =
         forkFromInteractionId ?? current?.lastInteractionId ?? null;
+
+      // EDIT OR NEW CLIP. Only a turn that HAS a video to continue from has a question to
+      // answer. A "new" verdict drops the chain point for THIS request — Gemini then renders
+      // it as a first turn, with a declared task and the cast's portraits — while the chain
+      // rule is untouched: when the new clip succeeds it becomes the video the next plain
+      // instruction edits, which is what the officer is now looking at.
+      const intent = await decideTurnIntent(client, {
+        conversationId: conversation.id,
+        turn,
+        chainPoint,
+        forked: forkFromInteractionId !== null,
+        choice: intentChoice,
+        imageCount: referenceRows.length,
+      });
+      const previousInteractionId = intent.intent === 'new' ? null : chainPoint;
       const isEdit = previousInteractionId !== null;
 
       // A CHARACTER'S PORTRAIT IS ATTACHED ONLY ON THE TURN THAT ESTABLISHES THEM — the turn
@@ -595,9 +660,18 @@ export function startNewVideoTurn(
       // one edit" failure; it would also re-index every <IMAGE_REF_n> tag mid-chain. Their
       // VOICE is still restated every turn, in the scaffold below, because a voice cannot be
       // repaired by a later instruction at all.
+      //
+      // On a NEW CLIP inside an existing conversation the portraits come back — the new clip
+      // has never seen the character — but only as many as still fit beside the pictures the
+      // officer attached. The route budgeted portrait slots only for a conversation's first
+      // turn, so the cap is applied here, and the officer's own pictures win: they were
+      // attached for this very clip. Trailing portraits are dropped, never re-ordered, so the
+      // scaffold's tag arithmetic still counts from the front.
       const portraitCharacters = isEdit
         ? []
-        : characters.filter((character) => character.portraitPath !== null);
+        : characters
+            .filter((character) => character.portraitPath !== null)
+            .slice(0, Math.max(0, NEW_VIDEO_MAX_IMAGES - referenceRows.length));
 
       // Downloaded now rather than held since the upload: a reference image may have been
       // attached minutes ago, and holding several of them per conversation is how a page
@@ -716,6 +790,7 @@ export function startNewVideoTurn(
       console.log(
         `[new-video-workflow ${conversation.id}/${turn.id}] mode=${promptMode} ` +
           `images=${referenceImages.length} edit=${isEdit} ` +
+          `intent=${intent.intent}(${intent.source}${intent.reason !== '' ? `: ${intent.reason}` : ''}) ` +
           `${forkFromInteractionId !== null ? 'forked ' : ''}` +
           `cast=${characters.length} portraits=${portraitCharacters.length} ` +
           `task=${videoTask ?? '(inferred)'} ` +

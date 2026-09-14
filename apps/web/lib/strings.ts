@@ -40,7 +40,7 @@ export const STR = {
   installAppDismiss: 'आत्ता नको',
 
   // New-generation form
-  newTitle: 'नवीन बातमी / पोस्टर तयार करा',
+  newTitle: 'नवीन बातमी',
   noteLabel: 'टिपणी येथे लिहा किंवा चिकटवा',
   noteHint: 'Paste your official note (टिपणी) here',
 
@@ -107,8 +107,9 @@ export const STR = {
     'तयार पोस्टरची प्रतिमा द्या — तिच्यातील मजकूर जसाच्या तसा राहील आणि पोस्टरमधील काहीही वगळले जाणार नाही.',
   motionSourceDrop: 'प्रतिमा इथे ओढून आणा, किंवा निवडण्यासाठी क्लिक करा',
   motionSourceFormats: 'PNG, JPG किंवा WEBP',
-  motionSourceChange: 'दुसरे पोस्टर निवडा',
   motionSourceRemove: 'काढून टाका',
+  motionSourceExpand: 'मोठ्या आकारात उघडा',
+  motionSourceExpandTitle: 'हलणारा भाग मोठ्या प्रतिमेवर निवडा',
   motionSourceUploading: 'पोस्टर अपलोड होत आहे…',
   motionSourceRequired: 'कृपया आधी पोस्टरची प्रतिमा अपलोड करा.',
   motionDirectionLabel: 'AI प्रॉम्प्ट (ऐच्छिक)',
@@ -133,21 +134,26 @@ export const STR = {
   // the default's behaviour first, because that is the one where nothing is added.
   motionAspectHint:
     'पोस्टरसारखाच निवडल्यास व्हिडिओ पोस्टरच्याच आकारात येतो. उभा किंवा आडवा निवडल्यास त्या चौकटीत पोस्टर बसवले जाते आणि गरज असल्यास वर-खाली किंवा दोन्ही बाजूंना पोस्टरच्याच रंगाच्या पट्ट्या येतात — पोस्टरचा कोणताही भाग कापला जात नाही.',
-  // ---- the moving region, under the shape control (migration 0055) ----
+  // ---- the moving region, drawn on the uploaded poster itself (migration 0055) ----
   // THE HINT IS THE FEATURE. An officer marking a rectangle has no way to know why they are
   // being asked — the reason is that a video model redraws every pixel, including their
   // Devanagari, and this is what stops it. So the hint states the consequence in both
   // directions: only the marked part moves, and everything else stays exactly as uploaded.
-  // Without that it reads as an optional crop and nobody uses it.
-  motionRegionLabel: 'कोणता भाग हलवायचा?',
+  // Without that it reads as an optional crop and nobody uses it. The rectangle no longer has
+  // a heading of its own — it is armed with the upload — so this rides the upload card's ⓘ.
   motionRegionHint:
     'पोस्टरवर चौकट काढा. फक्त त्या भागात हालचाल होईल; बाकीचा भाग — मजकूर, आकडे, लोगो, तळटीप — जसा अपलोड केला होता तसाच राहील. चौकट काढली नाही तर संपूर्ण पोस्टर AI पुन्हा रंगवते आणि त्यात मजकूर बदलू शकतो.',
-  // The opt-in. Off by default, because marking nothing is a complete request and the lane
-  // behaved this way before the control existed.
-  motionRegionAdd: 'हलणारा भाग निवडा',
-  motionRegionClear: 'निवड काढून टाका',
   // Shown while the rectangle is on screen, so the officer knows the two halves apart.
   motionRegionActiveNote: 'चौकटीतला भाग हलेल · बाहेरचा भाग जसाच्या तसा राहील',
+  // ---- the two selection tools under the poster: box and lasso ----
+  motionRegionToolsLabel: 'हलणारा भाग निवडण्याची पद्धत',
+  motionRegionToolBox: 'चौकट निवड',
+  motionRegionToolLasso: 'मुक्त रेषा निवड (लॅसो)',
+  motionLassoActiveNote: 'रेषेच्या आतला भाग हलेल · बाहेरचा भाग जसाच्या तसा राहील',
+  motionLassoPrompt: 'हलणाऱ्या भागाभोवती बोटाने किंवा माउसने रेषा काढा',
+  motionLassoTooSmall: 'निवड खूप लहान आहे — पुन्हा मोठी रेषा काढा',
+  motionLassoSurfaceLabel:
+    'मुक्त रेषा निवड — हलणाऱ्या भागाभोवती ओढून रेषा काढा; नवी रेषा जुनी बदलते, Escape ने रद्द करा',
   // ---- the detail page ----
   motionOutputTitle: 'तयार झालेला डायनॅमिक पोस्टर',
   motionSourceCaption: 'मूळ पोस्टर',
@@ -372,16 +378,19 @@ export const STR = {
     `${window} · एकूण ${total}`,
   audioTrimEditLabel: (name: string) => `भाग निवडा: ${name}`,
 
-  // /dlo's ONE direction box (components/dlo/DloAiPromptBox). It replaces three separate
-  // cards — शीर्षक, तुमची विनंती and नमुना बातमी — which asked the officer three questions
-  // before they had seen a single line of the article. All three remain on the तपासणी step,
-  // where they are answered against a note that actually exists.
+  // /dlo's ONE direction box (components/dlo/DloAiPromptBox). It REPLACES three separate
+  // cards — शीर्षक किंवा बातमीचा रोख, तुमची विनंती and नमुना बातमी — which asked the officer
+  // three questions before they had seen a single line of the article. All three were the
+  // same request written three ways, and all three are now typed here: nothing else is sent
+  // as a heading or as a style sample from this lane.
   dloAiPromptLabel: 'AI साठी सूचना (ऐच्छिक)',
   // Short for the same reason as dloComposerHint, and shorter still because the label
   // already says (ऐच्छिक): a long paragraph on an optional box reads as a form to fill in.
+  // The full account of what may go in it is behind the ⓘ (infoDloAiPrompt).
   dloAiPromptHint:
-    'बातमी कशी हवी ते तुमच्या शब्दांत लिहा — शीर्षक, कशावर भर, भाषा.',
-  dloAiPromptPlaceholder: 'उदा. ५० कोटींच्या निधीवर भर द्या; भाषा सोपी ठेवा…',
+    'बातमी कशी हवी ते तुमच्या शब्दांत लिहा — शीर्षक, कशावर भर, भाषा व शैली.',
+  dloAiPromptPlaceholder:
+    'उदा. शीर्षकात कर्जमुक्तीचा उल्लेख हवा; ५० कोटींच्या निधीवर भर द्या; भाषा सोपी ठेवा…',
   // All three file sources are attached from ONE card (components/DloSourcesCard) — the
   // question "what do you want to add?" is the same for each, and three cards asking it made
   // the officer scroll past two they were not using. Nothing is read at this step at all:
@@ -1000,9 +1009,17 @@ export const STR = {
   fiveWEmpty: 'या टिपणीत नमूद नाही',
   copyText: 'मजकूर कॉपी करा',
   copied: 'कॉपी झाले ✓',
+  // One button on the article's action row; the three formats are its menu items, so
+  // the row reads as four commands rather than seven.
+  downloadMenu: 'डाउनलोड',
   downloadTxt: '.txt डाउनलोड',
   downloadMd: '.md डाउनलोड',
   downloadPdf: 'PDF डाउनलोड',
+  // Opens /translate with this article already in its box. The result page no longer
+  // runs a translation of its own: /translate is where the target is chosen and where
+  // the name check lives, so asking the same question in two places is gone.
+  articleTranslateLink: 'भाषांतर करा',
+  articleTranslateLinkTitle: 'हा लेख भाषांतर पानावर उघडा',
   translateToEnglish: 'इंग्रजीत भाषांतर करा',
   translateToHindi: 'हिंदीत भाषांतर करा',
   showMarathi: 'मराठी',
@@ -1192,6 +1209,10 @@ export const STR = {
   crossFormatFacebookShort: 'फेसबुक',
   crossFormatToTwitter: 'याच मजकुरावरून ट्विटर पोस्ट तयार करा',
   crossFormatToFacebook: 'याच मजकुरावरून फेसबुक पोस्ट तयार करा',
+  // The article result's one cross-lane link. Unlike the two above it carries the
+  // ARTICLE across, not the note — see `use=article` in useCreateForm.
+  crossFormatCreativeShort: 'क्रिएटिव्ह',
+  crossFormatToCreative: 'याच लेखावरून क्रिएटिव्ह पोस्टर तयार करा',
   // Shown on Creative and Social while the run named by ?from= is being fetched.
   prefillLoading: 'आधीच्या कामातील टिपणी आणली जात आहे…',
   prefillFailed:
@@ -2050,6 +2071,18 @@ export const STR = {
   nvwForkActiveHint:
     'नवीनतम व्हिडिओऐवजी निवडलेल्या व्हिडिओवरून पुढचा बदल केला जाईल.',
   nvwForkCancel: 'रद्द करा',
+  // Edit the video on screen, or make a new clip. Every follow-up used to be sent as an edit,
+  // so "दृश्य २: …" reached Gemini as a rewrite of scene 1 and failed after minutes.
+  nvwIntentLabel: 'ही सूचना कशासाठी?',
+  nvwIntentAuto: 'आपोआप ओळखा',
+  nvwIntentEdit: 'हाच व्हिडिओ बदला',
+  nvwIntentNew: 'नवीन क्लिप',
+  nvwIntentAutoHint:
+    'छोटा बदल असेल तर हाच व्हिडिओ बदलला जाईल; वेगळे दृश्य असेल तर नवीन क्लिप तयार होईल.',
+  nvwIntentEditHint:
+    'आधीच्या व्हिडिओत फक्त सांगितलेला बदल होईल. बाकी सर्व तसेच राहील.',
+  nvwIntentNewHint:
+    'आधीच्या व्हिडिओपासून स्वतंत्र नवीन क्लिप तयार होईल. निवडलेली पात्रे व आकार तसेच राहतील.',
   // Turns are not numbered anywhere else on this page, so the ordinal exists for this one
   // job: naming which video a pending change will continue from.
   nvwForkTurn: 'सूचना',
@@ -2259,6 +2292,47 @@ export const STR = {
   analyticsSliceMarathi: 'मराठी',
   analyticsSliceVideoNote: 'टिपणीवरून',
   analyticsSliceVideoScript: 'तयार संहितेवरून',
+
+  // ---- the ⓘ explanations (components/common/InfoHint) --------------------------------
+  //
+  // Each of these answers the question a one-line `hint` has no room for: what a box is
+  // FOR, what happens when it is left blank, and — the one an officer cannot guess — what
+  // it will NEVER do. They are deliberately longer than a hint and deliberately not in
+  // one: a paragraph under an optional field reads as a form to fill in, so it lives
+  // behind the icon and the hint stays a subtitle.
+  infoHintLabel: 'अधिक माहिती',
+
+  // Banner: the officer's own poster line. The two things that are not visible from the
+  // control are that leaving it blank is the NORMAL case, and that what is typed is
+  // printed exactly — it is not a suggestion the design may reword.
+  infoPosterHeading:
+    'बॅनरवर छापला जाणारा नेमका मजकूर. रिकामे ठेवल्यास वरील टिपणीतील योजना, पुरस्कार किंवा उपक्रमाचे नाव आपोआप शोधून वापरले जाईल — बहुतेक वेळा हेच पुरेसे असते. येथे काही लिहिल्यास नेमका तोच मजकूर, जसाच्या तसा, बॅनरवर येईल; तो बदलला किंवा लहान केला जाणार नाही. कमाल १२० अक्षरे.',
+
+  // /dlo — the page itself, then its two boxes.
+  infoDloPage:
+    'बैठकीचे ध्वनिमुद्रण, कागदपत्रे, फोटो, लिंक आणि तुमची टिपणी — हे सर्व एकत्र करून त्यांतून प्रसिद्धीयोग्य मराठी बातमी तयार होते. जोडलेल्या स्रोतांतील मजकूर प्रक्रियेदरम्यान वाचला जातो आणि तीच माहिती बातमीचा एकमेव आधार असते. नावे, तारखा, आकडे किंवा पदनाम स्रोतांबाहेरून कधीही घेतले जात नाहीत.',
+  infoDloSources:
+    'बातमी कशापासून तयार व्हायची, ते येथे द्या. टाइप केलेली टिपणी, बैठकीचे ध्वनिमुद्रण, कागदपत्रांचे फोटो, PDF / DOCX / TXT फाईल आणि यूट्युब लिंक — यांपैकी काहीही एक पुरे, आणि हवे तितके एकत्र जोडता येतील. ध्वनिमुद्रण व फाईल्समधील मजकूर प्रक्रियेदरम्यान वाचला जातो. फाईलच्या आकाराची मर्यादा नाही.',
+  infoDloAiPrompt:
+    'बातमी कशी हवी ते तुमच्या शब्दांत, एकाच ठिकाणी सांगा — शीर्षक किंवा बातमीचा रोख, कशावर भर द्यायचा, काय वगळायचे, भाषा किती सोपी हवी, लांबी किती हवी, किंवा नमुना म्हणून एखाद्या जुन्या बातमीची शैली. हे पूर्णपणे ऐच्छिक आहे; रिकामे ठेवल्यास मंच स्वतः रोख व शैली ठरवेल. ही सूचना बातमी कशी लिहायची हे ठरवते — माहितीचा आधार मात्र वरील स्रोतच राहतात, त्यामुळे येथे दिलेल्या नावांवरून किंवा आकड्यांवरून बातमीत नवीन तथ्य घातले जाणार नाही.',
+
+  // /transcribe
+  infoTranscribePage:
+    'बैठक, मुलाखत किंवा पत्रकार परिषदेचे ध्वनिमुद्रण जोडा — त्यातील बोलणे जसेच्या तसे मराठीत उतरवून मिळेल. यूट्युब लिंकही चालेल. ध्वनिफीत लांब असल्यास तिचा फक्त हवा तेवढा भाग निवडता येतो. येथे मिळणारा मजकूर म्हणजे ध्वनिमुद्रणाचा जसाच्या तसा उतारा आहे — बातमी नव्हे; त्यावरून बातमी करायची असल्यास DLO वापरा.',
+  infoTranscribeInput:
+    'एकावेळी १० पर्यंत ध्वनिमुद्रणे जोडता येतील; आकाराची मर्यादा नाही. MP3, M4A, AAC, WAV, FLAC, OGG, OPUS व WEBM चालतात. एखादी फाईल वाचता आली नाही तरी उरलेल्यांचे ध्वनिलेखन होते. तेच ध्वनिमुद्रण पूर्वी उतरवले असल्यास ते पुन्हा न उतरवता लगेच दाखवले जाते.',
+
+  // /translate
+  infoTranslatePage:
+    'मराठी, इंग्रजी व हिंदी यांच्यात भाषांतर. मजकूर कोणत्या भाषेत आहे ते आपोआप ओळखले जाते; चुकल्यास ते तुम्ही बदलू शकता. व्यक्ती, ठिकाणे, कार्यालये व योजनांची नावे शब्दकोशाप्रमाणे जशीच्या तशी राहतात, आणि भाषांतरापूर्वी ती तपासून घेता येतात. येथील मजकूर कुठेही जतन केला जात नाही.',
+  infoTranslateInput:
+    'भाषांतर करायचा मजकूर येथे चिकटवा, किंवा PDF / DOCX / TXT फाईल जोडा — फाईलमधील मजकूर वाचून त्याचेच भाषांतर होते. संपूर्ण कागदपत्र एकावेळी चालेल. मजकूर किंवा भाषांतर कुठेही जतन होत नाही, त्यामुळे पान सोडण्यापूर्वी निकाल कॉपी करून घ्या.',
+
+  // /proofread
+  infoProofreadPage:
+    'मराठी किंवा इंग्रजी मजकुरातील व्याकरण, शुद्धलेखन, विरामचिन्हे, नावांची स्पेलिंग आणि महासंवाद-शैली तपासली जाते. फक्त खात्रीशीर चुकाच दाखवल्या जातात — शंका असल्यास काहीही सुचवले जात नाही. दुरुस्त मजकुरात नेमके काय बदलले ते अधोरेखित करून दाखवले जाते, आणि आकडे कधीही बदलले जात नाहीत. येथील मजकूर जतन केला जात नाही.',
+  infoProofreadInput:
+    'तपासायचा मजकूर येथे चिकटवा, किंवा PDF / DOCX / TXT फाईल जोडा. मराठी मजकुराची शैलीही तपासली जाते; इंग्रजी मजकुराचे फक्त व्याकरण व नावे तपासली जातात. मजकूर पुन्हा लिहून दिला जात नाही — फक्त दाखवलेल्या जागीच दुरुस्ती होते, त्यामुळे मूळ मांडणी जशीच्या तशी राहते.',
 } as const;
 
 // The window the page is reporting on, spelled out. Shown under the title because

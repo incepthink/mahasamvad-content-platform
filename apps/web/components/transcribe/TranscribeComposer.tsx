@@ -44,6 +44,7 @@ import {
 } from '@/components/common/AttachmentStrip';
 import { ComposerToolbarButton } from '@/components/common/ComposerToolbarButton';
 import { FormCard } from '@/components/common/FormCard';
+import { InfoHint } from '@/components/common/InfoHint';
 import { ErrorNotice } from '@/components/ErrorNotice';
 import {
   YouTubeLinkInput,
@@ -138,7 +139,11 @@ export function TranscribeComposer({
   }));
 
   return (
-    <FormCard label={STR.transcribeNewTitle} hint={STR.transcribeHint}>
+    <FormCard
+      label={STR.transcribeNewTitle}
+      hint={STR.transcribeHint}
+      info={<InfoHint text={STR.infoTranscribeInput} />}
+    >
       {/* Where the other two composers put their text box. A button rather than a div, so
           the keyboard reaches it and the file dialog opens the same way for everyone; the
           drag handlers are a second way in, never the only one. */}

@@ -359,6 +359,16 @@ export {
   type ScaffoldCharacter,
 } from './video/new-video-scaffold.js';
 export {
+  classifyNewVideoIntent,
+  fallbackNewVideoIntent,
+  buildNewVideoIntentRequest,
+  parseNewVideoIntent,
+  NEW_VIDEO_TURN_INTENTS,
+  type NewVideoTurnIntent,
+  type NewVideoIntentDecision,
+  type NewVideoIntentInput,
+} from './video/new-video-intent.js';
+export {
   newVideoTaskFor,
   type NewVideoTaskInput,
 } from './video/new-video-task.js';

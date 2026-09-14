@@ -9,7 +9,10 @@
  * नमुना बातमी — शैलीसाठी — which between them asked the officer three separate questions
  * before they had seen a single line of the article. In practice all three are the same
  * request written three ways ("make it about X", "lead with Y", "read like this"), so they
- * are one free-text box, and the run stores it as `generations.instructions` (0041).
+ * are one free-text box, and the run stores it as `generations.instructions` (0041) —
+ * WHICH IS NOW THE ONLY DIRECTION /dlo SENDS. The intake form posts no `heading` and no
+ * `styleReference` at all, so anything the officer wants the article to be about has to
+ * reach the prompt through this box; that is what the ⓘ beside the label is there to say.
  *
  * The SAME box is reused on /dlo's workspace (DloFileWorkspace). What is typed here is
  * carried over through the intake's saved review state, so the officer sees one question in
@@ -23,6 +26,7 @@
 import { useId } from 'react';
 import { ARTICLE_INSTRUCTIONS_MAX_CHARS } from '@dgipr/schemas';
 import { FormCard } from '@/components/common/FormCard';
+import { InfoHint } from '@/components/common/InfoHint';
 import { PromptTextarea } from '@/components/common/PromptTextarea';
 import { STR } from '@/lib/strings';
 
@@ -47,6 +51,7 @@ export function DloAiPromptBox({
       htmlFor={id}
       label={STR.dloAiPromptLabel}
       hint={STR.dloAiPromptHint}
+      info={<InfoHint text={STR.infoDloAiPrompt} />}
     >
       <PromptTextarea
         id={id}

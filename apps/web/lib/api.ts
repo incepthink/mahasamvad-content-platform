@@ -15,7 +15,8 @@ import {
   type MotionCrop,
   type MotionSourceResponse,
   RestoreArticleVersionResponseSchema,
-  GenerationSummarySchema,
+  GenerationListResponseSchema,
+  type GenerationListResponse,
   GlossaryListResponseSchema,
   GlossaryTermSchema,
   PrepareDesignationsResponseSchema,
@@ -47,7 +48,6 @@ import {
   type CreateReferenceTypeRequest,
   type GenerationDetail,
   type GenerationSourceFile,
-  type GenerationSummary,
   type GlossaryListResponse,
   type GlossaryTerm,
   type PrepareDesignationsRequest,
@@ -342,9 +342,42 @@ export async function generateFromDloIntake(
   return z.object({ generationId: z.string() }).parse(body).generationId;
 }
 
-export async function listGenerations(): Promise<GenerationSummary[]> {
-  const body = await requestJson('/api/generations');
-  return z.array(GenerationSummarySchema).parse(body);
+// The history list, one page at a time. Filtering, sorting, paging and the facet counts all
+// happen in the database — the page that shows nine cards fetches nine cards — which is both
+// what keeps this fast and what lets the officer reach every run ever made rather than the
+// newest 100 the old bare-array endpoint returned.
+//
+// `facets` is asked for only when the FILTERS change: paging inside one filter set cannot
+// change a count, and each set costs the API thirteen head-only COUNTs.
+export type ListGenerationsParams = {
+  page?: number;
+  pageSize?: number;
+  q?: string;
+  format?: string | null;
+  status?: string | null;
+  date?: string | null;
+  sort?: 'newest' | 'oldest';
+  facets?: boolean;
+};
+
+export async function listGenerations(
+  params: ListGenerationsParams = {},
+): Promise<GenerationListResponse> {
+  const search = new URLSearchParams();
+  if (params.page && params.page > 1) search.set('page', String(params.page));
+  if (params.pageSize) search.set('pageSize', String(params.pageSize));
+  if (params.q) search.set('q', params.q);
+  if (params.format) search.set('format', params.format);
+  if (params.status) search.set('status', params.status);
+  if (params.date) search.set('date', params.date);
+  if (params.sort && params.sort !== 'newest') search.set('sort', params.sort);
+  if (params.facets) search.set('facets', '1');
+  // "आज" has to break where the OFFICER's day breaks, and only the server knows how to
+  // count from a boundary — so the browser sends the offset rather than the boundary.
+  search.set('tzOffset', String(new Date().getTimezoneOffset()));
+  const qs = search.toString();
+  const body = await requestJson(`/api/generations${qs ? `?${qs}` : ''}`);
+  return GenerationListResponseSchema.parse(body);
 }
 
 export async function getGeneration(id: string): Promise<GenerationDetail> {

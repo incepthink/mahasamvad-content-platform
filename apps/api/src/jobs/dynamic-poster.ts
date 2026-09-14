@@ -59,7 +59,7 @@ import {
   DEFAULT_MOTION_ASPECT,
   MotionAspectSchema,
   MotionRegionSchema,
-  isWholeClipCrop,
+  isWholeMotionRegion,
   motionAspectRatio,
   motionWireAspect,
 } from '@dgipr/schemas';
@@ -97,7 +97,7 @@ function motionRegionOf(row: GenerationRow): MotionRegion | null {
   // A rectangle covering the whole poster marks everything as moving, which leaves nothing to
   // freeze — so it is the same request as no region, and doing it the long way would cost an
   // encode to produce the picture that already came back.
-  return isWholeClipCrop(parsed.data) ? null : parsed.data;
+  return isWholeMotionRegion(parsed.data) ? null : parsed.data;
 }
 
 // HOW BIG THE FRAME COMES BACK, asked for rather than accepted.

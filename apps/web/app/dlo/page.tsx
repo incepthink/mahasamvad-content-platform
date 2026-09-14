@@ -13,6 +13,7 @@
 import { DloIntakeForm } from '../../components/dlo/DloIntakeForm';
 import { DloIntakeList } from '../../components/DloIntakeList';
 import { DloResumeCard } from '../../components/DloResumeCard';
+import { InfoHint } from '../../components/common/InfoHint';
 import { PageShell } from '../../components/common/PageShell';
 import { useDloIntakeList } from '../../lib/useDloIntakeList';
 import { STR } from '../../lib/strings';
@@ -27,7 +28,11 @@ export default function DloPage() {
     // carry the pinned bar.
     <PageShell
       background="dlo"
-      title={STR.dloTitle}
+      title={
+        <>
+          {STR.dloTitle} <InfoHint text={STR.infoDloPage} />
+        </>
+      }
       subtitle={STR.dloPageIntro}
     >
       {active ? <DloResumeCard intake={active} /> : null}

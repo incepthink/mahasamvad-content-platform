@@ -311,5 +311,107 @@ export type MotionCropRequest = z.infer<typeof MotionCropRequestSchema>;
 //
 // isWholeClipCrop above is the "this marks everything, so there is nothing left to freeze" test
 // and reads correctly on a region too.
-export const MotionRegionSchema = MotionCropSchema;
-export type MotionRegion = MotionCrop;
+//
+// OR A LASSO. A rectangle is the wrong shape for most of what an officer wants moving — a
+// photograph cut out around a person, a flag, a curved illustration — and a box big enough to
+// hold it also unfreezes the Devanagari beside it, which is the defect the region exists to
+// prevent. So a region may also be a freehand POLYGON, in the same 0..1 fraction space. The
+// rectangle stays the un-tagged shape so every stored 0055 row and every older web build still
+// parses; the polygon carries `type: 'polygon'`, which is what tells the two apart.
+//
+// Self-intersecting outlines are legal and are FILLED with the nonzero winding rule — a lasso
+// drawn as a figure-eight means "both loops move", never "the crossing is a hole".
+
+// Bounds on the outline. The web simplifies a drawn path before sending it, so the ceiling is
+// a backstop against a hand-crafted request rather than something a real gesture reaches.
+export const MOTION_LASSO_MIN_POINTS = 3;
+export const MOTION_LASSO_MAX_POINTS = 400;
+
+export const MotionPointSchema = z.object({
+  x: z.number().min(0).max(1),
+  y: z.number().min(0).max(1),
+});
+export type MotionPoint = z.infer<typeof MotionPointSchema>;
+
+export const MotionPolygonSchema = z
+  .object({
+    type: z.literal('polygon'),
+    points: z
+      .array(MotionPointSchema)
+      .min(MOTION_LASSO_MIN_POINTS)
+      .max(MOTION_LASSO_MAX_POINTS),
+  })
+  .superRefine((polygon, ctx) => {
+    // The same floor the rectangle has, applied to the outline's bounding box: an accidental
+    // flick of the pointer must not become a restore job with a hole nobody can see.
+    const box = polygonBounds(polygon.points);
+    if (box.width < MOTION_CROP_MIN_SIDE || box.height < MOTION_CROP_MIN_SIDE) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'The lasso selection is too small.',
+        path: ['points'],
+      });
+    }
+    if (polygonArea(polygon.points) <= 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'The lasso selection has no area.',
+        path: ['points'],
+      });
+    }
+  });
+export type MotionPolygon = z.infer<typeof MotionPolygonSchema>;
+
+// Rectangle first: an un-tagged object can only ever be one, and a polygon fails it on the
+// missing x/y/width/height before the union tries the second branch.
+export const MotionRegionSchema = z.union([
+  MotionCropSchema,
+  MotionPolygonSchema,
+]);
+export type MotionRegion = MotionCrop | MotionPolygon;
+
+export function isMotionPolygon(region: MotionRegion): region is MotionPolygon {
+  return 'type' in region && region.type === 'polygon';
+}
+
+/** The axis-aligned bounding box of an outline, in the same fraction space. */
+export function polygonBounds(points: readonly MotionPoint[]): MotionCrop {
+  let left = 1;
+  let top = 1;
+  let right = 0;
+  let bottom = 0;
+  for (const p of points) {
+    left = Math.min(left, p.x);
+    top = Math.min(top, p.y);
+    right = Math.max(right, p.x);
+    bottom = Math.max(bottom, p.y);
+  }
+  if (right < left || bottom < top) return { x: 0, y: 0, width: 0, height: 0 };
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
+/**
+ * The absolute shoelace area of an outline, as a share of the frame. A self-crossing lasso
+ * under-reports here (opposite loops cancel), which only matters to `isWholeMotionRegion`, where
+ * erring toward "not whole" costs one encode rather than a skipped restore.
+ */
+export function polygonArea(points: readonly MotionPoint[]): number {
+  let twice = 0;
+  for (let i = 0; i < points.length; i += 1) {
+    const a = points[i]!;
+    const b = points[(i + 1) % points.length]!;
+    twice += a.x * b.y - b.x * a.y;
+  }
+  return Math.abs(twice) / 2;
+}
+
+/**
+ * True when the region marks effectively the whole poster as moving, so there is nothing left
+ * to freeze and the restore would be an encode that produces the clip already returned.
+ */
+export function isWholeMotionRegion(region: MotionRegion): boolean {
+  if (!isMotionPolygon(region)) return isWholeClipCrop(region);
+  return (
+    polygonArea(region.points) >= MOTION_CROP_MAX_KEPT * MOTION_CROP_MAX_KEPT
+  );
+}

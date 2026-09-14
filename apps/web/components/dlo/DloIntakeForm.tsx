@@ -1,12 +1,21 @@
 'use client';
 
 /**
- * The /dlo input step: the source composer carries the action; direction fields follow.
+ * The /dlo input step: TWO boxes, and the first one carries the action.
  *
  *   DloComposer    — WHAT THE NEWS IS MADE OF: the typed note, the recordings, the
  *                    photographs, the documents and the links, in one card — and, at the
  *                    end of its tool row, the run's one submit.
- *   Heading, DloAiPromptBox and StyleReferenceField keep the officer's production inputs.
+ *   DloAiPromptBox — WHAT THE OFFICER WANTS SAID ABOUT IT: one free-text direction.
+ *
+ * IT WAS FOUR. A heading field (शीर्षक किंवा बातमीचा रोख), the direction box and a style
+ * sample (नमुना बातमी — शैलीसाठी) each asked their own question, before the officer had
+ * seen a single line of the article. In practice all three are the same request written
+ * three ways — "make it about X", "lead with Y", "read like this" — so they are one box,
+ * and what is typed in it travels as `generations.instructions` (0041) alone: no heading
+ * and no style reference are sent from this form any more. The prompt renders that block
+ * LAST and ranks it above every general instruction (PRECEDENCE_RULE), which is what makes
+ * one box able to carry what three fields used to.
  *
  * This page is DELIBERATELY thin, the way app/page.tsx is. Every rule about what a run
  * sends, drafts and refuses lives in `useDloIntakeForm`; the two blocks below are markup,
@@ -24,10 +33,6 @@
  */
 
 import { DloAiPromptBox } from './DloAiPromptBox';
-import { FormCard } from '../common/FormCard';
-import { PromptInput } from '../common/PromptInput';
-import { StyleReferenceField } from '../StyleReferenceField';
-import { STR } from '@/lib/strings';
 import { DloComposer } from './DloComposer';
 import { useDloIntakeForm } from './useDloIntakeForm';
 
@@ -37,30 +42,10 @@ export function DloIntakeForm() {
   return (
     <div className="flex flex-col gap-5">
       <DloComposer form={form} />
-      <FormCard
-        htmlFor="dlo-heading"
-        label={STR.headingLabel}
-        hint={STR.headingHint}
-      >
-        <PromptInput
-          id="dlo-heading"
-          value={form.heading}
-          onChange={form.setHeading}
-          placeholder={STR.headingPlaceholder}
-          disabled={form.submitting}
-          className="mt-3"
-        />
-      </FormCard>
       <DloAiPromptBox
         value={form.instructions}
         onChange={form.setInstructions}
         disabled={form.submitting}
-      />
-      <StyleReferenceField
-        value={form.styleReference}
-        onChange={form.setStyleReference}
-        disabled={form.submitting}
-        className=""
       />
     </div>
   );

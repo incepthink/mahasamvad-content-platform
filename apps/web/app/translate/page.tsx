@@ -109,11 +109,16 @@ import { AttachmentStrip } from '@/components/common/AttachmentStrip';
 import { ComposerToolbarButton } from '@/components/common/ComposerToolbarButton';
 import { useDocumentAttachments } from '@/components/common/DocumentAttachments';
 import { FormCard } from '@/components/common/FormCard';
+import { InfoHint } from '@/components/common/InfoHint';
 import { PageShell } from '@/components/common/PageShell';
 import { PromptTextarea } from '@/components/common/PromptTextarea';
 import { ErrorNotice } from '@/components/ErrorNotice';
 import { cn } from '@/lib/utils';
-import { prepareTextTranslation, translateText } from '../../lib/api';
+import {
+  getGeneration,
+  prepareTextTranslation,
+  translateText,
+} from '../../lib/api';
 import { downloadBlob } from '../../lib/download';
 import { STR } from '../../lib/strings';
 import { errorMessage } from '../../lib/errorMessage';
@@ -374,6 +379,47 @@ export default function TranslatePage() {
     submit();
   };
 
+  // Arriving from a finished article's "भाषांतर करा" link (?from=<id>&lang=<mr|en|hi>):
+  // the run's text lands in the box and the officer picks a target here, rather than the
+  // result page owning a second translation flow of its own.
+  //
+  // The handoff is an ID, not the text — an article is thousands of characters and a URL is
+  // not where a government press note belongs. Read off window.location rather than through
+  // useSearchParams for the same reason app/page.tsx does: this page is already a client
+  // component and the hook would drag a Suspense boundary in for a client-side fill.
+  //
+  // The ref is what makes it run EXACTLY ONCE, with no cleanup that cancels the fetch:
+  // Strict Mode mounts twice, so a cancel-on-cleanup would abandon the first pass's result
+  // while the ref makes the second return early. Running once also means the fill can never
+  // land on top of something the officer has since typed.
+  const prefillStartedRef = useRef(false);
+  useEffect(() => {
+    if (prefillStartedRef.current) return;
+    const params = new URLSearchParams(window.location.search);
+    const from = params.get('from');
+    if (!from) return;
+    prefillStartedRef.current = true;
+    const lang = params.get('lang');
+    void (async () => {
+      try {
+        const detail = await getGeneration(from);
+        const source =
+          lang === 'en'
+            ? detail.articleEnglish
+            : lang === 'hi'
+              ? detail.articleHindi
+              : detail.article;
+        // Falls back to the Marathi article: a `lang` naming a translation the row does
+        // not have would otherwise open an empty box with no explanation.
+        const filled = source?.trim() ? source : detail.article;
+        if (filled) setText(filled);
+      } catch {
+        // Nothing is said: the box is simply empty and the officer can paste. A failed
+        // prefill is not a failed translation, and there is nothing here to retry.
+      }
+    })();
+  }, []);
+
   // Held in a ref so the effect below can run on the document's status alone and still call
   // the CURRENT closure — one that can see the text the read just produced.
   const startSubmitRef = useRef(startSubmit);
@@ -417,7 +463,11 @@ export default function TranslatePage() {
     // below, so nothing is pinned over the last block or over the credit line any more.
     <PageShell
       background="translate"
-      title={STR.translatePageTitle}
+      title={
+        <>
+          {STR.translatePageTitle} <InfoHint text={STR.infoTranslatePage} />
+        </>
+      }
       subtitle={STR.translatePageIntro}
     >
       <div className="flex flex-col gap-5">
@@ -429,6 +479,7 @@ export default function TranslatePage() {
           // it expects instead of a separate control having to ask.
           label={INPUT_LABELS[source]}
           hint={STR.translateInputHint}
+          info={<InfoHint text={STR.infoTranslateInput} />}
         >
           <div className="mt-4">
             <PromptTextarea

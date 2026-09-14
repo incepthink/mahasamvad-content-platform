@@ -16,17 +16,17 @@
  */
 export const PAGE_BACKGROUNDS = {
   default: '/backgrounds/background-new.png',
-  home: '/backgrounds/background-new.png',
+  home: '/backgrounds/background-try.png',
   analytics: '/backgrounds/background-new.png',
   conversation: '/backgrounds/background-new.png',
   creative: '/backgrounds/background-new.png',
-  dlo: '/backgrounds/background-new.png',
+  dlo: '/backgrounds/background-2.png',
   generations: '/backgrounds/background-new.png',
   glossary: '/backgrounds/background-new.png',
   newDlo: '/backgrounds/background-new.png',
-  proofread: '/backgrounds/background-new.png',
+  proofread: '/backgrounds/background-4.png',
   references: '/backgrounds/background-new.png',
-  transcribe: '/backgrounds/background-new.png',
+  transcribe: '/backgrounds/background-3.png',
   translate: '/backgrounds/background-new.png',
   video: '/backgrounds/background-new.png',
 } as const satisfies Record<string, `/backgrounds/${string}`>;

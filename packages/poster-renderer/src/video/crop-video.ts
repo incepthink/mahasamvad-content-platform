@@ -39,7 +39,10 @@ import { promisify } from 'node:util';
 import sharp from 'sharp';
 import { socialChromeLayers } from '../twitter-chrome.js';
 import { resolveFfmpeg } from './assemble.js';
-import { buildFrozenSourceOverlay } from './source-overlay.js';
+import {
+  buildFrozenSourceOverlay,
+  type OverlayHole,
+} from './source-overlay.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -565,8 +568,11 @@ export type FrozenSource = Readonly<{
    */
   width: number;
   height: number;
-  /** The part of the poster that may MOVE, as fractions of its own width and height. */
-  hole: NormalizedRect;
+  /**
+   * The part of the poster that may MOVE, as fractions of its own width and height — a
+   * rectangle, or the officer's freehand lasso outline.
+   */
+  hole: OverlayHole;
 }>;
 
 /**

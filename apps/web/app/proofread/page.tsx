@@ -59,6 +59,7 @@ import { AttachmentStrip } from '@/components/common/AttachmentStrip';
 import { ComposerToolbarButton } from '@/components/common/ComposerToolbarButton';
 import { useDocumentAttachments } from '@/components/common/DocumentAttachments';
 import { FormCard } from '@/components/common/FormCard';
+import { InfoHint } from '@/components/common/InfoHint';
 import { PageShell } from '@/components/common/PageShell';
 import { PromptTextarea } from '@/components/common/PromptTextarea';
 import { cn } from '@/lib/utils';
@@ -439,7 +440,11 @@ export default function ProofreadPage() {
     // so nothing sits over the last block or over the credit line.
     <PageShell
       background="proofread"
-      title={STR.proofreadPageTitle}
+      title={
+        <>
+          {STR.proofreadPageTitle} <InfoHint text={STR.infoProofreadPage} />
+        </>
+      }
       subtitle={STR.proofreadPageIntro}
     >
       <div className="flex flex-col gap-5">
@@ -449,6 +454,7 @@ export default function ProofreadPage() {
           htmlFor="proofread-text"
           label={STR.proofreadInputLabel}
           hint={STR.proofreadInputHint}
+          info={<InfoHint text={STR.infoProofreadInput} />}
         >
           <div className="mt-4">
             {/* Uncontrolled by design: this box is pasted into, but it is also TYPED into,

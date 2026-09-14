@@ -10,14 +10,16 @@
 // refused would be finding out too late. The path is what leaves this component; the API
 // accepts only paths it minted itself, so the browser never names an arbitrary object.
 //
-// The picture is shown at its own aspect ratio (a DGIPR poster is portrait far more often than
-// not) with the measured pixel size beside it. That number is a RECEIPT — proof the API read
-// the file the officer meant — and no longer a promise about the output: the clip's shape is
-// the ratio chosen under the प्रॉम्प्ट box (migration 0053), and the whole poster is fitted
-// inside it. It used to be the promise, and the promise was not one a video model can keep.
+// Once uploaded, the picture is the whole control: shown large, at its own aspect ratio (a
+// DGIPR poster is portrait far more often than not), with a delete button in its corner and
+// nothing else. The filename and the measured pixel size used to sit beside it as a receipt;
+// the poster on screen is a better one, and the room they took is what the moving-region
+// rectangle is dragged over. The clip's shape is the ratio chosen under the प्रॉम्प्ट box
+// (migration 0053) and the whole poster is fitted inside it, so no size shown here was ever a
+// promise about the output.
 
-import { useRef, useState, type DragEvent } from 'react';
-import { ImagePlus, X } from 'lucide-react';
+import { useRef, useState, type DragEvent, type ReactNode } from 'react';
+import { ImagePlus, Trash2 } from 'lucide-react';
 import {
   MOTION_SOURCE_ACCEPT,
   MOTION_SOURCE_EXTENSIONS,
@@ -29,7 +31,7 @@ import { uploadMotionSource } from '../lib/api';
 import { errorMessage } from '../lib/errorMessage';
 import { STR } from '../lib/strings';
 import { ErrorNotice } from './ErrorNotice';
-import { FileName } from './FileName';
+import { FieldLabel } from './common/FieldLabel';
 
 function hasAcceptedExtension(name: string): boolean {
   const lower = name.toLowerCase();
@@ -40,10 +42,18 @@ export function MotionSourcePicker({
   value,
   disabled,
   onChange,
+  overlay,
+  tools,
 }: {
   value: MotionSourceResponse | null;
   disabled?: boolean;
   onChange: (source: MotionSourceResponse | null) => void;
+  // Drawn over the preview, inside the box that is exactly the picture — which is the one
+  // place a rectangle expressed as fractions of the poster can be positioned correctly.
+  // The Dynamic Poster lane passes its moving-region selector here; nothing else uses it.
+  overlay?: ReactNode | undefined;
+  // Rendered directly UNDER the picture: the selection tools that draw the overlay above.
+  tools?: ReactNode | undefined;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -86,11 +96,25 @@ export function MotionSourcePicker({
 
   return (
     <div className="option-field">
-      <label className="field-label" htmlFor="motion-source">
+      {/* A div rather than a <label>: the explanation now lives behind an ⓘ inside it, and
+          a label pointing at the hidden file input would open the file dialog when that icon
+          is clicked. The drop zone below is a real button, so nothing is lost. */}
+      <div className="field-label">
         <ImagePlus size={18} className="label-icon" aria-hidden="true" />
-        {STR.motionSourceLabel}
-      </label>
-      <p className="hint">{STR.motionSourceHint}</p>
+        <FieldLabel
+          helpId="motion-source-help"
+          label={STR.motionSourceLabel}
+          // BOTH sentences, because the rectangle is now drawn on this very preview and no
+          // longer has a heading of its own to explain it. Why an officer is being asked to
+          // mark one at all — a video model redraws every pixel, their Devanagari included —
+          // is the whole feature, and without it the box reads as an optional crop.
+          hint={
+            <>
+              {STR.motionSourceHint} {STR.motionRegionHint}
+            </>
+          }
+        />
+      </div>
 
       <input
         id="motion-source"
@@ -106,42 +130,43 @@ export function MotionSourcePicker({
       />
 
       {value ? (
+        /* THE PICTURE IS THE WHOLE CONTROL. No filename, no measured size, no pair of
+           buttons beside it: the officer is looking at the poster they just picked, which
+           says more than its name does, and the one thing left to do to it is take it back
+           out. So the only affordance is a delete button in the corner of the frame — and
+           the room the metadata column used to take is given to the picture, because the
+           moving-region rectangle is dragged over it. */
         <div className="motion-source">
-          {/* A plain <img>, like every other picture in this product: the URL is a public
-              bucket object not known at build time, so next/image would need a remote
-              pattern per deployment and buys nothing for one thumbnail. */}
-          <img
-            className="motion-source-thumb"
-            src={value.url}
-            alt={value.name}
-          />
-          <div className="motion-source-meta">
-            <FileName name={value.name} className="motion-source-name" />
-            <span className="hint">
-              {value.width} × {value.height}
-            </span>
-            <div className="btn-row" style={{ gap: 8, marginTop: 8 }}>
-              <button
-                type="button"
-                className="btn btn-small"
-                disabled={busy}
-                onClick={() => input.current?.click()}
-              >
-                {STR.motionSourceChange}
-              </button>
-              <button
-                type="button"
-                className="btn btn-small btn-ghost"
-                disabled={busy}
-                onClick={() => {
-                  setError(null);
-                  onChange(null);
-                }}
-              >
-                <X size={16} aria-hidden="true" /> {STR.motionSourceRemove}
-              </button>
-            </div>
+          {/* `position: relative` and a box that is exactly the image, not the card: the
+              overlay's coordinates are fractions of the POSTER, so whitespace beside it
+              would shift every one of them. */}
+          <div className="motion-source-frame">
+            {/* A plain <img>, like every other picture in this product: the URL is a public
+                bucket object not known at build time, so next/image would need a remote
+                pattern per deployment and buys nothing here. */}
+            <img
+              className="motion-source-preview"
+              src={value.url}
+              alt={value.name}
+            />
+            {overlay}
           </div>
+          {tools}
+          {/* In the corner of the CARD rather than over the picture, so it never covers
+              artwork or fights the selection surface for a press. */}
+          <button
+            type="button"
+            className="motion-source-delete"
+            disabled={busy}
+            aria-label={STR.motionSourceRemove}
+            title={STR.motionSourceRemove}
+            onClick={() => {
+              setError(null);
+              onChange(null);
+            }}
+          >
+            <Trash2 size={18} aria-hidden="true" />
+          </button>
         </div>
       ) : (
         <div

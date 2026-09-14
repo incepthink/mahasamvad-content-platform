@@ -729,6 +729,11 @@ export const GenerationSummarySchema = z.object({
   noteExcerpt: z.string(),
   headline: z.string().nullable(),
   posterUrl: z.string().nullable(),
+  // The picture a Dynamic Poster run was made FROM (public `posters` bucket), so that
+  // lane's history card has something to show: it never writes `poster_path` — its output
+  // is an .mp4 — and would otherwise be the one format represented by a bare gradient
+  // banner. Null on every other lane. Defaulted so an older API payload still parses.
+  sourceImageUrl: z.string().nullable().default(null),
   // Total USD the run has cost so far (null for pre-feature rows). Estimate: text is
   // measured from OpenAI usage, image is a fixed per-render tier price.
   costUsd: z.number().nullable(),
@@ -1337,3 +1342,62 @@ export const ApiErrorSchema = z.object({
   error: z.object({ message: z.string() }),
 });
 export type ApiError = z.infer<typeof ApiErrorSchema>;
+
+// ---------- the history list, paged on the SERVER ----------
+//
+// `GET /api/generations` used to answer with a bare array of the newest 100 runs, selected
+// with `select()` — i.e. EVERY column, including `note`, `article`, both translations, the
+// fact-check appendix, the style reference and every jsonb blob — of which the history card
+// reads eight fields. That was multiple megabytes on the wire for nine rendered cards, and
+// it was also the reason the list could only ever show 100 runs: filtering and paging both
+// ran in the browser over whatever that one request happened to return.
+//
+// Both halves move to the server. The query names the page and the facets, the row select is
+// narrowed to what a card actually draws, and `total` is an exact count over the FILTERED
+// set — so the officer can page through every run the department has ever made while each
+// request stays the size of one screen.
+export const GENERATION_PAGE_SIZE_MAX = 60;
+
+// What a run produced, as one key — the same value `runFormatKey` derives in the web. It is
+// the category, except that a social run rendering no poster is a caption-only run and is
+// its own format (see `runFormatLabel`). Kept here rather than imported from the web's
+// strings module because the API has to resolve it into a query.
+export const RunFormatKeySchema = z.union([
+  CategorySchema,
+  z.literal('caption'),
+]);
+export type RunFormatKey = z.infer<typeof RunFormatKeySchema>;
+
+// queued + running are ONE bucket: "is it still working" is one question.
+export const RunStatusFilterSchema = z.enum(['working', 'completed', 'failed']);
+export type RunStatusFilter = z.infer<typeof RunStatusFilterSchema>;
+
+export const RunDateFilterSchema = z.enum(['today', 'week', 'month']);
+export type RunDateFilter = z.infer<typeof RunDateFilterSchema>;
+
+// Facet counts, computed with every OTHER filter applied — so a count says what pressing
+// that option would give you, not how many such runs exist overall. Head-only COUNT queries
+// (no row ever leaves the database), so this stays exact however large the table grows.
+export const GenerationFacetCountsSchema = z.object({
+  format: z.record(z.string(), z.number()),
+  status: z.record(z.string(), z.number()),
+  date: z.record(z.string(), z.number()),
+});
+export type GenerationFacetCounts = z.infer<typeof GenerationFacetCountsSchema>;
+
+export const GenerationListResponseSchema = z.object({
+  items: z.array(GenerationSummarySchema),
+  // Rows matching the current filters, across every page. `pageCount` is derived from it.
+  total: z.number(),
+  page: z.number(),
+  pageSize: z.number(),
+  // Rows in the table regardless of filters — what the "एकूण" line compares against. Free:
+  // it is one more head-only count.
+  totalUnfiltered: z.number(),
+  // Absent when the caller did not ask for them (paging within one filter set does not need
+  // them recomputed), so the client keeps the last set it was given.
+  facets: GenerationFacetCountsSchema.nullable().default(null),
+});
+export type GenerationListResponse = z.infer<
+  typeof GenerationListResponseSchema
+>;

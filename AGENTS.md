@@ -3111,6 +3111,27 @@ client id/secret — see the milestone below.
 
 ## Latest Implementation Milestone
 
+- **/new-video-workflow decides EDIT vs NEW CLIP per follow-up** (2026-09-14, no migration, no
+  n8n): every follow-up used to be sent with `previous_interaction_id` plus the scaffold's
+  "this is an edit… keep everything else the same, including the voice". A "Scene 2" prompt
+  with three new keyframes and new narration therefore reached Gemini as a whole-video
+  re-specification of Scene 1, was accepted, and its interaction answered a bare
+  `400 invalid_request` eleven minutes later (conversation 88429b2f). New
+  `video/new-video-intent.ts` decides the intent before anything is sent: the officer's explicit
+  choice (`intent: 'auto'|'edit'|'new'` on the turn request, a pill row above the composer shown
+  once a video exists) → a fork is always an edit (`new` + `fromTurnId` is a Marathi 400) → one
+  terra/low call comparing the new instruction with the one that produced the video on screen →
+  on failure, a deterministic fallback (reference pictures attached ⇒ new, else edit — the old
+  behaviour). A `new` verdict drops the chain point for THAT request only, so it renders as a
+  first turn (declared task, first-turn authoring rule, cast portraits re-attached, capped so the
+  officer's own pictures fit within `NEW_VIDEO_MAX_IMAGES`); the chain rule is unchanged, so a
+  successful new clip becomes what the next plain instruction edits. The verdict is LOGGED
+  (`intent=new(model: …)`), not stored — a column in `TURN_COLUMNS` would take the page down
+  un-applied. Verified: typecheck 7/7, eslint clean, `new-video-intent` harness + live run
+  (short Marathi change → edit, the reported scene-2 shape → new), job registry check green.
+  Deploy `@dgipr/schemas` → `@dgipr/content-engine` dists → API + web. New env (optional):
+  `OPENAI_NEW_VIDEO_INTENT_MODEL`, `OPENAI_NEW_VIDEO_INTENT_REASONING_EFFORT`.
+
 - **A Dynamic Poster asks for NO resolution again — 1080p made the clip shake** (2026-09-13, no
   migration — REVERSES the `resolution` default of the 2026-09-12 Phase 1 milestone below):
   officers reported every Dynamic Poster "shaking" from ~1s in (generations 354f88d1 with a marked

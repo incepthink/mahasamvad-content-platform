@@ -67,7 +67,7 @@
   --glass-border: rgba(255, 255, 255, 0.78);
   --glass-shadow:
     0 16px 38px rgba(31, 55, 68, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.88);
-  --glass-filter: blur(0.5px) saturate(104%);
+  --glass-filter: blur(2px) saturate(104%);
   --glass-label: #3d4951;
 
   /* A FIELD takes the dark line. The light glass edge disappears against the
@@ -115,6 +115,80 @@
   /* The submit sheen's mid stop and glow — see .mr-submit-flow in globals.css. */
   --accent-lift: #45aa86;
   --accent-glow: rgba(35, 112, 91, 0.28);
+}
+
+/* ---------------------------------------------------------------------------
+   1b. THE NAVY-AND-GREY PALETTE — the product's colour, everywhere
+
+   This began as a trial scoped to `/` twice over: an inline CSSProperties object
+   on app/page.tsx (which reached the content column only) plus a
+   `.home-navy-grey-theme` class AppSidebar hung on the rail (which reached the
+   chrome). Two halves of one palette, in two places, gated on `pathname === '/'`
+   — so every other route kept the teal it replaced and the two could drift.
+
+   It is now the DEFAULT, declared once here. It redeclares tokens section 1 and
+   dgipr.css already name, and wins because this file is in the `dgipr-theme`
+   layer above `dgipr` and because a later declaration in the same layer and
+   specificity wins — which is why these sit in their own `:root` block BELOW the
+   one above rather than being edited into it. Keeping them separate is what
+   makes the palette one contiguous thing to read, and reverting it a block
+   deletion rather than a diff.
+
+   Changing the look is an edit HERE and nowhere else: no page passes a `style`,
+   and no component branches on the route.
+   --------------------------------------------------------------------------- */
+
+:root {
+  /* Ink and paper */
+  --text: #1f2937;
+  --muted: #64748b;
+  --card: #f8fafc;
+  --surface: #e2e8f0;
+  --border: rgba(51, 65, 85, 0.22);
+  --border-strong: rgba(30, 58, 95, 0.46);
+
+  /* The accent is the navy, used only where it means something (a pressed
+     control, a primary action) — never as a heading colour. */
+  --accent: #1e3a5f;
+  --accent-dark: #102a43;
+  --accent-soft: #dbe4ee;
+  --accent-tint: #eef2f6;
+  --accent-lift: #496989;
+  --accent-glow: rgba(30, 58, 95, 0.3);
+  --ring: rgba(37, 99, 235, 0.42);
+
+  /* Chrome. --rail-bg is restated in full rather than left to resolve from the
+     two steps below it: the rail's top stop is the NAVY (#1e3a5f), which is not
+     --chrome-700, and a var()-built gradient would quietly flatten it to slate. */
+  --chrome-700: #475569;
+  --chrome-800: #172033;
+  --chrome-600: #64748b;
+  --rail-bg: linear-gradient(180deg, #1e3a5f 0%, #172033 100%);
+  --rail-edge: rgba(15, 23, 42, 0.52);
+  --rail-active-bg: rgba(148, 163, 184, 0.24);
+  --rail-active-mark: #cbd5e1;
+  --rail-icon-active: #f8fafc;
+
+  /* Glass, retinted to the same family so a panel reads as cool grey rather
+     than as the warm sheet the teal palette was tuned against. */
+  --glass-bg: linear-gradient(
+    135deg,
+    rgba(248, 250, 252, 0.9),
+    rgba(203, 213, 225, 0.78)
+  );
+  --glass-border: rgba(226, 232, 240, 0.92);
+  --glass-label: #334155;
+  --glass-field-border: rgba(30, 58, 95, 0.42);
+  --glass-field-bg: rgba(241, 245, 249, 0.86);
+  --glass-fold-bg: rgba(226, 232, 240, 0.82);
+  --glass-chip-bg: rgba(203, 213, 225, 0.76);
+
+  /* A near-clear wash. The photographs behind the routes differ, so this is the
+     one token to lift if a busier ground ever makes body text hard to read. */
+  --page-bg-overlay: linear-gradient(
+    rgba(248, 250, 252, 0.18),
+    rgba(248, 250, 252, 0.18)
+  );
 }
 
 /* ---------------------------------------------------------------------------
@@ -200,23 +274,28 @@ body:not(:has(.sidebar)) {
 .page:not(.page-plain) .page-head {
   padding: 20px;
   border-radius: var(--r-lg);
-  border-left: 4px solid var(--accent);
 }
 
+/* The title reads as ordinary body text, not as an accent: the accent now appears
+   only where it means something (a pressed control), never as a colour on a heading
+   or as a rule down the head's left edge. */
 .page:not(.page-plain) .page-title {
-  color: var(--accent);
+  color: var(--text);
 }
 
-.page:not(.page-plain) .glass-card > label {
-  color: var(--glass-label);
-}
+/* FormCard's label is NOT a direct child of .glass-card: it renders inside a
+   `-my-1 flex` row so the ⓘ can sit beside it without growing the row. Two rules
+   used to live here reaching for `.glass-card > label` — one tinting the label,
+   one colouring the ⓘ inside it — and that wrapper broke the `>` on both. They
+   were measured matching ZERO elements on all ten index routes, so they are gone
+   rather than re-pointed: the label's colour is FormCard's own `text-foreground`,
+   and the ⓘ owns its three states in components/common/InfoHint.tsx, which is
+   where to change them. Do not re-add a `.glass-card label svg` rule — a `color`
+   set on the <svg> beats the button's own inherited colour, so it would pin the
+   icon to one colour through hover and open alike.
 
-/* THIS ONE SELECTOR IS WHAT GREENS THE ⓘ. It needs the icon inside a
-   DIRECT-CHILD <label> of a .glass-card — i.e. a FieldLabel passed to FormCard's
-   `label` prop. Put the icon anywhere else and it stays --muted-foreground. */
-.page:not(.page-plain) .glass-card > label svg {
-  color: var(--accent);
-}
+   --glass-label is left declared in section 1 as an unused token; it is what a
+   label tint would use if one is ever wanted again. */
 
 /* The crash cards must stay readable over an image that may not have decoded —
    they are what the reader sees when something has already gone wrong.
@@ -336,6 +415,28 @@ body:not(:has(.sidebar)) {
   box-shadow: 1px 0 0 var(--rail-edge);
 }
 
+/* The narrow-screen bar is the rail's stand-in, so it takes the rail's navy
+   rather than the page's. It is painted here rather than left to the tokens
+   because dgipr.css gives it flat literals of its own. */
+.mobile-topbar {
+  background: #1e3a5f;
+  border-bottom-color: var(--chrome-700);
+  color: var(--rail-fg-strong);
+}
+
+.mobile-topbar .site-brand-name {
+  color: var(--rail-fg-strong);
+}
+
+.mobile-topbar .nav-toggle {
+  border-color: rgba(226, 232, 240, 0.35);
+  background: var(--chrome-700);
+}
+
+.mobile-topbar .nav-toggle:hover {
+  background: var(--chrome-800);
+}
+
 .sidebar-head {
   border-bottom-color: var(--rail-hairline);
 }
@@ -367,7 +468,6 @@ body:not(:has(.sidebar)) {
 .sidebar-link.active {
   background: var(--rail-active-bg);
   color: var(--rail-fg-strong);
-  box-shadow: inset 3px 0 0 var(--rail-active-mark);
 }
 
 .sidebar-link.active svg,

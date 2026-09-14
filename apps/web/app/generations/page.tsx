@@ -10,14 +10,9 @@ import {
 } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import type { GenerationSummary } from '@dgipr/schemas';
+import type { GenerationFacetCounts, GenerationSummary } from '@dgipr/schemas';
 import { listGenerations } from '../../lib/api';
-import {
-  RUN_FORMAT_LABELS,
-  STR,
-  runFormatKey,
-  type RunFormatKey,
-} from '../../lib/strings';
+import { RUN_FORMAT_LABELS, STR, type RunFormatKey } from '../../lib/strings';
 import { errorMessage } from '../../lib/errorMessage';
 import {
   HistoryCard,
@@ -28,17 +23,24 @@ import { ErrorNotice } from '../../components/ErrorNotice';
 import { Pagination } from '../../components/Pagination';
 import { PageShell } from '../../components/common/PageShell';
 
-const PAGE_SIZE = 9;
+const PAGE_SIZE = 12;
 
 // ---------------------------------------------------------------------------
 // Filter model
 //
-// Every facet runs over the <=100 runs the list endpoint already returned, so filtering
-// is free and instant and no API change was needed. The three facets answer the three
-// questions an officer actually arrives with — what kind of thing was it, did it work,
-// and how recent — and all of them live in the URL, because opening a run and pressing
-// Back is a full remount in the app router: without that, every return trip would land
-// on the unfiltered first page.
+// Every facet, the sort, the page number and the search term are QUERY PARAMETERS on
+// `GET /api/generations`, and the database answers with one screen of cards plus the
+// numbers this page needs to draw its pager and its dropdowns.
+//
+// It used to work the other way round: the endpoint returned the newest 100 runs — every
+// column of every one of them, which on this table means the note, the article, both
+// translations and a dozen jsonb blobs — and all of this ran in the browser over whatever
+// came back. That was megabytes on the wire to render nine cards, and it was also why the
+// page could never reach the 101st run.
+//
+// All of it still lives in the URL, because opening a run and pressing Back is a full
+// remount in the app router: without that, every return trip would land on the unfiltered
+// first page.
 // ---------------------------------------------------------------------------
 
 // queued + running are ONE bucket: "is it still working" is one question, and splitting
@@ -46,12 +48,6 @@ const PAGE_SIZE = 9;
 type StatusKey = 'working' | 'completed' | 'failed';
 
 const STATUS_KEYS: readonly StatusKey[] = ['working', 'completed', 'failed'];
-
-function statusKeyOf(item: GenerationSummary): StatusKey {
-  if (item.status === 'completed') return 'completed';
-  if (item.status === 'failed') return 'failed';
-  return 'working';
-}
 
 const STATUS_FILTER_LABELS: Record<StatusKey, string> = {
   working: STR.historyStatusWorking,
@@ -68,24 +64,6 @@ const DATE_FILTER_LABELS: Record<DateKey, string> = {
   week: STR.historyDateWeek,
   month: STR.historyDateMonth,
 };
-
-// Day boundaries are the BROWSER's, deliberately: this is one officer narrowing a list
-// in front of them, so "आज" has to mean their own today. (The analytics aggregation pins
-// Asia/Kolkata for the opposite reason — it reports one number for everyone.)
-function withinDateWindow(iso: string, key: DateKey, now: Date): boolean {
-  const created = new Date(iso).getTime();
-  if (Number.isNaN(created)) return false;
-  if (key === 'today') {
-    const midnight = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate(),
-    ).getTime();
-    return created >= midnight;
-  }
-  const days = key === 'week' ? 7 : 30;
-  return created >= now.getTime() - days * 24 * 60 * 60 * 1000;
-}
 
 type SortKey = 'newest' | 'oldest';
 
@@ -111,38 +89,13 @@ function isFiltered(f: Filters): boolean {
   );
 }
 
-// `skip` is what makes a facet's pill counts honest: they are computed with every OTHER
-// filter applied, so a count says what pressing that pill would give you rather than how
-// many such runs exist overall.
-function matches(
-  item: GenerationSummary,
-  f: Filters,
-  now: Date,
-  skip?: keyof Filters,
-): boolean {
-  if (skip !== 'query' && f.query) {
-    // Case-insensitive match over headline + note excerpt (all Marathi/plain text).
-    const haystack = `${item.headline ?? ''} ${item.noteExcerpt}`.toLowerCase();
-    if (!haystack.includes(f.query)) return false;
-  }
-  if (
-    skip !== 'format' &&
-    f.format &&
-    runFormatKey(item.category, item.outputType) !== f.format
-  ) {
-    return false;
-  }
-  if (skip !== 'status' && f.status && statusKeyOf(item) !== f.status) {
-    return false;
-  }
-  if (
-    skip !== 'date' &&
-    f.date &&
-    !withinDateWindow(item.createdAt, f.date, now)
-  ) {
-    return false;
-  }
-  return true;
+// What a request is actually keyed on — everything except the page number. Two views with
+// the same key return the same rows in the same order, which is what lets the facet counts
+// be fetched once per view and reused across every page of it.
+function filterKey(f: Filters): string {
+  return [f.query, f.format ?? '', f.status ?? '', f.date ?? '', f.sort].join(
+    '|',
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -200,10 +153,14 @@ function HistoryPageBody() {
   const params = useSearchParams();
 
   const [items, setItems] = useState<GenerationSummary[] | null>(null);
+  const [total, setTotal] = useState(0);
+  const [totalUnfiltered, setTotalUnfiltered] = useState(0);
+  const [facets, setFacets] = useState<GenerationFacetCounts | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // One clock for the whole view, taken when the list lands, so two date pills evaluated
-  // milliseconds apart can never disagree about where "आज" starts.
-  const [loadedAt, setLoadedAt] = useState<Date>(() => new Date());
+  // Distinct from `items === null`: a refetch keeps the cards it already has on screen and
+  // dims them, because swapping a page of results for a skeleton on every keystroke reads
+  // as the list breaking rather than as it narrowing.
+  const [loading, setLoading] = useState(false);
 
   // Read the facets off the URL through primitives, so `filters` keeps a stable identity
   // across re-renders that changed nothing — the debounce below depends on it not
@@ -263,7 +220,7 @@ function HistoryPageBody() {
   );
 
   // Any facet change returns to page 1 — the old page number describes a list that no
-  // longer exists. This is what the removed reset effect used to guarantee.
+  // longer exists.
   const setFilters = useCallback(
     (next: Filters) => applyView(next, 1),
     [applyView],
@@ -274,23 +231,68 @@ function HistoryPageBody() {
     [applyView],
   );
 
-  // Extracted from the effect so the failure notice has something to call. The list is
-  // the officer's way back to every finished run, so "it did not load" with no button
-  // was a dead end that only a manual browser refresh got out of.
-  const load = useCallback(async () => {
-    setError(null);
-    try {
-      const rows = await listGenerations();
-      setItems(rows);
-      setLoadedAt(new Date());
-    } catch (e) {
-      setError(errorMessage(e, STR.genListLoadFailed));
-    }
-  }, []);
+  // Read through a ref by `load`, which must keep a stable identity — it is a dependency
+  // of the fetch effect, and re-creating it on every render would refetch forever.
+  const applyViewRef = useRef(applyView);
+  applyViewRef.current = applyView;
+
+  const key = filterKey(filters);
+  // The view whose counts we are currently holding. Facets are requested only when this
+  // disagrees with the view being loaded: paging inside one filter set cannot change a
+  // count, and each set costs the API thirteen head-only COUNT queries.
+  const facetKeyRef = useRef<string | null>(null);
+  // A stale response must never overwrite a fresh one — typing three letters starts three
+  // requests and they can land in any order.
+  const requestIdRef = useRef(0);
+
+  const load = useCallback(
+    async (page: number, view: Filters, viewKey: string) => {
+      const requestId = requestIdRef.current + 1;
+      requestIdRef.current = requestId;
+      const wantFacets = facetKeyRef.current !== viewKey;
+      setLoading(true);
+      setError(null);
+      try {
+        const result = await listGenerations({
+          page,
+          pageSize: PAGE_SIZE,
+          q: view.query,
+          format: view.format,
+          status: view.status,
+          date: view.date,
+          sort: view.sort,
+          facets: wantFacets,
+        });
+        if (requestIdRef.current !== requestId) return;
+        // A stale link — a bookmarked page 40 of a list that has since been filtered
+        // down — asks for a page past the end and gets an empty one back with the true
+        // count. Land on the last real page rather than on an empty grid under a pager
+        // that says "1".
+        const lastPage = Math.max(1, Math.ceil(result.total / PAGE_SIZE));
+        if (result.items.length === 0 && result.total > 0 && page > lastPage) {
+          applyViewRef.current(view, lastPage);
+          return;
+        }
+        setItems(result.items);
+        setTotal(result.total);
+        setTotalUnfiltered(result.totalUnfiltered);
+        if (result.facets) {
+          setFacets(result.facets);
+          facetKeyRef.current = viewKey;
+        }
+      } catch (e) {
+        if (requestIdRef.current !== requestId) return;
+        setError(errorMessage(e, STR.genListLoadFailed));
+      } finally {
+        if (requestIdRef.current === requestId) setLoading(false);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    void load(requestedPage, filters, key);
+  }, [load, requestedPage, filters, key]);
 
   // Debounce the search into the URL so filtering/paging doesn't thrash on each
   // keystroke. The current filters are read through a ref so this effect depends only
@@ -300,82 +302,60 @@ function HistoryPageBody() {
     if (normalized === filtersRef.current.query) return;
     const t = setTimeout(
       () => setFilters({ ...filtersRef.current, query: normalized }),
-      200,
+      300,
     );
     return () => clearTimeout(t);
   }, [query, setFilters]);
 
-  const filtered = useMemo(() => {
-    if (!items) return [];
-    const kept = items.filter((item) => matches(item, filters, loadedAt));
-    // The API already returns newest first; only the other direction needs work.
-    return filters.sort === 'oldest' ? [...kept].reverse() : kept;
-  }, [items, filters, loadedAt]);
-
+  // The counts come from the server, already computed with every OTHER filter applied — so
+  // a count says what pressing that option would give you rather than how many such runs
+  // exist overall.
   const formatOptions = useMemo<PillOption<RunFormatKey>[]>(() => {
-    if (!items) return [];
-    const present = new Set(
-      items.map((item) => runFormatKey(item.category, item.outputType)),
-    );
-    return (
-      (Object.keys(RUN_FORMAT_LABELS) as RunFormatKey[])
-        // Only formats this deployment has actually produced — a pill for a lane nobody
-        // here uses is a permanently empty control.
-        .filter((key) => present.has(key))
-        .map((key) => ({
-          key,
-          label: RUN_FORMAT_LABELS[key],
-          count: items.filter(
-            (item) =>
-              matches(item, filters, loadedAt, 'format') &&
-              runFormatKey(item.category, item.outputType) === key,
-          ).length,
-        }))
-    );
-  }, [items, filters, loadedAt]);
+    if (!facets) return [];
+    return (Object.keys(RUN_FORMAT_LABELS) as RunFormatKey[])
+      .filter((formatKey) => facets.format[formatKey] !== undefined)
+      .map((formatKey) => ({
+        key: formatKey,
+        label: RUN_FORMAT_LABELS[formatKey],
+        count: facets.format[formatKey] ?? 0,
+      }));
+  }, [facets]);
 
   const statusOptions = useMemo<PillOption<StatusKey>[]>(() => {
-    if (!items) return [];
-    const present = new Set(items.map(statusKeyOf));
-    return STATUS_KEYS.filter((key) => present.has(key)).map((key) => ({
-      key,
-      label: STATUS_FILTER_LABELS[key],
-      count: items.filter(
-        (item) =>
-          matches(item, filters, loadedAt, 'status') &&
-          statusKeyOf(item) === key,
-      ).length,
+    if (!facets) return [];
+    return STATUS_KEYS.map((statusKey) => ({
+      key: statusKey,
+      label: STATUS_FILTER_LABELS[statusKey],
+      count: facets.status[statusKey] ?? 0,
     }));
-  }, [items, filters, loadedAt]);
+  }, [facets]);
 
   const dateOptions = useMemo<PillOption<DateKey>[]>(() => {
-    if (!items) return [];
-    return DATE_KEYS.map((key) => ({
-      key,
-      label: DATE_FILTER_LABELS[key],
-      count: items.filter(
-        (item) =>
-          matches(item, filters, loadedAt, 'date') &&
-          withinDateWindow(item.createdAt, key, loadedAt),
-      ).length,
+    if (!facets) return [];
+    return DATE_KEYS.map((dateKey) => ({
+      key: dateKey,
+      label: DATE_FILTER_LABELS[dateKey],
+      count: facets.date[dateKey] ?? 0,
     }));
-  }, [items, filters, loadedAt]);
+  }, [facets]);
 
-  // A shrinking result set (a stale link, or a list that lost rows since it was paged)
-  // must not leave the requested page out of range. Clamped for display rather than
-  // rewritten, so an out-of-range URL costs no second navigation.
-  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  // A shrinking result set (a stale link, or a list that lost rows since it was paged) must
+  // not leave the requested page out of range. Clamped for display rather than rewritten,
+  // so an out-of-range URL costs no second navigation.
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const safePage = Math.min(requestedPage, pageCount);
-  const visible = filtered.slice(
-    (safePage - 1) * PAGE_SIZE,
-    safePage * PAGE_SIZE,
-  );
 
-  const total = items?.length ?? 0;
   const active = isFiltered(filters);
-  // A facet with one option only ever tells you what the cards already say.
-  const showFormatFacet = formatOptions.length > 1;
-  const showStatusFacet = statusOptions.length > 1;
+  const hasAnyRun = totalUnfiltered > 0;
+  // A facet whose options this deployment has never varied only ever tells you what the
+  // cards already say. Counted against the CURRENT view rather than the whole table, so an
+  // option the officer has selected is never the one that hides its own control.
+  const showFormatFacet =
+    formatOptions.filter((o) => o.count > 0 || o.key === filters.format)
+      .length > 1;
+  const showStatusFacet =
+    statusOptions.filter((o) => o.count > 0 || o.key === filters.status)
+      .length > 1;
 
   return (
     <PageShell
@@ -391,13 +371,13 @@ function HistoryPageBody() {
       {error ? (
         <ErrorNotice
           message={error}
-          onRetry={() => void load()}
+          onRetry={() => void load(requestedPage, filters, key)}
           fallback={STR.genListLoadFailed}
         />
       ) : null}
 
-      {items && items.length > 0 ? (
-        <div className="history-filters">
+      {hasAnyRun ? (
+        <div className="history-filters glass-card">
           <div className="history-toolbar">
             <input
               type="text"
@@ -425,12 +405,14 @@ function HistoryPageBody() {
               />
             ) : null}
 
-            <FacetSelect
-              label={STR.historyFilterDate}
-              options={dateOptions}
-              selected={filters.date}
-              onSelect={(date) => setFilters({ ...filters, date })}
-            />
+            {dateOptions.length > 0 ? (
+              <FacetSelect
+                label={STR.historyFilterDate}
+                options={dateOptions}
+                selected={filters.date}
+                onSelect={(date) => setFilters({ ...filters, date })}
+              />
+            ) : null}
 
             <label className="history-select">
               <span className="history-facet-label">{STR.historySort}</span>
@@ -450,7 +432,7 @@ function HistoryPageBody() {
           <div className="history-result-row">
             <span className="history-count">
               {STR.historyCount}:{' '}
-              {active ? `${filtered.length} / ${total}` : total}
+              {active ? `${total} / ${totalUnfiltered}` : totalUnfiltered}
             </span>
             {active ? (
               <button
@@ -470,17 +452,23 @@ function HistoryPageBody() {
 
       {!items && !error ? <HistorySkeletonGrid /> : null}
 
-      {items && items.length === 0 ? <HistoryEmpty /> : null}
+      {items && !active && total === 0 ? <HistoryEmpty /> : null}
 
-      {items && items.length > 0 && filtered.length === 0 ? (
+      {items && active && total === 0 ? (
         <p className="hint">
           {filters.query ? STR.historyNoResults : STR.historyFilterNoResults}
         </p>
       ) : null}
 
-      {visible.length > 0 ? (
-        <div className="history-grid">
-          {visible.map((item) => (
+      {items && items.length > 0 ? (
+        <div
+          className="history-grid"
+          // Dimmed rather than replaced while the next page loads: these are the cards the
+          // officer was just looking at, and they are about to become real ones again.
+          style={loading ? { opacity: 0.55 } : undefined}
+          aria-busy={loading || undefined}
+        >
+          {items.map((item) => (
             <HistoryCard key={item.id} item={item} />
           ))}
         </div>

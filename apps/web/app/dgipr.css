@@ -276,12 +276,12 @@ a {
   color: var(--accent);
 }
 
-/* Active page: accent fill + inset bar, so it never reads by color alone. */
+/* Active page: accent fill + a heavier weight, so it never reads by color alone.
+   The inset left bar is gone — the rail carries no coloured edge any more. */
 .sidebar-link.active {
   background: var(--accent-soft);
   color: var(--accent-dark);
   font-weight: 700;
-  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .sidebar-link.active svg {
@@ -532,11 +532,13 @@ a {
 
 /* ---------- footer ---------- */
 
+/* A thin credit strip, nothing more: it is the last thing on every page and was
+   taking a band's worth of height to say one line. */
 .site-footer {
-  margin-top: 48px;
+  margin-top: 28px;
   background: var(--accent-dark);
   border-top: 1px solid var(--border);
-  padding: 22px 24px;
+  padding: 8px 16px;
   display: flex;
   justify-content: center;
 }
@@ -549,7 +551,8 @@ a {
   gap: 8px;
   text-decoration: none;
   color: rgba(255, 255, 255, 0.82);
-  font-size: 0.85rem;
+  font-size: 0.72rem;
+  line-height: 1.2;
   transition: color 0.15s ease;
 }
 
@@ -557,10 +560,13 @@ a {
   color: #fff;
 }
 
-/* .powered-logo {
-  width: auto;
+/* The mark ships at its intrinsic 155x30, which is what set the strip's height.
+   Bounded here instead, so the footer is a line of text tall. */
+.powered-logo {
   display: block;
-} */
+  width: auto;
+  height: 16px;
+}
 
 /* ---------- page shell ---------- */
 
@@ -2689,17 +2695,16 @@ details.fold[aria-disabled='true'] summary {
    because a poster arrives by drag far more often than by dialog — but the whole zone is a
    real <button>, so keyboard and screen-reader users get the same control rather than a
    div that only reacts to a pointer. */
+/* NO BORDER, dashed or otherwise: the tinted well is what says "something goes here", and a
+   dashed outline around it read as a placeholder that had failed to load. The drag state is
+   therefore carried by the BACKGROUND alone, which is also the only thing left to change. */
 .motion-drop {
-  border: 2px dashed var(--border-strong);
   border-radius: var(--r-lg);
   background: var(--surface);
-  transition:
-    border-color 0.15s ease,
-    background 0.15s ease;
+  transition: background 0.15s ease;
 }
 
 .motion-drop.is-over {
-  border-color: var(--accent);
   background: var(--accent-soft);
 }
 
@@ -2726,18 +2731,85 @@ details.fold[aria-disabled='true'] summary {
   opacity: 0.72;
 }
 
-/* Once uploaded: the poster beside its own measured size, which is the promise this lane
-   makes — the clip comes back at exactly these pixels. */
+/* Once uploaded: the poster and nothing else. The filename, the measured size and the
+   change/remove pair that used to sit in a column beside it are gone — the picture says more
+   than any of them, and the room they took is what the moving-region rectangle is dragged
+   over, so the preview gets the whole card. */
 .motion-source {
+  position: relative;
   display: flex;
-  gap: 16px;
-  align-items: flex-start;
-  padding: 14px;
-  border: 1px solid var(--border);
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  /* The top padding is the delete button's row: it sits in the card's corner, never over
+     the picture. */
+  padding: 58px 14px 14px;
   border-radius: var(--r-lg);
   background: var(--surface);
 }
 
+/* Exactly the picture, because the region rectangle positions itself `absolute; inset: 0`
+   against this box and its coordinates are fractions of the POSTER — any whitespace inside
+   here would shift every one of them. `width: fit-content` is what keeps it off the card. */
+.motion-source-frame {
+  position: relative;
+  width: fit-content;
+  max-width: 100%;
+  line-height: 0;
+}
+
+.motion-source-preview {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  /* Tall enough to mark a card line on a portrait poster, which is the gesture this preview
+     now exists for; a 120px thumbnail could only ever be looked at. */
+  max-height: 520px;
+  border-radius: 14px;
+  background: #fff;
+}
+
+/* The one affordance left. An icon in the corner of the frame rather than a labelled button
+   under it: `aria-label` and `title` carry the wording, and the picture keeps the width. */
+.motion-source-delete {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 999px;
+  /* Opaque, not translucent: it sits over artwork of any colour, and a tinted disc over a
+     saffron poster reads as part of the design. */
+  background: #fff;
+  color: var(--err);
+  box-shadow: var(--shadow-md);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    transform 0.15s ease;
+}
+
+.motion-source-delete:hover {
+  background: var(--err-soft);
+}
+
+.motion-source-delete:focus-visible {
+  outline: 3px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.motion-source-delete:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+/* Kept for the detail page's "मूळ पोस्टर" thumbnail (.motion-source-ref), which is a
+   reference picture rather than a control and is still shown small. */
 .motion-source-thumb {
   width: 120px;
   height: auto;
@@ -2748,23 +2820,6 @@ details.fold[aria-disabled='true'] summary {
   background: #fff;
   display: block;
   flex: none;
-}
-
-.motion-source-meta {
-  /* overflow:hidden, not min-width:0 alone — it is what lets a flex item shrink below its
-     content, which is what keeps a 50-character phone filename from widening the card
-     (see components/FileName). */
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.motion-source-name {
-  display: block;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* The finished clip. Same frame as .poster-image so the two formats read alike. */
@@ -2813,6 +2868,166 @@ details.fold[aria-disabled='true'] summary {
   width: 100%;
   height: auto;
   display: block;
+}
+
+/* ---------- the region tools under the poster: box and lasso ---------- */
+
+/* A pill track holding two icon buttons, centred under the picture it draws on. */
+.motion-region-tools {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #fff;
+}
+
+.motion-region-tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.motion-region-tool:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.motion-region-tool.is-active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.motion-region-tool:focus-visible {
+  outline: 3px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.motion-region-tool:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+/* The maximise button: same track, set apart from the two radios by a hairline. */
+.motion-region-divider {
+  align-self: center;
+  width: 1px;
+  height: 22px;
+  margin: 0 2px;
+  background: var(--border);
+}
+
+/* The enlarged poster in the maximise dialog: as big as the viewport allows, still exactly
+   the picture so the overlay's fractions line up. */
+.motion-expand-frame {
+  position: relative;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 auto;
+  line-height: 0;
+}
+
+.motion-expand-preview {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  max-height: calc(100dvh - 190px);
+  border-radius: 14px;
+  background: #fff;
+}
+
+/* The implied closing segment of a lasso still being drawn. */
+.motion-lasso-closing {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 1.5px;
+  stroke-dasharray: 4 4;
+  opacity: 0.8;
+}
+
+/* The lasso surface reuses .motion-crop (absolute, clipped, crosshair, touch-action: none);
+   the outline and scrim are one SVG stretched over the poster in fraction space. */
+.motion-lasso:focus-visible {
+  outline: 3px solid var(--ring);
+  outline-offset: -3px;
+}
+
+.motion-lasso-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.motion-lasso-shadow,
+.motion-lasso-line {
+  fill: none;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.motion-lasso-shadow {
+  stroke: rgba(0, 0, 0, 0.55);
+  stroke-width: 4px;
+}
+
+.motion-lasso-line {
+  stroke: #fff;
+  stroke-width: 2px;
+  stroke-dasharray: 6 4;
+  animation: motion-lasso-ants 0.8s linear infinite;
+}
+
+/* While drawing the line is solid: marching ants on a moving path read as flicker. */
+.motion-lasso.is-drawing .motion-lasso-line {
+  stroke-dasharray: none;
+  animation: none;
+}
+
+@keyframes motion-lasso-ants {
+  to {
+    stroke-dashoffset: -10;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .motion-lasso-line {
+    animation: none;
+  }
+}
+
+.motion-lasso-prompt {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  max-width: calc(100% - 24px);
+  margin: 0;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.66);
+  color: #fff;
+  font-size: 0.85rem;
+  line-height: 1.35;
+  text-align: center;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.motion-lasso-prompt.is-warn {
+  background: var(--err);
 }
 
 /* ---------- the hand trim (MotionCropBox) ---------- */
@@ -3738,8 +3953,12 @@ fieldset.copy-group legend {
 /* Search + every facet as ONE wrapping row above the grid, each facet a dropdown. It is
    a plain block rather than a fold: with 100 runs on the page, filters that have to be
    opened before they can be seen are filters nobody uses. */
+/* On glass (.glass-card in the markup): the toolbar used to sit bare on the page
+   photograph, where muted small labels were hard to read. */
 .history-filters {
   margin-bottom: 20px;
+  padding: 14px 16px;
+  border-radius: var(--r-lg);
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -3758,13 +3977,13 @@ fieldset.copy-group legend {
 }
 
 .history-count {
-  color: var(--muted);
+  color: var(--text);
   font-size: 0.9rem;
   white-space: nowrap;
 }
 
 .history-facet-label {
-  color: var(--muted);
+  color: var(--text);
   font-size: 0.9rem;
   font-weight: 600;
 }
@@ -9122,6 +9341,51 @@ a.file-row-link > svg:last-child {
   padding: 4px;
   border-radius: var(--r-sm);
   color: var(--accent-dark);
+}
+
+/* Edit this video / new clip. Above the box for the fork banner's reason: it decides what the
+   words about to be typed will do. Wraps on a phone rather than widening the composer. */
+.nvw-intent {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin: 0 0 10px;
+  min-width: 0;
+}
+
+.nvw-intent-options {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+}
+
+.nvw-intent-option {
+  padding: 5px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.nvw-intent-option.is-active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.nvw-intent-hint {
+  flex: 1 1 14rem;
+  min-width: 0;
+  font-size: 0.8rem;
+  color: var(--text);
+  opacity: 0.7;
 }
 
 .nvw-model-label {

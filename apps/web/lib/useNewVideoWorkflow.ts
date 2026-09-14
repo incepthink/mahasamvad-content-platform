@@ -18,6 +18,7 @@ import type {
   NewVideoAspect,
   NewVideoCharacter,
   NewVideoConversation,
+  NewVideoTurnIntentChoice,
 } from '@dgipr/schemas';
 import {
   getNewVideoConversation,
@@ -67,7 +68,11 @@ export function useNewVideoWorkflow(
   setForkFromTurnId: (turnId: string | null) => void;
   addImages: (files: readonly File[]) => void;
   removeImage: (key: string) => void;
-  send: (prompt: string, aspect: NewVideoAspect) => Promise<boolean>;
+  send: (
+    prompt: string,
+    aspect: NewVideoAspect,
+    intent?: NewVideoTurnIntentChoice,
+  ) => Promise<boolean>;
   refresh: () => Promise<void>;
 } {
   // Seeded from the URL and then owned locally, so a conversation created by the first turn
@@ -221,7 +226,11 @@ export function useNewVideoWorkflow(
   }, []);
 
   const send = useCallback(
-    async (prompt: string, aspect: NewVideoAspect): Promise<boolean> => {
+    async (
+      prompt: string,
+      aspect: NewVideoAspect,
+      intent: NewVideoTurnIntentChoice = 'auto',
+    ): Promise<boolean> => {
       if (prompt.trim() === '') return false;
       setSending(true);
       setError(null);
@@ -260,6 +269,9 @@ export function useNewVideoWorkflow(
           // Omitted unless armed, so the ordinary turn's request is byte-for-byte what it
           // has always been.
           ...(forkRef.current !== null ? { fromTurnId: forkRef.current } : {}),
+          // Edit the video on screen or make a new clip. Omitted for `auto` (the API decides
+          // from the instruction) and on a fork, which is always an edit.
+          ...(intent !== 'auto' && forkRef.current === null ? { intent } : {}),
         });
 
         // Only cleared once the turn is on its way — the fork with it, since it described

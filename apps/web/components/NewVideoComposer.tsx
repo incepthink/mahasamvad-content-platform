@@ -54,6 +54,7 @@ import {
   NEW_VIDEO_MAX_IMAGES,
   type NewVideoAspect,
   type NewVideoCharacter,
+  type NewVideoTurnIntentChoice,
 } from '@dgipr/schemas';
 import { ComposeSafeTextarea, isComposingEvent } from './ComposeSafeInput';
 import {
@@ -64,6 +65,15 @@ import { NewVideoCharacters } from './NewVideoCharacters';
 import { imageFilesFromClipboard, isEditableTarget } from '../lib/pastedImages';
 import { STR } from '../lib/strings';
 import type { StagedImage } from '../lib/useNewVideoWorkflow';
+
+const INTENT_OPTIONS: ReadonlyArray<{
+  value: NewVideoTurnIntentChoice;
+  label: string;
+}> = [
+  { value: 'auto', label: STR.nvwIntentAuto },
+  { value: 'edit', label: STR.nvwIntentEdit },
+  { value: 'new', label: STR.nvwIntentNew },
+];
 
 // Both shapes the API accepts, in the order they are offered. Landscape leads because it is
 // the default — the button that is already pressed when the page opens.
@@ -122,12 +132,21 @@ export function NewVideoComposer({
   onAddImages: (files: readonly File[]) => void;
   onRemoveImage: (key: string) => void;
   /** Resolves true once the turn has left, which is when the box may be cleared. */
-  onSend: (prompt: string, aspect: NewVideoAspect) => Promise<boolean>;
+  onSend: (
+    prompt: string,
+    aspect: NewVideoAspect,
+    intent: NewVideoTurnIntentChoice,
+  ) => Promise<boolean>;
 }) {
   const [text, setText] = useState('');
   const [aspect, setAspect] = useState<NewVideoAspect>(
     DEFAULT_NEW_VIDEO_ASPECT,
   );
+  // EDIT THE VIDEO ON SCREEN, OR MAKE A NEW CLIP. `auto` lets the API read the instruction and
+  // decide — a short change is an edit, a whole new scene is a new clip. The two explicit
+  // choices are the officer's override for when that call is wrong. Per instruction, so it
+  // resets to `auto` once a turn has left.
+  const [intent, setIntent] = useState<NewVideoTurnIntentChoice>('auto');
   const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [castOpen, setCastOpen] = useState(false);
@@ -169,9 +188,10 @@ export function NewVideoComposer({
 
   const submit = () => {
     if (!canSend) return;
-    void onSend(text, aspect).then((sent) => {
+    void onSend(text, aspect, intent).then((sent) => {
       if (!sent) return;
       setText('');
+      setIntent('auto');
       // The chosen shape is deliberately NOT reset: the next instruction in a conversation is
       // an edit of the video just made, and handing it back at a different ratio would undo a
       // choice nobody changed.
@@ -283,6 +303,42 @@ export function NewVideoComposer({
             >
               <X size={16} aria-hidden="true" />
             </button>
+          </div>
+        ) : null}
+
+        {/* Only once there IS a video to edit, and not beside a fork — a fork names the video
+            to change, which is already the answer to this question. */}
+        {isFollowUp && forkOrdinal === null ? (
+          <div className="nvw-intent">
+            <div
+              className="nvw-intent-options"
+              role="radiogroup"
+              aria-label={STR.nvwIntentLabel}
+            >
+              {INTENT_OPTIONS.map(({ value, label }) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="radio"
+                  aria-checked={intent === value}
+                  className={
+                    intent === value
+                      ? 'nvw-intent-option is-active'
+                      : 'nvw-intent-option'
+                  }
+                  onClick={() => setIntent(value)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <span className="nvw-intent-hint">
+              {intent === 'auto'
+                ? STR.nvwIntentAutoHint
+                : intent === 'edit'
+                  ? STR.nvwIntentEditHint
+                  : STR.nvwIntentNewHint}
+            </span>
           </div>
         ) : null}
 

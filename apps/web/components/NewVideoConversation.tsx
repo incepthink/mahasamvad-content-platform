@@ -14,6 +14,7 @@ import type {
   NewVideoCharacter,
   NewVideoConversation as Conversation,
   NewVideoTurn,
+  NewVideoTurnIntentChoice,
 } from '@dgipr/schemas';
 import { ErrorNotice } from './ErrorNotice';
 import { NewVideoComposer } from './NewVideoComposer';
@@ -77,7 +78,11 @@ export function NewVideoConversationView({
   onRetry?: () => void;
   onAddImages: (files: readonly File[]) => void;
   onRemoveImage: (key: string) => void;
-  onSend: (prompt: string, aspect: NewVideoAspect) => Promise<boolean>;
+  onSend: (
+    prompt: string,
+    aspect: NewVideoAspect,
+    intent: NewVideoTurnIntentChoice,
+  ) => Promise<boolean>;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const [stick, setStick] = useState(true);

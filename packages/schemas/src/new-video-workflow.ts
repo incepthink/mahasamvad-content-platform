@@ -234,12 +234,24 @@ export const NewVideoTurnRequestSchema = z.object({
   //
   // Omitted means the ordinary case: continue from whatever last succeeded.
   fromTurnId: z.string().uuid().optional(),
+  // EDIT THE VIDEO ON SCREEN, OR MAKE A NEW CLIP. Meaningful only on a follow-up.
+  //
+  // `auto` (and omitted) lets the API decide from the instruction itself — a short change is
+  // an edit, a whole new scene is a new clip. Before this existed every follow-up was sent as
+  // an edit, so "Scene 2: …" reached Gemini as a heavily re-specified edit of Scene 1 and died
+  // minutes later with a bare `400 invalid_request`. `edit` and `new` are the officer's own
+  // override when the automatic call is wrong. A fork is always an edit, so `new` beside
+  // `fromTurnId` is refused.
+  intent: z.enum(['auto', 'edit', 'new']).optional(),
   // Optional so an older client — or a request written by hand — still sends a valid turn;
   // the route supplies DEFAULT_NEW_VIDEO_ASPECT in its place rather than leaving the shape to
   // whatever the model feels like.
   aspect: NewVideoAspectSchema.optional(),
 });
 export type NewVideoTurnRequest = z.infer<typeof NewVideoTurnRequestSchema>;
+export type NewVideoTurnIntentChoice = NonNullable<
+  NewVideoTurnRequest['intent']
+>;
 
 export const NewVideoTurnResponseSchema = z.object({
   conversationId: z.string().uuid(),

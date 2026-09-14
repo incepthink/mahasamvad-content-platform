@@ -21,8 +21,12 @@
 // variable and across a reload only their names survive, and the form asks for them back
 // by name.
 //
-// Heading, AI direction and the style reference retain their separate API fields.
-// Their saved values also preserve drafts started in the production form.
+// THE DIRECTION IS ONE FIELD. A heading and a pasted style sample used to be asked for
+// separately and sent as `heading` and `styleReference`; both are gone from this form, and
+// what the officer types in the single AI box travels as `instructions` alone. The draft
+// still CARRIES the two retired keys so a draft written before this change parses, but they
+// are written back empty and nothing reads them — restoring either field means restoring
+// its box, its state and its `form.append` together.
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -92,8 +96,6 @@ export function useDloIntakeForm() {
   // USED at generate time, so it is handed to the review step through the intake's saved
   // review state rather than being asked for twice.
   const [instructions, setInstructions] = useState(draft.instructions);
-  const [heading, setHeading] = useState(draft.heading);
-  const [styleReference, setStyleReference] = useState(draft.styleReference);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   // Which part of each recording the officer chose on the trim slider. Held here rather than
@@ -108,8 +110,9 @@ export function useDloIntakeForm() {
       writeDraft({
         notes,
         category: DLO_CATEGORY,
-        heading,
-        styleReference,
+        // Retired fields, kept in the draft shape and written empty — see the header.
+        heading: '',
+        styleReference: '',
         instructions,
         audioNames: files.map((file) => file.name),
         imageNames: images.map((file) => file.name),
@@ -118,16 +121,7 @@ export function useDloIntakeForm() {
       });
     }, 500);
     return () => clearTimeout(timer);
-  }, [
-    notes,
-    heading,
-    styleReference,
-    instructions,
-    documents,
-    files,
-    images,
-    youtube,
-  ]);
+  }, [notes, instructions, documents, files, images, youtube]);
 
   // Picked files ride in a module variable so client-side navigation away and back keeps
   // them.
@@ -217,10 +211,10 @@ export function useDloIntakeForm() {
       const form = new FormData();
       form.append('notes', notes);
       form.append('category', DLO_CATEGORY);
-      form.append('heading', heading);
-      if (styleReference.trim()) {
-        form.append('styleReference', styleReference.trim());
-      }
+      // No `heading` and no `styleReference`: this form asks ONE direction question and
+      // the answer goes in `instructions` below. Both remain optional server-side, so
+      // omitting them is not a partial request — it is the whole of what is now asked.
+      //
       // Not used until the article is generated, and it has no column on dlo_intakes —
       // the create route seeds it into the intake's review state, which is what makes the
       // review step open with what was typed here instead of an empty box.
@@ -273,10 +267,6 @@ export function useDloIntakeForm() {
     setYoutube,
     instructions,
     setInstructions,
-    heading,
-    setHeading,
-    styleReference,
-    setStyleReference,
     error,
     setError,
     submitting,
