@@ -11,6 +11,7 @@
     "lint": "pnpm -r --if-present lint",
     "format": "prettier . --write",
     "format:check": "prettier . --check",
+    "qwen:benchmark": "node --use-system-ca --env-file=.env scripts/benchmark-qwen.mjs",
     "n8n:push": "node --env-file-if-exists=.env n8n/push-workflows.mjs",
     "db:tunnel": "bash scripts/db-tunnel.sh",
     "finetune:export": "pnpm --filter @dgipr/content-engine finetune:export"

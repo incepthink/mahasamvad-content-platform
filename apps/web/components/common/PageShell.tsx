@@ -19,6 +19,7 @@
 import type { CSSProperties, ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import type { DoodleMark } from '../../lib/doodleMarks';
+import { InfoHint } from './InfoHint';
 import { PageBackdrop } from './PageBackdrop';
 import { PageBackground } from './PageBackground';
 import type { PageBackgroundKey } from '../../lib/pageBackgrounds';
@@ -40,8 +41,11 @@ export type PageShellProps = {
    * ground and nothing else.
    */
   title?: ReactNode;
-  /** Optional: analytics/[feature] has a title and no `.page-sub`. */
-  subtitle?: ReactNode;
+  /**
+   * The page's one-line description. NOT printed under the title: it is shown
+   * only inside the ⓘ popover beside the title, so the head stays one line.
+   */
+  subtitle?: string;
   /** Right-aligned commands — a range picker, a `btn btn-primary` link. */
   actions?: ReactNode;
   /**
@@ -101,8 +105,17 @@ export function PageShell({
       {hasHead ? (
         <header className="page-head">
           <div className="page-head-text">
-            {title ? <h1 className="page-title">{title}</h1> : null}
-            {subtitle ? <p className="page-sub">{subtitle}</p> : null}
+            {title ? (
+              <h1 className="page-title">
+                {title}
+                {subtitle ? (
+                  <>
+                    {' '}
+                    <InfoHint text={subtitle} />
+                  </>
+                ) : null}
+              </h1>
+            ) : null}
           </div>
           {statusChip || actions ? (
             <div className="page-head-actions">

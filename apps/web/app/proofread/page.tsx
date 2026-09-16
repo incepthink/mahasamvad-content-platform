@@ -440,11 +440,7 @@ export default function ProofreadPage() {
     // so nothing sits over the last block or over the credit line.
     <PageShell
       background="proofread"
-      title={
-        <>
-          {STR.proofreadPageTitle} <InfoHint text={STR.infoProofreadPage} />
-        </>
-      }
+      title={STR.proofreadPageTitle}
       subtitle={STR.proofreadPageIntro}
     >
       <div className="flex flex-col gap-5">

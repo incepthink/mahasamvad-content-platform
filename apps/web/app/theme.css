@@ -186,8 +186,8 @@
   /* A near-clear wash. The photographs behind the routes differ, so this is the
      one token to lift if a busier ground ever makes body text hard to read. */
   --page-bg-overlay: linear-gradient(
-    rgba(248, 250, 252, 0.18),
-    rgba(248, 250, 252, 0.18)
+    rgba(248, 250, 252, 0.68),
+    rgba(248, 250, 252, 0.68)
   );
 }
 

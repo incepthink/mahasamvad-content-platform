@@ -463,11 +463,7 @@ export default function TranslatePage() {
     // below, so nothing is pinned over the last block or over the credit line any more.
     <PageShell
       background="translate"
-      title={
-        <>
-          {STR.translatePageTitle} <InfoHint text={STR.infoTranslatePage} />
-        </>
-      }
+      title={STR.translatePageTitle}
       subtitle={STR.translatePageIntro}
     >
       <div className="flex flex-col gap-5">

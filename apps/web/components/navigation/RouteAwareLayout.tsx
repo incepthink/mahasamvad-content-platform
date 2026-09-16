@@ -29,7 +29,7 @@ const RouteAwareLayout = ({ children }: { children: React.ReactNode }) => {
             className="powered-by"
           >
             <span>{STR.poweredBy}</span>
-            <HashcaseLogo className="powered-logo" />
+            <HashcaseLogo className="powered-logo" viewBox="0 0 155 30" />
           </a>
         </footer>
       </div>
