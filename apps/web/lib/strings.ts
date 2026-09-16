@@ -2375,20 +2375,21 @@ export function analyticsCostRateNote(rate: number): string {
   return `खर्च १ अमेरिकी डॉलर = ₹${rate.toLocaleString('mr-IN')} या दराने रुपयांत दाखवला आहे.`;
 }
 
-// One rate line, e.g. "ध्वनिलेखन (ElevenLabs): ₹३५ प्रति ६० मिनिटे". `per` is spelled out
-// rather than reduced to a per-unit figure, because the published rate really is quoted per
-// hour or per 1,000 characters and a reader reconciling it against an invoice needs the
-// same shape.
+// One rate line, e.g. "ध्वनिलेखन: ₹३५ प्रति ६० मिनिटे". `per` is spelled out rather than
+// reduced to a per-unit figure, because the published rate really is quoted per hour or per
+// 1,000 characters and a reader checking it needs the same shape.
+//
+// The supplier's name used to lead the parenthetical and is gone on purpose — the platform
+// does not name the vendor behind a service anywhere an officer can read it.
 export function analyticsRateLine(
   service: string,
-  provider: string,
   inr: number,
   per: number,
   unit: string,
 ): string {
   const amount = inr.toLocaleString('mr-IN', { maximumFractionDigits: 2 });
   const quantity = per.toLocaleString('mr-IN');
-  return `${service} (${provider}): ₹${amount} प्रति ${quantity} ${unit}`;
+  return `${service}: ₹${amount} प्रति ${quantity} ${unit}`;
 }
 
 export function analyticsDayWork(day: string, count: number): string {

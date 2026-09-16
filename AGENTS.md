@@ -3111,6 +3111,58 @@ client id/secret — see the milestone below.
 
 ## Latest Implementation Milestone
 
+- **The platform never names the model vendor** (2026-09-16, no migration, no n8n): an officer
+  asked /chat which model it was and got "You're chatting with an OpenAI language model through
+  Mahasamvad" — a commercial supplier named inside a government tool, and on the Qwen lane
+  false as well. Three surfaces, one rule.
+  - **The chat brief had no identity paragraph at all**, so the model volunteered its provider.
+    `CHAT_IDENTITY_RULE` (`content-engine/src/chat/chat-identity.ts`) is appended to BOTH lanes'
+    system briefs — shared rather than duplicated, because they are deliberately identical apart
+    from their tool paragraph and the same question must not get two answers depending on who
+    served it. **It is worded as a REFUSAL TO DISCLOSE, never a false claim**: telling the model
+    to name another vendor, or to deny being a language model, would buy the same silence by
+    making it lie about the one thing the brief already asks it to be transparent about. "The
+    underlying model is not disclosed" is true on both lanes and stays true when the provider
+    changes. Pinned in `misc-chat.test.ts`, including deny-assertions against both false-claim
+    shapes.
+  - **Only ONE error could ever have reached an officer with a vendor in it, and the reason is
+    worth keeping**: `errorMessage.ts` whitelists on DEVANAGARI, so every English internal
+    message (`OpenAI could not index the document`) is already replaced by a canned Marathi
+    sentence — but a MARATHI message naming a vendor sails straight through. Three did, and all
+    three are reworded to describe the failure rather than the supplier: `openai-doc.ts`'s and
+    `gemini-doc.ts`'s "X कडून या पृष्ठांचा मजकूर मिळाला नाही", and `stt-provider.ts`'s YouTube
+    refusal, which named ElevenLabs and Sarvam. A new Marathi error must not name one.
+  - **/analytics stopped naming the supplier too, and that could not be done by deleting a
+    label.** `PROVIDER_LABELS` falls back to the raw key, so dropping `openai: 'OpenAI'` would
+    have printed `openai`; and the MODEL id beside it (`gpt-5.6-sol`) names the vendor just as
+    plainly, so half the line could not stay. Both are gone from `serviceDetail`, which is
+    deleted — the row was already named by CAPABILITY, which is what keeps the history
+    continuous across a seam flip in .env.
+    **The consequence is the interesting part**: the aggregator keys a row on
+    `[task, key, provider, model]`, so those two fields were what told two rows of the same
+    service apart. Hidden and not merged, they render as identical duplicates — **measured on
+    the real `?range=all` payload, 10 groups would have** (every `document_ocr` row, and
+    `article_generation` three ways across an OpenAI/Qwen swap). `mergeByService` collapses them
+    in the VIEW rather than in the API, the payload being a shared contract and the reason to
+    merge being a display decision. It sums calls, units and cost, keeps the task total's own
+    "not priced ≠ ₹0" rule, and guards on `unit` so pages can never be added to minutes.
+    `analyticsRateLine` drops its `(ElevenLabs)` parenthetical.
+  Verified 2026-09-16, all free: workspace typecheck green on content-engine, api and web;
+  eslint clean on every touched file (web's only 3 warnings are the pre-existing unused imports
+  in `analytics/[feature]/page.tsx`); prettier clean on every hunk of mine — `strings.ts`'s one
+  complaint is at `motionLassoActiveNote`, untouched and already failing at HEAD, so do NOT
+  `--write` it. `chat:test` **63/63** (62 before, plus "both lanes refuse to name the model
+  behind them"), and a new `AnalyticsServiceList.check.tsx` at **22/22** — the
+  `markdownRender.check.tsx` precedent, run with
+  `npx tsx --tsconfig apps/web/tsconfig.check.json apps/web/components/AnalyticsServiceList.check.tsx`
+  from `packages/content-engine`, which has tsx. It renders the table with every provider the
+  aggregator can emit and asserts none of the fourteen vendor spellings survives, that the
+  service and the ₹ figure still do, and the five merge cases. The merged arithmetic was then
+  checked against the LIVE payload (274 + 3 + 1 calls and ₹1863.21 + 0 + 1.79 folding to 278
+  and ₹1865.00).
+  **Left for a real run**: opening /chat and asking it which model it is. Deploy is
+  `@dgipr/content-engine` dist → API + web. No migration, no n8n, no new env.
+
 - **Creative and Social takes the officer's own PICTURES for the image model** (2026-09-16,
   migration 0056, no n8n): every poster lane on the create form has been made of TEXT alone —
   the officer types or pastes a note and the image model designs from words. That is fine
@@ -3178,8 +3230,11 @@ client id/secret — see the milestone below.
   overflow — two pictures attached at once show two cards with thumbnails, no card is left
   uploading or failed, the intercepted create carries both paths under the guarded prefix, and
   the tool is present on क्रिएटिव्ह/लेख/यूट्यूब and absent on कॅप्शन/डायनॅमिक पोस्टर.
-  **Left for a real run** (0056 applied + image spend): a poster rendered from an attached
-  picture, which is the step that needs the prompt-builder change above. **Deploy: 0056 →
+  **Migration 0056 applied to RDS on 2026-09-16**: verified the nullable `jsonb` column and
+  comment in PostgreSQL 17.10, reloaded PostgREST's schema cache, and confirmed its OpenAPI
+  schema exposes `prompt_image_paths`. **Left for a real run** (image spend): a poster rendered
+  from an attached picture, which is the step that needs the prompt-builder change above.
+  **Deploy: 0056 →
   `@dgipr/schemas` → `@dgipr/database` dists → API + web** (ship together — `promptImagePaths`
   and the upload response are one contract). No n8n, no new env.
 

@@ -55,6 +55,10 @@ the one workflow the migration made harder.
 pnpm db:tunnel      # leave running in its own terminal, then `pnpm dev`
 ```
 
+The script forwards PostgREST to `localhost:8000` and, when `RDS_ENDPOINT` is set in
+`.env`, PostgreSQL to `localhost:5433` for migrations, leaving the usual local PostgreSQL
+port 5432 available.
+
 `scripts/db-tunnel.sh` needs only a logged-in `aws` CLI (no pem — EC2 Instance Connect pushes
 a throwaway key). It **reconnects on its own**: the long haul to us-east-2 resets connections
 often enough that a one-shot tunnel is not good enough when the whole local app sits behind
@@ -171,7 +175,8 @@ change that one with `alter role authenticator with password '...'`.
 Migrations are no longer applied through the Supabase SQL editor. Tunnel in and:
 
 ```bash
-psql "postgresql://postgres:<RDS_MASTER_PASSWORD>@localhost:5432/dgipr" -f supabase/migrations/00NN_x.sql
+psql -h 127.0.0.1 -p 5433 -U postgres -d dgipr -W \
+  -v ON_ERROR_STOP=1 --single-transaction -f supabase/migrations/00NN_x.sql
 ```
 
 New tables are covered automatically — `alter default privileges` was set for `service_role`.

@@ -35,7 +35,6 @@ import {
   ANALYTICS_FEATURE_LABELS,
   formatNumber,
   isEstimatedMetric,
-  providerLabel,
   serviceLabel,
   sliceLabel,
   unitLabel,
@@ -157,7 +156,6 @@ function FeaturePageBody() {
                       <li key={rate.key}>
                         {analyticsRateLine(
                           serviceLabel(rate.key),
-                          providerLabel(rate.provider),
                           rate.inrPerUnit,
                           rate.per,
                           unitLabel(rate.unit),

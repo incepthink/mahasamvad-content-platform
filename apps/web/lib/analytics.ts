@@ -148,26 +148,11 @@ const SERVICE_UNIT_LABELS: Readonly<Record<ServiceUnit, string>> = {
   clips: STR.analyticsUnitClips,
 };
 
-// Providers are proper nouns and stay in Latin script deliberately: "ElevenLabs" is the name
-// on the invoice an officer would have to reconcile this page against, and transliterating
-// it would make that harder rather than friendlier.
-const PROVIDER_LABELS: Readonly<Record<string, string>> = {
-  openai: 'OpenAI',
-  elevenlabs: 'ElevenLabs',
-  sarvam: 'Sarvam AI',
-  gemini: 'Google Gemini',
-  kling: 'Kling AI',
-  veo: 'Google Veo',
-};
-
 export const serviceLabel = (key: AnalyticsServiceKey): string =>
   SERVICE_LABELS[key] ?? key;
 
 export const unitLabel = (unit: ServiceUnit): string =>
   SERVICE_UNIT_LABELS[unit] ?? unit;
-
-export const providerLabel = (name: string): string =>
-  PROVIDER_LABELS[name] ?? name;
 
 // "१,२४२ कॉल" — the number the row leads with, in its own unit. Minutes keep one decimal
 // because a 40-second clip rounding to zero would make a real render look like nothing

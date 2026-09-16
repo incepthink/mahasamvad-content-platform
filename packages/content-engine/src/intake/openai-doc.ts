@@ -580,7 +580,7 @@ export async function extractPdfPagesViaOpenAI(
   pages.sort((a, b) => a.page - b.page);
 
   if (pages.every((page) => page.text.length === 0)) {
-    throw new Error(`${name}: OpenAI कडून या पृष्ठांचा मजकूर मिळाला नाही.`);
+    throw new Error(`${name}: या पृष्ठांचा मजकूर वाचता आला नाही.`);
   }
   if (failures.length > 0) {
     console.warn(

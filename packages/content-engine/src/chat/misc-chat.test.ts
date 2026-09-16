@@ -11,6 +11,8 @@ import {
   type MiscChatTurn,
 } from './misc-chat.js';
 import { MISC_CHAT_PDF_MAX_BYTES } from './file-search.js';
+import { CHAT_IDENTITY_RULE } from './chat-identity.js';
+import { QWEN_CHAT_SYSTEM_INSTRUCTION } from './qwen-chat.js';
 
 test('chat defaults to the top OpenAI text tier and a broad honest assistant prompt', () => {
   // /chat has no deterministic post-filter behind it, so the single call is the product.
@@ -32,6 +34,30 @@ test('chat defaults to the top OpenAI text tier and a broad honest assistant pro
   // attachment" about a PDF sitting in its own index.
   assert.match(MISC_CHAT_SYSTEM_INSTRUCTION, /file_search/);
   assert.match(MISC_CHAT_SYSTEM_INSTRUCTION, /not shown to you in full/);
+});
+
+test('both lanes refuse to name the model behind them', () => {
+  // The reported leak: asked which model it was, the assistant answered "You're chatting
+  // with an OpenAI language model through Mahasamvad" — a commercial supplier named inside
+  // a government tool, and wrong outright on the Qwen lane. Asserted on BOTH instructions
+  // from one rule, so the same question cannot get two answers depending on who served it.
+  for (const brief of [
+    MISC_CHAT_SYSTEM_INSTRUCTION,
+    QWEN_CHAT_SYSTEM_INSTRUCTION,
+  ]) {
+    assert.ok(brief.includes(CHAT_IDENTITY_RULE));
+    assert.match(brief, /Mahasamvad's assistant/);
+    assert.match(brief, /never refer to yourself as ChatGPT/);
+    assert.match(brief, /underlying model is not disclosed/);
+  }
+  // It buys silence by DECLINING to say, never by saying something untrue: telling it to
+  // claim another vendor, or to deny being a language model, would make the assistant lie
+  // about the one thing this brief already asks it to be transparent about.
+  assert.doesNotMatch(
+    CHAT_IDENTITY_RULE,
+    /you are not (a|an) (language model|AI)/i,
+  );
+  assert.doesNotMatch(CHAT_IDENTITY_RULE, /(built|made|created|developed) by/i);
 });
 
 test('a document reaches the model as a searchable NAME, never as file input', () => {

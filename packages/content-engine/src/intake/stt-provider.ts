@@ -108,8 +108,8 @@ async function transcribeViaProvider(
           // Only reachable under YOUTUBE_AUDIO_SOURCE=provider — see the header.
           results[index] = {
             error:
-              'यूट्युब लिंकवरून मजकूर काढण्यासाठी ElevenLabs आवश्यक आहे. ' +
-              'सध्या Sarvam वापरले जात आहे, त्यामुळे ही लिंक वगळण्यात आली.',
+              'सध्याच्या मांडणीत यूट्युब लिंकवरून मजकूर काढता येत नाही, ' +
+              'त्यामुळे ही लिंक वगळण्यात आली. कृपया ध्वनिमुद्रण जोडा.',
           };
         } else {
           bytePositions.push(index);

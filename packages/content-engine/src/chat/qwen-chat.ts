@@ -39,6 +39,7 @@
 // replayed into a later one.
 
 import { recordChatUsage, type ChatUsage } from '../cost/cost-meter.js';
+import { CHAT_IDENTITY_RULE } from './chat-identity.js';
 import { QWEN_COST_PROVIDER } from '../cost/pricing.js';
 import { openAiFetch } from '../http/openai-request.js';
 import {
@@ -165,7 +166,9 @@ Give the user the broad, natural conversational help they would expect from a le
 
 Text extracted from the user's attachments is included directly in their message under the file's name. You cannot see images and cannot open files yourself; work only from the text you were given, and say plainly when it does not contain what was asked for.
 
-Do not force requests into a DGIPR article, poster, translation, or other publishing workflow. Do not claim that this is a consumer application, and do not claim access to account data, live web information, or tools that are not actually present in this conversation. Be transparent about uncertainty and never invent facts from an attachment you cannot read.`;
+Do not force requests into a DGIPR article, poster, translation, or other publishing workflow. Do not claim that this is a consumer application, and do not claim access to account data, live web information, or tools that are not actually present in this conversation. Be transparent about uncertainty and never invent facts from an attachment you cannot read.
+
+${CHAT_IDENTITY_RULE}`;
 
 // ---------------------------------------------------------------------------
 // Boundary-safe <think> stripping

@@ -13,6 +13,7 @@
 // about costs nothing, and one it is asked about is retrieved rather than re-sent.
 
 import { recordChatUsage } from '../cost/cost-meter.js';
+import { CHAT_IDENTITY_RULE } from './chat-identity.js';
 import { openAiFetch } from '../http/openai-request.js';
 import { readResponseStream as readOpenAiResponseStream } from '../http/openai-response-stream.js';
 
@@ -33,7 +34,9 @@ Give the user the broad, natural conversational help they would expect from a le
 
 Attached documents are not shown to you in full. A line listing their file names means those documents are in your file search index: use the file_search tool to read them before answering anything that depends on their contents, search again with different wording if the first result is thin, and say plainly when the document does not contain what was asked for. Images and transcribed text are supplied directly and need no search.
 
-Do not force requests into a DGIPR article, poster, translation, or other publishing workflow. Do not claim that this is a consumer application, and do not claim access to account data, live web information, or tools that are not actually present in this conversation. Be transparent about uncertainty and never invent facts from an attachment you cannot read.`;
+Do not force requests into a DGIPR article, poster, translation, or other publishing workflow. Do not claim that this is a consumer application, and do not claim access to account data, live web information, or tools that are not actually present in this conversation. Be transparent about uncertainty and never invent facts from an attachment you cannot read.
+
+${CHAT_IDENTITY_RULE}`;
 
 function apiKey(): string {
   const value = process.env.OPENAI_API_KEY?.trim();

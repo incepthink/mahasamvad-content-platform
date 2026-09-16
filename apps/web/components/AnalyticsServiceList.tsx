@@ -7,8 +7,15 @@
 // shared scale to draw bars against, and a bar chart over mixed units would be a picture that
 // lies. What the reader wants here is two exact figures per row, which is a table's job.
 //
-// Every row is named by CAPABILITY with the provider underneath, so flipping a seam in .env
-// changes the small line and not the row, and the history stays continuous.
+// Every row is named by CAPABILITY, and the supplier behind it is deliberately NOT shown.
+// Naming the vendor here would put a commercial supplier's name inside a government tool for
+// no gain the officer can act on, and it is the same rule the chat assistant follows. It
+// also keeps the history continuous across a seam flip in .env, which was already the
+// reason the row was named by capability rather than by provider.
+//
+// Because the provider and the model id are what used to tell two rows of the same service
+// apart, rows that differ only in those are MERGED. Hiding the line without merging would
+// print the same service name twice under one task with no way to read why.
 //
 // GROUPED BY TASK. One user-facing task usually runs SEVERAL services — proofreading is a
 // chat call plus an embedding lookup, a marker poster revision is a vision call plus an image
@@ -24,7 +31,6 @@
 import {
   formatNumber,
   formatServiceUnits,
-  providerLabel,
   serviceLabel,
   taskLabel,
 } from '../lib/analytics';
@@ -59,7 +65,7 @@ function groupByTask(services: readonly AnalyticsService[]): ServiceGroup[] {
   }
 
   return order.map((task) => {
-    const rows = byTask.get(task) ?? [];
+    const rows = mergeByService(byTask.get(task) ?? []);
     // "Not priced" and "₹0" are different answers, so the total stays null until at least
     // one service in the group actually carries a figure — the same distinction the single
     // row below draws with its dash.
@@ -122,13 +128,60 @@ function ServiceCost({ costInr }: { costInr: number | null }) {
   return <>{`₹${formatNumber(costInr)}`}</>;
 }
 
-function serviceDetail(service: AnalyticsService): string {
-  return [
-    service.provider ? providerLabel(service.provider) : '',
-    service.model,
-  ]
-    .filter(Boolean)
-    .join(' · ');
+// Collapse rows a reader can no longer tell apart. The aggregator keys a row on
+// [task, key, provider, model], so one window spanning a provider swap — or a service with
+// a text lane on two backends — legitimately produces several rows of the SAME service.
+// With the provider line gone those would render as identical duplicates, so they become
+// one row here rather than in the API: the payload is a shared contract, and the reason to
+// merge is a display decision.
+//
+// `unit` is part of the merge key as a guard, not because it is expected to differ: units
+// are a property of the service key, and silently adding pages to minutes would be worse
+// than showing two rows.
+function mergeByService(
+  services: readonly AnalyticsService[],
+): AnalyticsService[] {
+  const order: string[] = [];
+  const byService = new Map<string, AnalyticsService[]>();
+  for (const service of services) {
+    const mergeKey = `${service.key}|${service.unit}`;
+    const bucket = byService.get(mergeKey);
+    if (bucket) {
+      bucket.push(service);
+      continue;
+    }
+    byService.set(mergeKey, [service]);
+    order.push(mergeKey);
+  }
+
+  return order.map((mergeKey) => {
+    const rows = byService.get(mergeKey) ?? [];
+    const first = rows[0] as AnalyticsService;
+    if (rows.length === 1) return first;
+    // Same rule the task total above uses: 'not priced' and '₹0' are different answers, so
+    // the merged figure stays null until at least one of the rows carries one.
+    const priced = rows.filter((row) => row.costInr !== null);
+    return {
+      ...first,
+      // The merged row is no longer attributable to one supplier or model, and leaving the
+      // first one on it would be a claim about the whole figure that is not true.
+      provider: '',
+      model: '',
+      calls: rows.reduce((sum, row) => sum + row.calls, 0),
+      units: rows.reduce((sum, row) => sum + row.units, 0),
+      costInr:
+        priced.length === 0
+          ? null
+          : Math.round(
+              priced.reduce((sum, row) => sum + (row.costInr ?? 0), 0) * 100,
+            ) / 100,
+      costEstimated: rows.some(
+        (row) => row.costEstimated && (row.costInr ?? 0) > 0,
+      ),
+      eventBacked: rows.some((row) => row.eventBacked),
+      legacy: rows.some((row) => row.legacy),
+    };
+  });
 }
 
 export function AnalyticsServiceList({
@@ -171,9 +224,7 @@ export function AnalyticsServiceList({
                       {taskLabel(group.task)}
                     </span>
                     <span className="service-provider">
-                      {[serviceLabel(single.key), serviceDetail(single)]
-                        .filter(Boolean)
-                        .join(' · ')}
+                      {serviceLabel(single.key)}
                     </span>
                   </th>
                   <td className="service-units">
@@ -214,14 +265,11 @@ export function AnalyticsServiceList({
               {group.services.map((service) => (
                 <tr
                   className="service-detail"
-                  key={`${service.key}:${service.provider}:${service.model}`}
+                  key={`${service.key}:${service.unit}`}
                 >
                   <th scope="row">
                     <span className="service-detail-name">
                       {serviceLabel(service.key)}
-                    </span>
-                    <span className="service-provider">
-                      {serviceDetail(service)}
                     </span>
                   </th>
                   <td className="service-units">

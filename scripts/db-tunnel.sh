@@ -28,6 +28,18 @@ HOST=3.149.1.222
 USER=ubuntu
 CONTAINER=deploy-pgrst-proxy-1
 LOCAL_PORT="${DB_TUNNEL_PORT:-8000}"
+PG_LOCAL_PORT="${DB_TUNNEL_PG_PORT:-5433}"
+
+# The API tunnel only reaches PostgREST, which cannot execute migrations. Forward the
+# private RDS endpoint as well when this checkout has its hostname configured.
+RDS_HOST_FOR_TUNNEL="${DB_TUNNEL_RDS_HOST:-}"
+if [ -z "$RDS_HOST_FOR_TUNNEL" ] && [ -f .env ]; then
+  RDS_HOST_FOR_TUNNEL=$(node --env-file=.env -p 'process.env.RDS_ENDPOINT || ""')
+fi
+PG_FORWARD=()
+if [ -n "$RDS_HOST_FOR_TUNNEL" ]; then
+  PG_FORWARD=(-L "127.0.0.1:$PG_LOCAL_PORT:$RDS_HOST_FOR_TUNNEL:5432")
+fi
 
 KEY_DIR="${TMPDIR:-/tmp}/dgipr-db-tunnel"
 KEY="$KEY_DIR/id_ed25519"
@@ -77,11 +89,14 @@ while true; do
   fi
 
   echo "Tunnelling localhost:$LOCAL_PORT -> $PROXY_IP:8000 (Ctrl-C to stop)"
+  if [ ${#PG_FORWARD[@]} -gt 0 ]; then
+    echo "Tunnelling localhost:$PG_LOCAL_PORT -> RDS:5432"
+  fi
   push_key
   ssh -i "$KEY" -o StrictHostKeyChecking=no \
     -o ServerAliveInterval=20 -o ServerAliveCountMax=3 -o TCPKeepAlive=yes \
     -o ExitOnForwardFailure=yes -N \
-    -L "$LOCAL_PORT:$PROXY_IP:8000" "$USER@$HOST" || true
+    -L "$LOCAL_PORT:$PROXY_IP:8000" "${PG_FORWARD[@]}" "$USER@$HOST" || true
 
   echo "Tunnel dropped — reconnecting in 3s..." >&2
   sleep 3

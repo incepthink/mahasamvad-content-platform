@@ -387,6 +387,21 @@ body:not(:has(.sidebar)) {
   color: var(--rail-fg-strong);
 }
 
+/* THE ATTACHMENT CARDS ARE NOT TOOL-ROW CONTROLS, and the three rules above cannot
+   tell them apart: everything the strip renders is a <button> inside
+   .mr-note-composer too. A card sits ON the card surface rather than on the glass
+   (`bg-card`, a utility no rule here can beat), so the white-on-navy control colour
+   above left the remove ✕ white on a white circle — the icon rendered, at the right
+   size, and could not be seen. The strip keeps the card's own foreground and edge.
+
+   Scoped by `.attachment-strip` rather than by excluding it from the rules above,
+   so a tool-row button added later still gets the chrome treatment by default. */
+.page:not(.page-plain) .mr-note-composer .attachment-strip button,
+.page:not(.page-plain) .mr-note-composer .attachment-strip button svg {
+  color: var(--text);
+  border-color: var(--border);
+}
+
 .page:not(.page-plain) .mr-note-composer .mr-check-option {
   border-color: var(--glass-toggle-border);
   background: var(--glass-toggle-bg);
@@ -501,6 +516,18 @@ body:not(:has(.sidebar)) {
 .conv-page {
   --conv-canvas: transparent;
   --conv-rail-bg: var(--glass-chip-bg);
+
+  /* A conversation surface wants the photograph much fainter than an index
+     route does: it is a long scroller of message bubbles and a composer rather
+     than a few glass panels, so the ground shows through far more of the
+     viewport and competes with the text. Lifting the wash here — the token
+     section 1 names for exactly this — leaves the photograph as a hint of
+     texture instead of a picture, and leaves every other route untouched,
+     because .page-background is a CHILD of .conv-page on both surfaces. */
+  --page-bg-overlay: linear-gradient(
+    rgba(248, 250, 252, 0.94),
+    rgba(248, 250, 252, 0.94)
+  );
 }
 
 /* ---------------------------------------------------------------------------

@@ -2,8 +2,7 @@
 
 /**
  * BOX 1 — the composer. Everything that describes WHAT is being made lives in this
- * one card: the text, the file behind [+], which format, and the two Creative
- * opt-ins.
+ * one card: the text, which format, and the two Creative opt-ins.
  *
  * THE SUBMIT LIVES IN THIS CARD, at the end of the tool row beside the two Creative
  * opt-ins. It used to be `GenerateBar`, pinned to the foot of the viewport, on the
@@ -13,27 +12,24 @@
  * form can raise is rendered directly under it, so a refusal is never scrolled away from
  * the button that caused it.
  *
- * The [+] button sits in the tool row beside the format control and opens the shared
- * document intake INSIDE this card rather than as a card of its own: the file is a
- * source for the same box above it, and as a separate card it read as a separate form —
- * an officer could finish the page without noticing the two were related.
+ * THERE IS NO DOCUMENT [+] ANY MORE. The paperclip that opened the shared document
+ * intake inside this card was removed, so the article arrives by paste alone. The intake
+ * block below still renders while a document has something to ask — a page selection, or
+ * a failure to report — and its card in the strip (`AttachmentStrip`) is how it is
+ * reviewed or detached; nothing on this card opens it from scratch.
  *
- * WHAT IS ATTACHED IS A CARD IN THE STRIP under the tool row (`AttachmentStrip`), the
- * shape every chat assistant uses and the same one /dlo's composer shows. The upload
- * block below it is then folded away once the file is READ, and kept open while it still
- * has something to ask — a page selection, or a failure to report. That fold is what [+]
- * toggles for a finished document; it can never hide work still in progress, and the
- * strip's card opens the block again for a second look at the pages.
+ * WHAT IS ATTACHED IS A CARD IN THE STRIP under the tool row, the shape every chat
+ * assistant uses and the same one /dlo's composer shows. The officer's own PICTURES for
+ * the image model are still attached from the tool row.
  */
 
 import { useRef } from 'react';
-import { FileText, Image as ImageIcon, Paperclip } from 'lucide-react';
+import { FileText, Image as ImageIcon } from 'lucide-react';
 import {
   IMAGE_FILE_ACCEPT,
   POSTER_HEADING_MAX_CHARS,
   UPLOAD_FILE_MAX_BYTES,
 } from '@dgipr/schemas';
-import { Button } from '@/components/ui/button';
 import {
   AttachmentStrip,
   type AttachmentItem,
@@ -252,28 +248,6 @@ export function NoteComposer({ form }: { form: Form }) {
           कॅप्शनही तयार करा — the caption is a second paid call and can be added afterwards
             from the detail page, so off is a cheap default rather than a lossy one. */}
       <div className="mt-4 flex flex-wrap items-center gap-2">
-        {/* [+] sits with the format control rather than beside the text box: this row is
-            the one band of controls on the card, and an icon floating next to the
-            textarea read as part of the text field rather than as an action. It is the
-            same h-9 as everything else in the row. */}
-        <Button
-          variant="outline"
-          size="icon"
-          type="button"
-          aria-expanded={showDoc}
-          aria-controls="note-document"
-          title={STR.docUpload}
-          aria-label={STR.docUpload}
-          disabled={form.submitting}
-          onClick={() => form.setDocOpen((open) => !open)}
-          className={cn(
-            'shrink-0',
-            showDoc && 'bg-[var(--chrome-800)]',
-          )}
-        >
-          <Paperclip />
-        </Button>
-
         {/* The officer's OWN pictures for the image model — the building, the person, the
             look they mean, which no paragraph pins down. Beside the [+] rather than
             inside the upload block: a picture is not read, has no pages to pick and nothing
