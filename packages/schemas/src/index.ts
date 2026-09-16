@@ -36,6 +36,11 @@ export * from './audio-trim.js';
 // (the copy.js/designations.js precedent).
 export * from './dynamic-poster.js';
 
+// Pictures the officer attaches to a create request for the image model to see (migration
+// 0056). Exported BEFORE api.js, which imports its storage-path guard and its per-run cap,
+// so each name has exactly one definition in this barrel (the dynamic-poster.js precedent).
+export * from './prompt-image.js';
+
 // Generation API request/response schemas (apps/api + apps/web).
 export * from './api.js';
 

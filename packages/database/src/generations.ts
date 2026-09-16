@@ -130,6 +130,16 @@ export type GenerationRow = Readonly<{
   scenePrompt: string | null;
   scenePath: string | null;
   posterPath: string | null;
+  // Pictures the officer attached to this run for the IMAGE MODEL to see (migration 0056),
+  // as storage paths in the public posters bucket under PROMPT_IMAGE_PREFIX. NOT the
+  // reference-template library — `referenceImageId` above pins a MASTER and decides a
+  // poster's structure, while these decide no layout and are simply shown to the model.
+  //
+  // `unknown`, like every other jsonb column here, and PARSED by the reader rather than
+  // cast: these paths point a paid render at objects, so a hand-edited row must not be able
+  // to put an arbitrary string into one. Null on a run that carried no pictures, which is
+  // every run made before the control existed.
+  promptImagePaths: unknown;
   // ---------- Dynamic Poster (migration 0052) ----------
   // The still poster the officer uploaded, and the clip made from it. All null on every
   // other lane. `motionInteractionId` is THE CHAIN POINT: the Gemini interaction a follow-up
@@ -232,6 +242,7 @@ type GenerationDbRow = {
   scene_prompt: string | null;
   scene_path: string | null;
   poster_path: string | null;
+  prompt_image_paths: unknown;
   source_image_path: string | null;
   motion_path: string | null;
   motion_gif_path: string | null;
@@ -313,6 +324,10 @@ function fromDbRow(row: GenerationDbRow): GenerationRow {
     scenePrompt: row.scene_prompt,
     scenePath: row.scene_path,
     posterPath: row.poster_path,
+    // ?? null for the 0052 reason one line down: a database without 0056 returns no such
+    // column, and an undefined here would be DROPPED by JSON.stringify rather than reported
+    // as absent.
+    promptImagePaths: row.prompt_image_paths ?? null,
     // ?? null: a pre-0052 database returns no such columns (undefined), which JSON.stringify
     // would DROP from the detail payload and fail the web's Zod parse — the 0021 finding.
     sourceImagePath: row.source_image_path ?? null,
@@ -464,6 +479,11 @@ export async function insertGeneration(
     styleReference?: string | undefined;
     // Insert-only (migration 0041): the officer's trusted request for this article.
     instructions?: string | undefined;
+    // Insert-only (migration 0056): the pictures the officer attached for the image model.
+    // Insert-only for the reason imagePrompt is — the retry path and the poster regenerate
+    // both rebuild the job by re-reading the row, so pictures held only in the create request
+    // would be dropped on the first redo.
+    promptImagePaths?: readonly string[] | undefined;
     // Insert-only (migration 0052): the poster the officer uploaded for a Dynamic Poster
     // run. Insert-only for the reason imagePrompt is — a retry and every follow-up re-read
     // the row, so the source must be the same object every time.
@@ -533,6 +553,11 @@ export async function insertGeneration(
       // Same omit-unless-typed treatment (migration 0041), so an un-applied 0041 costs this
       // one field rather than every create.
       ...(input.instructions ? { instructions: input.instructions } : {}),
+      // Same omit-unless-attached treatment (migration 0056), so an un-applied 0056 costs a
+      // create that actually carries pictures rather than every create on every lane.
+      ...(input.promptImagePaths && input.promptImagePaths.length > 0
+        ? { prompt_image_paths: input.promptImagePaths }
+        : {}),
       // Same again (migration 0052). This one cannot save the run it belongs to — a Dynamic
       // Poster with no source is not a run — but it keeps every OTHER create working on a
       // database where 0052 has not been applied.

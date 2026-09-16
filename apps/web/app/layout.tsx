@@ -9,6 +9,7 @@ import { TasksProvider } from '../lib/TasksProvider';
 import { AppSidebar } from '../components/AppSidebar';
 import { InstallAppPrompt } from '../components/InstallAppPrompt';
 import { PwaRegistration } from '../components/PwaRegistration';
+import { BackgroundPreloader } from '../components/common/BackgroundPreloader';
 
 import RouteAwareLayout from '../components/navigation/RouteAwareLayout';
 
@@ -85,6 +86,7 @@ export default function RootLayout({
           `}
         </Script>
         <PwaRegistration />
+        <BackgroundPreloader />
         <RouteAwareLayout>{children}</RouteAwareLayout>
       </body>
     </html>

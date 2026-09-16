@@ -474,7 +474,6 @@ export default function TranslatePage() {
           // The label names the source the chosen target implies, so the box states what
           // it expects instead of a separate control having to ask.
           label={INPUT_LABELS[source]}
-          hint={STR.translateInputHint}
           info={<InfoHint text={STR.infoTranslateInput} />}
         >
           <div className="mt-4">

@@ -39,6 +39,7 @@ import {
   UnreadableImageError,
   generateArticlePdf,
   generateArticlePoster,
+  normalizeReferenceImage,
   normalizeSourceImage,
 } from '@dgipr/poster-renderer';
 import {
@@ -69,6 +70,12 @@ import {
   type RunFormatKey,
   type RunStatusFilter,
   DEFAULT_MOTION_ASPECT,
+  IMAGE_FILE_EXTENSIONS,
+  PROMPT_IMAGE_PREFIX,
+  UPLOAD_FILE_MAX_BYTES,
+  UPLOAD_FILE_MAX_MB,
+  isImageFileName,
+  isPromptImagePath,
   MOTION_SOURCE_MAX_BYTES,
   MOTION_SOURCE_MAX_MB,
   MOTION_SOURCE_PREFIX,
@@ -693,6 +700,17 @@ export function registerGenerationRoutes(
         .code(400)
         .send({ error: { message: 'Unknown uploaded poster.' } });
     }
+    // The officer's attached pictures (migration 0056), checked HERE as well as in the schema
+    // for exactly the reason above: they are the other field on this request that points a
+    // paid render at objects, so the rule that each must be one this API minted is stated
+    // where the row is written, not only where the body is parsed.
+    if (
+      body.promptImagePaths?.some((path) => !isPromptImagePath(path)) === true
+    ) {
+      return reply
+        .code(400)
+        .send({ error: { message: 'Unknown attached image.' } });
+    }
     // Lineage: a follow-up spawned from a run's detail page names its source;
     // the thread root is derived here (never client-supplied) so chains stay
     // flat under the original run.
@@ -770,6 +788,17 @@ export function registerGenerationRoutes(
       imagePrompt:
         isSocialCategory(body.category) && rendersPoster
           ? body.imagePrompt
+          : undefined,
+      // The officer's attached pictures (migration 0056). Scoped to a run that renders a
+      // poster from them, which is the imagePrompt rule applied a second time: the schema has
+      // already refused them on the caption and Dynamic Poster lanes with a message, and what
+      // gets STORED is checked separately from what was accepted, so a future caller that
+      // slips past the schema still cannot leave pictures on a row nothing will look at.
+      // insertGeneration omits the column when the list is empty, so an un-applied 0056 costs
+      // a create that carries pictures rather than every create.
+      promptImagePaths:
+        rendersPoster && !isDynamicPosterCategory(body.category)
+          ? body.promptImagePaths
           : undefined,
       // The uploaded poster a Dynamic Poster run is made from (migration 0052). The schema
       // has already refused it on any other lane and refused a path this API did not mint;
@@ -1869,6 +1898,81 @@ export function registerGenerationRoutes(
         .send(png);
     },
   );
+
+  // ---------- Attached pictures for the image model (migration 0056) ----------
+  //
+  // ONE picture per request, uploaded as it is picked, so several can go up in parallel while
+  // the officer is still typing — the /video reference-image shape, and the reason this is a
+  // route of its own rather than a multipart create: the create request stays the one JSON
+  // shape every format sends, and it names the resulting PATHS.
+  //
+  // It hands back a path AND a url. The path is what the create request carries and what the
+  // route checks against PROMPT_IMAGE_PREFIX; the url is only for the thumbnail on the form.
+  app.post('/generations/prompt-image', async (request, reply) => {
+    const file = await request.file({
+      limits: { fileSize: UPLOAD_FILE_MAX_BYTES, files: 1 },
+    });
+    if (!file) {
+      return reply.code(400).send({ error: { message: 'फाईल मिळाली नाही.' } });
+    }
+    // Extension-driven, never the browser's reported type — every upload path in this repo
+    // makes the same call, and sharp is what decides whether the bytes are really an image.
+    if (!isImageFileName(file.filename ?? '')) {
+      // Drain the part first, or busboy is left mid-stream.
+      await file.toBuffer();
+      return reply.code(400).send({
+        error: {
+          message: `ही प्रतिमा स्वीकारता येत नाही. ${IMAGE_FILE_EXTENSIONS.join(', ')} पैकी एक द्या.`,
+        },
+      });
+    }
+
+    let data: Buffer;
+    try {
+      data = await file.toBuffer();
+    } catch (error) {
+      if ((error as { code?: string }).code === 'FST_REQ_FILE_TOO_LARGE') {
+        return reply.code(413).send({
+          error: {
+            message: `प्रतिमा खूप मोठी आहे. कमाल ${UPLOAD_FILE_MAX_MB} MB.`,
+          },
+        });
+      }
+      throw error;
+    }
+    if (data.length === 0) {
+      return reply
+        .code(400)
+        .send({ error: { message: 'ही फाईल रिकामी आहे.' } });
+    }
+
+    // Normalised HERE — PNG, upright, long edge bounded — rather than inside the paid render,
+    // and NOT best-effort: the officer is standing in front of the form, so an unreadable file
+    // is refused in the same gesture instead of being stored and failing a run hours later.
+    // EXIF rotation matters more than it looks: a phone held upright writes a landscape image
+    // plus a "rotate me" tag, and a model that ignores the tag reads the picture sideways.
+    let png: Buffer;
+    try {
+      png = await normalizeReferenceImage(data);
+    } catch (error) {
+      if (error instanceof UnreadableImageError) {
+        return reply.code(400).send({
+          error: { message: 'ही प्रतिमा वाचता आली नाही. दुसरी फाईल निवडा.' },
+        });
+      }
+      throw error;
+    }
+
+    // The name is minted here, with no user-supplied component at all, so isPromptImagePath
+    // can be a real check rather than a formality.
+    const path = `${PROMPT_IMAGE_PREFIX}${Date.now()}-${randomUUID().slice(0, 8)}.png`;
+    await uploadFile(client, POSTERS_BUCKET, path, png, 'image/png');
+    return reply.send({
+      name: file.filename ?? '',
+      path,
+      url: publicUrlIn(client, POSTERS_BUCKET, path),
+    });
+  });
 
   // ---------- Dynamic Poster (migration 0052) ----------
   //

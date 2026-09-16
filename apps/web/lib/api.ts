@@ -12,8 +12,10 @@ import {
   GenerationDetailSchema,
   GenerationSourceFilesResponseSchema,
   MotionSourceResponseSchema,
+  PromptImageUploadResponseSchema,
   type MotionCrop,
   type MotionSourceResponse,
+  type PromptImageUpload,
   RestoreArticleVersionResponseSchema,
   GenerationListResponseSchema,
   type GenerationListResponse,
@@ -590,6 +592,24 @@ export function plainPosterDownloadUrl(id: string): string {
 // it; both keep their own aspect, so a caller sets a width and lets the height follow.
 export const socialLogoUrl = `${API_URL}/api/chrome/social-logo.png`;
 export const socialFooterUrl = `${API_URL}/api/chrome/social-footer.png`;
+
+// Uploading ONE picture the officer attached for the image model (migration 0056). Called
+// as each file is picked, so several go up in parallel while the note is still being typed —
+// and it returns a storage PATH, which is what the create request carries: the API accepts
+// only paths it minted itself.
+export async function uploadPromptImage(
+  file: File,
+): Promise<PromptImageUpload> {
+  const form = new FormData();
+  form.append('file', file);
+  const response = await fetch(`${API_URL}/api/generations/prompt-image`, {
+    method: 'POST',
+    body: form,
+  });
+  return PromptImageUploadResponseSchema.parse(
+    await readJsonResponse(response),
+  );
+}
 
 // ---------- Dynamic Poster (migration 0052) ----------
 

@@ -4762,9 +4762,14 @@ textarea.ref-desc-input {
   margin-top: 14px;
 }
 
+/* Sits INSIDE a .btn, whose surface is dark (--chrome-700) — so the count inherits the
+   button's own text colour and is dimmed with opacity. A fixed grey like --muted is a
+   light-surface token and rendered this at ~1.5:1 against the button. */
 .ref-thumb-more-count {
-  color: var(--muted);
+  color: inherit;
+  opacity: 0.78;
   font-size: 0.85em;
+  font-weight: 600;
 }
 
 .ref-thumb {
@@ -4966,14 +4971,20 @@ textarea.ref-desc-input {
   font-size: 0.82rem;
 }
 
-/* Quiet danger button: harmless-looking until hovered. */
+/* Quiet danger button: a bare icon until hovered — no plate, no border, no shadow.
+   The hover tint is the only affordance, which is why it has to outrank
+   `.btn:hover:not(:disabled)` rather than merely follow it. */
 .btn-danger-ghost {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
   color: var(--err);
 }
 
-.btn-danger-ghost:hover {
+.btn-danger-ghost:hover:not(:disabled) {
   background: var(--err-soft);
-  border-color: var(--err);
+  border-color: var(--err-soft);
+  color: var(--err);
 }
 
 /* ---------- home-page reference picker ---------- */
@@ -7787,6 +7798,10 @@ a.thread-node:hover {
   background: transparent;
   box-shadow: none;
   border-radius: var(--r-sm);
+  /* .btn's own colour is for its dark filled background, which this rule has just
+     removed — left inherited, it was white text on the light rail. Stated here rather
+     than in theme.css because the rail is light under BOTH palettes. */
+  color: var(--text);
   /* It is a Link, so the global anchor underline would otherwise show. */
   text-decoration: none;
 }

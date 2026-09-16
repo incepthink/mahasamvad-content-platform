@@ -11,6 +11,10 @@ import {
   isMotionSourcePath,
 } from './dynamic-poster.js';
 import {
+  GENERATION_PROMPT_IMAGE_LIMIT,
+  isPromptImagePath,
+} from './prompt-image.js';
+import {
   DesignationWarningSchema,
   NameDesignationSchema,
   NameDesignationsSchema,
@@ -395,6 +399,19 @@ export const CreateGenerationRequestSchema = z
       .trim()
       .max(ARTICLE_INSTRUCTIONS_MAX_CHARS)
       .optional(),
+    // Pictures the officer attached for the IMAGE MODEL to see (migration 0056) — "this
+    // building", "this person", "make it look like this". Storage PATHS as returned by
+    // POST /generations/prompt-image, not URLs, because the route checks each against
+    // PROMPT_IMAGE_PREFIX before a paid render is pointed at it.
+    //
+    // NOT the master-template pins above: `referenceImageId`/`referenceTypeId` name rows in
+    // the reference library and decide a poster's STRUCTURE, while these are the officer's own
+    // pictures and decide no layout at all — they are simply shown to the model. Absent/empty
+    // ⇒ today's run, which sees no pictures.
+    promptImagePaths: z
+      .array(z.string().trim().min(1))
+      .max(GENERATION_PROMPT_IMAGE_LIMIT)
+      .optional(),
   })
   .superRefine((value, ctx) => {
     // The note floor, applied per lane. A Dynamic Poster is sourced from the uploaded image,
@@ -480,6 +497,38 @@ export const CreateGenerationRequestSchema = z
             'imagePrompt is only accepted on a social run that renders a poster.',
           path: ['imagePrompt'],
         });
+      }
+    }
+    // The officer's attached pictures, scoped the way imagePrompt is and for the same reason:
+    // they exist to be shown to an IMAGE MODEL, so on a lane that renders no image they would
+    // be stored, paid for as an upload, and never looked at.
+    //
+    // Dynamic Poster is excluded too, and that is not an oversight: its source IS a picture
+    // (`sourceImagePath`), the model is handed exactly that one, and a second set beside it
+    // would be silently dropped.
+    if (value.promptImagePaths && value.promptImagePaths.length > 0) {
+      if (
+        value.outputType === 'article' ||
+        value.category === 'dynamic_poster'
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            'promptImagePaths is only accepted on a run that renders a poster from them.',
+          path: ['promptImagePaths'],
+        });
+      }
+      // Checked HERE as well as in the route, so a path this API did not mint is refused by
+      // the schema before any row is written — the sourceImagePath rule.
+      for (const path of value.promptImagePaths) {
+        if (!isPromptImagePath(path)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'promptImagePaths names an image this API did not store.',
+            path: ['promptImagePaths'],
+          });
+          break;
+        }
       }
     }
     // A social run with outputType 'article' is the कॅप्शन lane: no poster is rendered, so

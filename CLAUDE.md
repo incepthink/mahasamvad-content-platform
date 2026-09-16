@@ -1082,6 +1082,25 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   Insert-only on the ROW, like `style_reference` — the regenerate and retry paths re-read it, so a
   job option would be lost on the first redo. Schema AND route scope it to a social run that
   renders a poster. Free harness: `tsx src/generation/build-poster-prompt.ts`.
+- **The officer can attach their own PICTURES for the image model: `generations.prompt_image_paths`
+  (0056).** "प्रतिमा जोडा" in the composer's tool row beside the [+], several at a time, each a
+  thumbnail card in the same `AttachmentStrip` /dlo uses. Shapes + the storage-path guard +
+  the per-run cap → `packages/schemas/src/prompt-image.ts` (`PROMPT_IMAGE_PREFIX`,
+  `isPromptImagePath`, `GENERATION_PROMPT_IMAGE_LIMIT` = 4); upload route →
+  `POST /api/generations/prompt-image` in `apps/api/src/routes/generations.ts` (ONE picture per
+  request, `normalizeReferenceImage`, a minted object name with no user-supplied component);
+  web → `apps/web/components/media-room/usePromptImages.ts` + the picker in `NoteComposer`.
+  **NOT the reference library**: `referenceImageId` pins a MASTER and decides a poster's
+  structure, these decide no layout and are only shown to the model — hence the `promptImage`
+  name, borrowed from `video_projects.prompt_image_paths` (0051). Uploaded AS PICKED so the
+  create request stays the one JSON shape every format sends, and it carries PATHS, checked
+  against the prefix in the schema and again in the route (the `sourceImagePath` rule).
+  Insert-only on the row, because the retry and regenerate paths re-read it; omitted unless
+  pictures were attached, so an un-applied 0056 fails only a create that carries some
+  (verified live). Scoped to a lane that renders a poster from them — the caption lane paints
+  nothing and a Dynamic Poster's source IS a picture — and the control is not rendered
+  elsewhere, though the state survives a format switch. **Nothing reads the paths yet**: the
+  forwarding to the image model is a change in the poster prompt builders.
 - **फक्त कॅप्शन is a card on the create form again (2026-08-22), and it needed no server change:**
   it submits `category: 'facebook'` + `outputType: 'article'` + `generateCaption: true`, which is
   the caption-only lane described above. `facebook` deliberately, for the long-form caption —
@@ -1467,6 +1486,12 @@ create still returns 202, every input guard still answers in Marathi, and the dy
 create is the only thing that fails. The motion snapshot columns are separate from
 `poster_path` deliberately — that column is a PNG every poster reader in the API treats as one,
 and an .mp4 in it would be listed as a poster version by `posterVersionPaths`.
+`0056` — `generations.prompt_image_paths` (jsonb: storage paths of the pictures an officer
+attached to a run for the image model, under `generations/prompt-images/` in the public posters
+bucket). Additive + nullable, and `insertGeneration` omits the column unless pictures were
+actually attached, so an un-applied 0056 fails only a create that carries some — verified live,
+creates with no pictures and with an empty list both still return 202. Apply before the API
+deploy anyway.
 `0051` — `video_projects.ai_prompt` + `prompt_image_paths` (the officer's free-text direction
 for one video project and the reference pictures attached to it, replacing the retired शीर्षक
 field). Additive + nullable, and `insertVideoProject` omits `ai_prompt` unless something was

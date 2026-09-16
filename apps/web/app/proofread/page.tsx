@@ -449,7 +449,6 @@ export default function ProofreadPage() {
         <FormCard
           htmlFor="proofread-text"
           label={STR.proofreadInputLabel}
-          hint={STR.proofreadInputHint}
           info={<InfoHint text={STR.infoProofreadInput} />}
         >
           <div className="mt-4">

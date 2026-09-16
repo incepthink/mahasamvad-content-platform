@@ -3111,6 +3111,78 @@ client id/secret — see the milestone below.
 
 ## Latest Implementation Milestone
 
+- **Creative and Social takes the officer's own PICTURES for the image model** (2026-09-16,
+  migration 0056, no n8n): every poster lane on the create form has been made of TEXT alone —
+  the officer types or pastes a note and the image model designs from words. That is fine
+  until the run is about a specific thing (this building, this person, this look), which no
+  paragraph pins down. The composer's tool row now carries a picture button beside the [+],
+  several images at a time, each a card with a THUMBNAIL in the same `AttachmentStrip` /dlo's
+  composer uses.
+  - **NAMED `promptImage`, and the name matters.** "Reference image" is taken on this table by
+    `reference_image_id`, which pins a MASTER out of the template library and decides a
+    poster's STRUCTURE. These decide no layout at all — they are simply shown to the model. The
+    name is borrowed from `video_projects.prompt_image_paths` (0051), which is this idea on the
+    /video lane.
+  - **UPLOADED AS PICKED, NOT AT SUBMIT** (`POST /generations/prompt-image`, one picture per
+    request, the /video reference-image shape). A phone photograph is several megabytes and a
+    create that waited until the press would sit there uploading while the officer wondered
+    whether they had pressed it; parallel uploads during typing cost that wait nothing. It also
+    keeps the create request the ONE JSON shape every format sends.
+  - **A PATH, NEVER A URL.** The create request names storage paths, checked against
+    `PROMPT_IMAGE_PREFIX` in the schema AND again in the route — the `sourceImagePath` (0052)
+    rule, because this is the other field on that request that points a paid render at objects.
+    The object name has no user-supplied component at all, so `isPromptImagePath` is a real
+    check rather than a formality. Verified live: a foreign path and a `..` traversal are both
+    refused before any row is written.
+  - **Migration 0056 is one additive nullable jsonb column**, not a job parameter, for the
+    reason `style_reference` (0035) and `image_prompt` (0045) are columns: the retry path and
+    "पुन्हा तयार करा" both rebuild the job by RE-READING the row, so pictures held only in the
+    create request would be dropped on the officer's first redo — and the poster would come
+    back without the building it was about, with nothing on screen saying why.
+    `insertGeneration` omits the column unless pictures were attached. **Verified live against a
+    database WITHOUT 0056**: a create carrying pictures is the ONLY thing that fails (`Could not
+    find the 'prompt_image_paths' column`), while creates with no pictures and with an empty
+    list both still return 202.
+  - **Scoped to a lane that renders a poster FROM them**, in the schema and again at the row
+    write (the imagePrompt rule): a caption run paints nothing, and a Dynamic Poster's source
+    IS a picture — a second set beside it would be silently dropped. The control is not
+    rendered on either lane, since a control that changes nothing would be a lie; the state
+    SURVIVES a format switch, like `contentSource`, because it is a fact about this officer's
+    own material.
+  - **Normalised at UPLOAD time and NOT best-effort** (`normalizeReferenceImage`): PNG out
+    always, EXIF auto-rotate (a phone held upright writes a landscape image plus a "rotate me"
+    tag, and a model that ignores the tag reads the page sideways), 2048px long edge. The
+    officer is standing in front of the form, so an unreadable file is refused in that gesture
+    rather than stored and failed inside a paid render — the /video reference-image stance.
+  - **A FAILED upload keeps its card, labelled, and is simply not sent**; only an upload still
+    IN FLIGHT blocks the press, because that one resolves itself. Dropping a failed picture
+    silently would produce a poster that ignored one of the officer's pictures with nothing
+    anywhere saying why.
+  **DOCUMENTS ARE DELIBERATELY NOT PART OF THIS.** The original ask was /dlo's whole upload row
+  (documents and images); the document half was dropped by the officer's own call, so the
+  single-document `[+]` intake on this page is untouched and no multi-document picker was
+  added. Nothing else about the lane changed: no reference library, no poster copy, no chrome,
+  no caption path.
+  **The other half is left to the caller, by design**: the paths are on the row and nothing
+  reads them yet — forwarding them to the image model is a change in the poster prompt
+  builders, not here.
+  Verified 2026-09-16, all free: workspace typecheck **7/7 green**, eslint clean on all ten
+  touched files, prettier clean on every hunk of mine (five files report whole-file complaints
+  that are pre-existing — confirmed per file by running prettier over the HEAD blob, which
+  produces the IDENTICAL complaint count — so do NOT `--write` them); the upload route end to
+  end against the real bucket (a 600x400 JPEG stored as PNG, a 3000x2000 JPEG stored at
+  2048x1365, both served from the CDN as `image/png`) plus all three of its guards in Marathi
+  (a `.txt`, unreadable bytes named `.png`, and no file at all); every create guard (foreign
+  path, traversal, the caption lane, the Dynamic Poster lane, and a fifth picture over the cap
+  of four); and **28 browser assertions at 1360 and 390** with no page errors and no horizontal
+  overflow — two pictures attached at once show two cards with thumbnails, no card is left
+  uploading or failed, the intercepted create carries both paths under the guarded prefix, and
+  the tool is present on क्रिएटिव्ह/लेख/यूट्यूब and absent on कॅप्शन/डायनॅमिक पोस्टर.
+  **Left for a real run** (0056 applied + image spend): a poster rendered from an attached
+  picture, which is the step that needs the prompt-builder change above. **Deploy: 0056 →
+  `@dgipr/schemas` → `@dgipr/database` dists → API + web** (ship together — `promptImagePaths`
+  and the upload response are one contract). No n8n, no new env.
+
 - **/new-video-workflow decides EDIT vs NEW CLIP per follow-up** (2026-09-14, no migration, no
   n8n): every follow-up used to be sent with `previous_interaction_id` plus the scaffold's
   "this is an edit… keep everything else the same, including the voice". A "Scene 2" prompt

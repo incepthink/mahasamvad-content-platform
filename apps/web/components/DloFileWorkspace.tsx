@@ -45,6 +45,7 @@ import { DesignationReview } from '@/components/DesignationReview';
 import { ErrorNotice } from '@/components/ErrorNotice';
 import { FileName } from '@/components/FileName';
 import { FormCard } from '@/components/common/FormCard';
+import { InfoHint } from '@/components/common/InfoHint';
 import { PageShell } from '@/components/common/PageShell';
 import { PromptInput } from '@/components/common/PromptInput';
 import { DloAiPromptBox } from '@/components/dlo/DloAiPromptBox';
@@ -463,7 +464,7 @@ export function DloFileWorkspace({
               <FormCard
                 htmlFor="dlo-file-heading"
                 label={STR.headingLabel}
-                hint={STR.headingHint}
+                info={<InfoHint text={STR.headingHint} />}
               >
                 <PromptInput
                   id="dlo-file-heading"

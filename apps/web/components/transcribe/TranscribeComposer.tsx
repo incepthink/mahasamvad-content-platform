@@ -141,7 +141,6 @@ export function TranscribeComposer({
   return (
     <FormCard
       label={STR.transcribeNewTitle}
-      hint={STR.transcribeHint}
       info={<InfoHint text={STR.infoTranscribeInput} />}
     >
       {/* Where the other two composers put their text box. A button rather than a div, so

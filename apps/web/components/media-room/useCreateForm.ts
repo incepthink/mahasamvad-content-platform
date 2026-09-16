@@ -45,6 +45,7 @@ import {
   submitCategoryOf,
   type SelectableFormat,
 } from './formats';
+import { usePromptImages } from './usePromptImages';
 
 /**
  * Where the upload card remembers its in-flight job across a refresh. The form also
@@ -133,6 +134,15 @@ export function useCreateForm() {
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The officer's own pictures for the image model (migration 0056). Uploaded as they are
+  // picked and sent as storage paths, so the note and the pictures go up independently of
+  // each other. Declared HERE rather than with the other lane options above, because it
+  // reports its refusals through `setError` and would otherwise read it before it exists.
+  //
+  // HELD ACROSS A FORMAT SWITCH, like contentSource and for the same reason: they are a fact
+  // about this officer's own material, and the lanes that cannot use them simply do not
+  // render the control or send the field.
+  const promptImages = usePromptImages({ onError: setError });
   // Arriving from a finished run's "same note, other platform" link (?from=<id>).
   const [prefill, setPrefill] = useState<PrefillState>('none');
   const prefillStartedRef = useRef(false);
@@ -209,6 +219,10 @@ export function useCreateForm() {
   // the Creative lane: no template means a fully-AI poster, a template means that
   // template is followed. There is no separate "design mode" control.
   const templatePicked = isSocial && reference !== null;
+  // Which lanes may attach pictures for the image model. Every lane that RENDERS one, which
+  // is the same rule the API's schema enforces — a caption paints nothing, and a Dynamic
+  // Poster's source IS a picture, so a second set beside it would be silently dropped.
+  const acceptsPromptImages = !isCaption && !isDynamicPoster;
 
   // What actually goes on the wire. DERIVED, never stored — the officer answers two
   // INDEPENDENT questions and the mode is the cell they land on:
@@ -289,7 +303,10 @@ export function useCreateForm() {
   const canSubmit = isDynamicPoster
     ? motionSource !== null
     : combinedNote.length >= POSTER_TEXT_MIN_CHARS || docStatus === 'unread';
-  const submitBusy = submitting || awaitingRead;
+  // A picture still going up blocks the press, where one that FAILED does not: the first
+  // resolves itself in a moment, and pressing through it would send a shorter list than the
+  // cards on screen show. A failed picture keeps its card, says so, and is simply not sent.
+  const submitBusy = submitting || awaitingRead || promptImages.uploading;
   const submitLabel = awaitingRead
     ? STR.docReadingForSubmit
     : submitting
@@ -382,6 +399,13 @@ export function useCreateForm() {
         // back verbatim by every later render of this poster.
         imagePrompt:
           isSocial && imagePrompt.trim() ? imagePrompt.trim() : undefined,
+        // The officer's attached pictures (migration 0056) — paths, never URLs, and only
+        // the ones that actually landed. Omitted rather than sent empty on a lane that
+        // cannot use them, so a caption run's request is byte-for-byte what it was.
+        promptImagePaths:
+          acceptsPromptImages && promptImages.paths.length > 0
+            ? [...promptImages.paths]
+            : undefined,
         referenceImageId:
           reference?.kind === 'image' ? reference.id : undefined,
         referenceTypeId: reference?.kind === 'type' ? reference.id : undefined,
@@ -401,6 +425,10 @@ export function useCreateForm() {
       // The document has been consumed and must not be re-attached to the next
       // generation.
       clearDocument();
+      // A run CONSUMES its pictures, exactly as it consumes the attached document: the row
+      // owns them now, and leaving them on the form would silently attach them to the next
+      // run as well.
+      promptImages.clear();
       addTask(id);
       router.push(`/generations/${id}`);
     } catch (e) {
@@ -497,6 +525,8 @@ export function useCreateForm() {
     setWantCaption,
     imagePrompt,
     setImagePrompt,
+    promptImages,
+    acceptsPromptImages,
 
     // Banner option
     posterHeading,

@@ -26,8 +26,10 @@
  * strip's card opens the block again for a second look at the pages.
  */
 
-import { FileText, Paperclip } from 'lucide-react';
+import { useRef } from 'react';
+import { FileText, Image as ImageIcon, Paperclip } from 'lucide-react';
 import {
+  IMAGE_FILE_ACCEPT,
   POSTER_HEADING_MAX_CHARS,
   UPLOAD_FILE_MAX_BYTES,
 } from '@dgipr/schemas';
@@ -40,8 +42,11 @@ import { FieldLabel } from '@/components/common/FieldLabel';
 import { FormCard } from '@/components/common/FormCard';
 import { InfoHint } from '@/components/common/InfoHint';
 import { PromptTextarea } from '@/components/common/PromptTextarea';
+import { ComposerToolbarButton } from '@/components/common/ComposerToolbarButton';
 import { DocumentIntake } from '@/components/DocumentIntake';
 import { ErrorNotice } from '@/components/ErrorNotice';
+import { formatFileSize } from '@/lib/fileSize';
+import { useFilePreviews } from '@/lib/useFilePreviews';
 import { STR } from '@/lib/strings';
 import { cn } from '@/lib/utils';
 import { FormatMenu } from './FormatMenu';
@@ -50,6 +55,10 @@ import { DOC_STORAGE_KEY, type useCreateForm } from './useCreateForm';
 type Form = ReturnType<typeof useCreateForm>;
 
 export function NoteComposer({ form }: { form: Form }) {
+  const imageInput = useRef<HTMLInputElement>(null);
+  // Object URLs for the thumbnails, minted and revoked together — a picture is told apart by
+  // what it SHOWS and never by IMG_20260916.jpg.
+  const previews = useFilePreviews(form.promptImages.files);
   // The upload block stays open on its own while the document still needs the officer —
   // a scanned PDF waiting for its page selection, or a read that failed. Folding either
   // away would hide the question, and in the page-selection case the run would then be
@@ -62,7 +71,7 @@ export function NoteComposer({ form }: { form: Form }) {
   const docAttached = form.docStatus !== 'empty';
   const showDoc = form.docOpen || docNeedsBlock;
 
-  const attachments: AttachmentItem[] = form.docInfo
+  const documentAttachment: AttachmentItem[] = form.docInfo
     ? [
         {
           id: 'document',
@@ -100,6 +109,40 @@ export function NoteComposer({ form }: { form: Form }) {
         },
       ]
     : [];
+
+  // ONE row for everything attached, the document first and the pictures after it — the same
+  // strip /dlo's composer uses, so a source differs only in its icon and in what its second
+  // line says. A picture's card carries a THUMBNAIL and, while its upload is in flight, the
+  // spinner: it is sent as it is picked, and this card is the only place that says so.
+  //
+  // Rendered only on a lane that can use them. The state survives a format switch, so a
+  // picture attached on Creative is still there on returning to it — it is simply not shown,
+  // and not sent, on a lane that paints nothing from it.
+  const imageAttachments: AttachmentItem[] = form.acceptsPromptImages
+    ? form.promptImages.slots.map((slot) => ({
+        id: slot.id,
+        name: slot.file.name,
+        icon: ImageIcon,
+        ...(previews.get(slot.file)
+          ? { previewUrl: previews.get(slot.file) }
+          : {}),
+        meta:
+          slot.status === 'uploading'
+            ? STR.promptImageUploading
+            : slot.status === 'failed'
+              ? STR.promptImageFailed
+              : formatFileSize(slot.file.size),
+        busy: slot.status === 'uploading',
+        failed: slot.status === 'failed',
+        removeLabel: `${STR.promptImageRemove}: ${slot.file.name}`,
+        onRemove: () => form.promptImages.remove(slot.id),
+      }))
+    : [];
+
+  const attachments: AttachmentItem[] = [
+    ...documentAttachment,
+    ...imageAttachments,
+  ];
 
   return (
     <FormCard
@@ -231,6 +274,24 @@ export function NoteComposer({ form }: { form: Form }) {
           <Paperclip />
         </Button>
 
+        {/* The officer's OWN pictures for the image model — the building, the person, the
+            look they mean, which no paragraph pins down. Beside the [+] rather than
+            inside the upload block: a picture is not read, has no pages to pick and nothing
+            to review, so it needs no block at all — it goes up as it is picked and its card
+            in the strip above is the whole of its UI.
+
+            Hidden on the lanes that cannot use one: the caption run paints nothing, and a
+            Dynamic Poster's source IS a picture. A control that changes nothing would be a
+            lie — the rule the two Creative opt-ins below already follow. */}
+        {form.acceptsPromptImages ? (
+          <ComposerToolbarButton
+            icon={ImageIcon}
+            label={STR.promptImageUpload}
+            disabled={form.submitting}
+            onClick={() => imageInput.current?.click()}
+          />
+        ) : null}
+
         <FormatMenu
           value={form.format}
           onSelect={form.chooseFormat}
@@ -282,6 +343,19 @@ export function NoteComposer({ form }: { form: Form }) {
         >
           {form.submitLabel}
         </button>
+
+        <input
+          ref={imageInput}
+          type="file"
+          accept={IMAGE_FILE_ACCEPT}
+          multiple
+          hidden
+          onChange={(event) => {
+            form.promptImages.add(event.target.files);
+            // Clearing lets the same picture be re-picked after it was removed.
+            event.target.value = '';
+          }}
+        />
       </div>
 
       {/* Why a press would be refused, stated under the button rather than beside the

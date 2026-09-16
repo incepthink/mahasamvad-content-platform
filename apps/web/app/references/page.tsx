@@ -386,9 +386,9 @@ function ImageTile({
             disabled={disabled}
             onClick={onDelete}
             aria-label={STR.refDelete}
+            title={STR.refDelete}
           >
             <Trash2 size={16} strokeWidth={2} aria-hidden="true" />
-            {STR.refDelete}
           </button>
         </div>
         {/* Which group this master was filed under. Recorded, not organising — it is the

@@ -110,7 +110,7 @@
   );
   /* Safety net only: PageBackground sets this inline, per route, from
      lib/pageBackgrounds.ts. */
-  --page-bg-image: url('/backgrounds/background-new.png');
+  --page-bg-image: url('/backgrounds/background-1.png');
 
   /* The submit sheen's mid stop and glow — see .mr-submit-flow in globals.css. */
   --accent-lift: #45aa86;

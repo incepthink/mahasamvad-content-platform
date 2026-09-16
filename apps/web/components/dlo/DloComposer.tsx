@@ -188,7 +188,6 @@ export function DloComposer({ form }: { form: DloIntakeFormState }) {
     <FormCard
       htmlFor="dlo-notes"
       label={STR.dloNotesLabel}
-      hint={STR.dloComposerHint}
       info={<InfoHint text={STR.infoDloSources} />}
     >
       <div className="mt-4">

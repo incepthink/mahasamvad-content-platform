@@ -328,13 +328,10 @@ export const STR = {
   // officer scrolled through even when they were using one of them. They ask a single
   // question ("what is this news made of?"), so they are one box with a row of tools.
   //
-  // The hint is a SUBTITLE, so it is kept short enough to read as one — a paragraph under
-  // a one-line heading inverts the hierarchy and is scrolled past rather than read. It
-  // says the two things a first-time officer cannot work out from the controls (type, or
-  // attach — either alone is enough); what each kind of source costs and where it can be
-  // corrected is said on the step that does it, not here.
-  dloComposerHint:
-    'बैठकीत जे ऐकले व ठरले ते लिहा. ध्वनिमुद्रण, फोटो, फाईल किंवा लिंकही जोडता येईल — यापैकी काहीही एक पुरे.',
+  // It prints NO hint under its label: the explanation lives behind the card's ⓘ
+  // (infoDloSources), the way app/page.tsx says it on every one of its boxes. A paragraph
+  // under a one-line label inverts the hierarchy and is scrolled past rather than read,
+  // and it pushes the control it describes further down the page each time it grows.
   dloComposerNoteAria: 'बैठकीतील टिपणी',
   dloRemoveAudio: 'ध्वनिफीत काढा',
 
@@ -384,11 +381,9 @@ export const STR = {
   // same request written three ways, and all three are now typed here: nothing else is sent
   // as a heading or as a style sample from this lane.
   dloAiPromptLabel: 'AI साठी सूचना (ऐच्छिक)',
-  // Short for the same reason as dloComposerHint, and shorter still because the label
-  // already says (ऐच्छिक): a long paragraph on an optional box reads as a form to fill in.
-  // The full account of what may go in it is behind the ⓘ (infoDloAiPrompt).
-  dloAiPromptHint:
-    'बातमी कशी हवी ते तुमच्या शब्दांत लिहा — शीर्षक, कशावर भर, भाषा व शैली.',
+  // No hint under the label, for the reason given at dloComposerNoteAria: the whole account
+  // of what may go in this box is behind the ⓘ (infoDloAiPrompt), and the label already
+  // says (ऐच्छिक) — a paragraph on an optional box reads as a form to fill in.
   dloAiPromptPlaceholder:
     'उदा. शीर्षकात कर्जमुक्तीचा उल्लेख हवा; ५० कोटींच्या निधीवर भर द्या; भाषा सोपी ठेवा…',
   // All three file sources are attached from ONE card (components/DloSourcesCard) — the
@@ -654,11 +649,8 @@ export const STR = {
   translateInputLabelMarathi: 'मराठी मजकूर येथे लिहा किंवा चिकटवा',
   translateInputLabelEnglish: 'इंग्रजी मजकूर येथे लिहा किंवा चिकटवा',
   translateInputLabelHindi: 'हिंदी मजकूर येथे लिहा किंवा चिकटवा',
-  // Kept SHORT for the same reason as articleSourceHint and dloComposerHint: this is a
-  // subtitle under a one-line label, and a paragraph there inverts the hierarchy and is
-  // scrolled past rather than read. It says the two things the controls cannot — nothing
-  // is stored, and a file is a source too.
-  translateInputHint: 'हा मजकूर जतन केला जात नाही. फाईलमधूनही घेता येईल.',
+  // No hint under the label: the card's ⓘ (infoTranslateInput) already says both things the
+  // controls cannot — that nothing is stored, and that a file is a source too.
   translateInputPlaceholder: 'उदा. बातमी, टिपणी किंवा लेख…',
   translateAction: 'भाषांतर करा',
   translateMayTakeTime: 'मोठ्या मजकुराला एक-दोन मिनिटे लागू शकतात.',
@@ -742,6 +734,25 @@ export const STR = {
   attachmentOpen: 'तपशील उघडा',
   attachmentClose: 'तपशील बंद करा',
   attachmentPagesSuffix: 'पृष्ठे',
+
+  // ---------- pictures attached for the image model (migration 0056) ----------
+  //
+  // Creative and Social only, and only on a lane that renders a poster. These are the
+  // officer's OWN pictures — the building, the person, the look they mean — shown to the
+  // image model beside the note. Deliberately NOT called a "टेम्पलेट": that word belongs to
+  // the reference library below the composer, which decides a poster's structure, while
+  // these decide nothing.
+  promptImageUpload: 'प्रतिमा जोडा',
+  promptImageTypeError: 'कृपया प्रतिमा फाईल निवडा (JPG, PNG किंवा WEBP).',
+  promptImageRemove: 'प्रतिमा काढा',
+  // Shown once the allowance is used up, rather than silently dropping the extra picks —
+  // an officer who attaches six pictures and sees four must be told which rule applied.
+  promptImageLimit: (limit: string) =>
+    `जास्तीत जास्त ${limit} प्रतिमा जोडता येतात.`,
+  // On the card while its upload is in flight. The picture is sent as it is picked, so the
+  // officer can carry on typing — the card is the only place that says so.
+  promptImageUploading: 'पाठवत आहोत…',
+  promptImageFailed: 'पाठवता आली नाही',
 
   // ---------- shared document upload (<DocumentIntake> / <DocumentPages>) ----------
   //
@@ -846,13 +857,9 @@ export const STR = {
   proofreadPageIntro:
     'मजकुरातील व्याकरण, शुद्धलेखन, विरामचिन्हे, नावे आणि महासंवाद-शैली तपासा. फक्त खात्रीशीर चुका दाखवल्या जातात.',
   proofreadInputLabel: 'तपासायचा मजकूर येथे चिकटवा',
-  // Kept SHORT for the same reason as translateInputHint and articleSourceHint: this is a
-  // subtitle under a one-line label, and a paragraph there inverts the hierarchy and is
-  // scrolled past rather than read. WHAT is checked is the page-head's job
-  // (proofreadPageIntro) and the results say it again; this line carries only the two
-  // things the controls themselves cannot — which languages, and that nothing is stored.
-  proofreadInputHint:
-    'मराठी किंवा इंग्रजी. हा मजकूर जतन केला जात नाही; फाईलमधूनही घेता येईल.',
+  // No hint under the label: WHAT is checked is the page-head's job (proofreadPageIntro) and
+  // the results say it again, and the two things the controls themselves cannot say — which
+  // languages, and that nothing is stored — are in the card's ⓘ (infoProofreadInput).
   proofreadInputPlaceholder: 'उदा. बातमी, टिपणी किंवा लेख…',
   proofreadAction: 'तपासणी करा',
   // Split in two, the `translating` / `translateMayTakeTime` pair: the first is the
@@ -1587,7 +1594,8 @@ export const STR = {
   // The second line inside the composer's drop target. Dragging is the SECOND way in — the
   // whole area is clickable — so this reads as an alternative, never as the instruction.
   transcribeDropHint: 'किंवा इथे ओढा',
-  transcribeHint: 'कमाल १० फाईल्स. आकाराच्या मर्यादेची अट नाही.',
+  // No hint under the label: the file count and the absence of a size limit are both in the
+  // card's ⓘ (infoTranscribeInput), which says them beside the accepted formats.
   transcribeSharedReadError:
     'मोबाईलवरून पाठवलेली ध्वनिफीत उघडता आली नाही. कृपया पुन्हा Share करून Newsroom निवडा.',
   transcribeFilesTitle: 'जोडलेली ध्वनिमुद्रणे',
@@ -2308,9 +2316,12 @@ export const STR = {
   infoPosterHeading:
     'बॅनरवर छापला जाणारा नेमका मजकूर. रिकामे ठेवल्यास वरील टिपणीतील योजना, पुरस्कार किंवा उपक्रमाचे नाव आपोआप शोधून वापरले जाईल — बहुतेक वेळा हेच पुरेसे असते. येथे काही लिहिल्यास नेमका तोच मजकूर, जसाच्या तसा, बॅनरवर येईल; तो बदलला किंवा लहान केला जाणार नाही. कमाल १२० अक्षरे.',
 
-  // /dlo — its two boxes.
+  // /dlo — its two boxes. The source card's ⓘ carries the one line the card used to print
+  // as a subtitle: what to write, and that any single kind of source is enough on its own.
+  // What each kind of source costs, and where it can be corrected, is said on the step that
+  // does it rather than here.
   infoDloSources:
-    'बातमी कशापासून तयार व्हायची, ते येथे द्या. टाइप केलेली टिपणी, बैठकीचे ध्वनिमुद्रण, कागदपत्रांचे फोटो, PDF / DOCX / TXT फाईल आणि यूट्युब लिंक — यांपैकी काहीही एक पुरे, आणि हवे तितके एकत्र जोडता येतील. ध्वनिमुद्रण व फाईल्समधील मजकूर प्रक्रियेदरम्यान वाचला जातो. फाईलच्या आकाराची मर्यादा नाही.',
+    'बैठकीत जे ऐकले व ठरले ते लिहा. ध्वनिमुद्रण, फोटो, फाईल किंवा लिंकही जोडता येईल — यापैकी काहीही एक पुरे.',
   infoDloAiPrompt:
     'बातमी कशी हवी ते तुमच्या शब्दांत, एकाच ठिकाणी सांगा — शीर्षक किंवा बातमीचा रोख, कशावर भर द्यायचा, काय वगळायचे, भाषा किती सोपी हवी, लांबी किती हवी, किंवा नमुना म्हणून एखाद्या जुन्या बातमीची शैली. हे पूर्णपणे ऐच्छिक आहे; रिकामे ठेवल्यास मंच स्वतः रोख व शैली ठरवेल. ही सूचना बातमी कशी लिहायची हे ठरवते — माहितीचा आधार मात्र वरील स्रोतच राहतात, त्यामुळे येथे दिलेल्या नावांवरून किंवा आकड्यांवरून बातमीत नवीन तथ्य घातले जाणार नाही.',
 
@@ -2324,7 +2335,7 @@ export const STR = {
 
   // /proofread
   infoProofreadInput:
-    'तपासायचा मजकूर येथे चिकटवा, किंवा PDF / DOCX / TXT फाईल जोडा. मराठी मजकुराची शैलीही तपासली जाते; इंग्रजी मजकुराचे फक्त व्याकरण व नावे तपासली जातात. मजकूर पुन्हा लिहून दिला जात नाही — फक्त दाखवलेल्या जागीच दुरुस्ती होते, त्यामुळे मूळ मांडणी जशीच्या तशी राहते.',
+    'तपासायचा मजकूर येथे चिकटवा, किंवा PDF / DOCX / TXT फाईल जोडा. मराठी मजकुराची शैलीही तपासली जाते; इंग्रजी मजकुराचे फक्त व्याकरण व नावे तपासली जातात. मजकूर पुन्हा लिहून दिला जात नाही — फक्त दाखवलेल्या जागीच दुरुस्ती होते, त्यामुळे मूळ मांडणी जशीच्या तशी राहते. हा मजकूर कुठेही जतन होत नाही.',
 } as const;
 
 // The window the page is reporting on, spelled out. Shown under the title because

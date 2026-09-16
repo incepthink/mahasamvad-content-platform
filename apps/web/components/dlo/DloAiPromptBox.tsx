@@ -50,7 +50,6 @@ export function DloAiPromptBox({
     <FormCard
       htmlFor={id}
       label={STR.dloAiPromptLabel}
-      hint={STR.dloAiPromptHint}
       info={<InfoHint text={STR.infoDloAiPrompt} />}
     >
       <PromptTextarea
