@@ -262,6 +262,10 @@ export async function generateArticleSimple(
   const raw = await writeArticleDraft(messages, {
     maxTokens: ARTICLE_BODY_MAX_TOKENS,
     reasoningEffort: articleReasoningEffort(),
+    // Which prompt was just built, handed on rather than re-derived: on gemma it decides
+    // which of the endpoint's models answers, and the adapter is distilled on exactly the
+    // prompt this flag selects. A notes-only /dlo intake reaches gemma through HERE.
+    promptMode: dloPrompt ? 'dlo' : 'default',
     ...(onDelta ? { onDelta } : {}),
   });
 
@@ -325,7 +329,8 @@ export async function generateArticleSimple(
 
   console.log(
     `[simple-article] ${category} | provider=${articleProvider()} ` +
-      `model=${articleProviderModel()} effort=${articleReasoningEffort()} | ` +
+      `model=${articleProviderModel(dloPrompt ? 'dlo' : 'default')} ` +
+      `effort=${articleReasoningEffort()} | ` +
       `style-ref=${styleReference.source}x${styleReference.articles.length} | ` +
       `prompt=${promptVersion}${
         !dloPrompt && variant === 'minimal'

@@ -1175,8 +1175,17 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   `simple`).** The flag is read in ONE place, `articleGenerationMode()` in
   `apps/api/src/jobs/runner.ts`, beside the `ARTICLE_POSTER_MODE` precedent.
   - **WHICH MODEL writes the `simple` draft is a second, independent flag**:
-    `ARTICLE_PROVIDER` (`openai` default | `qwen`), read in ONE place,
-    `generation/article-provider.ts` (the `clip-provider.ts` seam). `qwen` sends the draft to
+    `ARTICLE_PROVIDER` (`openai` default | `qwen` | `gemma`), read in ONE place,
+    `generation/article-provider.ts` (the `clip-provider.ts` seam). **`gemma` is the only
+    non-OpenAI provider that can read the officer's UPLOADS** — a self-hosted
+    `google/gemma-4-31B-it` on Runpod serverless, and a VISION model, so the `/dlo` file lane
+    runs on it with no OCR stage. vLLM takes no PDF (`Unsupported chat content part type:
+    'file'`), so a PDF is rasterised locally to overlapping page strips
+    (`intake/pdf-raster.ts`) and sent as images; `generation/gemma-sources.ts` is the twin of
+    `responses-with-sources.ts`. **An image costs ~270 tokens whatever its size**, so a whole
+    A4 page smears and misreads digits — tiling is the accuracy guard, not an optimisation.
+    `articleProviderReadsSources()` is the one place that answers which provider can read an
+    upload. See the 2026-09-20 milestone in AGENTS.md. `qwen` sends the draft to
     the self-hosted pod /chat already uses (`streamQwenCompletion` in `chat/qwen-chat.ts` —
     the same client, the article's own system message, no preflight and no context fitting;
     see the 2026-09-05 milestone in AGENTS.md for why). **Only the DRAFT moves** — the length

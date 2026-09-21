@@ -3111,6 +3111,76 @@ client id/secret — see the milestone below.
 
 ## Latest Implementation Milestone
 
+- **`/dlo` can be written by a self-hosted vision model: `ARTICLE_PROVIDER=gemma`** (2026-09-20,
+  no migration, no n8n): `/dlo` has been the file-native lane since `DloFileWorkspace` replaced
+  the per-source review — documents go to the article call as `input_file` parts with no OCR
+  stage. That lane was OpenAI-only, because `input_file` is an OpenAI-platform feature. It now
+  also runs on `google/gemma-4-31B-it`, served by vLLM on a Runpod SERVERLESS endpoint, and it
+  is still no-OCR: the officer's pages reach the SAME article call as pixels, one pass, no
+  intermediate text. `qwen` remains text-only and a run carrying files still stays on OpenAI.
+  - **THE ENDPOINT TAKES NO PDF, and that is the server's own answer, not an assumption.** It
+    replies `Unsupported chat content part type: 'file'. Supported types: audio_embeds,
+    audio_url, image_embeds, image_pil, image_url, input_audio, input_image, input_text,
+    output_text, prompt_embeds, refusal, text, thinking, tool_reference, video_url`. vLLM has
+    no Files API. OpenAI's `input_file` works because OpenAI's PLATFORM converts the PDF before
+    the model sees it — that hidden conversion is the whole of what the parameter buys. It
+    happens in `intake/pdf-raster.ts` here instead (pdf.js + `@napi-rs/canvas`, already
+    pdf.js's own optional dependency), and it is NOT OCR: no model, no spend, no text.
+  - **AN IMAGE COSTS ~270 PROMPT TOKENS WHATEVER ITS PIXEL SIZE** — measured 14 tokens for text
+    alone, 282 with one 1588x2246 page, 554 with two images. The model normalises every image
+    into one fixed tile, so a whole A4 page is downsampled until the glyphs smear. Sending the
+    page whole, it read **`५०० कोटी` as `४०० कोटी`** and the scheme name **`पुण्यश्लोक` as
+    `पुण्यशोधक`** — reproducing exactly the failure that moved image OCR off OpenAI on
+    2026-08-27. Cut into three overlapping strips, the same page read `५००`, `पुण्यश्लोक`,
+    `दिलासा`, `३१ ऑगस्ट २०२६`, `२ कोटी`, `शिफारशी` and `स्वतंत्र` all correctly. **Tiling is the
+    accuracy guard, not an optimisation** — do not lower `GEMMA_TILES_PER_PAGE` to save tokens.
+    It matters more here than on the old OCR lane: the file-native `/dlo` has NO review step by
+    design, so a smeared digit reaches a published article with nothing to catch it, and the
+    never-invent rule cannot help because the model is not inventing — it is misreading.
+    Overlap (8%) exists so a line sitting on a cut still appears whole in one strip.
+  - **THE CONTEXT WINDOW CANNOT SIMPLY BE RAISED, and the template was left alone.** The model
+    supports 262,144 tokens natively but the endpoint is set to `MAX_MODEL_LEN=32768`, and that
+    is not merely conservative: gemma 4 has **10 full-attention layers of 60** at `head_dim:
+    256`, i.e. 16 KB of KV cache per token per layer, so 262,144 needs **43.8 GB** of KV cache
+    against roughly **12 GB** free (62.5 GB of weights inside `GPU_MEMORY_UTILIZATION=0.95` of
+    an 80 GB A100). It would fail to allocate and take the endpoint down. 32k is not limiting
+    anyway — ~100 strips, about 22-34 tiled pages per call. The ways up, if ever needed:
+    `KV_CACHE_DTYPE=fp8` (65,536 fits in 5.8 GB) or two GPUs per worker.
+  - **Where it plugs in.** `generation/gemma-sources.ts` is the twin of
+    `responses-with-sources.ts` — same `messages`, same returned string, so the delimiter
+    guard, the length fit, `applyDesignations` and the row write are untouched by the choice.
+    `articleProviderReadsSources()` is the one place that answers which of the three providers
+    can read an upload. Only the two kinds that ARE pixels become pixels: DOCX and TXT are
+    extracted to text locally, because a model cannot misread a character it was handed as text.
+  - **Three things found by walking the readers rather than by a type error.** The create
+    route's "nothing to write from" guard counted `files`, which is empty by design on gemma —
+    it would have **refused every gemma intake whose sources are documents with no typed note**,
+    the ordinary case. `extractNameContextFromSources` returned the note unchanged when `files`
+    was empty, so the NAME DICTIONARY would have been built from the note alone and every name
+    inside a PDF missed — the exact bug that function exists to fix, coming back silently on a
+    new provider. And under gemma the create route now **skips the OpenAI upload entirely**: the
+    bytes are already archived in the private `dlo-uploads` bucket (the route archives before it
+    uploads), so they are read back at generation time with no new column and no second upload.
+  - Cost is recorded under `GEMMA_COST_PROVIDER` in `UNBILLED_TEXT_PROVIDERS`: a serverless
+    endpoint bills GPU seconds, so tokens are counted but no per-token figure is invented.
+  Verified 2026-09-20: workspace typecheck **7/7 green**; eslint clean on all ten touched files;
+  prettier clean on every one (the three pre-existing files were confirmed clean at HEAD by
+  piping the blob through `--stdin-filepath`, so those complaints were mine and were fixed —
+  note AGENTS.md's older advice to write the blob to a temp file OUTSIDE the repo is wrong, it
+  resolves no `.prettierrc`); `gemma-sources` **17/17**, `article-provider` all checks
+  (7 new, covering the third provider and the reads-sources split), `ocr-provider` 14/14, and
+  `pdf-raster` rendering a page to 3 strips in 0.9s. **Verified LIVE end to end**: a real
+  Marathi PDF → 3 strips → gemma returned a publication-ready article in **15.5s**, streaming,
+  carrying `५०० कोटी`, the full scheme name verbatim, `३१ ऑगस्ट २०२६`, `२ कोटी` and
+  `श्री. संजय पाटील`, with none of the misreads. **Left for a real run**: genuinely scanned GRs
+  and phone photographs, to tune `GEMMA_TILES_PER_PAGE` against real scan quality rather than a
+  clean render. **Trap for the next agent: a content-engine harness hitting Runpod from a dev
+  machine needs `NODE_OPTIONS=--use-system-ca`** — Kaspersky re-signs `api.runpod.ai` too, and
+  without it every call fails `SELF_SIGNED_CERT_IN_CHAIN`. Deploy is `@dgipr/content-engine`
+  dist → API; no migration, no n8n, no web change. New env, all optional except the first when
+  the provider is selected: `GEMMA_BASE_URL`, `GEMMA_MODEL`, `GEMMA_API_KEY` (falls back to
+  `RUNPOD_API_KEY`), `GEMMA_TILES_PER_PAGE`, `GEMMA_MAX_SOURCE_TILES`, `GEMMA_TIMEOUT_MS`.
+
 - **The platform never names the model vendor** (2026-09-16, no migration, no n8n): an officer
   asked /chat which model it was and got "You're chatting with an OpenAI language model through
   Mahasamvad" — a commercial supplier named inside a government tool, and on the Qwen lane

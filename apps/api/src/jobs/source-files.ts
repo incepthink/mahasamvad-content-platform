@@ -12,9 +12,18 @@
 // `row.note` exactly as it always has. That is the correct degradation: the old lane is not
 // broken, it is just the other lane.
 
-import { getDloIntake, type SupabaseClient } from '@dgipr/database';
+import {
+  DLO_UPLOADS_BUCKET,
+  downloadFile,
+  getDloIntake,
+  type SupabaseClient,
+} from '@dgipr/database';
 import { parseDloReviewState } from '@dgipr/schemas';
-import type { SourceFileRef } from '@dgipr/content-engine';
+import {
+  articleProvider,
+  type SourceDocument,
+  type SourceFileRef,
+} from '@dgipr/content-engine';
 
 /**
  * What an article run can read of its intake: the files the model opens for itself, and the
@@ -26,10 +35,28 @@ import type { SourceFileRef } from '@dgipr/content-engine';
  */
 export type GenerationSourceContext = Readonly<{
   files: SourceFileRef[];
+  // The SAME sources as bytes, for a provider that has no file store to reference them in.
+  // Populated ONLY when ARTICLE_PROVIDER names such a provider — downloading a meeting's
+  // worth of scans on every run to hand them to OpenAI, which already holds them, would be
+  // pure waste. Empty on the OpenAI lane, always.
+  documents: SourceDocument[];
   // '' when the name step has not run, when the intake predates it, or on a database without
   // 0036. The caller then builds its dictionary from the note alone, exactly as before.
   nameContext: string;
 }>;
+
+/** Which intake file kinds are documents a vision model can be handed. Audio is transcribed. */
+function documentKind(kind: string): SourceDocument['kind'] | null {
+  switch (kind) {
+    case 'pdf':
+    case 'image':
+    case 'docx':
+    case 'txt':
+      return kind;
+    default:
+      return null;
+  }
+}
 
 /**
  * The OpenAI file handles attached to this generation's intake, in upload order.
@@ -60,10 +87,15 @@ export async function sourceContextForGeneration(
   row: Readonly<{ dloIntakeId?: string | null }>,
 ): Promise<GenerationSourceContext> {
   const intakeId = row.dloIntakeId;
-  if (!intakeId) return { files: [], nameContext: '' };
+  const empty: GenerationSourceContext = {
+    files: [],
+    documents: [],
+    nameContext: '',
+  };
+  if (!intakeId) return empty;
   try {
     const intake = await getDloIntake(client, intakeId);
-    if (!intake) return { files: [], nameContext: '' };
+    if (!intake) return empty;
     const files = intake.files.flatMap((file): SourceFileRef[] =>
       file.openaiFileId && file.status === 'done'
         ? [
@@ -78,8 +110,41 @@ export async function sourceContextForGeneration(
           ]
         : [],
     );
+    // Bytes, for a provider that cannot be handed a file id. Downloaded from the PRIVATE
+    // bucket the create route archived every upload to before it ever reached OpenAI, which
+    // is what makes this possible with no new column and no second upload from the browser.
+    //
+    // Best-effort PER FILE, deliberately: one unreadable object must not sink an article
+    // whose other sources are fine. The officer sees the article and the sources it names;
+    // a source that contributed nothing is a warning in the log, not a failed run.
+    const documents: SourceDocument[] = [];
+    if (articleProvider() === 'gemma') {
+      for (const file of intake.files) {
+        const kind = documentKind(file.kind);
+        if (!kind || file.status !== 'done' || !file.storagePath) continue;
+        try {
+          documents.push({
+            name: file.name,
+            kind,
+            data: await downloadFile(
+              client,
+              DLO_UPLOADS_BUCKET,
+              file.storagePath,
+            ),
+          });
+        } catch (error) {
+          console.warn(
+            `[source-files] could not read ${file.name} from storage; the article will ` +
+              'be written without it:',
+            error,
+          );
+        }
+      }
+    }
+
     return {
       files,
+      documents,
       nameContext:
         parseDloReviewState(intake.reviewState)?.nameContext?.trim() ?? '',
     };
@@ -88,6 +153,6 @@ export async function sourceContextForGeneration(
       `[source-files] could not read intake ${intakeId}; writing from text alone:`,
       error,
     );
-    return { files: [], nameContext: '' };
+    return empty;
   }
 }

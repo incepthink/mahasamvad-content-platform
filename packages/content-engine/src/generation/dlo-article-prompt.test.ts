@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  DGIPR_EDITORIAL_SYSTEM_PROMPT,
   DLO_ARTICLE_PROMPT_VERSION,
   DLO_SOURCE_FILES_MARKER,
   buildDloArticleMessages,
@@ -9,7 +10,7 @@ import {
 import { buildSourcesRequest } from './responses-with-sources.js';
 
 test('DLO uses the officer-approved complete prompt', () => {
-  assert.equal(DLO_ARTICLE_PROMPT_VERSION, 'dlo-rag-v2');
+  assert.equal(DLO_ARTICLE_PROMPT_VERSION, 'dlo-rag-v3');
   assert.deepEqual(
     buildDloArticleMessages({
       sourceInformation: 'बैठकीची टिपणी',
@@ -20,7 +21,7 @@ test('DLO uses the officer-approved complete prompt', () => {
     [
       {
         role: 'system',
-        content: 'Write a DGIPR Maharashtra style article.',
+        content: DGIPR_EDITORIAL_SYSTEM_PROMPT,
       },
       {
         role: 'user',

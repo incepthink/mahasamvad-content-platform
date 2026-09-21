@@ -73,8 +73,16 @@ const ZERO_TEXT_PRICE: TextPrice = {
 // and the way it would fail is silent — a free turn quietly billed at terra rates.
 export const QWEN_COST_PROVIDER = 'qwen';
 
+// The /dlo file lane's vision model, on a Runpod SERVERLESS endpoint. Billed per second of
+// GPU time rather than by the hour, but the conclusion is the same one QWEN_COST_PROVIDER
+// reaches: what is billed is wall-clock on a rented A100, and no arithmetic over a token
+// count produces a figure that means anything. Tokens are still counted, because how much
+// work went through the endpoint is a real question.
+export const GEMMA_COST_PROVIDER = 'gemma';
+
 const UNBILLED_TEXT_PROVIDERS: ReadonlySet<string> = new Set([
   QWEN_COST_PROVIDER,
+  GEMMA_COST_PROVIDER,
 ]);
 
 // USD for one chat/embedding call given its token usage. OpenAI's prompt_tokens

@@ -26,6 +26,7 @@ import {
   generateArticleSimple,
   generateArticleFromSources,
   articleProvider,
+  articleProviderReadsSources,
   isQwenChatError,
   ensureArticleDateline,
   type SimpleGenerateArticleOptions,
@@ -42,6 +43,7 @@ import {
   pickArticleReference,
   pickLayout,
   pickPalette,
+  pickSocialPalette,
   pickPlacement,
   placementById,
   posterCopyItemCount,
@@ -890,27 +892,35 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
             // generators take the same options and return the same shape — so this is the
             // only line that differs between the lanes, and everything below (the dateline,
             // the warnings, the style-reference write, posters, translation) is shared.
-            const { files: sourceFiles, nameContext } =
-              await sourceContextForGeneration(client, row);
-            // ARTICLE_PROVIDER cannot reach this branch: the file lane hands the documents
-            // to the model as `input_file` parts through the OpenAI Responses API, and the
-            // Qwen pod serves a text model with no file input and no File Search
-            // equivalent. Such a run stays on OpenAI, said out loud rather than silently —
-            // otherwise an operator who switched provider would read a normal-looking
-            // article and have no way to know which model wrote it.
-            if (sourceFiles.length > 0 && articleProvider() !== 'openai') {
+            const {
+              files: sourceFiles,
+              documents: sourceDocuments,
+              nameContext,
+            } = await sourceContextForGeneration(client, row);
+            // Not every provider can read the officer's uploads. OpenAI reads a file
+            // through its own platform conversion and gemma reads rasterised pages as
+            // images (see gemma-sources.ts); the Qwen pod serves a TEXT model and can do
+            // neither, so such a run stays on OpenAI — said out loud rather than silently,
+            // or an operator who switched provider would read a normal-looking article with
+            // no way to know which model wrote it.
+            const attachedCount =
+              articleProvider() === 'gemma'
+                ? sourceDocuments.length
+                : sourceFiles.length;
+            if (attachedCount > 0 && !articleProviderReadsSources()) {
               console.warn(
                 `[job ${id}] ARTICLE_PROVIDER=${articleProvider()}, but this run carries ` +
-                  `${sourceFiles.length} uploaded source file(s); writing on OpenAI, which ` +
-                  'is the only provider here that can read them.',
+                  `${attachedCount} uploaded source file(s); writing on OpenAI, which can ` +
+                  'read them.',
               );
             }
             const writeArticle =
-              sourceFiles.length > 0
+              attachedCount > 0
                 ? (note: string, options: SimpleGenerateArticleOptions) =>
                     generateArticleFromSources(note, {
                       ...options,
                       files: sourceFiles,
+                      documents: sourceDocuments,
                     })
                 : generateArticleSimple;
             const simple = await writeArticle(row.note, {
@@ -1820,12 +1830,9 @@ function verbatimWorkingTitle(note: string): string | null {
 // Render ONE social poster and store it at posterPath(id, version), updating referenceTitle +
 // posterPath. Shared by the initial job (version 1) and the regenerate action (next version).
 //
-// The default DGIPR path GENERATES the poster from scratch: the selected master is used only as a
-// loose STRUCTURAL idea, never as pixels to clone. Two independent rotations decide how it looks —
-// a colour palette (poster-palettes.ts) and a composition archetype (poster-layouts.ts), each
-// assigned per run and each spread away from what the last few runs used. The art director then
-// designs WITHIN both; it chooses neither. The legacy edit modes ('onbrand'/'adaptive') still edit
-// the master via the thin n8n workflow; CMO keeps its own template-following render.
+// The default DGIPR path generates the poster from scratch. A fast procedural colour plan reaches
+// the prompt; composition remains fully content-led. The legacy edit modes ('onbrand'/'adaptive')
+// still edit the master via the thin n8n workflow; CMO keeps its own template-following render.
 async function renderAndStoreSocialPoster(
   client: SupabaseClient,
   id: string,
@@ -1843,10 +1850,12 @@ async function renderAndStoreSocialPoster(
   //
   //   families   — colour, and ONLY on the "different colours" redo: a plain redo is not a
   //                complaint about the palette.
-  //   placement* — the ARRANGEMENT, on EVERY redo, which is what makes the reload button
-  //                structurally guarantee a different-shaped poster rather than hope for one.
+  //   placement* — legacy metadata rotation retained for persisted-row compatibility. It no
+  //                longer reaches the prompt and therefore makes no claim about the next shape.
   avoid: Readonly<{
     families?: readonly PaletteFamily[] | undefined;
+    dominantHexes?: readonly string[] | undefined;
+    groundHexes?: readonly string[] | undefined;
     placementIds?: readonly string[] | undefined;
     placementFamilies?: readonly PlacementFamily[] | undefined;
   }> = {},
@@ -2034,24 +2043,29 @@ async function renderAndStoreSocialPoster(
     });
   }
 
-  // 3a. Colour palette + composition — only the fully-AI-generated DGIPR path uses them. Both are
-  //     rotated per run away from what the last few runs used (families and coverages first, then
-  //     exact ids), so consecutive posters differ in hue AND in shape. The avoid set includes the
-  //     hue families the last few renders were MEASURED to be, not only the ones they were
-  //     assigned — if the image model ignores a spec, avoiding intentions would achieve nothing.
-  //     Seeded, so a retry reproduces the same assignment rather than redesigning. With no
-  //     master to take a structure hint from, the assigned archetype is now the ONLY structural
-  //     instruction a fresh poster gets — which it effectively already was, since COMPOSITION
-  //     was documented to outrank the master's hint wherever the two disagreed.
+  // 3a. Colour direction + composition metadata. Colour is generated locally in OKLCH, checked
+  //     for readable text pairings, spread away from actual colours measured on recent outputs,
+  //     and sent to the image model. This is synchronous and adds no model/provider call.
+  //     Composition remains fully content-led: layout/placement are retained only as compatible
+  //     poster_style metadata and do not reach the prompt.
   const history = isFresh
     ? await recentStyleHistory(client, SOCIAL_STYLE_CATEGORIES)
     : undefined;
-  const assignedPalette = isFresh
-    ? pickPalette(seed, {
-        ids: history?.paletteIds,
-        families: [...(history?.families ?? []), ...(avoid.families ?? [])],
-      })
-    : undefined;
+  const assignedPalette =
+    isFresh && !customPrompt
+      ? pickSocialPalette(seed, {
+          ids: history?.paletteIds,
+          families: [...(history?.families ?? []), ...(avoid.families ?? [])],
+          recentDominantHexes: [
+            ...(history?.measuredDominantHexes ?? []),
+            ...(avoid.dominantHexes ?? []),
+          ],
+          recentGroundHexes: [
+            ...(history?.measuredGroundHexes ?? []),
+            ...(avoid.groundHexes ?? []),
+          ],
+        })
+      : undefined;
   const assignedLayout = isFresh
     ? pickLayout(
         seed,
@@ -2068,17 +2082,9 @@ async function renderAndStoreSocialPoster(
       )
     : undefined;
 
-  // 3a-ii. THE ARRANGEMENT — the one assignment above that actually reaches the image model
-  //     (2026-08-14). The palette and the layout beside it are recorded for poster_style and
-  //     nothing else, retired from the prompt on 2026-08-10; this one is emitted, because handing
-  //     the composition over entirely did not produce varied compositions. It produced gpt-image's
-  //     two habits — a band over rows, or a picture down one side and text down the other — on run
-  //     after run, which is exactly what the officer reported.
-  //
-  //     WHY IT IS SAFE TO STATE FIRMLY, which is the objection it has to answer: the anchor is
-  //     filtered against what this poster actually contains BEFORE it can be picked, so an
-  //     arrangement the content cannot carry is never assigned. Both inputs are deterministic and
-  //     free — no model call decides eligibility:
+  // 3a-ii. Arrangement metadata. Like palette/layout above, this stays content-filtered and
+  //     rotation-aware for the persisted style record, but does not reach the image prompt.
+  //     Both inputs are deterministic and free — no model call decides eligibility:
   //
   //       hasImagery — the copy's own verdict. On a fresh run layoutSpec is null so this is
   //                    true, and the model invents the imagery; the flag is here for the
@@ -2108,24 +2114,18 @@ async function renderAndStoreSocialPoster(
       )
     : undefined;
 
-  // 3b. Art direction — RETIRED (2026-08-10). It designed a treatment WITHIN an assigned palette
-  //     and an assigned composition, and buildPosterPrompt no longer emits any of the three: the
-  //     fresh brief names the client and hands the whole design over to the image model. A paid
-  //     call whose output is dropped on the floor is worse than no call, so it is not made.
-  //     generateArtDirection itself is left in place — restoring the specification is re-adding
-  //     this block and the prompt's COLOUR SPECIFICATION / ART DIRECTION / COMPOSITION blocks.
+  // 3b. Art direction remains retired. The local colour plan replaces only its palette function;
+  //     no LLM is called, and composition/treatment remain the image model's decision.
   const artDirection = null;
   if (assignedPalette && assignedLayout) {
     console.log(
       `[job ${id}] style: palette=${assignedPalette.id} (${assignedPalette.family}) layout=${assignedLayout.id} (${assignedLayout.coverage})` +
-        // The arrangement is logged separately from the two beside it BECAUSE it is the only one
-        // that reached the prompt — when a poster comes back the wrong shape, this line is what
-        // says whether it was assigned the wrong anchor or ignored the right one.
+        // Kept in the log because it is persisted beside the other style metadata.
         ` placement=${assignedPlacement?.id ?? 'none'} (${assignedPlacement?.family ?? '-'})` +
         ` | avoided families=[${(history?.families ?? []).join(',')}${(avoid.families ?? []).length ? `+${(avoid.families ?? []).join(',')}` : ''}]` +
         ` placements=[${(history?.placementIds ?? []).join(',')}${(avoid.placementIds ?? []).length ? `+${(avoid.placementIds ?? []).join(',')}` : ''}]` +
         ` measured=[${(history?.measuredBuckets ?? []).join(',')}]` +
-        `${artDirection ? '' : ' (undirected)'}`,
+        ' (colour-directed, composition-free)',
     );
   }
 
@@ -2156,15 +2156,14 @@ async function renderAndStoreSocialPoster(
         designMode,
         brand,
         // Both empty on a fresh run. buildPosterPrompt only demands a master URL for the modes that
-        // EDIT one, and it omits the STRUCTURE INSPIRATION block entirely when there is no summary —
-        // so a fresh prompt now carries the assigned palette and composition and nothing borrowed.
+        // edit one, and it omits the structure summary when there is no master.
         masterUrl: resolved?.master.url,
         layoutSummary: resolved?.master.layoutSpec?.layoutSummary,
         hasPhoto: copyResult?.hasPhoto ?? false,
         artDirection: artDirection ?? undefined,
         assignedPalette,
         assignedLayout,
-        // The only one of these four the prompt actually emits — see the assignment above.
+        // Recorded as style metadata; deliberately ignored by the fresh prompt builder.
         assignedPlacement,
       });
 
@@ -2570,14 +2569,19 @@ export function startPosterRegenerateJob(
     //   colour      — only on "वेगळ्या रंगात तयार करा". A plain redo is not a complaint about the
     //                 palette, and barring a family nobody objected to narrows the rotation for
     //                 nothing.
-    //   arrangement — on EVERY redo, both buttons. "Give me another one" means another SHAPE
-    //                 first of all; that is the whole of what the officer reported when a reload
-    //                 returned the same poster with different wording. Barring the id and its
-    //                 family is what makes that a guarantee rather than a new roll of the dice
-    //                 (poster-placements.ts's harness asserts it at every version and anchor).
+    //   arrangement — legacy metadata is still rotated on every redo for stored-row
+    //                 compatibility, but it no longer reaches the image prompt. The new seed is
+    //                 what asks the image model for a genuinely new composition.
     const current = parsePosterStyle(row.posterStyle);
     const avoidFamilies: PaletteFamily[] =
       options.recolour && current ? [current.family] : [];
+    const avoidMeasuredColours =
+      options.recolour && current?.measured
+        ? {
+            dominantHexes: [current.measured.dominantHex],
+            groundHexes: [current.measured.groundHex],
+          }
+        : {};
     // Resolved through the library rather than trusted from the row, so an anchor removed from
     // the library since the last render simply bars nothing instead of poisoning the pool.
     const currentPlacement = placementById(current?.placementId);
@@ -2670,7 +2674,7 @@ export function startPosterRegenerateJob(
       designMode,
       version,
       `${id}:v${version}`,
-      { families: avoidFamilies, ...avoidPlacement },
+      { families: avoidFamilies, ...avoidMeasuredColours, ...avoidPlacement },
     );
 
     await insertRevision(client, {

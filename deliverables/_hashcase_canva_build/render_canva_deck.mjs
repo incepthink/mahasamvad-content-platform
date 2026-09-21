@@ -1,0 +1,14 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
+const require=createRequire(import.meta.url);
+const {chromium}=require('C:/Users/shaik/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const dir='C:/Users/shaik/Desktop/dev-work/mahasamvad-content-platform/deliverables/_hashcase_canva_build';
+const browser=await chromium.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true});
+const page=await browser.newPage({viewport:{width:1660,height:940},deviceScaleFactor:1});
+await page.goto(pathToFileURL(path.join(dir,'HashCase_Private_AI_Pitch.html')).href);
+await fs.mkdir(path.join(dir,'render'),{recursive:true});
+for(let i=0;i<11;i++)await page.locator('.page').nth(i).screenshot({path:path.join(dir,'render',`slide-${String(i+1).padStart(2,'0')}.png`)});
+await browser.close();
+console.log('rendered 11');

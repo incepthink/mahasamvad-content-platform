@@ -1,0 +1,368 @@
+{"kind":"deck","id":"pr/38cgob","name":"Deck"}
+{"kind":"layout","layoutId":"526b7c9a-6ec7-429a-8d81-3e51dca987df","name":"Master","type":"master"}
+{"kind":"layout","layoutId":"b5c023ce-e80b-4190-adf7-53daa5273444","name":"Title Slide","type":"title"}
+{"kind":"slide","id":"sl/x9obr5","slide":1,"title":"HASHCASE  /  APPLIED AI","textShapes":4}
+{"kind":"shape","id":"sh/k7294fi5","slide":1,"bbox":[0,0,575,720]}
+{"kind":"textbox","id":"sh/l8bqdkzq","slide":1,"text":"HASHCASE  /  APPLIED AI","textPreview":"HASHCASE  /  APPLIED AI","textChars":23,"textLines":1,"bbox":[68,62,455,30]}
+{"kind":"textbox","id":"sh/69kr6p0b","slide":1,"text":"AI that gets\nthe work done.","textPreview":"AI that gets | the work done.","textChars":27,"textLines":2,"bbox":[68,176,505,200]}
+{"kind":"textbox","id":"sh/7ad8fuhw","slide":1,"text":"End-to-end workflow automation and private AI systems built around your operations.","textPreview":"End-to-end workflow automation and private AI systems built around your operations.","textChars":83,"textLines":1,"bbox":[70,422,460,112]}
+{"kind":"textbox","id":"sh/tcvqhkz2","slide":1,"text":"CLIENT CAPABILITIES  /  SEPTEMBER 2026","textPreview":"CLIENT CAPABILITIES  /  SEPTEMBER 2026","textChars":38,"textLines":1,"bbox":[70,653,510,18]}
+{"kind":"image","id":"im/alcjyp8b","slide":1,"name":"","alt":"Editorial image of operations team reviewing source documents","bbox":[0,0,1280,720]}
+{"kind":"image","id":"im/9k3ipkrq","slide":1,"name":"","alt":"HashCase logo","bbox":[70,568,276,57]}
+{"kind":"notes","id":"nt/x9obr5","slide":1,"text":"HashCase client capabilities. Cover photograph: original image generated for this presentation."}
+{"kind":"slide","id":"sl/5fkz29","slide":2,"title":"THE OPPORTUNITY","textShapes":12}
+{"kind":"textbox","id":"sh/juxcz2lw","slide":2,"text":"THE OPPORTUNITY","textPreview":"THE OPPORTUNITY","textChars":15,"textLines":1,"bbox":[70,45,1000,20]}
+{"kind":"textbox","id":"sh/4v6dsn2h","slide":2,"text":"02","textPreview":"02","textChars":2,"textLines":1,"bbox":[1172,44,40,24]}
+{"kind":"textbox","id":"sh/5wfu1s3m","slide":2,"text":"From scattered inputs\nto approved outcomes.","textPreview":"From scattered inputs | to approved outcomes.","textChars":43,"textLines":2,"bbox":[70,121,1090,170]}
+{"kind":"textbox","id":"sh/6xovuxk7","slide":2,"text":"HashCase designs the complete path from source material to a finished, reviewable business result.","textPreview":"HashCase designs the complete path from source material to a finished, reviewable business result.","textChars":98,"textLines":1,"bbox":[72,325,1020,76]}
+{"kind":"shape","id":"sh/ryxw321s","slide":2,"bbox":[70,475,343,0]}
+{"kind":"textbox","id":"sh/sz6dw72d","slide":2,"text":"READ THE WORK","textPreview":"READ THE WORK","textChars":13,"textLines":1,"bbox":[70,500,343,25]}
+{"kind":"textbox","id":"sh/t0ze5cjy","slide":2,"text":"Documents, audio, images and connected systems","textPreview":"Documents, audio, images and connected systems","textChars":46,"textLines":1,"bbox":[70,538,338,62]}
+{"kind":"shape","id":"sh/m14vidk3","slide":2,"bbox":[455,475,343,0]}
+{"kind":"textbox","id":"sh/72dcrilo","slide":2,"text":"APPLY JUDGMENT","textPreview":"APPLY JUDGMENT","textChars":14,"textLines":1,"bbox":[455,500,343,25]}
+{"kind":"textbox","id":"sh/ni94zmxo","slide":2,"text":"Grounded models, rules and staff review","textPreview":"Grounded models, rules and staff review","textChars":39,"textLines":1,"bbox":[455,538,338,62]}
+{"kind":"shape","id":"sh/2h0nqhg3","slide":2,"bbox":[840,475,343,0]}
+{"kind":"textbox","id":"sh/p4rm1wfu","slide":2,"text":"FINISH THE TASK","textPreview":"FINISH THE TASK","textChars":15,"textLines":1,"bbox":[840,500,343,25]}
+{"kind":"textbox","id":"sh/o3i5sry9","slide":2,"text":"Approved outputs, records and actions","textPreview":"Approved outputs, records and actions","textChars":37,"textLines":1,"bbox":[840,538,338,62]}
+{"kind":"shape","id":"sh/fe94v2xs","slide":2,"bbox":[70,673,1140,0]}
+{"kind":"textbox","id":"sh/edgnmxg7","slide":2,"text":"HASHCASE  /  CLIENT CAPABILITIES","textPreview":"HASHCASE  /  CLIENT CAPABILITIES","textChars":32,"textLines":1,"bbox":[70,681,950,15]}
+{"kind":"textbox","id":"sh/1grmxcfi","slide":2,"text":"02","textPreview":"02","textChars":2,"textLines":1,"bbox":[1168,680,40,17]}
+{"kind":"notes","id":"nt/5fkz29","slide":2,"text":"Summary based on the HashCase Executive Note, deliverables/HashCase_Executive_Note.docx."}
+{"kind":"slide","id":"sl/tn267t","slide":3,"title":"AN EVERYDAY OPERATIONS PROBLEM","textShapes":26}
+{"kind":"textbox","id":"sh/poj2p0be","slide":3,"text":"AN EVERYDAY OPERATIONS PROBLEM","textPreview":"AN EVERYDAY OPERATIONS PROBLEM","textChars":30,"textLines":1,"bbox":[70,45,1000,20]}
+{"kind":"textbox","id":"sh/2lsju5sn","slide":3,"text":"03","textPreview":"03","textChars":2,"textLines":1,"bbox":[1172,44,40,24]}
+{"kind":"textbox","id":"sh/3m1knqt8","slide":3,"text":"A routine request becomes five handoffs","textPreview":"A routine request becomes five handoffs","textChars":39,"textLines":1,"bbox":[70,85,1135,105]}
+{"kind":"textbox","id":"sh/cbu10fa5","slide":3,"text":"Illustrative example: a request arrives by email with a scanned form and a voice note.","textPreview":"Illustrative example: a request arrives by email with a scanned form and a voice note.","textChars":86,"textLines":1,"bbox":[72,190,1120,37]}
+{"kind":"shape","id":"sh/xc32tkra","slide":3,"bbox":[70,271,213,245]}
+{"kind":"textbox","id":"sh/a9sjy5sz","slide":3,"text":"01","textPreview":"01","textChars":2,"textLines":1,"bbox":[88,289,80,31]}
+{"kind":"textbox","id":"sh/ba1kratk","slide":3,"text":"RECEIVE","textPreview":"RECEIVE","textChars":7,"textLines":1,"bbox":[88,336,178,30]}
+{"kind":"textbox","id":"sh/kfu14fa1","slide":3,"text":"Email, scan and audio arrive in different formats.","textPreview":"Email, scan and audio arrive in different formats.","textChars":50,"textLines":1,"bbox":[88,381,175,103]}
+{"kind":"textbox","id":"sh/lg32xkrm","slide":3,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[284,360,19,35]}
+{"kind":"shape","id":"sh/ds3y1oru","slide":3,"bbox":[303,271,213,245]}
+{"kind":"textbox","id":"sh/cruh8ja9","slide":3,"text":"02","textPreview":"02","textChars":2,"textLines":1,"bbox":[321,289,80,31]}
+{"kind":"textbox","id":"sh/rqlgzy9o","slide":3,"text":"RE-ENTER","textPreview":"RE-ENTER","textChars":8,"textLines":1,"bbox":[321,336,178,30]}
+{"kind":"textbox","id":"sh/qpcz6ts3","slide":3,"text":"Someone copies details into a case system.","textPreview":"Someone copies details into a case system.","textChars":42,"textLines":1,"bbox":[321,381,175,103]}
+{"kind":"textbox","id":"sh/1wni58rq","slide":3,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[517,360,19,35]}
+{"kind":"shape","id":"sh/0vuhc3a5","slide":3,"bbox":[536,271,213,245]}
+{"kind":"textbox","id":"sh/zul03y9k","slide":3,"text":"03","textPreview":"03","textChars":2,"textLines":1,"bbox":[554,289,80,31]}
+{"kind":"textbox","id":"sh/etczatsz","slide":3,"text":"CHECK","textPreview":"CHECK","textChars":5,"textLines":1,"bbox":[554,336,178,30]}
+{"kind":"textbox","id":"sh/h0jyt4rm","slide":3,"text":"Names, policy and prior records are verified.","textPreview":"Names, policy and prior records are verified.","textChars":45,"textLines":1,"bbox":[554,381,175,103]}
+{"kind":"textbox","id":"sh/gzah0za1","slide":3,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[750,360,19,35]}
+{"kind":"shape","id":"sh/8jehgjix","slide":3,"bbox":[769,271,213,245]}
+{"kind":"textbox","id":"sh/t4ni94zi","slide":3,"text":"04","textPreview":"04","textChars":2,"textLines":1,"bbox":[787,289,80,31]}
+{"kind":"textbox","id":"sh/6hcze90r","slide":3,"text":"DRAFT","textPreview":"DRAFT","textChars":5,"textLines":1,"bbox":[787,336,178,30]}
+{"kind":"textbox","id":"sh/7ilg7ehc","slide":3,"text":"A response is written in another tool.","textPreview":"A response is written in another tool.","textChars":38,"textLines":1,"bbox":[787,381,175,103]}
+{"kind":"textbox","id":"sh/g7ehkjit","slide":3,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[983,360,19,35]}
+{"kind":"shape","id":"sh/h8nidoze","slide":3,"bbox":[1002,271,213,245]}
+{"kind":"textbox","id":"sh/u5wzi90n","slide":3,"text":"05","textPreview":"05","textChars":2,"textLines":1,"bbox":[1020,289,80,31]}
+{"kind":"textbox","id":"sh/v650beh8","slide":3,"text":"CLOSE","textPreview":"CLOSE","textChars":5,"textLines":1,"bbox":[1020,336,178,30]}
+{"kind":"textbox","id":"sh/4byho3i5","slide":3,"text":"A supervisor approves it and staff update the record.","textPreview":"A supervisor approves it and staff update the record.","textChars":53,"textLines":1,"bbox":[1020,381,175,103]}
+{"kind":"shape","id":"sh/5c7ihoza","slide":3,"bbox":[70,550,1142,81]}
+{"kind":"textbox","id":"sh/f69kn21s","slide":3,"text":"The hard part is locating evidence, checking rules, getting approval and updating the system — all in one controlled run.","textPreview":"The hard part is locating evidence, checking rules, getting approval and updating the system — all in one controlled run.","textChars":121,"textLines":1,"bbox":[93,565,1090,52]}
+{"kind":"shape","id":"sh/e50jexk7","slide":3,"bbox":[70,673,1140,0]}
+{"kind":"textbox","id":"sh/18r2psji","slide":3,"text":"HASHCASE  /  CLIENT CAPABILITIES","textPreview":"HASHCASE  /  CLIENT CAPABILITIES","textChars":32,"textLines":1,"bbox":[70,681,950,15]}
+{"kind":"textbox","id":"sh/07ilg72d","slide":3,"text":"03","textPreview":"03","textChars":2,"textLines":1,"bbox":[1168,680,40,17]}
+{"kind":"notes","id":"nt/tn267t","slide":3,"text":"The request scenario is illustrative and is not presented as a HashCase client case study."}
+{"kind":"slide","id":"sl/90y70z","slide":4,"title":"WHY WORK GETS STUCK","textShapes":18}
+{"kind":"textbox","id":"sh/nmdgrm54","slide":4,"text":"WHY WORK GETS STUCK","textPreview":"WHY WORK GETS STUCK","textChars":19,"textLines":1,"bbox":[70,45,1000,20]}
+{"kind":"textbox","id":"sh/8nmh0rm9","slide":4,"text":"04","textPreview":"04","textChars":2,"textLines":1,"bbox":[1172,44,40,24]}
+{"kind":"textbox","id":"sh/9ofitwnu","slide":4,"text":"Four gaps behind one unfinished task","textPreview":"Four gaps behind one unfinished task","textChars":36,"textLines":1,"bbox":[70,85,1135,105]}
+{"kind":"shape","id":"sh/apoz214f","slide":4,"bbox":[70,236,265,292]}
+{"kind":"textbox","id":"sh/vax0v650","slide":4,"text":"01","textPreview":"01","textChars":2,"textLines":1,"bbox":[92,257,65,30]}
+{"kind":"textbox","id":"sh/wb6h4rml","slide":4,"text":"Fragmented intake","textPreview":"Fragmented intake","textChars":17,"textLines":1,"bbox":[92,316,215,62]}
+{"kind":"textbox","id":"sh/xcfixwn6","slide":4,"text":"Files and messages arrive without a reliable, shared case record.","textPreview":"Files and messages arrive without a reliable, shared case record.","textChars":65,"textLines":1,"bbox":[92,404,216,91]}
+{"kind":"shape","id":"sh/idoz614r","slide":4,"bbox":[356,236,265,292]}
+{"kind":"textbox","id":"sh/jex0z65w","slide":4,"text":"02","textPreview":"02","textChars":2,"textLines":1,"bbox":[378,257,65,30]}
+{"kind":"textbox","id":"sh/jqtkza18","slide":4,"text":"Weak evidence","textPreview":"Weak evidence","textChars":13,"textLines":1,"bbox":[378,316,215,62]}
+{"kind":"textbox","id":"sh/ipkjq5kn","slide":4,"text":"Teams need to verify names, numbers and source claims manually.","textPreview":"Teams need to verify names, numbers and source claims manually.","textChars":63,"textLines":1,"bbox":[378,404,216,91]}
+{"kind":"shape","id":"sh/5sb210je","slide":4,"bbox":[642,236,265,292]}
+{"kind":"textbox","id":"sh/4r21sf2t","slide":4,"text":"03","textPreview":"03","textChars":2,"textLines":1,"bbox":[664,257,65,30]}
+{"kind":"textbox","id":"sh/v2t0vq1c","slide":4,"text":"Disconnected action","textPreview":"Disconnected action","textChars":19,"textLines":1,"bbox":[664,316,215,62]}
+{"kind":"textbox","id":"sh/u1kjmlkr","slide":4,"text":"A draft answer still needs staff to move it between systems.","textPreview":"A draft answer still needs staff to move it between systems.","textChars":60,"textLines":1,"bbox":[664,404,216,91]}
+{"kind":"shape","id":"sh/h4bix0j2","slide":4,"bbox":[928,236,265,292]}
+{"kind":"textbox","id":"sh/w321ov2h","slide":4,"text":"04","textPreview":"04","textChars":2,"textLines":1,"bbox":[950,257,65,30]}
+{"kind":"textbox","id":"sh/fydk7u1g","slide":4,"text":"Unclear boundary","textPreview":"Unclear boundary","textChars":16,"textLines":1,"bbox":[950,316,215,62]}
+{"kind":"textbox","id":"sh/ex4jypkv","slide":4,"text":"Sensitive material needs explicit rules for access and model use.","textPreview":"Sensitive material needs explicit rules for access and model use.","textChars":65,"textLines":1,"bbox":[950,404,216,91]}
+{"kind":"textbox","id":"sh/qt8nqt43","slide":4,"text":"The workflow must carry evidence, approval and action together.","textPreview":"The workflow must carry evidence, approval and action together.","textChars":63,"textLines":1,"bbox":[70,567,1100,50]}
+{"kind":"shape","id":"sh/buh4zylo","slide":4,"bbox":[70,673,1140,0]}
+{"kind":"textbox","id":"sh/cfq5s3m9","slide":4,"text":"HASHCASE  /  CLIENT CAPABILITIES","textPreview":"HASHCASE  /  CLIENT CAPABILITIES","textChars":32,"textLines":1,"bbox":[70,681,950,15]}
+{"kind":"textbox","id":"sh/dgzm1o3u","slide":4,"text":"04","textPreview":"04","textChars":2,"textLines":1,"bbox":[1168,680,40,17]}
+{"kind":"notes","id":"nt/90y70z","slide":4,"text":"Problem categories are derived from the HashCase Executive Note. They describe common workflow patterns, not measured prevalence."}
+{"kind":"slide","id":"sl/0ga7jz","slide":5,"title":"WHAT HASHCASE BUILDS","textShapes":12}
+{"kind":"textbox","id":"sh/l0fudwbu","slide":5,"text":"WHAT HASHCASE BUILDS","textPreview":"WHAT HASHCASE BUILDS","textChars":20,"textLines":1,"bbox":[70,45,1000,20]}
+{"kind":"textbox","id":"sh/yd4bihc3","slide":5,"text":"05","textPreview":"05","textChars":2,"textLines":1,"bbox":[1172,44,40,24]}
+{"kind":"textbox","id":"sh/zedsbmto","slide":5,"text":"Two capabilities. One operating standard.","textPreview":"Two capabilities. One operating standard.","textChars":41,"textLines":1,"bbox":[70,85,1135,105]}
+{"kind":"shape","id":"sh/cbmtg7ux","slide":5,"bbox":[70,230,543,352]}
+{"kind":"shape","id":"sh/dcva9cbi","slide":5,"bbox":[635,230,575,352]}
+{"kind":"shape","id":"sh/q94bexcr","slide":5,"bbox":[70,230,543,6]}
+{"kind":"shape","id":"sh/bads72tc","slide":5,"bbox":[635,230,575,6]}
+{"kind":"textbox","id":"sh/w7qtsbuh","slide":5,"text":"01","textPreview":"01","textChars":2,"textLines":1,"bbox":[95,260,70,40]}
+{"kind":"textbox","id":"sh/x8zulgbm","slide":5,"text":"Applied AI\nworkflow automation","textPreview":"Applied AI | workflow automation","textChars":30,"textLines":2,"bbox":[95,315,468,100]}
+{"kind":"textbox","id":"sh/h8rypc76","slide":5,"text":"Intake → evidence → model and rules → review → approved action","textPreview":"Intake → evidence → model and rules → review → approved action","textChars":62,"textLines":1,"bbox":[95,448,465,74]}
+{"kind":"textbox","id":"sh/g7ihw76l","slide":5,"text":"02","textPreview":"02","textChars":2,"textLines":1,"bbox":[660,260,70,40]}
+{"kind":"textbox","id":"sh/v6pgn2p0","slide":5,"text":"Private model\ndeployment and tuning","textPreview":"Private model | deployment and tuning","textChars":35,"textLines":2,"bbox":[660,315,500,100]}
+{"kind":"textbox","id":"sh/u5gzuxov","slide":5,"text":"Inference, retrieval, data, logs and lifecycle inside a client-controlled boundary","textPreview":"Inference, retrieval, data, logs and lifecycle inside a client-controlled boundary","textChars":82,"textLines":1,"bbox":[660,448,510,74]}
+{"kind":"textbox","id":"sh/t47yls7a","slide":5,"text":"Built as products your team can run, inspect and improve.","textPreview":"Built as products your team can run, inspect and improve.","textChars":57,"textLines":1,"bbox":[71,606,1080,32]}
+{"kind":"shape","id":"sh/83yhsn6p","slide":5,"bbox":[70,673,1140,0]}
+{"kind":"textbox","id":"sh/72pgj2p4","slide":5,"text":"HASHCASE  /  CLIENT CAPABILITIES","textPreview":"HASHCASE  /  CLIENT CAPABILITIES","textChars":32,"textLines":1,"bbox":[70,681,950,15]}
+{"kind":"textbox","id":"sh/61gzqxoj","slide":5,"text":"05","textPreview":"05","textChars":2,"textLines":1,"bbox":[1168,680,40,17]}
+{"kind":"notes","id":"nt/0ga7jz","slide":5,"text":"Source: HashCase Executive Note, core offerings and delivery model."}
+{"kind":"slide","id":"sl/yvzr36","slide":6,"title":"01  APPLIED AI WORKFLOW AUTOMATION","textShapes":30}
+{"kind":"textbox","id":"sh/4zmxwrq9","slide":6,"text":"01  APPLIED AI WORKFLOW AUTOMATION","textPreview":"01  APPLIED AI WORKFLOW AUTOMATION","textChars":34,"textLines":1,"bbox":[70,45,1000,20]}
+{"kind":"textbox","id":"sh/3ydg3m9o","slide":6,"text":"06","textPreview":"06","textChars":2,"textLines":1,"bbox":[1172,44,40,24]}
+{"kind":"textbox","id":"sh/ix4fuh83","slide":6,"text":"An automation that carries work to completion","textPreview":"An automation that carries work to completion","textChars":45,"textLines":1,"bbox":[70,85,1135,105]}
+{"kind":"textbox","id":"sh/d4fy9w7q","slide":6,"text":"Every stage has an input, an output, a failure path and an owner.","textPreview":"Every stage has an input, an output, a failure path and an owner.","textChars":65,"textLines":1,"bbox":[71,194,1110,34]}
+{"kind":"shape","id":"sh/c36x0rq5","slide":6,"bbox":[70,275,168,200]}
+{"kind":"shape","id":"sh/r2xg7690","slide":6,"bbox":[70,275,168,7]}
+{"kind":"textbox","id":"sh/q1ofy18f","slide":6,"text":"01","textPreview":"01","textChars":2,"textLines":1,"bbox":[86,300,45,30]}
+{"kind":"textbox","id":"sh/t8bexcrm","slide":6,"text":"INTAKE","textPreview":"INTAKE","textChars":6,"textLines":1,"bbox":[86,346,145,31]}
+{"kind":"textbox","id":"sh/872xo7q1","slide":6,"text":"PDFs, audio, forms, APIs","textPreview":"PDFs, audio, forms, APIs","textChars":24,"textLines":1,"bbox":[86,394,143,67]}
+{"kind":"textbox","id":"sh/qtcb65gf","slide":6,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[238,350,22,38]}
+{"kind":"shape","id":"sh/rulszax0","slide":6,"bbox":[260,275,168,200]}
+{"kind":"shape","id":"sh/cvetsfyl","slide":6,"bbox":[260,275,168,7]}
+{"kind":"textbox","id":"sh/dwna1kf6","slide":6,"text":"02","textPreview":"02","textChars":2,"textLines":1,"bbox":[276,300,45,30]}
+{"kind":"textbox","id":"sh/exwbu5gr","slide":6,"text":"EXTRACT","textPreview":"EXTRACT","textChars":7,"textLines":1,"bbox":[276,346,145,31]}
+{"kind":"textbox","id":"sh/zi5s3axw","slide":6,"text":"Text, fields and entities","textPreview":"Text, fields and entities","textChars":25,"textLines":1,"bbox":[276,394,143,67]}
+{"kind":"textbox","id":"sh/0jetwfyh","slide":6,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[428,350,22,38]}
+{"kind":"shape","id":"sh/1knu5kf2","slide":6,"bbox":[450,275,168,200]}
+{"kind":"shape","id":"sh/mlwbypgn","slide":6,"bbox":[450,275,168,7]}
+{"kind":"textbox","id":"sh/nmpc7ux8","slide":6,"text":"03","textPreview":"03","textChars":2,"textLines":1,"bbox":[466,300,45,30]}
+{"kind":"textbox","id":"sh/jqpsvudg","slide":6,"text":"GROUND","textPreview":"GROUND","textChars":6,"textLines":1,"bbox":[466,346,145,31]}
+{"kind":"textbox","id":"sh/ypgrmpcv","slide":6,"text":"Approved sources and policy","textPreview":"Approved sources and policy","textChars":27,"textLines":1,"bbox":[466,394,143,67]}
+{"kind":"textbox","id":"sh/ls7ax4v6","slide":6,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[618,350,22,38]}
+{"kind":"shape","id":"sh/kry9ozu1","slide":6,"bbox":[640,275,168,200]}
+{"kind":"shape","id":"sh/bmpsrad4","slide":6,"bbox":[640,275,168,7]}
+{"kind":"textbox","id":"sh/alwripcj","slide":6,"text":"04","textPreview":"04","textChars":2,"textLines":1,"bbox":[656,300,45,30]}
+{"kind":"textbox","id":"sh/xo7atkva","slide":6,"text":"DECIDE","textPreview":"DECIDE","textChars":6,"textLines":1,"bbox":[656,346,145,31]}
+{"kind":"textbox","id":"sh/wny9kfup","slide":6,"text":"Models plus deterministic rules","textPreview":"Models plus deterministic rules","textChars":31,"textLines":1,"bbox":[656,394,143,67]}
+{"kind":"textbox","id":"sh/ny5snad8","slide":6,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[808,350,22,38]}
+{"kind":"shape","id":"sh/mxwre5cn","slide":6,"bbox":[830,275,168,200]}
+{"kind":"shape","id":"sh/c3upobal","slide":6,"bbox":[830,275,168,7]}
+{"kind":"textbox","id":"sh/d436xgb6","slide":6,"text":"05","textPreview":"05","textChars":2,"textLines":1,"bbox":[846,300,45,30]}
+{"kind":"textbox","id":"sh/q1s7m1sf","slide":6,"text":"REVIEW","textPreview":"REVIEW","textChars":6,"textLines":1,"bbox":[846,346,145,31]}
+{"kind":"textbox","id":"sh/r21ov6t0","slide":6,"text":"Staff resolve exceptions","textPreview":"Staff resolve exceptions","textChars":24,"textLines":1,"bbox":[846,394,143,67]}
+{"kind":"textbox","id":"sh/0rupsbah","slide":6,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[998,350,22,38]}
+{"kind":"shape","id":"sh/1s3q1gb2","slide":6,"bbox":[1020,275,168,200]}
+{"kind":"shape","id":"sh/e5c7qlsb","slide":6,"bbox":[1020,275,168,7]}
+{"kind":"textbox","id":"sh/zql8zqtw","slide":6,"text":"06","textPreview":"06","textChars":2,"textLines":1,"bbox":[1036,300,45,30]}
+{"kind":"textbox","id":"sh/gvapgrad","slide":6,"text":"DELIVER","textPreview":"DELIVER","textChars":7,"textLines":1,"bbox":[1036,346,145,31]}
+{"kind":"textbox","id":"sh/hwj6pwby","slide":6,"text":"Records, reports or actions","textPreview":"Records, reports or actions","textChars":27,"textLines":1,"bbox":[1036,394,143,67]}
+{"kind":"shape","id":"sh/9svypwb2","slide":6,"bbox":[70,519,1108,90]}
+{"kind":"textbox","id":"sh/8rmhwrah","slide":6,"text":"Built to handle retries, invalid inputs and partial failure — with state your team can see.","textPreview":"Built to handle retries, invalid inputs and partial failure — with state your team can see.","textChars":91,"textLines":1,"bbox":[93,537,1058,56]}
+{"kind":"shape","id":"sh/nqtgnmtw","slide":6,"bbox":[70,673,1140,0]}
+{"kind":"textbox","id":"sh/mpkzuhsb","slide":6,"text":"HASHCASE  /  CLIENT CAPABILITIES","textPreview":"HASHCASE  /  CLIENT CAPABILITIES","textChars":32,"textLines":1,"bbox":[70,681,950,15]}
+{"kind":"textbox","id":"sh/lobylcb6","slide":6,"text":"06","textPreview":"06","textChars":2,"textLines":1,"bbox":[1168,680,40,17]}
+{"kind":"notes","id":"nt/yvzr36","slide":6,"text":"Representative architecture based on implemented DGIPR intake, content generation, review and job orchestration components. Sources: apps/api/src/jobs/document-intake.ts; packages/content-engine/src/intake; packages/content-engine/src/generation; HashCase Executive Note."}
+{"kind":"slide","id":"sl/3f9jr4","slide":7,"title":"WORKFLOWS WE CAN BUILD","textShapes":21}
+{"kind":"textbox","id":"sh/qtonmlwj","slide":7,"text":"WORKFLOWS WE CAN BUILD","textPreview":"WORKFLOWS WE CAN BUILD","textChars":22,"textLines":1,"bbox":[70,45,1000,20]}
+{"kind":"textbox","id":"sh/dwfmh0fu","slide":7,"text":"07","textPreview":"07","textChars":2,"textLines":1,"bbox":[1172,44,40,24]}
+{"kind":"textbox","id":"sh/cv65ove9","slide":7,"text":"Built around your documents, decisions and systems","textPreview":"Built around your documents, decisions and systems","textChars":50,"textLines":1,"bbox":[70,85,1135,105]}
+{"kind":"shape","id":"sh/3qd4bqxs","slide":7,"bbox":[70,208,1140,89]}
+{"kind":"shape","id":"sh/2p4nilw7","slide":7,"bbox":[70,208,6,89]}
+{"kind":"textbox","id":"sh/psfmd0fy","slide":7,"text":"DOCUMENT OPERATIONS","textPreview":"DOCUMENT OPERATIONS","textChars":19,"textLines":1,"bbox":[94,226,312,32]}
+{"kind":"textbox","id":"sh/4r65kved","slide":7,"text":"PDFs, scans, forms and attachments","textPreview":"PDFs, scans, forms and attachments","textChars":34,"textLines":1,"bbox":[422,225,315,56]}
+{"kind":"textbox","id":"sh/f2d476xw","slide":7,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[759,228,40,35]}
+{"kind":"textbox","id":"sh/u143e1gb","slide":7,"text":"Validated fields, review-ready records and exception queues","textPreview":"Validated fields, review-ready records and exception queues","textChars":59,"textLines":1,"bbox":[824,223,354,62]}
+{"kind":"shape","id":"sh/kzy5k7yp","slide":7,"bbox":[70,312,1140,89]}
+{"kind":"shape","id":"sh/l07mtcza","slide":7,"bbox":[70,312,6,89]}
+{"kind":"textbox","id":"sh/yxgnihgj","slide":7,"text":"KNOWLEDGE WORK","textPreview":"KNOWLEDGE WORK","textChars":14,"textLines":1,"bbox":[94,330,312,32]}
+{"kind":"textbox","id":"sh/jyp4r2h4","slide":7,"text":"Approved internal policies and reference material","textPreview":"Approved internal policies and reference material","textChars":49,"textLines":1,"bbox":[422,329,315,56]}
+{"kind":"textbox","id":"sh/wby5g7it","slide":7,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[759,332,40,35]}
+{"kind":"textbox","id":"sh/xc7mpcze","slide":7,"text":"Sourced answers, reports and reusable institutional knowledge","textPreview":"Sourced answers, reports and reusable institutional knowledge","textChars":61,"textLines":1,"bbox":[824,327,354,62]}
+{"kind":"shape","id":"sh/a9wnex0n","slide":7,"bbox":[70,416,1140,89]}
+{"kind":"shape","id":"sh/ba54n2h8","slide":7,"bbox":[70,416,6,89]}
+{"kind":"textbox","id":"sh/g7i5sryx","slide":7,"text":"MULTI-SYSTEM OPERATIONS","textPreview":"MULTI-SYSTEM OPERATIONS","textChars":23,"textLines":1,"bbox":[94,434,312,32]}
+{"kind":"textbox","id":"sh/h8r61wzi","slide":7,"text":"Requests, business APIs and approval chains","textPreview":"Requests, business APIs and approval chains","textChars":43,"textLines":1,"bbox":[422,433,315,56]}
+{"kind":"textbox","id":"sh/ponm5wrm","slide":7,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[759,436,40,35]}
+{"kind":"textbox","id":"sh/one5crq1","slide":7,"text":"Tracked actions, recovery from partial failure and clear ownership","textPreview":"Tracked actions, recovery from partial failure and clear ownership","textChars":66,"textLines":1,"bbox":[824,431,354,62]}
+{"kind":"shape","id":"sh/3m543m9g","slide":7,"bbox":[70,520,1140,89]}
+{"kind":"shape","id":"sh/2lwnah8v","slide":7,"bbox":[70,520,6,89]}
+{"kind":"textbox","id":"sh/1knmhcrq","slide":7,"text":"MULTIMODAL PRODUCTION","textPreview":"MULTIMODAL PRODUCTION","textChars":21,"textLines":1,"bbox":[94,538,312,32]}
+{"kind":"textbox","id":"sh/gje58rq5","slide":7,"text":"Audio, notes, images and source documents","textPreview":"Audio, notes, images and source documents","textChars":41,"textLines":1,"bbox":[422,537,315,56]}
+{"kind":"textbox","id":"sh/fi54fm9k","slide":7,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[759,540,40,35]}
+{"kind":"textbox","id":"sh/uxwn6h8z","slide":7,"text":"Multilingual text and approved visual or video assets","textPreview":"Multilingual text and approved visual or video assets","textChars":53,"textLines":1,"bbox":[824,535,354,62]}
+{"kind":"shape","id":"sh/tw3mdcre","slide":7,"bbox":[70,673,1140,0]}
+{"kind":"textbox","id":"sh/svu547qt","slide":7,"text":"HASHCASE  /  CLIENT CAPABILITIES","textPreview":"HASHCASE  /  CLIENT CAPABILITIES","textChars":32,"textLines":1,"bbox":[70,681,950,15]}
+{"kind":"textbox","id":"sh/i1sjedor","slide":7,"text":"07","textPreview":"07","textChars":2,"textLines":1,"bbox":[1168,680,40,17]}
+{"kind":"notes","id":"nt/3f9jr4","slide":7,"text":"Client workflow patterns from HashCase Executive Note. These are scope examples rather than claims of identical prior deployments."}
+{"kind":"slide","id":"sl/cypo9r","slide":8,"title":"02  PRIVATE AI DEPLOYMENT","textShapes":6}
+{"kind":"shape","id":"sh/zadkzutw","slide":8,"bbox":[0,0,570,720]}
+{"kind":"textbox","id":"sh/e94369cb","slide":8,"text":"02  PRIVATE AI DEPLOYMENT","textPreview":"02  PRIVATE AI DEPLOYMENT","textChars":25,"textLines":1,"bbox":[70,45,1000,20]}
+{"kind":"textbox","id":"sh/d8v2x4bq","slide":8,"text":"08","textPreview":"08","textChars":2,"textLines":1,"bbox":[1172,44,40,24]}
+{"kind":"textbox","id":"sh/c7ml4zu5","slide":8,"text":"Your AI stays\ninside your\nboundary.","textPreview":"Your AI stays | inside your | boundary.","textChars":35,"textLines":3,"bbox":[70,130,475,230]}
+{"kind":"textbox","id":"sh/r6dkvutk","slide":8,"text":"We deploy inference, retrieval and approved model adaptation in infrastructure you control.","textPreview":"We deploy inference, retrieval and approved model adaptation in infrastructure you control.","textChars":91,"textLines":1,"bbox":[71,400,445,95]}
+{"kind":"textbox","id":"sh/q5k32pcz","slide":8,"text":"Data paths, identity, network egress and logs are specified and tested for the deployment.","textPreview":"Data paths, identity, network egress and logs are specified and tested for the deployment.","textChars":90,"textLines":1,"bbox":[71,534,455,67]}
+{"kind":"textbox","id":"sh/p4b2tkbu","slide":8,"text":"PRIVATE DEPLOYMENT  /  CLIENT-SPECIFIC DESIGN","textPreview":"PRIVATE DEPLOYMENT  /  CLIENT-SPECIFIC DESIGN","textChars":45,"textLines":1,"bbox":[71,656,460,18]}
+{"kind":"image","id":"im/98f6xc7i","slide":8,"name":"","alt":"Private data center engineer inspecting server infrastructure","bbox":[538,0,742,720]}
+{"kind":"notes","id":"nt/cypo9r","slide":8,"text":"Original data center photograph generated for this presentation. Private deployment design comes from HashCase Executive Note and is a proposed offering, not a description of the current DGIPR deployment."}
+{"kind":"slide","id":"sl/tkcmkr","slide":9,"title":"PRIVATE DEPLOYMENT ARCHITECTURE","textShapes":28}
+{"kind":"textbox","id":"sh/qd83uhgv","slide":9,"text":"PRIVATE DEPLOYMENT ARCHITECTURE","textPreview":"PRIVATE DEPLOYMENT ARCHITECTURE","textChars":31,"textLines":1,"bbox":[70,45,1000,20]}
+{"kind":"textbox","id":"sh/dgz2pcz6","slide":9,"text":"09","textPreview":"09","textChars":2,"textLines":1,"bbox":[1172,44,40,24]}
+{"kind":"textbox","id":"sh/cfqlw7yl","slide":9,"text":"A data boundary you can inspect","textPreview":"A data boundary you can inspect","textChars":31,"textLines":1,"bbox":[70,85,1135,105]}
+{"kind":"textbox","id":"sh/z21krmhc","slide":9,"text":"The exact boundary is mapped to your infrastructure, access model and approved integrations.","textPreview":"The exact boundary is mapped to your infrastructure, access model and approved integrations.","textChars":92,"textLines":1,"bbox":[71,188,1120,43]}
+{"kind":"shape","id":"sh/y183yhgr","slide":9,"bbox":[70,255,250,309]}
+{"kind":"textbox","id":"sh/l4j2twzi","slide":9,"text":"CLIENT SOURCES","textPreview":"CLIENT SOURCES","textChars":14,"textLines":1,"bbox":[92,279,205,27]}
+{"kind":"shape","id":"sh/03al0ryx","slide":9,"bbox":[91,326,207,38]}
+{"kind":"textbox","id":"sh/f6xkfih8","slide":9,"text":"Documents and media","textPreview":"Documents and media","textChars":19,"textLines":1,"bbox":[102,332,190,26]}
+{"kind":"shape","id":"sh/ulojmdgn","slide":9,"bbox":[91,375,207,38]}
+{"kind":"textbox","id":"sh/03mpc3ed","slide":9,"text":"Internal systems","textPreview":"Internal systems","textChars":16,"textLines":1,"bbox":[102,381,190,26]}
+{"kind":"shape","id":"sh/l4v6l8fy","slide":9,"bbox":[91,424,207,38]}
+{"kind":"textbox","id":"sh/y147atw7","slide":9,"text":"Approved training data","textPreview":"Approved training data","textChars":22,"textLines":1,"bbox":[102,430,190,26]}
+{"kind":"shape","id":"sh/z2dojyxs","slide":9,"bbox":[91,473,207,38]}
+{"kind":"textbox","id":"sh/8r6pgne9","slide":9,"text":"Policies and reference","textPreview":"Policies and reference","textChars":22,"textLines":1,"bbox":[102,479,190,26]}
+{"kind":"textbox","id":"sh/9sf6psfu","slide":9,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[327,385,51,45]}
+{"kind":"shape","id":"sh/m547edw3","slide":9,"bbox":[385,255,555,309]}
+{"kind":"textbox","id":"sh/nqxonixo","slide":9,"text":"CLIENT-CONTROLLED ENVIRONMENT","textPreview":"CLIENT-CONTROLLED ENVIRONMENT","textChars":29,"textLines":1,"bbox":[410,278,500,29]}
+{"kind":"shape","id":"sh/ov2p4je5","slide":9,"bbox":[408,331,230,82]}
+{"kind":"textbox","id":"sh/pwb6dofq","slide":9,"text":"MODEL INFERENCE","textPreview":"MODEL INFERENCE","textChars":15,"textLines":1,"bbox":[421,344,210,23]}
+{"kind":"textbox","id":"sh/5gjelg32","slide":9,"text":"Selected open-weight models","textPreview":"Selected open-weight models","textChars":27,"textLines":1,"bbox":[421,374,210,27]}
+{"kind":"shape","id":"sh/kfadsb2h","slide":9,"bbox":[664,331,230,82]}
+{"kind":"textbox","id":"sh/je1wjqlc","slide":9,"text":"PRIVATE RETRIEVAL","textPreview":"PRIVATE RETRIEVAL","textChars":17,"textLines":1,"bbox":[677,344,210,23]}
+{"kind":"textbox","id":"sh/idsvqlkr","slide":9,"text":"Indexes and grounding","textPreview":"Indexes and grounding","textChars":21,"textLines":1,"bbox":[677,374,210,27]}
+{"kind":"shape","id":"sh/tk3ep03e","slide":9,"bbox":[408,431,230,82]}
+{"kind":"textbox","id":"sh/sjudwv2t","slide":9,"text":"ADAPTATION","textPreview":"ADAPTATION","textChars":10,"textLines":1,"bbox":[421,444,210,23]}
+{"kind":"textbox","id":"sh/7ilwnql8","slide":9,"text":"Approved examples and versions","textPreview":"Approved examples and versions","textChars":30,"textLines":1,"bbox":[421,474,210,27]}
+{"kind":"shape","id":"sh/6hcvulkn","slide":9,"bbox":[664,431,230,82]}
+{"kind":"textbox","id":"sh/18net03a","slide":9,"text":"CONTROL PLANE","textPreview":"CONTROL PLANE","textChars":13,"textLines":1,"bbox":[677,444,210,23]}
+{"kind":"textbox","id":"sh/gnud0v2p","slide":9,"text":"Identity, logging and rollback","textPreview":"Identity, logging and rollback","textChars":30,"textLines":1,"bbox":[677,474,210,27]}
+{"kind":"textbox","id":"sh/ytobux07","slide":9,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[948,385,50,45]}
+{"kind":"shape","id":"sh/zuxsn21s","slide":9,"bbox":[1005,255,205,309]}
+{"kind":"textbox","id":"sh/0v6tw7id","slide":9,"text":"APPROVED\nOUTPUTS","textPreview":"APPROVED | OUTPUTS","textChars":16,"textLines":2,"bbox":[1026,279,165,62]}
+{"kind":"textbox","id":"sh/lwfapcjy","slide":9,"text":"• Reviewed answers","textPreview":"• Reviewed answers","textChars":18,"textLines":1,"bbox":[1026,364,166,32]}
+{"kind":"textbox","id":"sh/mxobyh0j","slide":9,"text":"• System actions","textPreview":"• System actions","textChars":16,"textLines":1,"bbox":[1026,406,166,32]}
+{"kind":"textbox","id":"sh/nihsrm14","slide":9,"text":"• Exportable records","textPreview":"• Exportable records","textChars":20,"textLines":1,"bbox":[1026,448,166,32]}
+{"kind":"textbox","id":"sh/8jqt0ri9","slide":9,"text":"• Audit evidence","textPreview":"• Audit evidence","textChars":16,"textLines":1,"bbox":[1026,490,166,32]}
+{"kind":"shape","id":"sh/9kzatcju","slide":9,"bbox":[70,590,1140,48]}
+{"kind":"textbox","id":"sh/al8b2h0f","slide":9,"text":"Unapproved external model calls are blocked by policy when the agreed private boundary requires it.","textPreview":"Unapproved external model calls are blocked by policy when the agreed private boundary requires it.","textChars":99,"textLines":1,"bbox":[89,599,1100,32]}
+{"kind":"shape","id":"sh/vmhsvm10","slide":9,"bbox":[70,673,1140,0]}
+{"kind":"textbox","id":"sh/jidsfmt4","slide":9,"text":"HASHCASE  /  CLIENT CAPABILITIES","textPreview":"HASHCASE  /  CLIENT CAPABILITIES","textChars":32,"textLines":1,"bbox":[70,681,950,15]}
+{"kind":"textbox","id":"sh/ih4b6hsj","slide":9,"text":"09","textPreview":"09","textChars":2,"textLines":1,"bbox":[1168,680,40,17]}
+{"kind":"notes","id":"nt/tkcmkr","slide":9,"text":"Conceptual reference architecture based on HashCase Executive Note, private deployment section. Actual security controls, data flow and egress policy require client-specific design and verification."}
+{"kind":"slide","id":"sl/mpvlm3","slide":10,"title":"EVALUATION AND ASSURANCE","textShapes":21}
+{"kind":"textbox","id":"sh/7udgv2xs","slide":10,"text":"EVALUATION AND ASSURANCE","textPreview":"EVALUATION AND ASSURANCE","textChars":24,"textLines":1,"bbox":[70,45,1000,20]}
+{"kind":"textbox","id":"sh/svmx47ed","slide":10,"text":"10","textPreview":"10","textChars":2,"textLines":1,"bbox":[1172,44,40,24]}
+{"kind":"textbox","id":"sh/twvyxsfy","slide":10,"text":"Quality is tested at every layer","textPreview":"Quality is tested at every layer","textChars":32,"textLines":1,"bbox":[70,85,1135,105]}
+{"kind":"shape","id":"sh/ux4f6xw3","slide":10,"bbox":[70,284,1140,0]}
+{"kind":"textbox","id":"sh/fydgz2do","slide":10,"text":"01","textPreview":"01","textChars":2,"textLines":1,"bbox":[70,221,64,39]}
+{"kind":"textbox","id":"sh/gzmx87e9","slide":10,"text":"PROGRAMMATIC","textPreview":"PROGRAMMATIC","textChars":12,"textLines":1,"bbox":[151,221,265,38]}
+{"kind":"textbox","id":"sh/hkvy1cvu","slide":10,"text":"Schemas, identifiers, numbers and safe state transitions","textPreview":"Schemas, identifiers, numbers and safe state transitions","textChars":56,"textLines":1,"bbox":[454,219,735,48]}
+{"kind":"shape","id":"sh/2l4fahwf","slide":10,"bbox":[70,366,1140,0]}
+{"kind":"textbox","id":"sh/3mxg3md0","slide":10,"text":"02","textPreview":"02","textChars":2,"textLines":1,"bbox":[70,303,64,39]}
+{"kind":"textbox","id":"sh/32x8ra9c","slide":10,"text":"CONTENT","textPreview":"CONTENT","textChars":7,"textLines":1,"bbox":[151,303,265,38]}
+{"kind":"textbox","id":"sh/2hori5sr","slide":10,"text":"Source coverage, claim support, language rubrics and terminology","textPreview":"Source coverage, claim support, language rubrics and terminology","textChars":64,"textLines":1,"bbox":[454,301,735,48]}
+{"kind":"shape","id":"sh/p4fqtkri","slide":10,"bbox":[70,448,1140,0]}
+{"kind":"textbox","id":"sh/4369kfax","slide":10,"text":"03","textPreview":"03","textChars":2,"textLines":1,"bbox":[70,385,64,39]}
+{"kind":"textbox","id":"sh/fex8nq9g","slide":10,"text":"TRAJECTORY","textPreview":"TRAJECTORY","textChars":10,"textLines":1,"bbox":[151,385,265,38]}
+{"kind":"textbox","id":"sh/ud4re5sv","slide":10,"text":"Tool choices, arguments, loops and final system state","textPreview":"Tool choices, arguments, loops and final system state","textChars":53,"textLines":1,"bbox":[454,383,735,48]}
+{"kind":"shape","id":"sh/hgfqp0r6","slide":10,"bbox":[70,530,1140,0]}
+{"kind":"textbox","id":"sh/gf69gval","slide":10,"text":"04","textPreview":"04","textChars":2,"textLines":1,"bbox":[70,467,64,39]}
+{"kind":"textbox","id":"sh/zahszu9k","slide":10,"text":"FAILURE CASES","textPreview":"FAILURE CASES","textChars":13,"textLines":1,"bbox":[151,467,265,38]}
+{"kind":"textbox","id":"sh/e98rqpsz","slide":10,"text":"Conflicts, malformed inputs, timeouts and recovery","textPreview":"Conflicts, malformed inputs, timeouts and recovery","textChars":50,"textLines":1,"bbox":[454,465,735,48]}
+{"kind":"shape","id":"sh/a5cbitc7","slide":10,"bbox":[70,612,1140,0]}
+{"kind":"textbox","id":"sh/b6lcryts","slide":10,"text":"05","textPreview":"05","textChars":2,"textLines":1,"bbox":[70,549,64,39]}
+{"kind":"textbox","id":"sh/wrutk3ud","slide":10,"text":"OPERATIONS","textPreview":"OPERATIONS","textChars":10,"textLines":1,"bbox":[151,549,265,38]}
+{"kind":"textbox","id":"sh/xs3ut8by","slide":10,"text":"Latency, throughput, task cost and regression after change","textPreview":"Latency, throughput, task cost and regression after change","textChars":58,"textLines":1,"bbox":[454,547,735,48]}
+{"kind":"shape","id":"sh/ytcvmdc3","slide":10,"bbox":[70,620,1140,40]}
+{"kind":"textbox","id":"sh/julcvyto","slide":10,"text":"The client sees acceptance evidence, release criteria and the rollback path.","textPreview":"The client sees acceptance evidence, release criteria and the rollback path.","textChars":76,"textLines":1,"bbox":[85,627,1100,26]}
+{"kind":"shape","id":"sh/kvudo3u9","slide":10,"bbox":[70,673,1140,0]}
+{"kind":"textbox","id":"sh/lwnux8bu","slide":10,"text":"HASHCASE  /  CLIENT CAPABILITIES","textPreview":"HASHCASE  /  CLIENT CAPABILITIES","textChars":32,"textLines":1,"bbox":[70,681,950,15]}
+{"kind":"textbox","id":"sh/exsba9cz","slide":10,"text":"10","textPreview":"10","textChars":2,"textLines":1,"bbox":[1168,680,40,17]}
+{"kind":"notes","id":"nt/mpvlm3","slide":10,"text":"Evaluation categories grounded in HashCase Executive Note and DGIPR code including packages/content-engine/src/generation/verify-coverage.ts and packages/content-engine/src/finetune/eval-model.ts. Thresholds are defined per client workflow."}
+{"kind":"slide","id":"sl/8w9q0s","slide":11,"title":"HUMAN CONTROL","textShapes":16}
+{"kind":"textbox","id":"sh/4jix4zeh","slide":11,"text":"HUMAN CONTROL","textPreview":"HUMAN CONTROL","textChars":13,"textLines":1,"bbox":[70,45,1000,20]}
+{"kind":"textbox","id":"sh/3y9wbuxc","slide":11,"text":"11","textPreview":"11","textChars":2,"textLines":1,"bbox":[1172,44,40,24]}
+{"kind":"textbox","id":"sh/ix0f2pwr","slide":11,"text":"Keep consequential decisions with your team","textPreview":"Keep consequential decisions with your team","textChars":43,"textLines":1,"bbox":[70,85,1135,105]}
+{"kind":"textbox","id":"sh/hwre9kf6","slide":11,"text":"We place approval gates where a wrong fact or outward action would matter.","textPreview":"We place approval gates where a wrong fact or outward action would matter.","textChars":74,"textLines":1,"bbox":[71,187,1100,42]}
+{"kind":"shape","id":"sh/gvix0fel","slide":11,"bbox":[70,274,359,277]}
+{"kind":"textbox","id":"sh/vu9w7ux0","slide":11,"text":"01","textPreview":"01","textChars":2,"textLines":1,"bbox":[92,296,60,36]}
+{"kind":"textbox","id":"sh/ut0fypwf","slide":11,"text":"CORRECT THE SOURCE","textPreview":"CORRECT THE SOURCE","textChars":18,"textLines":1,"bbox":[92,356,310,39]}
+{"kind":"textbox","id":"sh/1svylova","slide":11,"text":"Staff inspect extracted text, names and fields before generation.","textPreview":"Staff inspect extracted text, names and fields before generation.","textChars":65,"textLines":1,"bbox":[92,419,304,91]}
+{"kind":"shape","id":"sh/0r2xcjep","slide":11,"bbox":[451,274,359,277]}
+{"kind":"textbox","id":"sh/m1cbm9wf","slide":11,"text":"02","textPreview":"02","textChars":2,"textLines":1,"bbox":[473,296,60,36]}
+{"kind":"textbox","id":"sh/n2lsvex0","slide":11,"text":"REVIEW THE RESULT","textPreview":"REVIEW THE RESULT","textChars":17,"textLines":1,"bbox":[473,356,310,39]}
+{"kind":"textbox","id":"sh/o3etojel","slide":11,"text":"The draft carries evidence, exceptions and editable output.","textPreview":"The draft carries evidence, exceptions and editable output.","textChars":59,"textLines":1,"bbox":[473,419,304,91]}
+{"kind":"shape","id":"sh/94naxof6","slide":11,"bbox":[832,274,359,277]}
+{"kind":"textbox","id":"sh/edcri9wj","slide":11,"text":"03","textPreview":"03","textChars":2,"textLines":1,"bbox":[854,296,60,36]}
+{"kind":"textbox","id":"sh/zelsrexo","slide":11,"text":"APPROVE THE ACTION","textPreview":"APPROVE THE ACTION","textChars":18,"textLines":1,"bbox":[854,356,310,39]}
+{"kind":"textbox","id":"sh/0futkje9","slide":11,"text":"Publication or system changes follow the client’s authority rules.","textPreview":"Publication or system changes follow the client’s authority rules.","textChars":66,"textLines":1,"bbox":[854,419,304,91]}
+{"kind":"textbox","id":"sh/1g3atofu","slide":11,"text":"The approval design can differ by task: staff may review every output, only exceptions, or only outward actions.","textPreview":"The approval design can differ by task: staff may review every output, only exceptions, or only outward actions.","textChars":112,"textLines":1,"bbox":[70,584,1130,48]}
+{"kind":"shape","id":"sh/i9wbudwn","slide":11,"bbox":[70,673,1140,0]}
+{"kind":"textbox","id":"sh/ja5s3yx8","slide":11,"text":"HASHCASE  /  CLIENT CAPABILITIES","textPreview":"HASHCASE  /  CLIENT CAPABILITIES","textChars":32,"textLines":1,"bbox":[70,681,950,15]}
+{"kind":"textbox","id":"sh/feh8vqdk","slide":11,"text":"11","textPreview":"11","textChars":2,"textLines":1,"bbox":[1168,680,40,17]}
+{"kind":"notes","id":"nt/8w9q0s","slide":11,"text":"Based on implemented DGIPR correction and publishing gates, plus configurable client workflow design. The three-step visual is an illustrative pattern."}
+{"kind":"slide","id":"sl/db8rji","slide":12,"title":"PROOF FROM A DEMANDING ENVIRONMENT","textShapes":26}
+{"kind":"textbox","id":"sh/1o7mlg7u","slide":12,"text":"PROOF FROM A DEMANDING ENVIRONMENT","textPreview":"PROOF FROM A DEMANDING ENVIRONMENT","textChars":34,"textLines":1,"bbox":[70,45,1000,20]}
+{"kind":"textbox","id":"sh/elg3q183","slide":12,"text":"12","textPreview":"12","textChars":2,"textLines":1,"bbox":[1172,44,40,24]}
+{"kind":"textbox","id":"sh/zmp4j6po","slide":12,"text":"Official inputs to reviewed public communication","textPreview":"Official inputs to reviewed public communication","textChars":48,"textLines":1,"bbox":[70,85,1135,105]}
+{"kind":"textbox","id":"sh/sjelorqx","slide":12,"text":"For Maharashtra Government DGIPR, HashCase built a Marathi-first platform in production use.","textPreview":"For Maharashtra Government DGIPR, HashCase built a Marathi-first platform in production use.","textChars":92,"textLines":1,"bbox":[71,188,1130,45]}
+{"kind":"shape","id":"sh/dk7mhw7i","slide":12,"bbox":[70,253,291,256]}
+{"kind":"textbox","id":"sh/qxw3mh87","slide":12,"text":"SOURCE MATERIAL","textPreview":"SOURCE MATERIAL","textChars":15,"textLines":1,"bbox":[91,274,243,28]}
+{"kind":"textbox","id":"sh/ri54fmps","slide":12,"text":"• Official notes and resolutions","textPreview":"• Official notes and resolutions","textChars":32,"textLines":1,"bbox":[91,325,245,40]}
+{"kind":"textbox","id":"sh/4velkrq1","slide":12,"text":"• Audio and scanned documents","textPreview":"• Audio and scanned documents","textChars":29,"textLines":1,"bbox":[91,378,245,40]}
+{"kind":"textbox","id":"sh/5wnmdc7m","slide":12,"text":"• Video source material","textPreview":"• Video source material","textChars":23,"textLines":1,"bbox":[91,431,245,40]}
+{"kind":"textbox","id":"sh/d8re94fy","slide":12,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[371,354,42,44]}
+{"kind":"shape","id":"sh/s7yd0zyd","slide":12,"bbox":[425,253,426,256]}
+{"kind":"textbox","id":"sh/r6pw7uxs","slide":12,"text":"HASHCASE WORKFLOW","textPreview":"HASHCASE WORKFLOW","textChars":17,"textLines":1,"bbox":[447,274,380,28]}
+{"kind":"textbox","id":"sh/65gvypg7","slide":12,"text":"INTAKE","textPreview":"INTAKE","textChars":6,"textLines":1,"bbox":[447,322,130,27]}
+{"kind":"textbox","id":"sh/547u5kf2","slide":12,"text":"Extraction and entity review","textPreview":"Extraction and entity review","textChars":28,"textLines":1,"bbox":[582,320,245,39]}
+{"kind":"textbox","id":"sh/43ydwfyh","slide":12,"text":"GROUNDING","textPreview":"GROUNDING","textChars":9,"textLines":1,"bbox":[447,377,130,27]}
+{"kind":"textbox","id":"sh/j2pc3axw","slide":12,"text":"Official facts, separate style references","textPreview":"Official facts, separate style references","textChars":41,"textLines":1,"bbox":[582,375,245,39]}
+{"kind":"textbox","id":"sh/i1gvupgb","slide":12,"text":"PRODUCTION","textPreview":"PRODUCTION","textChars":10,"textLines":1,"bbox":[447,432,130,27]}
+{"kind":"textbox","id":"sh/h07u1kfq","slide":12,"text":"Generation, validation and officer edits","textPreview":"Generation, validation and officer edits","textChars":40,"textLines":1,"bbox":[582,430,245,39]}
+{"kind":"textbox","id":"sh/wzedsfy5","slide":12,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[860,354,42,44]}
+{"kind":"shape","id":"sh/8jid8f61","slide":12,"bbox":[914,253,296,256]}
+{"kind":"textbox","id":"sh/9krehknm","slide":12,"text":"REVIEWED OUTPUTS","textPreview":"REVIEWED OUTPUTS","textChars":16,"textLines":1,"bbox":[935,274,253,28]}
+{"kind":"textbox","id":"sh/mh0v65ov","slide":12,"text":"• Marathi articles","textPreview":"• Marathi articles","textChars":18,"textLines":1,"bbox":[935,317,250,34]}
+{"kind":"textbox","id":"sh/ni9wfa5g","slide":12,"text":"• Translations","textPreview":"• Translations","textChars":14,"textLines":1,"bbox":[935,359,250,34]}
+{"kind":"textbox","id":"sh/0fid4v65","slide":12,"text":"• Branded creatives","textPreview":"• Branded creatives","textChars":19,"textLines":1,"bbox":[935,401,250,34]}
+{"kind":"textbox","id":"sh/lgred07a","slide":12,"text":"• Explainer videos","textPreview":"• Explainer videos","textChars":18,"textLines":1,"bbox":[935,443,250,34]}
+{"kind":"shape","id":"sh/ydgv25oz","slide":12,"bbox":[70,538,1140,71]}
+{"kind":"textbox","id":"sh/ze9cbapk","slide":12,"text":"Safeguards include tracked jobs, verified names and terminology, source checks, schema rules and officer approval.","textPreview":"Safeguards include tracked jobs, verified names and terminology, source checks, schema rules and officer approval.","textChars":114,"textLines":1,"bbox":[88,549,1097,52]}
+{"kind":"textbox","id":"sh/kb2dgz69","slide":12,"text":"Current DGIPR workflows use approved external AI services for several tasks. Private deployment is a separate offering.","textPreview":"Current DGIPR workflows use approved external AI services for several tasks. Private deployment is a separate offering.","textChars":119,"textLines":1,"bbox":[71,621,1126,27]}
+{"kind":"shape","id":"sh/5cbep4nu","slide":12,"bbox":[70,673,1140,0]}
+{"kind":"textbox","id":"sh/f6xgfypw","slide":12,"text":"HASHCASE  /  CLIENT CAPABILITIES","textPreview":"HASHCASE  /  CLIENT CAPABILITIES","textChars":32,"textLines":1,"bbox":[70,681,950,15]}
+{"kind":"textbox","id":"sh/e5oz6t8b","slide":12,"text":"12","textPreview":"12","textChars":2,"textLines":1,"bbox":[1168,680,40,17]}
+{"kind":"notes","id":"nt/db8rji","slide":12,"text":"Sources: docs/CASE_STUDY.md; AGENTS.md current phase; apps/api/src/jobs/document-intake.ts; packages/content-engine/src/generation/generate-article.ts; packages/content-engine/src/generation/verify-coverage.ts; HashCase Executive Note. Current DGIPR architecture uses external AI providers in several flows and is not represented as on-prem."}
+{"kind":"slide","id":"sl/yn6tvb","slide":13,"title":"A PRACTICAL START","textShapes":23}
+{"kind":"textbox","id":"sh/5g3qpcne","slide":13,"text":"A PRACTICAL START","textPreview":"A PRACTICAL START","textChars":17,"textLines":1,"bbox":[70,45,1000,20]}
+{"kind":"textbox","id":"sh/its7uh4n","slide":13,"text":"13","textPreview":"13","textChars":2,"textLines":1,"bbox":[1172,44,40,24]}
+{"kind":"textbox","id":"sh/3e1on258","slide":13,"text":"Start with one high-value workflow","textPreview":"Start with one high-value workflow","textChars":34,"textLines":1,"bbox":[70,85,1135,105]}
+{"kind":"textbox","id":"sh/graps7mx","slide":13,"text":"We agree on the work to automate, the data boundary and the evidence required before expansion.","textPreview":"We agree on the work to automate, the data boundary and the evidence required before expansion.","textChars":95,"textLines":1,"bbox":[71,190,1120,56]}
+{"kind":"shape","id":"sh/hsj6lcni","slide":13,"bbox":[70,277,265,290]}
+{"kind":"textbox","id":"sh/ups7qx4r","slide":13,"text":"01","textPreview":"01","textChars":2,"textLines":1,"bbox":[90,295,65,38]}
+{"kind":"textbox","id":"sh/vq1oj25c","slide":13,"text":"MAP","textPreview":"MAP","textChars":3,"textLines":1,"bbox":[90,351,222,35]}
+{"kind":"textbox","id":"sh/8naponml","slide":13,"text":"Source systems, decisions, handoffs and cost of errors","textPreview":"Source systems, decisions, handoffs and cost of errors","textChars":54,"textLines":1,"bbox":[90,401,221,82]}
+{"kind":"shape","id":"sh/toj6hsn6","slide":13,"bbox":[90,493,224,0]}
+{"kind":"textbox","id":"sh/l8ju1g36","slide":13,"text":"Workflow map + acceptance cases","textPreview":"Workflow map + acceptance cases","textChars":31,"textLines":1,"bbox":[90,506,223,45]}
+{"kind":"shape","id":"sh/k7atsvm1","slide":13,"bbox":[356,277,265,290]}
+{"kind":"textbox","id":"sh/z61czqlg","slide":13,"text":"02","textPreview":"02","textChars":2,"textLines":1,"bbox":[376,295,65,38]}
+{"kind":"textbox","id":"sh/y5sbql4v","slide":13,"text":"BUILD","textPreview":"BUILD","textChars":5,"textLines":1,"bbox":[376,351,222,35]}
+{"kind":"textbox","id":"sh/d4zaxg3a","slide":13,"text":"Intake, model, rules, review and integration in a working pilot","textPreview":"Intake, model, rules, review and integration in a working pilot","textChars":63,"textLines":1,"bbox":[376,401,221,82]}
+{"kind":"shape","id":"sh/cjqtobmp","slide":13,"bbox":[376,493,224,0]}
+{"kind":"textbox","id":"sh/bihsv6l4","slide":13,"text":"Usable interface + connected pipeline","textPreview":"Usable interface + connected pipeline","textChars":37,"textLines":1,"bbox":[376,506,223,45]}
+{"kind":"shape","id":"sh/qh8bm14j","slide":13,"bbox":[642,277,265,290]}
+{"kind":"textbox","id":"sh/pgzatw3e","slide":13,"text":"03","textPreview":"03","textChars":2,"textLines":1,"bbox":[662,295,65,38]}
+{"kind":"textbox","id":"sh/ofqtkbmt","slide":13,"text":"PROVE","textPreview":"PROVE","textChars":5,"textLines":1,"bbox":[662,351,222,35]}
+{"kind":"textbox","id":"sh/gzut0bup","slide":13,"text":"Representative and edge cases against the current baseline","textPreview":"Representative and edge cases against the current baseline","textChars":58,"textLines":1,"bbox":[662,401,221,82]}
+{"kind":"shape","id":"sh/hk3u9gbu","slide":13,"bbox":[662,493,224,0]}
+{"kind":"textbox","id":"sh/uxsby1cj","slide":13,"text":"Evaluation record + failure modes","textPreview":"Evaluation record + failure modes","textChars":33,"textLines":1,"bbox":[662,506,223,45]}
+{"kind":"shape","id":"sh/fy1c76t4","slide":13,"bbox":[928,277,265,290]}
+{"kind":"textbox","id":"sh/svatwrud","slide":13,"text":"04","textPreview":"04","textChars":2,"textLines":1,"bbox":[948,295,65,38]}
+{"kind":"textbox","id":"sh/twju5wby","slide":13,"text":"OPERATE","textPreview":"OPERATE","textChars":7,"textLines":1,"bbox":[948,351,222,35]}
+{"kind":"textbox","id":"sh/6tsbuhc7","slide":13,"text":"Logging, versioning, rollback and ownership","textPreview":"Logging, versioning, rollback and ownership","textChars":43,"textLines":1,"bbox":[948,401,221,82]}
+{"kind":"shape","id":"sh/7u1s3mts","slide":13,"bbox":[948,493,224,0]}
+{"kind":"textbox","id":"sh/cret8vuh","slide":13,"text":"Release plan + handover","textPreview":"Release plan + handover","textChars":23,"textLines":1,"bbox":[948,506,223,45]}
+{"kind":"textbox","id":"sh/dsnuh0b2","slide":13,"text":"The outcome is a working process and a documented decision on how to scale it.","textPreview":"The outcome is a working process and a documented decision on how to scale it.","textChars":78,"textLines":1,"bbox":[70,594,1115,36]}
+{"kind":"shape","id":"sh/7y9onehg","slide":13,"bbox":[70,673,1140,0]}
+{"kind":"textbox","id":"sh/mx0nu90v","slide":13,"text":"HASHCASE  /  CLIENT CAPABILITIES","textPreview":"HASHCASE  /  CLIENT CAPABILITIES","textChars":32,"textLines":1,"bbox":[70,681,950,15]}
+{"kind":"textbox","id":"sh/90r6pozm","slide":13,"text":"13","textPreview":"13","textChars":2,"textLines":1,"bbox":[1168,680,40,17]}
+{"kind":"notes","id":"nt/yn6tvb","slide":13,"text":"Pilot approach from HashCase Executive Note. Duration, scope, commercial terms and numeric acceptance thresholds are client-specific."}
+{"kind":"slide","id":"sl/zhrj39","slide":14,"title":"WHAT WE CAN BUILD TOGETHER","textShapes":4}
+{"kind":"shape","id":"sh/jmpcrqdw","slide":14,"bbox":[0,0,635,720]}
+{"kind":"textbox","id":"sh/ylgbilcr","slide":14,"text":"WHAT WE CAN BUILD TOGETHER","textPreview":"WHAT WE CAN BUILD TOGETHER","textChars":26,"textLines":1,"bbox":[70,66,520,24]}
+{"kind":"textbox","id":"sh/xk7upgv6","slide":14,"text":"Bring us one\nworkflow worth\nfixing.","textPreview":"Bring us one | workflow worth | fixing.","textChars":35,"textLines":3,"bbox":[70,141,530,225]}
+{"kind":"textbox","id":"sh/wjytgbul","slide":14,"text":"We will map it, build a working pilot and prove it against your real cases.","textPreview":"We will map it, build a working pilot and prove it against your real cases.","textChars":75,"textLines":1,"bbox":[70,414,500,105]}
+{"kind":"textbox","id":"sh/ahgbe1cf","slide":14,"text":"taaha@hashcase.tech   ·   www.hashcase.tech","textPreview":"taaha@hashcase.tech   ·   www.hashcase.tech","textChars":43,"textLines":1,"bbox":[70,646,530,25]}
+{"kind":"image","id":"im/psnihwj2","slide":14,"name":"","alt":"Editorial operations image from cover","bbox":[625,0,655,720]}
+{"kind":"image","id":"im/e1czihkf","slide":14,"name":"","alt":"HashCase logo","bbox":[70,552,310,64]}
+{"kind":"notes","id":"nt/zhrj39","slide":14,"text":"Contact details follow the user-provided Maharashtra Visitor Platform reference presentation, slide 14. Photograph: original generated image for this deck."}

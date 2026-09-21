@@ -28,10 +28,34 @@ export {
 export {
   articleProvider,
   articleProviderModel,
+  articleProviderReadsSources,
   writeArticleDraft,
   type ArticleDraftOptions,
   type ArticleProvider,
 } from './generation/article-provider.js';
+// The self-hosted vision lane. gemma reads the officer's documents as PIXELS, so the API
+// supplies BYTES where the OpenAI lane supplies file ids — see gemma-sources.ts for why
+// there is no file id to supply, and pdf-raster.ts for what a PDF becomes on the way.
+export {
+  isGemmaConfigured,
+  gemmaModel,
+  gemmaDloModel,
+  gemmaModelFor,
+  listGemmaModels,
+  prepareGemmaSources,
+  respondWithSourcesViaGemma,
+  GemmaNotConfiguredError,
+  GemmaSourcesTooLargeError,
+  type GemmaLane,
+  type SourceDocument,
+  type SourceDocumentKind,
+} from './generation/gemma-sources.js';
+export {
+  rasterizePdf,
+  PdfRasterTooLargeError,
+  type RasterTile,
+  type RasterizeOptions,
+} from './intake/pdf-raster.js';
 // The new /dlo lane: the officer's documents go to the article call as `input_file` parts,
 // with no page-by-page transcription stage in front of it. Same prompt, same deterministic
 // guarantees, same result shape as generateArticleSimple above — only the source transport
@@ -629,15 +653,14 @@ export {
   type BuildYoutubeThumbnailPromptInput,
   type BuildYoutubeFeedbackPromptInput,
 } from './generation/build-youtube-thumbnail-prompt.js';
-// Per-run AI art direction: the colours/background/composition the fully-AI-generated poster
-// uses, so every render looks different (the master is only a loose structural idea).
+// Per-run AI art direction retained for the article-poster workflow. Fresh social posters do not
+// call it; their colour plan is local and their composition remains model-led.
 export {
   generateArtDirection,
   type ArtDirection,
   type GenerateArtDirectionInput,
 } from './generation/art-direction.js';
-// Curated palette library + seeded recency-aware picker: anchors each fully-AI-generated poster
-// to a distinct colour family so consecutive renders don't converge on the saffron/cream default.
+// Stable curated palettes used by article posters, plus the shared palette shape/id resolver.
 export {
   POSTER_PALETTES,
   PALETTE_FAMILIES,
@@ -647,9 +670,15 @@ export {
   type PaletteFamily,
   type PaletteAvoid,
 } from './generation/poster-palettes.js';
-// The second diversity axis: which COMPOSITION a poster is built to. Rotated independently of
-// colour, because two posters in different palettes still read alike when both are a top band
-// over a column of bullet rows.
+// Procedural, perceptually validated palettes for fresh social posters. This is deliberately
+// separate from the fixed article-poster library above.
+export {
+  pickSocialPalette,
+  socialPaletteById,
+  type SocialPaletteAvoid,
+} from './generation/social-colour-plan.js';
+// Legacy social composition metadata. It is retained for stored-row compatibility but no longer
+// reaches the fresh social prompt.
 export {
   POSTER_LAYOUTS,
   pickLayout,
@@ -659,11 +688,7 @@ export {
   type LayoutNeed,
   type LayoutAvoid,
 } from './generation/poster-layouts.js';
-// The arrangement rotation for the fully-AI social lane: WHERE the visual weight sits and how the
-// canvas is divided, one anchor per run. Not a rebuild of POSTER_LAYOUTS above — that library
-// specified whole posters and was retired from the prompt in 2026-08; an anchor states placement
-// only and is filtered against the content before it can be assigned. It is also what the redo
-// button bars, so a re-render cannot repeat the previous version's shape.
+// Legacy social arrangement metadata, also retained for stored-row compatibility.
 export {
   POSTER_PLACEMENTS,
   pickPlacement,

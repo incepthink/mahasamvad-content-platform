@@ -140,24 +140,23 @@ export type BuildPosterPromptInput = Readonly<{
   masterUrl?: string | undefined;
   // The chosen master's vision-derived one-liner ('' = un-analysed → generic prompt). Reaches
   // the template-edit modes only: a 'fresh' run has no master, so the STRUCTURE INSPIRATION
-  // block it used to feed is simply not emitted and the assigned COMPOSITION archetype is the
-  // whole structural instruction — which it already outranked whenever both were present.
+  // block it used to feed is simply not emitted; a fresh run carries no assigned structural
+  // instruction.
   layoutSummary?: string | undefined;
   hasPhoto: boolean;
-  // RETIRED FROM THE PROMPT (2026-08-10) — all three were the fresh lane's design specification
-  // and none of them reaches the image model any more. The fresh brief now names the client and
-  // hands the design over; see the branch below for why.
+  // The old full design specification is retired. Only `assignedPalette` reaches the image model
+  // now, as a compact colour-only block; art direction, layout and placement remain absent so the
+  // content can still determine the composition.
   //
   // They are kept on the type, and the runner still ASSIGNS a palette and a layout, because
   // `generations.poster_style` (migration 0028) persists them and the UI reads them back as the
-  // run's style label. Be honest about what that label now means: it records a rotation that no
-  // longer influences the render. `artDirection` is no longer requested at all — the runner
-  // skips that paid call rather than buying a treatment nothing consumes.
+  // run's style label. `artDirection` is no longer requested at all — the runner skips that paid
+  // call rather than buying a treatment nothing consumes.
   artDirection?: ArtDirection | undefined;
   assignedPalette?: PosterPalette | undefined;
   assignedLayout?: PosterLayout | undefined;
-  // Retained on the shared caller contract because the selected arrangement is still recorded as
-  // style metadata. The officer's replacement prompt deliberately does not send it to the model.
+  // Retained on the caller contract because the selected arrangement is stored as style metadata
+  // and used by redo/history rotation. It deliberately does not reach the image prompt.
   assignedPlacement?: PosterPlacement | undefined;
 }>;
 
@@ -297,7 +296,7 @@ function buildChange(copyStyle: string, c: PosterCopy): string {
   return lines.join('\n');
 }
 
-// The fresh (fully-AI) lane's rendering of the SAME copy object.
+// The fresh (fully-AI) lane's rendering of the SAME copy object as a wording manifest.
 //
 // buildChange() above doubles as a LAYOUT SPEC. Every one of its labels names a position or a
 // size: "(small tag near the top)", "(largest block)", "(line under the headline)", "(in the body
@@ -311,8 +310,10 @@ function buildChange(copyStyle: string, c: PosterCopy): string {
 // model reads is the words "body list zone" followed by a numbered list. The concrete instruction
 // beats the abstract permission, every time; this repo already learned that with NO_TEXT_RULE,
 // where a bare "no signage" lost to a scene description containing a door plate and the model
-// painted signage and filled it with gibberish. So the fresh lane gets ROLE-ONLY labels, and the
-// items are unnumbered — an enumerated list is itself a suggestion to draw an enumerated list.
+// painted signage and filled it with gibberish. So the fresh lane gets no poster-component slots
+// at all. It receives one primary value and a set of additional exact text values. Those are
+// semantic metadata, not a title/tag/subhead/list template, and the prompt explicitly says their
+// order and line breaks do not define placement.
 //
 // It also OMITS an empty field instead of printing a bare label. `SUBHEAD:` with nothing after it
 // is an empty slot on a form, and simple-article-prompt.ts already documented what a model does
@@ -329,23 +330,18 @@ function freshItems(
   const items = Array.isArray(arr) ? arr : [];
   return items
     .map((item) => render((item ?? {}) as Record<string, unknown>).trim())
-    .filter(Boolean)
-    .map((line) => `  - ${line}`);
+    .filter(Boolean);
 }
 
-function freshIconHint(item: Record<string, unknown>): string {
-  const hint = freshText(item.icon_hint);
-  return hint ? `  [icon idea: ${hint}]` : '';
-}
-
-function buildFreshChange(copyStyle: string, c: PosterCopy): string {
-  const out: string[] = [];
-  const add = (label: string, value: unknown): void => {
+function buildFreshCopyManifest(copyStyle: string, c: PosterCopy): string {
+  let primary = '';
+  const additional: string[] = [];
+  const add = (value: unknown): void => {
     const v = freshText(value);
-    if (v) out.push(`${label}: ${v}`);
+    if (v) additional.push(v);
   };
-  const addList = (label: string, lines: string[]): void => {
-    if (lines.length > 0) out.push(`${label}:`, ...lines);
+  const addList = (lines: string[]): void => {
+    additional.push(...lines);
   };
 
   if (copyStyle === 'quote') {
@@ -353,57 +349,74 @@ function buildFreshChange(copyStyle: string, c: PosterCopy): string {
     const who = [freshText(at.name), freshText(at.title)]
       .filter(Boolean)
       .join(', ');
-    add('TAG', c.topic_label);
-    add('SUBJECT LINE', c.headline);
-    add('QUOTE', c.quote_text);
-    add('SPOKEN BY', who);
-    addList(
-      'SUPPORTING POINTS',
-      freshItems(c.points, (p) => `${freshText(p.text)}${freshIconHint(p)}`),
-    );
+    primary = freshText(c.quote_text) || freshText(c.headline);
+    add(c.topic_label);
+    if (freshText(c.headline) !== primary) add(c.headline);
+    add(who);
+    addList(freshItems(c.points, (p) => freshText(p.text)));
   } else if (copyStyle === 'timeline') {
-    add('EMPHASIS PHRASE', c.side_label);
-    add('HEADLINE', c.headline);
-    add('INTRO LINE', c.intro);
+    primary = freshText(c.headline);
+    add(c.side_label);
+    add(c.intro);
     addList(
-      'DATED MILESTONES (chronological)',
       freshItems(c.milestones, (m) =>
         [freshText(m.date), freshText(m.text)].filter(Boolean).join(' — '),
       ),
     );
   } else if (copyStyle === 'campaign') {
     const sch = (c.schedule ?? {}) as Record<string, unknown>;
-    add('TAG', c.kicker);
-    add('HEADLINE', c.headline);
-    add('SUPPORTING LINE', c.subhead);
-    add('DATE', sch.date);
-    add('TIME', sch.time);
-    add('AUDIENCE / ELIGIBILITY', c.audience);
-    add('CALL TO ACTION', c.cta);
+    primary = freshText(c.headline);
+    add(c.kicker);
+    add(c.subhead);
+    add(sch.date);
+    add(sch.time);
+    add(c.audience);
+    add(c.cta);
     addList(
-      'FIGURES',
       freshItems(
         c.stats,
-        (st) =>
-          `${freshText(st.value)} — ${freshText(st.label)}${freshIconHint(st)}`,
+        (st) => `${freshText(st.value)} — ${freshText(st.label)}`,
       ),
     );
   } else {
     // alert, info_bullets and the generic registry the fresh lane actually runs on.
-    add('TAG', c.kicker);
-    add('HEADLINE', c.headline);
-    add('SUPPORTING LINE', c.subhead);
-    addList(
-      'SUPPORTING POINTS',
-      freshItems(c.bullets, (b) => {
-        const e = (Array.isArray(b.emphasis) ? b.emphasis : [])
-          .map((x) => freshText(x))
-          .filter(Boolean);
-        return `${freshText(b.text)}${e.length ? `  [emphasise: ${e.join(' | ')}]` : ''}`;
-      }),
-    );
+    primary = freshText(c.headline);
+    add(c.kicker);
+    add(c.subhead);
+    addList(freshItems(c.bullets, (b) => freshText(b.text)));
   }
-  return out.join('\n');
+
+  // A malformed/older copy object may lack the nominal primary field. Promote its first surviving
+  // string rather than emitting an empty "primary" slot, which invites the image model to invent.
+  if (!primary) primary = additional.shift() ?? '';
+
+  return [
+    'MOST IMPORTANT MESSAGE — render the value only; its placement is your decision:',
+    primary,
+    ...(additional.length > 0
+      ? [
+          '',
+          'ADDITIONAL EXACT TEXT — render these values only; arrange and group them freely:',
+          additional.join('\n'),
+        ]
+      : []),
+  ].join('\n');
+}
+
+function buildFreshColourDirection(palette: PosterPalette): string {
+  const textOnPanel = palette.hex.textOnPanel ?? palette.hex.ink;
+  return [
+    'COLOUR DIRECTION — PALETTE ONLY, NOT A LAYOUT:',
+    `- Principal background / large open areas: ${palette.hex.ground}`,
+    `- Strong supporting colour fields, shapes or type: ${palette.hex.panel}`,
+    `- Main text on the principal background: ${palette.hex.ink}`,
+    `- Text on the strong supporting colour: ${textOnPanel}`,
+    `- Flexible accent: ${palette.hex.accent}`,
+    'The hex codes are design instructions, not text to print on the poster.',
+    'Use these as the poster’s colour anchors. Close tints and shades are welcome for depth, gradients and illustration, and photographic subjects may retain natural colours.',
+    'The accent has no compulsory role: it may be used for typography when contrast and hierarchy support it, but it is not automatically the headline colour.',
+    'This palette controls colour only. It does not imply panels, boxes, bands, cards, rows or any other composition.',
+  ].join('\n');
 }
 
 // Keep the reserved-zone numbers in sync with packages/poster-renderer/src/cmo-geometry.ts.
@@ -571,16 +584,23 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
     const verbatim = (input.information ?? '').trim();
     const isVerbatim = designMode === 'fresh_verbatim' && verbatim.length > 0;
     // `fresh` typesets the curated copy; `fresh_verbatim` typesets the officer's unchanged text.
-    // Keep the generated/typed copy as a clearly labelled data block inside one compact brief.
+    // Keep the generated/typed copy as a wording-only data block inside one compact brief.
     // The image model had begun losing late instructions in the former ~1,000-word prompt, whose
     // content-led layout, chrome and safe-area rules repeated the same ideas several times. This
     // version states each contract once and spends the saved attention on character-perfect
     // Marathi and Devanagari numerals.
     const posterContent = isVerbatim
       ? verbatim
-      : buildFreshChange(copyStyle, copy);
+      : buildFreshCopyManifest(copyStyle, copy);
     return [
       `Create a 1280 × 1504 social-media poster for DGIPR, Government of Maharashtra.
+
+CREATIVE DIRECTION:
+Invent a distinctive visual concept that communicates the meaning of this specific content. The content block below defines exact wording only: its metadata labels, order, line breaks and grouping do not define canvas positions, panels, cards, rows or components.
+Choose the visual hierarchy, scale, grouping, typography, imagery, shapes, depth, cropping and negative space from the message itself. Build typography and imagery as one integrated visual system rather than treating the words as a form to fill.
+Render only the supplied Marathi text values. Any metadata headings inside the content block are instructions, not poster text.
+
+${input.assignedPalette ? buildFreshColourDirection(input.assignedPalette) : ''}
 
 TEXT ACCURACY IS MANDATORY:
 - Preserve every अक्षर, मात्रा, जोडाक्षर and अनुस्वार in its correct position.
@@ -594,7 +614,7 @@ Never use Western numerals: 0 1 2 3 4 5 6 7 8 9.
 
 Do not add any logo, emblem, seal, QR code, government wordmark, or map of any state, district or country.`,
       '',
-      'POSTER CONTENT:',
+      'TEXT TO USE — WORDING ONLY, NOT A LAYOUT:',
       '',
       posterContent,
       '',
@@ -855,14 +875,23 @@ if (
   const failures: string[] = [];
 
   void Promise.all([
-    import('./poster-palettes.js'),
+    import('./social-colour-plan.js'),
     import('./poster-layouts.js'),
-  ]).then(([{ pickPalette }, { pickLayout }]) => {
+    import('./poster-placements.js'),
+  ]).then(([{ pickSocialPalette }, { pickLayout }, { pickPlacement }]) => {
+    const testPlacement = pickPlacement('manifest-test', {
+      hasImagery: true,
+      itemCount: 3,
+    });
     for (const seed of ['run-alpha', 'run-beta']) {
-      const palette = pickPalette(seed);
+      const palette = pickSocialPalette(seed);
       const layout = pickLayout(seed, {
         hasPhoto: true,
         copyStyle: 'info_bullets',
+      });
+      const placement = pickPlacement(seed, {
+        hasImagery: true,
+        itemCount: 3,
       });
       const prompt = buildPosterPrompt({
         copy: COPY,
@@ -874,6 +903,7 @@ if (
         hasPhoto: true,
         assignedPalette: palette,
         assignedLayout: layout,
+        assignedPlacement: placement,
         artDirection: {
           palette: '',
           background:
@@ -888,25 +918,22 @@ if (
         `\n${'='.repeat(78)}\nseed ${seed} · ${palette.id} (${palette.family}) · ${layout.id}\n${'='.repeat(78)}\n${prompt}`,
       );
 
-      // THE DESIGN SPECIFICATION MUST NOT REACH THE MODEL (2026-08-10). A palette, a layout, an
-      // art direction AND a master summary are all supplied above precisely so this asserts they
-      // are IGNORED — the fresh lane is a brief now, not a spec. If posters ever go back to
-      // reading as one template in rotating colours, check whether these blocks came back.
-      //
-      // 1. Not one assigned hex may appear. The rotation is still recorded for poster_style; it
-      //    just no longer decides what the poster looks like.
+      // Colour reaches the model, while composition, art direction and the old master summary do
+      // not. This narrow contract fixes palette repetition without making every poster share a
+      // layout again.
       for (const hex of [
         palette.hex.ground,
         palette.hex.panel,
         palette.hex.ink,
+        palette.hex.textOnPanel,
         palette.hex.accent,
       ]) {
-        if (prompt.includes(hex))
+        if (hex && !prompt.includes(hex))
           failures.push(
-            `${seed}: assigned hex ${hex} is back in the prompt — the fresh lane chooses its own colours`,
+            `${seed}: assigned colour ${hex} did not reach the fresh prompt`,
           );
       }
-      // 2. …nor any of the four blocks that carried the specification.
+      // The retired full design specification must remain absent.
       for (const retired of [
         'COLOUR SPECIFICATION',
         'ART DIRECTION',
@@ -922,6 +949,24 @@ if (
             `${seed}: the retired design specification is back in the fresh prompt ("${retired}")`,
           );
       }
+      if (prompt.includes(placement.instruction))
+        failures.push(
+          `${seed}: the selected placement anchor reached the prompt`,
+        );
+      if (prompt.includes('COMPOSITION ANCHOR FOR THIS POSTER:'))
+        failures.push(
+          `${seed}: the placement-anchor heading reached the prompt`,
+        );
+      for (const forbiddenBan of [
+        'Never generate yellow',
+        'Never use yellow',
+        'Never use gold',
+      ]) {
+        if (prompt.includes(forbiddenBan))
+          failures.push(
+            `${seed}: colour guidance became a hard ban: ${forbiddenBan}`,
+          );
+      }
       // The replacement prompt is intentionally compact: one content-led design paragraph, one
       // text-fidelity block, the runtime content, and three short chrome/fit rules.
       for (const needle of [
@@ -933,7 +978,13 @@ if (
         'Use only Devanagari numerals: ० १ २ ३ ४ ५ ६ ७ ८ ९',
         'Never use Western numerals: 0 1 2 3 4 5 6 7 8 9',
         'map of any state, district or country',
-        'POSTER CONTENT:',
+        'CREATIVE DIRECTION:',
+        'COLOUR DIRECTION — PALETTE ONLY, NOT A LAYOUT:',
+        'The accent has no compulsory role',
+        'This palette controls colour only',
+        'TEXT TO USE — WORDING ONLY, NOT A LAYOUT:',
+        'MOST IMPORTANT MESSAGE — render the value only; its placement is your decision:',
+        'ADDITIONAL EXACT TEXT — render these values only; arrange and group them freely:',
         'Official branding is added later by software',
         'top-right 180 × 170 pixels',
         'footer is attached below the image and covers nothing',
@@ -951,7 +1002,6 @@ if (
         'You are free to use your creativity',
         'Create one highly creative, original portrait poster',
         'VISUAL COMMUNICATION',
-        'CREATIVE DIRECTION',
         'TYPOGRAPHY',
         'IMAGERY',
         'BRANDING AND SAFE AREAS',
@@ -1178,6 +1228,7 @@ if (
       brand: 'dgipr',
       masterUrl: '',
       hasPhoto: true,
+      assignedPlacement: testPlacement,
     });
     for (const retired of [
       'top-right 180 x 170 pixel badge area',
@@ -1200,6 +1251,17 @@ if (
     ]) {
       if (!freshPrompt.includes(chromeRule))
         failures.push(`the fresh prompt lost chrome rule "${chromeRule}"`);
+    }
+    for (const creativityRule of [
+      'CREATIVE DIRECTION:',
+      'TEXT TO USE — WORDING ONLY, NOT A LAYOUT:',
+      'MOST IMPORTANT MESSAGE — render the value only; its placement is your decision:',
+      'ADDITIONAL EXACT TEXT — render these values only; arrange and group them freely:',
+    ]) {
+      if (!freshPrompt.includes(creativityRule))
+        failures.push(
+          `the fresh prompt lost creativity rule "${creativityRule}"`,
+        );
     }
     if (freshPrompt.includes('MAKE IT BRIGHT'))
       failures.push(
@@ -1232,6 +1294,7 @@ if (
       brand: 'dgipr',
       masterUrl: '',
       hasPhoto: false,
+      assignedPlacement: testPlacement,
     });
     if (freshNoSubject.includes('Optional visual subject:'))
       failures.push(
@@ -1259,6 +1322,7 @@ if (
         brand: 'dgipr',
         masterUrl: '',
         hasPhoto: true,
+        assignedPlacement: testPlacement,
       });
       const onbrandLabels = buildPosterPrompt({
         copy: COPY,
@@ -1269,9 +1333,9 @@ if (
         hasPhoto: true,
       });
 
-      // The placement language, gone from fresh and INTACT on a template lane. Asserting both
-      // directions is the point: deleting these labels outright would quietly damage the lane
-      // whose posters currently come back correct.
+      // The slot-placement language is gone from fresh and INTACT on a template lane. Asserting
+      // both directions is the point: deleting these labels outright would quietly damage the
+      // lane whose posters currently come back correct.
       // The PARENTHESISED label forms specifically. A bare 'largest block' would also match the
       // shrink-to-fit rule ("Shrink the HEADLINE first: it is the largest block"), which is a
       // legitimate instruction about what to reduce, not a label telling the model where to put
@@ -1296,10 +1360,26 @@ if (
           'a template-lane prompt lost its body-list-zone label — those lanes edit a master that really has one',
         );
 
-      // Role-only labels reach the model, so it still knows what each string IS.
-      for (const label of ['HEADLINE:', 'SUPPORTING POINTS:']) {
+      // No conventional poster slots or inline emphasis markup reach the model. They turn the
+      // copy object into a form and strongly suggest the same headline-over-rows composition.
+      for (const label of [
+        'HEADLINE:',
+        'SUPPORTING POINTS:',
+        'SUPPORTING LINE:',
+        'TAG:',
+        '[emphasise:',
+      ]) {
+        if (freshInfo.includes(label))
+          failures.push(
+            `the fresh prompt still carries the slot label ${label}`,
+          );
+      }
+      for (const label of [
+        'MOST IMPORTANT MESSAGE — render the value only; its placement is your decision:',
+        'ADDITIONAL EXACT TEXT — render these values only; arrange and group them freely:',
+      ]) {
         if (!freshInfo.includes(label))
-          failures.push(`the fresh prompt no longer labels ${label}`);
+          failures.push(`the fresh wording manifest lost ${label}`);
       }
       // ...and the items are not pre-enumerated. An enumerated list is itself a suggestion to
       // draw an enumerated list.
@@ -1322,15 +1402,14 @@ if (
         brand: 'dgipr',
         masterUrl: '',
         hasPhoto: false,
+        assignedPlacement: testPlacement,
       });
-      for (const empty of ['SUPPORTING LINE:', 'TAG:', 'SUPPORTING POINTS:']) {
-        if (freshSparse.includes(empty))
-          failures.push(
-            `a headline-only run still emits an empty "${empty}" slot, which invites the model to invent one`,
-          );
-      }
-      if (!freshSparse.includes('HEADLINE:'))
-        failures.push('a headline-only run lost its headline label');
+      if (freshSparse.includes('ADDITIONAL EXACT TEXT —'))
+        failures.push(
+          'a headline-only run emits an empty additional-text section, which invites the model to invent one',
+        );
+      if (!freshSparse.includes('MOST IMPORTANT MESSAGE —'))
+        failures.push('a headline-only run lost its primary-message metadata');
 
       // Both from-scratch content shapes receive the same compact replacement prompt.
       const freshVerbatim = buildPosterPrompt({
@@ -1341,6 +1420,7 @@ if (
         masterUrl: '',
         hasPhoto: true,
         information: 'चार प्राथमिक आरोग्य केंद्रांचे उन्नतीकरण होणार आहे.',
+        assignedPlacement: testPlacement,
       });
       for (const [name, prompt] of [
         ['fresh', freshInfo],
@@ -1385,6 +1465,7 @@ if (
       brand: 'dgipr',
       masterUrl: '',
       hasPhoto: false,
+      assignedPlacement: testPlacement,
     });
     // (a) It must NOT throw for want of a master. The template branches do, and this mode reaches
     //     the same guard — `isFreshDesign` is what excuses it. Building it above is that assertion.
@@ -1397,7 +1478,8 @@ if (
       'Create a 1280 × 1504 social-media poster for DGIPR, Government of Maharashtra.',
       'TEXT ACCURACY IS MANDATORY',
       'Use only Devanagari numerals: ० १ २ ३ ४ ५ ६ ७ ८ ९',
-      'POSTER CONTENT:',
+      'CREATIVE DIRECTION:',
+      'TEXT TO USE — WORDING ONLY, NOT A LAYOUT:',
       'Official branding is added later by software',
       'top-right 180 × 170 pixels',
       'footer is attached below the image and covers nothing',
@@ -1472,6 +1554,7 @@ if (
         brand: 'dgipr',
         masterUrl: '',
         hasPhoto: true,
+        assignedPlacement: testPlacement,
       })
     )
       failures.push(

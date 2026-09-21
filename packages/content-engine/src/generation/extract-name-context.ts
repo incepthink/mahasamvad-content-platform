@@ -21,6 +21,11 @@
 // is a review card that is quietly less useful, so the prompt is worded against it.
 
 import { respondWithSources } from './responses-with-sources.js';
+import { articleProvider } from './article-provider.js';
+import {
+  respondWithSourcesViaGemma,
+  type SourceDocument,
+} from './gemma-sources.js';
 import type { SourceFileRef } from '../intake/openai-source-files.js';
 
 // Must be a model that accepts file input, which is why this defaults to the vision tier —
@@ -69,8 +74,15 @@ const SYSTEM_PROMPT = [
 export async function extractNameContextFromSources(
   note: string,
   files: readonly SourceFileRef[],
+  documents: readonly SourceDocument[] = [],
 ): Promise<string> {
-  if (files.length === 0) return note;
+  // Which transport carries the sources depends on the provider — see gemma-sources.ts.
+  // Without this the gemma lane found `files` empty and returned the typed note, so the
+  // NAME DICTIONARY was built from the note alone and every name that occurs only inside an
+  // attached PDF was missed. That is the exact bug this function was written to fix, and it
+  // would have come back silently on the new provider.
+  const onGemma = articleProvider() === 'gemma';
+  if ((onGemma ? documents.length : files.length) === 0) return note;
 
   const typed = note.trim();
   const userText =
@@ -83,18 +95,33 @@ export async function extractNameContextFromSources(
           'हा मजकूर आणि सोबतची कागदपत्रे — दोन्हींतून व्यक्तींची नावे असलेली वाक्ये जशीच्या तशी काढा.',
         ].join('\n');
 
+  const messages = [
+    { role: 'system' as const, content: SYSTEM_PROMPT },
+    { role: 'user' as const, content: userText },
+  ];
   try {
-    const raw = await respondWithSources({
-      label: 'name scan',
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: userText },
-      ],
-      files,
-      model: NAME_SCAN_MODEL,
-      maxOutputTokens: NAME_SCAN_MAX_TOKENS,
-      reasoningEffort: 'low',
-    });
+    const raw = onGemma
+      ? await respondWithSourcesViaGemma({
+          label: 'name scan (gemma)',
+          messages,
+          documents,
+          maxOutputTokens: NAME_SCAN_MAX_TOKENS,
+          // NO `lane` — this stays on the BASE model deliberately, even on a deployment
+          // whose /dlo articles are written by the fine-tuned adapter. That adapter was
+          // distilled on one task, writing a DGIPR article, and this is the opposite kind
+          // of task: copy sentences out verbatim and add nothing. Pointing a model tuned to
+          // WRITE at a job whose entire contract is not to would be a quiet regression in
+          // the one call that decides whether a name reaches the review card with its
+          // पदनाम attached. Omission is the safe default here by construction.
+        })
+      : await respondWithSources({
+          label: 'name scan',
+          messages,
+          files,
+          model: NAME_SCAN_MODEL,
+          maxOutputTokens: NAME_SCAN_MAX_TOKENS,
+          reasoningEffort: 'low',
+        });
     // The officer's own typed text is prepended rather than left to the model to echo: it is
     // already exact, and a name that appears only there must still reach the review card.
     return typed === '' ? raw : `${typed}\n\n${raw}`;

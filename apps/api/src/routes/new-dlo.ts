@@ -55,6 +55,7 @@ import {
   extractNameContextFromSources,
   runInCostScope,
   runInCostTask,
+  articleProvider,
   uploadSourceFile,
   type SourceFileRef,
 } from '@dgipr/content-engine';
@@ -63,7 +64,7 @@ import { startGenerationJob } from '../jobs/runner.js';
 import { rememberDesignations } from '../jobs/designation-writeback.js';
 import { prepareDesignations } from '../jobs/translation-terms.js';
 import { recordTasksFromCost } from '../jobs/service-usage.js';
-import { sourceFilesForGeneration } from '../jobs/source-files.js';
+import { sourceContextForGeneration } from '../jobs/source-files.js';
 
 // Keep the step-2 name digest on the intake so the ARTICLE call can read it.
 //
@@ -330,6 +331,19 @@ export function registerNewDloRoutes(
         continue;
       }
 
+      // gemma reads the archived bytes itself at generation time (see source-files.ts), so
+      // there is nothing to upload and no OpenAI key to need. Marked done immediately: the
+      // intake job skips a done entry, which is what keeps this file out of the OCR path.
+      if (articleProvider() === 'gemma') {
+        entries.push({
+          name: upload.name,
+          storagePath,
+          kind: upload.kind,
+          status: 'done',
+        });
+        continue;
+      }
+
       try {
         const fileId = await uploadSourceFile(
           upload.data as Buffer,
@@ -384,13 +398,17 @@ export function registerNewDloRoutes(
         });
       }
 
-      const files = await sourceFilesForGeneration(client, {
+      const { files, documents } = await sourceContextForGeneration(client, {
         dloIntakeId: row.id,
       });
       const cost = createCostAccumulator();
       const digest = await runInCostScope(cost, () =>
         runInCostTask('designation_extraction', () =>
-          extractNameContextFromSources(row.combinedText ?? '', files),
+          extractNameContextFromSources(
+            row.combinedText ?? '',
+            files,
+            documents,
+          ),
         ),
       );
       const result = await runInCostScope(cost, () =>
@@ -429,14 +447,20 @@ export function registerNewDloRoutes(
         });
       }
 
-      const files = await sourceFilesForGeneration(client, {
+      const { files, documents } = await sourceContextForGeneration(client, {
         dloIntakeId: row.id,
       });
       const note = (row.combinedText ?? '').trim();
-      // Nothing to write from: no readable file reached OpenAI AND nothing was typed or
+      // Nothing to write from: no readable source reached the model AND nothing was typed or
       // transcribed. Refused here rather than left to the model, which would otherwise be
       // asked to write a government article out of an empty source.
-      if (files.length === 0 && note.length === 0) {
+      //
+      // COUNTED PER PROVIDER. `files` is the OpenAI lane's handles and is empty by design on
+      // gemma, which carries bytes instead — counting it alone would refuse every gemma
+      // intake whose sources are documents with no typed note, i.e. the ordinary case.
+      const attachedCount =
+        articleProvider() === 'gemma' ? documents.length : files.length;
+      if (attachedCount === 0 && note.length === 0) {
         return reply.code(400).send({
           error: {
             message:

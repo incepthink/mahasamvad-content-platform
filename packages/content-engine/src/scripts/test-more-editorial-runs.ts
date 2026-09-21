@@ -1,0 +1,81 @@
+import { readFileSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import {
+  buildDloArticleMessages,
+  DLO_ARTICLE_PROMPT_VERSION,
+} from '../generation/dlo-article-prompt.js';
+import { chatComplete, ARTICLE_MODEL } from '../generation/openai-chat.js';
+import { splitDloPrompt } from '../finetune/eval-dlo-distillation.js';
+
+async function main() {
+  console.log('=== Running Next Batch of Unused Inputs (Items 5, 7, 8) ===');
+  console.log('Prompt Version:', DLO_ARTICLE_PROMPT_VERSION);
+  console.log('Model:', ARTICLE_MODEL);
+
+  const evalPath = resolve(
+    'packages/content-engine/data/finetune/distill/eval.jsonl',
+  );
+  const lines = readFileSync(evalPath, 'utf8').trim().split('\n');
+
+  // Items 5, 7, 8 (0-indexed: 4, 6, 7)
+  const testIndices = [4, 6, 7];
+  const results = [];
+
+  for (const idx of testIndices) {
+    const rawLine = lines[idx];
+    if (!rawLine) {
+      console.warn(`[skip] eval.jsonl has no line ${idx + 1}`);
+      continue;
+    }
+    const rawItem = JSON.parse(rawLine);
+    const userMessage =
+      rawItem.messages.find((m: any) => m.role === 'user')?.content || '';
+
+    // Split the user turn to get the original inputs
+    const parsed = splitDloPrompt(userMessage);
+
+    console.log(
+      `\n------------------------------------------------------------`,
+    );
+    console.log(`[TEST RUN: Item ${idx + 1}] Processing item ${idx + 1}...`);
+    console.log(
+      `Source preview: ${parsed.sourceInformation.slice(0, 150).replace(/\n/g, ' ')}...`,
+    );
+
+    const messages = buildDloArticleMessages({
+      sourceInformation: parsed.sourceInformation,
+      designations: parsed.designations,
+      heading: parsed.heading || undefined,
+      officerInstructions: parsed.officerInstructions || undefined,
+    });
+
+    console.log(
+      `Calling ${ARTICLE_MODEL} with updated DGIPR leadership prompt...`,
+    );
+    const startTime = Date.now();
+    const article = await chatComplete(messages, {
+      model: ARTICLE_MODEL,
+      maxTokens: 3000,
+    });
+    const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+    console.log(`Completed in ${duration}s.`);
+    console.log(`Preview of generated article:\n${article.slice(0, 250)}...\n`);
+
+    results.push({
+      itemIndex: idx + 1,
+      sourcePreview: parsed.sourceInformation.slice(0, 200),
+      generatedArticle: article,
+    });
+  }
+
+  const outputPath = resolve(
+    'packages/content-engine/data/finetune/distill/test-more-runs-output.json',
+  );
+  writeFileSync(outputPath, JSON.stringify(results, null, 2));
+  console.log(`\n=== All Test Runs Complete! Saved to ${outputPath} ===\n`);
+}
+
+main().catch((err) => {
+  console.error('Error running test runs:', err);
+  process.exit(1);
+});

@@ -56,6 +56,11 @@ import {
   type SimpleGeneratedArticle,
 } from './generate-article-simple.js';
 import type { SourceFileRef } from '../intake/openai-source-files.js';
+import { articleProvider, articleProviderModel } from './article-provider.js';
+import {
+  respondWithSourcesViaGemma,
+  type SourceDocument,
+} from './gemma-sources.js';
 import {
   respondWithSources,
   sourceInformationBlock,
@@ -71,6 +76,11 @@ export type SourceArticleOptions = SimpleGenerateArticleOptions &
     // intake can be recordings and typed notes alone, in which case this behaves exactly like
     // the text lane, on the same prompt, through a different transport.
     files?: readonly SourceFileRef[] | undefined;
+    // The SAME sources, as bytes, for a provider with no file store to reference them in.
+    // Supplied only when ARTICLE_PROVIDER names one — see articleProviderReadsSources and
+    // gemma-sources.ts. The caller reads them back out of the private dlo-uploads bucket the
+    // create route archived them to, so nothing has to be uploaded twice.
+    documents?: readonly SourceDocument[] | undefined;
   }>;
 
 /**
@@ -87,6 +97,14 @@ export async function generateArticleFromSources(
   const onProgress = options?.onProgress ?? (() => {});
   const category = options?.category ?? 'news';
   const files = options?.files ?? [];
+  const documents = options?.documents ?? [];
+  // Gemma reads the officer's pages itself, as images, so this lane routes to it rather
+  // than to the Responses API. Decided from the env var, in the one place that reads it.
+  const onGemma = articleProvider() === 'gemma';
+  // How many sources are attached, whichever transport carries them. The prompt says "you
+  // have documents" from this, and getting it from `files` alone would tell a gemma run it
+  // had none while its pages were being attached.
+  const attachedCount = onGemma ? documents.length : files.length;
   const selectedFacts = options?.includeFacts ?? [];
   const statements = options?.statements ?? [];
   const designations = options?.designations ?? [];
@@ -119,7 +137,7 @@ export async function generateArticleFromSources(
         designations,
         heading: options?.heading,
         officerInstructions: options?.instructions,
-        attachedSourceFiles: files.length > 0,
+        attachedSourceFiles: attachedCount > 0,
       })
     : buildArticleMessagesForReferenceMode(
         {
@@ -140,19 +158,34 @@ export async function generateArticleFromSources(
         referencesEnabled,
       );
 
-  const raw = await respondWithSources({
-    label: 'article from sources',
-    messages,
-    files,
-    model: ARTICLE_MODEL,
-    maxOutputTokens: ARTICLE_BODY_MAX_TOKENS,
-    reasoningEffort: articleReasoningEffort(),
-    // The live draft, exactly as the text lane publishes it. This lane silently did NOT: the
-    // caller has always passed `onDelta`, `SimpleGenerateArticleOptions` has always carried
-    // it, and it was simply dropped here — so an intake with a document attached showed a
-    // progress bar where an intake without one showed the article being written.
-    ...(options?.onDelta ? { onDelta: options.onDelta } : {}),
-  });
+  // Which provider reads the sources is one env line, and the two transports are twins:
+  // same `messages`, same returned string, so everything below this call — the delimiter
+  // guard, the length fit, applyDesignations, the row write — is untouched by the choice.
+  const raw = onGemma
+    ? await respondWithSourcesViaGemma({
+        label: 'article from sources (gemma)',
+        messages,
+        documents,
+        maxOutputTokens: ARTICLE_BODY_MAX_TOKENS,
+        // The endpoint can serve the DGIPR-voice adapter beside the base; /dlo's article is
+        // the only text it was distilled to write, so it is the only lane that addresses it.
+        lane: dloPrompt ? 'dlo' : 'default',
+        ...(options?.onDelta ? { onDelta: options.onDelta } : {}),
+      })
+    : await respondWithSources({
+        label: 'article from sources',
+        messages,
+        files,
+        model: ARTICLE_MODEL,
+        maxOutputTokens: ARTICLE_BODY_MAX_TOKENS,
+        reasoningEffort: articleReasoningEffort(),
+        // The live draft, exactly as the text lane publishes it. This lane silently did
+        // NOT: the caller has always passed `onDelta`, `SimpleGenerateArticleOptions` has
+        // always carried it, and it was simply dropped here — so an intake with a document
+        // attached showed a progress bar where an intake without one showed the article
+        // being written.
+        ...(options?.onDelta ? { onDelta: options.onDelta } : {}),
+      });
 
   // Defensive, and for the same reason the text lane is: the specification asks for the
   // article alone, but a draft that emits the traceability delimiter anyway must not have it
@@ -209,9 +242,14 @@ export async function generateArticleFromSources(
         : SIMPLE_ARTICLE_PROMPT_VERSION
       : `${variant}-${NO_REFERENCE_ARTICLE_PROMPT_VERSION}`;
 
+  // Named the OpenAI article model unconditionally until 2026-09-20, so a gemma run's only
+  // log line reported a model that had not written a word of it. It is now the model that
+  // answered — which on gemma is also how an operator sees whether the DLO adapter is live.
   console.log(
-    `[source-article] ${category} | model=${ARTICLE_MODEL} effort=${articleReasoningEffort()} | ` +
-      `files=${files.length} note=${note.length} chars | ` +
+    `[source-article] ${category} | provider=${articleProvider()} ` +
+      `model=${articleProviderModel(dloPrompt ? 'dlo' : 'default')} ` +
+      `effort=${articleReasoningEffort()} | ` +
+      `files=${onGemma ? documents.length : files.length} note=${note.length} chars | ` +
       `style-ref=${styleReference.source}x${styleReference.articles.length} | ` +
       `prompt=${promptVersion} | ` +
       `${article.length} chars`,

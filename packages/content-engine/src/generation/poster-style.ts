@@ -66,33 +66,32 @@ export type PosterStyle = Readonly<{
   // use this library, and because the template-edit modes are assigned nothing at all. jsonb, so
   // adding it needed no migration: 0028's column has no column schema.
   //
-  // Unlike `layoutId` beside it, this one DOES reach the image prompt, and that asymmetry is the
-  // thing to know when reading a stored style. The layout is a rotation that no longer influences
-  // the render (retired 2026-08-10, kept for the id history); the placement is what the poster was
-  // actually asked to be arranged as. It is persisted for two readers: the recency ring, and the
-  // redo button, which bars this exact id and family so the next version cannot repeat the shape.
+  // Like `layoutId` beside it, this no longer reaches the image prompt. Both values remain as
+  // backward-compatible metadata while the fresh prompt keeps composition fully content-led.
   placementId?: string | undefined;
   placementFamily?: PlacementFamily | undefined;
   // Absent when the render failed before it could be measured, or on a CMO/edit-mode run.
   measured?: MeasuredColours | undefined;
 }>;
 
-// What the last few runs used, ready to hand to pickPalette + pickLayout. `measuredBuckets` is
-// the one that matters most: it is what SHIPPED, so avoiding it works even when the image model
-// ignores the assignment entirely — which avoiding intentions cannot do.
+// What the last few runs used, ready for the palette/layout history readers. Measured colours are
+// what matter most: they describe what shipped even when the image model drifted from its prompt.
 export type StyleHistory = Readonly<{
   paletteIds: readonly string[];
   families: readonly PaletteFamily[];
   layoutIds: readonly string[];
   coverages: readonly LayoutCoverage[];
-  // The arrangements the last few fresh social posters were assigned. These are the ring that
-  // most directly answers "why does every poster look the same shape", because unlike the layout
-  // ids above them they describe something the image model was actually told.
+  // Legacy arrangement rotation retained for older stored rows and redo compatibility.
   placementIds: readonly string[];
   placementFamilies: readonly PlacementFamily[];
   measuredBuckets: readonly string[];
-  // One human-readable line per recent poster, newest first, for the art director's
-  // "design something different from these" brief.
+  // Actual sampled colours, not merely the palette we asked for. The procedural social picker
+  // uses perceptual distance from these values, so a model that drifted from its assigned palette
+  // still teaches the next run what not to repeat.
+  measuredDominantHexes: readonly string[];
+  measuredGroundHexes: readonly string[];
+  // One human-readable line per recent poster, newest first. The article art director is the
+  // remaining consumer; the fresh social lane makes no paid art-direction call.
   treatments: readonly string[];
 }>;
 
@@ -104,6 +103,8 @@ export const EMPTY_STYLE_HISTORY: StyleHistory = {
   placementIds: [],
   placementFamilies: [],
   measuredBuckets: [],
+  measuredDominantHexes: [],
+  measuredGroundHexes: [],
   treatments: [],
 };
 
@@ -192,13 +193,25 @@ export const FAMILY_HUES: Readonly<Record<PaletteFamily, readonly string[]>> = {
   teal: ['teal', 'blue', 'green'],
   green: ['green', 'teal', 'yellow'],
   purple: ['purple', 'blue', 'red'],
-  neutral: ['red', 'orange', 'yellow', 'green', 'teal', 'blue', 'purple', 'neutral'],
+  neutral: [
+    'red',
+    'orange',
+    'yellow',
+    'green',
+    'teal',
+    'blue',
+    'purple',
+    'neutral',
+  ],
   warm: ['orange', 'red', 'yellow'],
 };
 
 // Did the render honour its assigned family? A 'neutral' measurement is never a violation — an
 // almost colourless poster has no hue to disagree with.
-export function familyHonoured(family: PaletteFamily, hueBucket: string): boolean {
+export function familyHonoured(
+  family: PaletteFamily,
+  hueBucket: string,
+): boolean {
   if (hueBucket === 'neutral') return true;
   return FAMILY_HUES[family].includes(hueBucket);
 }
@@ -209,12 +222,13 @@ export function familyHonoured(family: PaletteFamily, hueBucket: string): boolea
 export function describePosterStyle(style: PosterStyle): string {
   const palette = paletteById(style.paletteId);
   const layout = anyLayoutById(style.layoutId);
-  // The ARRANGEMENT is what the image model was told, so it describes the poster; the layout is a
-  // rotation that has not reached a prompt since 2026-08-10. Prefer the one that is true.
+  // A stored placement marks a social run, where composition is now fully model-led. Do not claim
+  // that unused metadata describes the render. Article runs have no placement and still use their
+  // assigned landscape layout, so retain that description there.
   const placement = placementById(style.placementId);
   const parts = [
     palette?.palette ?? style.paletteId,
-    placement?.name ?? layout?.name ?? style.layoutId,
+    ...(placement ? [] : [layout?.name ?? style.layoutId]),
   ];
   if (style.measured && style.measured.groundIsWarm) {
     parts.push('rendered with a warm cream background');
@@ -234,6 +248,7 @@ export const COVERAGE_RING = 2;
 export const PALETTE_ID_RING = 5;
 export const LAYOUT_ID_RING = 4;
 export const BUCKET_RING = 3;
+export const MEASURED_COLOUR_RING = 5;
 export const TREATMENT_RING = 4;
 // 14 anchors across 6 families, so barring 3 families still leaves at least half the library and
 // barring 5 ids leaves nine. Both are upper bounds, not promises — pickPlacement skips any filter
@@ -250,7 +265,7 @@ export function toStyleHistory(stored: readonly unknown[]): StyleHistory {
   // De-duplicate while preserving newest-first order: a family used three runs ago and again
   // last run should occupy ONE slot in the ring, not two, or a deep ring fills up with repeats
   // and stops barring anything new.
-  const dedupe = <T,>(values: readonly T[], cap: number): T[] => {
+  const dedupe = <T>(values: readonly T[], cap: number): T[] => {
     const seen = new Set<T>();
     const out: T[] = [];
     for (const value of values) {
@@ -263,10 +278,22 @@ export function toStyleHistory(stored: readonly unknown[]): StyleHistory {
   };
 
   return {
-    paletteIds: dedupe(styles.map((s) => s.paletteId), PALETTE_ID_RING),
-    families: dedupe(styles.map((s) => s.family), FAMILY_RING),
-    layoutIds: dedupe(styles.map((s) => s.layoutId), LAYOUT_ID_RING),
-    coverages: dedupe(styles.map((s) => s.coverage), COVERAGE_RING),
+    paletteIds: dedupe(
+      styles.map((s) => s.paletteId),
+      PALETTE_ID_RING,
+    ),
+    families: dedupe(
+      styles.map((s) => s.family),
+      FAMILY_RING,
+    ),
+    layoutIds: dedupe(
+      styles.map((s) => s.layoutId),
+      LAYOUT_ID_RING,
+    ),
+    coverages: dedupe(
+      styles.map((s) => s.coverage),
+      COVERAGE_RING,
+    ),
     // Filtered before de-duplication: a run with no placement (article, template-edit, or any
     // row older than 2026-08-14) must not occupy a ring slot with an empty string, or a few
     // legacy rows would fill the ring and stop it barring anything real.
@@ -286,6 +313,18 @@ export function toStyleHistory(stored: readonly unknown[]): StyleHistory {
         .filter((b) => b.length > 0 && b !== 'neutral'),
       BUCKET_RING,
     ),
+    measuredDominantHexes: dedupe(
+      styles
+        .map((s) => s.measured?.dominantHex ?? '')
+        .filter((value) => value.length > 0),
+      MEASURED_COLOUR_RING,
+    ),
+    measuredGroundHexes: dedupe(
+      styles
+        .map((s) => s.measured?.groundHex ?? '')
+        .filter((value) => value.length > 0),
+      MEASURED_COLOUR_RING,
+    ),
     treatments: styles.slice(0, TREATMENT_RING).map(describePosterStyle),
   };
 }
@@ -297,11 +336,10 @@ export function posterStyleLabel(value: unknown): string | null {
   if (!style) return null;
   const palette = paletteById(style.paletteId);
   const layout = anyLayoutById(style.layoutId);
-  // Same choice as describePosterStyle, and here it matters to the officer rather than to a log:
-  // the label sits under the poster on the detail page, so it must name the arrangement the
-  // poster was actually asked for rather than a rotation nothing acted on.
+  // Do not show unused composition metadata beneath a fresh social poster. Article posters have
+  // no placement record and continue to show the landscape layout that actually reached them.
   const placement = placementById(style.placementId);
-  const parts = [palette?.label, placement?.label ?? layout?.label].filter(
+  const parts = [palette?.label, ...(placement ? [] : [layout?.label])].filter(
     (p): p is string => typeof p === 'string' && p.length > 0,
   );
   return parts.length > 0 ? parts.join(' · ') : null;
@@ -311,7 +349,10 @@ export function posterStyleLabel(value: unknown): string | null {
 //   tsx src/generation/poster-style.ts
 // Offline assertions over the parse/history/label round trip, including the junk a real column
 // will eventually contain. No model call, no spend.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
   const failures: string[] = [];
   const { POSTER_PALETTES } = await import('./poster-palettes.js');
   const { POSTER_LAYOUTS } = await import('./poster-layouts.js');
@@ -334,18 +375,35 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   }
 
   // 2. Junk must yield null, never throw.
-  for (const junk of [null, undefined, 0, 'x', {}, { paletteId: 'gone', layoutId: 'gone' }]) {
-    if (parsePosterStyle(junk) !== null) failures.push(`junk ${JSON.stringify(junk)} parsed`);
+  for (const junk of [
+    null,
+    undefined,
+    0,
+    'x',
+    {},
+    { paletteId: 'gone', layoutId: 'gone' },
+  ]) {
+    if (parsePosterStyle(junk) !== null)
+      failures.push(`junk ${JSON.stringify(junk)} parsed`);
   }
 
   // 3. History de-duplicates and respects the ring caps.
   const history = toStyleHistory([
-    buildPosterStyle(POSTER_PALETTES[0] as PosterPalette, POSTER_LAYOUTS[0] as PosterLayout),
-    buildPosterStyle(POSTER_PALETTES[1] as PosterPalette, POSTER_LAYOUTS[1] as PosterLayout),
+    built,
+    buildPosterStyle(
+      POSTER_PALETTES[1] as PosterPalette,
+      POSTER_LAYOUTS[1] as PosterLayout,
+    ),
     // Same family as [0] would be — force a duplicate by repeating the entry outright.
-    buildPosterStyle(POSTER_PALETTES[0] as PosterPalette, POSTER_LAYOUTS[0] as PosterLayout),
+    buildPosterStyle(
+      POSTER_PALETTES[0] as PosterPalette,
+      POSTER_LAYOUTS[0] as PosterLayout,
+    ),
     { garbage: true },
-    buildPosterStyle(POSTER_PALETTES[5] as PosterPalette, POSTER_LAYOUTS[3] as PosterLayout),
+    buildPosterStyle(
+      POSTER_PALETTES[5] as PosterPalette,
+      POSTER_LAYOUTS[3] as PosterLayout,
+    ),
   ]);
   if (new Set(history.paletteIds).size !== history.paletteIds.length) {
     failures.push('paletteIds contain duplicates');
@@ -353,29 +411,56 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   if (new Set(history.families).size !== history.families.length) {
     failures.push('families contain duplicates');
   }
-  if (history.families.length > FAMILY_RING) failures.push('family ring exceeded its cap');
-  if (history.coverages.length > COVERAGE_RING) failures.push('coverage ring exceeded its cap');
-  if (history.treatments.length === 0) failures.push('no treatments produced for the brief');
+  if (history.families.length > FAMILY_RING)
+    failures.push('family ring exceeded its cap');
+  if (history.coverages.length > COVERAGE_RING)
+    failures.push('coverage ring exceeded its cap');
+  if (history.treatments.length === 0)
+    failures.push('no treatments produced for the brief');
+  if (history.measuredDominantHexes[0] !== '#B24B1D') {
+    failures.push('actual dominant colour was not carried into history');
+  }
+  if (history.measuredGroundHexes[0] !== '#FAF2E2') {
+    failures.push('actual ground colour was not carried into history');
+  }
   console.log(JSON.stringify(history, null, 2));
 
   // 4. Empty / all-junk history is the neutral value, not a crash.
-  if (toStyleHistory([]).families.length !== 0) failures.push('empty history was not empty');
+  if (toStyleHistory([]).families.length !== 0)
+    failures.push('empty history was not empty');
   if (toStyleHistory([{ x: 1 }, null]).paletteIds.length !== 0) {
     failures.push('all-junk history was not empty');
   }
 
   // 5. The Marathi label resolves and is not just punctuation.
   const label = posterStyleLabel(built);
-  if (!label || !label.includes('·')) failures.push(`unexpected label: ${label}`);
+  if (!label || !label.includes('·'))
+    failures.push(`unexpected label: ${label}`);
   console.log(`\nlabel: ${label}`);
   if (posterStyleLabel({ paletteId: 'gone' }) !== null) {
     failures.push('an unresolvable style produced a label');
   }
 
+  // A procedural id contains enough information to survive persistence without duplicating the
+  // palette inside poster_style.
+  {
+    const { pickSocialPalette } = await import('./social-colour-plan.js');
+    const socialPalette = pickSocialPalette('style-round-trip');
+    const socialStyle = buildPosterStyle(socialPalette, layout);
+    const back = parsePosterStyle(JSON.parse(JSON.stringify(socialStyle)));
+    if (back?.paletteId !== socialPalette.id) {
+      failures.push('a procedural social palette failed to parse back');
+    }
+    if (!posterStyleLabel(socialStyle)?.includes(socialPalette.label)) {
+      failures.push('a procedural social palette produced no label');
+    }
+  }
+
   // 6. An ARTICLE run's style resolves through the same functions — the layout id comes from the
   //    landscape library, and one column stores both kinds.
   {
-    const { ARTICLE_POSTER_LAYOUTS } = await import('./article-poster-layouts.js');
+    const { ARTICLE_POSTER_LAYOUTS } =
+      await import('./article-poster-layouts.js');
     const articleLayout = ARTICLE_POSTER_LAYOUTS[0] as ArticlePosterLayout;
     const articleStyle = buildPosterStyle(palette, articleLayout, {
       groundHex: '#EEF1F7',
@@ -387,7 +472,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const back = parsePosterStyle(JSON.parse(JSON.stringify(articleStyle)));
     if (!back) failures.push('an article style failed to parse back');
     if (back && back.layoutId !== articleLayout.id) {
-      failures.push(`article layout id lost in the round trip: ${back.layoutId}`);
+      failures.push(
+        `article layout id lost in the round trip: ${back.layoutId}`,
+      );
     }
     const articleLabel = posterStyleLabel(articleStyle);
     if (!articleLabel || !articleLabel.includes(articleLayout.label)) {
@@ -398,7 +485,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     // the API queries them apart by category).
     const mixed = toStyleHistory([articleStyle, built]);
     if (mixed.layoutIds.length !== 2) {
-      failures.push(`mixed history lost a layout: ${JSON.stringify(mixed.layoutIds)}`);
+      failures.push(
+        `mixed history lost a layout: ${JSON.stringify(mixed.layoutIds)}`,
+      );
     }
   }
 
@@ -408,14 +497,15 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   //    template-edit run legitimately has none, and nulling those would throw away their colour
   //    history as well.
   {
-    const { POSTER_PLACEMENTS, placementById } = await import(
-      './poster-placements.js'
-    );
+    const { POSTER_PLACEMENTS, placementById } =
+      await import('./poster-placements.js');
     const anchor = POSTER_PLACEMENTS[2] as PosterPlacement;
     const withPlacement = buildPosterStyle(palette, layout, undefined, anchor);
     const backP = parsePosterStyle(JSON.parse(JSON.stringify(withPlacement)));
     if (backP?.placementId !== anchor.id)
-      failures.push(`the placement was lost in the round trip: ${backP?.placementId}`);
+      failures.push(
+        `the placement was lost in the round trip: ${backP?.placementId}`,
+      );
     if (backP?.placementFamily !== anchor.family)
       failures.push('the placement family was not resolved from the library');
 
@@ -431,18 +521,19 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       ...JSON.parse(JSON.stringify(withPlacement)),
       placementId: 'retired_anchor',
     });
-    if (!stale) failures.push('an unresolvable placement nulled the whole style');
+    if (!stale)
+      failures.push('an unresolvable placement nulled the whole style');
     if (stale?.placementId !== undefined)
       failures.push('an unresolvable placement id survived the parse');
 
-    // The label names the ARRANGEMENT, not the layout: the layout is a rotation that has not
-    // reached a prompt since 2026-08-10, and the officer reads this under the poster.
+    // Neither stored social composition id reaches the prompt now, so the officer sees only the
+    // procedural palette that did influence the poster.
     const labelled = posterStyleLabel(withPlacement);
-    if (!labelled?.includes(anchor.label))
-      failures.push(`the label does not name the arrangement: ${labelled}`);
+    if (labelled?.includes(anchor.label))
+      failures.push(`the label names an unused arrangement: ${labelled}`);
     if (labelled?.includes(layout.label))
       failures.push(
-        'the label still names the retired composition rotation beside the arrangement',
+        'the label still names the retired social composition rotation',
       );
     // An article/legacy row has no arrangement, so it keeps naming its layout rather than losing
     // half its label.
@@ -466,7 +557,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         `placement ring took ${mixedHistory.placementIds.length} entries from 2 placed + 1 unplaced style`,
       );
     if (mixedHistory.placementIds.some((id) => placementById(id) === null))
-      failures.push('the placement ring carries an id the library cannot resolve');
+      failures.push(
+        'the placement ring carries an id the library cannot resolve',
+      );
     if (mixedHistory.placementFamilies.length === 0)
       failures.push('the placement family ring came back empty');
     if (EMPTY_STYLE_HISTORY.placementIds.length !== 0)
