@@ -2008,6 +2008,15 @@ async function renderAndStoreSocialPoster(
     placementIds?: readonly string[] | undefined;
     placementFamilies?: readonly PlacementFamily[] | undefined;
   }> = {},
+  // Only the v1 write upserts — the same guarantee runArticlePosterPhase already makes, and
+  // for the same reason. v1 is never legitimately re-rendered, but a crash (or a process
+  // restart) between the upload and the posterPath row-write leaves an ORPHAN at that path,
+  // and the retry route's "this run produced nothing" branch re-runs at version 1 again: the
+  // row is then permanently unrenderable, every retry failing on "object already exists".
+  // Safe: the v1 URL is never served before posterPath is set, so no CDN cache entry can hold
+  // a stale copy. A regenerate (v>1) must NOT upsert — there posterPath is written BEFORE
+  // insertRevision, so a version that reached the row was served.
+  upsert = false,
 ): Promise<{ postType: string; title: string | null }> {
   // A fully-AI poster: designed from scratch, with NO reference of any kind. TWO modes land here,
   // differing only in where the poster's words come from — 'fresh' has generatePosterCopy write
@@ -2393,12 +2402,12 @@ async function renderAndStoreSocialPoster(
     posterPng = await overlayTwitterChrome(rawPoster);
   }
   const posterObjectPath = posterPath(id, version);
-  await uploadPng(client, posterObjectPath, posterPng);
+  await uploadPng(client, posterObjectPath, posterPng, upsert);
   // The artwork on its own, for the un-branded download. On the DGIPR lane this is the
   // 1280x1504 canvas the model actually painted — no badge stamped over its corner and no
   // footer strip joined below it. CMO's is its 1280x1600 render with the leader header,
   // footer and photo circle all still absent.
-  await storePlainPoster(client, id, version, rawPoster);
+  await storePlainPoster(client, id, version, rawPoster, upsert);
 
   // Working title → referenceTitle (surfaced in UI). Persisted with the poster so a later
   // caption failure never loses the paid render. A fresh run has no reference ranker to name it,
@@ -2490,6 +2499,8 @@ export function startSocialPostJob(
         designMode,
         1,
         id,
+        {},
+        true,
       );
 
       if (!options.generateCaption) return;
@@ -2536,6 +2547,8 @@ async function renderAndStoreYoutubeThumbnail(
   version: number,
   // Diversifies selection per run (id on a first render, `${id}:v${n}` on a redo).
   seed: string,
+  // v1 only — see the note on renderAndStoreSocialPoster's own flag.
+  upsert = false,
 ): Promise<{ title: string | null }> {
   // 1. Which reference. A pinned exact image wins outright (resolvePinnedImage is
   //    category-agnostic and resolves the type off the image itself); otherwise the whole
@@ -2629,7 +2642,7 @@ async function renderAndStoreYoutubeThumbnail(
     await fitToYoutubeThumbnail(edited),
   );
   const objectPath = posterPath(id, version);
-  await uploadPng(client, objectPath, thumbnailPng);
+  await uploadPng(client, objectPath, thumbnailPng, upsert);
 
   await updateGeneration(client, id, {
     referenceTitle: resolved.title ?? null,
@@ -2666,7 +2679,7 @@ export function startYoutubeThumbnailJob(
       error: null,
     });
 
-    await renderAndStoreYoutubeThumbnail(client, id, row, 1, id);
+    await renderAndStoreYoutubeThumbnail(client, id, row, 1, id, true);
   });
 }
 

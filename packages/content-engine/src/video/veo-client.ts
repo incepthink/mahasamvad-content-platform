@@ -245,7 +245,8 @@ async function startVeoOperation(
 
   const wantNegative =
     input.negativePrompt !== undefined && input.negativePrompt.trim() !== '';
-  let sendingNegative = wantNegative && !modelsRejectingNegativePrompt.has(model);
+  let sendingNegative =
+    wantNegative && !modelsRejectingNegativePrompt.has(model);
   let lastFrameShape: LastFrameShape | null =
     input.lastFramePng !== undefined && !modelsRejectingLastFrame.has(model)
       ? (lastFrameShapeByModel.get(model) ?? 'bytes')
@@ -307,7 +308,10 @@ async function startVeoOperation(
         lastFrameShape = null;
         continue;
       }
-      if (sendingGenerateAudio && mentionsField(error, 'generateaudio', 'generate_audio')) {
+      if (
+        sendingGenerateAudio &&
+        mentionsField(error, 'generateaudio', 'generate_audio')
+      ) {
         modelsRejectingGenerateAudio.add(model);
         // Not fatal, but worth saying out loud: this model will generate audio
         // we then strip, and its audio safety filter can fail an otherwise good

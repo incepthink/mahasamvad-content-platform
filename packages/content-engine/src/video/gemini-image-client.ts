@@ -81,7 +81,9 @@ function refusalTextOf(body: GeminiImageResponse): string {
   const parts = body.candidates?.[0]?.content?.parts ?? [];
   const text = parts
     .map((part) => part.text)
-    .filter((value): value is string => typeof value === 'string' && value !== '')
+    .filter(
+      (value): value is string => typeof value === 'string' && value !== '',
+    )
     .join(' ')
     .trim();
   const blocked = body.promptFeedback?.blockReason;
@@ -171,7 +173,9 @@ export async function generateGeminiImage(
     },
   });
 
-  const send = async (withImageConfig: boolean): Promise<GeminiImageResponse> => {
+  const send = async (
+    withImageConfig: boolean,
+  ): Promise<GeminiImageResponse> => {
     const response = await geminiFetch(`models/${model}:generateContent`, {
       label: 'gemini image',
       apiKey,

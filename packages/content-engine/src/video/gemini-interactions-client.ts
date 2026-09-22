@@ -565,6 +565,42 @@ function requireApiKey(): string {
   return key;
 }
 
+function readBool(name: string, fallback: boolean): boolean {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === '') return fallback;
+  const value = raw.trim().toLowerCase();
+  return value === 'true' || value === '1';
+}
+
+// WHETHER A RENDER IS BACKGROUNDED. Read in ONE place, and the default is OFF.
+//
+// `background: true` is what the API is for and what this client shipped with, but Google's
+// GET /v1beta/interactions/{id} now answers
+//   400 {"error":{"message":"API key not valid. Please pass a valid API key.", ...}}
+// for any interaction still `in_progress` — so a backgrounded render can never be POLLED, and
+// awaitInteraction fails on its first poll every time.
+//
+// THE MESSAGE NAMES THE WRONG CAUSE; the key is fine. Measured 2026-09-22 with bare curl,
+// outside this codebase, three runs, one key:
+//   background=true  -> create 200 (in_progress) -> GET 400 "API key not valid"
+//   background=false -> create 200 (completed)   -> GET 200
+// The same key lists /v1beta/models, and CREATED the very interaction the GET then refuses,
+// one second earlier. Nothing here changed to cause it (the model default and
+// isTerminalInteractionStatus are untouched since this client was written) — the server's
+// behaviour did. So do NOT spend another afternoon on the key, the header, the id encoding or
+// the `?key=` query form; all four were tested and none of them is it.
+//
+// With it off the create call BLOCKS until the render finishes and returns a TERMINAL
+// interaction, which is why every caller already skips awaitInteraction via
+// isTerminalInteractionStatus and why nothing downstream needed changing. The cost is that one
+// request now spans the whole render: GEMINI_VIDEO_TIMEOUT_MS must be render-length (30 min,
+// not the 5-minute default), and a timeout is never retried while the render is billed anyway.
+//
+// Set GEMINI_VIDEO_BACKGROUND=true to put polling back the day Google fixes the GET.
+export function interactionBackgroundEnabled(): boolean {
+  return readBool('GEMINI_VIDEO_BACKGROUND', false);
+}
+
 function readInt(name: string, fallback: number): number {
   const raw = process.env[name];
   if (raw === undefined || raw.trim() === '') return fallback;
@@ -614,7 +650,8 @@ export async function createVideoInteraction(
     const body = buildInteractionRequest({
       ...input,
       model,
-      background: !modelsRejectingBackground.has(model),
+      background:
+        interactionBackgroundEnabled() && !modelsRejectingBackground.has(model),
       uriDelivery: !modelsRejectingResponseFormat.has(model),
       aspectRatio:
         dropAspectRatio || modelsRejectingAspectRatio.has(model)
