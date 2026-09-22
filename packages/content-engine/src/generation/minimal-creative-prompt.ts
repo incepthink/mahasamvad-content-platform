@@ -1,13 +1,12 @@
 // Minimal creative poster prompt for testing.
 // Contains ONLY:
-// 1. "Make a creative poster for social media platforms in the size {width} × {height}."
+// 1. "Make a creative poster for social media platforms in the size {width} × {height}. It must look very professional and not be congested."
 // 2. Text accuracy rules
-// 3. Text priority & readability (text takes priority over artwork/icons, large readable font for mobile)
-// 4. Numbers rule (Devanagari numerals ०-९ only)
-// 5. Do not use (logos, watermarks, maps)
-// 6. Headline & margins (font scaled/wrapped to clear top-right badge)
-// 7. Area rules (bottom text cushion)
-// 8. The text to put on the poster
+// 3. Numbers rule (Devanagari numerals ०-९ only)
+// 4. Do not use (logos, watermarks, maps)
+// 5. Headline & margins (font scaled/wrapped to clear top-right badge)
+// 6. Area rules (bottom text cushion)
+// 7. The text to put on the poster
 //
 // No extra creative direction essay, no color palettes, no forced layout templates.
 
@@ -34,12 +33,6 @@ export const TEXT_ACCURACY_RULE = `TEXT ACCURACY:
 - Words such as “व्यक्ती”, “शक्ती”, “युक्ती” and “निर्देश” must remain exactly as supplied.
 - Do not rewrite, translate, autocorrect, abbreviate or approximate any word.
 - Before finishing, compare every rendered word and number with the supplied content and correct all differences.`;
-
-export const TEXT_PRIORITY_RULE = `TEXT PRIORITY & READABILITY:
-- The text is the primary purpose of the poster and must take priority over artwork, illustrations, and decorative elements.
-- The poster will be read on mobile phones: ensure all body text, bullet points, and cards use large, bold, easily readable font sizes with strong contrast against their background.
-- Never shrink text into tiny unreadable lines to make room for giant icons or heavy illustrations.
-- Keep icons compact and secondary so the written text has plenty of room to breathe and remains effortlessly readable at a glance.`;
 
 export const NUMBERS_RULE = `NUMBERS:
 - Use only Devanagari numerals: ० १ २ ३ ४ ५ ६ ७ ८ ९.
@@ -82,7 +75,7 @@ export function buildMinimalCreativePrompt(
   const badgeHeight = input.badgeHeight ?? DEFAULT_BADGE_HEIGHT;
   const text = input.text.trim();
 
-  const opening = `Make a creative poster for social media platforms in the size ${width} × ${height}.`;
+  const opening = `Make a creative poster for social media platforms in the size ${width} × ${height}. It must look very professional and not be congested.`;
   const areaRule = buildAreaRule(width, height, bottomMargin);
   const headlineMarginsRule = buildHeadlineMarginsRule(badgeWidth, badgeHeight);
 
@@ -90,8 +83,6 @@ export function buildMinimalCreativePrompt(
     opening,
     '',
     TEXT_ACCURACY_RULE,
-    '',
-    TEXT_PRIORITY_RULE,
     '',
     NUMBERS_RULE,
     '',
