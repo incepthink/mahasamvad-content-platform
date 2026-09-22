@@ -6,10 +6,15 @@
 // Mahasamvad style and structure, but are explicitly fenced off from the factual source.
 
 import type { DesignationPair } from './category-prompt.js';
+import {
+  editorialPreferencePlacement,
+  editorialPreferencesSystemSection,
+  editorialPreferencesUserBlock,
+} from './editorial-preferences-block.js';
 import type { ChatMessage } from './openai-chat.js';
 import type { StyleReferenceArticle } from './select-style-reference.js';
 
-export const DLO_ARTICLE_PROMPT_VERSION = 'dlo-rag-v3';
+export const DLO_ARTICLE_PROMPT_VERSION = 'dlo-rag-v4';
 
 export const DGIPR_EDITORIAL_SYSTEM_PROMPT = [
   'You are a senior DGIPR (माहिती व जनसंपर्क महासंचालनालय) editor. Write a publication-ready Mahasamvad news article in formal Marathi, following these strict editorial rules:',
@@ -49,6 +54,12 @@ export type DloArticlePromptInputs = Readonly<{
   heading?: string | null | undefined;
   officerInstructions?: string | null | undefined;
   attachedSourceFiles?: boolean | undefined;
+  // The department's learned editorial preferences (migration 0057), already ranked and
+  // scoped by the caller. WHERE they land is EDITORIAL_PREFERENCE_PLACEMENT's decision, not
+  // this type's — see editorial-preferences-block.ts. Absent or empty leaves both messages
+  // byte-identical to what this builder produced before they existed, which is what keeps
+  // capture-dlo-distillation.ts able to reconstruct a historical prompt.
+  editorialPreferences?: readonly string[] | undefined;
 }>;
 
 function clean(value: string | null | undefined): string {
@@ -99,6 +110,16 @@ export function buildDloArticleUserPrompt(
     );
   }
 
+  // AFTER the reviewed names and BEFORE the officer's own two blocks, so those stay last —
+  // this repo's standing belief that a late block weighs most, and the officer wrote theirs
+  // for this one article. Empty under the default `system` placement, where the rules travel
+  // in the system message instead.
+  if (editorialPreferencePlacement() === 'user') {
+    parts.push(
+      ...editorialPreferencesUserBlock(inputs.editorialPreferences ?? []),
+    );
+  }
+
   const heading = clean(inputs.heading);
   if (heading) parts.push('', '### HEADLINE / ANGLE', '', heading);
 
@@ -113,10 +134,17 @@ export function buildDloArticleUserPrompt(
 export function buildDloArticleMessages(
   inputs: DloArticlePromptInputs,
 ): ChatMessage[] {
+  // The base five rules are NEVER mutated — a learned section is appended after them, and
+  // only under the `system` placement. `editorialPreferencesSystemSection` returns '' when
+  // there is nothing to append, so the common case is the constant itself, unchanged.
+  const learned =
+    editorialPreferencePlacement() === 'system'
+      ? editorialPreferencesSystemSection(inputs.editorialPreferences ?? [])
+      : '';
   return [
     {
       role: 'system',
-      content: DGIPR_EDITORIAL_SYSTEM_PROMPT,
+      content: `${DGIPR_EDITORIAL_SYSTEM_PROMPT}${learned}`,
     },
     { role: 'user', content: buildDloArticleUserPrompt(inputs) },
   ];

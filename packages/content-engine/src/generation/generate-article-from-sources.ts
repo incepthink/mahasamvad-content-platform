@@ -69,6 +69,7 @@ import {
   DLO_ARTICLE_PROMPT_VERSION,
   buildDloArticleMessages,
 } from './dlo-article-prompt.js';
+import { editorialPreferencePlacement } from './editorial-preferences-block.js';
 
 export type SourceArticleOptions = SimpleGenerateArticleOptions &
   Readonly<{
@@ -130,6 +131,11 @@ export async function generateArticleFromSources(
 
   onProgress('draft');
   const variant = articlePromptVariant();
+  // As on the text lane: only the /dlo prompt receives them, and the same builder decides
+  // whether they ride in the system message or in the user turn.
+  const editorialPreferences = dloPrompt
+    ? (options?.editorialPreferences ?? [])
+    : [];
   const messages = dloPrompt
     ? buildDloArticleMessages({
         sourceInformation: note,
@@ -138,6 +144,7 @@ export async function generateArticleFromSources(
         heading: options?.heading,
         officerInstructions: options?.instructions,
         attachedSourceFiles: attachedCount > 0,
+        editorialPreferences,
       })
     : buildArticleMessagesForReferenceMode(
         {
@@ -251,7 +258,11 @@ export async function generateArticleFromSources(
       `effort=${articleReasoningEffort()} | ` +
       `files=${onGemma ? documents.length : files.length} note=${note.length} chars | ` +
       `style-ref=${styleReference.source}x${styleReference.articles.length} | ` +
-      `prompt=${promptVersion} | ` +
+      `prompt=${promptVersion}${
+        dloPrompt
+          ? ` prefs=${editorialPreferences.length}@${editorialPreferencePlacement()}`
+          : ''
+      } | ` +
       `${article.length} chars`,
   );
 
@@ -270,6 +281,7 @@ export async function generateArticleFromSources(
       mode: 'simple',
       promptVersion,
       articleCount: styleReference.articles.length,
+      editorialPreferenceCount: editorialPreferences.length,
     },
     fiveWOneH,
     designationIssues: designationResult.issues,

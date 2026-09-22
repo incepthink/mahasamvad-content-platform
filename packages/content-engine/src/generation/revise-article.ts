@@ -18,6 +18,7 @@ import {
   chatCompleteStream,
   type ChatMessage,
 } from './openai-chat.js';
+import { editorialPreferencesRevisionBlock } from './editorial-preferences-block.js';
 import type { SourceFileRef } from '../intake/openai-source-files.js';
 import {
   respondWithSources,
@@ -120,6 +121,13 @@ function buildRevisionMessages(
   excludeFacts: readonly string[] = [],
   officerRequest = '',
   heading = '',
+  // The department's learned editorial preferences (migration 0057).
+  //
+  // NOT OPTIONAL IN SPIRIT, whatever the default says. Without them a feedback round rewrites
+  // the article with no knowledge of the standing rules it was written under — which is
+  // exactly how the officer's HEADLINE / ANGLE used to be lost — so every learned preference
+  // would be silently argued away by the first "make the opening punchier".
+  preferences: readonly string[] = [],
 ): ChatMessage[] {
   const { article: currentArticle, factCheck: currentFactCheck } =
     splitContent(currentContent);
@@ -129,6 +137,7 @@ function buildRevisionMessages(
     parseLengthRequest(feedback) ?? parseLengthRequest(officerRequest);
   const requiredRows = includedFactsBlock(includeFacts);
   const statementRows = statementBlock(statements);
+  const preferenceRows = editorialPreferencesRevisionBlock(preferences);
   const excluded = excludeFacts.map((fact) => fact.trim()).filter(Boolean);
 
   const userPrompt = [
@@ -182,6 +191,9 @@ function buildRevisionMessages(
           '',
         ]
       : []),
+    // IMMEDIATELY BEFORE <FEEDBACK>, so this round's feedback — the most recent statement of
+    // what the officer wants — is the last thing the model reads before the task.
+    ...(preferenceRows.length > 0 ? [...preferenceRows, ''] : []),
     '<FEEDBACK purpose="style_structure_emphasis_only_not_fact_source">',
     feedback.trim(),
     '</FEEDBACK>',
@@ -215,6 +227,14 @@ function buildRevisionMessages(
     ...(excluded.length > 0
       ? [
           'EXCLUDED_FACTS मधील तथ्ये अधिकाऱ्याने वगळली आहेत; feedback काहीही असला तरी ती पुन्हा आणू नका.',
+        ]
+      : []),
+    // Said in the TASK as well as in the block, because the block states its own precedence
+    // against the GENERAL rules while this states it against THIS round's feedback — the one
+    // thing a standing rule must never outrank.
+    ...(preferenceRows.length > 0
+      ? [
+          'LEARNED_PREFERENCES ही आधीच्या अभिप्रायांतून शिकलेली कायमस्वरूपी लेखनशैली आहे; ती पाळा. मात्र या फेरीतील FEEDBACK शी विरोध असेल तर FEEDBACK ला प्राधान्य द्या. कोणत्याही preference मधून नवीन तथ्य, नाव, तारीख, रक्कम, पदनाम किंवा ठिकाण जोडू नका.',
         ]
       : []),
     ...(expand
@@ -425,6 +445,16 @@ export async function reviseArticle(
   // than run half-blind (see the guards below). Empty on every other lane, which keeps its
   // chatComplete calls and its full coverage/faithfulness loop byte-for-byte unchanged.
   files: readonly SourceFileRef[] = [],
+  // The department's learned editorial preferences (migration 0057), already ranked, scoped
+  // and capped by the caller. Inserted HERE rather than appended last so it sits beside the
+  // other per-run prompt data it belongs with; `onDelta` stays the trailing argument, which
+  // is what keeps both runner call sites readable.
+  //
+  // THIS IS NOT OPTIONAL IN PRACTICE. A feedback round that cannot see the standing rules
+  // rewrites the article without them, so the first "make the opening punchier" would undo
+  // everything the department has learned. The default is empty only so the non-/dlo lanes,
+  // which have no preferences, need no change.
+  preferences: readonly string[] = [],
   // The live view of the rewrite, if the caller has one. Only the FIRST call streams — the
   // coverage-inject and faithfulness passes below rewrite the whole article again, and
   // streaming a second full text over the first would read as the article being written
@@ -462,6 +492,7 @@ export async function reviseArticle(
     excludeFacts,
     officerRequest,
     heading,
+    preferences,
   );
   let content = hasFiles
     ? await respondWithSources({
@@ -806,6 +837,62 @@ if (
   check('no officer request block', !bare.includes('OFFICER_REQUEST'));
   check('no length block', !bare.includes('LENGTH REQUIREMENT'));
   check('no precedence carve-out', !bare.includes('वरचढ आहे'));
+  check('no learned-preferences block', !bare.includes('LEARNED_PREFERENCES'));
+
+  // Migration 0057. The feedback path must see the standing rules the draft was written
+  // under, or the first feedback round argues them away — the failure the officer's
+  // HEADLINE / ANGLE had before it reached this prompt.
+  console.log('\n=== the learned editorial preferences reach the revision ===');
+  const rules = [
+    'शीर्षक १० शब्दांच्या आत ठेवा.',
+    'निर्णय पहिल्या वाक्यात द्या.',
+  ];
+  const revisionArgs = [
+    'टिपणी मजकूर.',
+    '# शीर्षक\n\nपहिला परिच्छेद.',
+    'सुरुवात आणखी आकर्षक करा',
+    'news',
+    false,
+    [],
+    [],
+    [],
+    [],
+    request,
+    heading,
+  ] as const;
+  const withRules =
+    buildRevisionMessages(...revisionArgs, rules)[1]?.content ?? '';
+  check(
+    'the block is rendered and fenced as not a fact source',
+    withRules.includes(
+      '<LEARNED_PREFERENCES purpose="standing_editorial_rules_not_fact_source">',
+    ),
+  );
+  check(
+    'every rule reaches the prompt',
+    rules.every((rule) => withRules.includes(rule)),
+  );
+  check(
+    'it sits IMMEDIATELY before <FEEDBACK>, so this round’s feedback is read last',
+    withRules.includes('</LEARNED_PREFERENCES>\n\n<FEEDBACK'),
+  );
+  check(
+    'the TASK says this round’s feedback outranks a standing rule',
+    withRules.includes('FEEDBACK शी विरोध असेल तर FEEDBACK ला प्राधान्य द्या'),
+  );
+  check(
+    'the never-a-fact fence is stated',
+    withRules.includes('No preference may ever introduce a fact'),
+  );
+  const withoutRules = buildRevisionMessages(...revisionArgs)[1]?.content ?? '';
+  const withNoRules =
+    buildRevisionMessages(...revisionArgs, [])[1]?.content ?? '';
+  const withBlankRules =
+    buildRevisionMessages(...revisionArgs, ['  ', ''])[1]?.content ?? '';
+  check(
+    'byte-identical to the pre-0057 prompt when there are no rules',
+    withNoRules === withoutRules && withBlankRules === withoutRules,
+  );
 
   if (failures > 0) process.exitCode = 1;
   else console.log('\nAll revise-article checks passed.');

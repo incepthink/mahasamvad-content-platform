@@ -3111,6 +3111,193 @@ client id/secret — see the milestone below.
 
 ## Latest Implementation Milestone
 
+- **An officer's feedback now WRITES the editorial rules — Phase 2 of 3: learning, behind a
+  default-off flag** (2026-09-21, no migration, no n8n). Phase 1 made a rule in
+  `editorial_preferences` reach every /dlo article and every feedback revision of it, with the
+  rules seeded by hand. This is what learns them. The loop the brief asked for — an officer
+  says "शीर्षक खूप लांब आहे, लहान ठेवा" once and tomorrow's article is shorter — closes here;
+  the officer-facing off switch is Phase 3, which is why the flag ships OFF.
+  - **The heart of it is telling a RULE from a FACT, and the guard is the whole feature.** One
+    officer sentence is two different things wearing one shape: "शीर्षक लहान ठेवा" is how the
+    department wants articles written, "बजेट ५०० नाही, ६०० कोटी आहे" is a fact about one note.
+    A missed rule costs one rule, which an officer can add by hand. A factual correction
+    mistaken for a rule is injected into EVERY future article, where it asserts a budget figure
+    about notes that have nothing to do with it. So the module is written to reject on doubt,
+    and that asymmetry is stated in its header rather than left as a tuning choice.
+  - **INSTRUCT, THEN GUARANTEE — and this one runs the repo's usual test BACKWARDS.** Layer 1
+    is one strict-JSON call (`extractPreferenceCandidates`, `OPENAI_PREFERENCE_MODEL`, default
+    `gpt-5.6-sol`) that splits the feedback into candidates and marks each `editorial` or
+    `factual`; a single round legitimately yields both. Layer 2 is the pure, free
+    `isPortableRule`, which re-decides in code, and **a candidate must pass BOTH** — the
+    model's verdict is necessary and never sufficient. `findUnsupportedClaims` and
+    `validatePosterSubject` require a claim to be ACCOUNTABLE IN THE NOTE before it may be
+    published; a learned rule is rejected *because* it is. Its tests, in order: the form-unit
+    allowlist applied PER DIGIT RUN (what lets "Tier-2 शीर्षक १० शब्दांच्या आत ठेवा" survive a
+    note that happens to contain १०), the digit-in-note test, world-quantity units
+    (कोटी/लाख/टक्के/…, factual whatever the note says — which is what catches a corrected figure
+    the note does not yet spell), date values, and glossary `person|place|org|scheme` entities.
+    `designation` and `other` are **deliberately allowed**: "मंत्र्यांच्या धोरणात्मक विधानाने
+    सुरुवात करा" is a legitimate standing rule and base rule 1 already names मुख्यमंत्री — the
+    same split the Hindi translation lock makes. A quoted span is exempt from the digit and date
+    tests so a banned phrasing can quote itself, and **not** from the entity test, so a name
+    cannot be laundered by quoting it.
+  - **One deliberate departure from the plan, and it was a false reject waiting to happen.**
+    The plan's date test rejected `तारीख · दिनांक · दि.` outright; `@dgipr/schemas`' own header
+    names "निर्णयाची तारीख पहिल्या परिच्छेदात द्या" as a canonical valid preference, which that
+    test would have refused on sight. A weekday or month is always factual (it IS a value); a
+    date MARKER is factual only when a digit run sits beside it. Both halves are asserted.
+  - **Consolidation is FREE FIRST.** Exact match after normalisation, then near-duplicate by
+    the shared `editDistance` (≤ 8), bumps `reinforcement_count` and stamps `last_seen_at` with
+    **no insert and no model call** — the commonest case by far is the department repeating
+    itself, and repetition is information about emphasis, so making it expensive is backwards.
+    Only a genuinely new rule buys the `ADD | DUPLICATE_OF | SUPERSEDES | MERGE_WITH` call, and
+    it sees EVERY active rule in that scope (the set is capped at `MAX_INJECTED_PREFERENCES`, so
+    "all of them" is one small request — which is the argument against embeddings here: with a
+    capped set there is nothing for a vector index to narrow, and injection stays deterministic
+    and auditable for Phase 3's page). `SUPERSEDES` inserts and then MARKS the old row with
+    `superseded_by`; nothing is ever deleted.
+  - **A real defect the harness caught on its first run, and a line not to remove.** Two rules
+    whose NUMBERS differ are never duplicates however alike they read: "शीर्षक १५ शब्दांच्या आत
+    ठेवा" and "शीर्षक १० शब्दांच्या आत ठेवा" are one edit apart and say opposite things, and the
+    near-duplicate test was folding the second into the first — silently REINFORCING the limit
+    the department had just changed, with no model call to catch it. `findDuplicatePreference`
+    now requires the script-normalised digit signature to match before accepting a near
+    duplicate, which is what sends that pair to the consolidator to supersede.
+  - **Zero disruption, by four constraints each set by neighbouring code.** The pass fires
+    `void learn(...).catch(...)` after `insertRevision` — anything awaited inside `revise()` is
+    inside `runJob`'s `try`, so a throw would route a SUCCESSFUL revision into
+    `recoverEditFailure` and report a finished article as a failed edit. It carries **its own
+    cost accumulator and its own `persistCost`**, because `runJob`'s `finally` persists cost as
+    soon as the revision settles, which is before this pass has made its calls; `persistCost`
+    chains writers per generation, so the later write is additive. It carries **its own
+    timeout** (`EDITORIAL_LEARNING_TIMEOUT_MS`, 180 s), and the article is already on screen
+    when it starts. It is metered as a new task `feedback_learning` (registered in
+    `jobs/analytics.ts` and `web/lib/analytics.ts`, Marathi label in `strings.ts`).
+  - **Hooked at BOTH feedback jobs through one shared helper.** `startArticleFeedbackJob` and
+    `startConcurrentArticleFeedbackJob` have identical tails; hooking only the first would
+    silently miss every revision an officer makes while a poster is still rendering, which is
+    exactly the round they are most likely to make. Asserted structurally, by reading
+    `runner.ts` in the harness, rather than reviewed.
+  - **The "memory updated" signal** follows the established registry pattern —
+    `learnedPreferences` beside `lengthWarnings`, a getter, a field on `toDetail` and on
+    `GenerationDetailSchema` (defaulted, so an older payload parses), and a Marathi callout on
+    `ArticleView`. `useGeneration` does **one** extra refetch 6 s after the row settles, armed
+    through a **ref** rather than state (its own `refresh()` changes `detail`, so a state flag
+    would schedule another read forever). A note missed because the page was closed costs
+    nothing — the rule is a row, and Phase 3's page is where it lives. Do not turn that one
+    read into a second poll.
+  - **The honest limit, stated in the module header rather than glossed:** a person the
+    verified glossary has never met, written with no digits, no date word and no Latin-script
+    name, passes every test. "श्री. क्ष यांचे नाव आधी द्या" is a factual correction this guard
+    cannot see. The review page is the backstop, and that is the reason the flag is off.
+  Verified 2026-09-21, all free: workspace typecheck **7/7 green**; eslint clean on all 13
+  touched files; prettier clean on every hunk of mine — `apps/api/src/jobs/analytics.ts`,
+  `apps/api/src/routes/generations.ts` and `apps/web/lib/strings.ts` report complaints that are
+  **pre-existing** (confirmed by running prettier over each HEAD blob through `--stdin-filepath`,
+  which reproduces them, and by checking prettier's remaining diff touches only untouched lines
+  — `reduce(`, a `reply.code(409)` chain and `motionLassoActiveNote`), so do NOT `--write` them.
+  New `tsx src/generation/learn-editorial-preferences.ts --check` at **35/35** — every row of
+  the brief's own table (a corrected budget, a weekday, a named minister, the Tier-2 headline,
+  the quoted banned phrasing, the closing dignitary convention, the designation case, the mixed
+  feedback splitting one-kept-one-dropped, and a person's name inside quotes), plus the refined
+  date test both ways, the script-normalised digit tests, the shape guard and the de-duplication
+  half including the changed-number case. New `npx tsx
+  ../../apps/api/src/jobs/editorial-learning.check.ts` (run from content-engine) at **52/52** —
+  it drives the real pass through a routed PostgREST stub with the two model calls injected, and
+  asserts all four consolidation outcomes, that a repeat costs NO consolidation call, that
+  SUPERSEDES marks and never deletes, that MERGE_WITH inserts nothing, that the guard overrules
+  the model in both directions, that a classifier failure returns `[]`, and the structural
+  check that both feedback call sites reach the helper with the flag, the /dlo gate, the
+  un-awaited fire and the separate cost accumulator in place. Phase 1's harnesses are unchanged
+  and green (block builder, `dlo-article-prompt.test.ts` 9/9, `revise-article --check`, the
+  preferences route check, `export-dlo-generation.test.ts`).
+  **Left for a real run** (needs the flag on + OpenAI spend): feedback "शीर्षक खूप लांब आहे,
+  लहान ठेवा" producing a rule within seconds with the revision's wall-clock unchanged against a
+  flag-off run; "बजेट ६०० कोटी आहे" producing none; the same rule given twice bumping
+  `reinforcement_count` instead of inserting; and the live-classifier sweep over the harness's
+  own table, asserting the model's `kind` agrees with the deterministic verdict — a disagreement
+  is the signal for tuning the PROMPT, never for loosening the guard.
+  **Blast radius**: with the flag off nothing runs at all, and with it on every database call in
+  the pass is inside a catch that degrades to no learning, so an un-applied 0057 would cost the
+  learning and never the revision.
+  **Deploy**: rebuild `@dgipr/schemas` → `@dgipr/content-engine` dists → API + web (ship
+  together — `learnedPreferences` on the detail payload is a shared contract, though it is
+  defaulted so a half-deploy simply shows no callout). No migration, no n8n. New env:
+  `EDITORIAL_LEARNING_ENABLED` (**leave off**), `OPENAI_PREFERENCE_MODEL`,
+  `OPENAI_PREFERENCE_REASONING_EFFORT`, `EDITORIAL_LEARNING_TIMEOUT_MS`.
+
+- **/dlo articles are written with the department's LEARNED editorial preferences — Phase 1
+  of 3: persistence and injection** (2026-09-21, migration 0057, no n8n, no web change). An
+  officer's feedback on a /dlo article was used once by `reviseArticle` and thrown away, so
+  tomorrow's article repeated the same mistake. The platform already had LangMem's semantic
+  memory (`glossary_terms`) and episodic memory (`selectStyleReference`); the third,
+  PROCEDURAL memory — how to write — existed only as the five hand-written rules in
+  `DGIPR_EDITORIAL_SYSTEM_PROMPT` (added by hand in `c97bbbb`). This phase builds the storage
+  and the injection path, with rules seeded by hand; **nothing learns yet** (extraction from
+  feedback is Phase 2, the officer review page Phase 3 — plan
+  `~/.claude/plans/task-plan-implementation-fluffy-crown.md`).
+  - **Its own table, `editorial_preferences` (0057), and no column on `generations`** — a new
+    column on an existing table must be named in a column-list constant, so an un-applied
+    migration would break every read of that table; a table nothing else reads disables only
+    the learning. Nothing is deleted on supersession (`status: 'superseded'` +
+    `superseded_by`, the insert-only doctrine); `supersedeEditorialPreference` is in the module
+    from the start so later code never learns to delete.
+  - **`EDITORIAL_PREFERENCE_PLACEMENT` (`system` default | `user`), read in ONE place**
+    (`editorialPreferencePlacement()` in `editorial-preferences-block.ts`). `system` appends a
+    `6. LEARNED EDITORIAL PREFERENCES` section after the base five — LangMem's own shape and
+    in-distribution in form for this model; `user` puts `### LEARNED EDITORIAL PREFERENCES`
+    after REVIEWED NAMES and before HEADLINE / ANGLE so the officer's two per-run blocks stay
+    last. Which one Gemma FOLLOWS is empirical, so it is a flag and an attributable A/B. An
+    unrecognised value falls back to `system` rather than failing every /dlo run.
+  - **What must not be undone.** The base five rules are NEVER mutated — learned rules only
+    extend them. Every shape carries the same three precedence lines (a preference beats the
+    general rules; the officer's HEADLINE / ANGLE and OFFICER REQUEST beat a preference) plus a
+    separate never-a-fact sentence. **No preferences ⇒ both messages byte-identical under either
+    placement** (`DLO_ARTICLE_PROMPT_VERSION` → `dlo-rag-v4`), which is what keeps
+    `capture-dlo-distillation.ts` reconstructing historical prompts faithfully. **The feedback
+    path sees them too** — `buildRevisionMessages` renders `<LEARNED_PREFERENCES
+    purpose="standing_editorial_rules_not_fact_source">` immediately before `<FEEDBACK>` plus a
+    TASK line saying this round's feedback wins; `reviseArticle`'s new `preferences` parameter
+    sits after `files`, before `onDelta`, and both runner call sites pass it. Without that,
+    every feedback round would argue the rules away, the failure HEADLINE / ANGLE had once.
+  - **Scoped to /dlo, best-effort, capped in SQL.** `articleEditorialPreferences` (runner.ts)
+    returns `[]` unless `row.dloIntakeId` is set, and on any read failure;
+    `listActiveEditorialPreferences` selects `active` rows whose scope is the run's category or
+    `both`, ordered `reinforcement_count desc, last_seen_at desc`, limited to
+    `MAX_INJECTED_PREFERENCES` (12, ≈760 Gemma tokens at 240 chars each). Both generators thread
+    it to the DLO builder only; `styleReferenceMeta.editorialPreferenceCount` (jsonb, no
+    migration) and the `prefs=N@placement` log field make an A/B attributable afterwards.
+  - **Stale at HEAD and fixed here, independently of this feature:** the three distillation
+    harnesses (`build-distillation-dataset.ts`, two checks in `capture-dlo-distillation.ts`,
+    `export-dlo-generation.test.ts`) still asserted the retired one-line system message. They
+    now assert it STARTS WITH the imported `DGIPR_EDITORIAL_SYSTEM_PROMPT` (starts-with because a
+    `system`-placement run legitimately appends learned rules). The eval grader's
+    `DLO_PROMPT_HEADINGS` gained `### LEARNED EDITORIAL PREFERENCES` — unlisted, the rules would
+    fold into REVIEWED NAMES and be read as fact support. **Not touched, deliberately:**
+    `gemma-sources.ts`'s harness fixture and `deploy/runpod-gemma-finetune/train.py` still carry
+    the one-liner as a transport fixture — they test wire shape, not the prompt.
+  Verified 2026-09-21, all free: workspace typecheck **7/7 green**; eslint clean and prettier
+  clean on every hunk of mine (`schemas/src/index.ts` complains of CRLF only, and
+  `generate-article-simple.ts`'s remaining complaint is the pre-existing `ensureArticleHeading`
+  line — do NOT `--write` them); `editorial-preferences-block.ts` harness all green;
+  `dlo-article-prompt.test.ts` + `export-dlo-generation.test.ts` **16/16** (incl. byte-identity
+  under both placements, block position, the cap); `revise-article.ts --check` green (+6);
+  `build-distillation-dataset --check`, `capture-dlo-distillation --check`, and
+  `eval-dlo-distillation --check` **75/75** (+4 split checks); a new offline route check
+  (`npx tsx ../../apps/api/src/routes/editorial-preferences.check.ts` from content-engine) —
+  guards answer 400 before any DB call, hand-seeded rows are `manual`/`both`/`active`, unknown id
+  404, PATCH writes only what it names. **Blast radius verified live against the real database,
+  where 0057 is NOT applied**: `listActiveEditorialPreferences` throws `relation
+  "public.editorial_preferences" does not exist` in ~0.5s and the runner degrades to `[]`.
+  **Left for a real run — the point of this phase, and what Phases 2-3 depend on:** apply 0057;
+  `POST /api/preferences {"rule":"शीर्षक १० शब्दांच्या आत ठेवा","scope":"news"}`; generate a
+  /dlo article from an unrelated note on Gemma and confirm the log's `prefs=1@system` AND that
+  the headline actually obeys; repeat under `EDITORIAL_PREFERENCE_PLACEMENT=user`; keep and
+  RECORD the winner; send one feedback round and confirm the revision still honours it.
+  `eval-dlo-distillation.ts` is the instrument for doing that at scale. **Deploy: 0057 →
+  `@dgipr/schemas` → `@dgipr/database` → `@dgipr/content-engine` dists → API.** No web, no n8n.
+  New env (optional): `EDITORIAL_PREFERENCE_PLACEMENT`.
+
 - **`/dlo` can be written by a self-hosted vision model: `ARTICLE_PROVIDER=gemma`** (2026-09-20,
   no migration, no n8n): `/dlo` has been the file-native lane since `DloFileWorkspace` replaced
   the per-source review — documents go to the article call as `input_file` parts with no OCR

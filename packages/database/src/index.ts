@@ -269,3 +269,23 @@ export {
   type ReferenceTypeRow,
   type ReferenceTypePatch,
 } from './reference-types.js';
+// Learned editorial preferences (migration 0057): the /dlo article lane's procedural memory.
+// Its own table, read by nothing else, so an un-applied 0057 disables learning alone.
+export {
+  EDITORIAL_PREFERENCES_TABLE,
+  insertEditorialPreference,
+  updateEditorialPreference,
+  getEditorialPreference,
+  listEditorialPreferences,
+  listActiveEditorialPreferences,
+  countEditorialPreferences,
+  supersedeEditorialPreference,
+  deleteEditorialPreference,
+  type EditorialPreferenceScope,
+  type EditorialPreferenceStatus,
+  type EditorialPreferenceSource,
+  type EditorialPreferenceRow,
+  type EditorialPreferencePatch,
+  type EditorialPreferenceFilters,
+  type NewEditorialPreference,
+} from './editorial-preferences.js';

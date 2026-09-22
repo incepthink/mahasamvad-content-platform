@@ -24,6 +24,7 @@ import {
   Mic,
   PanelLeftClose,
   PanelLeftOpen,
+  ScrollText,
   SpellCheck,
   Video,
   X,
@@ -66,6 +67,9 @@ const NAV_LINKS = [
   { href: '/chat', label: STR.navChat, Icon: MessagesSquare },
   { href: '/generations', label: STR.navHistory, Icon: History },
   { href: '/analytics', label: STR.navAnalytics, Icon: ChartColumn },
+  // Last, with the other "look back at what happened" entries: these rules are a record of
+  // what the department has asked for, not a tool an officer opens to make something.
+  { href: '/preferences', label: STR.navPreferences, Icon: ScrollText },
 ] as const;
 
 export function AppSidebar() {

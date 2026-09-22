@@ -14,6 +14,7 @@ import { registerNewDloRoutes } from './routes/new-dlo.js';
 import { registerDocumentRoutes } from './routes/documents.js';
 import { registerGenerationRoutes } from './routes/generations.js';
 import { registerGlossaryRoutes } from './routes/glossary.js';
+import { registerEditorialPreferenceRoutes } from './routes/editorial-preferences.js';
 import { registerTranslateRoutes } from './routes/translate.js';
 import { registerProofreadRoutes } from './routes/proofread.js';
 import { registerPointerRoutes } from './routes/pointers.js';
@@ -131,6 +132,9 @@ export async function createServer() {
       // and reads nothing — the Dynamic Poster crop preview lays them over an unbranded clip.
       registerChromeRoutes(instance);
       registerGlossaryRoutes(instance, client);
+      // The /dlo lane's learned editorial preferences (migration 0057). Seeding and review
+      // only — nothing here writes a rule automatically; that is the extraction phase.
+      registerEditorialPreferenceRoutes(instance, client);
       registerTranslateRoutes(instance, client);
       // Generic file upload → pages of text. It still persists no document and no text;
       // the client is here only so a PAID OCR read can be attributed on /analytics.

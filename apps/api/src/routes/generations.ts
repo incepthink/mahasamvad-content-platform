@@ -115,6 +115,7 @@ import {
   getTranslateError,
   getTranslateWarnings,
   getDesignationWarnings,
+  getLearnedPreferences,
   getLengthWarning,
   getPosterCapacityWarning,
   nameDesignationsOf,
@@ -593,6 +594,10 @@ async function toDetail(
     // with every item, but only the officer can decide to split the note into two posters.
     posterCapacityWarning: getPosterCapacityWarning(row.id),
     lengthWarning: getLengthWarning(row.id),
+    // What the latest feedback round taught the platform (migration 0057). Same in-process
+    // registry, for the same reason: the rule is a row and the review page owns it, while
+    // this note is only worth showing to the officer whose feedback wrote it, now.
+    learnedPreferences: getLearnedPreferences(row.id),
     // Article revision can run beside the poster render (same registry pattern as
     // translation), so its liveness/failure also come from the runner, not the row.
     articleRevising: isRevisingArticle(row.id),

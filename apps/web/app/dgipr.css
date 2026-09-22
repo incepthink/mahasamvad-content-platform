@@ -4340,6 +4340,177 @@ details.fold .fold-body.gl-add-body {
   min-width: 0;
 }
 
+/* ---------- संपादकीय नियम (/preferences) ----------
+
+   The learned editorial rules (migration 0057). It reuses the glossary's toolbar, fold and
+   card wholesale — same capability, same shape, and a second set of toolbar rules would only
+   drift — so what is here is the ROW, which differs: a rule is a sentence rather than a pair
+   of short fields, so it reads as a line of prose with its chips under it rather than as a
+   term with columns beside it. */
+
+.pref-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pref-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--ok);
+  border-radius: var(--r-md);
+  background: var(--card);
+}
+
+/* A rule that is not steering articles says so with its own weight, not with colour alone —
+   the status chip is what carries the fact. */
+.pref-row.is-disabled,
+.pref-row.is-superseded {
+  border-left-color: var(--border-strong);
+  background: var(--surface);
+}
+
+.pref-row.is-superseded .pref-rule {
+  color: var(--muted);
+}
+
+.pref-row.is-open {
+  border-color: var(--border-strong);
+  border-left-color: var(--accent);
+  box-shadow: var(--shadow-sm);
+}
+
+.pref-row-head {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.pref-row-main {
+  flex: 1 1 280px;
+  min-width: 0;
+}
+
+/* The rule itself is the thing on this page, so it is set at body size rather than as a
+   label, and it wraps — a 240-character Marathi sentence is two lines on a phone. */
+.pref-rule {
+  margin: 0;
+  font-size: 1.02rem;
+  font-weight: 600;
+  line-height: 1.55;
+  overflow-wrap: break-word;
+}
+
+.pref-row-tags {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.pref-scope-chip {
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+}
+
+/* Beyond the cap: stored, active, and not currently reaching the model. Neutral rather than
+   red — nothing is wrong with the rule, it is simply queued behind better-reinforced ones. */
+.pref-chip-capped {
+  background: var(--surface);
+  color: var(--muted);
+  border: 1px solid var(--border-strong);
+}
+
+.pref-meta-item {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.pref-row-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+/* This page's controls sit beside running Marathi text rather than in a form grid, so they
+   take the full 44px touch target rather than .btn-small's 40. */
+.pref-row-actions .btn {
+  min-height: 44px;
+}
+
+.pref-delete-btn {
+  min-width: 44px;
+  padding-inline: 10px;
+}
+
+.pref-provenance {
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+
+/* The officer's own words, quoted. Marked as a quotation rather than restyled as a hint,
+   because whether the rule says what they meant is judged against exactly this. */
+.pref-feedback {
+  margin: 4px 0 0;
+  padding-left: 12px;
+  border-left: 3px solid var(--border-strong);
+  color: var(--muted);
+  font-size: 0.9rem;
+  overflow-wrap: break-word;
+}
+
+.pref-generation-link {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.pref-row-form {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(200px, 1fr);
+  gap: 12px;
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.pref-field {
+  min-width: 0;
+}
+
+.pref-field textarea {
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+}
+
+.pref-count {
+  text-align: right;
+}
+
+.pref-row-form-actions,
+.pref-row-error {
+  grid-column: 1 / -1;
+}
+
+.pref-cap-note {
+  margin-bottom: 12px;
+}
+
+.pref-row-skeleton {
+  min-height: 76px;
+  border-left-color: var(--border-strong);
+}
+
 /* Inline labels: hidden on wide screens (the grid columns are self-evident),
    shown when the row stacks on narrow screens so each field stays identifiable. */
 .glossary-field-label {
@@ -4521,6 +4692,16 @@ details.fold .fold-body.gl-add-body {
   color: var(--text);
   background: var(--warn-soft);
   border-color: var(--warn);
+}
+
+/* Success variant — the "memory updated" callout under a /dlo article, which reports a
+   standing editorial rule the last feedback round taught the platform (migration 0057).
+   Green rather than neutral because nothing went wrong: something was LEARNED, and the
+   officer is being told so in case they did not mean it. */
+.info-callout.ok {
+  color: var(--text);
+  background: var(--ok-soft);
+  border-color: var(--ok);
 }
 
 /* ---------- poster master references ---------- */
@@ -6939,6 +7120,18 @@ a.thread-node:hover {
   }
 
   .gl-bulk-actions {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  /* The rule's edit form stacks, and its actions stop being pushed to the right edge — at
+     390px a right-aligned row of three controls leaves the rule text it belongs to orphaned
+     above a gap. */
+  .pref-row-form {
+    grid-template-columns: 1fr;
+  }
+
+  .pref-row-actions {
     width: 100%;
     margin-left: 0;
   }

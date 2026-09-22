@@ -584,6 +584,20 @@ export const STR = {
     `तुम्ही सुमारे ${requested} मागितले होते; बातमी ${actual} झाली आहे. आणखी कमी केल्यास महत्त्वाची माहिती वगळावी लागली असती.`,
   lengthUnitChars: (count: number) => `${count.toLocaleString('mr-IN')} अक्षरे`,
   lengthUnitWords: (count: number) => `${count.toLocaleString('mr-IN')} शब्द`,
+  // The "memory updated" callout (migration 0057). Shown under a /dlo article after a
+  // feedback round that taught the platform a standing editorial rule. It is deliberately
+  // plain about what happened -- the rule now steers EVERY future article, department-wide,
+  // so an officer who did not mean that must be able to see it and say so.
+  learnedPrefsTitle: 'अभिप्रायातून शिकलेले नियम',
+  learnedPrefsIntro:
+    'तुमच्या सूचनेवरून पुढील लेखांसाठी खालील संपादकीय नियम लक्षात ठेवला आहे.',
+  learnedPrefsActionAdded: 'नवीन नियम',
+  learnedPrefsActionReinforced: 'आधीचा नियम अधिक बळकट केला',
+  learnedPrefsActionSuperseded: 'आधीचा नियम बदलला',
+  learnedPrefsActionMerged: 'आधीच्या नियमात एकत्र केला',
+  learnedPrefsScopeNews: 'बातमी',
+  learnedPrefsScopeScheme: 'योजना-लेख',
+  learnedPrefsScopeBoth: 'सर्व लेख',
   // Shown on a social poster whose information held more items than any master template lays
   // out. The poster DOES carry every item — the design was stretched to fit — so this is a
   // "check it reads well, or split the note" prompt, not an error.
@@ -2222,6 +2236,7 @@ export const STR = {
   analyticsTaskDesignationExtraction: 'व्यक्ती व पदनाम शोध',
   analyticsTaskArticleGeneration: 'लेखाचा मसुदा व पडताळणी',
   analyticsTaskArticleRevision: 'अभिप्रायानुसार लेख सुधारणा',
+  analyticsTaskFeedbackLearning: 'अभिप्रायातून संपादकीय नियम शिकणे',
   analyticsTaskTranslationNames: 'भाषांतरापूर्वी नावांचा शोध',
   analyticsTaskEnglishTranslation: 'इंग्रजी भाषांतर',
   analyticsTaskHindiTranslation: 'हिंदी भाषांतर',
@@ -2300,6 +2315,81 @@ export const STR = {
   analyticsSliceMarathi: 'मराठी',
   analyticsSliceVideoNote: 'टिपणीवरून',
   analyticsSliceVideoScript: 'तयार संहितेवरून',
+
+  // ---------- संपादकीय नियम (/preferences) ----------
+  //
+  // The review page for the /dlo lane's learned editorial rules (migration 0057). The
+  // glossary is this platform's memory for WHAT things are called; this is its memory for
+  // HOW an article is written, and unlike the glossary most of its rows were never typed by
+  // anyone — they were taken from an officer's feedback. So the page has to say three things
+  // a list of rows does not say by itself: that a rule steers EVERY officer's next article,
+  // where a learned rule came from, and which rules are actually reaching the model.
+  navPreferences: 'संपादकीय नियम',
+  prefsTitle: 'संपादकीय नियम',
+  prefsIntro:
+    'लेख व बातम्या कशा लिहायच्या याचे कायमस्वरूपी नियम. काही नियम तुम्ही दिलेल्या अभिप्रायातून आपोआप शिकले जातात, काही येथे हाताने लिहिता येतात. येथील प्रत्येक सुरू असलेला नियम पुढच्या प्रत्येक लेखाला लागू होतो.',
+  // Stated on the page rather than pretended away: there is no login, so a rule one officer
+  // teaches binds the whole department. This is the reason the page exists at all.
+  prefsSharedNotice:
+    'हे नियम संपूर्ण विभागासाठी समान आहेत. येथे केलेला बदल सर्व अधिकाऱ्यांच्या पुढील लेखांवर परिणाम करतो — नियम चुकीचा वाटल्यास तो बंद करा किंवा दुरुस्त करा.',
+
+  prefsAddToggle: 'नवीन नियम हाताने लिहा',
+  prefsRuleLabel: 'नियम',
+  prefsRulePlaceholder: 'उदा. शीर्षक १० शब्दांच्या आत ठेवा.',
+  prefsRuleHint:
+    'लेख कसा लिहायचा एवढेच सांगा. नाव, तारीख, रक्कम, पदनाम, योजनेचे नाव किंवा ठिकाण नियमात लिहू नका — ती माहिती प्रत्येक लेखाच्या स्रोतातूनच येते.',
+  prefsScopeLabel: 'कोणत्या लेखांना लागू',
+  prefsAdd: 'नियम जोडा',
+  prefsAdding: 'जोडत आहोत…',
+  prefsRuleCount: (chars: number, max: number) =>
+    `${chars.toLocaleString('mr-IN')} / ${max.toLocaleString('mr-IN')} अक्षरे`,
+
+  prefsFilterAllStatuses: 'सर्व',
+  prefsFilterAllScopes: 'सर्व प्रकारचे लेख',
+  prefsStatusActive: 'सुरू',
+  prefsStatusDisabled: 'बंद',
+  prefsStatusSuperseded: 'बदललेला',
+  prefsSourceLearned: 'अभिप्रायातून शिकलेला',
+  prefsSourceManual: 'हाताने लिहिलेला',
+
+  prefsLoading: 'नियम आणत आहोत…',
+  prefsLoadFailed: 'नियम आणता आले नाहीत.',
+  prefsShowing: 'दाखवत आहोत',
+  prefsCount: 'एकूण नियम',
+  prefsEmpty:
+    'अद्याप एकही नियम नाही. अभिप्राय दिल्यावर नियम आपोआप तयार होतील, किंवा वरून एखादा नियम हाताने लिहा.',
+  prefsNoResults: 'या निवडीशी जुळणारा नियम नाही.',
+
+  // The in-use marker. A rule can be active and still not reach the model: only the top
+  // MAX_INJECTED_PREFERENCES rules of each category are sent, ranked by how often the
+  // department has asked for them. Without this an officer reads an active rule as being
+  // followed when it is not.
+  prefsInUse: 'लेखांत वापरात',
+  prefsInUseNewsOnly: 'फक्त बातम्यांत वापरात',
+  prefsInUseSchemeOnly: 'फक्त योजना-लेखांत वापरात',
+  prefsInUseTitle: 'हा नियम सध्या प्रत्येक नव्या लेखाच्या सूचनांमध्ये पाठवला जातो.',
+  prefsBeyondCap: 'मर्यादेबाहेर',
+  prefsBeyondCapTitle: (cap: number) =>
+    `एका लेखाला जास्तीत जास्त ${cap.toLocaleString('mr-IN')} नियम पाठवले जातात. हा नियम सुरू आहे पण सध्या त्या यादीत बसत नाही — तो काढून टाकलेला नाही; वारंवार तीच सूचना आल्यास तो पुन्हा वर येईल.`,
+  prefsCapNote: (cap: number) =>
+    `एका लेखाला जास्तीत जास्त ${cap.toLocaleString('mr-IN')} नियम पाठवले जातात. जे नियम विभागाने वारंवार सांगितले आहेत त्यांना प्राधान्य मिळते.`,
+  prefsReinforcement: (count: number) =>
+    `${count.toLocaleString('mr-IN')} वेळा सांगितले`,
+
+  prefsSourceFeedbackLabel: 'ज्या सूचनेवरून हा नियम आला',
+  prefsViewGeneration: 'ती बातमी पाहा',
+  prefsSupersededBy: 'हा नियम नव्या नियमाने बदलला आहे.',
+
+  prefsEdit: 'बदला',
+  prefsSave: 'जतन करा',
+  prefsSaving: 'जतन करत आहोत…',
+  prefsSaved: 'जतन झाले',
+  prefsCancel: 'नको',
+  prefsDisable: 'बंद करा',
+  prefsEnable: 'पुन्हा सुरू करा',
+  prefsDelete: 'काढून टाका',
+  prefsDeleteConfirm:
+    'हा नियम कायमचा काढून टाकायचा? पुढील लेखांत तो वापरला जाणार नाही. फक्त तात्पुरता थांबवायचा असेल तर "बंद करा" वापरा.',
 
   // ---- the ⓘ explanations (components/common/InfoHint) --------------------------------
   //

@@ -100,10 +100,18 @@ export type EvalPath = 'text' | 'image';
  * allow-block, every officer-approved पदनाम is counted as an unsupported claim, because an
  * approved designation is by definition absent from the note.
  */
+// LEARNED EDITORIAL PREFERENCES is listed unconditionally even though it is only ever
+// EMITTED under EDITORIAL_PREFERENCE_PLACEMENT=user (the default puts those rules in the
+// system message, where this grader never looks). Listing it costs nothing when it is absent
+// — the split only matches headings that actually occur — and omitting it would be a silent
+// defect under that placement: an unlisted heading is folded into the section above it, so
+// the standing rules would be read as part of REVIEWED NAMES AND DESIGNATIONS and, through
+// it, counted as authoritative fact support for whatever the article then claims.
 export const DLO_PROMPT_HEADINGS = [
   '### SOURCE INFORMATION',
   '### MAHASAMVAD STYLE REFERENCES',
   '### REVIEWED NAMES AND DESIGNATIONS',
+  '### LEARNED EDITORIAL PREFERENCES',
   '### HEADLINE / ANGLE',
   '### OFFICER REQUEST',
 ] as const;
@@ -1437,6 +1445,38 @@ function runCheck(): void {
   check(
     'a prompt with no source section is refused',
     !splitDloPrompt('random text with no headings at all').ok,
+  );
+
+  // Learned editorial preferences (migration 0057), under the placement that puts them in
+  // the user turn. An unlisted heading would be folded into REVIEWED NAMES AND DESIGNATIONS
+  // above it — and a rule line read as fact support is exactly what this grader must not do.
+  const previousPlacement = process.env.EDITORIAL_PREFERENCE_PLACEMENT;
+  process.env.EDITORIAL_PREFERENCE_PLACEMENT = 'user';
+  const withRules = splitDloPrompt(
+    buildDloArticleUserPrompt({
+      sourceInformation: 'मुंबई येथे ५०० कोटी रुपयांची योजना जाहीर.',
+      designations: [{ name: 'देवेंद्र फडणवीस', designation: 'मुख्यमंत्री' }],
+      editorialPreferences: ['शीर्षक १० शब्दांच्या आत ठेवा.'],
+      heading: 'योजनेस मान्यता',
+    }),
+  );
+  if (previousPlacement === undefined) {
+    delete process.env.EDITORIAL_PREFERENCE_PLACEMENT;
+  } else {
+    process.env.EDITORIAL_PREFERENCE_PLACEMENT = previousPlacement;
+  }
+  check('a prompt carrying learned preferences parses', withRules.ok);
+  check(
+    'a learned preference never lands in the source',
+    !withRules.sourceInformation.includes('शीर्षक १० शब्दांच्या'),
+  );
+  check(
+    'a learned preference is not read as a designation row',
+    withRules.designations.length === 1,
+  );
+  check(
+    'the heading after the preferences still round-trips',
+    withRules.heading === 'योजनेस मान्यता',
   );
 
   // --- document stripping ---------------------------------------------------------------

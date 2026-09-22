@@ -97,3 +97,8 @@ export * from './chat.js';
 // the single USD→INR presentation rate. Carries machine keys only — every Marathi label on
 // that page lives in apps/web/lib/strings.ts.
 export * from './analytics.js';
+
+// Learned editorial preferences (/dlo, migration 0057): the procedural-memory rules an
+// article is written with, plus the injection cap and the per-rule length ceiling. Exported
+// last — nothing in api.ts or dlo.ts imports from it, so it has no ordering constraint.
+export * from './editorial-preference.js';

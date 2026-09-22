@@ -19,6 +19,14 @@ import {
   RestoreArticleVersionResponseSchema,
   GenerationListResponseSchema,
   type GenerationListResponse,
+  EditorialPreferenceListResponseSchema,
+  EditorialPreferenceSchema,
+  type CreateEditorialPreferenceRequest,
+  type EditorialPreference,
+  type EditorialPreferenceListResponse,
+  type EditorialPreferenceScope,
+  type EditorialPreferenceStatus,
+  type UpdateEditorialPreferenceRequest,
   GlossaryListResponseSchema,
   GlossaryTermSchema,
   PrepareDesignationsResponseSchema,
@@ -1015,6 +1023,56 @@ export async function updateGlossaryTerm(
 
 export async function deleteGlossaryTerm(id: string): Promise<void> {
   await requestJson(`/api/glossary/${id}`, { method: 'DELETE' });
+}
+
+// ---------- Learned editorial preferences (the /dlo lane's standing rules) ----------
+//
+// The glossary above is this platform's SEMANTIC memory — what things are called. These are
+// its PROCEDURAL memory — how an article is written (migration 0057). The review page at
+// /preferences drives all four, and the list's `injected` names the rules that actually
+// reach the model right now; see InjectedPreferenceIdsSchema for why the API computes it.
+
+export async function listEditorialPreferences(
+  params: {
+    status?: EditorialPreferenceStatus;
+    scope?: EditorialPreferenceScope;
+    limit?: number;
+    offset?: number;
+  } = {},
+): Promise<EditorialPreferenceListResponse> {
+  const qs = new URLSearchParams();
+  if (params.status) qs.set('status', params.status);
+  if (params.scope) qs.set('scope', params.scope);
+  if (params.limit !== undefined) qs.set('limit', String(params.limit));
+  if (params.offset !== undefined) qs.set('offset', String(params.offset));
+  const query = qs.toString();
+  const body = await requestJson(`/api/preferences${query ? `?${query}` : ''}`);
+  return EditorialPreferenceListResponseSchema.parse(body);
+}
+
+export async function createEditorialPreference(
+  input: CreateEditorialPreferenceRequest,
+): Promise<EditorialPreference> {
+  const body = await requestJson('/api/preferences', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  return EditorialPreferenceSchema.parse(body);
+}
+
+export async function updateEditorialPreference(
+  id: string,
+  patch: UpdateEditorialPreferenceRequest,
+): Promise<EditorialPreference> {
+  const body = await requestJson(`/api/preferences/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+  return EditorialPreferenceSchema.parse(body);
+}
+
+export async function deleteEditorialPreference(id: string): Promise<void> {
+  await requestJson(`/api/preferences/${id}`, { method: 'DELETE' });
 }
 
 // ---------- Reference type catalog + master-template library ----------

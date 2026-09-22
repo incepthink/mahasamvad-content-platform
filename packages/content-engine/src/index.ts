@@ -631,6 +631,10 @@ export {
   type BuildCustomPosterPromptInput,
   type BuildFeedbackPromptInput,
 } from './generation/build-poster-prompt.js';
+export {
+  buildMinimalCreativePrompt,
+  type MinimalCreativePromptInput,
+} from './generation/minimal-creative-prompt.js';
 // Step 1 of the Dynamic Poster lane (migration 0052): gpt-5.6-sol reads the officer's still
 // poster and writes the prompt gemini-omni renders the clip from. The measured resolution is
 // supplied to it as fact — see the header for why it is not asked for.
@@ -763,6 +767,32 @@ export {
   THUMBNAIL_MAX_PEOPLE,
   type ThumbnailPerson,
 } from './generation/resolve-thumbnail-people.js';
+
+// Learning a STANDING editorial rule out of one round of officer feedback (migration 0057).
+// The model only classifies; `isPortableRule` re-decides in code, and a candidate must pass
+// BOTH before anything is written. Consolidation is free first (exact and near duplicates) and
+// only then a call. Sequenced by apps/api/src/jobs/editorial-learning.ts.
+export {
+  extractPreferenceCandidates,
+  isPortableRule,
+  consolidatePreference,
+  findDuplicatePreference,
+  normalizeRule,
+  quotedSpans,
+  PREFERENCE_MODEL,
+  preferenceReasoningEffort,
+  NEAR_DUPLICATE_MAX_DISTANCE,
+  CONSOLIDATION_ACTIONS,
+  type PreferenceCandidate,
+  type PreferenceScope,
+  type PortabilityVerdict,
+  type PortabilityReason,
+  type GuardGlossaryTerm,
+  type ExistingPreference,
+  type ConsolidationAction,
+  type ConsolidationDecision,
+  type ExtractPreferencesInput,
+} from './generation/learn-editorial-preferences.js';
 
 export type ContentChunk = Readonly<{
   id: string; // `${articleId}-${chunkIndex}`

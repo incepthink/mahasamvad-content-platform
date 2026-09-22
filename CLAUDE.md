@@ -1415,6 +1415,83 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
     batched `.in()`; lineage stays one-way and an intake is never marked consumed.
   - Free harness: `tsx src/intake/dlo-review-state.ts` (in content-engine, which has tsx —
     the `proof-read.ts --check` split).
+- **Learned editorial preferences — /dlo's PROCEDURAL memory (0057, Phase 1 of 3,
+  2026-09-21).** `DGIPR_EDITORIAL_SYSTEM_PROMPT`'s five hand-written rules were the only
+  "how to write" memory, and an officer's feedback was used once by `reviseArticle` and
+  thrown away. Standing rules now live in the `editorial_preferences` table and reach every
+  /dlo article AND every feedback revision of it. Rows → `packages/database/src/
+  editorial-preferences.ts`; shapes + `MAX_INJECTED_PREFERENCES` (12) +
+  `PREFERENCE_RULE_MAX_CHARS` (240) → `packages/schemas/src/editorial-preference.ts`; the
+  block builder (all three prompt shapes + the placement flag, one module so the wording cannot
+  drift and no import cycle forms) → `content-engine/src/generation/
+  editorial-preferences-block.ts`; seeding/review API → `apps/api/src/routes/
+  editorial-preferences.ts` (`GET/POST /api/preferences`, `PATCH/DELETE /api/preferences/:id`,
+  hand-seeded rows are `source: 'manual'`). Five things to keep. **`EDITORIAL_PREFERENCE_
+  PLACEMENT` (`system` default | `user`) is read in ONE place** — `system` appends a
+  `6. LEARNED EDITORIAL PREFERENCES` section after the base five, `user` puts a
+  `### LEARNED EDITORIAL PREFERENCES` block after REVIEWED NAMES and before HEADLINE / ANGLE —
+  because which one Gemma actually follows is an empirical question. **The base five are never
+  mutated**; learned rules only extend them, and the block carries its own precedence (a
+  preference beats the general rules; the officer's HEADLINE / ANGLE and OFFICER REQUEST beat a
+  preference; no preference may ever introduce a fact). **No preferences ⇒ both messages
+  byte-identical** (`dlo-rag-v4`), which keeps `capture-dlo-distillation.ts` reconstructing
+  historical prompts; the distillation harnesses now assert the system message STARTS WITH
+  `DGIPR_EDITORIAL_SYSTEM_PROMPT` (they had been asserting the retired one-liner). **The
+  revision path gets them too** (`<LEARNED_PREFERENCES>` immediately before `<FEEDBACK>`, plus a
+  TASK line saying this round's feedback wins) — without it every feedback round argued the
+  rules away. **The runner's read is best-effort and /dlo-only** (`articleEditorialPreferences`,
+  `row.dloIntakeId`), ranked + scoped + capped in SQL; a failure returns `[]`, so an un-applied
+  0057 costs the learning and never the article (verified live: the read throws
+  `relation … does not exist` and nothing else is touched). Each run records
+  `styleReferenceMeta.editorialPreferenceCount` (jsonb, no migration) and logs
+  `prefs=N@placement`.
+  Free harnesses: `tsx src/generation/editorial-preferences-block.ts`,
+  `tsx --test src/generation/dlo-article-prompt.test.ts`, `tsx src/generation/revise-article.ts
+  --check`, and from content-engine `npx tsx ../../apps/api/src/routes/
+  editorial-preferences.check.ts`.
+- **Those rules are now LEARNED from feedback (Phase 2 of 3, 2026-09-21, no migration).**
+  `EDITORIAL_LEARNING_ENABLED` (**default OFF**, read in ONE place — `editorialLearningEnabled()`
+  in `apps/api/src/jobs/editorial-learning.ts`) turns on a background pass fired
+  **fire-and-forget after `insertRevision` in BOTH feedback jobs** (`startArticleFeedbackJob`
+  AND `startConcurrentArticleFeedbackJob`, via the shared `learnFromFeedback` helper in
+  `runner.ts` — hooking only the first silently misses every revision made while a poster is
+  rendering). Engine → `content-engine/src/generation/learn-editorial-preferences.ts`;
+  sequencing → `apps/api/src/jobs/editorial-learning.ts`; the "memory updated" note →
+  `LearnedPreferenceNoteSchema` (`@dgipr/schemas`) → the `learnedPreferences` registry in
+  `runner.ts` → `toDetail` → a Marathi callout on `ArticleView`.
+  Six things to keep. **INSTRUCT THEN GUARANTEE, and the guard is the guarantee**: one
+  strict-JSON call classifies the feedback into `editorial`/`factual` candidates, then the pure
+  `isPortableRule` re-decides in code and a candidate must pass **both** — a rule the model
+  called editorial is still dropped if the guard rejects it, and vice versa. Its tests, in
+  order, are the form-unit allowlist (per digit run, and what lets `Tier-2 शीर्षक १० शब्दांच्या
+  आत` survive), the digit-in-note test, world-quantity units, date VALUES, and glossary
+  `person|place|org|scheme` entities (`designation`/`other` deliberately allowed). **It is the
+  exact INVERSE of `findUnsupportedClaims`** — those require a claim to be accountable in the
+  note; a learned rule is rejected *because* it is. **Failing safe is asymmetric and
+  deliberate**: a missed rule costs one rule, a false accept asserts a budget figure in every
+  future article. **The date test is a refinement of the plan's**: a weekday or month is
+  always factual, but `तारीख`/`दिनांक`/`दि.` only when a digit sits beside them — otherwise
+  `निर्णयाची तारीख पहिल्या परिच्छेदात द्या`, a canonical valid rule, would be refused on sight.
+  **Consolidation is FREE FIRST**: exact then near-duplicate (`editDistance ≤ 8`) bumps
+  `reinforcement_count` with **no model call**, and only a genuinely new rule buys the
+  `ADD | DUPLICATE_OF | SUPERSEDES | MERGE_WITH` call against every active rule in scope (the
+  set is capped, which is the argument against embeddings). **Two rules whose DIGITS differ are
+  never duplicates** — `शीर्षक १५…` vs `शीर्षक १०…` is one edit apart and means the opposite, so
+  a digit-signature mismatch sends the pair to the consolidator to supersede; caught by the
+  harness on its first run, do not remove it. **Nothing is deleted** — `SUPERSEDES` marks the
+  old row and points `superseded_by` at its replacement. And the pass has **its own cost
+  accumulator + `persistCost`** (runJob's `finally` persists before this pass has made its
+  calls) metered as task `feedback_learning`, **its own timeout**, and a `void …catch` — a
+  throw inside `revise()` would route a *successful* revision into `recoverEditFailure`.
+  `useGeneration` does ONE extra refetch 6 s after the row settles, so a late note is usually
+  caught; a missed one costs nothing, the rule is a row. Free harnesses: `tsx
+  src/generation/learn-editorial-preferences.ts --check` (the guard + dedup) and, from
+  content-engine, `npx tsx ../../apps/api/src/jobs/editorial-learning.check.ts` (all four
+  consolidation outcomes against a stub client, plus the structural check that both feedback
+  call sites reach the helper). New env: `EDITORIAL_LEARNING_ENABLED`,
+  `OPENAI_PREFERENCE_MODEL`, `OPENAI_PREFERENCE_REASONING_EFFORT`,
+  `EDITORIAL_LEARNING_TIMEOUT_MS`. The review page is Phase 3, and turning the flag on is its
+  last step.
 
 **Data & schema:** `supabase/migrations/0001…0004_*.sql` — pgvector Mahasamvad
 chunks, `generations` table, generation category + chunk style-category columns;
@@ -1495,6 +1572,15 @@ create still returns 202, every input guard still answers in Marathi, and the dy
 create is the only thing that fails. The motion snapshot columns are separate from
 `poster_path` deliberately — that column is a PNG every poster reader in the API treats as one,
 and an .mp4 in it would be listed as a poster version by `posterVersionPaths`.
+`0057` — `editorial_preferences` (new table: the /dlo lane's learned editorial rules — `rule`,
+`scope` news|scheme|both, `status` active|disabled|superseded, `source` learned|manual,
+`reinforcement_count`, provenance `source_feedback`/`source_generation_id`, self-referential
+`superseded_by`). Its own table and **no column on `generations`**, which is the whole
+blast-radius argument: nothing else reads it, and the runner's read is best-effort, so an
+un-applied 0057 disables learned preferences alone — **verified live**, the read throws
+`relation "public.editorial_preferences" does not exist` and degrades to no preferences. Nothing
+is deleted on supersession (the old row is marked `superseded` + `superseded_by`). Apply before
+the API deploy anyway.
 `0056` — `generations.prompt_image_paths` (jsonb: storage paths of the pictures an officer
 attached to a run for the image model, under `generations/prompt-images/` in the public posters
 bucket). Additive + nullable, and `insertGeneration` omits the column unless pictures were

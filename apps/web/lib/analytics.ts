@@ -113,6 +113,7 @@ const TASK_LABELS: Readonly<Record<string, string>> = {
   designation_extraction: STR.analyticsTaskDesignationExtraction,
   article_generation: STR.analyticsTaskArticleGeneration,
   article_revision: STR.analyticsTaskArticleRevision,
+  feedback_learning: STR.analyticsTaskFeedbackLearning,
   translation_name_extraction: STR.analyticsTaskTranslationNames,
   english_translation: STR.analyticsTaskEnglishTranslation,
   hindi_translation: STR.analyticsTaskHindiTranslation,

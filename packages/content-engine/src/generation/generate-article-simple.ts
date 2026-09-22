@@ -98,6 +98,7 @@ import {
   DLO_ARTICLE_PROMPT_VERSION,
   buildDloArticleMessages,
 } from './dlo-article-prompt.js';
+import { editorialPreferencePlacement } from './editorial-preferences-block.js';
 
 // Which editorial specification writes the article. 'standard' (the unset default) is the full
 // DGIPR specification in simple-article-prompt.ts. 'minimal' is the experiment: five sentences,
@@ -152,6 +153,11 @@ export type SimpleGenerateArticleOptions = Readonly<{
   // The post-name-review /dlo lane has its own complete prompt. It is explicit rather than
   // inferred from the presence of a DLO row so the content engine stays independent of storage.
   promptMode?: 'default' | 'dlo' | undefined;
+  // The department's learned editorial preferences (migration 0057), already ranked, scoped
+  // and capped by the caller — content-engine does not depend on @dgipr/database. Read ONLY
+  // by the /dlo prompt: the Creative-and-Social lanes are deliberately out of scope, and the
+  // shared block builder is the seam if that is ever wanted.
+  editorialPreferences?: readonly string[] | undefined;
 }>;
 
 // What the run used, persisted to generations.style_reference_meta. Both the calibration signal
@@ -169,6 +175,10 @@ export type StyleReferenceMeta = Readonly<{
   // How many complete exemplars the prompt actually received. The calibration signal for
   // ARTICLE_STYLE_REFERENCE_COUNT — without it a 1-vs-3 A/B is unattributable after the fact.
   articleCount: number;
+  // How many learned editorial preferences this run was actually written with (migration
+  // 0057). The same job articleCount does one field up: without it, "did the rules change
+  // the article?" is unanswerable after the fact. jsonb, so this needed no migration.
+  editorialPreferenceCount: number;
 }>;
 
 export type SimpleGeneratedArticle = Readonly<{
@@ -240,6 +250,10 @@ export async function generateArticleSimple(
     date: options?.date,
   } as const;
 
+  // Only the /dlo prompt receives them, which is what keeps this scoped to that lane.
+  const editorialPreferences = dloPrompt
+    ? (options?.editorialPreferences ?? [])
+    : [];
   const messages = dloPrompt
     ? buildDloArticleMessages({
         sourceInformation: note,
@@ -247,6 +261,7 @@ export async function generateArticleSimple(
         designations,
         heading: options?.heading,
         officerInstructions: options?.instructions,
+        editorialPreferences,
       })
     : buildArticleMessagesForReferenceMode(
         promptInputs,
@@ -336,6 +351,10 @@ export async function generateArticleSimple(
         !dloPrompt && variant === 'minimal'
           ? ` names=${(options?.names ?? []).length}`
           : ''
+      }${
+        dloPrompt
+          ? ` prefs=${editorialPreferences.length}@${editorialPreferencePlacement()}`
+          : ''
       } | ${article.length} chars | ` +
       `${article.trim().split(/\s+/u).length} words`,
   );
@@ -355,6 +374,7 @@ export async function generateArticleSimple(
       mode: 'simple',
       promptVersion,
       articleCount: styleReference.articles.length,
+      editorialPreferenceCount: editorialPreferences.length,
     },
     fiveWOneH,
     designationIssues: designationResult.issues,

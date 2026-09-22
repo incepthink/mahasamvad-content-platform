@@ -128,6 +128,17 @@ export class GemmaSourcesTooLargeError extends Error {
   }
 }
 
+function readInt(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === '') return fallback;
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function configuredBaseUrl(): string {
   return process.env.GEMMA_BASE_URL?.trim() ?? '';
 }
@@ -530,70 +541,181 @@ export async function respondWithSourcesViaGemma(options: {
 
   const lane = options.lane ?? 'default';
   const model = gemmaModelFor(lane);
+  const maxAttempts = readInt('GEMMA_MAX_RETRIES', 5);
+  const retryDelayMs = readInt('GEMMA_RETRY_DELAY_MS', 8_000);
+  const timeoutMs = options.timeoutMs ?? gemmaTimeoutMs();
 
-  const body = {
-    model,
-    messages,
-    max_tokens: options.maxOutputTokens,
-    temperature: 0,
-    stream: true,
-    stream_options: { include_usage: true },
-  };
+  let lastError: unknown;
 
-  let response;
-  try {
-    response = await openAiFetch(gemmaChatCompletionsUrl(), {
-      label: options.label,
-      apiKey: gemmaApiKey(),
-      body,
-      timeoutMs: options.timeoutMs ?? gemmaTimeoutMs(),
-    });
-  } catch (error) {
-    // The override's one total failure, made self-diagnosing.
-    throw (await diagnoseGemmaModel(error, lane, model)) ?? error;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    // Attempt 1 uses streaming so live tokens are published to the caller.
+    // If attempt 1 yields empty text or fails before any tokens arrive (for example,
+    // when a serverless RunPod worker is initializing from 0 workers and drops the chunked
+    // stream early), subsequent attempts switch to non-streaming, which queues on RunPod
+    // until the worker is loaded and ready.
+    const isStreaming = attempt === 1;
+
+    const body = {
+      model,
+      messages,
+      max_tokens: options.maxOutputTokens,
+      temperature: 0,
+      stream: isStreaming,
+      ...(isStreaming ? { stream_options: { include_usage: true } } : {}),
+    };
+
+    let response: Response;
+    try {
+      response = await openAiFetch(gemmaChatCompletionsUrl(), {
+        label: options.label,
+        apiKey: gemmaApiKey(),
+        body,
+        timeoutMs,
+      });
+    } catch (error) {
+      lastError = error;
+      if (attempt < maxAttempts) {
+        console.warn(
+          `[gemma-sources] ${options.label} request errored (${String(error)}); ` +
+            `retrying in ${Math.round(retryDelayMs)}ms (attempt ${attempt + 1}/${maxAttempts})...`,
+        );
+        await sleep(retryDelayMs);
+        continue;
+      }
+      throw (await diagnoseGemmaModel(error, lane, model)) ?? error;
+    }
+
+    if (isStreaming) {
+      if (!response.body) {
+        lastError = new Error('gemma returned no response body to stream.');
+        if (attempt < maxAttempts) {
+          console.warn(
+            `[gemma-sources] ${options.label} carried no response body; ` +
+              `retrying in ${Math.round(retryDelayMs)}ms (attempt ${attempt + 1}/${maxAttempts})...`,
+          );
+          await sleep(retryDelayMs);
+          continue;
+        }
+        throw lastError;
+      }
+
+      let text = '';
+      try {
+        const result = await readChatCompletionStream<{
+          prompt_tokens?: number;
+          completion_tokens?: number;
+          total_tokens?: number;
+        }>(
+          response.body,
+          options.onDelta ?? (() => {}),
+          (chunk) => {
+            text += chunk;
+          },
+          { label: options.label },
+        );
+
+        if (result.usage) {
+          recordChatUsage(model, result.usage, GEMMA_COST_PROVIDER);
+        }
+
+        if (result.finishReason === 'length') {
+          throw new Error(
+            `gemma stopped at the ${options.maxOutputTokens}-token ceiling before finishing the article. ` +
+              `Raise GEMMA_MAX_OUTPUT_TOKENS or attach fewer pages.`,
+          );
+        }
+      } catch (streamError) {
+        if (text.trim().length > 0) {
+          throw streamError;
+        }
+        lastError = streamError;
+        if (attempt < maxAttempts) {
+          console.warn(
+            `[gemma-sources] ${options.label} stream interrupted (${String(streamError)}); ` +
+              `retrying in ${Math.round(retryDelayMs)}ms (attempt ${attempt + 1}/${maxAttempts})...`,
+          );
+          await sleep(retryDelayMs);
+          continue;
+        }
+        throw streamError;
+      }
+
+      const article = text.trim();
+      if (article) {
+        return article;
+      }
+
+      lastError = new Error('gemma returned an empty article.');
+      if (attempt < maxAttempts) {
+        console.warn(
+          `[gemma-sources] ${options.label} returned empty stream (worker may still be initializing on RunPod); ` +
+            `retrying in ${Math.round(retryDelayMs)}ms (attempt ${attempt + 1}/${maxAttempts})...`,
+        );
+        await sleep(retryDelayMs);
+        continue;
+      }
+    } else {
+      let payload: {
+        choices?: Array<{
+          message?: { content?: string | null };
+          finish_reason?: string | null;
+        }>;
+        usage?: {
+          prompt_tokens?: number;
+          completion_tokens?: number;
+          total_tokens?: number;
+        };
+      };
+      try {
+        payload = (await response.json()) as typeof payload;
+      } catch (jsonError) {
+        lastError = jsonError;
+        if (attempt < maxAttempts) {
+          console.warn(
+            `[gemma-sources] ${options.label} failed to parse JSON response (${String(jsonError)}); ` +
+              `retrying in ${Math.round(retryDelayMs)}ms (attempt ${attempt + 1}/${maxAttempts})...`,
+          );
+          await sleep(retryDelayMs);
+          continue;
+        }
+        throw jsonError;
+      }
+
+      if (payload.usage) {
+        recordChatUsage(model, payload.usage, GEMMA_COST_PROVIDER);
+      }
+
+      const choice = payload.choices?.[0];
+      if (choice?.finish_reason === 'length') {
+        throw new Error(
+          `gemma stopped at the ${options.maxOutputTokens}-token ceiling before finishing the article. ` +
+            `Raise GEMMA_MAX_OUTPUT_TOKENS or attach fewer pages.`,
+        );
+      }
+
+      const article = (choice?.message?.content ?? '').trim();
+      if (article) {
+        options.onDelta?.(article);
+        return article;
+      }
+
+      lastError = new Error('gemma returned an empty article.');
+      if (attempt < maxAttempts) {
+        console.warn(
+          `[gemma-sources] ${options.label} returned empty content; ` +
+            `retrying in ${Math.round(retryDelayMs)}ms (attempt ${attempt + 1}/${maxAttempts})...`,
+        );
+        await sleep(retryDelayMs);
+        continue;
+      }
+    }
   }
-  if (!response.body) {
-    throw new Error('gemma returned no response body to stream.');
-  }
 
-  // The reader hands the answer back through callbacks rather than returning it —
-  // `onDelta` is the officer's live view and `onText` is what accumulates. Keeping them
-  // separate is what lets a caller with no live view still get the article.
-  let text = '';
-  const result = await readChatCompletionStream<{
-    prompt_tokens?: number;
-    completion_tokens?: number;
-    total_tokens?: number;
-  }>(
-    response.body,
-    options.onDelta ?? (() => {}),
-    (chunk) => {
-      text += chunk;
-    },
-    { label: options.label },
-  );
-
-  // Recorded under the model that ACTUALLY answered, not the base: on an endpoint serving
-  // both, a usage row naming the base would make the adapter's traffic indistinguishable
-  // from the base's — and telling them apart is the whole point of serving them together.
-  if (result.usage) {
-    recordChatUsage(model, result.usage, GEMMA_COST_PROVIDER);
-  }
-
-  // A completion cut off at the ceiling is a partial article, and storing one silently is
-  // the failure the Qwen lane already learned to refuse.
-  if (result.finishReason === 'length') {
-    throw new Error(
-      `gemma stopped at the ${options.maxOutputTokens}-token ceiling before finishing the article. ` +
-        `Raise GEMMA_MAX_OUTPUT_TOKENS or attach fewer pages.`,
-    );
-  }
-
-  const article = text.trim();
-  if (!article) {
-    throw new Error('gemma returned an empty article.');
-  }
-  return article;
+  const finalError =
+    lastError instanceof Error
+      ? lastError
+      : new Error('gemma returned an empty article.');
+  throw (await diagnoseGemmaModel(finalError, lane, model)) ?? finalError;
 }
 
 // ---------------------------------------------------------------------------

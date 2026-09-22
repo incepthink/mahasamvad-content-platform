@@ -70,6 +70,28 @@ const SOURCE_ICON: Record<GenerationSourceFile['kind'], React.ReactNode> = {
   txt: <FileText size={18} />,
 };
 
+// What the learning pass did with this round of feedback, and which articles the rule now
+// applies to. Machine keys travel on the wire (migration 0057); every Marathi label lives in
+// strings.ts, so these two maps are the only place the two meet.
+const LEARNED_PREF_ACTIONS: Record<
+  GenerationDetail['learnedPreferences'][number]['action'],
+  string
+> = {
+  added: STR.learnedPrefsActionAdded,
+  reinforced: STR.learnedPrefsActionReinforced,
+  superseded: STR.learnedPrefsActionSuperseded,
+  merged: STR.learnedPrefsActionMerged,
+};
+
+const LEARNED_PREF_SCOPES: Record<
+  GenerationDetail['learnedPreferences'][number]['scope'],
+  string
+> = {
+  news: STR.learnedPrefsScopeNews,
+  scheme: STR.learnedPrefsScopeScheme,
+  both: STR.learnedPrefsScopeBoth,
+};
+
 export function ArticleView({
   detail,
   onFeedbackSent,
@@ -345,6 +367,36 @@ export function ArticleView({
                 : STR.lengthWarnLong(label(requested), label(actual));
             })()}
           </p>
+        </div>
+      ) : null}
+
+      {/* "Memory updated" — what the last feedback round taught the platform (migration 0057).
+          Shown rather than left silent, because a learned rule is DEPARTMENT-WIDE: it steers
+          every future /dlo article for every officer, so the one who wrote the feedback is the
+          one who has to be able to see it and undo it on the review page. Marathi only, like
+          the two blocks above; the translations derive from the article, not from this. */}
+      {shownLang === 'mr' && detail.learnedPreferences.length > 0 ? (
+        <div className="info-callout ok" style={{ marginBottom: 12 }}>
+          <p className="field-label">{STR.learnedPrefsTitle}</p>
+          <p className="hint">{STR.learnedPrefsIntro}</p>
+          <ul className="hint" style={{ margin: '6px 0 0', paddingLeft: 20 }}>
+            {detail.learnedPreferences.map((note) => (
+              <li key={note.id}>
+                {note.rule}
+                {' — '}
+                {LEARNED_PREF_ACTIONS[note.action]}
+                {', '}
+                {LEARNED_PREF_SCOPES[note.scope]}
+              </li>
+            ))}
+          </ul>
+          {/* The callout is transient — it is reported from an in-process registry, not a
+              column — so this link is the only durable way back to what was just learned.
+              It matters most for the officer who did NOT mean to teach a rule: the page it
+              opens is where they turn it off. */}
+          <Link className="pref-generation-link" href="/preferences">
+            {STR.learnedPrefsReview}
+          </Link>
         </div>
       ) : null}
 

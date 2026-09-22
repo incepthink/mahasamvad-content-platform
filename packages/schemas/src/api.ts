@@ -19,6 +19,7 @@ import {
   NameDesignationSchema,
   NameDesignationsSchema,
 } from './designations.js';
+import { LearnedPreferenceNoteSchema } from './editorial-preference.js';
 
 export const OutputTypeSchema = z.enum(['article', 'poster', 'both']);
 export type OutputType = z.infer<typeof OutputTypeSchema>;
@@ -999,6 +1000,15 @@ export const GenerationDetailSchema = z.object({
   // the honest answer is a shorter article plus this notice — not filler in a government
   // article. Transient like the registries above, and defaulted so an older payload parses.
   lengthWarning: LengthWarningSchema.nullable().default(null),
+  // What the latest round of feedback on this run TAUGHT the platform (migration 0057) — a
+  // standing editorial rule added, reinforced, replaced or merged. The "memory updated"
+  // affordance. Transient like the registries above, because the RULE is durable (it is a row,
+  // and the review page is where it lives afterwards) while this is a "here is what I took
+  // from what you just said" prompt for the officer reading the revision they asked for. It
+  // lands a few seconds AFTER the revision, so the detail page refetches once more on settle;
+  // a note missed because the page was closed costs nothing. Defaulted so an older payload
+  // parses, and `[]` on every run that has learned nothing — which is most of them.
+  learnedPreferences: z.array(LearnedPreferenceNoteSchema).default([]),
   // Article revision can also run alongside the main job: while the poster is still
   // rendering the article is already final, so the user may refine it without waiting
   // out the render. Like `translating`, it can't own status/step/error and is reported

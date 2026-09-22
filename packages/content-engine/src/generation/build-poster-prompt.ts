@@ -11,6 +11,7 @@ import type { ArtDirection } from './art-direction.js';
 import type { PosterPalette } from './poster-palettes.js';
 import type { PosterLayout } from './poster-layouts.js';
 import type { PosterPlacement } from './poster-placements.js';
+import { buildMinimalCreativePrompt } from './minimal-creative-prompt.js';
 import {
   clearSpaceRule,
   contentInventoryLines,
@@ -584,46 +585,21 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
     const verbatim = (input.information ?? '').trim();
     const isVerbatim = designMode === 'fresh_verbatim' && verbatim.length > 0;
     // `fresh` typesets the curated copy; `fresh_verbatim` typesets the officer's unchanged text.
-    // Keep the generated/typed copy as a wording-only data block inside one compact brief.
-    // The image model had begun losing late instructions in the former ~1,000-word prompt, whose
-    // content-led layout, chrome and safe-area rules repeated the same ideas several times. This
-    // version states each contract once and spends the saved attention on character-perfect
-    // Marathi and Devanagari numerals.
+    // Minimal creative prompt for social media platforms containing only:
+    // 1. "Make a creative poster for social media platforms in the size 1280 × 1504."
+    // 2. TEXT ACCURACY
+    // 3. NUMBERS
+    // 4. AREA RULES
+    // 5. TEXT TO PUT ON THE POSTER
     const posterContent = isVerbatim
       ? verbatim
       : buildFreshCopyManifest(copyStyle, copy);
-    return [
-      `Create a 1280 × 1504 social-media poster for DGIPR, Government of Maharashtra.
 
-CREATIVE DIRECTION:
-Invent a distinctive visual concept that communicates the meaning of this specific content. The content block below defines exact wording only: its metadata labels, order, line breaks and grouping do not define canvas positions, panels, cards, rows or components.
-Choose the visual hierarchy, scale, grouping, typography, imagery, shapes, depth, cropping and negative space from the message itself. Build typography and imagery as one integrated visual system rather than treating the words as a form to fill.
-Render only the supplied Marathi text values. Any metadata headings inside the content block are instructions, not poster text.
-
-${input.assignedPalette ? buildFreshColourDirection(input.assignedPalette) : ''}
-
-TEXT ACCURACY IS MANDATORY:
-- Preserve every अक्षर, मात्रा, जोडाक्षर and अनुस्वार in its correct position.
-- Pay special attention to conjuncts such as “क्ती” and “र्दे”. Never separate, reorder, replace or omit their characters or matras.
-- Words such as “व्यक्ती”, “शक्ती”, “युक्ती” and “निर्देश” must remain exactly as supplied.
-- Do not rewrite, translate, autocorrect, abbreviate or approximate any word.
-- Before finishing, compare every rendered word and number with the supplied content and correct all differences.
-
-Use only Devanagari numerals: ० १ २ ३ ४ ५ ६ ७ ८ ९.
-Never use Western numerals: 0 1 2 3 4 5 6 7 8 9.
-
-Do not add any logo, emblem, seal, QR code, government wordmark, or map of any state, district or country.`,
-      '',
-      'TEXT TO USE — WORDING ONLY, NOT A LAYOUT:',
-      '',
-      posterContent,
-      '',
-      'Official branding is added later by software. Do not paint any logo, emblem, government wordmark, department name, footer, social handle, website or QR code.',
-      '',
-      'Keep meaningful content—including text, icons, faces and focal subjects—out of the top-right 180 × 170 pixels. Continue the surrounding background, colour, panel, gradient or photograph naturally through that area; do not leave a blank patch or placeholder.',
-      '',
-      'The footer is attached below the image and covers nothing. Extend the design to the bottom edge, but keep all text and icons above y=1488. Reflow or shrink content until everything fits.',
-    ].join('\n');
+    return buildMinimalCreativePrompt({
+      text: posterContent,
+      width: 1280,
+      height: 1504,
+    });
   }
 
   const layoutRule =
@@ -918,75 +894,20 @@ if (
         `\n${'='.repeat(78)}\nseed ${seed} · ${palette.id} (${palette.family}) · ${layout.id}\n${'='.repeat(78)}\n${prompt}`,
       );
 
-      // Colour reaches the model, while composition, art direction and the old master summary do
-      // not. This narrow contract fixes palette repetition without making every poster share a
-      // layout again.
-      for (const hex of [
-        palette.hex.ground,
-        palette.hex.panel,
-        palette.hex.ink,
-        palette.hex.textOnPanel,
-        palette.hex.accent,
-      ]) {
-        if (hex && !prompt.includes(hex))
-          failures.push(
-            `${seed}: assigned colour ${hex} did not reach the fresh prompt`,
-          );
-      }
-      // The retired full design specification must remain absent.
-      for (const retired of [
-        'COLOUR SPECIFICATION',
-        'ART DIRECTION',
-        'COMPOSITION —',
-        'STRUCTURE INSPIRATION',
-        // The art direction's own text, in case it is ever inlined without its heading.
-        'calm, clinical, reassuring',
-        // The assigned archetype's instruction, same reason.
-        layout.instruction.slice(0, 40),
-      ]) {
-        if (prompt.includes(retired))
-          failures.push(
-            `${seed}: the retired design specification is back in the fresh prompt ("${retired}")`,
-          );
-      }
-      if (prompt.includes(placement.instruction))
-        failures.push(
-          `${seed}: the selected placement anchor reached the prompt`,
-        );
-      if (prompt.includes('COMPOSITION ANCHOR FOR THIS POSTER:'))
-        failures.push(
-          `${seed}: the placement-anchor heading reached the prompt`,
-        );
-      for (const forbiddenBan of [
-        'Never generate yellow',
-        'Never use yellow',
-        'Never use gold',
-      ]) {
-        if (prompt.includes(forbiddenBan))
-          failures.push(
-            `${seed}: colour guidance became a hard ban: ${forbiddenBan}`,
-          );
-      }
-      // The replacement prompt is intentionally compact: one content-led design paragraph, one
-      // text-fidelity block, the runtime content, and three short chrome/fit rules.
+      // The minimal prompt contains only: opening line, text accuracy, numbers, area rules, and content.
       for (const needle of [
-        'Create a 1280 × 1504 social-media poster for DGIPR, Government of Maharashtra.',
-        'TEXT ACCURACY IS MANDATORY',
+        'Make a creative poster for social media platforms in the size 1280 × 1504.',
+        'TEXT ACCURACY:',
         'Preserve every अक्षर, मात्रा, जोडाक्षर and अनुस्वार in its correct position',
         'Pay special attention to conjuncts such as “क्ती” and “र्दे”',
         'Words such as “व्यक्ती”, “शक्ती”, “युक्ती” and “निर्देश” must remain exactly as supplied',
+        'NUMBERS:',
         'Use only Devanagari numerals: ० १ २ ३ ४ ५ ६ ७ ८ ९',
         'Never use Western numerals: 0 1 2 3 4 5 6 7 8 9',
-        'map of any state, district or country',
-        'CREATIVE DIRECTION:',
-        'COLOUR DIRECTION — PALETTE ONLY, NOT A LAYOUT:',
-        'The accent has no compulsory role',
-        'This palette controls colour only',
-        'TEXT TO USE — WORDING ONLY, NOT A LAYOUT:',
+        'AREA RULES:',
+        'TEXT TO PUT ON THE POSTER:',
         'MOST IMPORTANT MESSAGE — render the value only; its placement is your decision:',
         'ADDITIONAL EXACT TEXT — render these values only; arrange and group them freely:',
-        'Official branding is added later by software',
-        'top-right 180 × 170 pixels',
         'footer is attached below the image and covers nothing',
         'all text and icons above y=1488',
       ]) {
@@ -1243,18 +1164,14 @@ if (
         );
     }
     for (const chromeRule of [
-      'Official branding is added later by software',
-      'top-right 180 × 170 pixels',
       'y=1488',
       'footer is attached below the image and covers nothing',
-      'Continue the surrounding background',
     ]) {
       if (!freshPrompt.includes(chromeRule))
         failures.push(`the fresh prompt lost chrome rule "${chromeRule}"`);
     }
     for (const creativityRule of [
-      'CREATIVE DIRECTION:',
-      'TEXT TO USE — WORDING ONLY, NOT A LAYOUT:',
+      'TEXT TO PUT ON THE POSTER:',
       'MOST IMPORTANT MESSAGE — render the value only; its placement is your decision:',
       'ADDITIONAL EXACT TEXT — render these values only; arrange and group them freely:',
     ]) {
@@ -1428,10 +1345,10 @@ if (
       ] as const) {
         if (
           !prompt.startsWith(
-            'Create a 1280 × 1504 social-media poster for DGIPR, Government of Maharashtra.',
+            'Make a creative poster for social media platforms in the size 1280 × 1504.',
           )
         )
-          failures.push(`the ${name} prompt lost the compact replacement`);
+          failures.push(`the ${name} prompt lost the minimal opening`);
         for (const retired of [
           'You are free to use your creativity',
           'Transform the information into a visual story',
@@ -1475,14 +1392,12 @@ if (
         "the fresh_verbatim prompt does not carry the officer's text verbatim",
       );
     for (const needle of [
-      'Create a 1280 × 1504 social-media poster for DGIPR, Government of Maharashtra.',
-      'TEXT ACCURACY IS MANDATORY',
+      'Make a creative poster for social media platforms in the size 1280 × 1504.',
+      'TEXT ACCURACY:',
       'Use only Devanagari numerals: ० १ २ ३ ४ ५ ६ ७ ८ ९',
-      'CREATIVE DIRECTION:',
-      'TEXT TO USE — WORDING ONLY, NOT A LAYOUT:',
-      'Official branding is added later by software',
-      'top-right 180 × 170 pixels',
+      'AREA RULES:',
       'footer is attached below the image and covers nothing',
+      'TEXT TO PUT ON THE POSTER:',
     ]) {
       if (!freshVerbatim.includes(needle))
         failures.push(`the fresh_verbatim prompt lost "${needle}"`);
@@ -1513,19 +1428,11 @@ if (
         'the fresh_verbatim prompt carries copy slot labels, which pre-decide the layout it hands over',
       );
     if (
-      freshVerbatim.indexOf(VERBATIM_NOTE) >
-      freshVerbatim.indexOf('Official branding is added later by software')
+      freshVerbatim.indexOf(VERBATIM_NOTE) <
+      freshVerbatim.indexOf('AREA RULES:')
     )
       failures.push(
-        'the fresh_verbatim officer text does not precede the chrome rules',
-      );
-    if (
-      !freshVerbatim
-        .trimEnd()
-        .endsWith('Reflow or shrink content until everything fits.')
-    )
-      failures.push(
-        'the fresh_verbatim prompt does not end on the chrome fit rule',
+        'the fresh_verbatim officer text does not follow the area rules',
       );
     for (const retired of [
       'Do not draw any government logo',

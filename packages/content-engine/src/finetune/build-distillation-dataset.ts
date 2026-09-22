@@ -47,7 +47,10 @@ import {
   gemmaModel,
   isGemmaConfigured,
 } from '../generation/gemma-sources.js';
-import { DLO_SOURCE_FILES_MARKER } from '../generation/dlo-article-prompt.js';
+import {
+  DGIPR_EDITORIAL_SYSTEM_PROMPT,
+  DLO_SOURCE_FILES_MARKER,
+} from '../generation/dlo-article-prompt.js';
 import { FACT_CHECK_DELIMITER } from '../generation/generate-article.js';
 import { CAPTURE_FORMAT_VERSION } from './capture-dlo-distillation.js';
 import {
@@ -67,14 +70,25 @@ const TEMPLATE_PROBE = resolve(
 export const DATASET_FORMAT_VERSION = 'dlo-distill-dataset-v1';
 
 /**
- * The system message every pair must carry, verbatim from `buildDloArticleMessages`.
+ * The system message every pair must OPEN WITH, taken from `buildDloArticleMessages` itself.
  *
  * Asserted rather than assumed: a dataset whose system turn drifts between examples teaches
- * the adapter that the instruction is decorative, and at serving time production sends exactly
- * this one string.
+ * the adapter that the instruction is decorative.
+ *
+ * TWO THINGS ABOUT THIS CONSTANT. It used to be the literal
+ * `'Write a DGIPR Maharashtra style article.'`, which commit c97bbbb replaced with the
+ * five-rule editorial prompt — so this file, capture-dlo-distillation.ts and
+ * export-dlo-generation.test.ts had all been asserting a string production no longer sends.
+ * It is now imported, so the same replacement can never leave it stale again.
+ *
+ * And the check below is STARTS-WITH rather than equality, because under
+ * EDITORIAL_PREFERENCE_PLACEMENT=system a run legitimately appends a
+ * `6. LEARNED EDITORIAL PREFERENCES` section after the five base rules (migration 0057).
+ * The base rules are what must be uniform across the dataset; what a particular run had
+ * learned by the day it was captured is not, and refusing those pairs would throw away every
+ * article written once the department started learning.
  */
-export const EXPECTED_SYSTEM_MESSAGE =
-  'Write a DGIPR Maharashtra style article.';
+export const EXPECTED_SYSTEM_MESSAGE = DGIPR_EDITORIAL_SYSTEM_PROMPT;
 
 export const DEFAULT_EVAL_FRACTION = 0.1;
 
@@ -267,9 +281,9 @@ export function validatePair(pair: CapturedPair): string[] {
     );
   }
   const [system, user, assistant] = messages;
-  if (system && system.content !== EXPECTED_SYSTEM_MESSAGE) {
+  if (system && !system.content.startsWith(EXPECTED_SYSTEM_MESSAGE)) {
     problems.push(
-      `system turn is not the builder's own: ${JSON.stringify(system.content.slice(0, 60))}`,
+      `system turn does not open with the builder's own editorial rules: ${JSON.stringify(system.content.slice(0, 60))}`,
     );
   }
   if (user && !user.content.includes('### SOURCE INFORMATION')) {

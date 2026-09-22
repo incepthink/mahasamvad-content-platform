@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { DloIntakeRow, GenerationRow, RevisionRow } from '@dgipr/database';
+import { DGIPR_EDITORIAL_SYSTEM_PROMPT } from '../generation/dlo-article-prompt.js';
 import { buildDloTrainingExample } from './export-dlo-generation.js';
 
 const row = {
@@ -29,10 +30,8 @@ test('exports reviewed input and the exact saved Marathi target as one JSONL rec
     messages.map((message) => message.role),
     ['system', 'user', 'assistant'],
   );
-  assert.equal(
-    messages[0]!.content,
-    'Write a DGIPR Maharashtra style article.',
-  );
+  // Imported, not written out: the old literal outlived the prompt it described (c97bbbb).
+  assert.ok(messages[0]!.content.startsWith(DGIPR_EDITORIAL_SYSTEM_PROMPT));
   assert.ok(messages[1]!.content.includes(row.note));
   assert.ok(messages[1]!.content.includes('पाटील — जिल्हाधिकारी'));
   assert.ok(messages[1]!.content.includes(row.instructions!));

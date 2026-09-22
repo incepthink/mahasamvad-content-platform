@@ -99,6 +99,7 @@ import {
   addGenerationCost,
   findGlossaryTermsInText,
   getGeneration,
+  listActiveEditorialPreferences,
   insertGlossaryCandidates,
   insertRevision,
   listRecentPosterStyles,
@@ -109,6 +110,7 @@ import {
   downloadPng,
   upsertGlossaryTerm,
   mapDesignationsToPersons,
+  type EditorialPreferenceScope,
   type GenerationCostIncrement,
   type GenerationRow,
   type SupabaseClient,
@@ -117,6 +119,7 @@ import {
 import {
   AttributedStatementsSchema,
   CopySchema,
+  MAX_INJECTED_PREFERENCES,
   NameDesignationsSchema,
   SelectedFactsSchema,
   isSocialCategory,
@@ -124,6 +127,7 @@ import {
   type Copy,
   type AttributedStatement,
   type DesignationWarning,
+  type LearnedPreferenceNote,
   type LengthWarning,
   type NameDesignation,
   type SelectedFact,
@@ -132,6 +136,10 @@ import {
   type TranslationLanguage,
   type TranslationTermInput,
 } from '@dgipr/schemas';
+import {
+  editorialLearningEnabled,
+  learnFromArticleFeedback,
+} from './editorial-learning.js';
 import { recordTasksFromCost } from './service-usage.js';
 import {
   sourceContextForGeneration,
@@ -182,6 +190,15 @@ const posterCapacityWarnings = new Map<
 // above: the article is on the row, and this is a "the note did not have this much in it"
 // prompt that matters while the officer is reading the fresh output.
 const lengthWarnings = new Map<string, LengthWarning | null>();
+
+// What the department's last round of feedback on this run TAUGHT the platform (migration
+// 0057) — the "memory updated" affordance. Transient for exactly the reason the four
+// registries above are, and more so: the RULE is durable (it is a row, and the review page is
+// where it lives), while this note is a "here is what I took from what you just said" prompt
+// that only matters while the officer is looking at the revision they asked for. An empty
+// entry means the round taught nothing, which is the ordinary outcome for a factual
+// correction; absent means no feedback ran this session.
+const learnedPreferences = new Map<string, LearnedPreferenceNote[]>();
 
 // Article revision may likewise run *alongside* the poster render: the article is
 // final and persisted before the poster phase starts, so the user can refine it
@@ -369,6 +386,13 @@ export function getDesignationWarnings(id: string): DesignationWarning[] {
 // asked for none, or when no article ran this session).
 export function getLengthWarning(id: string): LengthWarning | null {
   return lengthWarnings.get(id) ?? null;
+}
+
+// The standing rules this run's latest feedback added, reinforced, replaced or merged ([] when
+// it taught nothing, or when no feedback ran this session). Background work: it lands a few
+// seconds after the revision, which is why the detail page refetches once more after settling.
+export function getLearnedPreferences(id: string): LearnedPreferenceNote[] {
+  return learnedPreferences.get(id) ?? [];
 }
 
 // Set when the latest social poster carried more items than any master can lay out (null when
@@ -752,6 +776,123 @@ async function designationContext(
 
 // The verified glossary rows whose Marathi form occurs in this run's source text, as the
 // article prompt wants them. BOTH prompt variants read them as of simple-v4: neither
+// The department's learned editorial preferences for this run (migration 0057).
+//
+// ONLY ON /dlo, and that is the scope decision rather than an implementation detail: these
+// rules were learned from feedback on /dlo articles, and the Creative-and-Social lanes are
+// deliberately out of this phase. `row.dloIntakeId` is the test, the same one that already
+// decides which prompt the article is written with.
+//
+// BEST-EFFORT BY CONSTRUCTION, exactly like articleNameDictionary below: a failure logs and
+// returns [], so a database without 0057 applied costs the LEARNING and never the article
+// (the 0028 principle). Ranked, scoped and capped in SQL — see
+// listActiveEditorialPreferences — so what comes back is already what the prompt should use.
+async function articleEditorialPreferences(
+  client: SupabaseClient,
+  row: GenerationRow,
+): Promise<string[]> {
+  if (!row.dloIntakeId) return [];
+  // The run's own category, so a scheme rule never steers a news article. `both` rules are
+  // always in the pool; the database query owns that.
+  const scope = articleCategoryOf(row.category) as EditorialPreferenceScope;
+  try {
+    const rules = await listActiveEditorialPreferences(
+      client,
+      scope,
+      MAX_INJECTED_PREFERENCES,
+    );
+    return rules.map((rule) => rule.rule);
+  } catch (error) {
+    console.warn(
+      '[article] could not load the learned editorial preferences; continuing without them:',
+      error,
+    );
+    return [];
+  }
+}
+
+// The WRITE half of the same memory (migration 0057): what this round of feedback taught the
+// platform. Sits beside the read half on purpose — the two must agree about scope, and they do
+// so by both going through articleCategoryOf and row.dloIntakeId.
+//
+// FIRE AND FORGET, NEVER AWAITED, and every one of the four constraints below is set by
+// neighbouring code rather than chosen:
+//
+//   1. It must not run inside the awaited revision. Anything awaited inside `revise()` is
+//      inside runJob's `try`, so a throw would route a SUCCESSFUL revision into
+//      recoverEditFailure and surface to the officer as `editFailure` — a finished article
+//      reported as a failed edit. Hence `void` plus a catch that cannot rethrow, the
+//      snapshotArticleBaseline / recordUsageEvent pattern.
+//   2. Its own cost accumulator and its own persistCost. runJob's `finally` persists cost as
+//      soon as the revision settles, which is BEFORE this pass has made its calls — so
+//      sharing the revision's accumulator would silently drop the spend. persistCost chains
+//      writers per generation, so a second write landing later is additive, not a lost update.
+//   3. Its own timeout, inside learnFromArticleFeedback, so a hung provider cannot leak a
+//      promise in a long-lived process.
+//   4. The article is already on screen when it starts: finishArticleStream fires before the
+//      row write, and both call sites invoke this after insertRevision.
+//
+// Called from BOTH feedback jobs. Hooking only the status-owning one would silently miss every
+// revision an officer makes while a poster is still rendering.
+function learnFromFeedback(
+  client: SupabaseClient,
+  row: GenerationRow,
+  feedback: string,
+): void {
+  // Default off until Phase 3's review page exists — an auto-learned rule is department-wide.
+  if (!editorialLearningEnabled()) return;
+  // /dlo only: the Creative-and-Social lanes do not read these rules, so learning from their
+  // feedback would write rules nothing applies.
+  if (!row.dloIntakeId) return;
+  let category: 'news' | 'scheme';
+  try {
+    category = articleCategoryOf(row.category);
+  } catch {
+    return;
+  }
+  const id = row.id;
+  const cost = createCostAccumulator();
+  void (async () => {
+    try {
+      const notes = await runInCostScope(cost, () =>
+        runInCostTask('feedback_learning', () =>
+          learnFromArticleFeedback(client, {
+            generationId: id,
+            note: row.note,
+            feedback,
+            category,
+          }),
+        ),
+      );
+      // Written even when empty: an entry that exists and is empty is "this round taught
+      // nothing", which is the honest answer for a factual correction, and it replaces
+      // whatever the previous round on this row reported.
+      learnedPreferences.set(id, notes);
+    } catch (error) {
+      // learnFromArticleFeedback already swallows its own failures; this is the backstop that
+      // keeps constraint 1 true whatever changes inside it.
+      console.warn(`[editorial-learning ${id}] pass failed:`, error);
+    } finally {
+      try {
+        await persistCost(client, id, cost);
+      } catch (costError) {
+        console.warn(
+          `[editorial-learning ${id}] could not persist cost:`,
+          costError,
+        );
+      }
+      try {
+        recordTasksFromCost(client, 'article', cost);
+      } catch (usageError) {
+        console.warn(
+          `[editorial-learning ${id}] could not record task usage:`,
+          usageError,
+        );
+      }
+    }
+  })();
+}
+
 // specification states name rules any more, so each is handed the spellings themselves — the
 // dictionary reaching the article as SPELLING rather than only as designations.
 //
@@ -939,6 +1080,14 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
               // spellings. The digest is what makes this non-empty on the file lane, where
               // the note holds none of the document's text — see articleNameDictionary.
               names: await articleNameDictionary(client, row.note, nameContext),
+              // The department's standing editorial rules, learned from earlier feedback
+              // (migration 0057). /dlo only, best-effort, already ranked and capped — see
+              // articleEditorialPreferences. Read by the DLO prompt alone; the generators
+              // ignore it on every other lane.
+              editorialPreferences: await articleEditorialPreferences(
+                client,
+                row,
+              ),
               onProgress: progress,
               // Publish the draft as it is written, so the officer reads it appearing rather
               // than watching a progress bar for minutes. Display only — the authoritative
@@ -2837,6 +2986,11 @@ export function startArticleFeedbackJob(
       // an article while forbidding it to restate anything the article says. Empty for every
       // other run, which keeps the text path unchanged.
       await sourceFilesForGeneration(client, row),
+      // The same standing rules the first draft was written under (migration 0057). NOT
+      // optional in practice: a revision that cannot see them rewrites the article without
+      // them, so the first "make the opening punchier" would silently undo everything the
+      // department has learned — the failure the officer's HEADLINE / ANGLE already had once.
+      await articleEditorialPreferences(client, row),
       // The rewrite as it is written, so अभिप्रायानुसार बातमी सुधारत आहोत… reads as the
       // article changing rather than as a spinner. Display only — the returned article is
       // authoritative and the final snapshot below replaces whatever was shown.
@@ -2866,6 +3020,11 @@ export function startArticleFeedbackJob(
       article: revisedArticle,
       factCheck: revised.factCheck,
     });
+
+    // The officer is DONE here: the revision is on screen, on the row and in the revision log.
+    // Everything after this point is the platform learning from what they said, and it is
+    // deliberately NOT awaited — see learnFromFeedback's header for the four reasons.
+    learnFromFeedback(client, row, feedback);
   };
 
   runJob(client, id, 'article_revision', async () => {
@@ -2934,6 +3093,9 @@ export function startConcurrentArticleFeedbackJob(
             row.instructions ?? undefined,
             // As on the status-owning path above: the article's facts are in these files.
             await sourceFilesForGeneration(client, row),
+            // As on the status-owning path above: the standing rules the draft was written
+            // under, or this round would argue them away.
+            await articleEditorialPreferences(client, row),
             // As on the status-owning path above: the rewrite as it is written.
             articleStreamingEnabled()
               ? (chunk: string) => pushArticleDelta(id, chunk)
@@ -2958,6 +3120,11 @@ export function startConcurrentArticleFeedbackJob(
             article: revisedArticle,
             factCheck: revised.factCheck,
           });
+
+          // The identical tail on the concurrent path. Hooking only the status-owning job
+          // above would silently miss every revision an officer makes while a poster is
+          // still rendering — which is exactly the round they are most likely to make.
+          learnFromFeedback(client, row, feedback);
         }),
       );
     } catch (error) {

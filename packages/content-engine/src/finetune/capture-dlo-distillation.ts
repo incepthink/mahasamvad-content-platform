@@ -78,6 +78,7 @@ import {
 } from '../cost/cost-meter.js';
 import type { DesignationPair } from '../generation/category-prompt.js';
 import {
+  DGIPR_EDITORIAL_SYSTEM_PROMPT,
   DLO_ARTICLE_PROMPT_VERSION,
   DLO_SOURCE_FILES_MARKER,
   buildDloArticleMessages,
@@ -1170,10 +1171,15 @@ export function runChecks(): void {
       studentUser.includes('### OFFICER REQUEST'),
     "the officer's own inputs did not reach the prompt",
   );
+  // Starts-with, and imported rather than written out: commit c97bbbb replaced the old
+  // one-line system message with the five-rule editorial prompt and left this literal
+  // asserting a string production no longer sends. Starts-with because a run under
+  // EDITORIAL_PREFERENCE_PLACEMENT=system appends learned rules after the base five.
   check(
-    textLane.student.find((m) => m.role === 'system')?.content ===
-      'Write a DGIPR Maharashtra style article.',
-    "the system message is not the builder's own",
+    (
+      textLane.student.find((m) => m.role === 'system')?.content ?? ''
+    ).startsWith(DGIPR_EDITORIAL_SYSTEM_PROMPT),
+    "the system message does not open with the builder's own editorial rules",
   );
 
   // --- buildCapturePrompts: the native lane ---
@@ -1229,7 +1235,7 @@ export function runChecks(): void {
     'the article was not trimmed into the assistant turn',
   );
   check(
-    pair.messages[0]!.content === 'Write a DGIPR Maharashtra style article.',
+    pair.messages[0]!.content.startsWith(DGIPR_EDITORIAL_SYSTEM_PROMPT),
     "the pair did not carry the builder's system message",
   );
   let threw = false;

@@ -660,6 +660,10 @@ const TASK_ORDER = [
   'designation_extraction',
   'article_generation',
   'article_revision',
+  // The background pass that turns a feedback round into a standing editorial rule
+  // (migration 0057). Its own task rather than folded into article_revision: it is metered
+  // separately precisely so its cost is visible as learning rather than as revision.
+  'feedback_learning',
   'translation_name_extraction',
   'english_translation',
   'hindi_translation',

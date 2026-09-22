@@ -31,6 +31,9 @@ export const PAGE_BACKGROUNDS = {
   generations: '/backgrounds/background-3.png',
   glossary: '/backgrounds/background-2.png',
   newDlo: '/backgrounds/background-2.png',
+  // Sits with the glossary on purpose: both are the platform's learned knowledge, reviewed
+  // rather than produced.
+  preferences: '/backgrounds/background-2.png',
   proofread: '/backgrounds/background-4.png',
   references: '/backgrounds/background-4.png',
   transcribe: '/backgrounds/background-3.png',
