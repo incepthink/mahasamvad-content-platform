@@ -3111,6 +3111,63 @@ client id/secret — see the milestone below.
 
 ## Latest Implementation Milestone
 
+- **No poster lane calls n8n any more — the two workflows were pass-throughs** (2026-09-22, no
+  migration, no web change; SUPERSEDES the n8n render half of the 2026-07-24 thin-workflow
+  milestones and every deploy-ordering note that depends on it): a marker-feedback round on a
+  social poster failed with `TypeError: fetch failed … ECONNREFUSED 127.0.0.1:5678`. The vision
+  pass had already produced a good instruction; the failure was one line later, in
+  `renderSocialPosterViaN8n`, which POSTs to `N8N_SOCIAL_POST_WEBHOOK_URL`. Nothing was
+  listening — but "start n8n" was the wrong fix, because **there was nothing left in the
+  workflow to run.**
+  - **Both workflows were pure pass-throughs.** Once the prompts moved into the API on
+    2026-07-24, `social-post-v2-api` and `article-poster-v1-api` were five nodes that fetched
+    the image URL, POSTed it to `https://api.openai.com/v1/images/edits` with the prompt the
+    API had already built, and returned the base64 — verified node by node against the
+    committed JSON. `fetchReferencePng` + `editImage` is that, in-process. The YouTube lane
+    reached the same conclusion when it was written and says so in its own comment: *"the
+    workflows exist because those prompts used to live inside them, and there is no reason to
+    add a third."* This is that reasoning applied to the two older lanes.
+  - `renderSocialPosterViaN8n` → **`renderSocialPosterEdit(imageUrl, prompt, size)`**,
+    `renderArticlePosterEditViaN8n` → **`renderArticlePosterEdit(imageUrl, prompt)`**,
+    `renderSocialPosterFeedbackViaN8n` → **`renderSocialPosterFeedbackEdit`**. Renamed rather
+    than left alone: a function called `…ViaN8n` that does not use n8n is the kind of comment
+    that sends the next reader to the wrong machine. Four call sites, same return types, same
+    per-brand sizes, chrome still stamped by the caller.
+  - **THE CALLERS METER THE RENDER, SO THESE FUNCTIONS MUST NOT.** Every one of the four call
+    sites already had its own `recordImageCost(...)` — the n8n round-trip was never metered
+    from inside — so adding one to the new helpers (the shape the YouTube lane appears to use,
+    where the record sits beside the `editImage` call) would double-count every poster in
+    `generations.cost_usd` and in `/analytics`. Stated in the function comment.
+  - **Quality and size are unchanged, checked rather than assumed.** The workflow sent
+    `quality` from the payload (`imageQuality()`, `OPENAI_IMAGE_QUALITY ?? 'medium'`) and
+    `editImage` reads the same variable with the same fallback; sizes are the same literals
+    (`1536x1024` for the article, per-brand `SOCIAL_ARTWORK_SIZE` / `CMO_POSTER_SIZE`).
+  - **Three things dropped as genuinely dead**, not as cleanup: the `legacy`
+    `reference_url`/`image_feedback`/`marker_count` fields (they existed only so a new API
+    could degrade to a not-yet-pushed workflow's in-workflow prompt), the `id` parameters
+    (used only to fill `generation_id` in the payload), and `requireEnv` (its only two callers
+    were these).
+  - `N8N_SOCIAL_POST_WEBHOOK_URL` / `N8N_ARTICLE_POSTER_WEBHOOK_URL` are now **unread by any
+    code**. They are left in `.env`/`.env.example`, and both workflow JSONs and `pnpm n8n:push`
+    are left in the tree — deleting a deploy artifact is a separate call, and the push script
+    still serves anything else imported into that instance. The docs-screenshot preflight
+    stopped requiring them (it hard-failed on env vars nothing uses, which would have sent
+    someone chasing a dependency the capture no longer has).
+  - `ARTICLE_POSTER_MODE=n8n` keeps its NAME and no longer means n8n: it selects the
+    master-EDIT initial render, against `fresh` (generate from scratch) and `html` (Chromium).
+    Renaming the value would break existing deployments' `.env` for nothing.
+  Verified 2026-09-22, all free: workspace typecheck **7/7 green**; eslint clean on both
+  touched files; prettier clean on `runner.ts`. `preflight.ts` was **already prettier-unclean
+  at HEAD** (confirmed by piping the HEAD blob through `--stdin-filepath`), so the three
+  reformats `--write` made to lines this change never touched were reverted by hand — do NOT
+  `--write` that file. The API boots clean on an isolated port with `/health` 200 and no n8n
+  env read. **Left for a real run** (one image charge): a marker-feedback round on a live
+  social poster and one on an article poster, confirming the edit lands and the chrome is
+  re-stamped — the thing that could not be tested here, since the local n8n was down and the
+  database is not reachable from a dev machine without the tunnel. Deploy is API only; no
+  migration, no web change, and **no `pnpm n8n:push`** — that step is now irrelevant to both
+  poster lanes.
+
 - **An officer's feedback now WRITES the editorial rules — Phase 2 of 3: learning, behind a
   default-off flag** (2026-09-21, no migration, no n8n). Phase 1 made a rule in
   `editorial_preferences` reach every /dlo article and every feedback revision of it, with the

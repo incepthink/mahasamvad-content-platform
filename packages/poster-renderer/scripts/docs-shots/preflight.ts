@@ -1,6 +1,10 @@
 // Preflight for the docs screenshot capture: verifies the local stack is ready
-// WITHOUT printing any secret values — env vars are checked for presence only,
-// and webhook URLs are reduced to their origin before anything is printed.
+// WITHOUT printing any secret values — env vars are checked for presence only.
+//
+// It no longer checks the n8n webhook vars: both poster lanes now edit their image
+// with a direct OpenAI call (renderSocialPosterEdit / renderArticlePosterEdit in
+// apps/api/src/jobs/runner.ts), so a docs run needs no n8n at all. Requiring them
+// here would send someone chasing a dependency the capture does not have.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -11,8 +15,6 @@ const REQUIRED_ENV_KEYS = [
   'SUPABASE_URL',
   'SUPABASE_SERVICE_ROLE_KEY',
   'OPENAI_API_KEY',
-  'N8N_SOCIAL_POST_WEBHOOK_URL',
-  'N8N_ARTICLE_POSTER_WEBHOOK_URL',
 ] as const;
 
 type Check = { name: string; ok: boolean; hard: boolean; note: string };
@@ -69,22 +71,6 @@ export async function preflight(): Promise<void> {
 
   checks.push(await checkHttp('API /health', `${API_URL}/health`, true));
   checks.push(await checkHttp('Web app', WEB_URL, true));
-
-  // Webhook hosts: an HTTP GET against the ORIGIN only (never the webhook path —
-  // a POST would fire the workflow). Any response, even 404, proves the host is up.
-  for (const key of [
-    'N8N_SOCIAL_POST_WEBHOOK_URL',
-    'N8N_ARTICLE_POSTER_WEBHOOK_URL',
-  ] as const) {
-    const raw = env.get(key);
-    if (!raw) continue;
-    try {
-      const origin = new URL(raw).origin;
-      checks.push(await checkHttp(`n8n host for ${key} (${origin})`, origin, false));
-    } catch {
-      checks.push({ name: `${key} is a valid URL`, ok: false, hard: false, note: 'unparseable' });
-    }
-  }
 
   // At least one enabled reference image per category, or poster runs will fail.
   try {
