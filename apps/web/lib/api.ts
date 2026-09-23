@@ -25,7 +25,13 @@ import {
   type PromptImageUpload,
   RestoreArticleVersionResponseSchema,
   GenerationListResponseSchema,
+  GenerationSummarySchema,
+  type GenerationFacetCounts,
   type GenerationListResponse,
+  type GenerationSummary,
+  type RunDateFilter,
+  type RunFormatKey,
+  type RunStatusFilter,
   EditorialPreferenceListResponseSchema,
   EditorialPreferenceSchema,
   type CreateEditorialPreferenceRequest,
@@ -140,6 +146,7 @@ import {
   type VideoProjectSummary,
 } from '@dgipr/schemas';
 import { z } from 'zod';
+import { runFormatKey } from './strings';
 
 export const API_URL =
   process.env.NEXT_PUBLIC_API_URL ?? 'http://127.0.0.1:3001';
@@ -437,6 +444,142 @@ export type ListGenerationsParams = {
   facets?: boolean;
 };
 
+// ---------------------------------------------------------------------------
+// Legacy API fallback
+//
+// `GET /api/generations` used to answer with a BARE ARRAY of the newest 100 runs, before
+// filtering, paging and the facet counts moved into the database. A deployment whose API
+// image is older than the web build still answers that way — the request succeeds with a
+// 200, the envelope schema then fails to parse, and `describeError` turns that ZodError
+// into `errServer`: the whole history page reads as a server outage while the API is
+// perfectly healthy. (That is exactly what production showed on 2026-09-22.)
+//
+// So a bare array is accepted and the envelope is rebuilt here, with the filters, the sort,
+// the page and the facet counts applied in the browser — i.e. the behaviour this page had
+// before server paging, including its ceiling of the newest 100 runs. It costs nothing when
+// the API is current (the array branch is never taken) and it is what lets web and API be
+// deployed in either order.
+// ---------------------------------------------------------------------------
+
+const LEGACY_FACET_FORMATS: readonly RunFormatKey[] = [
+  'scheme',
+  'news',
+  'twitter',
+  'facebook',
+  'youtube',
+  'dynamic_poster',
+  'caption',
+];
+const LEGACY_FACET_STATUSES: readonly RunStatusFilter[] = [
+  'working',
+  'completed',
+  'failed',
+];
+const LEGACY_FACET_DATES: readonly RunDateFilter[] = ['today', 'week', 'month'];
+
+type LegacyView = {
+  q: string;
+  format: RunFormatKey | null;
+  status: RunStatusFilter | null;
+  date: RunDateFilter | null;
+};
+
+// The oldest `createdAt` a row may carry to be inside the window, mirroring the API's
+// `dateBoundary`. "आज" is the officer's OWN midnight — here that is simply the local
+// midnight of the browser doing the filtering, which is what the server reconstructs from
+// the `tzOffset` it is sent.
+function legacyDateBoundary(date: RunDateFilter | null): number | null {
+  if (!date) return null;
+  if (date === 'today') {
+    const midnight = new Date();
+    midnight.setHours(0, 0, 0, 0);
+    return midnight.getTime();
+  }
+  return Date.now() - (date === 'week' ? 7 : 30) * 86_400_000;
+}
+
+function legacyMatches(row: GenerationSummary, view: LegacyView): boolean {
+  if (
+    view.format &&
+    runFormatKey(row.category, row.outputType) !== view.format
+  ) {
+    return false;
+  }
+  if (view.status) {
+    const bucket: RunStatusFilter =
+      row.status === 'queued' || row.status === 'running'
+        ? 'working'
+        : row.status;
+    if (bucket !== view.status) return false;
+  }
+  const boundary = legacyDateBoundary(view.date);
+  if (boundary !== null && new Date(row.createdAt).getTime() < boundary) {
+    return false;
+  }
+  if (view.q) {
+    // Only the excerpt and the headline are on a summary row — the server searches the
+    // whole note and article, so a legacy search is narrower. Better than none, and it
+    // disappears the moment the API is up to date.
+    const haystack = `${row.noteExcerpt} ${row.headline ?? ''}`.toLowerCase();
+    if (!haystack.includes(view.q)) return false;
+  }
+  return true;
+}
+
+// Each count is computed with every OTHER filter applied, exactly as `computeFacets` does
+// server-side: a count says what pressing that option would give you, not how many such
+// runs exist overall.
+function legacyFacets(
+  rows: readonly GenerationSummary[],
+  view: LegacyView,
+): GenerationFacetCounts {
+  const count = (override: Partial<LegacyView>) =>
+    rows.filter((row) => legacyMatches(row, { ...view, ...override })).length;
+  const facets: GenerationFacetCounts = { format: {}, status: {}, date: {} };
+  for (const format of LEGACY_FACET_FORMATS) {
+    facets.format[format] = count({ format });
+  }
+  for (const status of LEGACY_FACET_STATUSES) {
+    facets.status[status] = count({ status });
+  }
+  for (const date of LEGACY_FACET_DATES) {
+    facets.date[date] = count({ date });
+  }
+  return facets;
+}
+
+function legacyGenerationList(
+  body: unknown,
+  params: ListGenerationsParams,
+): GenerationListResponse {
+  const rows = z.array(GenerationSummarySchema).parse(body);
+  const view: LegacyView = {
+    q: params.q?.trim().toLowerCase() ?? '',
+    format: (params.format as RunFormatKey | null | undefined) ?? null,
+    status: (params.status as RunStatusFilter | null | undefined) ?? null,
+    date: (params.date as RunDateFilter | null | undefined) ?? null,
+  };
+  const matched = rows.filter((row) => legacyMatches(row, view));
+  // The legacy endpoint orders newest first; sort explicitly rather than reversing, so a
+  // row inserted out of order cannot shuffle the page.
+  matched.sort((a, b) => {
+    const delta =
+      new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+    return params.sort === 'oldest' ? delta : -delta;
+  });
+  const pageSize = params.pageSize ?? 12;
+  const page = Math.max(1, params.page ?? 1);
+  const start = (page - 1) * pageSize;
+  return {
+    items: matched.slice(start, start + pageSize),
+    total: matched.length,
+    page,
+    pageSize,
+    totalUnfiltered: rows.length,
+    facets: params.facets ? legacyFacets(rows, view) : null,
+  };
+}
+
 export async function listGenerations(
   params: ListGenerationsParams = {},
 ): Promise<GenerationListResponse> {
@@ -454,6 +597,9 @@ export async function listGenerations(
   search.set('tzOffset', String(new Date().getTimezoneOffset()));
   const qs = search.toString();
   const body = await requestJson(`/api/generations${qs ? `?${qs}` : ''}`);
+  // An older API answers with a bare array; rebuild the envelope in the browser rather
+  // than failing the page. See the block above.
+  if (Array.isArray(body)) return legacyGenerationList(body, params);
   return GenerationListResponseSchema.parse(body);
 }
 

@@ -459,17 +459,6 @@ export function clearEditFailure(id: string): void {
   editFailures.delete(id);
 }
 
-function requireEnv(name: string): string {
-  const value = process.env[name];
-  if (!value) {
-    throw new Error(
-      `Missing required environment variable ${name}. ` +
-        'Copy .env.example to .env and fill it in (see repo README).',
-    );
-  }
-  return value;
-}
-
 // Storage paths are versioned per render: public bucket URLs are CDN-cached, so a
 // path must never be reused. Version n = revision count + 2 (v1 was the original).
 function scenePath(id: string, version: number): string {
@@ -1509,7 +1498,7 @@ async function renderAndStoreArticlePoster(
 
   const rawPoster = isFresh
     ? await generateImage(prompt, { size: '1536x1024' })
-    : await renderArticlePosterEditViaN8n(id, reference.url, prompt);
+    : await renderArticlePosterEdit(reference.url, prompt);
   // gpt-image-2 @ 1536x1024 — attribute the fixed tier price (image usage isn't measurable
   // whether it ran in n8n or the direct call).
   recordImageCost('article', imageQuality());
@@ -1608,129 +1597,50 @@ export function startArticlePosterJob(
   });
 }
 
-// Shape n8n's article-poster-v1-api workflow returns from its Respond-to-Webhook node.
-type ArticlePosterResult = {
-  poster_png_base64?: string;
-};
-
-// POST an already-built image-edit request to the thin n8n `article-poster-v1-api` workflow:
-// it fetches `imageUrl`, edits it with `prompt` at 1536x1024, and returns the poster PNG. The
-// exact twin of renderSocialPosterViaN8n, and used for the same two things: the pixel/marker
-// FEEDBACK re-render (edit the current poster) and the legacy ARTICLE_POSTER_MODE=n8n initial
-// render (edit the chosen master). The default 'fresh' path never comes here at all.
+// Edit an image with an API-built prompt and hand back the raw render. Used for the
+// pixel/marker FEEDBACK re-render (edit the current poster) and for the legacy
+// ARTICLE_POSTER_MODE=n8n initial render (edit the chosen master). The default 'fresh'
+// path never comes here at all — it calls generateImage directly.
 //
-// The prompt is built in the API now (build-article-poster-prompt.ts) rather than in the
-// workflow's Code node, so the reserved-zone geometry lives beside the chrome overlay it must
-// stay in sync with. It returns the model's RAW edit — the crisp brand chrome (महासंवाद logo
-// top-left + department footer strip) is stamped by the CALLER, which is what lets the caller
-// keep the un-chromed artwork for the plain download. Both callers stamp; the initial-render
-// one always did, since it also measures colours on the raw poster.
+// THIS USED TO BE AN n8n ROUND-TRIP (the `article-poster-v1-api` workflow) and is now a
+// direct call, because there was nothing left in the workflow to run: once the prompt moved
+// into the API (build-article-poster-prompt.ts, so the reserved-zone geometry lives beside
+// the chrome overlay it must stay in sync with), the five remaining nodes only fetched the
+// image URL, POSTed it to /v1/images/edits and returned the base64 — which is exactly what
+// fetchReferencePng + editImage do here. The YouTube lane already made that call directly;
+// this is the same reasoning applied to the two older lanes. A feedback edit therefore no
+// longer needs n8n running at all, and the only thing that can fail is a fetch we control.
 //
-// LEGACY FIELDS: `reference_url` / `image_feedback` / `marker_count` are still sent, duplicating
-// `image_url`, purely so a newly-deployed API talking to a not-yet-pushed workflow degrades to
-// the OLD in-workflow prompt instead of throwing "No reference_url received". They can be
-// dropped once every instance is on the 5-node workflow.
-async function renderArticlePosterEditViaN8n(
-  id: string,
+// It returns the model's RAW edit — the crisp brand chrome (महासंवाद logo top-left +
+// department footer strip) is stamped by the CALLER, which is what lets the caller keep the
+// un-chromed artwork for the plain download. Both callers stamp; the initial-render one
+// always did, since it also measures colours on the raw poster. The callers also meter the
+// render (recordImageCost), so this function must NOT — that would double-count every poster.
+async function renderArticlePosterEdit(
   imageUrl: string,
   prompt: string,
-  legacy: Readonly<{ imageFeedback?: string; markerCount?: number }> = {},
 ): Promise<Buffer> {
-  const webhookUrl = requireEnv('N8N_ARTICLE_POSTER_WEBHOOK_URL');
-  const webhookSecret = process.env.N8N_WEBHOOK_SECRET;
-
-  const headers: Record<string, string> = {
-    'content-type': 'application/json',
-  };
-  if (webhookSecret) headers['x-n8n-webhook-secret'] = webhookSecret;
-
-  // Generous timeout to outlast the workflow's ~1-2 min gpt-image-2 edit stage.
-  const response = await fetch(webhookUrl, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      generation_id: id,
-      image_url: imageUrl,
-      prompt,
-      quality: imageQuality(),
-      // --- legacy compatibility, see the note above ---
-      reference_url: imageUrl,
-      image_feedback: legacy.imageFeedback ?? '',
-      marker_count: legacy.markerCount ?? 0,
-    }),
-    signal: AbortSignal.timeout(420_000),
-  });
-  if (!response.ok) {
-    const detail = await response.text().catch(() => '');
-    throw new Error(
-      `n8n article-poster webhook failed (${response.status}): ${detail.slice(0, 500)}`,
-    );
-  }
-
-  const result = (await response.json()) as ArticlePosterResult;
-  if (!result.poster_png_base64) {
-    throw new Error('n8n article-poster webhook returned no poster.');
-  }
-  return Buffer.from(result.poster_png_base64, 'base64');
+  const current = await fetchReferencePng(imageUrl);
+  return editImage(current, prompt, { size: '1536x1024' });
 }
 
-// Shape the thin social-post-v2-api workflow returns from its Respond-to-Webhook node.
-// The workflow now ONLY edits an image with an API-built prompt — classify/copy/prompt all
-// run in the API — so the response carries just the rendered poster.
-type SocialPostResult = {
-  poster_png_base64?: string;
-};
-
-// POST an already-built image-edit request to the thin n8n workflow: it fetches `imageUrl`,
-// edits it with `prompt` at `quality`, and returns the poster PNG. Used by BOTH the initial
-// render (edit the chosen master) and the pixel-feedback render (edit the current poster) —
-// they differ only in which image and which prompt. Chrome is stamped by the caller.
+// The social twin of renderArticlePosterEdit, and likewise a direct edit rather than the
+// `social-post-v2-api` round-trip it used to be — see that function's note for why. Used by
+// BOTH the initial template-edit render (edit the chosen master) and the pixel-feedback
+// render (edit the current poster); they differ only in which image and which prompt. Chrome
+// is stamped by the caller, and so is the cost record.
 //
 // `size` is the render size, and it is per-BRAND because the two brands finish differently:
 // DGIPR's band is JOINED BELOW the artwork (so the model paints SOCIAL_ARTWORK_SIZE and the
 // officer receives 1280x1600), while CMO's chrome is OVERLAID (so what the model paints is
-// already the finished poster, CMO_POSTER_SIZE). It travels in the payload rather than being
-// pinned in the workflow, which is also what keeps the deploy safe in both directions: the
-// workflow defaults the field to '1280x1600', so an old API against the new workflow renders
-// exactly as it does today, and a new API against the old workflow is ignored rather than
-// broken.
-async function renderSocialPosterViaN8n(
-  id: string,
+// already the finished poster, CMO_POSTER_SIZE).
+async function renderSocialPosterEdit(
   imageUrl: string,
   prompt: string,
   size: string,
 ): Promise<Buffer> {
-  const webhookUrl = requireEnv('N8N_SOCIAL_POST_WEBHOOK_URL');
-  const webhookSecret = process.env.N8N_WEBHOOK_SECRET;
-
-  const headers: Record<string, string> = {
-    'content-type': 'application/json',
-  };
-  if (webhookSecret) headers['x-n8n-webhook-secret'] = webhookSecret;
-
-  const response = await fetch(webhookUrl, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      generation_id: id,
-      image_url: imageUrl,
-      prompt,
-      quality: imageQuality(),
-      size,
-    }),
-    signal: AbortSignal.timeout(420_000),
-  });
-  if (!response.ok) {
-    const detail = await response.text().catch(() => '');
-    throw new Error(
-      `n8n social-post webhook failed (${response.status}): ${detail.slice(0, 500)}`,
-    );
-  }
-  const result = (await response.json()) as SocialPostResult;
-  if (!result.poster_png_base64) {
-    throw new Error('n8n social-post webhook returned no poster.');
-  }
-  return Buffer.from(result.poster_png_base64, 'base64');
+  const current = await fetchReferencePng(imageUrl);
+  return editImage(current, prompt, { size });
 }
 
 // The social lane the caption is being written for. The row's category already is one
@@ -1742,11 +1652,10 @@ function socialPlatformOf(
   throw new Error(`Caption requested for non-social category: ${category}`);
 }
 
-// Re-edit a completed poster without rerunning classify/copy. The feedback PROMPT is now
-// built in the API (buildFeedbackPrompt) and the thin workflow just edits the current poster
+// Re-edit a completed poster without rerunning classify/copy. The feedback PROMPT is built
+// in the API (buildFeedbackPrompt) and renderSocialPosterEdit just edits the current poster
 // with it — the same render path as the initial run, differing only in image + prompt.
-async function renderSocialPosterFeedbackViaN8n(
-  id: string,
+async function renderSocialPosterFeedbackEdit(
   currentPosterUrl: string,
   feedback: string,
   // > 0 when currentPosterUrl carries numbered marker boxes (see the article
@@ -1779,8 +1688,7 @@ async function renderSocialPosterFeedbackViaN8n(
   // 1280x1600 poster, the model erases the branding it can see (stampedChromeRule) and returns
   // artwork, and overlayTwitterChrome joins a fresh band back on — so the poster stays exactly
   // 4:5 through any number of rounds rather than growing or shrinking.
-  const rawPoster = await renderSocialPosterViaN8n(
-    id,
+  const rawPoster = await renderSocialPosterEdit(
     currentPosterUrl,
     prompt,
     brand === 'cmo' ? CMO_POSTER_SIZE : SOCIAL_ARTWORK_SIZE,
@@ -2043,6 +1951,15 @@ async function renderAndStoreSocialPoster(
     placementIds?: readonly string[] | undefined;
     placementFamilies?: readonly PlacementFamily[] | undefined;
   }> = {},
+  // Only the v1 write upserts — the same guarantee runArticlePosterPhase already makes, and
+  // for the same reason. v1 is never legitimately re-rendered, but a crash (or a process
+  // restart) between the upload and the posterPath row-write leaves an ORPHAN at that path,
+  // and the retry route's "this run produced nothing" branch re-runs at version 1 again: the
+  // row is then permanently unrenderable, every retry failing on "object already exists".
+  // Safe: the v1 URL is never served before posterPath is set, so no CDN cache entry can hold
+  // a stale copy. A regenerate (v>1) must NOT upsert — there posterPath is written BEFORE
+  // insertRevision, so a version that reached the row was served.
+  upsert = false,
 ): Promise<{ postType: string; title: string | null }> {
   // A fully-AI poster: designed from scratch, with NO reference of any kind. TWO modes land here,
   // differing only in where the poster's words come from — 'fresh' has generatePosterCopy write
@@ -2362,8 +2279,7 @@ async function renderAndStoreSocialPoster(
   //    false for CMO by construction, so the direct call never needs that branch.
   const rawPoster = isFresh
     ? await generateImage(prompt, { size: SOCIAL_ARTWORK_SIZE })
-    : await renderSocialPosterViaN8n(
-        id,
+    : await renderSocialPosterEdit(
         resolved!.master.url,
         prompt,
         brand === 'cmo' ? CMO_POSTER_SIZE : SOCIAL_ARTWORK_SIZE,
@@ -2428,12 +2344,12 @@ async function renderAndStoreSocialPoster(
     posterPng = await overlayTwitterChrome(rawPoster);
   }
   const posterObjectPath = posterPath(id, version);
-  await uploadPng(client, posterObjectPath, posterPng);
+  await uploadPng(client, posterObjectPath, posterPng, upsert);
   // The artwork on its own, for the un-branded download. On the DGIPR lane this is the
   // 1280x1504 canvas the model actually painted — no badge stamped over its corner and no
   // footer strip joined below it. CMO's is its 1280x1600 render with the leader header,
   // footer and photo circle all still absent.
-  await storePlainPoster(client, id, version, rawPoster);
+  await storePlainPoster(client, id, version, rawPoster, upsert);
 
   // Working title → referenceTitle (surfaced in UI). Persisted with the poster so a later
   // caption failure never loses the paid render. A fresh run has no reference ranker to name it,
@@ -2525,6 +2441,8 @@ export function startSocialPostJob(
         designMode,
         1,
         id,
+        {},
+        true,
       );
 
       if (!options.generateCaption) return;
@@ -2571,6 +2489,8 @@ async function renderAndStoreYoutubeThumbnail(
   version: number,
   // Diversifies selection per run (id on a first render, `${id}:v${n}` on a redo).
   seed: string,
+  // v1 only — see the note on renderAndStoreSocialPoster's own flag.
+  upsert = false,
 ): Promise<{ title: string | null }> {
   // 1. Which reference. A pinned exact image wins outright (resolvePinnedImage is
   //    category-agnostic and resolves the type off the image itself); otherwise the whole
@@ -2664,7 +2584,7 @@ async function renderAndStoreYoutubeThumbnail(
     await fitToYoutubeThumbnail(edited),
   );
   const objectPath = posterPath(id, version);
-  await uploadPng(client, objectPath, thumbnailPng);
+  await uploadPng(client, objectPath, thumbnailPng, upsert);
 
   await updateGeneration(client, id, {
     referenceTitle: resolved.title ?? null,
@@ -2701,7 +2621,7 @@ export function startYoutubeThumbnailJob(
       error: null,
     });
 
-    await renderAndStoreYoutubeThumbnail(client, id, row, 1, id);
+    await renderAndStoreYoutubeThumbnail(client, id, row, 1, id, true);
   });
 }
 
@@ -3664,8 +3584,7 @@ export function startPosterImageFeedbackJob(
         row.templateBrand === 'cmo'
           ? await downloadPng(client, cmoPhotoPath(id))
           : undefined;
-      const rendered = await renderSocialPosterFeedbackViaN8n(
-        id,
+      const rendered = await renderSocialPosterFeedbackEdit(
         inputUrl,
         feedbackText,
         annotations.length,
@@ -3690,10 +3609,7 @@ export function startPosterImageFeedbackJob(
       // The stamped chrome is erased by the edit (stampedChromeRule) and composited again
       // here, which is what keeps it crisp through repeated rounds — and leaves `rawPoster`
       // as a genuine un-branded copy of this version.
-      rawPoster = await renderArticlePosterEditViaN8n(id, inputUrl, prompt, {
-        imageFeedback: feedbackText,
-        markerCount: annotations.length,
-      });
+      rawPoster = await renderArticlePosterEdit(inputUrl, prompt);
       posterPng = await overlayArticleChrome(rawPoster);
       recordImageCost('article', imageQuality());
     }

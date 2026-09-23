@@ -5,9 +5,6 @@ import type { ReactNode } from 'react';
 import { Mukta } from 'next/font/google';
 import Script from 'next/script';
 import { STR } from '../lib/strings';
-import { TasksProvider } from '../lib/TasksProvider';
-import { AppSidebar } from '../components/AppSidebar';
-import { InstallAppPrompt } from '../components/InstallAppPrompt';
 import { PwaRegistration } from '../components/PwaRegistration';
 import { BackgroundPreloader } from '../components/common/BackgroundPreloader';
 

@@ -149,7 +149,8 @@ export const STR = {
   motionRegionToolsLabel: 'हलणारा भाग निवडण्याची पद्धत',
   motionRegionToolBox: 'चौकट निवड',
   motionRegionToolLasso: 'मुक्त रेषा निवड (लॅसो)',
-  motionLassoActiveNote: 'रेषेच्या आतला भाग हलेल · बाहेरचा भाग जसाच्या तसा राहील',
+  motionLassoActiveNote:
+    'रेषेच्या आतला भाग हलेल · बाहेरचा भाग जसाच्या तसा राहील',
   motionLassoPrompt: 'हलणाऱ्या भागाभोवती बोटाने किंवा माउसने रेषा काढा',
   motionLassoTooSmall: 'निवड खूप लहान आहे — पुन्हा मोठी रेषा काढा',
   motionLassoSurfaceLabel:
@@ -598,7 +599,7 @@ export const STR = {
   learnedPrefsScopeNews: 'बातमी',
   learnedPrefsScopeScheme: 'योजना-लेख',
   learnedPrefsScopeBoth: 'सर्व लेख',
-  learnedPrefsReview: 'संपादकीय नियम पाहा किंवा बंद करा →',
+  learnedPrefsReview: 'संपादकीय नियम तपासा किंवा बदला →',
   // Shown on a social poster whose information held more items than any master template lays
   // out. The poster DOES carry every item — the design was stretched to fit — so this is a
   // "check it reads well, or split the note" prompt, not an error.
@@ -2368,7 +2369,8 @@ export const STR = {
   prefsInUse: 'लेखांत वापरात',
   prefsInUseNewsOnly: 'फक्त बातम्यांत वापरात',
   prefsInUseSchemeOnly: 'फक्त योजना-लेखांत वापरात',
-  prefsInUseTitle: 'हा नियम सध्या प्रत्येक नव्या लेखाच्या सूचनांमध्ये पाठवला जातो.',
+  prefsInUseTitle:
+    'हा नियम सध्या प्रत्येक नव्या लेखाच्या सूचनांमध्ये पाठवला जातो.',
   prefsBeyondCap: 'मर्यादेबाहेर',
   prefsBeyondCapTitle: (cap: number) =>
     `एका लेखाला जास्तीत जास्त ${cap.toLocaleString('mr-IN')} नियम पाठवले जातात. हा नियम सुरू आहे पण सध्या त्या यादीत बसत नाही — तो काढून टाकलेला नाही; वारंवार तीच सूचना आल्यास तो पुन्हा वर येईल.`,

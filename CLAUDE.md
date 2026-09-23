@@ -44,8 +44,8 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
   - **Article poster = `renderAndStoreArticlePoster`, the twin of
     `renderAndStoreSocialPoster`.** `ARTICLE_POSTER_MODE` (default **`fresh`**) forks it:
     `fresh` builds the whole prompt in the API (`buildArticlePosterPrompt`) and calls
-    `generateImage` at 1536x1024 — **no n8n**; `n8n` edits the picked master through the now
-    thin 5-node `article-poster-v1-api` (`renderArticlePosterEditViaN8n`); `html` is the
+    `generateImage` at 1536x1024; `n8n` edits the picked master
+    (`renderArticlePosterEdit` — the name is historical, see below); `html` is the
     original `buildArticleScenePrompt`+`generateImage`+`generateArticlePoster` Chromium path.
     Sequence: `generateCopy` → **the poster's text** (`row.posterHeading` if the officer typed
     one, else `resolvePosterSubject` — if the news has ONE named subject the poster's entire text
@@ -55,8 +55,13 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
     → `generateArtDirection` → render → `measurePosterColours` on the RAW poster →
     `overlayArticleChrome` → upload → persist `copy`+`posterPath`, then `posterStyle` as a
     SEPARATE best-effort update (an un-applied 0028 must cost the rotation memory, not the
-    paid render). Feedback re-renders build their prompt with `buildArticleFeedbackPrompt`
-    and are the only article path still touching n8n. `ARTICLE_POSTER_THEMES` is deleted —
+    paid render). Feedback re-renders build their prompt with `buildArticleFeedbackPrompt`.
+    **NO POSTER LANE CALLS n8n ANY MORE** (2026-09-22): `renderArticlePosterEdit` and
+    `renderSocialPosterEdit` are `fetchReferencePng` + `editImage`, the YouTube lane's
+    long-standing direct call. The two workflows were pure pass-throughs once the prompts
+    moved into the API — fetch the URL, POST `/v1/images/edits`, return the base64 — so a
+    feedback round no longer needs n8n running, and `N8N_*_WEBHOOK_URL` are unread.
+    `ARTICLE_POSTER_MODE=n8n` still names the master-EDIT mode; it no longer means n8n. `ARTICLE_POSTER_THEMES` is deleted —
     the shared palette rotation supersedes it. Neither n8n mode writes a `scenePath`, so
     poster copy/scene feedback stay `html`-only.
   - `startSocialPostJob` (both social categories) now runs reference selection → copy
@@ -67,7 +72,8 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
     **`resolveSocialReferenceByInformation`**)
     → `generatePosterCopy` (gpt-5.6-luna,
     env `OPENAI_COPY_MODEL`; applies `lockSchemeNames` so a scheme name stays full/verbatim) →
-    `buildPosterPrompt` → `renderSocialPosterViaN8n(id, imageUrl, prompt)`.
+    `buildPosterPrompt` → `renderSocialPosterEdit(imageUrl, prompt, size)` (a direct
+    `editImage` call since 2026-09-22 — see the article bullet above).
     **Reference selection is INFORMATION-FIRST** (2026-07-28,
     `references/select-by-information.ts`): the raw note is compared against EVERY enabled
     master of the brand across ALL types, using the informational descriptions cached on
@@ -126,12 +132,11 @@ pnpm workspaces (`apps/*`, `packages/*`); packages are referenced as `@dgipr/*`.
     per attempt — the version counter only advances on success, so a failed round +
     resubmit would otherwise collide on the same path), turns marks +
     notes into one element-aware instruction via a `VISION_MODEL` vision pass
-    (`interpretImageFeedback`, raw-notes fallback), and sends the marked URL +
-    `marker_count` to n8n — whose feedback prompts branch on it (0 = legacy prompt
-    byte-for-byte, so plain text feedback is unchanged). Web side:
-    `PosterAnnotator` + `PosterImageFeedbackBox`. Deploy ordering is INVERTED for
-    this feature: `pnpm n8n:push` first, API second (old workflow + new API can
-    leave the red marker boxes in the output).
+    (`interpretImageFeedback`, raw-notes fallback), and edits the marked poster with a prompt
+    that branches on `markerCount` (0 = the legacy prompt byte-for-byte, so plain text
+    feedback is unchanged). Web side: `PosterAnnotator` + `PosterImageFeedbackBox`.
+    The INVERTED deploy order this feature once had (`pnpm n8n:push` first) no longer
+    applies — the prompt and the render both live in the API.
 - DLO intake (meeting MP3s/PDFs/DOCX/TXT → reviewed Marathi text → normal generation):
   routes → `apps/api/src/routes/dlo.ts` (multipart with per-request `UPLOAD_FILE_MAX_BYTES`
   (**50 MiB**, `@dgipr/schemas`, shared with `/transcribe` and with the web pickers, which
@@ -1312,7 +1317,7 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   (`generate-article-poster.ts`, `build-scene-prompt.ts`, `openai-image.ts`,
   `article-template.ts` / `poster-template.ts`, `render-html.ts`,
   `article-chrome.ts` / `twitter-chrome.ts` / `cmo-chrome.ts` + `cmo-geometry.ts` —
-  sharp overlays of the brand chrome onto n8n article/twitter/CMO posters); public API in
+  sharp overlays of the brand chrome onto the article/twitter/CMO renders); public API in
   `packages/poster-renderer/src/index.ts`
 - **The poster WITHOUT its chrome — `GET /api/generations/:id/poster-plain.png`.** It serves a
   SECOND stored object, `generations/{id}/poster-v{n}-plain.png`, not a crop of the finished
@@ -1323,8 +1328,8 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   render at the three sites that produce one (article initial/regenerate, social
   initial/regenerate, and the shared image-feedback re-render), always AFTER the poster write
   and **best-effort**: a convenience copy must never cost a paid render (the 0028 principle).
-  So `renderArticlePosterEditViaN8n` now returns the model's RAW edit and both callers stamp
-  the chrome themselves, and `renderSocialPosterFeedbackViaN8n` returns `{ png, raw }`. The
+  So `renderArticlePosterEdit` returns the model's RAW edit and both callers stamp
+  the chrome themselves, and `renderSocialPosterFeedbackEdit` returns `{ png, raw }`. The
   route derives the object from `row.posterPath` (`plainPathForPoster`), so a restore to an
   older version serves that version's plain copy and no column is needed. **A poster rendered
   before 2026-09-03, and every `ARTICLE_POSTER_MODE=html` poster, has none** — the route
@@ -1819,7 +1824,8 @@ Chromium): `pnpm --filter @dgipr/poster-renderer exec playwright install chromiu
   image-feedback re-renders alike. Zone numbers there, in `ARTICLE_RESERVED_ZONES` (web), and
   in `build-article-poster-prompt.ts` must stay in sync; tune for free with
   `poster:preview:chrome`. `ARTICLE_POSTER_MODE=n8n` restores the old master-edit behaviour
-  (`buildArticlePosterPrompt` mode `onbrand` → the 5-node workflow); neither n8n mode produces
+  (`buildArticlePosterPrompt` mode `onbrand` → `renderArticlePosterEdit`; the VALUE is
+  historical — that edit is a direct OpenAI call, not a workflow); neither mode produces
   a scene image, so poster feedback + manual copy-edit (which need `scenePath`) stay
   `html`-only.
 - **The social footer is APPENDED below the artwork (2026-08-10), so it can never cover text.**

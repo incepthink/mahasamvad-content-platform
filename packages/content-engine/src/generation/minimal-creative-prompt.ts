@@ -1,12 +1,12 @@
 // Minimal creative poster prompt for testing.
 // Contains ONLY:
-// 1. "Make a creative poster for social media platforms in the size {width} × {height}."
-// 2. Text accuracy rules
-// 3. Text priority & readability (text takes priority over artwork/icons, large readable font for mobile)
-// 4. Numbers rule (Devanagari numerals ०-९ only)
-// 5. Do not use (logos, watermarks, maps)
+// 1. "Make a creative poster for social media platforms in the size {width} × {height}. It must look very professional and not be congested."
+// 2. Numbers rule (Devanagari numerals ०-९ only, no English numerals)
+// 3. Text accuracy rules (including preserving the loop in 'श')
+// 4. Icons rule (compact, small, secondary)
+// 5. Do not use (logos, watermarks, maps, wave patterns at bottom)
 // 6. Headline & margins (font scaled/wrapped to clear top-right badge)
-// 7. Area rules (bottom text cushion)
+// 7. Area rules (bottom text cushion, no wave patterns)
 // 8. The text to put on the poster
 //
 // No extra creative direction essay, no color palettes, no forced layout templates.
@@ -28,26 +28,27 @@ export type MinimalCreativePromptInput = Readonly<{
   badgeHeight?: number | undefined;
 }>;
 
+export const NUMBERS_RULE = `NUMBERS:
+- Use only Devanagari numerals: ० १ २ ३ ४ ५ ६ ७ ८ ९.
+- Never use Western numerals: 0 1 2 3 4 5 6 7 8 9.
+- Every year (e.g. २०२६ instead of 2026), date, quantity, and phone number must strictly use Devanagari numerals only. No English digits anywhere.`;
+
 export const TEXT_ACCURACY_RULE = `TEXT ACCURACY:
 - Preserve every अक्षर, मात्रा, जोडाक्षर and अनुस्वार in its correct position.
 - Pay special attention to conjuncts such as “क्ती” and “र्दे”. Never separate, reorder, replace or omit their characters or matras.
 - Words such as “व्यक्ती”, “शक्ती”, “युक्ती” and “निर्देश” must remain exactly as supplied.
+- For letters with a loop such as “श”, the loop/circle at the top-left of the letter must be clearly formed and properly maintained (never omit, break, or flatten the circle in “श” in words such as “शेतकरी”, “शासन”, “विशेष”, “शिक्षण”).
 - Do not rewrite, translate, autocorrect, abbreviate or approximate any word.
 - Before finishing, compare every rendered word and number with the supplied content and correct all differences.`;
 
-export const TEXT_PRIORITY_RULE = `TEXT PRIORITY & READABILITY:
-- The text is the primary purpose of the poster and must take priority over artwork, illustrations, and decorative elements.
-- The poster will be read on mobile phones: ensure all body text, bullet points, and cards use large, bold, easily readable font sizes with strong contrast against their background.
-- Never shrink text into tiny unreadable lines to make room for giant icons or heavy illustrations.
-- Keep icons compact and secondary so the written text has plenty of room to breathe and remains effortlessly readable at a glance.`;
-
-export const NUMBERS_RULE = `NUMBERS:
-- Use only Devanagari numerals: ० १ २ ३ ४ ५ ६ ७ ८ ९.
-- Never use Western numerals: 0 1 2 3 4 5 6 7 8 9.`;
+export const ICONS_RULE = `ICONS:
+- Keep all icons and icon badge containers small, compact, and subtle.
+- Never use oversized icons or bulky circular badges that dominate the layout; the written text must remain the main visual focus.`;
 
 export const DO_NOT_USE_RULE = `DO NOT USE:
 - Do not add or paint any logo, emblem, seal, QR code, government wordmark, or watermark.
-- Do not include maps (no geographic maps, territory outlines, world maps, or country/state outlines).`;
+- Do not include maps (no geographic maps, territory outlines, world maps, or country/state outlines).
+- Do not add wave patterns, wavy ribbons, curved swooshes, or decorative wave-like shapes along the bottom. Keep the lower background clean, flat, and natural.`;
 
 // Backwards compatibility alias
 export const NO_LOGOS_RULE = DO_NOT_USE_RULE;
@@ -69,7 +70,7 @@ export function buildAreaRule(
 ): string {
   const bottomY = height - bottomMargin;
   return `AREA RULES:
-- Bottom margin: The footer is attached below the image and covers nothing. Extend the design to the bottom edge, but keep all text and icons above y=${bottomY} (at least ${bottomMargin} pixels above the bottom edge). Reflow or shrink content until everything fits.`;
+- Bottom margin: The footer is attached below the image and covers nothing. Extend the design to the bottom edge, but keep all text and icons above y=${bottomY} (at least ${bottomMargin} pixels above the bottom edge). Do not draw wave patterns or curved decorative swooshes along the bottom. Reflow or shrink content until everything fits.`;
 }
 
 export function buildMinimalCreativePrompt(
@@ -82,18 +83,18 @@ export function buildMinimalCreativePrompt(
   const badgeHeight = input.badgeHeight ?? DEFAULT_BADGE_HEIGHT;
   const text = input.text.trim();
 
-  const opening = `Make a creative poster for social media platforms in the size ${width} × ${height}.`;
+  const opening = `Make a creative poster for social media platforms in the size ${width} × ${height}. It must look very professional and not be congested.`;
   const areaRule = buildAreaRule(width, height, bottomMargin);
   const headlineMarginsRule = buildHeadlineMarginsRule(badgeWidth, badgeHeight);
 
   const sections = [
     opening,
     '',
+    NUMBERS_RULE,
+    '',
     TEXT_ACCURACY_RULE,
     '',
-    TEXT_PRIORITY_RULE,
-    '',
-    NUMBERS_RULE,
+    ICONS_RULE,
     '',
     DO_NOT_USE_RULE,
     '',
