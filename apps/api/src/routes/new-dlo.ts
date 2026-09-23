@@ -27,6 +27,9 @@
 
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
+import { trackActivity } from '../activity/actor.js';
+import { trackGenerationActivity } from '../activity/generation.js';
+import { activitySummary, firstLine } from '@dgipr/schemas';
 import {
   getDloIntake,
   insertDloIntake,
@@ -371,6 +374,18 @@ export function registerNewDloRoutes(
     }
 
     await updateDloIntake(client, row.id, { files: entries });
+    trackActivity(client, request, {
+      feature: 'dlo',
+      action: 'dlo_intake_creation',
+      status: 'in_progress',
+      subject: { kind: 'dlo_intake', id: row.id },
+      summary: activitySummary(
+        row.heading,
+        firstLine(row.notes),
+        entries.map((entry) => entry.name).join(', '),
+      ),
+      detail: { files: entries.length, lane: 'new' },
+    });
     startDloIntakeJob(client, row.id);
     return reply.code(202).send({ id: row.id });
   });
@@ -491,6 +506,13 @@ export function registerNewDloRoutes(
       // The ordinary article runner. It finds this run's files through `dlo_intake_id` and
       // calls generateArticleFromSources instead of generateArticleSimple — the only
       // difference between the two lanes past this point.
+      trackGenerationActivity(
+        client,
+        request,
+        generation,
+        'article_generation',
+        { detail: { intake: row.id, lane: 'new' } },
+      );
       startGenerationJob(client, generation.id);
       return reply.code(202).send({ generationId: generation.id });
     },

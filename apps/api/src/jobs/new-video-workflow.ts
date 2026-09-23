@@ -70,6 +70,7 @@ import {
   type NewVideoTurnRow,
   type SupabaseClient,
 } from '@dgipr/database';
+import { settleJobActivity } from '../activity/actor.js';
 import {
   NEW_VIDEO_MAX_IMAGES,
   newVideoTitleFrom,
@@ -526,6 +527,12 @@ export async function markTurnCompleted(
   await updateNewVideoConversation(client, conversationId, {
     lastInteractionId: result.interactionId,
   });
+  settleJobActivity(
+    client,
+    { kind: 'nvw_turn', id: turnId },
+    'nvw_turn',
+    'success',
+  );
 }
 
 // Edit the video on screen, or a new clip — see video/new-video-intent.ts. Exported so the
@@ -581,6 +588,13 @@ export async function markTurnFailed(
     status: 'failed',
     error: message,
   });
+  settleJobActivity(
+    client,
+    { kind: 'nvw_turn', id: turnId },
+    'nvw_turn',
+    'failed',
+    message,
+  );
 }
 
 // Fire and forget: the route has already answered 202 and the client is polling. Every failure

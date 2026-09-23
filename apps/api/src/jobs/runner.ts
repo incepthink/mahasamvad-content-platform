@@ -141,6 +141,8 @@ import {
   learnFromArticleFeedback,
 } from './editorial-learning.js';
 import { recordTasksFromCost } from './service-usage.js';
+import { isActivityAction } from '@dgipr/schemas';
+import { settleJobActivity } from '../activity/actor.js';
 import {
   sourceContextForGeneration,
   sourceFilesForGeneration,
@@ -232,7 +234,12 @@ const captionReviseErrors = new Map<string, string>();
 // lost on restart — the recovery itself is not (the row is `completed` again), so a restart
 // costs the one-click retry, never the run. A row that failed BEFORE producing anything is
 // untouched by all of this and still reports `failed`: there is nothing to go back to.
-type EditFailure = { message: string; retry: (() => void) | null };
+// `task` is the failed job's key, so a retry can open an /activity row the re-run settles.
+type EditFailure = {
+  message: string;
+  retry: (() => void) | null;
+  task: string;
+};
 const editFailures = new Map<string, EditFailure>();
 
 // How an edit job declares itself one: it arms its own re-run immediately before calling
@@ -431,6 +438,12 @@ export function isEditRetryable(id: string): boolean {
   return editFailures.get(id)?.retry != null;
 }
 
+// The job key of the failed edit, read by the retry route BEFORE it re-runs it, so the retry
+// can be logged under the same action the re-run will settle.
+export function getEditFailureTask(id: string): string | null {
+  return editFailures.get(id)?.task ?? null;
+}
+
 // Re-run the failed edit with the arguments it was given. Returns false when there is nothing
 // armed — a different process ran it, or the run was already recovered — and the caller then
 // simply clears the failure, which is all a legacy `failed` row needs to become usable again.
@@ -582,6 +595,7 @@ async function recoverEditFailure(
   id: string,
   error: unknown,
   retry: () => void,
+  task: string,
 ): Promise<boolean> {
   try {
     const row = await getGeneration(client, id);
@@ -593,7 +607,7 @@ async function recoverEditFailure(
       step: 'done',
       error: null,
     });
-    editFailures.set(id, { message: errorMessage(error), retry });
+    editFailures.set(id, { message: errorMessage(error), retry, task });
     return true;
   } catch (recoverError) {
     // Falling through to the normal failed write is the safe outcome: the officer sees a
@@ -601,6 +615,21 @@ async function recoverEditFailure(
     console.error(`[job ${id}] could not recover edit failure:`, recoverError);
     return false;
   }
+}
+
+// Settle the /activity row a route opened for a generation job. The action is the job's
+// own task key (see ActivityActionSchema), which is what lets a job settle without knowing
+// anything about the request that started it. Exported for jobs/dynamic-poster.ts' sibling
+// paths; every other caller is in this file.
+export function settleGenerationActivity(
+  client: SupabaseClient,
+  id: string,
+  task: string,
+  status: 'success' | 'failed',
+  error?: unknown,
+): void {
+  if (!isActivityAction(task)) return;
+  settleJobActivity(client, { kind: 'generation', id }, task, status, error);
 }
 
 // Wrap a job body with the shared bookkeeping: claim the id, flip the row to
@@ -633,10 +662,16 @@ export function runJob(
         step: 'done',
         error: null,
       });
+      // The /activity row the route opened for this job (action = this task key). A no-op
+      // when nothing was opened. Fire-and-forget: it can never affect the run.
+      settleGenerationActivity(client, id, task, 'success');
     } catch (error) {
       console.error(`[job ${id}] failed:`, error);
+      // Settled FAILED even when the edit is recovered below: the row goes back to
+      // `completed`, but the action the officer asked for did not land.
+      settleGenerationActivity(client, id, task, 'failed', error);
       const recovered = retry
-        ? await recoverEditFailure(client, id, error, retry)
+        ? await recoverEditFailure(client, id, error, retry, task)
         : false;
       if (!recovered) {
         try {
@@ -2867,8 +2902,21 @@ export function startGenerateCaptionJob(
           await updateGeneration(client, id, { article: caption });
         }),
       );
+      settleGenerationActivity(
+        client,
+        id,
+        'social_caption_creation',
+        'success',
+      );
     } catch (error) {
       console.error(`[generate-caption ${id}] failed:`, error);
+      settleGenerationActivity(
+        client,
+        id,
+        'social_caption_creation',
+        'failed',
+        error,
+      );
       captionReviseErrors.set(id, errorMessage(error));
     } finally {
       try {
@@ -3127,8 +3175,10 @@ export function startConcurrentArticleFeedbackJob(
           learnFromFeedback(client, row, feedback);
         }),
       );
+      settleGenerationActivity(client, id, 'article_revision', 'success');
     } catch (error) {
       console.error(`[revise-article ${id}] failed:`, error);
+      settleGenerationActivity(client, id, 'article_revision', 'failed', error);
       reviseArticleErrors.set(id, errorMessage(error));
     } finally {
       try {
@@ -3196,8 +3246,21 @@ export function startCaptionFeedbackJob(
           });
         }),
       );
+      settleGenerationActivity(
+        client,
+        id,
+        'social_caption_revision',
+        'success',
+      );
     } catch (error) {
       console.error(`[revise-caption ${id}] failed:`, error);
+      settleGenerationActivity(
+        client,
+        id,
+        'social_caption_revision',
+        'failed',
+        error,
+      );
       captionReviseErrors.set(id, errorMessage(error));
     } finally {
       try {
@@ -3328,8 +3391,16 @@ export function startTranslateJob(
           },
         ),
       );
+      settleGenerationActivity(client, id, 'article_translation', 'success');
     } catch (error) {
       console.error(`[translate ${id}] failed:`, error);
+      settleGenerationActivity(
+        client,
+        id,
+        'article_translation',
+        'failed',
+        error,
+      );
       translateErrors.set(id, errorMessage(error));
     } finally {
       try {

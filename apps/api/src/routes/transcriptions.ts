@@ -7,6 +7,9 @@
 
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
+import { trackActivity } from '../activity/actor.js';
+import { activitySummary } from '@dgipr/schemas';
+import { settleAllActivity } from '@dgipr/database';
 import {
   DLO_UPLOADS_BUCKET,
   getTranscription,
@@ -332,6 +335,18 @@ export function registerTranscriptionRoutes(
       files: entries,
       fileCount: entries.length,
     });
+    trackActivity(client, request, {
+      feature: 'transcribe',
+      action: 'transcription_creation',
+      status: 'in_progress',
+      subject: { kind: 'transcription', id: row.id },
+      summary: activitySummary(entries.map((entry) => entry.name).join(', ')),
+      detail: {
+        files: entries.length,
+        youtube: youtube.length,
+        bytes: uploads.reduce((sum, upload) => sum + (upload.bytes ?? 0), 0),
+      },
+    });
     startTranscriptionJob(client, row.id);
     return reply.code(202).send({ id: row.id });
   });
@@ -367,6 +382,12 @@ export function registerTranscriptionRoutes(
       ) {
         const error = 'Server restarted while this job was running.';
         await updateTranscription(client, row.id, { status: 'failed', error });
+        settleAllActivity(
+          client,
+          { kind: 'transcription', id: row.id },
+          'failed',
+          error,
+        );
         return toDetail({ ...row, status: 'failed', error }, includeText);
       }
       return toDetail(row, includeText);

@@ -440,6 +440,23 @@ export async function updateGlossaryTerm(
   return fromDbRow(data as GlossaryDbRow);
 }
 
+// One term by id, or null. Read by the delete route (best-effort) so the /activity log can
+// name what was removed after it is gone.
+export async function getGlossaryTerm(
+  client: SupabaseClient,
+  id: string,
+): Promise<GlossaryTerm | null> {
+  const { data, error } = await client
+    .from(GLOSSARY_TERMS_TABLE)
+    .select()
+    .eq('id', id)
+    .maybeSingle();
+  if (error) {
+    throw new Error(`Failed to read glossary term ${id}: ${error.message}`);
+  }
+  return data ? fromDbRow(data as GlossaryDbRow) : null;
+}
+
 export async function deleteGlossaryTerm(
   client: SupabaseClient,
   id: string,

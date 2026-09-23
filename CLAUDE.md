@@ -713,6 +713,35 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   one field that points a paid render at an object. Deliberately absent: no reference library,
   no poster copy, no chrome, no caption, no publishing, no Canva, no n8n — and `NextActions`
   renders nothing here, since its edit-note re-run would submit a run with no poster.
+- **Activity / audit log (`/activity`, migration 0058) — WHO did WHAT, with no login.** A hidden
+  page (not in `NAV_LINKS`) with a live feed, today's KPIs, filters in the URL and a per-IP /
+  per-device journey. "Who" is the IP as the ONE trusted proxy saw it (`Fastify({ trustProxy: 1 })`
+  in `apps/api/src/index.ts` — `true` would believe a forged leftmost X-Forwarded-For) plus a
+  browser device id (`apps/web/lib/deviceId.ts`, `dgipr.device`, sent as `x-dgipr-device` by
+  `apiFetch` in `lib/api.ts` on EVERY request, and as `?device=` on the download/PDF links).
+  **Neither is auth** — nothing grants, filters or refuses on them. Actor hook + `trackActivity`
+  → `apps/api/src/activity/actor.ts` (registered inside the `/api` scope, never rejects a request);
+  generation helpers → `activity/generation.ts`; rows → `packages/database/src/activity-events.ts`
+  (`recordActivity`/`settleActivity`/`settleAllActivity` are fire-and-forget, the
+  `recordUsageEvent` contract); shapes + the action vocabulary + `activitySummary()` (the ONLY way a
+  summary is built, capped at 140 chars) → `packages/schemas/src/activity.ts`; read API →
+  `routes/activity.ts` + `jobs/activity.ts`; web → `app/activity/page.tsx`, `lib/useActivityFeed.ts`
+  (10 s poll, newest page only, paused while hidden), `lib/activity.ts`, the `ACTIVITY_*` block at
+  the end of `strings.ts`, the `/activity` block at the end of `dgipr.css`.
+  Three things to know. **A route opens an `in_progress` row keyed by the JOB'S OWN TASK KEY** and
+  the job settles it (`runJob` via `settleGenerationActivity`, the three off-status jobs,
+  `runIntakeJob`'s new `action` argument, `transcription-runner`, `runVideoJob` through
+  `VIDEO_TASK_ACTIONS`, `markTurnCompleted/Failed`) — so no job needs the request, and settling is
+  keyed by action AS WELL AS subject because two jobs can run on one generation at once. A failed
+  EDIT settles `failed` even though `recoverEditFailure` puts the row back to `completed`;
+  `EditFailure.task` is what lets the retry route log a retry under the key the re-run settles.
+  **The orphan reapers** (generation, dlo, transcription, video detail GETs) call
+  `settleAllActivity`, so a restart cannot leave a row in progress for ever — the off-status jobs
+  (caption/translate/concurrent feedback) are the known gap, since their row stays `completed`.
+  **Only major work is logged** — no GETs, polls, autosaves or copy; a new action needs a key in
+  `ActivityActionSchema` AND a label in `ACTIVITY_ACTION_LABELS`. Free harnesses (from
+  content-engine): `npx tsx ../../apps/api/src/activity/actor.check.ts` (21) and
+  `npx tsx ../schemas/src/activity.ts` (16).
 - **Department usage analytics (`/analytics`) — how much the department uses the platform.**
   One read-only endpoint serves the landing page AND all six drill-downs, which is what makes a
   card's number and its feature page's number impossible to disagree: route →
@@ -1490,8 +1519,9 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   consolidation outcomes against a stub client, plus the structural check that both feedback
   call sites reach the helper). New env: `EDITORIAL_LEARNING_ENABLED`,
   `OPENAI_PREFERENCE_MODEL`, `OPENAI_PREFERENCE_REASONING_EFFORT`,
-  `EDITORIAL_LEARNING_TIMEOUT_MS`. The review page is Phase 3, and turning the flag on is its
-  last step.
+  `EDITORIAL_LEARNING_TIMEOUT_MS`. The review page (Phase 3) is `apps/web/app/preferences/page.tsx`
+  (sidebar **संपादकीय नियम**) over the `/api/preferences` routes; turn the flag on only where
+  that page is deployed, since it is the only way to see and disable a learned rule.
 
 **Data & schema:** `supabase/migrations/0001…0004_*.sql` — pgvector Mahasamvad
 chunks, `generations` table, generation category + chunk style-category columns;
@@ -1572,6 +1602,13 @@ create still returns 202, every input guard still answers in Marathi, and the dy
 create is the only thing that fails. The motion snapshot columns are separate from
 `poster_path` deliberately — that column is a PNG every poster reader in the API treats as one,
 and an .mp4 in it would be listed as a poster version by `posterVersionPaths`.
+`0058` — `activity_events` (new table: the /activity audit log — IP, device id, user agent,
+feature, action, status, a ≤140-char summary, subject kind/id, small jsonb detail). Its own table,
+not an extension of `usage_events`, whose contract is "no content, no identity". Every write is
+fire-and-forget, so an un-applied 0058 costs the /activity page alone — **verified live**: every
+other route answers normally and the activity reads fail with `relation
+"public.activity_events" does not exist`. Retention: keep everything, no pruning. Apply before the
+API deploy anyway.
 `0057` — `editorial_preferences` (new table: the /dlo lane's learned editorial rules — `rule`,
 `scope` news|scheme|both, `status` active|disabled|superseded, `source` learned|manual,
 `reinforcement_count`, provenance `source_feedback`/`source_generation_id`, self-referential

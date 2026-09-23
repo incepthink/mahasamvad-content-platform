@@ -9628,3 +9628,265 @@ a.file-row-link > svg:last-child {
   line-height: 1.5;
   color: var(--text);
 }
+
+/* ---------- /activity — the hidden admin log ----------
+   Rows use the shared chip colours for status (text + colour, never colour alone). IPs and
+   device labels are buttons that open that actor's journey, so they read as links but keep
+   a 40px target on a phone. */
+
+.activity-back {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+}
+
+.activity-overview {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: 16px;
+}
+
+.activity-busy {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.activity-busy li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  min-width: 0;
+}
+
+.activity-busy-meta {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.activity-link {
+  background: none;
+  border: none;
+  padding: 4px 0;
+  min-height: 32px;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.activity-link:hover {
+  text-decoration-thickness: 2px;
+}
+
+.activity-ip {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9rem;
+}
+
+.activity-device {
+  font-size: 0.86rem;
+}
+
+.activity-device--none {
+  color: var(--muted);
+}
+
+.activity-filters input[type='text'],
+.activity-filters input[type='date'] {
+  font: inherit;
+  font-size: 0.95rem;
+  color: inherit;
+  padding: 10px 12px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--card);
+  max-width: 100%;
+}
+
+.activity-filters input[type='text'] {
+  width: 16ch;
+}
+
+.activity-filter-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.activity-feed-head {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.activity-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.activity-pulse {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: currentColor;
+  margin-right: 6px;
+  vertical-align: middle;
+  animation: activity-pulse 1.4s ease-in-out infinite;
+}
+
+.activity-live .activity-pulse {
+  color: var(--accent);
+  margin-right: 0;
+}
+
+@keyframes activity-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .activity-pulse {
+    animation: none;
+  }
+}
+
+.activity-feed {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.activity-row {
+  display: grid;
+  grid-template-columns: minmax(0, 11rem) minmax(0, 14rem) minmax(0, 1fr) auto;
+  gap: 6px 16px;
+  align-items: start;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+  min-width: 0;
+}
+
+.activity-row:first-child {
+  border-top: none;
+}
+
+.activity-row-when {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.activity-row-who {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.activity-row-what {
+  min-width: 0;
+}
+
+.activity-action {
+  margin: 0;
+  font-weight: 600;
+}
+
+.activity-feature {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 1px 10px;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.activity-summary {
+  margin: 4px 0 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.activity-error {
+  margin: 4px 0 0;
+  color: var(--err);
+  font-size: 0.86rem;
+  overflow-wrap: anywhere;
+}
+
+.activity-open {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 0.88rem;
+}
+
+.activity-row-status .chip {
+  white-space: nowrap;
+}
+
+.activity-more {
+  margin-top: 12px;
+}
+
+.activity-journey-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  gap: 12px;
+  margin: 0 0 12px;
+}
+
+.activity-journey-facts dt {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.activity-journey-facts dd {
+  margin: 2px 0 0;
+  font-weight: 700;
+}
+
+.activity-journey-sub {
+  font-size: 1rem;
+  margin: 12px 0 6px;
+}
+
+/* Below the two-column width the row stacks: when, who, what, then the chip. */
+@media (max-width: 860px) {
+  .activity-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .activity-row-when {
+    grid-column: 1;
+  }
+  .activity-row-status {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .activity-row-who,
+  .activity-row-what {
+    grid-column: 1 / -1;
+  }
+}

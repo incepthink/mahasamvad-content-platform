@@ -65,6 +65,8 @@ import {
   type VideoProjectRow,
   type VideoSceneEntry,
 } from '@dgipr/database';
+import type { ActivityAction } from '@dgipr/schemas';
+import { settleJobActivity } from '../activity/actor.js';
 import {
   VIDEO_CLIP_MIN_SECONDS,
   VIDEO_NARRATION_FIT_TOLERANCE,
@@ -166,6 +168,18 @@ async function uploadVersioned(
   );
 }
 
+// Which /activity row each video job settles: the route opens it under the user-facing
+// action, the job runs under its cost-task key.
+const VIDEO_TASK_ACTIONS: Readonly<Record<string, ActivityAction>> = {
+  video_script_creation: 'video_script_creation',
+  video_storyboard_creation: 'video_storyboard',
+  video_storyboard_revision: 'video_still',
+  video_clip_creation: 'video_animation',
+  video_scene_reanimation: 'video_scene_animation',
+  video_narration: 'video_narration',
+  video_assembly: 'video_stitch',
+};
+
 // Wrap a job body with the shared bookkeeping: claim the id, run in a cost
 // scope, persist an unexpected failure onto the row, always persist the accrued
 // cost (additively — a failed job still spent money) and release the id.
@@ -181,10 +195,30 @@ function runVideoJob(
   running.add(id);
   void (async () => {
     const cost = createCostAccumulator();
+    const activityAction = VIDEO_TASK_ACTIONS[task];
     try {
       await runInCostScope(cost, () => runInCostTask(task, job));
+      if (activityAction) {
+        settleJobActivity(
+          client,
+          { kind: 'video_project', id },
+          activityAction,
+          'success',
+        );
+      }
     } catch (error) {
       console.error(`[video ${id}] failed:`, error);
+      // Failed even when the project returns to `completed` (a re-animate or restitch that
+      // did not land leaves the previous video playable, but the action still failed).
+      if (activityAction) {
+        settleJobActivity(
+          client,
+          { kind: 'video_project', id },
+          activityAction,
+          'failed',
+          error,
+        );
+      }
       try {
         await updateVideoProject(client, id, {
           status: options.failureStatus ?? 'failed',

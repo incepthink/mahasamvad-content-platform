@@ -6,6 +6,10 @@
 
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
+import { trackActivity } from '../activity/actor.js';
+import { trackGenerationActivity } from '../activity/generation.js';
+import { activitySummary, firstLine } from '@dgipr/schemas';
+import { settleAllActivity } from '@dgipr/database';
 import {
   DLO_UPLOADS_BUCKET,
   downloadFile,
@@ -714,6 +718,18 @@ export function registerDloRoutes(
       }
     }
 
+    trackActivity(client, request, {
+      feature: 'dlo',
+      action: 'dlo_intake_creation',
+      status: 'in_progress',
+      subject: { kind: 'dlo_intake', id: row.id },
+      summary: activitySummary(
+        heading,
+        firstLine(notes),
+        entries.map((entry) => entry.name).join(', '),
+      ),
+      detail: { files: entries.length },
+    });
     startDloIntakeJob(client, row.id);
     return reply.code(202).send({ id: row.id });
   });
@@ -771,6 +787,12 @@ export function registerDloRoutes(
       ) {
         const error = 'Server restarted while this job was running.';
         await updateDloIntake(client, row.id, { status: 'failed', error });
+        settleAllActivity(
+          client,
+          { kind: 'dlo_intake', id: row.id },
+          'failed',
+          error,
+        );
         return toDetail({ ...row, status: 'failed', error }, includeText);
       }
       // Only a `ready` intake can have produced an article, and useDloIntake stops polling at
@@ -918,6 +940,20 @@ export function registerDloRoutes(
         step: 'extract',
         error: null,
       });
+      trackActivity(client, request, {
+        feature: 'dlo',
+        action: 'dlo_extraction',
+        status: 'in_progress',
+        subject: { kind: 'dlo_intake', id: row.id },
+        summary: activitySummary(row.heading, firstLine(row.notes)),
+        detail: {
+          files: body.selections.length,
+          pages: body.selections.reduce(
+            (sum, selection) => sum + selection.pages.length,
+            0,
+          ),
+        },
+      });
       startDloExtractionJob(client, row.id, body.selections);
       return reply.code(202).send({ id: row.id });
     },
@@ -969,6 +1005,14 @@ export function registerDloRoutes(
         status: 'running',
         step: 'extract',
         error: null,
+      });
+      trackActivity(client, request, {
+        feature: 'dlo',
+        action: 'dlo_reextraction',
+        status: 'in_progress',
+        subject: { kind: 'dlo_intake', id: row.id },
+        summary: activitySummary(entry.name),
+        detail: { pages: body.pages.length },
       });
       startDloFileReextractionJob(client, row.id, index, body.pages);
       return reply.code(202).send({ id: row.id });
@@ -1028,6 +1072,13 @@ export function registerDloRoutes(
         // omit-when-empty treatment again.
         instructions: body.instructions,
       });
+      trackGenerationActivity(
+        client,
+        request,
+        generation,
+        'article_generation',
+        { detail: { intake: row.id } },
+      );
       startGenerationJob(client, generation.id);
       return reply.code(202).send({ generationId: generation.id });
     },

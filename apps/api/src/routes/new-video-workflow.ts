@@ -22,6 +22,8 @@
 // ids this API minted, and a turn request may name only those ids.
 
 import type { FastifyInstance } from 'fastify';
+import { trackActivity } from '../activity/actor.js';
+import { activitySummary, firstLine } from '@dgipr/schemas';
 import type { SupabaseClient } from '@dgipr/database';
 import {
   DEFAULT_NEW_VIDEO_ASPECT,
@@ -384,6 +386,20 @@ export function registerNewVideoWorkflowRoutes(
       body.intent ?? 'auto',
     );
 
+    trackActivity(client, request, {
+      feature: 'video',
+      action: 'nvw_turn',
+      status: 'in_progress',
+      subject: { kind: 'nvw_turn', id: turn.id },
+      summary: activitySummary(firstLine(body.prompt)),
+      detail: {
+        conversation: conversation.id,
+        images: resolved.length,
+        characters: cast.length,
+        intent: body.intent ?? 'auto',
+        fork: forkFromInteractionId !== null,
+      },
+    });
     return reply
       .code(202)
       .send({ conversationId: conversation.id, turnId: turn.id });
@@ -443,6 +459,14 @@ export function registerNewVideoWorkflowRoutes(
         });
       }
       await removeConversation(client, conversation.id);
+      trackActivity(client, request, {
+        feature: 'video',
+        action: 'nvw_conversation_delete',
+        status: 'success',
+        subject: { kind: 'nvw_conversation', id: conversation.id },
+        summary: activitySummary(conversation.title),
+        detail: { turns: turns.length },
+      });
       return reply.code(204).send();
     },
   );
@@ -479,6 +503,13 @@ export function registerNewVideoWorkflowRoutes(
       voice: body.voice ?? '',
       portrait,
     });
+    trackActivity(client, request, {
+      feature: 'video',
+      action: 'nvw_character_create',
+      status: 'success',
+      summary: activitySummary(body.name),
+      detail: { portrait: portrait !== null && portrait !== undefined },
+    });
     return reply.code(201).send(toCharacterPayload(created));
   });
 
@@ -513,6 +544,17 @@ export function registerNewVideoWorkflowRoutes(
           .code(404)
           .send({ error: { message: 'हे पात्र सापडले नाही.' } });
       }
+      trackActivity(client, request, {
+        feature: 'video',
+        action: 'nvw_character_edit',
+        status: 'success',
+        summary: activitySummary(body.name, updated.name),
+        detail: {
+          changed: Object.keys(body)
+            .filter((key) => body[key as keyof typeof body] !== undefined)
+            .join(','),
+        },
+      });
       return toCharacterPayload(updated);
     },
   );
@@ -531,6 +573,12 @@ export function registerNewVideoWorkflowRoutes(
       // rendered are untouched, and so is the uploaded portrait object — this repo does not
       // delete stored bytes on a click aimed at a list row.
       await removeCharacter(client, request.params.id);
+      trackActivity(client, request, {
+        feature: 'video',
+        action: 'nvw_character_delete',
+        status: 'success',
+        summary: activitySummary(existing.name),
+      });
       return reply.code(204).send();
     },
   );

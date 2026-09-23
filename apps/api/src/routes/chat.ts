@@ -7,6 +7,8 @@
 // deployment offers.
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { trackActivity } from '../activity/actor.js';
+import { activitySummary, firstLine } from '@dgipr/schemas';
 import {
   DLO_UPLOADS_BUCKET,
   POSTERS_BUCKET,
@@ -482,6 +484,14 @@ export function registerChatRoutes(
         }
       }
       await deleteChatThread(client, thread.id);
+      trackActivity(client, request, {
+        feature: 'chat',
+        action: 'chat_thread_delete',
+        status: 'success',
+        subject: { kind: 'chat_thread', id: thread.id },
+        summary: activitySummary(thread.title),
+        detail: { messages: thread.messageCount },
+      });
       return reply.code(204).send();
     },
   );
@@ -529,6 +539,13 @@ export function registerChatRoutes(
       // photograph paths elsewhere do; isImageFileName above guarantees a hit.
       imageMimeForFileName(name) ?? 'image/jpeg',
     );
+    trackActivity(client, request, {
+      feature: 'chat',
+      action: 'chat_image_attach',
+      status: 'success',
+      summary: activitySummary(name),
+      detail: { bytes: data.length },
+    });
     return { name, imageUrl: publicUrl(client, path) };
   });
 
@@ -638,6 +655,12 @@ export function registerChatRoutes(
       storagePath,
       openAiFileId: handle.id,
       bytes: handle.bytes,
+    });
+    trackActivity(client, request, {
+      feature: 'chat',
+      action: 'chat_document_attach',
+      status: 'success',
+      summary: activitySummary(row.displayName),
     });
     return reply.code(201).send({ documentId: row.id, name: row.displayName });
   });
@@ -918,6 +941,27 @@ export function registerChatRoutes(
       } catch (error) {
         request.log.warn({ err: error }, 'chat thread bookkeeping failed');
       }
+
+      // The terminal state is known here, so the chat turn is recorded already settled: the
+      // prompt's opening words and what was attached, never the answer.
+      trackActivity(client, request, {
+        feature: 'chat',
+        action: 'chat_message',
+        status: failure === null ? 'success' : 'failed',
+        subject: { kind: 'chat_thread', id: thread.id },
+        summary: activitySummary(
+          firstLine(content),
+          attachments.map((attachment) => attachment.name).join(', '),
+        ),
+        detail: {
+          provider,
+          attachments: attachments.length,
+          kinds: [...new Set(attachments.map((attachment) => attachment.kind))]
+            .sort()
+            .join(','),
+        },
+        error: failure,
+      });
 
       if (failure !== null) {
         sendEvent(reply, {

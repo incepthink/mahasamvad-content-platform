@@ -2,6 +2,7 @@
 // schemas, read/write rows via @dgipr/database, and hand real work to jobs/runner.
 
 import type { FastifyInstance } from 'fastify';
+import { settleAllActivity } from '@dgipr/database';
 import { randomUUID } from 'node:crypto';
 import { PassThrough } from 'node:stream';
 import { once } from 'node:events';
@@ -110,6 +111,7 @@ import {
   getEditFailure,
   isEditRetryable,
   retryFailedEdit,
+  getEditFailureTask,
   clearEditFailure,
   getReviseArticleError,
   getTranslateError,
@@ -139,6 +141,12 @@ import {
   startYoutubeThumbnailJob,
   startTranslateJob,
 } from '../jobs/runner.js';
+import {
+  generationJobTask,
+  generationSummary,
+  trackGenerationActivity,
+} from '../activity/generation.js';
+import { activitySummary, isActivityAction } from '@dgipr/schemas';
 import {
   motionVersionsOf,
   startDynamicPosterJob,
@@ -833,6 +841,25 @@ export function registerGenerationRoutes(
         ? body.motionRegion
         : undefined,
     });
+    // Opened in progress; the job settles it under the same key (runJob's task).
+    trackGenerationActivity(
+      client,
+      request,
+      row,
+      generationJobTask(row.category),
+      {
+        detail: {
+          template: body.referenceImageId
+            ? 'pinned'
+            : body.referenceTypeId
+              ? 'type'
+              : 'auto',
+          ...(isSocialCategory(row.category)
+            ? { caption: body.generateCaption === true }
+            : {}),
+        },
+      },
+    );
     // Twitter/Facebook → external n8n social-post job; news/scheme → in-process
     // article pipeline. A social run is poster-only unless the caller asked for a
     // caption; the flag rides as a job parameter (no column — a re-run infers it from
@@ -944,6 +971,13 @@ export function registerGenerationRoutes(
           status: 'failed',
           error: 'Server restarted while this job was running.',
         });
+        // Whatever /activity row this job opened can no longer settle itself.
+        settleAllActivity(
+          client,
+          { kind: 'generation', id: row.id },
+          'failed',
+          'Server restarted while this job was running.',
+        );
         return toDetail(client, {
           ...row,
           status: 'failed',
@@ -1111,6 +1145,9 @@ export function registerGenerationRoutes(
             .code(409)
             .send({ error: { message: 'A job is already running.' } });
         }
+        trackGenerationActivity(client, request, row, 'article_revision', {
+          summary: activitySummary(body.feedback),
+        });
         startConcurrentArticleFeedbackJob(client, row.id, body.feedback);
         return reply.code(202).send({});
       }
@@ -1123,6 +1160,9 @@ export function registerGenerationRoutes(
         status: 'running',
         step: 'revise_article',
         error: null,
+      });
+      trackGenerationActivity(client, request, row, 'article_revision', {
+        summary: activitySummary(body.feedback),
       });
       startArticleFeedbackJob(client, row.id, body.feedback);
       return reply.code(202).send({});
@@ -1162,6 +1202,9 @@ export function registerGenerationRoutes(
           error: { message: 'A caption revision is already running.' },
         });
       }
+      trackGenerationActivity(client, request, row, 'social_caption_revision', {
+        summary: activitySummary(body.feedback),
+      });
       startCaptionFeedbackJob(client, row.id, body.feedback);
       return reply.code(202).send({});
     },
@@ -1206,6 +1249,7 @@ export function registerGenerationRoutes(
           error: { message: 'A caption job is already running.' },
         });
       }
+      trackGenerationActivity(client, request, row, 'social_caption_creation');
       startGenerateCaptionJob(client, row.id);
       return reply.code(202).send({});
     },
@@ -1248,6 +1292,10 @@ export function registerGenerationRoutes(
         generationId: row.id,
         target: 'manual_caption',
         article: body.caption,
+      });
+      trackGenerationActivity(client, request, row, 'caption_edit', {
+        status: 'success',
+        detail: { chars: body.caption.length },
       });
       return reply.send({ caption: body.caption });
     },
@@ -1320,6 +1368,9 @@ export function registerGenerationRoutes(
           .code(409)
           .send({ error: { message: 'The article is being revised.' } });
       }
+      trackGenerationActivity(client, request, row, 'article_translation', {
+        detail: { language: body.language },
+      });
       startTranslateJob(client, row.id, body.language, body.terms);
       return reply.code(202).send({});
     },
@@ -1379,6 +1430,7 @@ export function registerGenerationRoutes(
         error: null,
         outputType: 'both',
       });
+      trackGenerationActivity(client, request, row, 'article_poster_creation');
       startArticlePosterJob(client, row.id, body.referenceImageId);
       return reply.code(202).send({});
     },
@@ -1412,6 +1464,10 @@ export function registerGenerationRoutes(
         status: 'running',
         step: body.target === 'copy' ? 'revise_copy' : 'revise_scene',
         error: null,
+      });
+      trackGenerationActivity(client, request, row, 'poster_content_revision', {
+        summary: activitySummary(body.feedback),
+        detail: { target: body.target },
       });
       startPosterFeedbackJob(client, row.id, body.target, body.feedback);
       return reply.code(202).send({});
@@ -1448,6 +1504,13 @@ export function registerGenerationRoutes(
         status: 'running',
         step: 'revise_image',
         error: null,
+      });
+      trackGenerationActivity(client, request, row, 'poster_image_revision', {
+        summary: activitySummary(body.feedback, generationSummary(row)),
+        detail: {
+          markers: body.annotations?.length ?? 0,
+          clearRegions: body.clearRegions?.length ?? 0,
+        },
       });
       startPosterImageFeedbackJob(client, row.id, body);
       return reply.code(202).send({});
@@ -1514,6 +1577,12 @@ export function registerGenerationRoutes(
         status: 'running',
         step: null,
         error: null,
+      });
+      trackGenerationActivity(client, request, row, 'poster_regeneration', {
+        detail: {
+          recolour: body.recolour === true,
+          heading: body.posterHeading !== undefined,
+        },
       });
       startPosterRegenerateJob(client, row.id, {
         recolour: body.recolour === true,
@@ -1728,6 +1797,13 @@ export function registerGenerationRoutes(
           error: null,
         });
         clearEditFailure(row.id);
+        trackGenerationActivity(
+          client,
+          request,
+          row,
+          generationJobTask(row.category),
+          { detail: { retry: true } },
+        );
         if (isSocialCategory(row.category)) {
           startSocialPostJob(client, row.id, {
             // The caption preference is a job parameter, not a column, so it cannot be read
@@ -1752,7 +1828,15 @@ export function registerGenerationRoutes(
         return reply.code(202).send({ retried: true });
       }
 
+      // Read before the re-run consumes it: the retry is logged under the failed job's own
+      // key, which is the key the re-run settles.
+      const retriedTask = getEditFailureTask(row.id);
       if (retryFailedEdit(row.id)) {
+        if (retriedTask && isActivityAction(retriedTask)) {
+          trackGenerationActivity(client, request, row, retriedTask, {
+            detail: { retry: true },
+          });
+        }
         return reply.code(202).send({ retried: true });
       }
 
@@ -1812,6 +1896,9 @@ export function registerGenerationRoutes(
         copy: editedCopy,
         posterPath: posterObjectPath,
       });
+      trackGenerationActivity(client, request, row, 'poster_copy_edit', {
+        status: 'success',
+      });
 
       return reply.send({ posterUrl: publicUrl(client, posterObjectPath) });
     },
@@ -1836,6 +1923,9 @@ export function registerGenerationRoutes(
         feature: isSocialCategory(row.category) ? 'social' : 'article',
         action: 'poster_download',
         detail: { category: row.category },
+      });
+      trackGenerationActivity(client, request, row, 'poster_download', {
+        status: 'success',
       });
       return reply
         .header('content-type', 'image/png')
@@ -1893,6 +1983,9 @@ export function registerGenerationRoutes(
         feature: isSocialCategory(row.category) ? 'social' : 'article',
         action: 'poster_download',
         detail: { category: row.category, variant: 'plain' },
+      });
+      trackGenerationActivity(client, request, row, 'poster_plain_download', {
+        status: 'success',
       });
       return reply
         .header('content-type', 'image/png')
@@ -2086,6 +2179,9 @@ export function registerGenerationRoutes(
           .code(409)
           .send({ error: { message: 'This run is already busy.' } });
       }
+      trackGenerationActivity(client, request, row, 'dynamic_poster_revision', {
+        summary: activitySummary(body.feedback, generationSummary(row)),
+      });
       startMotionFeedbackJob(client, row.id, body.feedback);
       return reply.code(202).send({ ok: true });
     },
@@ -2141,6 +2237,7 @@ export function registerGenerationRoutes(
           .code(409)
           .send({ error: { message: 'This run is already busy.' } });
       }
+      trackGenerationActivity(client, request, row, 'dynamic_poster_crop');
       startMotionCropJob(client, row.id, body.crop, {
         chrome: body.chrome,
         ...(body.sourceVersion === undefined
@@ -2166,6 +2263,10 @@ export function registerGenerationRoutes(
         feature: 'social',
         action: 'poster_download',
         detail: { category: row.category, format: 'mp4' },
+      });
+      trackGenerationActivity(client, request, row, 'motion_download', {
+        status: 'success',
+        detail: { format: 'mp4' },
       });
       return reply
         .header('content-type', 'video/mp4')
@@ -2195,6 +2296,10 @@ export function registerGenerationRoutes(
         feature: 'social',
         action: 'poster_download',
         detail: { category: row.category, format: 'gif' },
+      });
+      trackGenerationActivity(client, request, row, 'motion_download', {
+        status: 'success',
+        detail: { format: 'gif' },
       });
       return reply
         .header('content-type', 'image/gif')
@@ -2413,6 +2518,10 @@ export function registerGenerationRoutes(
           charCount: text.length,
           detail: { language: lang },
         });
+        trackGenerationActivity(client, request, row, 'article_pdf', {
+          status: 'success',
+          detail: { language: lang },
+        });
         return (
           reply
             .header('content-type', 'application/pdf')
@@ -2568,8 +2677,17 @@ export function registerGenerationRoutes(
           publishedUrl: result.postUrl,
           publishedAt: new Date().toISOString(),
         });
+        trackGenerationActivity(client, request, row, 'publish', {
+          status: 'success',
+          detail: { platform },
+        });
         return reply.send({ postUrl: result.postUrl });
       } catch (error) {
+        trackGenerationActivity(client, request, row, 'publish', {
+          status: 'failed',
+          detail: { platform },
+          error,
+        });
         // Upstream platform failures (duplicate tweet, expired token, …) carry a
         // readable message; 502 keeps the status honest vs the handler's 500.
         if (error instanceof SocialPublishError) {

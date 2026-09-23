@@ -17,7 +17,7 @@ import {
   type NameDesignation,
   type PrepareDesignationsResponse,
 } from '@dgipr/schemas';
-import { API_URL, ApiRequestError } from './api';
+import { API_URL, ApiRequestError, apiFetch } from './api';
 
 async function readJson(response: Response): Promise<unknown> {
   const body: unknown = await response.json().catch(() => null);
@@ -44,7 +44,7 @@ async function readJson(response: Response): Promise<unknown> {
  * see, in the form of two separate pickers and a page-selection step.
  */
 export async function createNewDloIntake(form: FormData): Promise<string> {
-  const response = await fetch(`${API_URL}/api/new-dlo/intakes`, {
+  const response = await apiFetch(`${API_URL}/api/new-dlo/intakes`, {
     method: 'POST',
     body: form,
   });
@@ -58,9 +58,12 @@ export async function createNewDloIntake(form: FormData): Promise<string> {
 export async function prepareNewDloNames(
   id: string,
 ): Promise<PrepareDesignationsResponse> {
-  const response = await fetch(`${API_URL}/api/new-dlo/intakes/${id}/names`, {
-    method: 'POST',
-  });
+  const response = await apiFetch(
+    `${API_URL}/api/new-dlo/intakes/${id}/names`,
+    {
+      method: 'POST',
+    },
+  );
   return PrepareDesignationsResponseSchema.parse(await readJson(response));
 }
 
@@ -80,7 +83,7 @@ export async function generateFromNewDloIntake(
   id: string,
   input: NewDloGenerateInput = {},
 ): Promise<string> {
-  const response = await fetch(
+  const response = await apiFetch(
     `${API_URL}/api/new-dlo/intakes/${id}/generate`,
     {
       method: 'POST',
@@ -97,7 +100,7 @@ export async function removeNewDloFile(
   id: string,
   index: number,
 ): Promise<void> {
-  const response = await fetch(
+  const response = await apiFetch(
     `${API_URL}/api/new-dlo/intakes/${id}/files/${index}`,
     { method: 'DELETE' },
   );

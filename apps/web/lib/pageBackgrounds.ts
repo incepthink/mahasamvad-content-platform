@@ -25,6 +25,8 @@ export const PAGE_BACKGROUNDS = {
   default: '/backgrounds/background-1.png',
   home: '/backgrounds/background-1.png',
   analytics: '/backgrounds/background-2.png',
+  // The hidden /activity admin log sits on the analytics ground: both read the platform's use.
+  activity: '/backgrounds/background-2.png',
   conversation: '/backgrounds/background-1.png',
   creative: '/backgrounds/background-4.png',
   dlo: '/backgrounds/background-2.png',

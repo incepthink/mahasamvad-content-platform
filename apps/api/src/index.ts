@@ -24,6 +24,9 @@ import { registerTranscriptionRoutes } from './routes/transcriptions.js';
 import { registerVideoRoutes } from './routes/video.js';
 import { registerNewVideoWorkflowRoutes } from './routes/new-video-workflow.js';
 import { registerYouTubeRoutes } from './routes/youtube.js';
+import { registerActivityRoutes } from './routes/activity.js';
+import { registerActorHook } from './activity/actor.js';
+import { DEVICE_HEADER } from '@dgipr/schemas';
 
 export async function createServer() {
   const app = Fastify({
@@ -35,6 +38,13 @@ export async function createServer() {
     // third of this so the officer gets a Marathi 400 rather than an opaque 413.
     // Multipart uploads have their own limits below.
     bodyLimit: 67_108_864,
+    // Exactly ONE proxy hop is trusted: Caddy, the only way in (the api container publishes
+    // no host port — deploy/docker-compose.yml). With `1`, `request.ip` is the address Caddy
+    // itself observed and a client-supplied X-Forwarded-For prefix is ignored; `true` would
+    // take the LEFTMOST entry, which any browser can forge. Read by the /activity audit log
+    // only — nothing grants or refuses anything on an IP. Local dev has no proxy, so the
+    // value there is simply the loopback address.
+    trustProxy: 1,
   });
 
   // A callback rather than the list itself, because CORS_ORIGIN entries may be wildcard
@@ -46,6 +56,9 @@ export async function createServer() {
       cb(null, origin === undefined || isAllowedOrigin(origin));
     },
     methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'],
+    // Stated rather than reflected: the device header (an attribution label for the
+    // /activity log, never auth) must survive a preflight on purpose, not by accident.
+    allowedHeaders: ['content-type', 'accept', DEVICE_HEADER],
   });
 
   // Multipart default. Every upload route now sets its OWN per-request limits — /dlo,
@@ -126,6 +139,9 @@ export async function createServer() {
   const client = createServiceRoleClient();
   await app.register(
     async (instance) => {
+      // Who made this request (IP + browser device id) for the /activity audit log. Inside
+      // this scope so /health gets none; it can never reject a request.
+      registerActorHook(instance);
       registerGenerationRoutes(instance, client);
       registerCanvaRoutes(instance, client);
       // The social poster's emblem badge and footer band as plain PNGs. Persists nothing
@@ -157,6 +173,8 @@ export async function createServer() {
       registerChatRoutes(instance, client);
       // Department usage analytics. Read-only and derived — writes nothing.
       registerAnalyticsRoutes(instance, client);
+      // The hidden /activity page's feed + KPIs. Read-only, and not itself instrumented.
+      registerActivityRoutes(instance, client);
     },
     { prefix: '/api' },
   );

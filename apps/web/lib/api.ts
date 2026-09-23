@@ -1,7 +1,14 @@
 // Typed fetch wrappers for the generation API. Responses are validated with the
 // shared Zod schemas so the UI never renders shapes the API didn't promise.
 
+import { deviceHeaders, withDeviceParam } from './deviceId';
 import {
+  ActivityActorResponseSchema,
+  ActivityListResponseSchema,
+  ActivitySummaryResponseSchema,
+  type ActivityActorResponse,
+  type ActivityListResponse,
+  type ActivitySummaryResponse,
   AnalyticsResponseSchema,
   type AnalyticsRange,
   type AnalyticsResponse,
@@ -137,6 +144,17 @@ import { z } from 'zod';
 export const API_URL =
   process.env.NEXT_PUBLIC_API_URL ?? 'http://127.0.0.1:3001';
 
+// Every request to the API goes through here so it carries this browser's device id — an
+// attribution label for the /activity admin log, never auth (see lib/deviceId.ts). Merged via
+// `Headers` so a caller's own headers, in any of the forms fetch accepts, are kept.
+export function apiFetch(input: string, init?: RequestInit): Promise<Response> {
+  const headers = new Headers(init?.headers);
+  for (const [name, value] of Object.entries(deviceHeaders())) {
+    if (!headers.has(name)) headers.set(name, value);
+  }
+  return fetch(input, { ...init, headers });
+}
+
 // Reads the API's { error: { message } } body when present so users see the
 // server's reason, not just an HTTP status.
 async function readJsonResponse(response: Response): Promise<unknown> {
@@ -156,7 +174,7 @@ async function readJsonResponse(response: Response): Promise<unknown> {
 }
 
 async function requestJson(path: string, init?: RequestInit): Promise<unknown> {
-  const response = await fetch(`${API_URL}${path}`, {
+  const response = await apiFetch(`${API_URL}${path}`, {
     ...init,
     headers: {
       // Only declare a JSON content-type when we actually send a body.
@@ -191,7 +209,7 @@ export async function createGeneration(
 // DLO intake: multipart create (notes/category/heading fields + the uploaded
 // files). No content-type header — the browser sets the multipart boundary.
 export async function createDloIntake(form: FormData): Promise<string> {
-  const response = await fetch(`${API_URL}/api/dlo/intakes`, {
+  const response = await apiFetch(`${API_URL}/api/dlo/intakes`, {
     method: 'POST',
     body: form,
   });
@@ -233,7 +251,7 @@ export async function probeYouTubeVideo(url: string): Promise<YouTubeVideo> {
 // Transcription: multipart create (recordings only). No content-type header — the browser
 // sets the multipart boundary (same as createDloIntake).
 export async function createTranscription(form: FormData): Promise<string> {
-  const response = await fetch(`${API_URL}/api/transcriptions`, {
+  const response = await apiFetch(`${API_URL}/api/transcriptions`, {
     method: 'POST',
     body: form,
   });
@@ -267,6 +285,55 @@ export async function getAnalytics(
 ): Promise<AnalyticsResponse> {
   const body = await requestJson(`/api/analytics?range=${range}`);
   return AnalyticsResponseSchema.parse(body);
+}
+
+// The hidden /activity admin log. Filters travel as query parameters exactly as the page holds
+// them in its own URL; nothing here is cached, the feed is live.
+export type ActivityFeedQuery = Readonly<{
+  ip?: string | undefined;
+  device?: string | undefined;
+  feature?: string | undefined;
+  status?: string | undefined;
+  from?: string | undefined;
+  to?: string | undefined;
+  cursor?: string | undefined;
+  limit?: number | undefined;
+}>;
+
+function activityQueryString(query: Readonly<Record<string, unknown>>): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined || value === null || value === '') continue;
+    params.set(key, String(value));
+  }
+  const text = params.toString();
+  return text ? `?${text}` : '';
+}
+
+export async function getActivityFeed(
+  query: ActivityFeedQuery,
+): Promise<ActivityListResponse> {
+  const body = await requestJson(`/api/activity${activityQueryString(query)}`);
+  return ActivityListResponseSchema.parse(body);
+}
+
+export async function getActivitySummary(
+  day?: string,
+): Promise<ActivitySummaryResponse> {
+  const body = await requestJson(
+    `/api/activity/summary${activityQueryString({ day })}`,
+  );
+  return ActivitySummaryResponseSchema.parse(body);
+}
+
+export async function getActivityActor(target: {
+  ip?: string | undefined;
+  device?: string | undefined;
+}): Promise<ActivityActorResponse> {
+  const body = await requestJson(
+    `/api/activity/actor${activityQueryString(target)}`,
+  );
+  return ActivityActorResponseSchema.parse(body);
 }
 
 // Persist the review step's state so a reload — or a colleague opening the same intake —
@@ -583,7 +650,7 @@ export function dloFileImageUrl(intakeId: string, index: number): string {
 }
 
 export function posterDownloadUrl(id: string): string {
-  return `${API_URL}/api/generations/${id}/poster.png`;
+  return withDeviceParam(`${API_URL}/api/generations/${id}/poster.png`);
 }
 
 // The same poster with the logo and footer left off — the artwork alone, stored separately
@@ -591,7 +658,7 @@ export function posterDownloadUrl(id: string): string {
 // rendered before that landed has no plain copy and the route answers in Marathi; the button
 // is still offered, since redoing the poster is what produces one.
 export function plainPosterDownloadUrl(id: string): string {
-  return `${API_URL}/api/generations/${id}/poster-plain.png`;
+  return withDeviceParam(`${API_URL}/api/generations/${id}/poster-plain.png`);
 }
 
 // The social poster's brand chrome as bare artwork, for a page that wants to lay it over
@@ -610,7 +677,7 @@ export async function uploadPromptImage(
 ): Promise<PromptImageUpload> {
   const form = new FormData();
   form.append('file', file);
-  const response = await fetch(`${API_URL}/api/generations/prompt-image`, {
+  const response = await apiFetch(`${API_URL}/api/generations/prompt-image`, {
     method: 'POST',
     body: form,
   });
@@ -629,7 +696,7 @@ export async function uploadMotionSource(
 ): Promise<MotionSourceResponse> {
   const form = new FormData();
   form.append('file', file);
-  const response = await fetch(`${API_URL}/api/generations/motion-image`, {
+  const response = await apiFetch(`${API_URL}/api/generations/motion-image`, {
     method: 'POST',
     body: form,
   });
@@ -676,11 +743,11 @@ export async function cropMotionVideo(
 // anchor is ignored cross-origin, so only the server can force a save. Playing the clip does
 // NOT come through here — the page plays it straight from the public bucket.
 export function motionVideoDownloadUrl(id: string): string {
-  return `${API_URL}/api/generations/${id}/motion.mp4`;
+  return withDeviceParam(`${API_URL}/api/generations/${id}/motion.mp4`);
 }
 
 export function motionGifDownloadUrl(id: string): string {
-  return `${API_URL}/api/generations/${id}/motion.gif`;
+  return withDeviceParam(`${API_URL}/api/generations/${id}/motion.gif`);
 }
 
 // A normal navigation rather than fetch: the API redirects through Canva OAuth and finally
@@ -760,7 +827,9 @@ export function articlePdfDownloadUrl(
   id: string,
   language: 'mr' | TranslationLanguage = 'mr',
 ): string {
-  return `${API_URL}/api/generations/${id}/article.pdf?lang=${language}`;
+  return withDeviceParam(
+    `${API_URL}/api/generations/${id}/article.pdf?lang=${language}`,
+  );
 }
 
 // Posts the poster + caption to an official account — X or the Facebook Page. `platform`
@@ -818,7 +887,7 @@ export async function translateText(
 export async function createDocumentIntake(
   form: FormData,
 ): Promise<CreateDocumentResponse> {
-  const response = await fetch(`${API_URL}/api/documents`, {
+  const response = await apiFetch(`${API_URL}/api/documents`, {
     method: 'POST',
     body: form,
   });
@@ -875,7 +944,7 @@ export async function reextractDocumentIntake(
 export async function createTranslateDocument(
   form: FormData,
 ): Promise<CreateTranslateDocumentResponse> {
-  const response = await fetch(`${API_URL}/api/translate/documents`, {
+  const response = await apiFetch(`${API_URL}/api/translate/documents`, {
     method: 'POST',
     body: form,
   });
@@ -1125,7 +1194,7 @@ export async function uploadReferenceImage(
   if (band) query.set('band', band);
   const form = new FormData();
   form.set('file', file);
-  const response = await fetch(`${API_URL}/api/references?${query}`, {
+  const response = await apiFetch(`${API_URL}/api/references?${query}`, {
     method: 'POST',
     body: form,
   });
@@ -1210,7 +1279,7 @@ export async function createVideoProject(
     for (const image of promptImages) {
       form.append('promptImages', image, image.name);
     }
-    const response = await fetch(`${API_URL}/api/video/projects`, {
+    const response = await apiFetch(`${API_URL}/api/video/projects`, {
       method: 'POST',
       body: form,
     });
@@ -1273,7 +1342,7 @@ export async function uploadVideoSceneReferenceImage(
 ): Promise<VideoReferenceImageUploadResponse> {
   const form = new FormData();
   form.append('file', file);
-  const response = await fetch(
+  const response = await apiFetch(
     `${API_URL}/api/video/projects/${id}/reference-image`,
     { method: 'POST', body: form },
   );
@@ -1432,7 +1501,7 @@ export async function getChatThread(id: string): Promise<ChatThreadDetail> {
 }
 
 export async function deleteChatThread(id: string): Promise<void> {
-  const response = await fetch(`${API_URL}/api/chat/threads/${id}`, {
+  const response = await apiFetch(`${API_URL}/api/chat/threads/${id}`, {
     method: 'DELETE',
   });
   // 204, so there is no body to read — but a failure still carries one.
@@ -1446,7 +1515,7 @@ export async function uploadChatImage(
 ): Promise<ChatImageUploadResponse> {
   const form = new FormData();
   form.append('file', file);
-  const response = await fetch(`${API_URL}/api/chat/attachments/image`, {
+  const response = await apiFetch(`${API_URL}/api/chat/attachments/image`, {
     method: 'POST',
     body: form,
   });
@@ -1460,7 +1529,7 @@ export async function uploadChatDocument(
 ): Promise<ChatDocumentUploadResponse> {
   const form = new FormData();
   form.append('file', file);
-  const response = await fetch(`${API_URL}/api/chat/attachments/document`, {
+  const response = await apiFetch(`${API_URL}/api/chat/attachments/document`, {
     method: 'POST',
     body: form,
   });
@@ -1485,7 +1554,7 @@ export async function sendChatMessage(
   onEvent: (event: ChatStreamEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  const response = await fetch(
+  const response = await apiFetch(
     `${API_URL}/api/chat/threads/${threadId}/messages`,
     {
       method: 'POST',
@@ -1565,7 +1634,7 @@ export async function sendChatMessage(
 export async function uploadNewVideoImage(file: File): Promise<NewVideoImage> {
   const form = new FormData();
   form.append('file', file);
-  const response = await fetch(`${API_URL}/api/new-video-workflow/images`, {
+  const response = await apiFetch(`${API_URL}/api/new-video-workflow/images`, {
     method: 'POST',
     body: form,
   });
@@ -1603,7 +1672,7 @@ export async function listNewVideoConversations(): Promise<
 }
 
 export async function deleteNewVideoConversation(id: string): Promise<void> {
-  const response = await fetch(
+  const response = await apiFetch(
     `${API_URL}/api/new-video-workflow/conversations/${id}`,
     { method: 'DELETE' },
   );
@@ -1641,7 +1710,7 @@ export async function updateNewVideoCharacter(
 }
 
 export async function deleteNewVideoCharacter(id: string): Promise<void> {
-  const response = await fetch(
+  const response = await apiFetch(
     `${API_URL}/api/new-video-workflow/characters/${id}`,
     { method: 'DELETE' },
   );

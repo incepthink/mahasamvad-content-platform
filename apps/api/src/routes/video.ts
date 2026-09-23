@@ -6,7 +6,14 @@
 // instant the 202 lands, and a row still reading an idle status would stop its
 // poll and sit there).
 
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { settleAllActivity } from '@dgipr/database';
+import { trackActivity } from '../activity/actor.js';
+import {
+  activitySummary,
+  firstLine,
+  type ActivityAction,
+} from '@dgipr/schemas';
 
 import {
   findActiveVideoProject,
@@ -670,6 +677,32 @@ function toSummary(
   };
 }
 
+// One /activity row for a video project. The job's own settle (runVideoJob) flips the
+// in-progress ones; the gate edits are recorded already finished.
+function trackVideo(
+  client: SupabaseClient,
+  request: FastifyRequest,
+  row: Pick<VideoProjectRow, 'id' | 'title' | 'aiPrompt' | 'heading' | 'note'>,
+  feature: 'storyboard' | 'video',
+  action: ActivityAction,
+  status: 'in_progress' | 'success',
+  detail: Record<string, string | number | boolean | null> = {},
+): void {
+  trackActivity(client, request, {
+    feature,
+    action,
+    status,
+    subject: { kind: 'video_project', id: row.id },
+    summary: activitySummary(
+      row.title,
+      row.heading,
+      row.aiPrompt,
+      firstLine(row.note),
+    ),
+    detail,
+  });
+}
+
 export function registerVideoRoutes(
   app: FastifyInstance,
   client: SupabaseClient,
@@ -780,6 +813,18 @@ export function registerVideoRoutes(
         });
       }
     }
+    trackVideo(
+      client,
+      request,
+      row,
+      'storyboard',
+      'video_script_creation',
+      'in_progress',
+      {
+        inputMode: row.inputMode,
+        recording: uploaded !== undefined,
+      },
+    );
     startVideoScriptJob(client, row.id, uploaded);
     return reply.code(202).send({ id: row.id });
   });
@@ -855,6 +900,12 @@ export function registerVideoRoutes(
       ) {
         const error = 'Server restarted while this job was running.';
         await updateVideoProject(client, row.id, { status: 'failed', error });
+        settleAllActivity(
+          client,
+          { kind: 'video_project', id: row.id },
+          'failed',
+          error,
+        );
         return toDetail(client, { ...row, status: 'failed', error });
       }
       // The row is idle and nothing is running here, so no scene can still be
@@ -973,6 +1024,14 @@ export function registerVideoRoutes(
         ...(styleChanged ? { style } : {}),
       });
       const updated = await getVideoProject(client, row.id);
+      trackVideo(
+        client,
+        request,
+        updated!,
+        'storyboard',
+        'video_script_edit',
+        'success',
+      );
       return toDetail(client, updated!);
     },
   );
@@ -1097,6 +1156,14 @@ export function registerVideoRoutes(
 
       await updateVideoProject(client, row.id, { scenes });
       const updated = await getVideoProject(client, row.id);
+      trackVideo(
+        client,
+        request,
+        updated!,
+        'storyboard',
+        'video_script_replan',
+        'success',
+      );
       return toDetail(client, updated!);
     },
   );
@@ -1180,6 +1247,17 @@ export function registerVideoRoutes(
       const token = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
       const path = `${referencePathPrefix(row.id)}${token}.png`;
       await uploadFile(client, VIDEOS_BUCKET, path, png, 'image/png');
+      trackVideo(
+        client,
+        request,
+        row,
+        'storyboard',
+        'video_reference_image',
+        'success',
+        {
+          file: file.filename,
+        },
+      );
       return {
         name: file.filename,
         path,
@@ -1235,6 +1313,14 @@ export function registerVideoRoutes(
         step: 'narrate',
         error: null,
       });
+      trackVideo(
+        client,
+        request,
+        row,
+        'storyboard',
+        'video_storyboard',
+        'in_progress',
+      );
       startStoryboardJob(client, row.id);
       return reply.code(202).send({ id: row.id });
     },
@@ -1307,6 +1393,18 @@ export function registerVideoRoutes(
         step: 'stills',
         error: null,
       });
+      trackVideo(
+        client,
+        request,
+        row,
+        'storyboard',
+        'video_still',
+        'in_progress',
+        {
+          scene: index + 1,
+          frame,
+        },
+      );
       startSceneStillJob(client, row.id, index, returnTo, frame);
       return reply.code(202).send({ id: row.id });
     },
@@ -1369,6 +1467,18 @@ export function registerVideoRoutes(
       scenes[index] = kept;
       await updateVideoProject(client, row.id, { scenes });
       const updated = await getVideoProject(client, row.id);
+      trackVideo(
+        client,
+        request,
+        updated!,
+        'storyboard',
+        'video_end_frame_edit',
+        'success',
+        {
+          scene: index + 1,
+          change: 'remove',
+        },
+      );
       return toDetail(client, updated!);
     },
   );
@@ -1429,6 +1539,18 @@ export function registerVideoRoutes(
       };
       await updateVideoProject(client, row.id, { scenes });
       const updated = await getVideoProject(client, row.id);
+      trackVideo(
+        client,
+        request,
+        updated!,
+        'storyboard',
+        'video_end_frame_edit',
+        'success',
+        {
+          scene: index + 1,
+          change: 'from_start',
+        },
+      );
       return toDetail(client, updated!);
     },
   );
@@ -1478,6 +1600,17 @@ export function registerVideoRoutes(
       };
       await updateVideoProject(client, row.id, { scenes });
       const updated = await getVideoProject(client, row.id);
+      trackVideo(
+        client,
+        request,
+        updated!,
+        'storyboard',
+        'video_scene_motion_edit',
+        'success',
+        {
+          scene: index + 1,
+        },
+      );
       return toDetail(client, updated!);
     },
   );
@@ -1576,6 +1709,17 @@ export function registerVideoRoutes(
         step: 'animate',
         error: null,
       });
+      trackVideo(
+        client,
+        request,
+        row,
+        'video',
+        'video_animation',
+        'in_progress',
+        {
+          scenes: row.scenes.length,
+        },
+      );
       startVideoAnimateJob(client, row.id, forced);
       return reply.code(202).send({ id: row.id });
     },
@@ -1619,6 +1763,17 @@ export function registerVideoRoutes(
         step: 'animate',
         error: null,
       });
+      trackVideo(
+        client,
+        request,
+        row,
+        'video',
+        'video_scene_animation',
+        'in_progress',
+        {
+          scene: index + 1,
+        },
+      );
       startSceneReanimateJob(client, row.id, index);
       return reply.code(202).send({ id: row.id });
     },
@@ -1668,6 +1823,14 @@ export function registerVideoRoutes(
         step: 'narrate',
         error: null,
       });
+      trackVideo(
+        client,
+        request,
+        row,
+        'video',
+        'video_narration',
+        'in_progress',
+      );
       startNarrationJob(client, row.id);
       return reply.code(202).send({ id: row.id });
     },
@@ -1793,6 +1956,7 @@ export function registerVideoRoutes(
         step: 'stitch',
         error: null,
       });
+      trackVideo(client, request, row, 'video', 'video_stitch', 'in_progress');
       startVideoStitchJob(
         client,
         row.id,

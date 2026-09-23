@@ -63,6 +63,7 @@ export {
   upsertGlossaryTerm,
   updateGlossaryTerm,
   deleteGlossaryTerm,
+  getGlossaryTerm,
   type TermType,
   type TermSource,
   type GlossaryMatchForm,
@@ -289,3 +290,22 @@ export {
   type EditorialPreferenceFilters,
   type NewEditorialPreference,
 } from './editorial-preferences.js';
+// Activity / audit log (migration 0058): who (IP + device id, never auth) did what, for the
+// hidden /activity page. Writes are fire-and-forget; an un-applied 0058 costs that page alone.
+export {
+  ACTIVITY_EVENTS_TABLE,
+  recordActivity,
+  settleActivity,
+  settleAllActivity,
+  listActivityEvents,
+  listActivityWindow,
+  encodeActivityCursor,
+  decodeActivityCursor,
+  type ActivityActor,
+  type ActivityStatusValue,
+  type ActivitySubjectRef,
+  type NewActivityEvent,
+  type ActivityEventRow,
+  type ActivityFilters,
+  type ActivityWindowRow,
+} from './activity-events.js';

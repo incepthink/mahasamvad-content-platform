@@ -3111,6 +3111,61 @@ client id/secret — see the milestone below.
 
 ## Latest Implementation Milestone
 
+- **A hidden activity / audit log: who (IP + browser device) did what, with no login**
+  (2026-09-23, migration 0058, no n8n). The admin needed to see who did what, live and
+  historically, on a product that has no login and must not get one — and nothing identified a
+  request at all: no route read an IP, and Fastify's `trustProxy` was unset, so `request.ip` was
+  Caddy's Docker-bridge address for every caller.
+  - **Identity without auth.** `Fastify({ trustProxy: 1 })` — exactly one hop, Caddy, the only
+    way in (the api container publishes no host port) — so `request.ip` is what Caddy observed
+    and a client-forged X-Forwarded-For prefix is ignored (`true` would take the leftmost entry).
+    Beside it a browser-scoped device id (`d-` + 16 base36, `dgipr.device` in localStorage) that
+    every web request carries: `apiFetch` in `lib/api.ts` is now the one fetch for the whole
+    client (all 21 raw fetches in api.ts and newDlo.ts go through it), and the five navigation
+    download/PDF URLs append `?device=`. The id is validated against a strict pattern and stored
+    as null otherwise. **It is an attribution label, never auth**, and it resets with site data.
+    CORS now names `allowedHeaders` (content-type, accept, the device header) instead of
+    reflecting them.
+  - **Own table, not `usage_events`**: that table's stated contract is no content and no
+    identity, and /analytics reads it; this one carries both, so it is separate and an un-applied
+    0058 costs only the monitor page. Every write is fire-and-forget and swallows every error.
+  - **Routes open, jobs settle.** A route that starts a job inserts an `in_progress` row whose
+    action IS the job's own task key; the job flips it when it ends. That is why no job signature
+    changed. Settles are keyed by subject AND action (a caption revision and a poster re-render
+    can run on one generation at once), touch only `in_progress` rows, and a failed edit settles
+    `failed` even when `recoverEditFailure` restores the row. The four orphan reapers settle
+    everything in progress on their subject.
+  - **Major work only** (the user's scope): creation of every format, every edit/feedback/retry,
+    manual caption and poster-copy edits, publish, poster/clip/PDF downloads, template library
+    changes, /dlo intake + extraction + generation, transcriptions, ad-hoc and article
+    translations, every /video gate action and render, /new-video-workflow turns and characters,
+    glossary add/edit/delete, and chat messages/attachments/deletes. The summary is a heading, a
+    file name, a term or a prompt's opening words — never a body — built only by
+    `activitySummary()` (140 chars, word boundary, never ends on a matra) and clamped again at the
+    writer.
+  - **The page** (`/activity`, not in the nav, open to anyone with the URL — obscurity, stated in
+    the route header): today's KPIs (active IPs, devices, actions, failed), actions by feature,
+    busiest IPs, filters in the URL, a live feed polled every 10 s while the newest page is shown,
+    keyset "load more", and a journey card per IP (its devices) or per device (its IPs). Device
+    labels are `Chrome · Windows · …a1b2` from the stored user agent.
+  Verified 2026-09-23: workspace typecheck **7/7 green**; eslint clean on all 34 touched files;
+  prettier clean on every hunk of mine (dlo.ts, generations.ts, dlo-runner.ts and strings.ts carry
+  pre-existing complaints at untouched lines — do not `--write` them); new harnesses
+  `actor.check.ts` (21: the forged X-Forwarded-For ignored, header/query device id, malformed id
+  → null, `/health` with no actor, writes never throw on a throwing or rejecting client, settle
+  filters on subject+action+in_progress, clamps) and `schemas/src/activity.ts` (16); the existing
+  new-video-workflow, chat, canva, editorial-learning and editorial-preferences checks still green.
+  **Live against the running stack WITHOUT 0058**: other routes 200, the preflight answers
+  `access-control-allow-headers: content-type, accept, x-dgipr-device`, the activity reads fail
+  only with `relation "public.activity_events" does not exist`, and the browser shows the Marathi
+  error notice. Populated layout verified with intercepted responses at 1360 and 390 (no overflow,
+  no page errors), and every browser request carried the device header.
+  **Left for a real run (0058 applied):** two browsers on one IP showing as two devices; a
+  translation appearing within 10 s; a Dynamic Poster going `in_progress` → `success`; a caption
+  edited twice giving two rows; a poster download carrying the device via `?device=`; a restart
+  mid-job reaped to `failed`; and on prod, `curl -H 'X-Forwarded-For: 1.2.3.4'` storing the real
+  caller's IP. **Deploy: 0058 → `@dgipr/schemas` → `@dgipr/database` dists → API + web.** No new env.
+
 - **An officer's feedback now WRITES the editorial rules — Phase 2 of 3: learning, behind a
   default-off flag** (2026-09-21, no migration, no n8n). Phase 1 made a rule in
   `editorial_preferences` reach every /dlo article and every feedback revision of it, with the

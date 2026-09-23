@@ -40,6 +40,7 @@ import {
 } from '@dgipr/database';
 import { trimmedAudioPath } from './audio-trim.js';
 import { combineTranscripts } from '@dgipr/schemas';
+import { settleJobActivity } from '../activity/actor.js';
 
 import { batchBySize } from './audio-batches.js';
 import { recordTasksFromCost } from './service-usage.js';
@@ -312,8 +313,21 @@ export function startTranscriptionJob(
         combinedText: combined,
         ...countersFor(entries, combined),
       });
+      settleJobActivity(
+        client,
+        { kind: 'transcription', id },
+        'transcription_creation',
+        'success',
+      );
     } catch (error) {
       console.error(`[transcription ${id}] failed:`, error);
+      settleJobActivity(
+        client,
+        { kind: 'transcription', id },
+        'transcription_creation',
+        'failed',
+        error,
+      );
       try {
         await updateTranscription(client, id, {
           status: 'failed',

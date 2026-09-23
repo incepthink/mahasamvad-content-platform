@@ -598,6 +598,7 @@ export const STR = {
   learnedPrefsScopeNews: 'बातमी',
   learnedPrefsScopeScheme: 'योजना-लेख',
   learnedPrefsScopeBoth: 'सर्व लेख',
+  learnedPrefsReview: 'संपादकीय नियम पाहा किंवा बंद करा →',
   // Shown on a social poster whose information held more items than any master template lays
   // out. The poster DOES carry every item — the design was stretched to fit — so this is a
   // "check it reads well, or split the note" prompt, not an error.
@@ -2746,4 +2747,148 @@ export function videoReadyScriptEstimate(
       ? `${minutes.toLocaleString('mr-IN')} मि. ${seconds.toLocaleString('mr-IN')} से.`
       : `${seconds.toLocaleString('mr-IN')} से.`;
   return `अंदाजे ${duration} · ${sceneCount.toLocaleString('mr-IN')} दृश्ये`;
+}
+
+// ---------- गतिविधी (/activity) ----------
+//
+// The hidden admin page (not in NAV_LINKS). Every key the API sends is a machine key; these
+// maps are the only place it becomes Marathi. An unknown key falls back to itself, so a row
+// written by a newer API still renders.
+
+export const ACTIVITY_STR = {
+  title: 'गतिविधी नोंद',
+  intro:
+    'कोणत्या IP व उपकरणावरून कोणते काम झाले याची नोंद. ही ओळख फक्त नोंदीसाठी आहे — लॉगिन नाही. साइट डेटा साफ केल्यास किंवा खासगी विंडो/दुसरा ब्राउझर वापरल्यास तेच उपकरण नवीन दिसते.',
+  loading: 'नोंदी आणत आहोत…',
+  loadFailed: 'गतिविधी नोंद आणता आली नाही.',
+  retry: 'पुन्हा प्रयत्न करा',
+  empty: 'या निकषांसाठी कोणतीही नोंद नाही.',
+  kpiActiveIps: 'आज सक्रिय IP',
+  kpiDevices: 'आज उपकरणे',
+  kpiActions: 'आजची कामे',
+  kpiFailed: 'आज अयशस्वी',
+  kpiInProgress: 'सध्या सुरू',
+  byFeatureTitle: 'आज विभागानुसार कामे',
+  busiestTitle: 'आज सर्वाधिक सक्रिय IP',
+  busiestDevices: (count: number) => `${count.toLocaleString('mr-IN')} उपकरणे`,
+  busiestActions: (count: number) => `${count.toLocaleString('mr-IN')} कामे`,
+  feedTitle: 'थेट नोंद',
+  feedLive: 'दर १० सेकंदांनी ताजी होते',
+  feedPaused: 'जुनी पाने पाहताना ताजेतवाने थांबते',
+  filterIp: 'IP',
+  filterIpPlaceholder: 'उदा. 203.0.113.9',
+  filterFeature: 'विभाग',
+  filterStatus: 'स्थिती',
+  filterFrom: 'पासून',
+  filterTo: 'पर्यंत',
+  filterAll: 'सर्व',
+  filterApply: 'शोधा',
+  filterClear: 'निकष काढा',
+  loadMore: 'आणखी नोंदी दाखवा',
+  colTime: 'वेळ',
+  colWho: 'कोण',
+  colWhat: 'काय',
+  colStatus: 'स्थिती',
+  noDevice: 'उपकरण ओळख नाही',
+  openRun: 'काम उघडा',
+  journeyIp: (ip: string) => `IP ${ip} चा प्रवास`,
+  journeyDevice: (label: string) => `उपकरण ${label} चा प्रवास`,
+  journeyFirst: 'पहिल्यांदा दिसले',
+  journeyLast: 'शेवटचे दिसले',
+  journeyActions: 'एकूण कामे',
+  journeyDevices: 'या IP वरील उपकरणे',
+  journeyIps: 'हे उपकरण वापरलेले IP',
+  journeyBack: '← सर्व नोंदी',
+  unknownBrowser: 'अज्ञात ब्राउझर',
+  unknownOs: 'अज्ञात प्रणाली',
+};
+
+export const ACTIVITY_FEATURE_LABELS: Record<string, string> = {
+  creative: 'क्रिएटिव्ह आणि सोशल',
+  dlo: 'लेख-बातमी',
+  transcribe: 'ध्वनिलेखन',
+  translate: 'भाषांतर',
+  storyboard: 'व्हिडिओ संहिता व स्टोरीबोर्ड',
+  video: 'व्हिडिओ',
+  glossary: 'शब्दकोश',
+  chat: 'चॅट',
+};
+
+export const ACTIVITY_STATUS_LABELS: Record<
+  string,
+  { label: string; chip: 'running' | 'completed' | 'failed' }
+> = {
+  in_progress: { label: 'सुरू आहे', chip: 'running' },
+  success: { label: 'यशस्वी', chip: 'completed' },
+  failed: { label: 'अयशस्वी', chip: 'failed' },
+};
+
+export const ACTIVITY_ACTION_LABELS: Record<string, string> = {
+  article_generation: 'लेख तयार केला',
+  article_poster_creation: 'लेखाचे पोस्टर तयार केले',
+  social_post_creation: 'सोशल पोस्टर तयार केले',
+  youtube_thumbnail_creation: 'यूट्यूब थंबनेल तयार केले',
+  dynamic_poster_creation: 'डायनॅमिक पोस्टर तयार केले',
+  dynamic_poster_revision: 'डायनॅमिक पोस्टर AI ने बदलले',
+  dynamic_poster_crop: 'डायनॅमिक पोस्टर कापले',
+  poster_regeneration: 'पोस्टर पुन्हा तयार केले',
+  poster_content_revision: 'पोस्टरचा मजकूर/दृश्य बदलले',
+  poster_image_revision: 'पोस्टरवर खुणा करून बदल',
+  article_revision: 'लेखात बदल (अभिप्राय)',
+  social_caption_creation: 'कॅप्शन तयार केले',
+  social_caption_revision: 'कॅप्शन AI ने बदलले',
+  article_translation: 'लेखाचे भाषांतर',
+  caption_edit: 'कॅप्शन हाताने बदलले',
+  poster_copy_edit: 'पोस्टरचा मजकूर हाताने बदलला',
+  publish: 'सोशल मीडियावर प्रकाशित केले',
+  poster_download: 'पोस्टर डाउनलोड केले',
+  poster_plain_download: 'लोगोशिवाय पोस्टर डाउनलोड',
+  motion_download: 'डायनॅमिक पोस्टर डाउनलोड',
+  article_pdf: 'लेख PDF डाउनलोड',
+  reference_upload: 'टेम्पलेट अपलोड केले',
+  reference_enable: 'टेम्पलेट सुरू केले',
+  reference_disable: 'टेम्पलेट बंद केले',
+  reference_delete: 'टेम्पलेट काढले',
+  dlo_intake_creation: 'लेखासाठी स्रोत जोडले',
+  dlo_extraction: 'निवडलेली पृष्ठे वाचली',
+  dlo_reextraction: 'फाईल OCR ने पुन्हा वाचली',
+  transcription_creation: 'ध्वनिलेखन केले',
+  text_translation: 'मजकुराचे भाषांतर',
+  video_script_creation: 'व्हिडिओ संहिता तयार केली',
+  video_script_replan: 'संहिता AI ने पुन्हा तयार केली',
+  video_script_edit: 'संहिता संपादित केली',
+  video_storyboard: 'स्टोरीबोर्ड तयार केला',
+  video_still: 'दृश्याची फ्रेम पुन्हा काढली',
+  video_scene_motion_edit: 'दृश्याची हालचाल बदलली',
+  video_end_frame_edit: 'शेवटची फ्रेम बदलली',
+  video_reference_image: 'दृश्यासाठी संदर्भ चित्र जोडले',
+  video_animation: 'व्हिडिओ क्लिप्स तयार केल्या',
+  video_scene_animation: 'एका दृश्याची क्लिप पुन्हा केली',
+  video_narration: 'निवेदन पुन्हा केले',
+  video_stitch: 'व्हिडिओ पुन्हा जोडला',
+  nvw_turn: 'Gemini व्हिडिओ सूचना',
+  nvw_character_create: 'पात्र जोडले',
+  nvw_character_edit: 'पात्र बदलले',
+  nvw_character_delete: 'पात्र काढले',
+  nvw_conversation_delete: 'व्हिडिओ संभाषण काढले',
+  glossary_create: 'शब्दकोशात नोंद जोडली',
+  glossary_edit: 'शब्दकोश नोंद बदलली',
+  glossary_delete: 'शब्दकोश नोंद काढली',
+  chat_message: 'चॅटमध्ये प्रश्न विचारला',
+  chat_document_attach: 'चॅटला दस्तऐवज जोडला',
+  chat_image_attach: 'चॅटला चित्र जोडले',
+  chat_thread_delete: 'चॅट काढली',
+};
+
+// A social run with outputType 'article' renders no poster — it was a caption, so its
+// creation row is named for what the officer actually made.
+export function activityActionLabel(
+  action: string,
+  detail: Record<string, unknown>,
+): string {
+  if (action === 'social_post_creation' && detail.captionOnly === true) {
+    return 'फक्त कॅप्शन तयार केले';
+  }
+  const base = ACTIVITY_ACTION_LABELS[action] ?? action;
+  return detail.retry === true ? `${base} (पुन्हा प्रयत्न)` : base;
 }

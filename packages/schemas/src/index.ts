@@ -102,3 +102,7 @@ export * from './analytics.js';
 // article is written with, plus the injection cap and the per-rule length ceiling. Exported
 // last — nothing in api.ts or dlo.ts imports from it, so it has no ordering constraint.
 export * from './editorial-preference.js';
+
+// Activity / audit log (/activity, migration 0058): who (IP + browser device id, never auth)
+// did what. Exported last — nothing else in this barrel imports from it.
+export * from './activity.js';

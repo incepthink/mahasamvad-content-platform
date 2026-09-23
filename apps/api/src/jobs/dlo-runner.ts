@@ -48,7 +48,12 @@ import {
   type DloIntakeFileEntry,
   type SupabaseClient,
 } from '@dgipr/database';
-import { combineIntakeSources, type IntakeSource } from '@dgipr/schemas';
+import {
+  combineIntakeSources,
+  type ActivityAction,
+  type IntakeSource,
+} from '@dgipr/schemas';
+import { settleJobActivity } from '../activity/actor.js';
 
 import { batchBySize } from './audio-batches.js';
 import { trimmedAudioPath } from './audio-trim.js';
@@ -95,9 +100,12 @@ function rebuildCombinedText(
 // Wrap the job body with the shared bookkeeping: claim the id, persist
 // ready/failed, always release the id. No cost meter — Sarvam usage is not
 // metered today (same as the translate job).
+//
+// `action` is the /activity key the route opened this job under; the job settles it.
 function runIntakeJob(
   client: SupabaseClient,
   id: string,
+  action: ActivityAction,
   job: () => Promise<void>,
 ): void {
   running.add(id);
@@ -109,8 +117,16 @@ function runIntakeJob(
         step: 'done',
         error: null,
       });
+      settleJobActivity(client, { kind: 'dlo_intake', id }, action, 'success');
     } catch (error) {
       console.error(`[dlo-intake ${id}] failed:`, error);
+      settleJobActivity(
+        client,
+        { kind: 'dlo_intake', id },
+        action,
+        'failed',
+        error,
+      );
       try {
         await updateDloIntake(client, id, {
           status: 'failed',
@@ -304,7 +320,7 @@ async function extractImageEntry(
 }
 
 export function startDloIntakeJob(client: SupabaseClient, id: string): void {
-  runIntakeJob(client, id, async () => {
+  runIntakeJob(client, id, 'dlo_intake_creation', async () => {
     const row = await getDloIntake(client, id);
     if (!row) throw new Error(`DLO intake ${id} not found.`);
 
@@ -638,7 +654,7 @@ export function startDloExtractionJob(
   id: string,
   selections: ReadonlyArray<{ index: number; pages: readonly number[] }>,
 ): void {
-  runIntakeJob(client, id, async () => {
+  runIntakeJob(client, id, 'dlo_extraction', async () => {
     const row = await getDloIntake(client, id);
     if (!row) throw new Error(`DLO intake ${id} not found.`);
 
@@ -685,7 +701,7 @@ export function startDloFileReextractionJob(
   index: number,
   pages: readonly number[],
 ): void {
-  runIntakeJob(client, id, async () => {
+  runIntakeJob(client, id, 'dlo_reextraction', async () => {
     const row = await getDloIntake(client, id);
     if (!row) throw new Error(`DLO intake ${id} not found.`);
     const entry = row.files[index];

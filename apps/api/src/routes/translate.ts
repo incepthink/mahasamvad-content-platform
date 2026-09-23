@@ -20,6 +20,8 @@
 // forms out of Marathi text, and neither of these inputs is Marathi.
 
 import type { FastifyInstance } from 'fastify';
+import { shortError, trackActivity } from '../activity/actor.js';
+import { activitySummary, firstLine } from '@dgipr/schemas';
 import {
   createCostAccumulator,
   extractGlossaryCandidates,
@@ -139,16 +141,38 @@ export function registerTranslateRoutes(
     // busiest translation surface reports no service usage at all. The scope wraps only the
     // translation — the glossary mining below is a different feature's spend.
     const cost = createCostAccumulator();
-    const { text: translated, unpreservedNames } = await runInCostScope(
-      cost,
-      () =>
+    // The /activity row for this ad-hoc translation: the target language and the text's
+    // opening words, never the text.
+    const activity = {
+      feature: 'translate',
+      action: 'text_translation',
+      summary: activitySummary(firstLine(body.text)),
+      detail: {
+        language: body.language,
+        sourceLanguage: body.sourceLanguage,
+        chars: body.text.length,
+      },
+    } as const;
+    let translation: Awaited<ReturnType<typeof translateArticle>>;
+    try {
+      translation = await runInCostScope(cost, () =>
         runInCostTask(TRANSLATION_TASKS[body.language], () =>
           translateArticle(body.text, glossary, body.language, {
             sourceLanguage: body.sourceLanguage,
           }),
         ),
-    );
+      );
+    } catch (error) {
+      trackActivity(client, request, {
+        ...activity,
+        status: 'failed',
+        error: shortError(error),
+      });
+      throw error;
+    }
+    const { text: translated, unpreservedNames } = translation;
     recordTasksFromCost(client, 'translate', cost);
+    trackActivity(client, request, { ...activity, status: 'success' });
 
     // Legacy path only: with no confirmed set, mine unverified candidates into the
     // review queue (best-effort). The prepare flow already extracted these, so

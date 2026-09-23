@@ -5,6 +5,9 @@
 // rows then lock into future translations (the "no more Donkey" guarantee).
 
 import type { FastifyInstance } from 'fastify';
+import { getGlossaryTerm } from '@dgipr/database';
+import { trackActivity } from '../activity/actor.js';
+import { activitySummary } from '@dgipr/schemas';
 import { z } from 'zod';
 import {
   countGlossaryTerms,
@@ -38,6 +41,13 @@ const ListQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).optional(),
   offset: z.coerce.number().int().min(0).optional(),
 });
+
+function glossarySummary(
+  marathi: string,
+  designation: string | null | undefined,
+): string | null {
+  return activitySummary(designation ? `${marathi} (${designation})` : marathi);
+}
 
 export function registerGlossaryRoutes(
   app: FastifyInstance,
@@ -87,6 +97,14 @@ export function registerGlossaryRoutes(
       source: 'manual',
       notes: body.notes ?? null,
     });
+    trackActivity(client, request, {
+      feature: 'glossary',
+      action: 'glossary_create',
+      status: 'success',
+      subject: { kind: 'glossary_term', id: term.id },
+      summary: glossarySummary(term.marathi, term.designation),
+      detail: { termType: term.termType, verified: term.verified },
+    });
     return reply.code(201).send(term);
   });
 
@@ -113,6 +131,14 @@ export function registerGlossaryRoutes(
       if (body.notes !== undefined) patch.notes = body.notes;
       try {
         const term = await updateGlossaryTerm(client, request.params.id, patch);
+        trackActivity(client, request, {
+          feature: 'glossary',
+          action: 'glossary_edit',
+          status: 'success',
+          subject: { kind: 'glossary_term', id: term.id },
+          summary: glossarySummary(term.marathi, term.designation),
+          detail: { changed: Object.keys(patch).join(',') },
+        });
         return term;
       } catch {
         return reply
@@ -125,7 +151,20 @@ export function registerGlossaryRoutes(
   app.delete<{ Params: { id: string } }>(
     '/glossary/:id',
     async (request, reply) => {
+      // Read first, best-effort, so the log can name what was removed.
+      const existing = await getGlossaryTerm(client, request.params.id).catch(
+        () => null,
+      );
       await deleteGlossaryTerm(client, request.params.id);
+      trackActivity(client, request, {
+        feature: 'glossary',
+        action: 'glossary_delete',
+        status: 'success',
+        subject: { kind: 'glossary_term', id: request.params.id },
+        summary: existing
+          ? glossarySummary(existing.marathi, existing.designation)
+          : null,
+      });
       return reply.code(204).send();
     },
   );

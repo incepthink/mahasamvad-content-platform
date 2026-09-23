@@ -1,4 +1,6 @@
 import type { FastifyInstance } from 'fastify';
+import { trackActivity } from '../activity/actor.js';
+import { activitySummary } from '@dgipr/schemas';
 import { findReferenceTypeRow, type SupabaseClient } from '@dgipr/database';
 import {
   ACCEPTED_UPLOAD_MIME_TYPES,
@@ -121,6 +123,14 @@ export function registerReferenceRoutes(
       await file.toBuffer(),
       band,
     );
+    trackActivity(client, request, {
+      feature: 'creative',
+      action: 'reference_upload',
+      status: 'success',
+      subject: { kind: 'reference_image', id: image.id },
+      summary: activitySummary(file.filename),
+      detail: { category, subtype, ...(band ? { band } : {}) },
+    });
     return reply.code(201).send(image);
   });
 
@@ -143,6 +153,13 @@ export function registerReferenceRoutes(
             .code(404)
             .send({ error: { message: 'Reference image not found.' } });
         }
+        trackActivity(client, request, {
+          feature: 'creative',
+          action: enabled ? 'reference_enable' : 'reference_disable',
+          status: 'success',
+          subject: { kind: 'reference_image', id: image.id },
+          detail: { category: image.category, subtype: image.subtype },
+        });
         return image;
       },
     );
@@ -193,6 +210,12 @@ export function registerReferenceRoutes(
           .code(404)
           .send({ error: { message: 'Reference image not found.' } });
       }
+      trackActivity(client, request, {
+        feature: 'creative',
+        action: 'reference_delete',
+        status: 'success',
+        subject: { kind: 'reference_image', id: request.params.id },
+      });
       return reply.code(204).send();
     },
   );
