@@ -7959,6 +7959,56 @@ a.thread-node:hover {
   margin-top: 0;
 }
 
+/* A viewport-LOCKED conversation (/new-video-workflow): the document never
+   scrolls. body and .app-main are pinned to the viewport, the conversation
+   takes whatever height is left once the footer (and, on a phone, the sticky
+   topbar) are placed, and the only scrollers are the rail and .chat-scroll —
+   so the composer stays at the foot of the screen. The class-qualified
+   selectors outrank the 100dvh / calc(100dvh - 63px) heights above and below,
+   which assume the footer sits below the fold. */
+html:has(.conv-page.viewport-locked),
+body:has(.conv-page.viewport-locked) {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+body:has(.conv-page.viewport-locked) .app-main {
+  height: 100dvh;
+  min-height: 0;
+}
+
+.conv-page.viewport-locked {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+  grid-template-rows: minmax(0, 1fr);
+}
+
+/* No credit strip on a locked conversation — the composer owns the foot of the
+   screen. */
+.conv-page.viewport-locked + .site-footer {
+  display: none;
+}
+
+/* The turns carry absolutely-positioned `.visually-hidden` labels. With no
+   positioned ancestor their containing block is <body>, so they escape the
+   scroller and give the locked document thousands of pixels of hidden overflow
+   — which a scrollIntoView would still scroll. Positioning the scroller keeps
+   them inside it. */
+.conv-page.viewport-locked .chat-scroll {
+  position: relative;
+}
+
+/* Below 860px body is a column (sticky topbar, then .app-main), so .app-main
+   takes the height left under the topbar instead of a full viewport. */
+@media (max-width: 860px) {
+  body:has(.conv-page.viewport-locked) .app-main {
+    height: auto;
+    flex: 1 1 auto;
+  }
+}
+
 /* ----- the rail ----- */
 
 .conv-rail {

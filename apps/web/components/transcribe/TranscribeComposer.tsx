@@ -33,8 +33,7 @@
 import { useRef, useState } from 'react';
 import { CirclePlay, Mic } from 'lucide-react';
 import {
-  AUDIO_FILE_ACCEPT,
-  isAudioFileName,
+  RECORDING_FILE_ACCEPT,
   TRANSCRIPTION_MAX_FILES,
   type YouTubeVideo,
 } from '@dgipr/schemas';
@@ -51,17 +50,22 @@ import {
   YOUTUBE_INPUT_OFF,
 } from '@/components/YouTubeLinkInput';
 import { AudioTrimDialog } from '@/components/common/AudioTrimDialog';
-import { acceptFilePicks } from '@/lib/filePicks';
 import { formatFileSize } from '@/lib/fileSize';
 import { audioCardMeta, type AudioTrimsState } from '@/lib/useAudioTrims';
 import { STR } from '@/lib/strings';
 import { cn } from '@/lib/utils';
+import {
+  recordingCardMeta,
+  type useVideoExtraction,
+} from '@/lib/useVideoExtraction';
 
 const YOUTUBE_PANEL_ID = 'transcribe-youtube-panel';
 
 export function TranscribeComposer({
   files,
   audioTrims,
+  extraction,
+  onPickRecordings,
   onFilesChange,
   youtube,
   onYoutubeChange,
@@ -77,6 +81,12 @@ export function TranscribeComposer({
   // Which part of each recording is set to be used. Owned by the form, because it has to
   // reach the submit — this only opens the dialog that edits it.
   audioTrims: AudioTrimsState;
+  // Videos being turned into recordings in the browser. Owned by the form, because the
+  // Android share path converts shared videos before it submits them.
+  extraction: ReturnType<typeof useVideoExtraction>;
+  // What the officer picked or dropped, unfiltered: the form decides which are recordings,
+  // which are videos to convert, and which are refused.
+  onPickRecordings: (picked: readonly File[]) => void;
   // Called with the whole next list, so the form keeps ownership of what it will submit.
   onFilesChange: (files: File[]) => void;
   youtube: readonly YouTubeVideo[];
@@ -102,24 +112,12 @@ export function TranscribeComposer({
   // would point at a different recording the moment one above it is removed.
   const [trimming, setTrimming] = useState<File | null>(null);
   const showLinks = linkOpen || youtube.length > 0;
-  const atLimit = files.length >= TRANSCRIPTION_MAX_FILES;
+  // A video still converting counts: it is about to become a recording.
+  const atLimit =
+    files.length + extraction.jobs.length >= TRANSCRIPTION_MAX_FILES;
 
-  // No size ceiling, matching /transcribe's own route — a picker refusing a two-hour
-  // recording the server would have accepted costs the officer a source.
   const addFiles = (picked: readonly File[]) => {
-    if (picked.length === 0) return;
-    const {
-      files: next,
-      added,
-      error,
-    } = acceptFilePicks({
-      current: files,
-      picked,
-      isAllowedName: isAudioFileName,
-      typeError: STR.dloFileTypeError,
-    });
-    onError(error);
-    if (added > 0) onFilesChange(next.slice(0, TRANSCRIPTION_MAX_FILES));
+    if (picked.length > 0) onPickRecordings(picked);
   };
 
   // Keyed by name AND size: two takes of the same meeting can arrive under one name.
@@ -129,7 +127,10 @@ export function TranscribeComposer({
     icon: Mic,
     // The chosen window once there is one, so a trim is visible without reopening the
     // dialog; the file's size otherwise, which is what the card always said.
-    meta: audioCardMeta(audioTrims.get(file), formatFileSize(file.size)),
+    meta: recordingCardMeta(
+      file,
+      audioCardMeta(audioTrims.get(file), formatFileSize(file.size)),
+    ),
     removeLabel: `${STR.dloRemoveAudio}: ${file.name}`,
     onRemove: () => onFilesChange(files.filter((_, i) => i !== index)),
     // The one thing a recording's card has to open: which PART of it to use.
@@ -137,6 +138,8 @@ export function TranscribeComposer({
     openLabel: STR.audioTrimEditLabel(file.name),
     open: trimming === file,
   }));
+  // Videos still converting, after the recordings they will join.
+  attachments.push(...extraction.items);
 
   return (
     <FormCard
@@ -206,12 +209,13 @@ export function TranscribeComposer({
           <button
             type="button"
             onClick={onSubmit}
-            disabled={submitBusy || !canSubmit}
+            // Held while a video converts: pressed then, the run would leave without it.
+            disabled={submitBusy || !canSubmit || extraction.busy}
             className={cn(
               'text-primary-foreground inline-flex h-9 shrink-0 items-center rounded-md px-5 text-sm font-bold transition-[filter]',
               'focus-visible:ring-ring/50 outline-none focus-visible:ring-[3px]',
               'disabled:cursor-not-allowed disabled:opacity-60',
-              submitBusy || !canSubmit
+              submitBusy || !canSubmit || extraction.busy
                 ? 'bg-primary'
                 : 'mr-submit-flow hover:saturate-110 hover:brightness-105',
             )}
@@ -223,7 +227,7 @@ export function TranscribeComposer({
         <input
           ref={audioInput}
           type="file"
-          accept={AUDIO_FILE_ACCEPT}
+          accept={RECORDING_FILE_ACCEPT}
           multiple
           hidden
           onChange={(event) => {

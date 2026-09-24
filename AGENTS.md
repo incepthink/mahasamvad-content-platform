@@ -3111,6 +3111,94 @@ client id/secret — see the milestone below.
 
 ## Latest Implementation Milestone
 
+- **Meeting VIDEOS are accepted as recordings, and only their audio is uploaded** (2026-09-24, no
+  migration, no n8n, no new server env). DLOs film meetings and press meets on a phone; every
+  recording picker (`/dlo`, `/transcribe`, `/chat`) accepted audio containers only. Allowing
+  `.mp4` outright would have worked — the routes have no size cap and Scribe takes video — but a
+  1-4 GB upload through the API box with no progress, no resume and a real chance of a truncated
+  object, for ~2-5 % of useful bytes. So the audio is pulled out IN THE BROWSER and the video never
+  leaves the device.
+  - **`mediabunny` (MPL-2.0, used unmodified) in a module Web Worker** — Next splits it into its own
+    chunk loaded via `importScripts`; no page bundle carries it. `BlobSource` reads the `File`
+    lazily (8 MiB cache) and a `File` crosses into and out of the worker by reference, so a 1.6 GB
+    video leaves the page heap unchanged (measured 78 → 78 MiB). ffmpeg.wasm was rejected (~30 MB
+    wasm, 2 GB heap ceiling); `MediaRecorder` runs in real time.
+  - **Three paths** (`lib/extractRecordingAudio.ts`): AAC/MP3 COPIED into MP4 → `.m4a`
+    (`copy: { mode: 'forced', shiftTolerance: Infinity }`, so a track that would need a transcode
+    makes the conversion invalid rather than silently transcoding); Opus/Vorbis copied into WebM;
+    otherwise — or when a copy exceeds `RECORDING_COPY_MAX_BYTES` (200 MB) — RE-ENCODED to mono
+    48 kbps **Opus** in WebM, because AAC encoding is missing from Firefox and pre-26 Safari while
+    Opus is everywhere, and `.webm → audio/webm` is already an accepted recording. No raw-video
+    fallback, by decision: `unsupported` names Chrome/Edge. `.webm` is an AUDIO extension too, so it
+    is probed and passed through untouched when it holds no video.
+  - **Nothing after the composer changed**: the extracted file joins through the same
+    `acceptFilePicks` (so re-picking the same video is still one file — which is why
+    `recordingNameFromVideo` deliberately does NOT uniquify names), and the trim dialog, draft,
+    multipart submit, routes, runner, STT and cache are untouched. The trim dialog now works on a
+    video's audio (it never could on the video). `AUDIO_MIME_BY_EXTENSION` stays audio-only; the
+    two server 400s only gained a sentence saying a video is converted in the browser.
+  - **One queue, concurrency 1, page-wide** (`lib/useVideoExtraction.ts`). /dlo and /transcribe
+    render in-flight jobs as `AttachmentStrip` cards ("व्हिडिओतून आवाज काढत आहे… N %") and hold
+    submit while `busy`; a failure stays as a card until removed; removing a card terminates the
+    worker. /chat uses its own tray: a video is an `audio` draft with `extracting: true`, registered
+    in the same in-flight map a PDF upload uses so `prepare()` waits for it — send is never gated,
+    per that surface's rule — and the settled draft is written to `attachmentsRef` synchronously
+    too, since `prepare()` re-reads the ref before React re-renders.
+  - **Android share**: the manifest's `share_target` accepts `video/*`; `sharedAudio.ts` names a
+    nameless shared video by MIME; `TranscriptionForm` converts shared videos before the
+    auto-submit. `sw.js` unchanged.
+  Verified 2026-09-24: workspace typecheck **7/7 green**, eslint clean on every touched file,
+  prettier clean on every hunk of mine (the other complaints are pre-existing CRLF/lines — do NOT
+  `--write` them), `next build` green; the Node harness **28/28** (copy from AAC MP4/MOV with no
+  video stream and duration within 0.1 s, Opus MKV → WebM, audio-only WebM passthrough, no-audio,
+  unreadable, and `unsupported` for PCM MOV and an oversized copy under Node's absent WebCodecs);
+  and **31 Playwright assertions** in Chromium at 1360 and 390 — a 1.6 GB MP4 → `meeting.m4a` in
+  9.7 s with the POST to `/api/transcriptions` carrying `audio/mp4` at 1.4 MB, submit disabled
+  while converting, the badge, the trim dialog, a PCM MOV taking the Opus re-encode to `.webm`,
+  and /dlo + /chat converting with no overflow or page errors. **Left for a real run**: Firefox
+  and Safari, and one genuine 30-60 min Marathi phone video end to end into an article. Deploy:
+  `@dgipr/schemas` dist → web + API (the API only for two message strings).
+
+- **Closing the Gemma ↔ GPT gap on /dlo, Steps 1–3: the pipeline faults first** (2026-09-24, no
+  migration, no n8n). About half of what officers' feedback asked for on the 2026-09-23 /dlo runs
+  was the pipeline, not the model. Three changes, cheapest first:
+  - **Dateline (code bug, both models).** `ensureArticleDateline` recognised only `X, दि. N :`, so
+    a model-written `**मुंबई, ०७ ऑगस्ट २०२५**`, `जालना, ११ सप्टेंबर २०२६ —` or
+    `**[स्थळ], दि. [दिनांक] :**` slipped past and the code prepended its own in front (4 of 5
+    outputs). It now recognises every such shape — the guard against eating a sentence is a
+    required TERMINATOR (colon/dash, closing bold, end of line) plus "no `दि.` ⇒ must carry a
+    year or placeholder" — DELETES a standalone dateline line, strips one off a headline or
+    subheadline, and treats a short non-sentence line under the headline as furniture (the
+    `0a516802` subheadline defect), placing the dateline on the first real paragraph. The /dlo
+    prompt now tells the model not to write one at all. 13 new harness cases, incl. the
+    must-not-match ones (`पुणे, दि. ५ रोजी…`, `पुणे, २ लाख…`).
+  - **Document-type-aware system prompt (`dlo-rag-v5`).** v4 REQUIRED an attributed Tier-1
+    statement, Minister attribution and a `यावेळी … उपस्थित होते` close; on GRs with no speaker the
+    model invented all three. Rules 1/2/3/5 now branch on MEETING / EVENT vs DOCUMENT, decided
+    only by what the source contains, and the durable feedback is folded in as positive rules
+    (decision → background → procedure, condensed annexures/form fields, no repeated "शासन
+    निर्णयात नमूद", end on an actionable provision). Still exactly five numbered rules — the
+    learned section is 6. **Consequence:** `build-distillation-dataset.ts` rejects records whose
+    system message does not start with the new prompt, so the old capture is invalid for a
+    retrain (plan Step 5 recaptures anyway).
+  - **Gemma inference knobs, all env-flagged OFF** (`gemma-sources.ts`, pure
+    `buildGemmaRequestBody`): `GEMMA_MAX_SOFT_TOKENS` (70/140/280/560/1120 → vLLM
+    `mm_processor_kwargs`, only on calls carrying images; tile-per-page and max-tile defaults
+    follow it so the 32k window holds), `GEMMA_ENABLE_THINKING` (`chat_template_kwargs`, budget
+    `GEMMA_THINKING_TOKENS` cut to what `GEMMA_MAX_MODEL_LEN` leaves, switched off below 1,024 so
+    an article is never truncated), `GEMMA_SAMPLING=greedy|google`. With thinking on,
+    `skip_special_tokens: false` keeps Gemma's `<|channel>…<channel|>` markers so the shared
+    `createThinkingStripper` (now tag-parameterised) removes the thought on a parser-less server;
+    the stream reader also reads vLLM's newer `delta.reasoning` field. Unset ⇒ byte-identical
+    request.
+  Verified free: workspace typecheck 7/7, dateline harness (25), `dlo-article-prompt.test.ts`
+  (13), gemma-sources harness 57/57, qwen stripper tests 47/47, all three distillation `--check`s.
+  **Not done — plan Step 0 (the paid baseline):** `eval-dlo-distillation.ts` evaluates the
+  held-out capture set and reads its teacher arm off OLD-prompt pairs, so "Gemma vs OpenAI on the
+  CURRENT prompt over `test-assets/`" needs a file-based mode it does not have yet. Steps 4–5
+  (few-shot exemplars, re-distill) wait on those numbers. Deploy: `@dgipr/content-engine` dist →
+  API.
+
 - **A hidden activity / audit log: who (IP + browser device) did what, with no login**
   (2026-09-23, migration 0058, no n8n). The admin needed to see who did what, live and
   historically, on a product that has no login and must not get one — and nothing identified a

@@ -42,11 +42,11 @@
 import { useRef, useState } from 'react';
 import { CirclePlay, FileText, Image as ImageIcon, Mic } from 'lucide-react';
 import {
-  AUDIO_FILE_ACCEPT,
   DOCUMENT_MAX_BYTES,
   IMAGE_FILE_ACCEPT,
   isAudioFileName,
   isImageFileName,
+  RECORDING_FILE_ACCEPT,
 } from '@dgipr/schemas';
 import { formatFileSize } from '@/lib/fileSize';
 import { audioCardMeta } from '@/lib/useAudioTrims';
@@ -70,6 +70,11 @@ import {
 } from '@/components/YouTubeLinkInput';
 import { acceptFilePicks } from '@/lib/filePicks';
 import { useFilePreviews } from '@/lib/useFilePreviews';
+import {
+  recordingCardMeta,
+  splitRecordingPicks,
+  useVideoExtraction,
+} from '@/lib/useVideoExtraction';
 import { STR } from '@/lib/strings';
 import { DloLostFilesNotice } from './DloLostFilesNotice';
 import { DloSubmitButton } from './DloSubmitButton';
@@ -91,20 +96,31 @@ export function DloComposer({ form }: { form: DloIntakeFormState }) {
   const showLinks = linkOpen || form.youtube.length > 0;
   const previews = useFilePreviews(form.images);
 
-  const addAudio = (list: FileList | null) => {
-    if (!list || list.length === 0) return;
+  const acceptAudio = (picked: readonly File[]) => {
     const {
       files: next,
       added,
       error,
     } = acceptFilePicks({
       current: form.files,
-      picked: Array.from(list),
+      picked,
       isAllowedName: isAudioFileName,
       typeError: STR.dloFileTypeError,
     });
     form.setError(error);
     if (added > 0) form.changeFiles(next);
+  };
+
+  // A VIDEO is converted to its audio track here in the browser (lib/useVideoExtraction) and
+  // joins the recordings only once it is an ordinary `.m4a`/`.webm` — through the same
+  // `acceptFilePicks` as a picked recording, so re-picking the same video is still one file.
+  const extraction = useVideoExtraction((file) => acceptAudio([file]));
+
+  const addAudio = (list: FileList | null) => {
+    if (!list || list.length === 0) return;
+    const { audio, videos } = splitRecordingPicks(Array.from(list));
+    if (audio.length > 0) acceptAudio(audio);
+    void extraction.start(videos);
   };
 
   const addImages = (list: FileList | null) => {
@@ -153,7 +169,10 @@ export function DloComposer({ form }: { form: DloIntakeFormState }) {
       icon: Mic,
       // The chosen window once there is one, so a trim is visible on the composer without
       // reopening the dialog; the file's size otherwise, which is what the card always said.
-      meta: audioCardMeta(form.audioTrims.get(file), formatFileSize(file.size)),
+      meta: recordingCardMeta(
+        file,
+        audioCardMeta(form.audioTrims.get(file), formatFileSize(file.size)),
+      ),
       removeLabel: `${STR.dloRemoveAudio}: ${file.name}`,
       onRemove: () =>
         form.changeFiles(form.files.filter((_, i) => i !== index)),
@@ -163,6 +182,9 @@ export function DloComposer({ form }: { form: DloIntakeFormState }) {
       openLabel: STR.audioTrimEditLabel(file.name),
       open: trimming === file,
     })),
+    // Videos still being turned into recordings: a progress line, then they become a
+    // recording card above; a failure stays here, with its reason, until removed.
+    ...extraction.items,
     ...form.images.map((file, index) => ({
       id: `image-${file.name}-${file.size}-${index}`,
       name: file.name,
@@ -265,10 +287,12 @@ export function DloComposer({ form }: { form: DloIntakeFormState }) {
                 Enabled it carries the slow warm sheen (`mr-submit-flow`, globals.css) —
                 the only moving thing on the page, so "there is something to press now"
                 reads without a label; disabled it is quiet and still. */}
+            {/* Also held while a video is still being converted: pressed then, the run
+                would leave without the recording the officer is watching appear. */}
             <DloSubmitButton
               label={STR.dloSubmit}
               submitting={form.submitting}
-              disabled={!form.hasInput}
+              disabled={!form.hasInput || extraction.busy}
               onClick={() => void form.submit()}
             />
           </div>
@@ -276,7 +300,7 @@ export function DloComposer({ form }: { form: DloIntakeFormState }) {
           <input
             ref={audioInput}
             type="file"
-            accept={AUDIO_FILE_ACCEPT}
+            accept={RECORDING_FILE_ACCEPT}
             multiple
             hidden
             onChange={(event) => {

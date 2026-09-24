@@ -31,7 +31,12 @@ import {
   type YouTubeVideo,
 } from '@dgipr/schemas';
 import { createTranscription } from '../lib/api';
+import { acceptFilePicks } from '../lib/filePicks';
 import { consumeSharedAudio } from '../lib/sharedAudio';
+import {
+  splitRecordingPicks,
+  useVideoExtraction,
+} from '../lib/useVideoExtraction';
 import { TranscribeComposer } from './transcribe/TranscribeComposer';
 import { useAudioTrims } from '@/lib/useAudioTrims';
 import { STR } from '../lib/strings';
@@ -56,6 +61,34 @@ export function TranscriptionForm({
   // bring those objects back, and a restored window would belong to a recording that is gone.
   const audioTrims = useAudioTrims();
   const handledShare = useRef(false);
+
+  // No size ceiling, matching /transcribe's own route — a picker refusing a two-hour
+  // recording the server would have accepted costs the officer a source.
+  const acceptRecordings = (picked: readonly File[]) => {
+    const {
+      files: next,
+      added,
+      error: pickError,
+    } = acceptFilePicks({
+      current: files,
+      picked,
+      isAllowedName: isAudioFileName,
+      typeError: STR.dloFileTypeError,
+    });
+    setError(pickError);
+    if (added > 0) setFiles(next.slice(0, TRANSCRIPTION_MAX_FILES));
+  };
+
+  // A picked VIDEO is converted to its audio track in the browser (lib/useVideoExtraction)
+  // and joins the list above only once it is an ordinary recording — the video is never
+  // uploaded.
+  const extraction = useVideoExtraction((file) => acceptRecordings([file]));
+
+  const pickRecordings = (picked: readonly File[]) => {
+    const { audio, videos } = splitRecordingPicks(picked);
+    if (audio.length > 0) acceptRecordings(audio);
+    void extraction.start(videos);
+  };
 
   const submitSources = async (
     selectedFiles: readonly File[],
@@ -130,19 +163,33 @@ export function TranscriptionForm({
     setSubmitting(true);
     setError(null);
     void consumeSharedAudio(shareId!)
-      .then((shared) => {
+      .then(async (shared) => {
         // Kind only — the route has no per-file size ceiling any more, so neither may this
         // (a picker refusing what the server would accept costs the officer a recording).
-        const accepted = shared
-          .filter((file) => isAudioFileName(file.name))
-          .slice(0, TRANSCRIPTION_MAX_FILES);
-        if (accepted.length === 0) {
+        // A shared VIDEO (WhatsApp, the camera app) is converted first, on the phone, with
+        // the same progress card a picked one gets; the auto-submit waits for it.
+        const { audio, videos } = splitRecordingPicks(
+          shared.slice(0, TRANSCRIPTION_MAX_FILES),
+        );
+        const accepted = audio.filter((file) => isAudioFileName(file.name));
+        if (accepted.length === 0 && videos.length === 0) {
           setSubmitting(false);
           setError(STR.dloFileTypeError);
           return;
         }
         setFiles(accepted);
-        return submitSources(accepted, []);
+        const extracted = await extraction.start(videos);
+        const ready = [...accepted, ...extracted].slice(
+          0,
+          TRANSCRIPTION_MAX_FILES,
+        );
+        // Every shared video failed and nothing else came with them: the reason is on each
+        // card, so there is nothing to submit and nothing more to say.
+        if (ready.length === 0) {
+          setSubmitting(false);
+          return;
+        }
+        return submitSources(ready, []);
       })
       .catch((caught: unknown) => {
         console.error('[share-target] Could not consume shared audio:', caught);
@@ -156,6 +203,8 @@ export function TranscriptionForm({
     <TranscribeComposer
       files={files}
       audioTrims={audioTrims}
+      extraction={extraction}
+      onPickRecordings={pickRecordings}
       onFilesChange={(next) => {
         setFiles(next);
         // A removed recording's window goes with it, or re-attaching that same file later

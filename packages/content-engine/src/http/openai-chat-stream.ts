@@ -34,7 +34,13 @@
 // reasoning parser. It is reported separately and never folded into the answer text.
 type ChatCompletionStreamFrame<TUsage> = Readonly<{
   choices?: ReadonlyArray<{
-    delta?: { content?: string | null; reasoning_content?: string | null };
+    delta?: {
+      content?: string | null;
+      reasoning_content?: string | null;
+      // The same channel under the name newer vLLM releases use (and the Gemma 4 recipe's
+      // `--reasoning-parser gemma4` emits). Either one is thinking, never answer.
+      reasoning?: string | null;
+    };
     finish_reason?: string | null;
   }>;
   usage?: TUsage;
@@ -122,7 +128,8 @@ export async function readChatCompletionStream<TUsage>(
           if (chunk.usage) usage = chunk.usage;
           const choice = chunk.choices?.[0];
           if (choice?.finish_reason) finishReason = choice.finish_reason;
-          const reasoning = choice?.delta?.reasoning_content;
+          const reasoning =
+            choice?.delta?.reasoning_content ?? choice?.delta?.reasoning;
           if (reasoning) options?.onReasoning?.(reasoning);
           const delta = choice?.delta?.content;
           if (delta) {

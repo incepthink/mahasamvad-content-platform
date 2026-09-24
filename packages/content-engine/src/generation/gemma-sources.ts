@@ -54,6 +54,7 @@ import { pathToFileURL } from 'node:url';
 import { GEMMA_COST_PROVIDER } from '../cost/pricing.js';
 import { recordChatUsage } from '../cost/cost-meter.js';
 import { openAiFetch } from '../http/openai-request.js';
+import { createThinkingStripper } from '../chat/qwen-chat.js';
 import { readChatCompletionStream } from '../http/openai-chat-stream.js';
 import { extractDocxText } from '../intake/docx.js';
 import {
@@ -251,16 +252,250 @@ export function gemmaTimeoutMs(): number {
 
 export function gemmaMaxSourceTiles(): number {
   const configured = Number(process.env.GEMMA_MAX_SOURCE_TILES);
-  return Number.isFinite(configured) && configured >= 1
-    ? Math.floor(configured)
-    : DEFAULT_MAX_SOURCE_TILES;
+  if (Number.isFinite(configured) && configured >= 1) {
+    return Math.floor(configured);
+  }
+  // The pixel budget is fixed by the window, not the tile count: at a larger per-image cost
+  // (GEMMA_MAX_SOFT_TOKENS) fewer tiles fit. Unchanged at the default — 60.
+  return Math.max(
+    1,
+    Math.floor(
+      (DEFAULT_MAX_SOURCE_TILES * GEMMA_TOKENS_PER_IMAGE) /
+        gemmaTokensPerImage(),
+    ),
+  );
 }
 
 function tilesPerPage(): number | undefined {
   const configured = Number(process.env.GEMMA_TILES_PER_PAGE);
   return Number.isFinite(configured) && configured >= 1
     ? Math.floor(configured)
-    : undefined;
+    : defaultTilesPerPage();
+}
+
+// ---------------------------------------------------------------------------
+// Inference settings (2026-09-24). All env-flagged and OFF by default, so an unconfigured
+// deployment sends byte-for-byte the request it always has. They exist to be A/B'd with
+// finetune/eval-dlo-distillation.ts, not switched on by belief — each one is a documented
+// Gemma 4 lever the /dlo lane was not using:
+//
+//   GEMMA_MAX_SOFT_TOKENS  per-image vision budget (vLLM `mm_processor_kwargs.max_soft_tokens`,
+//                          one of 70/140/280/560/1120; the server default is 280). Google
+//                          recommends 1120 for OCR and document layout. The Jalna report read
+//                          at 280 came back with अबेड for अंबड and घनसावनी for घनसावंगी.
+//                          Raising it raises every image's COST in the 32k context, so the
+//                          tile defaults below follow it.
+//   GEMMA_ENABLE_THINKING  `chat_template_kwargs.enable_thinking` — the reasoning step GPT-5.6
+//                          always takes and this lane never did. Budgeted against the window.
+//   GEMMA_SAMPLING         `greedy` (temperature 0, today) or `google` (1.0 / 0.95 / 64, the
+//                          model card's recommendation). Factual writing may still favour
+//                          greedy, which is exactly why it is measured and not assumed.
+// ---------------------------------------------------------------------------
+
+export const GEMMA_SOFT_TOKEN_VALUES = [70, 140, 280, 560, 1120] as const;
+export type GemmaSoftTokens = (typeof GEMMA_SOFT_TOKEN_VALUES)[number];
+
+/** The per-image vision budget to REQUEST, or null to send nothing (the server's 280). */
+export function gemmaMaxSoftTokens(): GemmaSoftTokens | null {
+  const raw = process.env.GEMMA_MAX_SOFT_TOKENS?.trim();
+  if (!raw) return null;
+  const value = Number(raw);
+  const match = GEMMA_SOFT_TOKEN_VALUES.find((allowed) => allowed === value);
+  if (match === undefined) {
+    // Refusing loudly beats sending a value vLLM rejects on every paid /dlo article.
+    throw new Error(
+      `GEMMA_MAX_SOFT_TOKENS must be one of ${GEMMA_SOFT_TOKEN_VALUES.join(', ')} ` +
+        `(got "${raw}"). Unset it to use the server default of 280.`,
+    );
+  }
+  return match;
+}
+
+/**
+ * What one image costs in the prompt. Measured at the default (270 at 280 soft tokens); at a
+ * requested budget the budget itself is taken, which errs high — the safe side of a refusal.
+ */
+export function gemmaTokensPerImage(): number {
+  return gemmaMaxSoftTokens() ?? GEMMA_TOKENS_PER_IMAGE;
+}
+
+/**
+ * Strips per page when GEMMA_TILES_PER_PAGE is unset. Tiling exists because a whole page
+ * squeezed into 280 soft tokens smears (`५०० कोटी` read as `४०० कोटी`); at 1120 a page has four
+ * times the pixels to itself and one tile is the starting point, at 560 two. Measure before
+ * trusting either — this is a default, not a finding.
+ */
+function defaultTilesPerPage(): number | undefined {
+  const soft = gemmaMaxSoftTokens();
+  if (soft === 1120) return 1;
+  if (soft === 560) return 2;
+  return undefined;
+}
+
+/** The deployed endpoint's MAX_MODEL_LEN. */
+export function gemmaMaxModelLen(): number {
+  return readInt('GEMMA_MAX_MODEL_LEN', 32_768);
+}
+
+export function gemmaThinkingEnabled(): boolean {
+  const raw = process.env.GEMMA_ENABLE_THINKING?.trim().toLowerCase() ?? '';
+  return raw === '1' || raw === 'true' || raw === 'on' || raw === 'yes';
+}
+
+/** The most tokens thinking may take on one call, before the window cuts it down. */
+export function gemmaThinkingTokens(): number {
+  return readInt('GEMMA_THINKING_TOKENS', 8_192);
+}
+
+// Below this, thinking is not worth enabling: a model that runs out of room mid-thought never
+// reaches the article, and a truncated article is the one failure a paid run must not have.
+const MIN_THINKING_TOKENS = 1_024;
+// Slack between the estimate and the window — the estimate is a character ratio, not a tokenizer.
+const CONTEXT_SAFETY_TOKENS = 1_024;
+
+export type GemmaSampling = 'greedy' | 'google';
+
+export function gemmaSampling(): GemmaSampling {
+  const raw = process.env.GEMMA_SAMPLING?.trim().toLowerCase() || 'greedy';
+  if (raw === 'greedy' || raw === 'google') return raw;
+  throw new Error(
+    `GEMMA_SAMPLING must be "greedy" or "google" (got "${raw}").`,
+  );
+}
+
+function samplingParams(
+  sampling: GemmaSampling,
+): Readonly<Record<string, number>> {
+  return sampling === 'google'
+    ? { temperature: 1.0, top_p: 0.95, top_k: 64 }
+    : { temperature: 0 };
+}
+
+// Gemma 4's thinking channel as it appears in `content` when the server runs no reasoning
+// parser. `skip_special_tokens: false` is what keeps these markers in the text at all —
+// without it vLLM drops them and the thought itself lands in the article unmarked.
+export const GEMMA_THINK_TAGS = {
+  open: '<|channel>',
+  close: '<channel|>',
+} as const;
+
+// Any other Gemma control token that survives `skip_special_tokens: false`. Devanagari prose
+// never contains this shape.
+const GEMMA_CONTROL_TOKEN = /<\|[a-z_]+>|<[a-z_]+\|>/gu;
+
+export function scrubGemmaControlTokens(text: string): string {
+  return text.replace(GEMMA_CONTROL_TOKEN, '');
+}
+
+/**
+ * A rough prompt size: ~3.8 characters per token for text (Gemma reads Devanagari at ~3.8, and
+ * the specification is English), plus the per-image cost. Only ever used to decide how much
+ * thinking fits — vLLM itself is the authority on the window.
+ */
+export function estimateGemmaPromptTokens(
+  messages: readonly GemmaMessage[],
+  tokensPerImage = gemmaTokensPerImage(),
+): number {
+  let chars = 0;
+  let images = 0;
+  for (const message of messages) {
+    if (typeof message.content === 'string') {
+      chars += message.content.length;
+      continue;
+    }
+    for (const part of message.content) {
+      if (part.type === 'text') chars += part.text.length;
+      else images += 1;
+    }
+  }
+  return Math.ceil(chars / 3.8) + images * tokensPerImage;
+}
+
+export type GemmaRequestPlan = Readonly<{
+  body: Readonly<Record<string, unknown>>;
+  /** Tokens granted to thinking on this call; 0 when it is off or does not fit. */
+  thinkingTokens: number;
+}>;
+
+/**
+ * The Chat Completions body, from the settings above. Pure (bar the env reads) and exported
+ * so every combination is asserted offline — the failure modes here are all silent on the
+ * wire: a thought leaking into the article, a window overrun that 400s only on long sources.
+ */
+export function buildGemmaRequestBody(options: {
+  model: string;
+  messages: readonly GemmaMessage[];
+  maxOutputTokens: number;
+  stream: boolean;
+  thinking?: boolean | undefined;
+}): GemmaRequestPlan {
+  const images = options.messages.reduce(
+    (count, message) =>
+      typeof message.content === 'string'
+        ? count
+        : count +
+          message.content.filter((part) => part.type === 'image_url').length,
+    0,
+  );
+
+  let thinkingTokens = 0;
+  if (options.thinking ?? gemmaThinkingEnabled()) {
+    const room =
+      gemmaMaxModelLen() -
+      estimateGemmaPromptTokens(options.messages) -
+      options.maxOutputTokens -
+      CONTEXT_SAFETY_TOKENS;
+    const granted = Math.min(gemmaThinkingTokens(), room);
+    if (granted >= MIN_THINKING_TOKENS) thinkingTokens = granted;
+  }
+
+  const soft = gemmaMaxSoftTokens();
+  const body: Record<string, unknown> = {
+    model: options.model,
+    messages: options.messages,
+    max_tokens: options.maxOutputTokens + thinkingTokens,
+    ...samplingParams(gemmaSampling()),
+    ...(thinkingTokens > 0
+      ? {
+          chat_template_kwargs: { enable_thinking: true },
+          skip_special_tokens: false,
+        }
+      : {}),
+    ...(soft !== null && images > 0
+      ? { mm_processor_kwargs: { max_soft_tokens: soft } }
+      : {}),
+    stream: options.stream,
+    ...(options.stream ? { stream_options: { include_usage: true } } : {}),
+  };
+  return { body, thinkingTokens };
+}
+
+function lengthMessage(answerTokens: number, thinkingTokens: number): string {
+  return thinkingTokens > 0
+    ? `gemma stopped at the ${answerTokens + thinkingTokens}-token ceiling ` +
+        `(${answerTokens} answer + ${thinkingTokens} thinking) before finishing the article. ` +
+        `Lower GEMMA_THINKING_TOKENS, unset GEMMA_ENABLE_THINKING, or attach fewer pages.`
+    : `gemma stopped at the ${answerTokens}-token ceiling before finishing the article. ` +
+        `Raise GEMMA_MAX_OUTPUT_TOKENS or attach fewer pages.`;
+}
+
+/**
+ * The answer with any thinking removed, for a whole (non-streamed) reply. With a reasoning
+ * parser the content carries no markers and this is the identity; without one it drops the
+ * `<|channel>…<channel|>` block.
+ */
+export function stripGemmaThinking(text: string): string {
+  let answer = '';
+  const stripper = createThinkingStripper(
+    (chunk) => {
+      answer += chunk;
+    },
+    () => {},
+    GEMMA_THINK_TAGS,
+  );
+  stripper.push(text);
+  stripper.flush();
+  return scrubGemmaControlTokens(answer);
 }
 
 function dataUri(buf: Buffer, mime = 'image/png'): string {
@@ -555,14 +790,20 @@ export async function respondWithSourcesViaGemma(options: {
     // until the worker is loaded and ready.
     const isStreaming = attempt === 1;
 
-    const body = {
+    const { body, thinkingTokens } = buildGemmaRequestBody({
       model,
       messages,
-      max_tokens: options.maxOutputTokens,
-      temperature: 0,
+      maxOutputTokens: options.maxOutputTokens,
       stream: isStreaming,
-      ...(isStreaming ? { stream_options: { include_usage: true } } : {}),
-    };
+    });
+    const thinking = thinkingTokens > 0;
+    if (attempt === 1) {
+      console.log(
+        `[gemma-sources] ${options.label}: sampling=${gemmaSampling()} ` +
+          `thinking=${thinking ? thinkingTokens : 'off'} ` +
+          `softTokens=${gemmaMaxSoftTokens() ?? 'default'} images=${prepared.imageCount}`,
+      );
+    }
 
     let response: Response;
     try {
@@ -600,6 +841,21 @@ export async function respondWithSourcesViaGemma(options: {
       }
 
       let text = '';
+      // With thinking on and no reasoning parser on the server, the thought arrives inline
+      // between Gemma's channel markers. Everything goes through the stripper so neither the
+      // live draft nor the stored article ever carries it. With thinking off this is the old
+      // direct path, untouched.
+      const onDelta = options.onDelta ?? (() => {});
+      const stripper = thinking
+        ? createThinkingStripper(
+            (chunk) => {
+              text += chunk;
+              onDelta(chunk);
+            },
+            () => {},
+            GEMMA_THINK_TAGS,
+          )
+        : null;
       try {
         const result = await readChatCompletionStream<{
           prompt_tokens?: number;
@@ -607,12 +863,19 @@ export async function respondWithSourcesViaGemma(options: {
           total_tokens?: number;
         }>(
           response.body,
-          options.onDelta ?? (() => {}),
+          stripper ? () => {} : onDelta,
           (chunk) => {
-            text += chunk;
+            if (stripper) stripper.push(chunk);
+            else text += chunk;
           },
-          { label: options.label },
+          {
+            label: options.label,
+            // A parser-equipped server sends the thought on its own channel, which proves
+            // the content that follows is already the answer.
+            onReasoning: () => stripper?.separatedReasoning(),
+          },
         );
+        stripper?.flush();
 
         if (result.usage) {
           recordChatUsage(model, result.usage, GEMMA_COST_PROVIDER);
@@ -620,8 +883,7 @@ export async function respondWithSourcesViaGemma(options: {
 
         if (result.finishReason === 'length') {
           throw new Error(
-            `gemma stopped at the ${options.maxOutputTokens}-token ceiling before finishing the article. ` +
-              `Raise GEMMA_MAX_OUTPUT_TOKENS or attach fewer pages.`,
+            lengthMessage(options.maxOutputTokens, thinkingTokens),
           );
         }
       } catch (streamError) {
@@ -640,7 +902,7 @@ export async function respondWithSourcesViaGemma(options: {
         throw streamError;
       }
 
-      const article = text.trim();
+      const article = (thinking ? scrubGemmaControlTokens(text) : text).trim();
       if (article) {
         return article;
       }
@@ -687,13 +949,11 @@ export async function respondWithSourcesViaGemma(options: {
 
       const choice = payload.choices?.[0];
       if (choice?.finish_reason === 'length') {
-        throw new Error(
-          `gemma stopped at the ${options.maxOutputTokens}-token ceiling before finishing the article. ` +
-            `Raise GEMMA_MAX_OUTPUT_TOKENS or attach fewer pages.`,
-        );
+        throw new Error(lengthMessage(options.maxOutputTokens, thinkingTokens));
       }
 
-      const article = (choice?.message?.content ?? '').trim();
+      const content = choice?.message?.content ?? '';
+      const article = (thinking ? stripGemmaThinking(content) : content).trim();
       if (article) {
         options.onDelta?.(article);
         return article;
@@ -881,6 +1141,180 @@ if (
   );
   process.env.GEMMA_MAX_SOURCE_TILES = '12';
   check('tile budget overridable', gemmaMaxSourceTiles() === 12);
+
+  // --- Inference settings (2026-09-24). Every one OFF by default: the request must be the
+  // one the lane has always sent until an operator opts in.
+  {
+    const knobs = [
+      'GEMMA_MAX_SOFT_TOKENS',
+      'GEMMA_ENABLE_THINKING',
+      'GEMMA_SAMPLING',
+      'GEMMA_THINKING_TOKENS',
+      'GEMMA_MAX_MODEL_LEN',
+      'GEMMA_TILES_PER_PAGE',
+      'GEMMA_MAX_SOURCE_TILES',
+    ] as const;
+    const saved = Object.fromEntries(knobs.map((k) => [k, process.env[k]]));
+    for (const k of knobs) delete process.env[k];
+
+    const textOnly: GemmaMessage[] = [
+      { role: 'system', content: 'नियम' },
+      { role: 'user', content: 'टिपणी' },
+    ];
+    const withImage: GemmaMessage[] = [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'टिपणी' },
+          { type: 'image_url', image_url: { url: 'data:image/png;base64,AA' } },
+        ],
+      },
+    ];
+    const plan = (messages: GemmaMessage[], stream = false) =>
+      buildGemmaRequestBody({
+        model: 'm',
+        messages,
+        maxOutputTokens: 8192,
+        stream,
+      });
+
+    const baseline = plan(withImage);
+    check(
+      'defaults: temperature 0, the caller budget, no thinking, no soft tokens',
+      baseline.body.temperature === 0 &&
+        baseline.body.max_tokens === 8192 &&
+        baseline.thinkingTokens === 0 &&
+        !('chat_template_kwargs' in baseline.body) &&
+        !('skip_special_tokens' in baseline.body) &&
+        !('mm_processor_kwargs' in baseline.body) &&
+        !('top_p' in baseline.body),
+    );
+    check(
+      'defaults: the tile rules are unchanged (60 tiles, rasteriser default per page)',
+      gemmaMaxSourceTiles() === DEFAULT_MAX_SOURCE_TILES &&
+        tilesPerPage() === undefined &&
+        gemmaTokensPerImage() === GEMMA_TOKENS_PER_IMAGE,
+    );
+    check(
+      'streaming still asks for usage',
+      JSON.stringify(plan(textOnly, true).body.stream_options) ===
+        JSON.stringify({ include_usage: true }),
+    );
+
+    process.env.GEMMA_MAX_SOFT_TOKENS = '1120';
+    const soft = plan(withImage);
+    check(
+      'soft tokens ride as mm_processor_kwargs when an image is attached',
+      JSON.stringify(soft.body.mm_processor_kwargs) ===
+        JSON.stringify({ max_soft_tokens: 1120 }),
+    );
+    check(
+      'and are not sent on a text-only call',
+      !('mm_processor_kwargs' in plan(textOnly).body),
+    );
+    check(
+      'at 1120 a page is one tile and the tile budget shrinks with the per-image cost',
+      tilesPerPage() === 1 &&
+        gemmaMaxSourceTiles() ===
+          Math.floor((60 * GEMMA_TOKENS_PER_IMAGE) / 1120),
+    );
+    process.env.GEMMA_TILES_PER_PAGE = '2';
+    check('GEMMA_TILES_PER_PAGE still wins', tilesPerPage() === 2);
+    delete process.env.GEMMA_TILES_PER_PAGE;
+    process.env.GEMMA_MAX_SOFT_TOKENS = '560';
+    check('at 560 a page is two tiles', tilesPerPage() === 2);
+    process.env.GEMMA_MAX_SOFT_TOKENS = '1000';
+    let refused = false;
+    try {
+      gemmaMaxSoftTokens();
+    } catch {
+      refused = true;
+    }
+    check('a soft-token value vLLM would reject is refused up front', refused);
+    delete process.env.GEMMA_MAX_SOFT_TOKENS;
+
+    process.env.GEMMA_SAMPLING = 'google';
+    const google = plan(textOnly).body;
+    check(
+      "google sampling is the model card's 1.0 / 0.95 / 64",
+      google.temperature === 1 && google.top_p === 0.95 && google.top_k === 64,
+    );
+    process.env.GEMMA_SAMPLING = 'hot';
+    let badSampling = false;
+    try {
+      plan(textOnly);
+    } catch {
+      badSampling = true;
+    }
+    check('an unknown sampling name is refused', badSampling);
+    delete process.env.GEMMA_SAMPLING;
+
+    process.env.GEMMA_ENABLE_THINKING = 'true';
+    const thought = plan(textOnly);
+    check(
+      'thinking: template flag on, special tokens kept, budget added on top of the answer',
+      thought.thinkingTokens === 8192 &&
+        thought.body.max_tokens === 8192 + 8192 &&
+        JSON.stringify(thought.body.chat_template_kwargs) ===
+          JSON.stringify({ enable_thinking: true }) &&
+        thought.body.skip_special_tokens === false,
+    );
+    const huge: GemmaMessage[] = [
+      { role: 'user', content: 'क'.repeat(80_000) },
+    ];
+    const squeezed = plan(huge);
+    check(
+      'thinking is cut to what the 32k window leaves',
+      squeezed.thinkingTokens > 0 &&
+        squeezed.thinkingTokens < 8192 &&
+        estimateGemmaPromptTokens(huge) +
+          (squeezed.body.max_tokens as number) <=
+          gemmaMaxModelLen(),
+    );
+    const full = plan([{ role: 'user', content: 'क'.repeat(95_000) }]);
+    check(
+      'and switched off, not truncated, when it cannot fit',
+      full.thinkingTokens === 0 &&
+        full.body.max_tokens === 8192 &&
+        !('chat_template_kwargs' in full.body),
+    );
+    delete process.env.GEMMA_ENABLE_THINKING;
+
+    check(
+      'a parser-less thought block is stripped from a whole reply',
+      stripGemmaThinking(
+        '<|channel>thought\nthe angle is the GR<channel|># शीर्षक\n\nपरिच्छेद.',
+      ) === '# शीर्षक\n\nपरिच्छेद.',
+    );
+    check(
+      'a reply with no markers (a parser-equipped server) is unchanged',
+      stripGemmaThinking('# शीर्षक\n\nपरिच्छेद.') === '# शीर्षक\n\nपरिच्छेद.',
+    );
+    let streamed = '';
+    const stripper = createThinkingStripper(
+      (chunk) => {
+        streamed += chunk;
+      },
+      () => {},
+      GEMMA_THINK_TAGS,
+    );
+    for (const chunk of ['<|cha', 'nnel>thou', 'ght x<chan', 'nel|>उत्तर', '.'])
+      stripper.push(chunk);
+    stripper.flush();
+    check(
+      'a thought split across stream chunks never leaks',
+      streamed === 'उत्तर.',
+    );
+    check(
+      'a stray control token is scrubbed',
+      scrubGemmaControlTokens('परिच्छेद.<turn|>') === 'परिच्छेद.',
+    );
+
+    for (const k of knobs) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  }
 
   const run = async (): Promise<void> => {
     const txt = await prepareGemmaSources([

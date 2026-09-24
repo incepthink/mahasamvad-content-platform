@@ -179,8 +179,8 @@ ${CHAT_IDENTITY_RULE}`;
 // endpoint's own contract, and a stripper inside the reader would be a policy every other
 // caller silently inherits. It is a caller's job to decide what its model's text means.
 
-const THINK_OPEN = '<think>';
-const THINK_CLOSE = '</think>';
+const DEFAULT_THINK_OPEN = '<think>';
+const DEFAULT_THINK_CLOSE = '</think>';
 
 // How many characters at the end of `text` could still turn out to be the start of `tag`
 // once the next frame arrives. Longest match first, so `<think` holds six rather than one.
@@ -218,7 +218,15 @@ export type ThinkingStripper = Readonly<{
 export function createThinkingStripper(
   onAnswer: (chunk: string) => void,
   onThinking: (chunk: string) => void,
+  // Qwen's `<think>…</think>` by default. Gemma 4 served with thinking on and no reasoning
+  // parser writes `<|channel>thought …<channel|>` instead (gemma-sources.ts passes those).
+  tags: Readonly<{ open: string; close: string }> = {
+    open: DEFAULT_THINK_OPEN,
+    close: DEFAULT_THINK_CLOSE,
+  },
 ): ThinkingStripper {
+  const THINK_OPEN = tags.open;
+  const THINK_CLOSE = tags.close;
   let buffer = '';
   let inside = false;
   // Some Qwen/vLLM combinations omit the opening tag and emit only

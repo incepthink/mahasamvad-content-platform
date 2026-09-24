@@ -105,6 +105,7 @@ export function NewVideoWorkspace({
 
   return (
     <ConversationWorkspace
+      lockViewport
       groups={groups}
       activeId={workflow.conversationId}
       title={workflow.conversation?.title || STR.nvwTitle}

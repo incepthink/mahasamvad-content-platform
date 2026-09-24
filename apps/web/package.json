@@ -17,6 +17,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.24.0",
+    "mediabunny": "^1.59.1",
     "next": "^15.4.2",
     "radix-ui": "^1.6.7",
     "react": "^19.1.1",

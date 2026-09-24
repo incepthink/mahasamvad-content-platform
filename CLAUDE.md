@@ -281,6 +281,21 @@ AudioTrimDialog.tsx` + `AudioTrimRange.tsx` over `lib/audioWaveform.ts` and `lib
   so it is capped at 50 MB and skipped above that (a bigger decode hangs the tab rather than
   failing). Free harnesses: `npx tsx src/intake/trim-audio.ts --check` (18) and, from
   content-engine, `npx tsx ../../apps/api/src/routes/audio-trims.ts` (18).
+- **A VIDEO is a recording source on `/dlo`, `/transcribe` and `/chat` — but only its AUDIO is
+  uploaded (2026-09-24, no migration).** The browser pulls the audio track out locally with
+  `mediabunny` (the one new web dependency) in a Web Worker, and what joins the recording list is
+  an ordinary `.m4a` (AAC/MP3 COPIED, no decode — a 1.6 GB MP4 → 1.4 MB in ~10 s) or `.webm`
+  (mono 48 kbps Opus RE-ENCODE, for PCM/AC-3 or a copy over 200 MB). Engine →
+  `apps/web/lib/extractRecordingAudio.ts` (+ `.worker.ts`); queue, `splitRecordingPicks`, the
+  "व्हिडिओमधून" badge and the strip hook → `apps/web/lib/useVideoExtraction.ts`; accept lists →
+  `VIDEO_*` / `RECORDING_FILE_ACCEPT` / `needsAudioExtraction` in `schemas/src/dlo.ts`.
+  **`AUDIO_MIME_BY_EXTENSION` stays audio-only and the API is unchanged** — a raw video reaching a
+  recording route is a picker bug and the Marathi 400 is right. `.webm` is PROBED (audio-only
+  passes through untouched). /dlo and /transcribe hold submit while a video converts; /chat does
+  not gate send — the extraction sits in the tray's existing in-flight map, as a PDF upload does.
+  No raw-video fallback: a browser that can neither copy nor encode gets a Marathi
+  "use Chrome/Edge". Free harness (from content-engine, which has tsx + ffmpeg-static):
+  `npx tsx --tsconfig ../../apps/web/tsconfig.check.json ../../apps/web/lib/extractRecordingAudio.check.ts`.
 - **Transcription (`/transcribe`) — recordings in, Marathi text out, nothing else.** The DLO
   intake job's transcribe phase as a product of its own: routes →
   `apps/api/src/routes/transcriptions.ts` (create/list/detail only — no review contract, no

@@ -11,7 +11,7 @@ import { EDITORIAL_PREFERENCES_HEADING } from './editorial-preferences-block.js'
 import { buildSourcesRequest } from './responses-with-sources.js';
 
 test('DLO uses the officer-approved complete prompt', () => {
-  assert.equal(DLO_ARTICLE_PROMPT_VERSION, 'dlo-rag-v4');
+  assert.equal(DLO_ARTICLE_PROMPT_VERSION, 'dlo-rag-v5');
   assert.deepEqual(
     buildDloArticleMessages({
       sourceInformation: 'बैठकीची टिपणी',
@@ -45,6 +45,61 @@ test('DLO uses the officer-approved complete prompt', () => {
         ].join('\n'),
       },
     ],
+  );
+});
+
+// v5: the rules branch on what the source contains. On a GR with no speaker, v4 REQUIRED an
+// attributed statement, a Minister and an attendance line, and the model invented all three.
+test('the system prompt branches on MEETING / EVENT vs DOCUMENT sources', () => {
+  const system = DGIPR_EDITORIAL_SYSTEM_PROMPT;
+  assert.match(system, /FIRST DECIDE WHAT KIND OF SOURCE THIS IS/u);
+  assert.match(system, /MEETING \/ EVENT:/u);
+  assert.match(system, /DOCUMENT: a Government Resolution \(शासन निर्णय\)/u);
+  assert.match(
+    system,
+    /Never add a speaker, a Minister, a quotation, a meeting or attendees/u,
+  );
+  // Each branching rule states both cases.
+  for (const rule of ['1. ', '2. ', '3. ', '5. ']) {
+    const at = system.indexOf(`\n${rule}`);
+    const next = system.indexOf('\n\n', at + 1);
+    const body = system.slice(at, next === -1 ? undefined : next);
+    assert.match(body, /DOCUMENT/u, `rule ${rule.trim()} has a DOCUMENT case`);
+  }
+  assert.match(system, /No attributed statement line/u);
+  assert.match(system, /end on the last source-supported provision/u);
+  // The attendance close is scoped to meetings, not unconditional.
+  assert.match(
+    system,
+    /MEETING \/ EVENT: when the source lists other attendees/u,
+  );
+});
+
+test('the system prompt keeps exactly five numbered rules (the learned section is 6)', () => {
+  const numbered = DGIPR_EDITORIAL_SYSTEM_PROMPT.split('\n').filter((line) =>
+    /^\d+\. /u.test(line),
+  );
+  assert.deepEqual(
+    numbered.map((line) => line.slice(0, 2)),
+    ['1.', '2.', '3.', '4.', '5.'],
+  );
+});
+
+test('the officer feedback is folded in as positive rules', () => {
+  const system = DGIPR_EDITORIAL_SYSTEM_PROMPT;
+  assert.match(system, /then background, then procedure/u);
+  assert.match(system, /Condense annexures, application-form fields/u);
+  assert.match(system, /instead of repeating "शासन निर्णयात नमूद/u);
+  assert.match(
+    system,
+    /every sentence carries information from SOURCE INFORMATION/u,
+  );
+});
+
+test('the model is told the platform owns the dateline', () => {
+  assert.match(
+    DGIPR_EDITORIAL_SYSTEM_PROMPT,
+    /Do not write a dateline \(स्थळ, दिनांक\) line; the platform adds it/u,
   );
 });
 

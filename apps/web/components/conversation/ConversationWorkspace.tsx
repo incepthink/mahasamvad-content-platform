@@ -38,6 +38,7 @@ export function ConversationWorkspace({
   onRetry,
   onDelete,
   deleting,
+  lockViewport = false,
   children,
 }: {
   groups: readonly ConversationRailGroup[];
@@ -57,6 +58,10 @@ export function ConversationWorkspace({
   onRetry?: () => void;
   onDelete?: (id: string) => void;
   deleting: string | null;
+  // Pins the whole surface to the viewport: the document itself never scrolls, the
+  // composer stays at the bottom and only the open conversation (and the rail) scroll.
+  // The footer is drawn inside the viewport rather than below the fold.
+  lockViewport?: boolean;
   children: ReactNode;
 }) {
   const [railOpen, setRailOpen] = useState(false);
@@ -73,7 +78,15 @@ export function ConversationWorkspace({
   }, [railOpen]);
 
   return (
-    <main className={collapsed ? 'conv-page rail-collapsed' : 'conv-page'}>
+    <main
+      className={[
+        'conv-page',
+        collapsed ? 'rail-collapsed' : '',
+        lockViewport ? 'viewport-locked' : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+    >
       {/* A conversation is not a `.page`, so it places its own ground. theme.css
           section 7 makes --conv-canvas transparent, which is what lets this show
           through; the --sidebar-w inset is correct here because the APP sidebar is

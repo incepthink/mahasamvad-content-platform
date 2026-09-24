@@ -217,6 +217,59 @@ export function isAudioFileName(fileName: string): boolean {
   return audioMimeForFileName(fileName) !== null;
 }
 
+// ---------- meeting VIDEOS: accepted by the picker, never by the API ----------
+//
+// Officers record press meets and meetings on a phone, as video. Only the AUDIO is needed for
+// a transcript, and it is ~2-5 % of the file, so the browser pulls the audio track out locally
+// (apps/web/lib/extractRecordingAudio.ts) and what is uploaded is an ordinary `.m4a`/`.webm`
+// recording from the list above. The video itself never leaves the device.
+//
+// That is why this list is deliberately NOT merged into AUDIO_MIME_BY_EXTENSION: the API
+// validates against that map, and a raw video reaching a recording route is a bug in the
+// picker which the route's existing Marathi 400 answers correctly. AVI is absent because the
+// in-browser demuxer cannot read it.
+export const VIDEO_MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
+  '.mp4': 'video/mp4',
+  '.m4v': 'video/mp4',
+  '.mov': 'video/quicktime',
+  '.mkv': 'video/x-matroska',
+  '.3gp': 'video/3gpp',
+};
+
+export const VIDEO_FILE_EXTENSIONS: readonly string[] = Object.keys(
+  VIDEO_MIME_BY_EXTENSION,
+);
+
+export const VIDEO_FILE_ACCEPT: string = [
+  ...VIDEO_FILE_EXTENSIONS,
+  ...new Set(Object.values(VIDEO_MIME_BY_EXTENSION)),
+].join(',');
+
+export function isVideoFileName(fileName: string): boolean {
+  const dot = fileName.lastIndexOf('.');
+  if (dot === -1) return false;
+  return fileName.slice(dot).toLowerCase() in VIDEO_MIME_BY_EXTENSION;
+}
+
+// What a recording PICKER offers: every audio container, plus the videos it will convert.
+export const RECORDING_FILE_ACCEPT: string = [
+  AUDIO_FILE_ACCEPT,
+  VIDEO_FILE_ACCEPT,
+].join(',');
+
+// A picked file must go through the in-browser audio extraction before it may join a list of
+// recordings. `.webm` is the awkward one: it is an AUDIO extension (a browser MediaRecorder
+// writes audio-only WebM), but a screen or phone recording in WebM carries video too — so it is
+// probed, and passed through untouched when it turns out to hold no video track.
+export function needsAudioExtraction(fileName: string): boolean {
+  return isVideoFileName(fileName) || fileName.toLowerCase().endsWith('.webm');
+}
+
+// Anything a recording picker may accept at all: audio as-is, or a video it will convert.
+export function isRecordingFileName(fileName: string): boolean {
+  return isAudioFileName(fileName) || isVideoFileName(fileName);
+}
+
 // ---------- photographs of documents: the image formats the OCR path can read ----------
 //
 // Exactly what the OpenAI vision input accepts, which is what reads these (intake/image-ocr.ts

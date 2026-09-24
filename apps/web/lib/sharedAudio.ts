@@ -1,4 +1,4 @@
-import { AUDIO_FILE_EXTENSIONS } from '@dgipr/schemas';
+import { AUDIO_FILE_EXTENSIONS, VIDEO_FILE_EXTENSIONS } from '@dgipr/schemas';
 
 const SHARE_CACHE = 'dgipr-shared-audio-v1';
 const SHARE_PREFIX = '/__dgipr-shared-audio/';
@@ -48,6 +48,14 @@ const EXTENSION_BY_MIME: Readonly<Record<string, string>> = {
   'audio/flac': '.flac',
   'audio/x-flac': '.flac',
   'audio/webm': '.webm',
+  // A shared VIDEO (WhatsApp, the camera app) is converted to its audio track before it is
+  // submitted (TranscriptionForm), and that conversion is chosen by extension too — so a
+  // nameless shared video needs one as much as a nameless voice note does.
+  'video/mp4': '.mp4',
+  'video/quicktime': '.mov',
+  'video/x-matroska': '.mkv',
+  'video/3gpp': '.3gp',
+  'video/webm': '.webm',
 };
 
 // `audio/ogg; codecs=opus` and `audio/mp4; codecs="mp4a.40.2"` are what WhatsApp and the
@@ -74,7 +82,12 @@ function fileNameWithAudioExtension(name: string, type: string): string {
   const clean = name.trim() || 'ध्वनिमुद्रण';
   const dot = clean.lastIndexOf('.');
   const current = dot === -1 ? '' : clean.slice(dot).toLowerCase();
-  if (AUDIO_FILE_EXTENSIONS.includes(current)) return clean;
+  if (
+    AUDIO_FILE_EXTENSIONS.includes(current) ||
+    VIDEO_FILE_EXTENSIONS.includes(current)
+  ) {
+    return clean;
+  }
   return `${clean}${EXTENSION_BY_MIME[baseMimeType(type)] ?? ''}`;
 }
 

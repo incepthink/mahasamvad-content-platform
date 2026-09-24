@@ -219,7 +219,7 @@ export function registerTranscriptionRoutes(
           return reply.code(400).send({
             error: {
               message:
-                'फक्त समर्थित ध्वनिमुद्रण फाईल्स (MP3, M4A, AAC, AIFF, OGG, OPUS, WAV, FLAC, WEBM) स्वीकारल्या जातात.',
+                'फक्त समर्थित ध्वनिमुद्रण फाईल्स (MP3, M4A, AAC, AIFF, OGG, OPUS, WAV, FLAC, WEBM) स्वीकारल्या जातात. व्हिडिओ थेट पाठवता येत नाही — तो पानावर जोडल्यास त्यातील आवाज ब्राउझरमध्येच वेगळा काढून पाठवला जातो.',
             },
           });
         }

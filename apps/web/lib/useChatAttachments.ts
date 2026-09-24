@@ -21,6 +21,12 @@
 //     the only place the officer would ever see it, and an attachment picked while the turn
 //     was being prepared is not in the snapshot and so survives untouched.
 //
+// A VIDEO picked as a recording is the one other thing that starts at selection: its audio
+// track is pulled out in the browser (lib/useVideoExtraction) so the video itself is never
+// uploaded. The chip reads "व्हिडिओतून आवाज काढत आहे… N %" meanwhile, and the extraction is
+// registered in the same in-flight map a PDF upload uses, so a turn sent mid-extraction waits
+// for it exactly as it waits for a PDF — nothing about Send changes.
+//
 // Where the remaining work happens:
 //   - PDFs go directly to the chat upload endpoint, which stages them in the private bucket
 //     and hands them to OpenAI for file search;
@@ -52,6 +58,10 @@ import {
 import { joinPageTexts, numberedPages } from './documentSelection';
 import { STR } from './strings';
 import { errorMessage } from './errorMessage';
+import {
+  runRecordingExtraction,
+  splitRecordingPicks,
+} from './useVideoExtraction';
 
 export type DraftAttachmentState =
   'pending' | 'preparing' | 'transcribing' | 'ready' | 'failed';
@@ -78,6 +88,11 @@ export type DraftAttachment = Readonly<{
   // Held on the draft rather than in a map beside it because a chat attachment already has a
   // stable key of its own, which is exactly what a trim needs to survive a list edit.
   trim?: AudioTrim;
+  // A picked VIDEO whose audio is still being extracted in the browser. It has no `file` yet;
+  // when the extraction lands it becomes an ordinary pending recording.
+  extracting?: boolean;
+  // 0..1 while extracting.
+  progress?: number;
 }>;
 
 const TRANSCRIPTION_POLL_INTERVAL_MS = 4000;
@@ -229,6 +244,8 @@ export function useChatAttachments(): {
   // Selection-time uploads still in flight, by draft key. Never rejects — each entry owns its
   // own catch — so awaiting one can only mean "this file has settled, ready or failed".
   const inflight = useRef(new Map<string, Promise<void>>());
+  // Video extractions still running, by draft key, so removing the chip stops the work.
+  const extractions = useRef(new Map<string, AbortController>());
 
   const patch = useCallback((key: string, next: Partial<DraftAttachment>) => {
     setAttachments((current) =>
@@ -318,17 +335,75 @@ export function useChatAttachments(): {
 
   const addAudio = useCallback(
     (files: readonly File[]) => {
-      add(
-        files.map((file) => ({
+      const { audio, videos } = splitRecordingPicks(files);
+      const videoByKey = new Map<string, File>();
+      const accepted = add([
+        ...audio.map((file) => ({
           key: makeKey(),
           kind: 'audio' as const,
           name: file.name,
           state: 'pending' as const,
           file,
         })),
-      );
+        ...videos.map((file) => {
+          const key = makeKey();
+          videoByKey.set(key, file);
+          return {
+            key,
+            kind: 'audio' as const,
+            name: file.name,
+            state: 'preparing' as const,
+            extracting: true,
+          };
+        }),
+      ]);
+
+      for (const draft of accepted) {
+        const video = videoByKey.get(draft.key);
+        if (!video) continue;
+        const controller = new AbortController();
+        extractions.current.set(draft.key, controller);
+        const extraction = runRecordingExtraction(video, {
+          signal: controller.signal,
+          onProgress: (progress) => patch(draft.key, { progress }),
+        })
+          .then((result) => {
+            const next = {
+              state: 'pending' as const,
+              file: result.file,
+              name: result.file.name,
+              extracting: false,
+            };
+            // Written to the ref as well as to state: `prepare()` re-reads the ref the
+            // instant this promise settles, which can be before React has re-rendered — and
+            // a draft still reading 'preparing' there would leave the turn without it.
+            attachmentsRef.current = attachmentsRef.current.map((attachment) =>
+              attachment.key === draft.key
+                ? { ...attachment, ...next }
+                : attachment,
+            );
+            patch(draft.key, next);
+          })
+          .catch((error: unknown) => {
+            // Removed by the officer: the chip is already gone.
+            if (error instanceof DOMException && error.name === 'AbortError') {
+              return;
+            }
+            attachmentsRef.current = attachmentsRef.current.map((attachment) =>
+              attachment.key === draft.key
+                ? { ...attachment, state: 'failed' as const }
+                : attachment,
+            );
+            fail(draft.key, error);
+          })
+          .finally(() => {
+            extractions.current.delete(draft.key);
+            inflight.current.delete(draft.key);
+          });
+        inflight.current.set(draft.key, extraction);
+      }
     },
-    [add],
+    [add, fail, patch],
   );
 
   const addYouTube = useCallback(
@@ -365,6 +440,7 @@ export function useChatAttachments(): {
   }, []);
 
   const remove = useCallback((key: string) => {
+    extractions.current.get(key)?.abort();
     setAttachments((current) =>
       current.filter((attachment) => attachment.key !== key),
     );
@@ -546,8 +622,9 @@ export function useChatAttachments(): {
       preparingTurn ||
       attachments.some(
         (attachment) =>
-          attachment.kind === 'document' &&
-          attachment.state === 'preparing',
+          (attachment.kind === 'document' &&
+            attachment.state === 'preparing') ||
+          attachment.extracting === true,
       ),
     full: attachments.length >= CHAT_MAX_ATTACHMENTS,
     addImages,

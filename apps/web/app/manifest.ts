@@ -69,9 +69,17 @@ export default function manifest(): ShareTargetManifest {
             name: 'recordings',
             // `audio/*` is what lets recorder and messaging apps offer Newsroom even
             // when their exact MIME spelling differs. The client and API still enforce
-            // the narrower supported-container list before transcription.
+            // the narrower supported-container list before transcription. `video/*` is
+            // there for a meeting filmed on the phone: the page pulls the audio track out
+            // on the device and only that is uploaded.
             accept: [
               'audio/*',
+              'video/*',
+              '.mp4',
+              '.m4v',
+              '.mov',
+              '.mkv',
+              '.3gp',
               '.mp3',
               '.m4a',
               '.aac',

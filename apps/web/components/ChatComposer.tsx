@@ -41,8 +41,8 @@ import {
   type KeyboardEvent,
 } from 'react';
 import {
-  AUDIO_FILE_ACCEPT,
   CHAT_MESSAGE_MAX_CHARS,
+  RECORDING_FILE_ACCEPT,
   IMAGE_FILE_ACCEPT,
   type ChatProvider,
   type YouTubeVideo,
@@ -76,6 +76,7 @@ import {
   type DraftAttachment,
 } from '../lib/useChatAttachments';
 import { useChatProvider } from '../lib/useChatProvider';
+import { wasExtractedFromVideo } from '../lib/useVideoExtraction';
 
 const KIND_ICON = {
   image: ImageIcon,
@@ -89,9 +90,20 @@ function stateLabel(attachment: DraftAttachment): string {
     return storedErrorMessage(attachment.error, STR.chatAttachFailed);
   }
   if (attachment.state === 'transcribing') return STR.chatAttachTranscribing;
+  if (attachment.extracting) {
+    return STR.videoExtracting(
+      attachment.progress === undefined ? null : attachment.progress * 100,
+    );
+  }
   if (attachment.state === 'preparing') return STR.chatAttachPreparing;
-  // Nothing has been read yet, and the chip says so rather than claiming to be ready.
-  if (attachment.state === 'pending') return STR.chatAttachPending;
+  // Nothing has been read yet, and the chip says so rather than claiming to be ready. A
+  // recording made from a video says so too — otherwise `meeting.mp4` quietly becoming
+  // `meeting.m4a` reads as a mistake.
+  if (attachment.state === 'pending') {
+    return attachment.file && wasExtractedFromVideo(attachment.file)
+      ? `${STR.videoExtractedBadge} · ${STR.chatAttachPending}`
+      : STR.chatAttachPending;
+  }
   return STR.chatAttachReady;
 }
 
@@ -499,7 +511,7 @@ export function ChatComposer({
       <input
         ref={audioInput}
         type="file"
-        accept={AUDIO_FILE_ACCEPT}
+        accept={RECORDING_FILE_ACCEPT}
         multiple
         hidden
         onChange={(event) => {

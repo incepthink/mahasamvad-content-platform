@@ -451,7 +451,21 @@ export const STR = {
   ytSourceLabel: 'यूट्युब व्हिडिओ',
   ytOpen: 'यूट्युबवर पाहा',
   dloFileTypeError:
-    'कृपया ध्वनिमुद्रण फाईल निवडा (MP3, M4A, AAC, AIFF, OGG, OPUS, WAV, FLAC किंवा WEBM).',
+    'कृपया ध्वनिमुद्रण किंवा व्हिडिओ फाईल निवडा (MP3, M4A, AAC, AIFF, OGG, OPUS, WAV, FLAC, WEBM, किंवा MP4, MOV, MKV, 3GP व्हिडिओ).',
+  // A VIDEO picked as a recording: the browser pulls its audio track out locally (see
+  // lib/extractRecordingAudio) and only that audio is uploaded. These are the card's lines
+  // while that runs, the badge it keeps afterwards, and the two ways it can fail.
+  videoExtracting: (percent: number | null) =>
+    percent === null
+      ? 'व्हिडिओतून आवाज काढत आहे…'
+      : `व्हिडिओतून आवाज काढत आहे… ${Math.round(percent).toLocaleString('mr-IN')} %`,
+  videoExtractedBadge: 'व्हिडिओमधून',
+  videoNoAudio: 'या व्हिडिओमध्ये आवाज नाही.',
+  videoUnsupported:
+    'हा व्हिडिओ या ब्राउझरमध्ये वेगळा करता आला नाही. कृपया Chrome किंवा Edge ची नवी आवृत्ती वापरा.',
+  videoUnreadable:
+    'हा व्हिडिओ उघडता आला नाही — फाईल खराब झाली असेल किंवा प्रकार समर्थित नसेल.',
+  videoExtractWait: 'व्हिडिओतून आवाज काढून होईपर्यंत थांबा.',
   dloNeedInput: 'कृपया टिपणी लिहा, किमान एक फाईल जोडा किंवा यूट्युब लिंक द्या.',
   dloSubmit: 'पुढे जा →',
   dloProcessingTitle: 'माहितीवर प्रक्रिया सुरू आहे…',
@@ -2414,13 +2428,13 @@ export const STR = {
   // What each kind of source costs, and where it can be corrected, is said on the step that
   // does it rather than here.
   infoDloSources:
-    'बैठकीत जे ऐकले व ठरले ते लिहा. ध्वनिमुद्रण, फोटो, फाईल किंवा लिंकही जोडता येईल — यापैकी काहीही एक पुरे.',
+    'बैठकीत जे ऐकले व ठरले ते लिहा. ध्वनिमुद्रण किंवा व्हिडिओ, फोटो, फाईल किंवा लिंकही जोडता येईल — यापैकी काहीही एक पुरे. व्हिडिओतील फक्त आवाज वापरला जातो; व्हिडिओ अपलोड होत नाही.',
   infoDloAiPrompt:
     'बातमी कशी हवी ते तुमच्या शब्दांत, एकाच ठिकाणी सांगा — शीर्षक किंवा बातमीचा रोख, कशावर भर द्यायचा, काय वगळायचे, भाषा किती सोपी हवी, लांबी किती हवी, किंवा नमुना म्हणून एखाद्या जुन्या बातमीची शैली. हे पूर्णपणे ऐच्छिक आहे; रिकामे ठेवल्यास मंच स्वतः रोख व शैली ठरवेल. ही सूचना बातमी कशी लिहायची हे ठरवते — माहितीचा आधार मात्र वरील स्रोतच राहतात, त्यामुळे येथे दिलेल्या नावांवरून किंवा आकड्यांवरून बातमीत नवीन तथ्य घातले जाणार नाही.',
 
   // /transcribe
   infoTranscribeInput:
-    'एकावेळी १० पर्यंत ध्वनिमुद्रणे जोडता येतील; आकाराची मर्यादा नाही. MP3, M4A, AAC, WAV, FLAC, OGG, OPUS व WEBM चालतात. एखादी फाईल वाचता आली नाही तरी उरलेल्यांचे ध्वनिलेखन होते. तेच ध्वनिमुद्रण पूर्वी उतरवले असल्यास ते पुन्हा न उतरवता लगेच दाखवले जाते.',
+    'एकावेळी १० पर्यंत ध्वनिमुद्रणे जोडता येतील; आकाराची मर्यादा नाही. MP3, M4A, AAC, WAV, FLAC, OGG, OPUS व WEBM चालतात. MP4, MOV, MKV किंवा 3GP व्हिडिओ जोडल्यास त्यातील फक्त आवाज तुमच्या ब्राउझरमध्येच वेगळा काढून पाठवला जातो — व्हिडिओ अपलोड होत नाही. एखादी फाईल वाचता आली नाही तरी उरलेल्यांचे ध्वनिलेखन होते. तेच ध्वनिमुद्रण पूर्वी उतरवले असल्यास ते पुन्हा न उतरवता लगेच दाखवले जाते.',
 
   // /translate
   infoTranslateInput:

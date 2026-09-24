@@ -403,7 +403,7 @@ export function registerDloRoutes(
           return reply.code(400).send({
             error: {
               message:
-                'फक्त ध्वनिमुद्रण (MP3, AAC, M4A), प्रतिमा (JPG, PNG, WEBP), PDF, DOCX आणि TXT फाईल्स स्वीकारल्या जातात.',
+                'फक्त ध्वनिमुद्रण (MP3, AAC, M4A), प्रतिमा (JPG, PNG, WEBP), PDF, DOCX आणि TXT फाईल्स स्वीकारल्या जातात. व्हिडिओ थेट पाठवता येत नाही — तो पानावर जोडल्यास त्यातील आवाज ब्राउझरमध्येच वेगळा काढून पाठवला जातो.',
             },
           });
         }
