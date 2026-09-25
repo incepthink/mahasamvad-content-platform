@@ -11,7 +11,7 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { ListTodo } from 'lucide-react';
-import { isSocialCategory } from '@dgipr/schemas';
+import { isCarouselCategory, isSocialCategory } from '@dgipr/schemas';
 import type { GenerationDetail } from '@dgipr/schemas';
 import { useTasks } from '../lib/TasksProvider';
 import { STATUS_LABELS, STEP_LABELS, STR } from '../lib/strings';
@@ -99,7 +99,10 @@ export function TasksMenu({ collapsed = false }: { collapsed?: boolean }) {
                   <ul className="task-list">
                     {tasks.map((task) => {
                       const failed = task.status === 'failed';
-                      const isSocial = isSocialCategory(task.category);
+                      // A carousel's posterUrl is its cover, so it gets the same thumbnail.
+                      const isSocial =
+                        isSocialCategory(task.category) ||
+                        isCarouselCategory(task.category);
                       const active =
                         task.status === 'queued' || task.status === 'running';
                       // Active runs show the fine-grained step; otherwise the status.

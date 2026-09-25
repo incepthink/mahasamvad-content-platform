@@ -99,6 +99,36 @@ export const STR = {
   mediaOutputVideoDesc: 'टिपणीवरून मराठी व्हिडिओ',
   // The Dynamic Poster lane. The one format on this page whose SOURCE is a picture rather
   // than text, which is why choosing it replaces the note box with an upload.
+  // The carousel lane (migration 0059): one note → a cover plus 2-3 detail slides.
+  mediaFormatCarousel: 'कॅरोसेल',
+  mediaFormatCarouselDesc:
+    'एकाच रूपातील ३–४ स्लाइडची पोस्ट — मुखपृष्ठ आणि तपशील',
+  carouselSlidesLabel: 'स्लाइड',
+  carouselSlidesAuto: 'स्वयं',
+  carouselSlidesHint:
+    'स्वयं निवडल्यास मजकुराच्या प्रमाणात ३ किंवा ४ स्लाइड तयार होतील.',
+  carouselTitle: 'कॅरोसेल',
+  carouselSlideOf: (n: number, total: number) =>
+    `स्लाइड ${n.toLocaleString('mr-IN')}/${total.toLocaleString('mr-IN')}`,
+  carouselCover: 'मुखपृष्ठ',
+  carouselSlidePending: 'ही स्लाइड तयार होत आहे…',
+  carouselSlideMissing: 'ही स्लाइड तयार झालेली नाही',
+  carouselPrev: 'मागील स्लाइड',
+  carouselNext: 'पुढील स्लाइड',
+  carouselGoTo: (n: number) => `स्लाइड ${n.toLocaleString('mr-IN')} वर जा`,
+  carouselRedoSlide: 'हा स्लाइड पुन्हा तयार करा',
+  carouselRedoCoverHint:
+    'फक्त मुखपृष्ठ पुन्हा केल्यास इतर स्लाइडचे रूप वेगळे दिसू शकते — सर्व स्लाइड एकत्र पुन्हा तयार करणे चांगले.',
+  carouselRedoAll: 'सर्व स्लाइड पुन्हा तयार करा',
+  carouselRedoAllConfirm: 'सर्व स्लाइड नव्याने तयार होतील. पुढे जायचे?',
+  carouselEditSlide: 'या स्लाइडवर खूण करून बदल करा',
+  carouselEditSlideOn: 'खूण करणे चालू आहे — स्लाइडवर क्लिक करा',
+  carouselEditingTitle: (n: number) =>
+    `स्लाइड ${n.toLocaleString('mr-IN')} मध्ये बदल`,
+  carouselEditClose: 'बंद करा',
+  carouselVersions: (n: number) => `${n.toLocaleString('mr-IN')} आवृत्त्या`,
+  carouselPublishPending:
+    'कॅरोसेल थेट प्रकाशित करण्याची सुविधा लवकरच येत आहे — सध्या प्रत्येक स्लाइड डाउनलोड करून वापरा.',
   mediaFormatDynamicPoster: 'डायनॅमिक पोस्टर (beta)',
   mediaFormatDynamicPosterDesc: 'तयार पोस्टरला हालचाल देऊन व्हिडिओ',
   // ---- the upload card that replaces the note box on that lane ----
@@ -2259,6 +2289,8 @@ export const STR = {
   analyticsTaskMarathiTranslation: 'मराठी भाषांतर',
   analyticsTaskProofreading: 'मुद्रितशोधन व भाषा तपासणी',
   analyticsTaskSocialPost: 'सोशल मीडिया पोस्टर तयार करणे',
+  analyticsTaskCarouselPlan: 'कॅरोसेल स्लाइडची आखणी',
+  analyticsTaskCarouselSlide: 'कॅरोसेल स्लाइड तयार करणे',
   analyticsTaskSocialCaption: 'सोशल मीडिया कॅप्शन लिहिणे',
   analyticsTaskSocialCaptionRevision: 'कॅप्शनमध्ये सुधारणा',
   analyticsTaskYoutubeThumbnail: 'YouTube थंबनेल तयार करणे',
@@ -2599,6 +2631,9 @@ export const STEP_LABELS: Record<GenerationStep, string> = {
   motion_prompt: 'पोस्टर वाचून सूचना तयार करत आहोत…',
   motion_render: 'पोस्टरला हालचाल देत आहोत…',
   motion_crop: 'व्हिडिओ क्रॉप करत आहोत…',
+  // Carousel (migration 0059): one plan, then the slides.
+  carousel_plan: 'स्लाइडची आखणी करत आहोत…',
+  carousel_render: 'स्लाइड तयार करत आहोत…',
   translate: 'भाषांतर',
   done: 'पूर्ण झाले',
 };
@@ -2637,6 +2672,7 @@ export const CATEGORY_LABELS: Record<Category, string> = {
   facebook: 'फेसबुक',
   youtube: 'यूट्यूब',
   dynamic_poster: 'डायनॅमिक',
+  carousel: 'कॅरोसेल',
 };
 
 // What a run actually produced, for the history card and the thread rail. A social
@@ -2847,6 +2883,9 @@ export const ACTIVITY_ACTION_LABELS: Record<string, string> = {
   dynamic_poster_creation: 'डायनॅमिक पोस्टर तयार केले',
   dynamic_poster_revision: 'डायनॅमिक पोस्टर AI ने बदलले',
   dynamic_poster_crop: 'डायनॅमिक पोस्टर कापले',
+  carousel_creation: 'कॅरोसेल तयार केले',
+  carousel_slide_regeneration: 'कॅरोसेल स्लाइड पुन्हा तयार केली',
+  carousel_slide_revision: 'कॅरोसेल स्लाइडवर खुणा करून बदल',
   poster_regeneration: 'पोस्टर पुन्हा तयार केले',
   poster_content_revision: 'पोस्टरचा मजकूर/दृश्य बदलले',
   poster_image_revision: 'पोस्टरवर खुणा करून बदल',

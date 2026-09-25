@@ -72,7 +72,9 @@ export function FormatMenu({
               option.value !== 'dynamic_poster' &&
               (option.value === 'caption' ||
               option.value === 'twitter' ||
-              option.value === 'facebook'
+              option.value === 'facebook' ||
+              // A carousel shares the social gate — see TasksProvider.
+              option.value === 'carousel'
                 ? socialBusy
                 : articleBusy);
             return (

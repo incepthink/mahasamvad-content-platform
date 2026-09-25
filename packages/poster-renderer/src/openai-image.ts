@@ -29,6 +29,78 @@ type ImageResponse = {
   data: Array<{ b64_json?: string }>;
 };
 
+// Bounded retry for the image calls, which do not go through content-engine's
+// openAiFetch (this package cannot import it). Retried ONLY where the request
+// provably never started a render, because an image call is paid: a connect
+// timeout / DNS / refused connection (undici names these by code on `cause`),
+// or a 429 / 502 / 503 answer. A reset mid-response is deliberately NOT
+// retried — the render may already have been billed.
+const MAX_ATTEMPTS = Math.max(
+  1,
+  Number(process.env.OPENAI_IMAGE_MAX_ATTEMPTS ?? 4) || 4,
+);
+const PRE_REQUEST_ERROR_CODES = new Set([
+  'UND_ERR_CONNECT_TIMEOUT',
+  'ECONNREFUSED',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'ENETUNREACH',
+  'EHOSTUNREACH',
+]);
+const RETRYABLE_STATUSES = new Set([429, 502, 503]);
+
+function errorCode(error: unknown): string | undefined {
+  const cause = (error as { cause?: { code?: unknown } } | null)?.cause;
+  const code = cause?.code ?? (error as { code?: unknown } | null)?.code;
+  return typeof code === 'string' ? code : undefined;
+}
+
+function retryDelayMs(attempt: number, response?: Response): number {
+  const header = response?.headers.get('retry-after');
+  const seconds =
+    header === null || header === undefined ? NaN : Number(header);
+  if (Number.isFinite(seconds) && seconds >= 0)
+    return Math.min(seconds * 1000, 60_000);
+  return Math.min(2_000 * 2 ** (attempt - 1), 20_000) + Math.random() * 500;
+}
+
+async function postWithRetry(
+  url: string,
+  init: RequestInit,
+  context: string,
+): Promise<Response> {
+  for (let attempt = 1; ; attempt += 1) {
+    let response: Response;
+    try {
+      response = await fetch(url, init);
+    } catch (error) {
+      const code = errorCode(error);
+      if (
+        attempt >= MAX_ATTEMPTS ||
+        !code ||
+        !PRE_REQUEST_ERROR_CODES.has(code)
+      )
+        throw error;
+      const delay = retryDelayMs(attempt);
+      console.warn(
+        `[openai-image] ${context} could not connect (${code}); ` +
+          `retrying in ${Math.round(delay)}ms (attempt ${attempt + 1}/${MAX_ATTEMPTS})`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      continue;
+    }
+    if (attempt >= MAX_ATTEMPTS || !RETRYABLE_STATUSES.has(response.status))
+      return response;
+    const delay = retryDelayMs(attempt, response);
+    await response.body?.cancel().catch(() => undefined);
+    console.warn(
+      `[openai-image] ${context} got ${response.status}; ` +
+        `retrying in ${Math.round(delay)}ms (attempt ${attempt + 1}/${MAX_ATTEMPTS})`,
+    );
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  }
+}
+
 function requireApiKey(): string {
   const key = process.env.OPENAI_API_KEY;
   if (!key) {
@@ -72,20 +144,24 @@ export async function generateImage(
   opts: GenerateImageOptions = {},
 ): Promise<Buffer> {
   const apiKey = requireApiKey();
-  const response = await fetch(GENERATIONS_URL, {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${apiKey}`,
-      'content-type': 'application/json',
+  const response = await postWithRetry(
+    GENERATIONS_URL,
+    {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: IMAGE_MODEL,
+        prompt,
+        size: opts.size ?? SIZE,
+        quality: QUALITY,
+        n: 1,
+      }),
     },
-    body: JSON.stringify({
-      model: IMAGE_MODEL,
-      prompt,
-      size: opts.size ?? SIZE,
-      quality: QUALITY,
-      n: 1,
-    }),
-  });
+    'image generation',
+  );
   return decode(response, 'image generation');
 }
 
@@ -127,10 +203,15 @@ export async function editImage(
       `frame-${index + 1}.png`,
     );
   });
-  const response = await fetch(EDITS_URL, {
-    method: 'POST',
-    headers: { authorization: `Bearer ${apiKey}` },
-    body: form,
-  });
+  // FormData is re-serialized on every fetch, so the same `form` is safe to resend.
+  const response = await postWithRetry(
+    EDITS_URL,
+    {
+      method: 'POST',
+      headers: { authorization: `Bearer ${apiKey}` },
+      body: form,
+    },
+    'image edit',
+  );
   return decode(response, 'image edit');
 }

@@ -41,6 +41,10 @@ export * from './dynamic-poster.js';
 // so each name has exactly one definition in this barrel (the dynamic-poster.js precedent).
 export * from './prompt-image.js';
 
+// Carousel posters (migration 0059): the slide plan, the stored slide state and the detail
+// shape. Exported BEFORE api.js, which imports the slide-count and detail shapes.
+export * from './carousel.js';
+
 // Generation API request/response schemas (apps/api + apps/web).
 export * from './api.js';
 

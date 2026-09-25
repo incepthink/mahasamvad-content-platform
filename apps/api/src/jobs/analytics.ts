@@ -670,6 +670,9 @@ const TASK_ORDER = [
   'marathi_translation',
   'proofreading',
   'social_post_creation',
+  // Carousel (migration 0059): the one planning call, and every slide render.
+  'carousel_plan',
+  'carousel_slide',
   'social_caption_creation',
   'social_caption_revision',
   'youtube_thumbnail_creation',

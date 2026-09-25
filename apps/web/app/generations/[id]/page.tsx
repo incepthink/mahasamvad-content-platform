@@ -3,6 +3,7 @@
 import { use, useCallback, useState } from 'react';
 import {
   isArticleCategory,
+  isCarouselCategory,
   isDynamicPosterCategory,
   isSocialCategory,
   type Category,
@@ -20,6 +21,7 @@ import { ProgressSteps } from '../../../components/ProgressSteps';
 import { TaskProgressBar } from '../../../components/TaskProgressBar';
 import { StatusChip } from '../../../components/StatusChip';
 import { ArticleView } from '../../../components/ArticleView';
+import { CarouselView } from '../../../components/CarouselView';
 import { DynamicPosterView } from '../../../components/DynamicPosterView';
 import { ErrorNotice } from '../../../components/ErrorNotice';
 import { FiveWOneHView } from '../../../components/FiveWOneHView';
@@ -228,7 +230,11 @@ export default function GenerationDetailPage({
       // the panel outright stays social-only, where the panel is that lane's own surface.
       if (restarted) {
         addTask(detail.id);
-        if (isSocialCategory(detail.category)) openPanel();
+        if (
+          isSocialCategory(detail.category) ||
+          isCarouselCategory(detail.category)
+        )
+          openPanel();
       }
       await refresh();
     } catch (e) {
@@ -272,6 +278,14 @@ export default function GenerationDetailPage({
   const motionBusy =
     isDynamicPosterCategory(detail.category) &&
     !!detail.motionUrl &&
+    (detail.status === 'queued' || detail.status === 'running');
+
+  // A carousel shows its strip from the moment its slides are PLANNED — each slide lands on
+  // its own, and a placeholder that fills in is the progress. Before the plan there is nothing
+  // to lay out, so the compact progress bar stays.
+  const carouselBusy =
+    isCarouselCategory(detail.category) &&
+    detail.carouselSlides.length > 0 &&
     (detail.status === 'queued' || detail.status === 'running');
 
   const posterBusy =
@@ -355,6 +369,7 @@ export default function GenerationDetailPage({
         !posterBusy &&
         !posterPending &&
         !motionBusy &&
+        !carouselBusy &&
         // A यूट्यूब थंबनेल run has no article stages to list, so it takes the compact
         // bar the social lane uses rather than ProgressSteps' news/scheme step list.
         (!isArticleCategory(detail.category) ? (
@@ -470,11 +485,18 @@ export default function GenerationDetailPage({
         posterBusy ||
         posterPending ||
         motionBusy ||
+        carouselBusy ||
         // A failure must not hide what the run already produced — the article, the poster,
         // or the poster's whole version history. The notice stays above; the result renders
         // below it and stays fully editable, which is what makes the run recoverable at all.
         (detail.status === 'failed' && hasOutput)) &&
-        (isDynamicPosterCategory(detail.category) ? (
+        (isCarouselCategory(detail.category) ? (
+          <CarouselView
+            detail={detail}
+            onChanged={refresh}
+            onImageWorkStarted={trackImageWork}
+          />
+        ) : isDynamicPosterCategory(detail.category) ? (
           <DynamicPosterView
             detail={detail}
             onChanged={refresh}

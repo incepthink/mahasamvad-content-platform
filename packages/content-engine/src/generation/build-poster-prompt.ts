@@ -56,7 +56,9 @@ import {
 // divisible by 16; the 96px remainder is the strip, slightly taller than the band, and the
 // difference is absorbed by the same edge-continuation fill that hides the join. Keep in sync
 // with SOCIAL_ARTWORK_HEIGHT in packages/poster-renderer/src/twitter-chrome.ts.
-const SOCIAL_ZONES: ReservedZoneGeometry = {
+// Exported for the carousel lane (build-carousel-prompt.ts), whose slides are the same canvas
+// finished by the same overlayTwitterChrome.
+export const SOCIAL_ZONES: ReservedZoneGeometry = {
   width: 1280,
   height: 1504,
   lockupWidth: 180,
@@ -75,13 +77,13 @@ const SOCIAL_ZONES: ReservedZoneGeometry = {
 // the model is painting. It is left at the call sites so that clearing footerAppendedMargin
 // (the one-line rollback to an overlaid footer) restores the old prompt intact, rather than
 // restoring it with this hard-won sentence missing.
-const SOCIAL_FOOTER_NOTE =
+export const SOCIAL_FOOTER_NOTE =
   'The software-added footer has TWO parts: a navy-blue ministry title pill that rises above a white social-media strip. Together they cover the full canvas width at the bottom; do NOT treat only the white strip as the footer.';
 
 // What overlayTwitterChrome actually stamps, described as the model sees it — on the reference
 // template it is editing (initial) and on the finished poster it is editing (feedback). Keep the
 // wording matched to packages/poster-renderer/src/twitter-chrome.ts.
-const SOCIAL_CHROME: StampedChrome = {
+export const SOCIAL_CHROME: StampedChrome = {
   surface: 'poster',
   lockup:
     'white rounded-square महाराष्ट्र शासन emblem-and-wordmark badge in the top-right corner',
@@ -404,7 +406,7 @@ function buildFreshCopyManifest(copyStyle: string, c: PosterCopy): string {
   ].join('\n');
 }
 
-function buildFreshColourDirection(palette: PosterPalette): string {
+export function buildFreshColourDirection(palette: PosterPalette): string {
   const textOnPanel = palette.hex.textOnPanel ?? palette.hex.ink;
   return [
     'COLOUR DIRECTION — PALETTE ONLY, NOT A LAYOUT:',

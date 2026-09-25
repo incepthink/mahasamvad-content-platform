@@ -275,6 +275,22 @@ export function NoteComposer({ form }: { form: Form }) {
           articleBusy={form.hasActiveArticleTask}
         />
 
+        {/* कॅरोसेल: how many slides, and the same caption opt-in a social poster has. No
+            verbatim toggle — a carousel's text is always PLANNED across slides, so the box
+            is never printed as it stands. */}
+        {form.isCarousel ? (
+          <>
+            <SlideCountControl form={form} />
+            <CheckOption
+              checked={form.wantCaption}
+              disabled={form.submitting}
+              onChange={form.setWantCaption}
+              label={STR.captionToggleLabel}
+              title={STR.captionToggleHint}
+            />
+          </>
+        ) : null}
+
         {form.isSocial ? (
           <>
             <CheckOption
@@ -399,6 +415,50 @@ function CheckOption({
       />
       {label}
     </label>
+  );
+}
+
+// स्वयं / ३ / ४ — a segmented control in the tool row, the same height as the chips beside it.
+// स्वयं is the default: the planner picks 3 or 4 from how much the note says.
+const SLIDE_COUNTS = ['auto', 3, 4] as const;
+
+function SlideCountControl({ form }: { form: Form }) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label={STR.carouselSlidesLabel}
+      title={STR.carouselSlidesHint}
+      className={cn(
+        'mr-slide-count inline-flex h-9 shrink-0 items-center gap-1 rounded-md border p-1 text-sm',
+        form.submitting && 'pointer-events-none opacity-50',
+      )}
+    >
+      {/* Inherits the chip's own foreground: the muted grey vanished on the glass. */}
+      <span className="px-1.5 opacity-80">{STR.carouselSlidesLabel}</span>
+      {SLIDE_COUNTS.map((count) => {
+        const selected = form.carouselSlides === count;
+        return (
+          <button
+            key={count}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            disabled={form.submitting}
+            onClick={() => form.setCarouselSlides(count)}
+            className={cn(
+              'h-7 min-w-9 rounded px-2 transition-colors',
+              selected
+                ? 'bg-primary text-primary-foreground font-semibold'
+                : 'hover:bg-secondary',
+            )}
+          >
+            {count === 'auto'
+              ? STR.carouselSlidesAuto
+              : count.toLocaleString('mr-IN')}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 

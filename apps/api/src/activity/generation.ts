@@ -10,6 +10,7 @@ import type { GenerationRow, SupabaseClient } from '@dgipr/database';
 import {
   activitySummary,
   firstLine,
+  isCarouselCategory,
   isDynamicPosterCategory,
   isSocialCategory,
   isYoutubeCategory,
@@ -35,6 +36,7 @@ export function generationJobTask(category: Category): ActivityAction {
   if (isSocialCategory(category)) return 'social_post_creation';
   if (isYoutubeCategory(category)) return 'youtube_thumbnail_creation';
   if (isDynamicPosterCategory(category)) return 'dynamic_poster_creation';
+  if (isCarouselCategory(category)) return 'carousel_creation';
   return 'article_generation';
 }
 

@@ -1,21 +1,12 @@
 import { VIDEO_KEY_POINT_MAX_CHARS } from '@dgipr/schemas';
+import { digitsAreGrounded } from '../generation/digit-grounding.js';
 
 // A key point is burned onto the finished video. Keep the inexpensive,
 // deterministic number check even though the model prompt is intentionally
-// minimal: it is output validation, not an instruction sent to the model.
-const DEVANAGARI_ZERO = 0x0966;
-
-function toLatinDigits(text: string): string {
-  return text.replace(/[०-९]/g, (digit) =>
-    String(digit.codePointAt(0)! - DEVANAGARI_ZERO),
-  );
-}
-
+// minimal: it is output validation, not an instruction sent to the model. The
+// check itself is shared with the carousel planner (generation/digit-grounding.ts).
 export function keyPointIsGrounded(keyPoint: string, source: string): boolean {
-  const numbers = toLatinDigits(keyPoint).match(/\d+/g);
-  if (!numbers) return true;
-  const haystack = toLatinDigits(source);
-  return numbers.every((number) => haystack.includes(number));
+  return digitsAreGrounded(keyPoint, source);
 }
 
 export function keyPointOf(raw: string | undefined, source: string): string {

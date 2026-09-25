@@ -29,7 +29,8 @@ export function mediaKindOf(
   const social = item.category === 'twitter' || item.category === 'facebook';
   if (social && item.outputType === 'article') return 'caption';
   if (item.category === 'youtube') return 'youtube';
-  if (social) return 'creative';
+  // A carousel's card shows its cover, which is a 4:5 social poster.
+  if (social || item.category === 'carousel') return 'creative';
   return 'banner';
 }
 

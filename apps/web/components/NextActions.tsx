@@ -17,7 +17,11 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { isDynamicPosterCategory, isSocialCategory } from '@dgipr/schemas';
+import {
+  isCarouselCategory,
+  isDynamicPosterCategory,
+  isSocialCategory,
+} from '@dgipr/schemas';
 import type { Category, GenerationDetail } from '@dgipr/schemas';
 import { createGeneration, requestArticlePoster } from '../lib/api';
 import { useTasks } from '../lib/TasksProvider';
@@ -235,6 +239,10 @@ export function NextActions({
   // box on the card above, which edits the clip rather than starting over; the way to start
   // over is the create form, with the poster attached again.
   if (isDynamicPosterCategory(detail.category)) return null;
+  // Nor, in v1, for a carousel: the edit-note re-run below is built for a single poster or an
+  // article, and would submit a run with none of the carousel's own choices (its slide count).
+  // Its slides are changed on the card above; a fresh carousel starts from the create form.
+  if (isCarouselCategory(detail.category)) return null;
 
   const isSocial = isSocialCategory(detail.category);
 

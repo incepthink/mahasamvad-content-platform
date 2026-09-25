@@ -17,7 +17,6 @@ import type {
   PosterImageFeedbackRequest,
 } from '@dgipr/schemas';
 import {
-  Copy,
   Download,
   ImageDown,
   // Palette — the "वेगळ्या रंगात तयार करा" recolour redo, hidden from the UI (see the
@@ -27,14 +26,12 @@ import {
   SquarePen,
 } from 'lucide-react';
 import {
-  generateCaption,
   plainPosterDownloadUrl,
   posterDownloadUrl,
   publishGeneration,
   regeneratePoster,
   sendCaptionFeedback,
   sendPosterImageFeedback,
-  updateCaption,
 } from '../lib/api';
 import { STR } from '../lib/strings';
 import { errorMessage } from '../lib/errorMessage';
@@ -53,6 +50,7 @@ import { CanvaLink } from './CanvaLink';
 // keyboard, which a controlled box can overwrite half-formed. See ComposeSafeInput.
 import { ComposeSafeInput, ComposeSafeTextarea } from './ComposeSafeInput';
 import { ErrorNotice } from './ErrorNotice';
+import { SocialCaptionEditor } from './SocialCaptionEditor';
 
 type ChangeTab = 'caption' | 'poster';
 
@@ -72,7 +70,6 @@ export function SocialPostView({
   // running before their 202, and the panel files a still-`completed` row as terminal.
   onImageWorkStarted?: (() => void) | undefined;
 }) {
-  const [copied, setCopied] = useState(false);
   const [pending, setPending] = useState(false);
   // Direct publish to the official account: two-step confirm (posting is
   // outward-facing and irreversible), then a synchronous API call. The live-post
@@ -107,17 +104,8 @@ export function SocialPostView({
   // round, so switching between them never discards anything.
   const [annotMode, setAnnotMode] = useState<AnnotatorMode | null>(null);
   const annotOpen = annotMode !== null;
-  // The caption is always live. `baseline` is the server's text: when it changes —
-  // an AI revision landed, or the page reloaded — both reset, but ONLY while the box
-  // is clean, so a refresh can never wipe something half-typed.
-  const [captionDraft, setCaptionDraft] = useState(detail.article ?? '');
-  const [captionBaseline, setCaptionBaseline] = useState(detail.article ?? '');
-  const [savingCaption, setSavingCaption] = useState(false);
-  const [captionSaved, setCaptionSaved] = useState(false);
-  const [captionError, setCaptionError] = useState<string | null>(null);
-  // Asking for the first caption on a run created poster-only. Local only until the
-  // 202 lands; after that detail.captionRevising drives the state, like the AI revision.
-  const [startingCaption, setStartingCaption] = useState(false);
+  // The caption box itself — its draft, autosave and generate button — is
+  // SocialCaptionEditor, shared with the carousel card.
   // One fold, two change requests. Both drafts live here so switching a pill is a
   // pure view change — nothing typed is thrown away.
   const [changeTab, setChangeTab] = useState<ChangeTab>('caption');
@@ -126,25 +114,10 @@ export function SocialPostView({
   const [sendingChange, setSendingChange] = useState(false);
   const [changeError, setChangeError] = useState<string | null>(null);
 
-  const captionDirty = captionDraft !== captionBaseline;
-  if (
-    !captionDirty &&
-    detail.article !== null &&
-    detail.article !== captionBaseline
-  ) {
-    setCaptionBaseline(detail.article);
-    setCaptionDraft(detail.article);
-  }
-  // Code points, not `.length`: the label reads "अक्षरे", so an emoji counts once.
-  const captionLength = Array.from(captionDraft).length;
   // The caption revision runs off the row's status (like translation), so it is read
   // from the payload flag rather than from `busy`.
   const captionRevising = detail.captionRevising;
-  const captionMissing = detail.article === null;
-  const captionGenerating =
-    captionMissing && (startingCaption || captionRevising);
   const showSpinner = busy || pending;
-  const settled = detail.status === 'completed' && !showSpinner;
   // Poster edits do NOT need a completed row — every poster route (image-feedback,
   // regenerate, restore) asks only for a poster and no running job. Gating them on
   // 'completed' is what left a run whose last edit failed with a visible poster and no way
@@ -153,59 +126,6 @@ export function SocialPostView({
     detail.posterUrl !== null &&
     (detail.status === 'completed' || detail.status === 'failed') &&
     !showSpinner;
-
-  // Copies what is on screen, so an unsaved hand edit copies as the user sees it.
-  const copyCaption = async () => {
-    if (!captionDraft) return;
-    try {
-      await navigator.clipboard.writeText(captionDraft);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1800);
-    } catch {
-      /* clipboard blocked — ignore */
-    }
-  };
-
-  // Autosave: the box has no save button, so leaving it is the commit. Silent when
-  // nothing changed, and never fires mid-revision (the job owns the column then).
-  const saveCaptionOnBlur = async () => {
-    if (!captionDirty || savingCaption || captionRevising) return;
-    const text = captionDraft.trim();
-    // An empty box on a run that never had a caption is not an edit to persist.
-    if (text.length === 0) return;
-    setSavingCaption(true);
-    setCaptionError(null);
-    try {
-      const saved = await updateCaption(detail.id, text);
-      setCaptionBaseline(saved);
-      setCaptionDraft(saved);
-      setCaptionSaved(true);
-      setTimeout(() => setCaptionSaved(false), 2500);
-      // Pull the row back so publish + history read the saved text (this row is
-      // settled, so no poll is running).
-      await onChanged();
-    } catch (error) {
-      setCaptionError(errorMessage(error));
-    } finally {
-      setSavingCaption(false);
-    }
-  };
-
-  // First caption for a poster-only run. The job reports through captionRevising, so
-  // this only has to survive the gap until the next poll. An existing caption is
-  // changed through the fold below instead — the generate route refuses to overwrite.
-  const startCaption = async () => {
-    setStartingCaption(true);
-    setCaptionError(null);
-    try {
-      await generateCaption(detail.id);
-      await onChanged();
-    } catch (error) {
-      setCaptionError(errorMessage(error));
-    } finally {
-      setStartingCaption(false);
-    }
-  };
 
   const publish = async () => {
     setPublishingPost(true);
@@ -577,83 +497,11 @@ export function SocialPostView({
               text already on screen. */}
           {/* The caption is a live textarea from the first render — no "बदल करा" step.
               A poster-only run gets an empty one plus the generate icon. */}
-          <div className="caption-editor">
-            <label className="caption-label" htmlFor="social-caption">
-              {STR.captionLabel}
-            </label>
-            <div className="caption-box">
-              <ComposeSafeTextarea
-                id="social-caption"
-                className="social-caption-edit"
-                value={captionDraft}
-                onChange={(next) => {
-                  setCaptionDraft(next);
-                  setCaptionError(null);
-                }}
-                onBlur={() => void saveCaptionOnBlur()}
-                rows={10}
-                readOnly={captionMissing}
-                tabIndex={captionMissing ? -1 : undefined}
-                disabled={savingCaption || captionRevising}
-                aria-label={STR.captionLabel}
-              />
-              {captionMissing ? (
-                <div className="caption-generate-overlay">
-                  <button
-                    type="button"
-                    className="btn btn-primary caption-generate-button"
-                    aria-label={
-                      captionGenerating
-                        ? STR.captionGenerating
-                        : STR.captionGenerate
-                    }
-                    disabled={!settled || captionGenerating}
-                    onClick={() => void startCaption()}
-                  >
-                    {captionGenerating ? (
-                      <span className="spinner" aria-hidden="true" />
-                    ) : (
-                      STR.captionGenerate
-                    )}
-                  </button>
-                </div>
-              ) : (
-                <div className="caption-box-actions">
-                  <button
-                    type="button"
-                    className="icon-btn icon-btn-sm"
-                    title={copied ? STR.copied : STR.iconCopyCaption}
-                    aria-label={copied ? STR.copied : STR.iconCopyCaption}
-                    disabled={captionDraft.length === 0}
-                    onClick={() => void copyCaption()}
-                  >
-                    <Copy size={16} strokeWidth={1.9} aria-hidden="true" />
-                  </button>
-                </div>
-              )}
-            </div>
-            <div className="caption-meta">
-              <span className="caption-counter">
-                {captionLength} {STR.captionCounterLabel}
-              </span>
-            </div>
-            {captionRevising || startingCaption ? (
-              <span className="translating-note">
-                <span className="spinner" aria-hidden="true" />
-                {startingCaption ? STR.captionGenerating : STR.revisingCaption}
-              </span>
-            ) : null}
-            {savingCaption ? (
-              <p className="hint">{STR.captionSavingShort}</p>
-            ) : null}
-            {captionSaved ? (
-              <p className="form-success">{STR.captionSaved}</p>
-            ) : null}
-            {captionError ? <ErrorNotice message={captionError} /> : null}
-            {detail.captionReviseError ? (
-              <ErrorNotice message={detail.captionReviseError} />
-            ) : null}
-          </div>
+          <SocialCaptionEditor
+            detail={detail}
+            onChanged={onChanged}
+            busy={showSpinner}
+          />
 
           {/* Marker notes: shown only once something is actually marked on the poster
               (or a marked round was just sent). Their submit action sits below the

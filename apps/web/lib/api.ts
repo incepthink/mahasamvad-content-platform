@@ -468,6 +468,7 @@ const LEGACY_FACET_FORMATS: readonly RunFormatKey[] = [
   'facebook',
   'youtube',
   'dynamic_poster',
+  'carousel',
   'caption',
 ];
 const LEGACY_FACET_STATUSES: readonly RunStatusFilter[] = [
@@ -759,6 +760,44 @@ export async function regeneratePoster(
 // true = that exact step is running again (poll for it), false = there was nothing to re-run
 // and the run was simply put back in working order (its poster and versions are untouched
 // either way). Neither shape starts a new generation.
+// ---------- Carousel (migration 0059) ----------
+// Every slide address is 1-based, the number the officer sees.
+
+// "हा स्लाइड पुन्हा तयार करा" — or 'all', "सर्व स्लाइड पुन्हा". The row flips to running before
+// the 202, so the caller just refreshes to start polling.
+export async function regenerateCarouselSlide(
+  id: string,
+  slide: number | 'all',
+): Promise<void> {
+  await requestJson(`/api/generations/${id}/carousel/${slide}/regenerate`, {
+    method: 'POST',
+  });
+}
+
+// A marker round on one slide — the poster's pixel-feedback request, unchanged.
+export async function sendCarouselSlideFeedback(
+  id: string,
+  slide: number,
+  input: PosterImageFeedbackRequest,
+): Promise<void> {
+  await requestJson(`/api/generations/${id}/carousel/${slide}/feedback`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+// A URL rather than a fetch, for posterDownloadUrl's reason: only the server can force a
+// cross-origin download. `plain` is the render without the badge and footer.
+export function carouselSlideDownloadUrl(
+  id: string,
+  slide: number,
+  plain = false,
+): string {
+  return withDeviceParam(
+    `${API_URL}/api/generations/${id}/carousel/${slide}/slide.png${plain ? '?plain=1' : ''}`,
+  );
+}
+
 export async function retryGeneration(id: string): Promise<boolean> {
   const body = await requestJson(`/api/generations/${id}/retry`, {
     method: 'POST',

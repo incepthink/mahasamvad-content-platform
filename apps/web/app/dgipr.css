@@ -9940,3 +9940,179 @@ a.file-row-link > svg:last-child {
     grid-column: 1 / -1;
   }
 }
+
+/* ---------- Carousel (migration 0059) ----------
+
+   The slides as a horizontal scroll-snap strip: ONE slide per view on a phone (the swipe is
+   the natural gesture there), and a row of slides at a comfortable poster width on a desktop,
+   still scrolling when there are more than fit. Every slide is the same 4:5 poster, so the
+   placeholder reserves exactly that box while a slide is still being drawn — the strip does
+   not jump as the slides land. */
+.carousel-strip {
+  display: flex;
+  gap: 16px;
+  margin: 12px 0 0;
+  padding: 0 0 8px;
+  list-style: none;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.carousel-slide {
+  flex: 0 0 min(100%, 340px);
+  min-width: 0;
+  scroll-snap-align: start;
+}
+
+.carousel-frame .poster-image,
+.carousel-placeholder {
+  aspect-ratio: 4 / 5;
+  width: 100%;
+}
+
+.carousel-frame .poster-image {
+  object-fit: cover;
+}
+
+.carousel-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 16px;
+  text-align: center;
+  border-radius: 14px; /* matches .poster-image */
+  border: 1px dashed var(--border-strong);
+  background: var(--surface);
+}
+
+.carousel-slide-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 8px;
+  margin: 10px 0 0;
+  font-weight: 600;
+  overflow-wrap: break-word;
+}
+
+.carousel-slide-number {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+  font-size: 0.82rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.carousel-slide-versions {
+  margin: 4px 0 0;
+}
+
+.carousel-slide .poster-icon-actions {
+  margin-top: 8px;
+}
+
+.carousel-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.carousel-dots {
+  display: flex;
+  gap: 8px;
+}
+
+/* A 10px dot inside a 28px hit area: the dot is what reads, the padding is what a thumb
+   can actually press. */
+.carousel-dot {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.carousel-dot::after {
+  content: '';
+  position: absolute;
+  inset: 9px;
+  border-radius: 999px;
+  background: var(--border-strong);
+  transition: background 0.15s ease;
+}
+
+.carousel-dot[aria-current='true']::after {
+  background: var(--accent);
+}
+
+.carousel-dot:focus-visible {
+  outline: 3px solid var(--ring);
+  outline-offset: 0;
+  border-radius: 999px;
+}
+
+.carousel-counter {
+  min-width: 7ch;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.carousel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin-top: 16px;
+}
+
+.carousel-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.carousel-actions .hint {
+  margin: 0;
+  flex: 1 1 260px;
+}
+
+.carousel-editor {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.carousel-editor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.carousel-editor-head h3 {
+  margin: 0;
+}
+
+.carousel-publish-note {
+  margin: 18px 0 16px;
+}
+
+@media (max-width: 560px) {
+  .carousel-slide {
+    flex-basis: 100%;
+  }
+}

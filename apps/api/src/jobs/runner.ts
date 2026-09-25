@@ -538,7 +538,8 @@ function errorMessage(error: unknown): string {
 // Quality the image renders run at — must stay in sync with OPENAI_IMAGE_QUALITY
 // (openai-image.ts) and the two n8n workflow JSONs. Used only to attribute the fixed
 // per-render image cost; image usage itself is not measurable (the render runs in n8n).
-function imageQuality(): ImageQuality {
+// Exported for jobs/carousel.ts, which attributes the same fixed per-render price.
+export function imageQuality(): ImageQuality {
   const q = process.env.OPENAI_IMAGE_QUALITY;
   return q === 'high' || q === 'low' ? q : 'medium';
 }
@@ -691,6 +692,9 @@ export function runJob(
             task === 'dynamic_poster_creation' ||
             task === 'dynamic_poster_revision' ||
             task === 'dynamic_poster_crop' ||
+            task === 'carousel_creation' ||
+            task === 'carousel_slide_regeneration' ||
+            task === 'carousel_slide_revision' ||
             task === 'poster_regeneration' ||
             task === 'poster_content_revision' ||
             task === 'poster_image_revision';
@@ -1649,13 +1653,19 @@ function socialPlatformOf(
   category: GenerationRow['category'],
 ): 'twitter' | 'facebook' {
   if (category === 'twitter' || category === 'facebook') return category;
+  // A carousel is a multi-image Facebook/Instagram-shaped post, so it takes the long-form
+  // caption — the फक्त कॅप्शन lane's choice, for the same reason (the twitter branch carries X's
+  // 280-character rule, and a carousel caption describes several slides).
+  if (category === 'carousel') return 'facebook';
   throw new Error(`Caption requested for non-social category: ${category}`);
 }
 
 // Re-edit a completed poster without rerunning classify/copy. The feedback PROMPT is built
 // in the API (buildFeedbackPrompt) and renderSocialPosterEdit just edits the current poster
 // with it — the same render path as the initial run, differing only in image + prompt.
-async function renderSocialPosterFeedbackEdit(
+// Exported for jobs/carousel.ts: a carousel slide is a DGIPR social poster on the same canvas,
+// so a marker round on one slide is exactly this edit.
+export async function renderSocialPosterFeedbackEdit(
   currentPosterUrl: string,
   feedback: string,
   // > 0 when currentPosterUrl carries numbered marker boxes (see the article
@@ -1756,7 +1766,7 @@ const STYLE_HISTORY_DEPTH = 8;
 const SOCIAL_STYLE_CATEGORIES = ['twitter', 'facebook'] as const;
 const ARTICLE_STYLE_CATEGORIES = ['news', 'scheme'] as const;
 
-async function recentStyleHistory(
+export async function recentStyleHistory(
   client: SupabaseClient,
   categories: readonly string[],
 ): Promise<StyleHistory> {
@@ -2596,7 +2606,7 @@ async function renderAndStoreYoutubeThumbnail(
 // Fetch a library master over its public Storage URL. Small and explicit rather than routed
 // through downloadPng: SelectedMaster carries a URL (what the n8n lanes are handed), not a
 // storage path.
-async function fetchReferencePng(url: string): Promise<Buffer> {
+export async function fetchReferencePng(url: string): Promise<Buffer> {
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(
@@ -3454,7 +3464,7 @@ export function startPosterFeedbackJob(
 // blue box is optional, so without this such a round would be logged blank — and
 // the history is the officer's record of what they asked for, including WHICH of
 // the two gestures they used.
-const STR_CLEAR_SPACE_HISTORY: Record<PosterClearAction, string> = {
+export const STR_CLEAR_SPACE_HISTORY: Record<PosterClearAction, string> = {
   displace: 'ही जागा मोकळी करा — आतील मजकूर दुसरीकडे हलवा',
   remove: 'ही जागा मोकळी करा — आतील मजकूर काढून टाका',
 };

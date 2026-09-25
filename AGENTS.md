@@ -3111,6 +3111,147 @@ client id/secret — see the milestone below.
 
 ## Latest Implementation Milestone
 
+- **Carousel posters (कॅरोसेल): one note → a cover plus 2-3 detail slides in one look**
+  (2026-09-24, migration 0059, no n8n). DGIPR regularly publishes multi-image posts (an election
+  programme as cover + schedule + polling slides; a health "प्रगती" as cover + facilities list +
+  city cards); the create form could only make one image per run and everything downstream assumed
+  one poster per generation. A new format card, category, job and view — the `dynamic_poster`
+  precedent — so no single-poster code path changed shape.
+  - **Plan once, then render.** `planCarousel` is ONE strict-JSON `POSTER_COPY_MODEL` call
+    returning `{ seriesTitle, slides: [{ role, title, subtitle, items: [{text, emphasis}] }] }`;
+    the pure `normalizeCarouselPlan` then GUARANTEES what the prompt only asks: the count clamped to
+    3-4 (or exactly the officer's ३/४, by merging surplus detail slides or halving the fullest one),
+    every digit run present in the note or the line is DROPPED (never re-valued, never a failed
+    run), no slide above 12 items with overflow moved to the NEXT slide, and verified scheme names
+    expanded. The digit check was generalised out of `video/video-key-point.ts` into
+    `generation/digit-grounding.ts`; the key-point guard delegates to it.
+  - **AMENDED 2026-09-25 — all three carousel prompts are now the DEPARTMENT'S OWN WORDING**,
+    reproduced as given with only the `{N}`/`{index}`/`{seriesTitle}`/`{slideTitle}`/`{items}`
+    slots filled: the planner is two sentences (field meanings moved into the json_schema
+    `description`s; the model no longer writes `subtitle`/`emphasis`/`role`), and the cover/detail
+    prompts carry their own NUMBERS / TEXT ACCURACY / ICONS / DO NOT USE / 180 × 170 / 16px blocks
+    instead of the shared reserved-zone rules. No palette is assigned (the model picks colour;
+    `paletteId` is stored null) and there is no swipe cue. A pinned-template cover gets one extra
+    opening line calling the image a layout reference. The deterministic guarantees
+    (`normalizeCarouselPlan`, digit grounding, scheme-name lock) are unchanged. Do not re-add
+    prompt rules without asking the department. What follows describes the original design.
+  - **AMENDED AGAIN 2026-09-25 — every slide is now GENERATED FRESH; the SYSTEM is shared, not the
+    pixels.** Generation 4b18548a came back as four copies of one photograph with different text:
+    gpt-image's edit keeps whatever it is not told to change, and the detail prompt only asked for a
+    body swap. So (1) the planner's json_schema gained a per-slide English `visual` (what THIS
+    slide's picture shows, from its own lines; `CarouselPlanSlideSchema.visual`, jsonb, defaulted
+    `''` — no migration), digit-grounded like every other line and capped at 300 chars; a split
+    slide inherits its parent's; (2) detail slides are `generateImage`, not `editImage([coverRaw])`;
+    (3) consistency is carried by what every slide's prompt states IDENTICALLY — one palette
+    (`pickSocialPalette`, stored as `carousel.paletteId`, emitted through the fresh social poster's
+    `buildFreshColourDirection`) and one `carouselSeriesFrame` (header band with the series title in
+    the same position/size/typography, same icon style, margins). The palette is assigned once before
+    the cover and REUSED by a retry, a detail redo and a cover-only redo; only "सर्व स्लाइड पुन्हा"
+    assigns a new one (away from the current family). A pinned-template cover still edits the
+    master but takes the palette too. The cover's plain copy is now best-effort like every slide's;
+    a legacy carousel with `paletteId` null keeps rendering without a colour block. The department's
+    NUMBERS / TEXT ACCURACY / ICONS / DO NOT USE / margin blocks are unchanged; the new SERIES FRAME,
+    PICTURE and "new picture, own arrangement" lines are OURS — agree them with the department. The
+    bullet below describes the superseded edit-from-cover design.
+    **AMENDED AGAIN 2026-09-25 — the palette block is gone and the rules are the SOCIAL POSTER'S.**
+    Slides came back with a painted lavender "reserved box" around the top-right badge: the detail
+    prompt's hand-shortened "keep the top-right 180 × 170 px area clear" asked for an empty area.
+    Both prompts now import `NUMBERS_RULE`/`TEXT_ACCURACY_RULE`/`ICONS_RULE`/`DO_NOT_USE_RULE`/
+    `buildHeadlineMarginsRule`/`buildAreaRule` from `minimal-creative-prompt.ts` (the fresh social
+    poster's prompt), whose badge rule is about TEXT only, and emit no colour block at all — the
+    model chooses colours as on social. `assignPalette`/`carousel.paletteId` stay (history only, as
+    the social runner still stores a palette it no longer prompts with); the series frame gained
+    "the same colour scheme on every slide", now the only cross-slide colour cue — accepted trade:
+    slides may drift in colour. Harness asserts the shared rules verbatim in both prompts and no
+    "area clear". No schema/migration/web change; deploy `@dgipr/content-engine` dist → API.
+    **AMENDED A THIRD TIME 2026-09-25 — the planner ART-DIRECTS and each slide gets its own
+    LAYOUT** (options C + D of `~/.claude/plans/i-only-gave-thsi-vectorized-wigderson.md`; no
+    migration). The fresh-generation fix above still produced one template repeated (e275b9fb):
+    N blind calls asked for "a title and some lines" come back in gpt-image's one default shape,
+    and a flat bullet list can only be drawn as a bullet list. Three changes. (1) **The planner's
+    json_schema now returns what a designer decides before drawing** — a `design_system` paragraph
+    (header treatment, two-tone headline, panel style, colours by NAME) stated identically in every
+    prompt, a `dateline`, and per slide `title_emphasis`, `subtitle`, `layout`, lines grouped under
+    section `heading`s, an attributed `quote` and a `closing` line. The department's two-sentence
+    prompt is unchanged; field meanings live in the schema descriptions. Sections are stored PER
+    LINE (`CarouselItem.section`) so overflow/merge/split keep the grouping for free. Every new
+    string passes the existing guards plus two new ones: a quote's speaker and a dateline's place
+    must occur in the note verbatim, or they are dropped. (2) **`carousel-layouts.ts`** — 7 body
+    layouts (`hero_cards`, `sectioned_cards`, `icon_list`, `timeline`, `figures`, `quote_panel`,
+    `split`) with content-eligibility tests; `assignCarouselLayouts` keeps a proposal only when it
+    fits and is unused, so layouts differ across the post by construction. The layout is stated
+    as a decision in a `THIS SLIDE'S LAYOUT` block (not on a pinned-master cover, whose master
+    decides). (3) **Slide 1 is attached to detail slides as a CONTEXT image** (`editImage(coverRaw)`)
+    with `SERIES_REFERENCE_RULE`: keep its header, pills, colours, type and icon style; do NOT reuse
+    its photograph, scene, lines or body layout. That second half is what the 4b18548a
+    edit-from-cover prompt lacked. `CAROUSEL_SERIES_REFERENCE=off` restores blind generation. Also:
+    "not be congested" is gone from the opening. (A `n/N` pager pill and a dateline pill were
+    added the same day and REMOVED again at the department's request, together with the stock
+    decoration they read as generic AI design: the planner no longer asks for a dateline
+    (`CarouselPlan.dateline` stays, always `''`), no prompt prints a slide number, and the series
+    frame carries `FLAT_STYLE_RULE` — no coloured bar, border strip, underline or accent rule under
+    icons, cards or headings; `icon_list` lost its "round badge", the closing line its
+    "highlighted callout". Do not re-add any of these without asking.) **ICONS and DO NOT USE (no maps, no bottom swooshes) are
+    kept VERBATIM** by the department's decision — plan D's "allow a state outline / corner curve /
+    bigger icon badges" was deliberately not done, and no layout asks for large icons. Harnesses:
+    `carousel-layouts.ts` (11), `build-carousel-prompt.ts` (34), `plan-carousel.ts --check` (37).
+    **Not done: options A/B** (the one-conversation Responses-API image-tool engine) — A is a paid
+    experiment; B depends on its result. **Left for a real run**: the Buldhana note and a
+    scheme/deadline note side by side against e275b9fb — a different body per slide, one frame, no
+    ungrounded digits, no badge clash, Devanagari accuracy, and that slide 1's photo does NOT reappear.
+    Deploy: `@dgipr/schemas` → `@dgipr/content-engine` dists → API.
+  - **Slide 1 sets the look; slides 2..N are EDITS of it.** The cover is generated from scratch
+    with one `pickSocialPalette` plan (or edited from a pinned twitter master) and told its header
+    band and series title will repeat; each detail slide is `editImage([coverRaw], …)` — "KEEP the
+    background, header band, series-title treatment, palette, typography, panel style; REPLACE the
+    body" — because cross-generation consistency is gpt-image's known weakness and image-to-image is
+    the fix /video already relies on. The anchor is the RAW, pre-chrome cover, so there is no badge
+    on the canvas to copy; every slide is then finished by `overlayTwitterChrome` (1280x1600, the
+    social poster exactly). Both prompts end with the shared reserved-zone blocks.
+  - **State is one jsonb column, and slides are persisted as they land.** `generations.carousel`
+    holds `requestedSlides` (written at insert, so a retry reproduces it), the plan, and per slide
+    its current path, plain path, version and history — so `generation_revisions`/`nextVersion` are
+    untouched. Detail slides render two at a time and each write replaces the whole value, so writes
+    go through a per-generation serialized chain holding one in-memory authoritative copy. Objects
+    are versioned (`slide-{k}-v{n}.png` + `-plain.png`) and uploaded with upsert, safe because a
+    version is recorded only after its upload. `poster_path` carries the current cover, so history
+    cards, the tasks panel and the gallery needed no change. A retry of a failed carousel RESUMES
+    (only missing slides render) — caught in the retry route before the "produced nothing" branch,
+    which would otherwise see the cover's `posterPath` and just mark the row completed.
+  - **Per-slide edits**: a one-slide redo (a detail slide re-drawn from the CURRENT cover; the cover
+    alone gives the post a new look, which is why "सर्व स्लाइड पुन्हा" sits beside it), and a marker
+    round on one slide reusing `annotateFeedbackRegions`, `interpretImageFeedback` and
+    `renderSocialPosterFeedbackEdit` unchanged. Both are armed edits, so a failure recovers the row
+    rather than hiding the slides. The detail payload carries `carouselSlides` and
+    `carouselBusySlides` (an in-process registry), so a redo spins on its own slide only.
+  - **Predicates**: `isCarouselCategory` (NOT social — own job, and no publishing in v1) and
+    `carriesSocialCaption` (social ∪ carousel), which the three caption routes and the web busy gate
+    now ask; `referenceCategoryOf('carousel') === 'twitter'`; the caption takes the long-form
+    facebook branch. Every single-poster edit route refuses a carousel in Marathi; publish and Canva
+    answer `CAROUSEL_PUBLISH_PENDING_MESSAGE` (phase 2: X with up to 4 media ids, the FB Page's
+    unpublished `/photos` + `/feed attached_media`, a multi-slide PPTX, a ZIP).
+  - **Web**: the कॅरोसेल entry in the format menu, a स्वयं / ३ / ४ control and the caption opt-in in
+    the composer (no verbatim toggle — the text is always planned across slides), `CarouselView`
+    (scroll-snap strip, one slide per view on a phone; arrows/dots/counter only while the strip
+    actually overflows, measured with a ResizeObserver), and the caption box EXTRACTED into
+    `SocialCaptionEditor`, which `SocialPostView` now renders too rather than a copy.
+  Verified 2026-09-24: workspace typecheck **7/7 green**, eslint clean on every touched file,
+  prettier clean on every hunk of mine (the remaining complaints in `routes/generations.ts`,
+  `jobs/analytics.ts`, `NoteComposer.tsx` and `database/generations.ts` are pre-existing — checked
+  against their HEAD blobs through stdin — so do NOT `--write` them); `plan-carousel --check` 20/20,
+  `build-carousel-prompt` 22/22, the video key-point harness still green, 15 schema-guard checks;
+  **live against the running API with 0059 NOT applied**: the detail payload carries the new fields
+  on an existing row, the new routes' guards answer (400 not-a-carousel, Marathi 404 on a slide
+  download), `carouselSlides` on a twitter create is a 400, and a carousel create fails at INSERT
+  (500, no row, nothing billed); and **52 browser assertions at 1360 and 390** with the create POST
+  and the detail GET mocked (the menu entry, the three-way control, the request body, the strip with
+  a placeholder slide while running, nav, the per-slide editor, no overflow, no page errors).
+  **0059 APPLIED to RDS 2026-09-25** (CHECK widened, `carousel` jsonb present, PostgREST reloaded). **Left for a real run (image spend, ~N+1 calls)**: the election note on स्वयं,
+  confirming 3-4 slides at 1280x1600 sharing one header/palette/footer, every digit in the note,
+  one slide redo and one marker round changing only that slide, the caption toggle, and a
+  mid-render failure resuming only the missing slides. **Deploy: 0059 → `@dgipr/schemas` →
+  `@dgipr/database` → `@dgipr/content-engine` dists → API + web, shipped together.** No n8n.
+
 - **Meeting VIDEOS are accepted as recordings, and only their audio is uploaded** (2026-09-24, no
   migration, no n8n, no new server env). DLOs film meetings and press meets on a phone; every
   recording picker (`/dlo`, `/transcribe`, `/chat`) accepted audio containers only. Allowing

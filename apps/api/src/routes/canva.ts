@@ -12,7 +12,11 @@ import {
   type SupabaseClient,
 } from '@dgipr/database';
 import { buildCanvaSocialPosterLayers } from '@dgipr/poster-renderer';
-import { isSocialCategory } from '@dgipr/schemas';
+import {
+  CAROUSEL_PUBLISH_PENDING_MESSAGE,
+  isCarouselCategory,
+  isSocialCategory,
+} from '@dgipr/schemas';
 import { createLayeredSocialPosterPptx } from '../canva/layered-poster.js';
 
 const CANVA_API = 'https://api.canva.com/rest/v1';
@@ -502,6 +506,13 @@ export function registerCanvaRoutes(
     const account = canvaAccount(query.account);
     const row = await getGeneration(client, id);
     if (!row) return reply.code(404).send({ error: { message: 'Not found.' } });
+    // Phase 2: a carousel becomes a multi-slide design, not its cover alone. Refused before the
+    // OAuth round trip, so the officer is not sent through Canva's sign-in for nothing.
+    if (isCarouselCategory(row.category)) {
+      return reply
+        .code(400)
+        .send({ error: { message: CAROUSEL_PUBLISH_PENDING_MESSAGE } });
+    }
     if (!row.posterPath) {
       return reply
         .code(409)

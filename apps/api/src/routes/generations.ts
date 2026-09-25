@@ -92,7 +92,10 @@ import {
   TranslateGenerationRequestSchema,
   UpdateCaptionRequestSchema,
   UpdateCopyRequestSchema,
+  CAROUSEL_PUBLISH_PENDING_MESSAGE,
+  carriesSocialCaption,
   isArticleCategory,
+  isCarouselCategory,
   isDynamicPosterCategory,
   isMotionSourcePath,
   isSocialCategory,
@@ -153,6 +156,15 @@ import {
   startMotionCropJob,
   startMotionFeedbackJob,
 } from '../jobs/dynamic-poster.js';
+import {
+  carouselSlidePaths,
+  carouselSlidesOf,
+  getCarouselBusySlides,
+  initialCarouselState,
+  startCarouselJob,
+  startCarouselSlideFeedbackJob,
+  startCarouselSlideRegenerateJob,
+} from '../jobs/carousel.js';
 import { rememberDesignations } from '../jobs/designation-writeback.js';
 import { prepareTranslationTerms } from '../jobs/translation-terms.js';
 import { recordTasksFromCost } from '../jobs/service-usage.js';
@@ -171,6 +183,21 @@ const ProgressPingSchema = z.object({ step: GenerationStepSchema });
 const PublishRequestSchema = z.object({
   platform: z.enum(['twitter', 'facebook']).optional(),
 });
+
+// A slide address on the carousel routes: 1-based, as the officer sees it, or `all` where the
+// route allows it. Null = not a slide address at all.
+function parseSlideTarget(
+  raw: string,
+  allowAll: boolean,
+): number | 'all' | null {
+  if (allowAll && raw === 'all') return 'all';
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 1 && n <= 12 ? n : null;
+}
+
+// What a single-poster route answers for a carousel run.
+const CAROUSEL_SLIDE_ROUTE_MESSAGE =
+  'कॅरोसेलमधील बदल त्या-त्या स्लाइडवरूनच करा.';
 
 // In-flight publish guard: posting to the official account is irreversible, so a
 // double click must never produce two live posts. In-process only (like the
@@ -335,6 +362,7 @@ const FACET_FORMATS: readonly RunFormatKey[] = [
   'facebook',
   'youtube',
   'dynamic_poster',
+  'carousel',
   'caption',
 ];
 const FACET_STATUSES: readonly RunStatusFilter[] = [
@@ -427,7 +455,9 @@ function posterVersionPaths(
   row: GenerationRow,
   revisions: readonly { posterPath: string | null; createdAt: string }[],
 ): { path: string; createdAt: string }[] {
-  if (!row.posterPath) return [];
+  // A carousel's poster_path is its CURRENT COVER, and its history lives per slide in the
+  // carousel column — the poster-v{n} numbering below does not exist for it.
+  if (!row.posterPath || isCarouselCategory(row.category)) return [];
   return [
     { path: `generations/${row.id}/poster-v1.png`, createdAt: row.createdAt },
     ...revisions.flatMap((revision) =>
@@ -577,6 +607,9 @@ async function toDetail(
       : null,
     motionPrompt: row.motionPrompt,
     motionVersions,
+    // Carousel (0059). Empty on every other lane.
+    carouselSlides: carouselSlidesOf(client, row),
+    carouselBusySlides: getCarouselBusySlides(row.id),
     posterVersions,
     articleVersions,
     // The colour + composition this poster was assigned, flattened to one Marathi line for the
@@ -673,7 +706,9 @@ export function registerGenerationRoutes(
       }
     }
     if (body.referenceTypeId) {
-      if (!isSocialCategory(body.category)) {
+      // A type pin chooses from the twitter master library: the two social lanes and the
+      // carousel's cover.
+      if (referenceCategoryOf(body.category) !== 'twitter') {
         return reply.code(400).send({
           error: {
             message: 'A reference type can only be pinned for a social post.',
@@ -840,6 +875,11 @@ export function registerGenerationRoutes(
       motionRegion: isDynamicPosterCategory(body.category)
         ? body.motionRegion
         : undefined,
+      // The carousel's slide count (migration 0059), on the row so a retry reproduces it.
+      // Omitted on every other lane, so an un-applied 0059 costs only a carousel create.
+      carousel: isCarouselCategory(body.category)
+        ? initialCarouselState(body.carouselSlides)
+        : undefined,
     });
     // Opened in progress; the job settles it under the same key (runJob's task).
     trackGenerationActivity(
@@ -854,7 +894,7 @@ export function registerGenerationRoutes(
             : body.referenceTypeId
               ? 'type'
               : 'auto',
-          ...(isSocialCategory(row.category)
+          ...(carriesSocialCaption(row.category)
             ? { caption: body.generateCaption === true }
             : {}),
         },
@@ -876,6 +916,11 @@ export function registerGenerationRoutes(
       // Two calls and nothing else: gpt-5.6-sol writes the motion prompt, gemini-omni renders
       // the clip. No article, no caption, no reference library, no n8n.
       startDynamicPosterJob(client, row.id);
+    } else if (isCarouselCategory(row.category)) {
+      // One plan call, then the cover and the detail slides; the caption only when asked for.
+      startCarouselJob(client, row.id, {
+        generateCaption: body.generateCaption === true,
+      });
     } else {
       startGenerationJob(client, row.id);
     }
@@ -1187,7 +1232,7 @@ export function registerGenerationRoutes(
           .code(404)
           .send({ error: { message: 'Generation not found.' } });
       }
-      if (!isSocialCategory(row.category)) {
+      if (!carriesSocialCaption(row.category)) {
         return reply.code(400).send({
           error: { message: 'Only social-post runs have a caption.' },
         });
@@ -1224,7 +1269,7 @@ export function registerGenerationRoutes(
           .code(404)
           .send({ error: { message: 'Generation not found.' } });
       }
-      if (!isSocialCategory(row.category)) {
+      if (!carriesSocialCaption(row.category)) {
         return reply.code(400).send({
           error: { message: 'Only social-post runs have a caption.' },
         });
@@ -1269,7 +1314,7 @@ export function registerGenerationRoutes(
           .code(404)
           .send({ error: { message: 'Generation not found.' } });
       }
-      if (!isSocialCategory(row.category)) {
+      if (!carriesSocialCaption(row.category)) {
         return reply.code(400).send({
           error: { message: 'Only social-post runs have a caption.' },
         });
@@ -1446,6 +1491,13 @@ export function registerGenerationRoutes(
           .code(404)
           .send({ error: { message: 'Generation not found.' } });
       }
+      // A carousel has several slides and no single poster: its edits go through the
+      // /carousel/:index routes, which know which slide they are changing.
+      if (isCarouselCategory(row.category)) {
+        return reply
+          .code(400)
+          .send({ error: { message: CAROUSEL_SLIDE_ROUTE_MESSAGE } });
+      }
       if (isJobRunning(row.id)) {
         return reply
           .code(409)
@@ -1486,6 +1538,13 @@ export function registerGenerationRoutes(
         return reply
           .code(404)
           .send({ error: { message: 'Generation not found.' } });
+      }
+      // A carousel has several slides and no single poster: its edits go through the
+      // /carousel/:index routes, which know which slide they are changing.
+      if (isCarouselCategory(row.category)) {
+        return reply
+          .code(400)
+          .send({ error: { message: CAROUSEL_SLIDE_ROUTE_MESSAGE } });
       }
       if (isJobRunning(row.id)) {
         return reply
@@ -1539,6 +1598,13 @@ export function registerGenerationRoutes(
         return reply
           .code(404)
           .send({ error: { message: 'Generation not found.' } });
+      }
+      // A carousel has several slides and no single poster: its edits go through the
+      // /carousel/:index routes, which know which slide they are changing.
+      if (isCarouselCategory(row.category)) {
+        return reply
+          .code(400)
+          .send({ error: { message: CAROUSEL_SLIDE_ROUTE_MESSAGE } });
       }
       if (
         body.posterHeading !== undefined &&
@@ -1698,6 +1764,13 @@ export function registerGenerationRoutes(
           .code(404)
           .send({ error: { message: 'Generation not found.' } });
       }
+      // A carousel has several slides and no single poster: its edits go through the
+      // /carousel/:index routes, which know which slide they are changing.
+      if (isCarouselCategory(row.category)) {
+        return reply
+          .code(400)
+          .send({ error: { message: CAROUSEL_SLIDE_ROUTE_MESSAGE } });
+      }
       if (isJobRunning(row.id)) {
         return reply
           .code(409)
@@ -1779,6 +1852,32 @@ export function registerGenerationRoutes(
       // Without `motionPath` here a failed FOLLOW-UP would read as "this run produced
       // nothing", take the branch below, and re-render v1 over the clip the officer already
       // had while resetting the Gemini chain to its start.
+      // A CAROUSEL whose own run failed RESUMES rather than starting again: the plan and every
+      // slide that already rendered are on the row, so the re-run draws only the missing ones
+      // (the /video resume doctrine). It has to be caught here, BEFORE the branch below: a
+      // carousel whose cover landed has a posterPath, so that branch would read "something was
+      // produced" and merely mark the row completed, leaving the missing slides missing for
+      // good. An EDIT of a carousel (a redo, a marker round) recovers to `completed` instead, so
+      // it never reaches this branch and takes the armed-retry path further down.
+      if (isCarouselCategory(row.category) && row.status === 'failed') {
+        await updateGeneration(client, row.id, {
+          status: 'queued',
+          step: null,
+          error: null,
+        });
+        clearEditFailure(row.id);
+        trackGenerationActivity(
+          client,
+          request,
+          row,
+          generationJobTask(row.category),
+          { detail: { retry: true } },
+        );
+        startCarouselJob(client, row.id, {
+          generateCaption: row.article !== null,
+        });
+        return reply.code(202).send({ retried: true });
+      }
       if (!row.posterPath && !row.article && !row.motionPath) {
         if (row.status !== 'failed') {
           return reply.code(409).send({
@@ -1864,6 +1963,13 @@ export function registerGenerationRoutes(
           .code(404)
           .send({ error: { message: 'Generation not found.' } });
       }
+      // A carousel has several slides and no single poster: its edits go through the
+      // /carousel/:index routes, which know which slide they are changing.
+      if (isCarouselCategory(row.category)) {
+        return reply
+          .code(400)
+          .send({ error: { message: CAROUSEL_SLIDE_ROUTE_MESSAGE } });
+      }
       if (isJobRunning(row.id)) {
         return reply
           .code(409)
@@ -1920,7 +2026,7 @@ export function registerGenerationRoutes(
       // trace on the row. Counted per category so the analytics page can say which lane the
       // department is really shipping (0043).
       recordUsageEvent(client, {
-        feature: isSocialCategory(row.category) ? 'social' : 'article',
+        feature: carriesSocialCaption(row.category) ? 'social' : 'article',
         action: 'poster_download',
         detail: { category: row.category },
       });
@@ -1980,7 +2086,7 @@ export function registerGenerationRoutes(
         });
       }
       recordUsageEvent(client, {
-        feature: isSocialCategory(row.category) ? 'social' : 'article',
+        feature: carriesSocialCaption(row.category) ? 'social' : 'article',
         action: 'poster_download',
         detail: { category: row.category, variant: 'plain' },
       });
@@ -2553,6 +2659,176 @@ export function registerGenerationRoutes(
     },
   );
 
+  // ---------- Carousel (migration 0059) ----------
+  //
+  // A carousel has several slides, so every edit names the slide it changes (1-based, the number
+  // the officer sees). All three are the single-poster routes' twins, scoped to one slide.
+
+  // "हा स्लाइड पुन्हा तयार करा" — or `all`, "सर्व स्लाइड पुन्हा". A detail slide is re-drawn from
+  // the CURRENT cover so it stays in the post's look; the cover alone gives the post a new look,
+  // which is why the page offers `all` beside it.
+  app.post<{ Params: { id: string; index: string } }>(
+    '/generations/:id/carousel/:index/regenerate',
+    async (request, reply) => {
+      const row = await getGeneration(client, request.params.id);
+      if (!row) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'Generation not found.' } });
+      }
+      if (!isCarouselCategory(row.category)) {
+        return reply
+          .code(400)
+          .send({ error: { message: 'This run is not a carousel.' } });
+      }
+      const slides = carouselSlidesOf(client, row);
+      const target = parseSlideTarget(request.params.index, true);
+      if (target === null) {
+        return reply
+          .code(400)
+          .send({ error: { message: 'स्लाइडचा क्रमांक चुकीचा आहे.' } });
+      }
+      if (slides.length === 0) {
+        return reply.code(409).send({
+          error: { message: 'कॅरोसेलच्या स्लाइड अद्याप तयार झालेल्या नाहीत.' },
+        });
+      }
+      if (target !== 'all' && !slides[target - 1]) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'ही स्लाइड सापडली नाही.' } });
+      }
+      // A detail slide is edited FROM the cover, so there must be one to edit from.
+      if (target !== 'all' && target > 1 && !slides[0]?.posterUrl) {
+        return reply.code(409).send({
+          error: { message: 'पहिली स्लाइड अद्याप तयार झालेली नाही.' },
+        });
+      }
+      // One writer at a time: every slide job rewrites the same carousel column.
+      if (isJobRunning(row.id) || row.status === 'running') {
+        return reply
+          .code(409)
+          .send({ error: { message: 'या कामावर एक काम आधीच सुरू आहे.' } });
+      }
+      // Flipped BEFORE the 202, so the client's immediate refresh keeps polling.
+      await updateGeneration(client, row.id, {
+        status: 'running',
+        step: 'carousel_render',
+        error: null,
+      });
+      trackGenerationActivity(
+        client,
+        request,
+        row,
+        'carousel_slide_regeneration',
+        { detail: { slide: target === 'all' ? 'all' : target } },
+      );
+      startCarouselSlideRegenerateJob(client, row.id, target);
+      return reply.code(202).send({});
+    },
+  );
+
+  // A marker round on ONE slide — the poster's pixel feedback, request shape and all.
+  app.post<{ Params: { id: string; index: string } }>(
+    '/generations/:id/carousel/:index/feedback',
+    async (request, reply) => {
+      const body = PosterImageFeedbackRequestSchema.parse(request.body);
+      const row = await getGeneration(client, request.params.id);
+      if (!row) {
+        return reply
+          .code(404)
+          .send({ error: { message: 'Generation not found.' } });
+      }
+      if (!isCarouselCategory(row.category)) {
+        return reply
+          .code(400)
+          .send({ error: { message: 'This run is not a carousel.' } });
+      }
+      const target = parseSlideTarget(request.params.index, false);
+      if (target === null || target === 'all') {
+        return reply
+          .code(400)
+          .send({ error: { message: 'स्लाइडचा क्रमांक चुकीचा आहे.' } });
+      }
+      const slide = carouselSlidesOf(client, row)[target - 1];
+      if (!slide?.posterUrl) {
+        return reply
+          .code(409)
+          .send({ error: { message: 'ही स्लाइड अद्याप तयार झालेली नाही.' } });
+      }
+      if (isJobRunning(row.id) || row.status === 'running') {
+        return reply
+          .code(409)
+          .send({ error: { message: 'या कामावर एक काम आधीच सुरू आहे.' } });
+      }
+      await updateGeneration(client, row.id, {
+        status: 'running',
+        step: 'revise_image',
+        error: null,
+      });
+      trackGenerationActivity(client, request, row, 'carousel_slide_revision', {
+        summary: activitySummary(body.feedback, generationSummary(row)),
+        detail: {
+          slide: target,
+          markers: body.annotations?.length ?? 0,
+          clearRegions: body.clearRegions?.length ?? 0,
+        },
+      });
+      startCarouselSlideFeedbackJob(client, row.id, target, body);
+      return reply.code(202).send({});
+    },
+  );
+
+  // Download proxy for one slide, beside poster.png and for its reason (the HTML `download`
+  // attribute is ignored cross-origin). `?plain=1` serves the render without the chrome. A plain
+  // navigation, so the 404s are Marathi — they are what the officer sees in the tab.
+  app.get<{
+    Params: { id: string; index: string };
+    Querystring: { plain?: string };
+  }>('/generations/:id/carousel/:index/slide.png', async (request, reply) => {
+    const row = await getGeneration(client, request.params.id);
+    const target = parseSlideTarget(request.params.index, false);
+    const paths =
+      row && isCarouselCategory(row.category) && typeof target === 'number'
+        ? carouselSlidePaths(row, target)
+        : null;
+    const plain = request.query.plain === '1';
+    const objectPath = plain ? paths?.plainPath : paths?.path;
+    if (!row || !objectPath || typeof target !== 'number') {
+      return reply.code(404).send({
+        error: {
+          message: plain
+            ? 'या स्लाइडची लोगो-फूटरशिवाय प्रत उपलब्ध नाही.'
+            : 'ही स्लाइड सापडली नाही.',
+        },
+      });
+    }
+    const png = await downloadPng(client, objectPath);
+    recordUsageEvent(client, {
+      feature: 'social',
+      action: 'poster_download',
+      detail: {
+        category: row.category,
+        slide: target,
+        ...(plain ? { variant: 'plain' } : {}),
+      },
+    });
+    trackGenerationActivity(
+      client,
+      request,
+      row,
+      plain ? 'poster_plain_download' : 'poster_download',
+      { status: 'success', detail: { slide: target } },
+    );
+    return reply
+      .header('content-type', 'image/png')
+      .header(
+        'content-disposition',
+        `attachment; filename="dgipr-carousel-${row.id}-slide-${target}${plain ? '-plain' : ''}.png"`,
+      )
+      .send(png);
+  });
+
   // Post the poster + caption to an official account — X or the Facebook Page, named by
   // the request's `platform` and falling back to the run's own category. Synchronous — a
   // publish is one media upload + one create (~3-10s). The latest live post URL is
@@ -2567,6 +2843,14 @@ export function registerGenerationRoutes(
         return reply
           .code(404)
           .send({ error: { message: 'Generation not found.' } });
+      }
+      // Phase 2: X takes up to four images per post and the Facebook Page a multi-photo feed
+      // post, neither of which this route speaks yet. Say so, rather than publishing the cover
+      // alone as if it were the post.
+      if (isCarouselCategory(row.category)) {
+        return reply
+          .code(400)
+          .send({ error: { message: CAROUSEL_PUBLISH_PENDING_MESSAGE } });
       }
       if (!isSocialCategory(row.category)) {
         return reply.code(400).send({

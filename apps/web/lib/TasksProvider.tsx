@@ -20,7 +20,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { isSocialCategory } from '@dgipr/schemas';
+import { carriesSocialCaption } from '@dgipr/schemas';
 import type { GenerationDetail } from '@dgipr/schemas';
 import { getGeneration } from './api';
 
@@ -90,12 +90,14 @@ export function TasksProvider({ children }: { children: ReactNode }) {
   const activeCount = loadedActive + pendingCount;
   // v1 allows one active social task at a time; gate only on social runs so an
   // in-flight article/news run doesn't disable the ट्विटर/फेसबुक cards.
+  // A carousel counts as SOCIAL: it paints 4:5 social posters from the twitter library, and
+  // its slides are several paid renders in a row, so it takes the same one-at-a-time gate.
   const hasActiveSocialTask = tasks.some(
-    (d) => isSocialCategory(d.category) && isActive(d.status),
+    (d) => carriesSocialCaption(d.category) && isActive(d.status),
   );
   // Mirror gate for news/scheme runs: one active article generation at a time.
   const hasActiveArticleTask = tasks.some(
-    (d) => !isSocialCategory(d.category) && isActive(d.status),
+    (d) => !carriesSocialCaption(d.category) && isActive(d.status),
   );
   const idle = activeCount === 0;
 

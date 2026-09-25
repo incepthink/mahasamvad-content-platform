@@ -20,11 +20,13 @@ import {
   POSTER_HEADING_MAX_CHARS,
   POSTER_TEXT_MIN_CHARS,
   isArticleCategory,
+  isCarouselCategory,
   isDynamicPosterCategory,
   isSocialCategory,
   referenceCategoryOf,
 } from '@dgipr/schemas';
 import type {
+  CarouselSlideCount,
   DesignMode,
   MotionAspect,
   MotionRegion,
@@ -132,6 +134,11 @@ export function useCreateForm() {
   // A rectangle from the box tool or a freehand polygon from the lasso.
   const [motionRegion, setMotionRegion] = useState<MotionRegion | null>(null);
 
+  // कॅरोसेल only (migration 0059): how many slides. 'auto' lets the planner choose 3 or 4 from
+  // the amount of content. Held across a format switch and simply not sent elsewhere.
+  const [carouselSlides, setCarouselSlides] =
+    useState<CarouselSlideCount>('auto');
+
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // The officer's own pictures for the image model (migration 0056). Uploaded as they are
@@ -208,6 +215,9 @@ export function useCreateForm() {
   // from every flag below it: its source is a picture, so it renders no note box, no
   // template picker, no image brief and none of the Creative opt-ins.
   const isDynamicPoster = isDynamicPosterCategory(submitCategory);
+  // The कॅरोसेल lane. Not social by category (it has its own job and several slides), but it
+  // shares the social busy gate, the twitter template library and the caption opt-in.
+  const isCarousel = isCarouselCategory(submitCategory);
   // The Creative lane (submitted as 'twitter'). Still asked through isSocialCategory so
   // a ?format=facebook handoff, and any future second social entry, behave identically.
   const isSocial = !isCaption && !isDynamicPoster && isSocialCategory(format);
@@ -255,7 +265,9 @@ export function useCreateForm() {
   // thumbnail boxes, whose wording is not this checkbox's to change.
   // ...and TRUE on the caption lane unconditionally: the box there is source material by
   // definition — the caption is written out of it and nothing in it is printed anywhere.
-  const fromArticle = (isSocial && !verbatimText) || isCaption;
+  // ...and on the carousel: the box is the note the slides are PLANNED out of, never printed
+  // as it stands.
+  const fromArticle = (isSocial && !verbatimText) || isCaption || isCarousel;
 
   // Which library the template picker shows: twitter masters for the social format,
   // article masters for Banner, youtube masters for the thumbnail.
@@ -352,7 +364,7 @@ export function useCreateForm() {
     // Both social lanes take the social gate — a caption-only run is short and paints
     // nothing, but TasksProvider deliberately keeps one social task at a time rather
     // than carving out an exception for it.
-    if (isSocial || isCaption) {
+    if (isSocial || isCaption || isCarousel) {
       if (hasActiveSocialTask) {
         setError(STR.busyError);
         return;
@@ -382,7 +394,13 @@ export function useCreateForm() {
         // caption-only lane, where the caption is the run's entire output — the API
         // rejects a caption-only request that does not ask for one, since it would be a
         // request for nothing at all.
-        generateCaption: isCaption ? true : isSocial ? wantCaption : undefined,
+        generateCaption: isCaption
+          ? true
+          : isSocial || isCarousel
+            ? wantCaption
+            : undefined,
+        // कॅरोसेल only: स्वयं / ३ / ४.
+        carouselSlides: isCarousel ? carouselSlides : undefined,
         // Banner only, and only when actually typed — an empty string would be a
         // meaningless "clear" on a run that has nothing to clear.
         posterHeading:
@@ -515,8 +533,13 @@ export function useCreateForm() {
     isSocial,
     isArticle,
     isCaption,
+    isCarousel,
     fromArticle,
     pickerCategory,
+
+    // Carousel option
+    carouselSlides,
+    setCarouselSlides,
 
     // Creative options
     verbatimText,

@@ -9,9 +9,16 @@ export const GENERATION_REVISIONS_TABLE = 'generation_revisions';
 export type OutputType = 'article' | 'poster' | 'both';
 // 'youtube' is the 1280x720 thumbnail lane (migration 0042). Mirrors CategorySchema in
 // @dgipr/schemas; kept structural here so this package stays dependency-free.
-// 'dynamic_poster' is the motionised-poster lane (migration 0052).
+// 'dynamic_poster' is the motionised-poster lane (migration 0052); 'carousel' is the
+// multi-slide social post (migration 0059).
 export type Category =
-  'news' | 'scheme' | 'twitter' | 'facebook' | 'youtube' | 'dynamic_poster';
+  | 'news'
+  | 'scheme'
+  | 'twitter'
+  | 'facebook'
+  | 'youtube'
+  | 'dynamic_poster'
+  | 'carousel';
 // Mirrors DesignModeSchema in @dgipr/schemas — a 2x2 of who DESIGNS the poster (a template, or
 // the image model from scratch) x where its TEXT comes from (generatePosterCopy, or the officer's
 // note verbatim). 'fresh_verbatim' is the from-scratch/verbatim cell. generations.design_mode is
@@ -166,6 +173,10 @@ export type GenerationRow = Readonly<{
   // Poster made before the control existed, where it means "no restore" — see the column
   // comment in 0055 for why there is no defensible default.
   motionRegion: unknown;
+  // Carousel only (migration 0059): the slide plan, every slide's current render and its
+  // version history, plus the slide count the officer asked for. `unknown` like every jsonb
+  // column here — the API parses it with CarouselStateSchema. Null on every other lane.
+  carousel: unknown;
   // Total USD this generation has cost so far (text measured from OpenAI usage + a fixed
   // per-render image tier price), accumulated across the initial run and any feedback
   // jobs. Null for pre-feature rows. `costBreakdown` holds the token/split audit detail.
@@ -250,6 +261,7 @@ type GenerationDbRow = {
   motion_interaction_id: string | null;
   motion_aspect: string | null;
   motion_region: unknown;
+  carousel: unknown;
   // PostgREST may serialise numeric as a string; fromDbRow coerces to number.
   cost_usd: number | string | null;
   cost_breakdown: unknown;
@@ -341,6 +353,8 @@ function fromDbRow(row: GenerationDbRow): GenerationRow {
     // ?? null for the same reason: a database without 0055 returns no such column, and an
     // undefined here would be dropped from the detail payload rather than reported as absent.
     motionRegion: row.motion_region ?? null,
+    // ?? null for the same reason: a database without 0059 returns no such column.
+    carousel: row.carousel ?? null,
     costUsd:
       row.cost_usd === null || row.cost_usd === undefined
         ? null
@@ -382,6 +396,8 @@ export type GenerationPatch = Partial<
     | 'motionGifPath'
     | 'motionPrompt'
     | 'motionInteractionId'
+    // Carousel (0059): rewritten by the job as each slide lands.
+    | 'carousel'
     | 'posterStyle'
     | 'posterHeading'
     | 'styleReferenceMeta'
@@ -415,6 +431,7 @@ function patchToDbRow(patch: GenerationPatch): Record<string, unknown> {
   if (patch.motionPrompt !== undefined) row.motion_prompt = patch.motionPrompt;
   if (patch.motionInteractionId !== undefined)
     row.motion_interaction_id = patch.motionInteractionId;
+  if (patch.carousel !== undefined) row.carousel = patch.carousel;
   if (patch.posterStyle !== undefined) row.poster_style = patch.posterStyle;
   if (patch.posterHeading !== undefined)
     row.poster_heading = patch.posterHeading;
@@ -497,6 +514,9 @@ export async function insertGeneration(
     // in the create request would be lost on the first follow-up, and the retry button could
     // not reproduce the same hole after a failed render.
     motionRegion?: unknown;
+    // Carousel runs only (migration 0059): the initial state, carrying the slide count the
+    // officer asked for. Written at insert so a retry reproduces it; the job fills in the rest.
+    carousel?: unknown;
     // Insert-only: the note is a finished article; the runner skips generation.
     articleProvided?: boolean | undefined;
   }>,
@@ -574,6 +594,9 @@ export async function insertGeneration(
       // where omitting it confines the damage to a Dynamic Poster create that actually carries
       // a region. The 0028 principle, and the reason every column above it is spread too.
       ...(input.motionRegion ? { motion_region: input.motionRegion } : {}),
+      // Same spread again (migration 0059), so an un-applied 0059 costs a carousel create — which
+      // the category CHECK would refuse anyway — rather than every create on every lane.
+      ...(input.carousel ? { carousel: input.carousel } : {}),
       article_provided: input.articleProvided ?? false,
     })
     .select()

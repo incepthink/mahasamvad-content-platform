@@ -63,6 +63,10 @@ export const ActivityActionSchema = z.enum([
   'dynamic_poster_creation',
   'dynamic_poster_revision',
   'dynamic_poster_crop',
+  // Carousel (migration 0059): the run, a one-slide / all-slides redo, a marker round on a slide.
+  'carousel_creation',
+  'carousel_slide_regeneration',
+  'carousel_slide_revision',
   'poster_regeneration',
   'poster_content_revision',
   'poster_image_revision',

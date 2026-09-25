@@ -420,6 +420,33 @@ body:not(:has(.sidebar)) {
   color: var(--rail-fg-strong);
 }
 
+/* The carousel's स्वयं / ३ / ४ control reads as one toggle chip with three segments: the
+   chip takes the check-option's glass, the segments sit clear inside it, and the chosen one
+   takes the checked colour. Its segments are <button>s, so without this the composer's
+   generic button rule above would give every segment its own boxed control. */
+.page:not(.page-plain) .mr-note-composer .mr-slide-count {
+  border-color: var(--glass-toggle-border);
+  background: var(--glass-toggle-bg);
+  color: var(--rail-fg-strong);
+}
+
+.page:not(.page-plain)
+  .mr-note-composer
+  .mr-slide-count
+  button:not(.mr-submit-button) {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--rail-fg-strong);
+}
+
+.page:not(.page-plain)
+  .mr-note-composer
+  .mr-slide-count
+  button[aria-checked='true']:not(.mr-submit-button) {
+  border-color: var(--glass-toggle-border-checked);
+  background: var(--glass-toggle-bg-checked);
+}
+
 /* ---------------------------------------------------------------------------
    6. CHROME — the dark slate rail and footer
    --------------------------------------------------------------------------- */

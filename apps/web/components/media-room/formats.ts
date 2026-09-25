@@ -25,7 +25,7 @@ export type Format = Category | 'video' | 'caption';
  */
 export type SelectableFormat = Extract<
   Format,
-  'twitter' | 'scheme' | 'youtube' | 'caption' | 'dynamic_poster'
+  'twitter' | 'scheme' | 'youtube' | 'caption' | 'dynamic_poster' | 'carousel'
 >;
 
 export type FormatOption = {
@@ -49,6 +49,13 @@ export const FORMATS: readonly FormatOption[] = [
     value: 'twitter',
     name: STR.mediaFormatCreative,
     desc: STR.mediaFormatCreativeDesc,
+  },
+  // Several 4:5 slides from one note, in one look (migration 0059). Beside क्रिएटिव्ह because
+  // it is the same kind of work — a social post — made of more than one image.
+  {
+    value: 'carousel',
+    name: STR.mediaFormatCarousel,
+    desc: STR.mediaFormatCarouselDesc,
   },
   {
     value: 'youtube',
@@ -102,7 +109,8 @@ export function selectableFormatOf(
   return value === 'twitter' ||
     value === 'scheme' ||
     value === 'youtube' ||
-    value === 'dynamic_poster'
+    value === 'dynamic_poster' ||
+    value === 'carousel'
     ? value
     : null;
 }

@@ -120,6 +120,8 @@ const TASK_LABELS: Readonly<Record<string, string>> = {
   marathi_translation: STR.analyticsTaskMarathiTranslation,
   proofreading: STR.analyticsTaskProofreading,
   social_post_creation: STR.analyticsTaskSocialPost,
+  carousel_plan: STR.analyticsTaskCarouselPlan,
+  carousel_slide: STR.analyticsTaskCarouselSlide,
   social_caption_creation: STR.analyticsTaskSocialCaption,
   social_caption_revision: STR.analyticsTaskSocialCaptionRevision,
   youtube_thumbnail_creation: STR.analyticsTaskYoutubeThumbnail,

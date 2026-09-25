@@ -733,6 +733,49 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   one field that points a paid render at an object. Deliberately absent: no reference library,
   no poster copy, no chrome, no caption, no publishing, no Canva, no n8n — and `NextActions`
   renders nothing here, since its edit-note re-run would submit a run with no poster.
+- **Carousel posters (कॅरोसेल, `category: 'carousel'`, migration 0059) — one note, a cover + 2-3
+  detail slides in one look.** Its own lane, the `dynamic_poster` precedent, so no single-poster
+  reader (one `poster_path`, the version strip, publish, Canva, pixel feedback) had to change. Plan
+  → `content-engine/src/generation/plan-carousel.ts` (ONE strict-JSON `POSTER_COPY_MODEL` call,
+  then the pure `normalizeCarouselPlan`: count clamped to 3-4 or exactly what was asked, every digit
+  run must be in the note or the LINE is dropped — `generation/digit-grounding.ts`, now shared with
+  the /video key-point guard — overflow past 12 items moves to the NEXT slide, `lockSchemeNames`);
+  prompts → `generation/build-carousel-prompt.ts`; job → `apps/api/src/jobs/carousel.ts`; routes →
+  `POST /generations/:id/carousel/:index/regenerate` (`:index` 1-based or `all`),
+  `POST …/carousel/:index/feedback` (the poster's `PosterImageFeedbackRequest`), `GET
+  …/carousel/:index/slide.png[?plain=1]`; shapes → `packages/schemas/src/carousel.ts`; web →
+  `components/CarouselView.tsx` (scroll-snap strip, dots/counter only while it overflows,
+  per-slide downloads/redo/marker round) and `components/SocialCaptionEditor.tsx` (the caption box,
+  EXTRACTED from `SocialPostView`, which now renders it too). Five things to know. **Every slide is
+  GENERATED FRESH with its own picture, and the SYSTEM is what is shared** (2026-09-25 — editing
+  detail slides from the cover made all four slides the same photograph): the planner gives each
+  slide an English `visual`, and every prompt emits the same `carouselSeriesFrame` (header band +
+  series title, typography, icons, margins, one colour scheme) plus the fresh social poster's OWN
+  rule constants from `minimal-creative-prompt.ts` (2026-09-25 — the carousel's hand-shortened copy
+  "keep the top-right 180 × 170 area clear" made the model paint an empty box around the badge; the
+  social rule only keeps TEXT out of that corner). **No palette reaches the prompt** — the model
+  chooses colours, as on social; `carousel.paletteId` is still assigned and stored, for history only.
+  **The planner also ART-DIRECTS** (2026-09-25): a `designSystem` paragraph + `dateline` for the
+  post, and per slide a two-tone title, subheading, lines grouped by section (`CarouselItem.section`,
+  per line), a speaker-checked quote, a closing line and a LAYOUT from `generation/carousel-layouts.ts`
+  (`assignCarouselLayouts` makes them differ across slides); detail slides get slide 1 as a CONTEXT
+  image with `SERIES_REFERENCE_RULE` (frame only, never its photo or body; `CAROUSEL_SERIES_REFERENCE=off`
+  = blind generation). ICONS and DO NOT USE (no maps) stay verbatim. **Each slide is persisted the moment it
+  lands** and the whole state is one jsonb column (`generations.carousel`), written through a
+  per-generation serialized chain because detail slides land concurrently (2 at a time) and each
+  write replaces the whole value; the retry route RESUMES a failed carousel (only missing slides
+  render) and must catch it BEFORE the "produced nothing" branch, since a landed cover sets
+  `posterPath`. **`poster_path` = the current cover**, which is what keeps history cards, the tasks
+  panel and the gallery unchanged; `posterVersionPaths` returns `[]` for a carousel (its history is
+  per slide) and every single-poster edit route refuses one in Marathi. **Predicates**:
+  `isCarouselCategory` (not social — own job, no publishing in v1) and `carriesSocialCaption`
+  (social ∪ carousel), which every caption route and the web busy gate now ask; a carousel takes
+  the twitter library (`referenceCategoryOf`) and the long-form facebook caption. **Phase 2, not
+  built**: publishing (X up to 4 media ids; FB unpublished `/photos` + `/feed` `attached_media`),
+  Canva multi-slide PPTX, a ZIP — both routes answer `CAROUSEL_PUBLISH_PENDING_MESSAGE`. Free
+  harnesses: `tsx src/generation/plan-carousel.ts --check` (20) and `tsx
+  src/generation/build-carousel-prompt.ts` (22); live: `tsx --env-file=../../.env
+  src/generation/plan-carousel.ts --file=note.txt [auto|3|4]` (cents).
 - **Activity / audit log (`/activity`, migration 0058) — WHO did WHAT, with no login.** A hidden
   page (not in `NAV_LINKS`) with a live feed, today's KPIs, filters in the URL and a per-IP /
   per-device journey. "Who" is the IP as the ONE trusted proxy saw it (`Fastify({ trustProxy: 1 })`
@@ -1622,6 +1665,11 @@ create still returns 202, every input guard still answers in Marathi, and the dy
 create is the only thing that fails. The motion snapshot columns are separate from
 `poster_path` deliberately — that column is a PNG every poster reader in the API treats as one,
 and an .mp4 in it would be listed as a poster version by `posterVersionPaths`.
+`0059` — the carousel lane: `generations.category` gains `'carousel'` and `generations.carousel`
+(jsonb: requested slide count, the slide plan, every slide's current render + version history).
+The column is omit-unless-present, but the CHECK widening cannot be worked around from code, so
+**apply it BEFORE the API deploy**: without it every carousel create fails (verified live — a 500
+at insert, no row, no spend) and nothing else does.
 `0058` — `activity_events` (new table: the /activity audit log — IP, device id, user agent,
 feature, action, status, a ≤140-char summary, subject kind/id, small jsonb detail). Its own table,
 not an extension of `usage_events`, whose contract is "no content, no identity". Every write is

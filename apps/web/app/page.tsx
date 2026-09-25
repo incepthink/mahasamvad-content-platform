@@ -71,7 +71,9 @@ export default function NewGenerationPage() {
             category={form.pickerCategory}
             value={form.reference}
             onChange={form.setReference}
-            isSocial={form.isSocial}
+            // A carousel with no template is designed from scratch, exactly like a Creative
+            // poster, so it takes the same "no template" wording.
+            isSocial={form.isSocial || form.isCarousel}
           />
         ) : null}
       </div>

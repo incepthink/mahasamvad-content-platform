@@ -20,6 +20,10 @@ import {
   NameDesignationsSchema,
 } from './designations.js';
 import { LearnedPreferenceNoteSchema } from './editorial-preference.js';
+import {
+  CarouselSlideCountSchema,
+  CarouselSlideDetailSchema,
+} from './carousel.js';
 
 export const OutputTypeSchema = z.enum(['article', 'poster', 'both']);
 export type OutputType = z.infer<typeof OutputTypeSchema>;
@@ -38,6 +42,11 @@ export const CategorySchema = z.enum([
   // (migration 0052). Its source is an IMAGE rather than a note, it writes no article and
   // no caption, and it uses no reference library — see dynamic-poster.ts.
   'dynamic_poster',
+  // A multi-image post (migration 0059): one note becomes a cover slide plus 2-3 detail slides
+  // in one look, all 4:5 with the DGIPR chrome. Its own lane, like dynamic_poster, so the
+  // single-poster code (one poster_path, one version strip, publish, Canva) is untouched —
+  // see carousel.ts.
+  'carousel',
 ]);
 export type Category = z.infer<typeof CategorySchema>;
 
@@ -73,6 +82,23 @@ export function isDynamicPosterCategory(
   category: Category,
 ): category is 'dynamic_poster' {
   return category === 'dynamic_poster';
+}
+
+// The carousel lane (migration 0059). Deliberately NOT social: it has its own job, its own
+// storage shape (several slides, not one poster_path) and — in v1 — no publishing. It DOES
+// carry a social caption and draw on the twitter master library, which is what the two
+// predicates below are for.
+export function isCarouselCategory(category: Category): category is 'carousel' {
+  return category === 'carousel';
+}
+
+// Which runs carry a SOCIAL caption in the `article` column: the two social lanes and the
+// carousel. Every caption route asks this rather than isSocialCategory, so a carousel's caption
+// can be generated, hand-edited and revised exactly like a social post's.
+export function carriesSocialCaption(
+  category: Category,
+): category is 'twitter' | 'facebook' | 'carousel' {
+  return isSocialCategory(category) || isCarouselCategory(category);
 }
 
 // The article pipeline's own categories — everything that writes Marathi prose. Stated
@@ -138,6 +164,10 @@ export const GenerationStepSchema = z.enum([
   // seconds rather than minutes — but it is still a job, so the officer sees why the card is
   // busy rather than watching an unexplained spinner.
   'motion_crop',
+  // Carousel (migration 0059): one text call plans every slide, then the slides render — the
+  // cover first, the rest from it.
+  'carousel_plan',
+  'carousel_render',
   'revise_article',
   'revise_copy',
   'revise_scene',
@@ -413,6 +443,10 @@ export const CreateGenerationRequestSchema = z
       .array(z.string().trim().min(1))
       .max(GENERATION_PROMPT_IMAGE_LIMIT)
       .optional(),
+    // Carousel runs only (migration 0059): how many slides — 'auto' lets the planner choose 3 or
+    // 4 from the amount of content. Stored on the row at insert, so a retry reproduces it.
+    // Absent ⇒ 'auto'.
+    carouselSlides: CarouselSlideCountSchema.optional(),
   })
   .superRefine((value, ctx) => {
     // The note floor, applied per lane. A Dynamic Poster is sourced from the uploaded image,
@@ -477,6 +511,23 @@ export const CreateGenerationRequestSchema = z
           path: ['motionRegion'],
         });
       }
+    }
+    // A slide count has nowhere to go on any other lane.
+    if (value.carouselSlides !== undefined && value.category !== 'carousel') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'carouselSlides is only accepted on a carousel run.',
+        path: ['carouselSlides'],
+      });
+    }
+    // A carousel IS its slides: a run asking for none of them asks for nothing.
+    if (value.category === 'carousel' && value.outputType === 'article') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "A carousel run always renders its slides (outputType 'article' is not accepted).",
+        path: ['outputType'],
+      });
     }
     if (value.referenceImageId && value.referenceTypeId) {
       ctx.addIssue({
@@ -943,6 +994,14 @@ export const GenerationDetailSchema = z.object({
   // Every render of that clip, oldest→newest; the last entry matches `motionUrl`. One entry
   // means there is nothing to move between and the page shows no version control at all.
   motionVersions: z.array(MotionVersionSchema).default([]),
+  // ---------- Carousel (migration 0059) ----------
+  // Every slide of a carousel run, in order (the cover first). Empty on every other lane and on
+  // a carousel whose plan has not been written yet. A slide not yet rendered carries a null
+  // posterUrl, which is what the strip shows a placeholder for.
+  carouselSlides: z.array(CarouselSlideDetailSchema).default([]),
+  // Which slides (1-based) a job is rendering RIGHT NOW — so a one-slide redo shows its spinner
+  // on that slide rather than over the whole strip. From the API's in-process registry.
+  carouselBusySlides: z.array(z.number().int()).default([]),
   // Every poster render of this generation, oldest→newest (empty when the run has
   // no poster). The last entry always matches `posterUrl`.
   posterVersions: z.array(PosterVersionSchema),
@@ -1244,7 +1303,9 @@ export type ReferenceCategory = z.infer<typeof ReferenceCategorySchema>;
 // they were three separate `isSocial ? 'twitter' : 'article'` ternaries, each of which
 // would have silently sent a youtube run to the article library.
 export function referenceCategoryOf(category: Category): ReferenceCategory {
-  if (isSocialCategory(category)) return 'twitter';
+  // A carousel's cover is a social 4:5 poster, so a pinned template comes from the same library.
+  if (isSocialCategory(category) || isCarouselCategory(category))
+    return 'twitter';
   if (isYoutubeCategory(category)) return 'youtube';
   return 'article';
 }

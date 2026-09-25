@@ -635,6 +635,37 @@ export {
   buildMinimalCreativePrompt,
   type MinimalCreativePromptInput,
 } from './generation/minimal-creative-prompt.js';
+// Carousel posters (migration 0059): one text call plans and art-directs every slide (with the
+// deterministic count / digit / overflow / scheme-name / layout guards), then every slide is a new
+// poster sharing one series frame; detail slides may see slide 1 as a context image.
+export {
+  planCarousel,
+  normalizeCarouselPlan,
+  buildCarouselPlanSystemPrompt,
+  type PlanCarouselInput,
+  type PlanCarouselResult,
+} from './generation/plan-carousel.js';
+export {
+  buildCarouselCoverPrompt,
+  buildCarouselDetailPrompt,
+  carouselSlideText,
+  carouselSeriesFrame,
+  FLAT_STYLE_RULE,
+  SERIES_REFERENCE_RULE,
+  type CarouselCoverPromptInput,
+  type CarouselDetailPromptInput,
+} from './generation/build-carousel-prompt.js';
+export {
+  CAROUSEL_LAYOUTS,
+  assignCarouselLayouts,
+  carouselLayoutById,
+  type CarouselLayout,
+} from './generation/carousel-layouts.js';
+export {
+  digitsAreGrounded,
+  toDevanagariDigits,
+  toLatinDigits,
+} from './generation/digit-grounding.js';
 // Step 1 of the Dynamic Poster lane (migration 0052): gpt-5.6-sol reads the officer's still
 // poster and writes the prompt gemini-omni renders the clip from. The measured resolution is
 // supplied to it as fact — see the header for why it is not asked for.

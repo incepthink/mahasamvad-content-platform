@@ -61,6 +61,7 @@ type GalleryGenerationType = Exclude<GenerationType, 'Video'>;
 function isMediaRoomGeneration(item: GenerationSummary): boolean {
   if (item.category === 'youtube') return true;
   if (isSocialCategory(item.category)) return true;
+  if (item.category === 'carousel') return true;
   return item.category === 'scheme' && item.outputType !== 'article';
 }
 
