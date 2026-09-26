@@ -3111,6 +3111,61 @@ client id/secret — see the milestone below.
 
 ## Latest Implementation Milestone
 
+- **A design director for fresh DGIPR social posters, and a light ground on every one**
+  (2026-09-26, no migration, no n8n, no web change). A contact sheet of the last 13 fully-AI
+  twitter/facebook renders (incl. generation `c0e28c9d`) showed one poster almost every time:
+  headline top-left, one column of lines with small icons, a photo bottom-right, cream with
+  saffron/maroon. Cause: the fresh prompt (`minimal-creative-prompt.ts`) says nothing about
+  design, and the runner's palette/layout/placement picks NEVER reached it — they were only
+  written to `poster_style`, which is how c0e28c9d was labelled "गडद प्रकाशमान", a palette its
+  model never saw. The comments claiming otherwise are corrected.
+  - **`generation/poster-design-director.ts` (new)**: one strict-JSON `chatComplete` on
+    `OPENAI_POSTER_DESIGN_MODEL` (default `UTILITY_MODEL`, low effort) whose system prompt IS the
+    design system — choose the presentation from the content's shape (figures → figure-led,
+    dates → sequence, one message → statement, many points → grouped sections, place/people →
+    image-led), name the icon list and the headline-top/list-left/photo-right shape as the
+    overused defaults, a colour MOOD in words on a LIGHT ground (no hex), and the protected
+    constraints (no maps, no bottom waves, small icons, nothing in the badge corner, no logos/QR).
+    Returns enums (`form`/`composition`/`imagery`/`colourMood` — the last is poster-colours'
+    `HueBucket` vocabulary) for memory and a `brief` that is the only thing the image model sees.
+    **The brief is sanitised in code**: any sentence with Devanagari, a digit, a quotation, a hex
+    code, map/wave/logo/QR or a dark-ground phrase is dropped; under 25 words ⇒ null. A redo that
+    repeats what it was asked to change (form AND composition, or the colour mood) gets ONE
+    retry with a sharper note. Never throws; null renders as before plus the light rule.
+    `SOCIAL_POSTER_DESIGN_DIRECTION=off` is the rollback.
+  - **Two additive prompt blocks, every existing rule byte-for-byte**: after the opening line,
+    DESIGN DIRECTION (when present, stated as never overriding the rules below) then LIGHT
+    BACKGROUND (`LIGHT_GROUND_RULE`, always on both fresh modes). With neither option
+    `buildMinimalCreativePrompt` is byte-identical — asserted. CMO/onbrand/adaptive/custom/
+    feedback/carousel paths untouched — asserted.
+  - **Runner**: the fresh branch no longer calls `pickSocialPalette`/`pickLayout`/
+    `pickPlacement`; it reads `history.designs` + measured buckets, calls the director on the text
+    the poster actually prints (the note on `fresh_verbatim`, `buildFreshCopyManifest` on
+    `fresh`), and records `buildDesignPosterStyle(direction, measured)` — or `null` when the
+    director failed, so a redo never shows the previous version's label. The redo job passes
+    `previousDesign` + `redoKind` (`arrangement` on पुन्हा तयार करा, `colour` on वेगळ्या रंगात).
+  - **Style memory** (`poster-style.ts`, jsonb): `paletteId`/`family`/`layoutId`/`coverage` are
+    now OPTIONAL and `design` (`v: 1`) is new; a design-only row parses, feeds a `designs` ring
+    (5, newest first, not de-duplicated) and stays out of the palette/layout rings.
+    `posterStyleLabel` names form · composition in Marathi when a design is present.
+  - **Light-ground monitoring**: `PosterColours` gained `lightness` (mean OKLab L) and
+    `darkShare` (L < 0.35) — the ground bins could not see a dark poster at all. The runner logs
+    `DARK POSTER` above 0.4; never retried.
+  `poster-placements.ts` is now legacy metadata (header says so). Verified free: workspace
+  typecheck 7/7, eslint clean on all 9 touched files, and five harnesses green —
+  `poster-design-director.ts --check` (parser, sanitiser per forbidden kind, null floor, redo
+  retry on a stubbed call, notes), `build-poster-prompt.ts` (+ order, verbatim rules, byte-
+  identity, other lanes), `poster-style.ts` (design round trip, ring, label),
+  `minimal-creative-prompt.ts` (prints), `poster-colours.ts --check`. Live director (cents) on a
+  seven-line numbers-heavy Marathi note: five runs gave five forms (grouped_sections,
+  figure_led ×2, split_columns, feature_and_supporting) in five colour moods, every brief
+  survived the sanitiser with no Devanagari or digits, and the arrangement redo changed both
+  form and composition. **Left for a run** (image spend): the c0e28c9d note on fresh_verbatim
+  with three redos, plus one fresh and one facebook run — contact sheet, darkShare < 0.4,
+  arrangements that differ from each other and from the icon list.
+  `poster-colours.ts` was already prettier-unclean at HEAD — do not `--write` it. Deploy:
+  `@dgipr/poster-renderer` → `@dgipr/content-engine` dists → API.
+
 - **Carousel posters (कॅरोसेल): one note → a cover plus 2-3 detail slides in one look**
   (2026-09-24, migration 0059, no n8n). DGIPR regularly publishes multi-image posts (an election
   programme as cover + schedule + polling slides; a health "प्रगती" as cover + facilities list +

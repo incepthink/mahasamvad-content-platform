@@ -1214,6 +1214,13 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   BOTH libraries (`anyLayoutById`), and `listRecentPosterStyles(client, limit, categories)` is
   SCOPED per lane so a social coverage can't bar an article pick. Harnesses (free):
   `tsx src/generation/{article-poster-layouts,build-article-poster-prompt}.ts`.
+- **SUPERSEDED FOR THE FRESH SOCIAL LANE (2026-09-26): the two bullets below are history.** A
+  fresh twitter/facebook poster is now directed by `generation/poster-design-director.ts` — one
+  small call writes a sanitised English brief (form, visual weight, imagery, colour mood on a
+  light ground) that reaches the prompt as DESIGN DIRECTION, plus an always-on LIGHT BACKGROUND
+  rule (`minimal-creative-prompt.ts`). No palette, layout or placement is picked; `poster_style`
+  stores `design` + `measured` (incl. `darkShare`). Rollback: `SOCIAL_POSTER_DESIGN_DIRECTION=off`.
+  See the 2026-09-26 milestone in AGENTS.md.
 - **Social poster arrangement = ONE assigned ANCHOR, and it is the only design assignment the
   fresh lane still emits** (`generation/poster-placements.ts`, 2026-08-14). 14 anchors across 6
   families (`immersive`/`anchored`/`divided`/`centred`/`stacked`/`typographic`), picked per run by

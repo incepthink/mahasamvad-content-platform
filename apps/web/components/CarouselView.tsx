@@ -3,11 +3,11 @@
 // The detail-page view of a कॅरोसेल run (migration 0059): the slides as a swipeable strip, one
 // slide per view on a phone and a scrolling row on a desktop, with a १/N counter and dots.
 //
-// Per slide: the two downloads (with and without the chrome), "हा स्लाइड पुन्हा तयार करा", and
-// the pencil that opens a marker round on THAT slide — shown below the strip at full width,
-// using the same PosterAnnotator + PosterImageFeedbackBox the single poster uses, one slide at a
-// time. A slide still being drawn is a placeholder with a spinner, so the first slides are
-// visible while the rest render.
+// Per slide: one edit button on the card, which opens the slide in a modal holding everything
+// that can be done to it — the two downloads (with and without the chrome), "हा स्लाइड पुन्हा
+// तयार करा", and a marker round using the same PosterAnnotator + PosterImageFeedbackBox the
+// single poster uses. A slide still being drawn is a placeholder with a spinner, so the first
+// slides are visible while the rest render.
 //
 // Deliberately absent in v1: publishing and Canva (a multi-image post needs its own call on
 // both), and version switching (each slide keeps its history, but there is no restore route).
@@ -24,6 +24,7 @@ import {
   Download,
   ImageDown,
   RotateCw,
+  SquareDashed,
   SquarePen,
 } from 'lucide-react';
 import {
@@ -38,6 +39,7 @@ import { PosterAnnotator, type AnnotatorMode } from './PosterAnnotator';
 import { PosterImageFeedbackBox } from './PosterImageFeedbackBox';
 import { SocialCaptionEditor } from './SocialCaptionEditor';
 import { ErrorNotice } from './ErrorNotice';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
 
 export function CarouselView({
   detail,
@@ -57,7 +59,7 @@ export function CarouselView({
   const [pending, setPending] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [confirmAll, setConfirmAll] = useState(false);
-  // The slide (1-based) whose marker round is open below the strip; null = none.
+  // The slide (1-based) open in the edit modal; null = none.
   const [editing, setEditing] = useState<number | null>(null);
   // Edits need an idle row: every slide job rewrites the same carousel column.
   const editable =
@@ -116,8 +118,7 @@ export function CarouselView({
     setActive(index);
   };
 
-  // A slide whose render is replaced closes its open marker round — the marks point at pixels
-  // that are gone.
+  // A slide that loses its render closes the modal — there is nothing left in it to edit.
   const editingSlide = editing !== null ? (slides[editing - 1] ?? null) : null;
   useEffect(() => {
     if (editing !== null && !editingSlide?.posterUrl) setEditing(null);
@@ -160,13 +161,11 @@ export function CarouselView({
                   busySlides.has(slide.index) || (running && !slide.posterUrl)
                 }
                 editable={editable}
-                editingThis={editing === slide.index}
                 onRedo={() => void redo(slide.index)}
-                onToggleEdit={() =>
-                  setEditing((current) =>
-                    current === slide.index ? null : slide.index,
-                  )
-                }
+                onEdit={() => {
+                  setActionError(null);
+                  setEditing(slide.index);
+                }}
               />
             ))}
           </ol>
@@ -212,8 +211,8 @@ export function CarouselView({
           ) : null}
 
           {/* Re-rendering the cover alone gives the post a look the other slides no longer
-              share, so the all-slides redo sits here, beside a line saying why. Two-step,
-              because it is several paid renders. */}
+              share, so the all-slides redo sits here. Two-step, because it is several paid
+              renders. */}
           <div className="carousel-actions">
             {confirmAll ? (
               <div className="info-callout">
@@ -247,30 +246,35 @@ export function CarouselView({
                 {STR.carouselRedoAll}
               </button>
             )}
-            <p className="hint">{STR.carouselRedoCoverHint}</p>
           </div>
-          {actionError ? <ErrorNotice message={actionError} /> : null}
-
-          {editingSlide?.posterUrl ? (
-            <SlideEditor
-              // Keyed by the slide AND its render, so marks never carry over to another slide
-              // or onto a render they were not drawn on.
-              key={`${editingSlide.index}:${editingSlide.posterUrl}`}
-              detail={detail}
-              slide={editingSlide}
-              total={total}
-              busy={busySlides.has(editingSlide.index) || running}
-              onClose={() => setEditing(null)}
-              onChanged={onChanged}
-              onImageWorkStarted={onImageWorkStarted}
-            />
+          {actionError && editing === null ? (
+            <ErrorNotice message={actionError} />
           ) : null}
+
+          <Dialog
+            open={editingSlide?.posterUrl != null}
+            onOpenChange={(open) => {
+              if (!open) setEditing(null);
+            }}
+          >
+            {editingSlide?.posterUrl ? (
+              <SlideEditor
+                // Keyed by the slide, so marks never carry over from one slide to another.
+                key={editingSlide.index}
+                detail={detail}
+                slide={editingSlide}
+                total={total}
+                busy={busySlides.has(editingSlide.index) || running}
+                editable={editable}
+                redoError={actionError}
+                onRedo={() => void redo(editingSlide.index)}
+                onChanged={onChanged}
+                onImageWorkStarted={onImageWorkStarted}
+              />
+            ) : null}
+          </Dialog>
         </>
       ) : null}
-
-      <p className="info-callout carousel-publish-note">
-        {STR.carouselPublishPending}
-      </p>
 
       <SocialCaptionEditor
         detail={detail}
@@ -288,18 +292,16 @@ function SlideCard({
   total,
   drawing,
   editable,
-  editingThis,
   onRedo,
-  onToggleEdit,
+  onEdit,
 }: {
   detail: GenerationDetail;
   slide: CarouselSlideDetail;
   total: number;
   drawing: boolean;
   editable: boolean;
-  editingThis: boolean;
   onRedo: () => void;
-  onToggleEdit: () => void;
+  onEdit: () => void;
 }) {
   const label = STR.carouselSlideOf(slide.index, total);
   return (
@@ -318,12 +320,39 @@ function SlideCard({
             <span className="hint">
               {drawing ? STR.carouselSlidePending : STR.carouselSlideMissing}
             </span>
+            {/* A slide that never rendered has no picture to open in the editor, so its
+                redo is offered here instead. */}
+            {!drawing ? (
+              <button
+                type="button"
+                className="btn btn-small"
+                disabled={
+                  !editable ||
+                  (slide.index > 1 && !detail.carouselSlides[0]?.posterUrl)
+                }
+                onClick={onRedo}
+              >
+                <RotateCw size={16} strokeWidth={1.9} aria-hidden="true" />
+                {STR.carouselRedoSlide}
+              </button>
+            ) : null}
           </div>
         )}
         {drawing && slide.posterUrl ? (
           <div className="poster-loading" aria-live="polite" aria-busy="true">
             <span className="spinner spinner-lg" />
           </div>
+        ) : null}
+        {slide.posterUrl ? (
+          <button
+            type="button"
+            className="icon-btn carousel-edit-btn"
+            title={STR.carouselEditSlide}
+            aria-label={`${STR.carouselEditSlide} — ${label}`}
+            onClick={onEdit}
+          >
+            <SquarePen size={18} strokeWidth={1.9} aria-hidden="true" />
+          </button>
         ) : null}
       </div>
       <p className="carousel-slide-title">
@@ -335,68 +364,22 @@ function SlideCard({
           {STR.carouselVersions(slide.versions.length)}
         </p>
       ) : null}
-      <div className="poster-icon-actions">
-        {slide.posterUrl ? (
-          <>
-            <a
-              className="icon-btn"
-              href={carouselSlideDownloadUrl(detail.id, slide.index)}
-              title={STR.iconDownloadPoster}
-              aria-label={`${STR.iconDownloadPoster} — ${label}`}
-            >
-              <Download size={18} strokeWidth={1.9} aria-hidden="true" />
-            </a>
-            <a
-              className="icon-btn"
-              href={carouselSlideDownloadUrl(detail.id, slide.index, true)}
-              title={STR.iconDownloadPosterPlain}
-              aria-label={`${STR.iconDownloadPosterPlain} — ${label}`}
-            >
-              <ImageDown size={18} strokeWidth={1.9} aria-hidden="true" />
-            </a>
-          </>
-        ) : null}
-        <button
-          type="button"
-          className="icon-btn"
-          title={STR.carouselRedoSlide}
-          aria-label={`${STR.carouselRedoSlide} — ${label}`}
-          disabled={
-            !editable ||
-            (slide.index > 1 && !detail.carouselSlides[0]?.posterUrl)
-          }
-          onClick={onRedo}
-        >
-          <RotateCw size={18} strokeWidth={1.9} aria-hidden="true" />
-        </button>
-        {slide.posterUrl ? (
-          <button
-            type="button"
-            className="icon-btn"
-            aria-pressed={editingThis}
-            title={
-              editingThis ? STR.carouselEditSlideOn : STR.carouselEditSlide
-            }
-            aria-label={`${editingThis ? STR.carouselEditSlideOn : STR.carouselEditSlide} — ${label}`}
-            disabled={!editable}
-            onClick={onToggleEdit}
-          >
-            <SquarePen size={18} strokeWidth={1.9} aria-hidden="true" />
-          </button>
-        ) : null}
-      </div>
     </li>
   );
 }
 
-// One slide's marker round, at full width under the strip — marking needs the slide large,
-// not at thumbnail size. The poster's own annotator and feedback box, unchanged.
+// One slide opened in a modal: the slide centred and large enough to mark, its icon actions
+// under it (downloads, redo, and the two marking gestures), and the poster's own feedback box
+// full width below — everything that used to sit under the card. It opens even while the row is busy (the downloads still work); the edits inside are
+// what wait for an idle row.
 function SlideEditor({
   detail,
   slide,
   total,
   busy,
-  onClose,
+  editable,
+  redoError,
+  onRedo,
   onChanged,
   onImageWorkStarted,
 }: {
@@ -404,7 +387,9 @@ function SlideEditor({
   slide: CarouselSlideDetail;
   total: number;
   busy: boolean;
-  onClose: () => void;
+  editable: boolean;
+  redoError: string | null;
+  onRedo: () => void;
   onChanged: () => Promise<void>;
   onImageWorkStarted?: (() => void) | undefined;
 }) {
@@ -427,6 +412,7 @@ function SlideEditor({
     dismissSubmitted,
   } = usePosterMarkers({ posterUrl: slide.posterUrl, status: detail.status });
   const showSpinner = busy || pending;
+  const label = STR.carouselSlideOf(slide.index, total);
 
   const submit = async (payload: PosterImageFeedbackRequest) => {
     setPending(true);
@@ -441,18 +427,20 @@ function SlideEditor({
   };
 
   return (
-    <div className="carousel-editor">
-      <div className="carousel-editor-head">
-        <h3>{STR.carouselEditingTitle(slide.index)}</h3>
-        <button type="button" className="btn btn-small" onClick={onClose}>
-          {STR.carouselEditClose}
-        </button>
-      </div>
-      <div className="poster-layout">
+    // No description line: the icons and the change box below say what can be done here.
+    <DialogContent
+      className="max-w-[min(96vw,640px)]"
+      aria-describedby={undefined}
+    >
+      <DialogHeader>
+        <DialogTitle>{STR.carouselEditingTitle(slide.index)}</DialogTitle>
+      </DialogHeader>
+
+      <div className="carousel-dialog-slide">
         <div className="poster-frame">
           <img
             src={slide.posterUrl ?? ''}
-            alt={STR.carouselSlideOf(slide.index, total)}
+            alt={label}
             className="poster-image"
             draggable={false}
           />
@@ -460,8 +448,8 @@ function SlideEditor({
             markers={markers}
             onAdd={addMarker}
             onRemove={removeMarker}
-            active={annotMode !== null && !showSpinner}
-            disabled={showSpinner}
+            active={annotMode !== null && !showSpinner && editable}
+            disabled={showSpinner || !editable}
             submittedMarkers={submittedMarkers}
             onDismissSubmitted={dismissSubmitted}
             mode={annotMode ?? 'mark'}
@@ -476,27 +464,96 @@ function SlideEditor({
             </div>
           ) : null}
         </div>
-        <div>
-          <PosterImageFeedbackBox
-            markers={markers}
-            onNoteChange={setNote}
-            onRemoveMarker={removeMarker}
-            onOpenChange={(open) =>
-              setAnnotMode((current) => (open ? (current ?? 'mark') : current))
-            }
-            disabled={showSpinner}
-            submittedMarkers={submittedMarkers}
-            mode={annotMode ?? 'mark'}
-            onModeChange={setAnnotMode}
-            clearRegions={clearRegions}
-            onClearNoteChange={setClearNote}
-            onClearActionChange={setClearAction}
-            onRemoveClearRegion={removeClearRegion}
-            submittedClearRegions={submittedClearRegions}
-            onSubmit={submit}
-          />
-        </div>
       </div>
-    </div>
+
+      {/* Icon-only actions under the slide, as on the single poster: the two downloads, the
+          redo, and the two marking gestures (red = change what is here, blue = free this
+          space). The marking modes live here rather than inside the change box. */}
+      <div className="poster-icon-actions carousel-dialog-actions">
+        <a
+          className="icon-btn"
+          href={carouselSlideDownloadUrl(detail.id, slide.index)}
+          title={STR.iconDownloadPoster}
+          aria-label={`${STR.iconDownloadPoster} — ${label}`}
+        >
+          <Download size={18} strokeWidth={1.9} aria-hidden="true" />
+        </a>
+        <a
+          className="icon-btn"
+          href={carouselSlideDownloadUrl(detail.id, slide.index, true)}
+          title={STR.iconDownloadPosterPlain}
+          aria-label={`${STR.iconDownloadPosterPlain} — ${label}`}
+        >
+          <ImageDown size={18} strokeWidth={1.9} aria-hidden="true" />
+        </a>
+        <button
+          type="button"
+          className="icon-btn"
+          title={STR.carouselRedoSlide}
+          aria-label={`${STR.carouselRedoSlide} — ${label}`}
+          disabled={
+            !editable ||
+            showSpinner ||
+            (slide.index > 1 && !detail.carouselSlides[0]?.posterUrl)
+          }
+          onClick={onRedo}
+        >
+          <RotateCw size={18} strokeWidth={1.9} aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          className="icon-btn"
+          aria-pressed={annotMode === 'mark'}
+          title={
+            annotMode === 'mark' ? STR.iconEditPosterOn : STR.iconEditPoster
+          }
+          aria-label={
+            annotMode === 'mark' ? STR.iconEditPosterOn : STR.iconEditPoster
+          }
+          disabled={showSpinner || !editable}
+          onClick={() =>
+            setAnnotMode((current) => (current === 'mark' ? null : 'mark'))
+          }
+        >
+          <SquarePen size={18} strokeWidth={1.9} aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          className="icon-btn icon-btn-clear"
+          aria-pressed={annotMode === 'clear'}
+          title={
+            annotMode === 'clear' ? STR.iconClearSpaceOn : STR.iconClearSpace
+          }
+          aria-label={
+            annotMode === 'clear' ? STR.iconClearSpaceOn : STR.iconClearSpace
+          }
+          disabled={showSpinner || !editable}
+          onClick={() =>
+            setAnnotMode((current) => (current === 'clear' ? null : 'clear'))
+          }
+        >
+          <SquareDashed size={18} strokeWidth={1.9} aria-hidden="true" />
+        </button>
+      </div>
+      {redoError ? <ErrorNotice message={redoError} /> : null}
+
+      <PosterImageFeedbackBox
+        markers={markers}
+        onNoteChange={setNote}
+        onRemoveMarker={removeMarker}
+        onOpenChange={(open) =>
+          setAnnotMode((current) => (open ? (current ?? 'mark') : current))
+        }
+        disabled={showSpinner || !editable}
+        submittedMarkers={submittedMarkers}
+        mode={annotMode ?? 'mark'}
+        clearRegions={clearRegions}
+        onClearNoteChange={setClearNote}
+        onClearActionChange={setClearAction}
+        onRemoveClearRegion={removeClearRegion}
+        submittedClearRegions={submittedClearRegions}
+        onSubmit={submit}
+      />
+    </DialogContent>
   );
 }

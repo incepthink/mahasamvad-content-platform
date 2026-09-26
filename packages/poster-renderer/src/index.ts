@@ -78,7 +78,11 @@ export type {
 } from './clear-region-check.js';
 // Measures what colours a rendered poster actually uses, so the palette rotation can spread away
 // from what SHIPPED rather than from what was merely assigned (see poster-colours.ts).
-export { measurePosterColours, hueBucketOf } from './poster-colours.js';
+export {
+  measurePosterColours,
+  hueBucketOf,
+  oklabLightness,
+} from './poster-colours.js';
 export type { PosterColours, HueBucket } from './poster-colours.js';
 // Turns a picture an officer uploaded into upright, bounded PNG bytes — the one
 // representation the image clients may assume they are holding.

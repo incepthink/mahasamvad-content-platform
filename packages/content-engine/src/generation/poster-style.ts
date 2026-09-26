@@ -33,6 +33,12 @@ import {
   type PlacementFamily,
   type PosterPlacement,
 } from './poster-placements.js';
+import {
+  parsePosterDesign,
+  type DesignComposition,
+  type DesignForm,
+  type PosterDesign,
+} from './poster-design-director.js';
 
 // Both poster kinds store their assigned composition in the SAME `generations.poster_style`
 // column, and they draw from two different libraries — portrait social archetypes
@@ -54,13 +60,26 @@ export type MeasuredColours = Readonly<{
   dominantHex: string;
   hueBucket: string;
   colourfulness: number;
+  // Mean OKLab L and the share of dark pixels (2026-09-26). Optional: every row measured before
+  // then lacks them, and they are monitoring only.
+  lightness?: number | undefined;
+  darkShare?: number | undefined;
 }>;
 
+// The design director's remembered direction (poster-design-director.ts), tagged with a version so
+// a later change to the vocabulary can tell old rows apart.
+export type StoredPosterDesign = PosterDesign & Readonly<{ v: 1 }>;
+
 export type PosterStyle = Readonly<{
-  paletteId: string;
-  family: PaletteFamily;
-  layoutId: string;
-  coverage: LayoutCoverage;
+  // The palette and layout ASSIGNMENT. Optional since 2026-09-26: a fresh social run no longer
+  // picks one (neither ever reached its prompt) and records `design` instead. The article lane
+  // and every row written before that date still carry both.
+  paletteId?: string | undefined;
+  family?: PaletteFamily | undefined;
+  layoutId?: string | undefined;
+  coverage?: LayoutCoverage | undefined;
+  // The fresh social lane's design direction — what the image model was actually told.
+  design?: StoredPosterDesign | undefined;
   // The ARRANGEMENT the fresh social lane was assigned (poster-placements.ts, 2026-08-14) —
   // optional because no row written before that date has one, because the article lane does not
   // use this library, and because the template-edit modes are assigned nothing at all. jsonb, so
@@ -90,6 +109,9 @@ export type StyleHistory = Readonly<{
   // still teaches the next run what not to repeat.
   measuredDominantHexes: readonly string[];
   measuredGroundHexes: readonly string[];
+  // The last few design directions, newest first, NOT de-duplicated — a repeated shape is exactly
+  // the signal the design director needs to steer away from.
+  designs: readonly PosterDesign[];
   // One human-readable line per recent poster, newest first. The article art director is the
   // remaining consumer; the fresh social lane makes no paid art-direction call.
   treatments: readonly string[];
@@ -105,6 +127,7 @@ export const EMPTY_STYLE_HISTORY: StyleHistory = {
   measuredBuckets: [],
   measuredDominantHexes: [],
   measuredGroundHexes: [],
+  designs: [],
   treatments: [],
 };
 
@@ -124,19 +147,33 @@ function parseMeasured(value: unknown): MeasuredColours | null {
     dominantHex,
     hueBucket: str(m.hueBucket) || 'neutral',
     colourfulness: typeof m.colourfulness === 'number' ? m.colourfulness : 0,
+    ...(typeof m.lightness === 'number' ? { lightness: m.lightness } : {}),
+    ...(typeof m.darkShare === 'number' ? { darkShare: m.darkShare } : {}),
   };
+}
+
+function parseStoredDesign(value: unknown): StoredPosterDesign | null {
+  const design = parsePosterDesign(value);
+  return design ? { ...design, v: 1 } : null;
 }
 
 // Read one stored style. Returns null for anything unusable — including a style whose palette or
 // layout id no longer exists in the library, since an id we cannot resolve tells the next run
 // nothing about what to avoid.
+//
+// A row carrying a `design` (a fresh social run since 2026-09-26) is usable on its own, with or
+// without resolvable palette/layout ids — that direction is what the next run steers away from.
 export function parsePosterStyle(value: unknown): PosterStyle | null {
   if (typeof value !== 'object' || value === null) return null;
   const raw = value as Record<string, unknown>;
   const palette = paletteById(str(raw.paletteId));
   const layout = anyLayoutById(str(raw.layoutId));
-  if (!palette || !layout) return null;
+  const design = parseStoredDesign(raw.design);
   const measured = parseMeasured(raw.measured);
+  if (!palette || !layout) {
+    if (!design) return null;
+    return { design, ...(measured ? { measured } : {}) };
+  }
   // An unresolvable or absent placement is NOT fatal to the style, unlike the palette and layout
   // above: every row written before 2026-08-14, every article run and every template-edit run
   // legitimately has none, and nulling those would throw away their colour history too.
@@ -153,6 +190,27 @@ export function parsePosterStyle(value: unknown): PosterStyle | null {
     ...(placement
       ? { placementId: placement.id, placementFamily: placement.family }
       : {}),
+    ...(design ? { design } : {}),
+    ...(measured ? { measured } : {}),
+  };
+}
+
+// The fresh social lane's style: the director's direction and what the render measured, with no
+// palette or layout — neither reached the prompt, so recording them would be recording a fiction.
+// Null when the director produced nothing: a measurement alone has no label to show.
+export function buildDesignPosterStyle(
+  design: PosterDesign | null | undefined,
+  measured?: MeasuredColours | undefined,
+): PosterStyle | null {
+  if (!design) return null;
+  return {
+    design: {
+      form: design.form,
+      composition: design.composition,
+      imagery: design.imagery,
+      colourMood: design.colourMood,
+      v: 1,
+    },
     ...(measured ? { measured } : {}),
   };
 }
@@ -220,6 +278,16 @@ export function familyHonoured(
 // Names the intended treatment and, when they disagree, what actually shipped — a poster that
 // was assigned a cool palette and came out warm should be avoided as WARM.
 export function describePosterStyle(style: PosterStyle): string {
+  if (style.design && !style.paletteId) {
+    const d = style.design;
+    const parts = [
+      `${d.form.replace(/_/g, ' ')} poster, weight ${d.composition.replace(/_/g, ' ')}, ${d.colourMood} colour`,
+    ];
+    if (style.measured && style.measured.groundIsWarm) {
+      parts.push('rendered with a warm cream background');
+    }
+    return parts.join(', ');
+  }
   const palette = paletteById(style.paletteId);
   const layout = anyLayoutById(style.layoutId);
   // A stored placement marks a social run, where composition is now fully model-led. Do not claim
@@ -227,9 +295,9 @@ export function describePosterStyle(style: PosterStyle): string {
   // assigned landscape layout, so retain that description there.
   const placement = placementById(style.placementId);
   const parts = [
-    palette?.palette ?? style.paletteId,
-    ...(placement ? [] : [layout?.name ?? style.layoutId]),
-  ];
+    palette?.palette ?? style.paletteId ?? '',
+    ...(placement ? [] : [layout?.name ?? style.layoutId ?? '']),
+  ].filter((p) => p.length > 0);
   if (style.measured && style.measured.groundIsWarm) {
     parts.push('rendered with a warm cream background');
   }
@@ -255,6 +323,8 @@ export const TREATMENT_RING = 4;
 // that would empty the pool.
 export const PLACEMENT_FAMILY_RING = 3;
 export const PLACEMENT_ID_RING = 5;
+// The design director is shown the last five directions.
+export const DESIGN_RING = 5;
 
 export function toStyleHistory(stored: readonly unknown[]): StyleHistory {
   const styles = stored
@@ -277,23 +347,19 @@ export function toStyleHistory(stored: readonly unknown[]): StyleHistory {
     return out;
   };
 
+  // A design-only row (fresh social, 2026-09-26) has no assignment and must not occupy a
+  // palette/layout ring slot with an empty value.
+  const defined = <T>(values: readonly (T | undefined)[]): T[] =>
+    values.filter((v): v is T => v !== undefined && v !== '');
+
   return {
     paletteIds: dedupe(
-      styles.map((s) => s.paletteId),
+      defined(styles.map((s) => s.paletteId)),
       PALETTE_ID_RING,
     ),
-    families: dedupe(
-      styles.map((s) => s.family),
-      FAMILY_RING,
-    ),
-    layoutIds: dedupe(
-      styles.map((s) => s.layoutId),
-      LAYOUT_ID_RING,
-    ),
-    coverages: dedupe(
-      styles.map((s) => s.coverage),
-      COVERAGE_RING,
-    ),
+    families: dedupe(defined(styles.map((s) => s.family)), FAMILY_RING),
+    layoutIds: dedupe(defined(styles.map((s) => s.layoutId)), LAYOUT_ID_RING),
+    coverages: dedupe(defined(styles.map((s) => s.coverage)), COVERAGE_RING),
     // Filtered before de-duplication: a run with no placement (article, template-edit, or any
     // row older than 2026-08-14) must not occupy a ring slot with an empty string, or a few
     // legacy rows would fill the ring and stop it barring anything real.
@@ -325,15 +391,50 @@ export function toStyleHistory(stored: readonly unknown[]): StyleHistory {
         .filter((value) => value.length > 0),
       MEASURED_COLOUR_RING,
     ),
+    designs: defined(styles.map((s) => s.design))
+      .slice(0, DESIGN_RING)
+      .map(({ form, composition, imagery, colourMood }) => ({
+        form,
+        composition,
+        imagery,
+        colourMood,
+      })),
     treatments: styles.slice(0, TREATMENT_RING).map(describePosterStyle),
   };
 }
 
 // The Marathi label shown to the officer on the generation detail page, e.g.
 // "गडद नीलम व पोर्सिलेन · डावी रंगपट्टी". Returns null when the run has no usable style.
+// Marathi names for the design director's vocabulary: form · where the visual weight sits.
+const DESIGN_FORM_LABELS: Readonly<Record<DesignForm, string>> = {
+  figure_led: 'आकडे ठळक',
+  sequence: 'क्रमवार मांडणी',
+  statement: 'एकच ठळक संदेश',
+  grouped_sections: 'गटवार विभाग',
+  split_columns: 'दोन स्तंभ',
+  feature_and_supporting: 'मुख्य मुद्दा व पूरक माहिती',
+  image_led: 'छायाचित्र-प्रधान',
+  icon_list: 'चिन्हांसह यादी',
+  other: 'मुक्त रचना',
+};
+const DESIGN_COMPOSITION_LABELS: Readonly<Record<DesignComposition, string>> = {
+  top: 'वरचा भाग प्रधान',
+  bottom: 'खालचा भाग प्रधान',
+  left: 'डावी बाजू प्रधान',
+  right: 'उजवी बाजू प्रधान',
+  centre: 'मध्यवर्ती',
+  full_bleed: 'पूर्ण कॅनव्हास',
+  layered: 'स्तरित',
+};
+
 export function posterStyleLabel(value: unknown): string | null {
   const style = parsePosterStyle(value);
   if (!style) return null;
+  // A fresh social run names what its image model was actually told — never a palette it did not
+  // see (the "गडद प्रकाशमान" label on generation c0e28c9d was exactly that).
+  if (style.design) {
+    return `${DESIGN_FORM_LABELS[style.design.form]} · ${DESIGN_COMPOSITION_LABELS[style.design.composition]}`;
+  }
   const palette = paletteById(style.paletteId);
   const layout = anyLayoutById(style.layoutId);
   // Do not show unused composition metadata beneath a fresh social poster. Article posters have
@@ -564,6 +665,78 @@ if (
       failures.push('the placement family ring came back empty');
     if (EMPTY_STYLE_HISTORY.placementIds.length !== 0)
       failures.push('the empty history is not empty for placements');
+  }
+
+  // 8. THE DESIGN DIRECTION (2026-09-26). A fresh social run records a design and NO palette or
+  //    layout, so a design-only row must parse, feed the designs ring, stay out of the palette
+  //    rings, and label itself from the design rather than from a palette nobody saw.
+  {
+    const design = {
+      form: 'figure_led',
+      composition: 'centre',
+      imagery: 'photo_large',
+      colourMood: 'teal',
+    } as const;
+    const measured = {
+      groundHex: '#F2F7F8',
+      groundIsWarm: false,
+      dominantHex: '#1F7A80',
+      hueBucket: 'teal',
+      colourfulness: 0.3,
+      lightness: 0.86,
+      darkShare: 0.08,
+    };
+    const designStyle = buildDesignPosterStyle(design, measured);
+    const back = parsePosterStyle(JSON.parse(JSON.stringify(designStyle)));
+    if (
+      !back?.design ||
+      back.design.form !== 'figure_led' ||
+      back.design.v !== 1
+    )
+      failures.push('a design-only style did not round-trip');
+    if (back?.paletteId !== undefined)
+      failures.push('a design-only style invented a palette');
+    if (back?.measured?.darkShare !== 0.08)
+      failures.push('darkShare was lost in the round trip');
+    if (buildDesignPosterStyle(null, measured) !== null)
+      failures.push('a missing design still built a style');
+    // Junk design fields do not rescue an otherwise unusable row.
+    if (
+      parsePosterStyle({ design: { form: 'x', composition: 'nowhere' } }) !==
+      null
+    )
+      failures.push('a junk design parsed');
+    const designLabel = posterStyleLabel(designStyle);
+    if (designLabel !== 'आकडे ठळक · मध्यवर्ती')
+      failures.push(`unexpected design label: ${designLabel}`);
+    console.log(`design label: ${designLabel}`);
+    const ring = toStyleHistory([
+      designStyle,
+      built,
+      buildDesignPosterStyle({
+        ...design,
+        form: 'icon_list',
+        composition: 'left',
+      }),
+      designStyle,
+      designStyle,
+      designStyle,
+    ]);
+    if (ring.designs.length !== DESIGN_RING)
+      failures.push(
+        `designs ring took ${ring.designs.length}, expected ${DESIGN_RING}`,
+      );
+    if (
+      ring.designs[0]?.form !== 'figure_led' ||
+      ring.designs[1]?.form !== 'icon_list'
+    )
+      failures.push('designs ring is not newest first');
+    if (ring.paletteIds.length !== 1 || ring.paletteIds[0] !== palette.id)
+      failures.push('a design-only row occupied a palette ring slot');
+    if (!ring.measuredBuckets.includes('teal'))
+      failures.push("a design-only row's measured colour was not remembered");
+    if (!ring.treatments[0]?.includes('figure led poster'))
+      failures.push(`design treatment not described: ${ring.treatments[0]}`);
   }
 
   if (failures.length > 0) {

@@ -37,15 +37,16 @@ import {
   interpretImageFeedback,
   listSocialTypes,
   buildPosterStyle,
+  buildDesignPosterStyle,
+  buildFreshCopyManifest,
+  analyzeInformationShape,
+  directPosterDesign,
+  posterDesignDirectionEnabled,
   familyHonoured,
   parsePosterStyle,
   pickArticleLayout,
   pickArticleReference,
-  pickLayout,
   pickPalette,
-  pickSocialPalette,
-  pickPlacement,
-  placementById,
   posterCopyItemCount,
   extractPosterPoints,
   resolvePosterSubject,
@@ -67,9 +68,10 @@ import {
   type ArticleDesignMode,
   type ImageQuality,
   type PaletteFamily,
-  type PlacementFamily,
   type PosterDesignMode,
   type PosterStyle,
+  type PosterDesign,
+  type RedoKind,
   type PosterSubject,
   type ResolvedReference,
   type StyleHistory,
@@ -1901,6 +1903,11 @@ async function resolveSocialReference(
 // copy_style, so this is not a new code path, just the one a reference-free run names explicitly.
 const FRESH_COPY_STYLE = 'generic';
 
+// A fresh social render with more than this share of dark pixels (OKLab L < 0.35) is logged as a
+// DARK POSTER. Monitoring only: the light-ground rule is an instruction, and the honest fix for
+// systematic non-compliance is the prompt, not a second paid render.
+const DARK_POSTER_SHARE = 0.4;
+
 // A fresh run has no reference ranker, so nothing hands it the Marathi working title that
 // becomes generations.reference_title. The poster's own headline is the best available answer and
 // costs nothing — it is already written by the time this is needed. null only if the copy step
@@ -1932,9 +1939,10 @@ function verbatimWorkingTitle(note: string): string | null {
 // Render ONE social poster and store it at posterPath(id, version), updating referenceTitle +
 // posterPath. Shared by the initial job (version 1) and the regenerate action (next version).
 //
-// The default DGIPR path generates the poster from scratch. A fast procedural colour plan reaches
-// the prompt; composition remains fully content-led. The legacy edit modes ('onbrand'/'adaptive')
-// still edit the master via the thin n8n workflow; CMO keeps its own template-following render.
+// The default DGIPR path generates the poster from scratch, directed per run by the design
+// director (a short brief in words, plus the light-ground rule); no palette, layout or placement
+// is assigned any more. The template modes ('onbrand'/'adaptive') edit the master directly; CMO
+// keeps its own template-following render.
 async function renderAndStoreSocialPoster(
   client: SupabaseClient,
   id: string,
@@ -1942,24 +1950,22 @@ async function renderAndStoreSocialPoster(
   brand: TemplateBrand,
   designMode: PosterDesignMode,
   version: number,
-  // Diversifies the assignment per run (id on a first render, `${id}:v${n}` on a regenerate, so a
-  // redo looks new rather than repeating the previous poster).
-  seed: string,
+  // Unused since 2026-09-26: it seeded the retired palette/layout/placement picks. Diversity now
+  // comes from the design director's recent memory and the redo's `avoid` below. Kept so both
+  // callers' signatures stay put.
+  _seed: string,
   // What this render must avoid ON TOP of the recent history, set by the redo buttons so a new
   // version cannot reproduce the one the officer just rejected. The recency ring only knows about
-  // OTHER runs — a redo of this row is not in it yet — so without this a fresh seed could
-  // legitimately land back on exactly what it was asked to replace.
+  // OTHER runs — a redo of this row is not in it yet.
   //
-  //   families   — colour, and ONLY on the "different colours" redo: a plain redo is not a
-  //                complaint about the palette.
-  //   placement* — legacy metadata rotation retained for persisted-row compatibility. It no
-  //                longer reaches the prompt and therefore makes no claim about the next shape.
+  //   previousDesign — the design direction of the version being redone (fresh lane only).
+  //   redoKind       — 'arrangement' on पुन्हा तयार करा (form AND composition must change),
+  //                    'colour' on वेगळ्या रंगात तयार करा (the colour mood must change).
+  //   previousMeasuredBucket — what that version's render measured, for a colour redo.
   avoid: Readonly<{
-    families?: readonly PaletteFamily[] | undefined;
-    dominantHexes?: readonly string[] | undefined;
-    groundHexes?: readonly string[] | undefined;
-    placementIds?: readonly string[] | undefined;
-    placementFamilies?: readonly PlacementFamily[] | undefined;
+    previousDesign?: PosterDesign | undefined;
+    previousMeasuredBucket?: string | undefined;
+    redoKind?: RedoKind | undefined;
   }> = {},
   // Only the v1 write upserts — the same guarantee runArticlePosterPhase already makes, and
   // for the same reason. v1 is never legitimately re-rendered, but a crash (or a process
@@ -2014,8 +2020,8 @@ async function renderAndStoreSocialPoster(
   //      - copyStyle  -> 'generic', whose registry self-bounds to a sensible 3-6 points rather
   //                      than filling a template's slots.
   //      - layoutSpec -> null, so nothing pins the point count and hasPhoto defaults true.
-  //      - structure  -> the assigned COMPOSITION archetype alone (poster-layouts.ts), which
-  //                      already OUTRANKED the master's hint whenever both were present.
+  //      - structure  -> the design director's brief (poster-design-director.ts, 2026-09-26),
+  //                      chosen from the content's shape rather than from any template.
   //    A fresh run therefore also has no capacity ceiling, so it can never report a shortfall:
   //    there is no template to overflow.
   //
@@ -2154,89 +2160,54 @@ async function renderAndStoreSocialPoster(
     });
   }
 
-  // 3a. Colour direction + composition metadata. Colour is generated locally in OKLCH, checked
-  //     for readable text pairings, spread away from actual colours measured on recent outputs,
-  //     and sent to the image model. This is synchronous and adds no model/provider call.
-  //     Composition remains fully content-led: layout/placement are retained only as compatible
-  //     poster_style metadata and do not reach the prompt.
-  const history = isFresh
+  // 3a. DESIGN DIRECTION (2026-09-26, poster-design-director.ts). One small strict-JSON call on
+  //     the utility tier decides, in plain words, how THIS poster presents its information — the
+  //     form, where the visual weight sits, the imagery and a colour mood on a light ground —
+  //     steering gently away from the last few posters and, on a redo, away from the version
+  //     being replaced. Its sanitised brief is the only part that reaches the image model.
+  //
+  //     It REPLACES the palette/layout/placement picks that used to sit here. None of the three
+  //     ever reached the fresh prompt; they were only written to poster_style, which is how a
+  //     poster came to be labelled with a palette its model never saw. Best-effort: a null
+  //     direction renders exactly as before, plus the light-ground rule.
+  const directsDesign =
+    isFresh && !customPrompt && posterDesignDirectionEnabled();
+  const history = directsDesign
     ? await recentStyleHistory(client, SOCIAL_STYLE_CATEGORIES)
     : undefined;
-  const assignedPalette =
-    isFresh && !customPrompt
-      ? pickSocialPalette(seed, {
-          ids: history?.paletteIds,
-          families: [...(history?.families ?? []), ...(avoid.families ?? [])],
-          recentDominantHexes: [
-            ...(history?.measuredDominantHexes ?? []),
-            ...(avoid.dominantHexes ?? []),
-          ],
-          recentGroundHexes: [
-            ...(history?.measuredGroundHexes ?? []),
-            ...(avoid.groundHexes ?? []),
-          ],
-        })
-      : undefined;
-  const assignedLayout = isFresh
-    ? pickLayout(
-        seed,
-        // A verbatim run made no copy call, so there is nothing to read a shape off. The defaults
-        // are the un-analysed-master defaults used everywhere else in this file: photo allowed,
-        // generic registry. Neither reaches the image model any more (the assignment is recorded
-        // for poster_style and nothing else) — but pickLayout still has to be given an answer, and
-        // `copyResult!` here was a live null-dereference the moment a second copy-less mode existed.
-        {
-          hasPhoto: copyResult?.hasPhoto ?? true,
-          copyStyle: copyResult?.copyStyle ?? FRESH_COPY_STYLE,
-        },
-        { ids: history?.layoutIds, coverages: history?.coverages },
-      )
-    : undefined;
-
-  // 3a-ii. Arrangement metadata. Like palette/layout above, this stays content-filtered and
-  //     rotation-aware for the persisted style record, but does not reach the image prompt.
-  //     Both inputs are deterministic and free — no model call decides eligibility:
-  //
-  //       hasImagery — the copy's own verdict. On a fresh run layoutSpec is null so this is
-  //                    true, and the model invents the imagery; the flag is here for the
-  //                    text-only case rather than as decoration.
-  //       itemCount  — read off the WRITTEN COPY, not the note. The generic registry self-bounds
-  //                    to 3-6 points, so a twelve-sentence note yields six items; counting the
-  //                    note would have excluded every capacity-capped anchor for no reason. The
-  //                    verbatim lane makes no copy call, so it passes 0 = unknown, which bars
-  //                    nothing and leaves the whole library eligible.
-  const assignedPlacement = isFresh
-    ? pickPlacement(
-        seed,
-        {
-          hasImagery: copyResult?.hasPhoto ?? true,
-          itemCount: copyResult ? posterCopyItemCount(copyResult.copy) : 0,
-        },
-        {
-          ids: [
-            ...(history?.placementIds ?? []),
-            ...(avoid.placementIds ?? []),
-          ],
-          families: [
-            ...(history?.placementFamilies ?? []),
-            ...(avoid.placementFamilies ?? []),
-          ],
-        },
-      )
-    : undefined;
-
-  // 3b. Art direction remains retired. The local colour plan replaces only its palette function;
-  //     no LLM is called, and composition/treatment remain the image model's decision.
-  const artDirection = null;
-  if (assignedPalette && assignedLayout) {
+  const designDirection = directsDesign
+    ? await directPosterDesign({
+        // What the poster will actually print: the officer's text, or the copy's manifest.
+        text: isFreshVerbatim
+          ? row.note
+          : buildFreshCopyManifest(
+              copyResult?.copyStyle ?? FRESH_COPY_STYLE,
+              copyResult?.copy ?? {},
+            ),
+        itemCount: isFreshVerbatim
+          ? analyzeInformationShape(row.note).itemCount
+          : copyResult
+            ? posterCopyItemCount(copyResult.copy)
+            : 0,
+        recent: history?.designs,
+        recentMeasuredBuckets: history?.measuredBuckets,
+        previous: avoid.previousDesign,
+        previousMeasuredBucket: avoid.previousMeasuredBucket,
+        redoKind: avoid.redoKind,
+      })
+    : null;
+  if (directsDesign) {
     console.log(
-      `[job ${id}] style: palette=${assignedPalette.id} (${assignedPalette.family}) layout=${assignedLayout.id} (${assignedLayout.coverage})` +
-        // Kept in the log because it is persisted beside the other style metadata.
-        ` placement=${assignedPlacement?.id ?? 'none'} (${assignedPlacement?.family ?? '-'})` +
-        ` | avoided families=[${(history?.families ?? []).join(',')}${(avoid.families ?? []).length ? `+${(avoid.families ?? []).join(',')}` : ''}]` +
-        ` placements=[${(history?.placementIds ?? []).join(',')}${(avoid.placementIds ?? []).length ? `+${(avoid.placementIds ?? []).join(',')}` : ''}]` +
+      `[job ${id}] design: ${
+        designDirection
+          ? `form=${designDirection.form} composition=${designDirection.composition} imagery=${designDirection.imagery} colourMood=${designDirection.colourMood}`
+          : 'none (rendering without a direction)'
+      }` +
+        ` | recent=[${(history?.designs ?? []).map((d) => `${d.form}/${d.composition}`).join(',')}]` +
         ` measured=[${(history?.measuredBuckets ?? []).join(',')}]` +
-        ' (colour-directed, composition-free)',
+        (avoid.redoKind
+          ? ` redo=${avoid.redoKind}${avoid.previousDesign ? ` from ${avoid.previousDesign.form}/${avoid.previousDesign.composition}/${avoid.previousDesign.colourMood}` : ''}`
+          : ''),
     );
   }
 
@@ -2271,11 +2242,8 @@ async function renderAndStoreSocialPoster(
         masterUrl: resolved?.master.url,
         layoutSummary: resolved?.master.layoutSpec?.layoutSummary,
         hasPhoto: copyResult?.hasPhoto ?? false,
-        artDirection: artDirection ?? undefined,
-        assignedPalette,
-        assignedLayout,
-        // Recorded as style metadata; deliberately ignored by the fresh prompt builder.
-        assignedPlacement,
+        // Fresh branch only: the DESIGN DIRECTION block (when present) + LIGHT BACKGROUND always.
+        designDirection,
       });
 
   // 5. Render. 'fresh' paints from scratch via the direct image call — no master, and no n8n;
@@ -2302,36 +2270,37 @@ async function renderAndStoreSocialPoster(
   //     band and emblem are the same colours on every poster, so measuring after them biases
   //     every measurement identically and makes the comparison across runs worthless.
   //
-  //     A mismatch against the assignment is logged, never retried: a re-render is another paid
-  //     image call, and the honest fix for systematic non-compliance is a better prompt. What the
-  //     measurement is FOR is the next run's avoid set (see recentStyleHistory).
-  let posterStyle: PosterStyle | undefined;
-  if (assignedPalette && assignedLayout) {
+  //     Measured colour is what the NEXT run's director is told recent posters came out in. The
+  //     light-ground check is MONITORING only: a dark poster is logged, never re-rendered — a
+  //     second render is another paid image call.
+  //
+  //     `null` (not undefined) when the director produced nothing: a redo must not leave the
+  //     previous version's design label under a poster that was not given that direction.
+  let posterStyle: PosterStyle | null | undefined;
+  if (directsDesign) {
     let measured;
     try {
       measured = await measurePosterColours(rawPoster);
     } catch (error) {
       console.warn(`[job ${id}] could not measure poster colours:`, error);
     }
-    // The arrangement rides along in the same jsonb value (no migration — 0028's column has no
-    // column schema). Persisting it is what lets a redo bar this exact shape, and what lets the
-    // next few runs spread away from it.
-    posterStyle = buildPosterStyle(
-      assignedPalette,
-      assignedLayout,
-      measured,
-      assignedPlacement,
-    );
+    posterStyle = buildDesignPosterStyle(designDirection, measured);
     if (measured) {
-      const complied = familyHonoured(
-        assignedPalette.family,
-        measured.hueBucket,
-      );
       console.log(
         `[job ${id}] measured: ground=${measured.groundHex}${measured.groundIsWarm ? ' (warm cream)' : ''}` +
           ` dominant=${measured.dominantHex} bucket=${measured.hueBucket}` +
-          `${complied ? '' : ` — MISMATCH, assigned ${assignedPalette.family}`}`,
+          ` lightness=${measured.lightness.toFixed(3)} dark=${(measured.darkShare * 100).toFixed(1)}%` +
+          (designDirection &&
+          measured.hueBucket !== 'neutral' &&
+          measured.hueBucket !== designDirection.colourMood
+            ? ` (directed ${designDirection.colourMood})`
+            : ''),
       );
+      if (measured.darkShare > DARK_POSTER_SHARE) {
+        console.warn(
+          `[job ${id}] DARK POSTER: ${(measured.darkShare * 100).toFixed(1)}% of the render is dark (L < 0.35) despite the light-ground rule — logged only, not re-rendered.`,
+        );
+      }
     }
   }
 
@@ -2380,7 +2349,7 @@ async function renderAndStoreSocialPoster(
   // on a database where 0028 has not been applied the whole update fails and the already-paid
   // poster never lands on the row. Losing the rotation memory for one run is a cost worth paying;
   // losing the render is not. Same ordering principle as the caption step.
-  if (posterStyle) {
+  if (posterStyle !== undefined) {
     try {
       await updateGeneration(client, id, { posterStyle });
     } catch (error) {
@@ -2682,26 +2651,17 @@ export function startPosterRegenerateJob(
     //
     //   colour      — only on "वेगळ्या रंगात तयार करा". A plain redo is not a complaint about the
     //                 palette, and barring a family nobody objected to narrows the rotation for
-    //                 nothing.
-    //   arrangement — legacy metadata is still rotated on every redo for stored-row
-    //                 compatibility, but it no longer reaches the image prompt. The new seed is
-    //                 what asks the image model for a genuinely new composition.
+    //                 nothing. (Article lane: the assigned family. Fresh social: the design
+    //                 director is told the colour mood must change.)
+    //   arrangement — on every plain redo of a fresh social poster the design director is told
+    //                 the form AND composition of the current version must both change.
     const current = parsePosterStyle(row.posterStyle);
     const avoidFamilies: PaletteFamily[] =
-      options.recolour && current ? [current.family] : [];
-    const avoidMeasuredColours =
-      options.recolour && current?.measured
-        ? {
-            dominantHexes: [current.measured.dominantHex],
-            groundHexes: [current.measured.groundHex],
-          }
-        : {};
-    // Resolved through the library rather than trusted from the row, so an anchor removed from
-    // the library since the last render simply bars nothing instead of poisoning the pool.
-    const currentPlacement = placementById(current?.placementId);
-    const avoidPlacement = {
-      placementIds: currentPlacement ? [currentPlacement.id] : [],
-      placementFamilies: currentPlacement ? [currentPlacement.family] : [],
+      options.recolour && current?.family ? [current.family] : [];
+    const designAvoid = {
+      previousDesign: current?.design,
+      previousMeasuredBucket: current?.measured?.hueBucket,
+      redoKind: (options.recolour ? 'colour' : 'arrangement') as RedoKind,
     };
 
     // Thumbnail lane. There is no palette or composition assignment to re-roll here (the
@@ -2788,7 +2748,7 @@ export function startPosterRegenerateJob(
       designMode,
       version,
       `${id}:v${version}`,
-      { families: avoidFamilies, ...avoidMeasuredColours, ...avoidPlacement },
+      designAvoid,
     );
 
     await insertRevision(client, {

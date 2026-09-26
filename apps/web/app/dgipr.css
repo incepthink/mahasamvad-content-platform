@@ -4029,6 +4029,36 @@ fieldset.copy-group legend {
   flex-wrap: wrap;
 }
 
+/* "Show card text" toggle, pushed to the end of the count row. */
+.history-text-toggle {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+}
+
+.history-text-toggle input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* Images-only card: the picture is the whole card. It grows to fill the card, because
+   a grid row that also holds a text card (a बातमी keeps its text) stretches every card
+   to that row's height — a fixed-ratio image would leave an empty band beneath it. */
+.history-card.is-image-only .history-media {
+  flex: 1 1 auto;
+  min-height: 0;
+  border-bottom: 0;
+}
+
 /* Skeleton shimmer (reuses the task-shimmer gradient/animation). */
 .skeleton {
   background: linear-gradient(
@@ -10015,8 +10045,15 @@ a.file-row-link > svg:last-child {
   margin: 4px 0 0;
 }
 
-.carousel-slide .poster-icon-actions {
-  margin-top: 8px;
+/* The one control on a slide card: it opens the slide in the edit modal. Sits over the
+   slide's top-left corner (the top-right holds the stamped badge), with a lift so it reads
+   over light and dark artwork alike. */
+.carousel-edit-btn {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 2;
+  box-shadow: var(--shadow-md);
 }
 
 .carousel-nav {
@@ -10075,7 +10112,7 @@ a.file-row-link > svg:last-child {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 14px;
-  margin-top: 16px;
+  margin: 16px 0;
 }
 
 .carousel-actions .btn {
@@ -10084,31 +10121,17 @@ a.file-row-link > svg:last-child {
   gap: 6px;
 }
 
-.carousel-actions .hint {
-  margin: 0;
-  flex: 1 1 260px;
+/* The slide editor modal (its width is a Tailwind class on it, since utilities outrank this
+   layer): the slide centred, the icon row centred under it, the change box full width. */
+.carousel-dialog-slide {
+  width: 100%;
+  max-width: 420px;
+  margin: 0 auto;
 }
 
-.carousel-editor {
-  margin-top: 20px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border);
-}
-
-.carousel-editor-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
-.carousel-editor-head h3 {
-  margin: 0;
-}
-
-.carousel-publish-note {
-  margin: 18px 0 16px;
+.carousel-dialog-actions {
+  justify-content: center;
+  margin-top: 0;
 }
 
 @media (max-width: 560px) {

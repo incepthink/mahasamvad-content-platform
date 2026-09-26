@@ -11,7 +11,16 @@ import type { ArtDirection } from './art-direction.js';
 import type { PosterPalette } from './poster-palettes.js';
 import type { PosterLayout } from './poster-layouts.js';
 import type { PosterPlacement } from './poster-placements.js';
-import { buildMinimalCreativePrompt } from './minimal-creative-prompt.js';
+import type { PosterDesignDirection } from './poster-design-director.js';
+import {
+  buildMinimalCreativePrompt,
+  DO_NOT_USE_RULE,
+  HEADLINE_MARGINS_RULE,
+  ICONS_RULE,
+  LIGHT_GROUND_RULE,
+  NUMBERS_RULE,
+  TEXT_ACCURACY_RULE,
+} from './minimal-creative-prompt.js';
 import {
   clearSpaceRule,
   contentInventoryLines,
@@ -147,20 +156,19 @@ export type BuildPosterPromptInput = Readonly<{
   // instruction.
   layoutSummary?: string | undefined;
   hasPhoto: boolean;
-  // The old full design specification is retired. Only `assignedPalette` reaches the image model
-  // now, as a compact colour-only block; art direction, layout and placement remain absent so the
-  // content can still determine the composition.
-  //
-  // They are kept on the type, and the runner still ASSIGNS a palette and a layout, because
-  // `generations.poster_style` (migration 0028) persists them and the UI reads them back as the
-  // run's style label. `artDirection` is no longer requested at all — the runner skips that paid
-  // call rather than buying a treatment nothing consumes.
+  // NONE OF THE FOUR BELOW REACHES THE IMAGE MODEL on any lane this function builds (corrected
+  // 2026-09-26 — this comment used to claim `assignedPalette` did, and the fresh branch never
+  // read it). They stay on the type only for callers that still pass them; the fresh social lane
+  // stopped assigning them and is directed by `designDirection` instead.
   artDirection?: ArtDirection | undefined;
   assignedPalette?: PosterPalette | undefined;
   assignedLayout?: PosterLayout | undefined;
-  // Retained on the caller contract because the selected arrangement is stored as style metadata
-  // and used by redo/history rotation. It deliberately does not reach the image prompt.
   assignedPlacement?: PosterPlacement | undefined;
+  // The design director's direction for a FRESH poster (poster-design-director.ts). Only its
+  // sanitised `brief` is emitted, as a DESIGN DIRECTION block; the fresh branch also always emits
+  // the LIGHT BACKGROUND rule, so a failed director still yields a light-ground poster. Ignored
+  // by every other branch.
+  designDirection?: PosterDesignDirection | null | undefined;
 }>;
 
 // BRIGHTNESS. Only for the lane where the image model chooses the colours itself — the
@@ -336,7 +344,10 @@ function freshItems(
     .filter(Boolean);
 }
 
-function buildFreshCopyManifest(copyStyle: string, c: PosterCopy): string {
+export function buildFreshCopyManifest(
+  copyStyle: string,
+  c: PosterCopy,
+): string {
   let primary = '';
   const additional: string[] = [];
   const add = (value: unknown): void => {
@@ -587,12 +598,8 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
     const verbatim = (input.information ?? '').trim();
     const isVerbatim = designMode === 'fresh_verbatim' && verbatim.length > 0;
     // `fresh` typesets the curated copy; `fresh_verbatim` typesets the officer's unchanged text.
-    // Minimal creative prompt for social media platforms containing only:
-    // 1. "Make a creative poster for social media platforms in the size 1280 × 1504."
-    // 2. TEXT ACCURACY
-    // 3. NUMBERS
-    // 4. AREA RULES
-    // 5. TEXT TO PUT ON THE POSTER
+    // The minimal creative prompt (minimal-creative-prompt.ts), plus two blocks after its opening
+    // line: the design director's DESIGN DIRECTION when there is one, and LIGHT BACKGROUND always.
     const posterContent = isVerbatim
       ? verbatim
       : buildFreshCopyManifest(copyStyle, copy);
@@ -601,6 +608,8 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
       text: posterContent,
       width: 1280,
       height: 1504,
+      designDirection: input.designDirection?.brief,
+      lightGround: true,
     });
   }
 
@@ -1731,6 +1740,144 @@ if (
       customThrew = true;
     }
     if (!customThrew) failures.push('empty custom prompt was accepted');
+
+    // 4g. THE DESIGN DIRECTOR + LIGHT GROUND (2026-09-26). Both fresh modes carry DESIGN
+    //     DIRECTION then LIGHT BACKGROUND, in that order, before NUMBERS; every existing rule
+    //     block survives verbatim; the text is still last; and no other lane changes.
+    {
+      const minimal = buildMinimalCreativePrompt;
+      const BRIEF =
+        'Let the figures carry the design as large confident numerals on a pale sky-tinted ground, with grouped sections below.';
+      const direction = {
+        form: 'figure_led',
+        composition: 'centre',
+        imagery: 'photo_large',
+        colourMood: 'teal',
+        brief: BRIEF,
+      } as const;
+      const VERBATIM_TEXT = 'राज्यातील २५ लाख शेतकऱ्यांना सौर कृषी पंप.';
+      for (const [mode, info] of [
+        ['fresh', undefined],
+        ['fresh_verbatim', VERBATIM_TEXT],
+      ] as const) {
+        const directed = buildPosterPrompt({
+          copy: COPY,
+          information: info,
+          copyStyle: 'info_bullets',
+          designMode: mode,
+          brand: 'dgipr',
+          hasPhoto: true,
+          designDirection: direction,
+        });
+        const at = (needle: string): number => directed.indexOf(needle);
+        if (!(
+          at('DESIGN DIRECTION:') > 0 &&
+          at('DESIGN DIRECTION:') < at('LIGHT BACKGROUND:')
+        ))
+          failures.push(
+            `${mode}: DESIGN DIRECTION does not precede LIGHT BACKGROUND`,
+          );
+        if (!(at('LIGHT BACKGROUND:') < at('NUMBERS:')))
+          failures.push(`${mode}: LIGHT BACKGROUND does not precede NUMBERS`);
+        if (!directed.includes(BRIEF))
+          failures.push(`${mode}: the brief did not reach the prompt`);
+        if (!directed.includes('It never overrides any rule below'))
+          failures.push(
+            `${mode}: the direction is not subordinated to the rules`,
+          );
+        for (const block of [
+          NUMBERS_RULE,
+          TEXT_ACCURACY_RULE,
+          ICONS_RULE,
+          DO_NOT_USE_RULE,
+          HEADLINE_MARGINS_RULE,
+          LIGHT_GROUND_RULE,
+        ]) {
+          if (!directed.includes(block))
+            failures.push(
+              `${mode}: a rule block is no longer verbatim: ${block.split('\n')[0]}`,
+            );
+        }
+        if (at('TEXT TO PUT ON THE POSTER:') < at('AREA RULES:'))
+          failures.push(`${mode}: the poster text is no longer last`);
+        if (directed.length > 3_500)
+          failures.push(
+            `${mode}: the directed fresh prompt exceeds 3,500 chars (${directed.length})`,
+          );
+        // A failed director still yields the light rule, and no empty direction heading.
+        const undirected = buildPosterPrompt({
+          copy: COPY,
+          information: info,
+          copyStyle: 'info_bullets',
+          designMode: mode,
+          brand: 'dgipr',
+          hasPhoto: true,
+          designDirection: null,
+        });
+        if (!undirected.includes(LIGHT_GROUND_RULE))
+          failures.push(`${mode}: a missing direction dropped the light rule`);
+        if (undirected.includes('DESIGN DIRECTION'))
+          failures.push(
+            `${mode}: a missing direction emitted an empty heading`,
+          );
+      }
+      // The builder without the new options is byte-identical to the pre-2026-09-26 assembly.
+      const plain = minimal({ text: VERBATIM_TEXT });
+      const expected = [
+        'Make a creative poster for social media platforms in the size 1280 × 1504. It must look very professional and not be congested.',
+        '',
+        NUMBERS_RULE,
+        '',
+        TEXT_ACCURACY_RULE,
+        '',
+        ICONS_RULE,
+        '',
+        DO_NOT_USE_RULE,
+        '',
+        HEADLINE_MARGINS_RULE,
+        '',
+        'AREA RULES:\n- Bottom margin: The footer is attached below the image and covers nothing. Extend the design to the bottom edge, but keep all text and icons above y=1488 (at least 16 pixels above the bottom edge). Do not draw wave patterns or curved decorative swooshes along the bottom. Reflow or shrink content until everything fits.',
+        '',
+        'TEXT TO PUT ON THE POSTER:',
+        VERBATIM_TEXT,
+      ].join('\n');
+      if (plain !== expected)
+        failures.push(
+          'buildMinimalCreativePrompt without the new options is no longer byte-identical',
+        );
+      // No other lane sees either block.
+      const onbrandDirected = buildPosterPrompt({
+        copy: {},
+        information: VERBATIM_TEXT,
+        itemCount: 1,
+        copyStyle: 'info_bullets',
+        designMode: 'onbrand',
+        brand: 'dgipr',
+        masterUrl: 'https://example.test/master.png',
+        hasPhoto: true,
+        designDirection: direction,
+      });
+      const cmoDirected = buildPosterPrompt({
+        copy: COPY,
+        copyStyle: 'info_bullets',
+        designMode: 'onbrand',
+        brand: 'cmo',
+        masterUrl: 'https://example.test/cmo.png',
+        hasPhoto: true,
+        designDirection: direction,
+      });
+      for (const [lane, text] of [
+        ['onbrand', onbrandDirected],
+        ['cmo', cmoDirected],
+        ['custom', custom],
+      ] as const) {
+        if (
+          text.includes('DESIGN DIRECTION') ||
+          text.includes('LIGHT BACKGROUND:')
+        )
+          failures.push(`the ${lane} prompt picked up a fresh-lane block`);
+      }
+    }
 
     if (failures.length > 0) {
       console.error(`\n${failures.length} FAILURE(S):`);

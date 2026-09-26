@@ -25,6 +25,30 @@ import { PageShell } from '../../components/common/PageShell';
 
 const PAGE_SIZE = 12;
 
+// "Images only" is a per-viewer display preference, so it lives in localStorage rather than
+// the URL: it changes how the list LOOKS, not which runs are in it.
+const IMAGE_ONLY_KEY = 'dgipr.history.image-only';
+
+function useImageOnly(): [boolean, (next: boolean) => void] {
+  const [imageOnly, setImageOnly] = useState(false);
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem(IMAGE_ONLY_KEY) === '1') setImageOnly(true);
+    } catch {
+      // A blocked localStorage costs the remembered choice, never the control.
+    }
+  }, []);
+  const update = useCallback((next: boolean) => {
+    setImageOnly(next);
+    try {
+      window.localStorage.setItem(IMAGE_ONLY_KEY, next ? '1' : '0');
+    } catch {
+      // As above.
+    }
+  }, []);
+  return [imageOnly, update];
+}
+
 // ---------------------------------------------------------------------------
 // Filter model
 //
@@ -161,6 +185,7 @@ function HistoryPageBody() {
   // dims them, because swapping a page of results for a skeleton on every keystroke reads
   // as the list breaking rather than as it narrowing.
   const [loading, setLoading] = useState(false);
+  const [imageOnly, setImageOnly] = useImageOnly();
 
   // Read the facets off the URL through primitives, so `filters` keeps a stable identity
   // across re-renders that changed nothing — the debounce below depends on it not
@@ -446,6 +471,14 @@ function HistoryPageBody() {
                 {STR.historyClearFilters}
               </button>
             ) : null}
+            <label className="history-text-toggle">
+              <input
+                type="checkbox"
+                checked={!imageOnly}
+                onChange={(e) => setImageOnly(!e.target.checked)}
+              />
+              <span>{STR.historyShowCardText}</span>
+            </label>
           </div>
         </div>
       ) : null}
@@ -469,7 +502,7 @@ function HistoryPageBody() {
           aria-busy={loading || undefined}
         >
           {items.map((item) => (
-            <HistoryCard key={item.id} item={item} />
+            <HistoryCard key={item.id} item={item} imageOnly={imageOnly} />
           ))}
         </div>
       ) : null}

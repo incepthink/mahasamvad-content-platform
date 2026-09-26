@@ -3,14 +3,31 @@ import type { GenerationSummary } from '@dgipr/schemas';
 import { formatDate, runFormatLabel, STR } from '../lib/strings';
 import { StatusChip } from './StatusChip';
 
-export function HistoryCard({ item }: { item: GenerationSummary }) {
+export function HistoryCard({
+  item,
+  imageOnly = false,
+}: {
+  item: GenerationSummary;
+  // "Images only" view: a card that HAS a picture shows just the picture. A card with no
+  // picture (a बातमी, a caption) keeps its text — a bare placeholder banner would leave
+  // nothing to recognise it by.
+  imageOnly?: boolean;
+}) {
   // A Dynamic Poster run never writes a posterPath — its output is an .mp4, which an
   // <img> cannot show — so it falls back to the picture it was made FROM. That is the
   // one thing about such a run an officer recognises at a glance, and without it this
   // lane was the only format whose cards were all identical gradient banners.
   const mediaUrl = item.posterUrl ?? item.sourceImageUrl;
+  const hideText = imageOnly && Boolean(mediaUrl);
+  const title = item.headline ?? item.noteExcerpt;
   return (
-    <Link href={`/generations/${item.id}`} className="history-card">
+    <Link
+      href={`/generations/${item.id}`}
+      className={`history-card${hideText ? ' is-image-only' : ''}`}
+      // With the text hidden the image is the whole card, so the link needs a name.
+      aria-label={hideText ? title : undefined}
+      title={hideText ? title : undefined}
+    >
       {mediaUrl ? (
         <img src={mediaUrl} alt="" className="history-media" loading="lazy" />
       ) : (
@@ -21,12 +38,14 @@ export function HistoryCard({ item }: { item: GenerationSummary }) {
           </span>
         </div>
       )}
-      <div className="history-info">
-        <StatusChip status={item.status} />
-        <p className="history-headline">{item.headline ?? item.noteExcerpt}</p>
-        <p className="history-excerpt">{item.noteExcerpt}</p>
-        <p className="history-date">{formatDate(item.createdAt)}</p>
-      </div>
+      {hideText ? null : (
+        <div className="history-info">
+          <StatusChip status={item.status} />
+          <p className="history-headline">{title}</p>
+          <p className="history-excerpt">{item.noteExcerpt}</p>
+          <p className="history-date">{formatDate(item.createdAt)}</p>
+        </div>
+      )}
     </Link>
   );
 }

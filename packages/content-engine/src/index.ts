@@ -624,6 +624,7 @@ export {
 } from './generation/generate-poster-copy.js';
 export {
   buildPosterPrompt,
+  buildFreshCopyManifest,
   buildCustomPosterPrompt,
   buildFeedbackPrompt,
   type DesignMode as PosterDesignMode,
@@ -633,6 +634,7 @@ export {
 } from './generation/build-poster-prompt.js';
 export {
   buildMinimalCreativePrompt,
+  LIGHT_GROUND_RULE,
   type MinimalCreativePromptInput,
 } from './generation/minimal-creative-prompt.js';
 // Carousel posters (migration 0059): one text call plans and art-directs every slide (with the
@@ -739,6 +741,7 @@ export {
 // 0028), and the reader that turns the last few rows into the pickers' avoid sets.
 export {
   buildPosterStyle,
+  buildDesignPosterStyle,
   parsePosterStyle,
   toStyleHistory,
   describePosterStyle,
@@ -749,7 +752,28 @@ export {
   type PosterStyle,
   type StyleHistory,
   type MeasuredColours,
+  type StoredPosterDesign,
 } from './generation/poster-style.js';
+// The fresh social lane's design director (2026-09-26): one small call that directs each poster
+// in words, steering away from recent posters. Its brief is the only part the image model sees.
+export {
+  directPosterDesign,
+  posterDesignDirectionEnabled,
+  parsePosterDesign,
+  sanitizeBrief,
+  DESIGN_FORMS,
+  DESIGN_COMPOSITIONS,
+  DESIGN_IMAGERY,
+  COLOUR_MOODS,
+  type PosterDesign,
+  type PosterDesignDirection,
+  type DirectPosterDesignInput,
+  type RedoKind,
+  type DesignForm,
+  type DesignComposition,
+  type DesignImagery,
+  type ColourMood,
+} from './generation/poster-design-director.js';
 // Removes colour language from a master's layout description before it is used as structure
 // inspiration, so the master library's saffron/cream house look cannot leak past the assigned
 // palette. Deterministic — "structural, not instructed".

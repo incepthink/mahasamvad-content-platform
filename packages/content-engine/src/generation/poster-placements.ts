@@ -1,6 +1,12 @@
 // A rotation of poster PLACEMENT ANCHORS for the fully-AI ('fresh') social lane, and a seeded,
 // recency-aware picker.
 //
+// LEGACY METADATA (2026-09-26). Nothing picks from this library any more and no anchor reaches
+// any prompt — the fresh lane is directed by poster-design-director.ts. It stays so that stored
+// generations.poster_style rows naming a placementId still parse. The rest of this header
+// describes the design as it was, and the claims below that an instruction is "injected
+// verbatim into the fresh image prompt" are historical.
+//
 // WHY THIS IS NOT poster-layouts.ts REBUILT. That library was retired from the prompt on
 // 2026-08-10 for a reason that still stands: its eleven archetypes were all "a flat colour
 // rectangle plus rows of text", two of them literally "photograph down one side, text down the

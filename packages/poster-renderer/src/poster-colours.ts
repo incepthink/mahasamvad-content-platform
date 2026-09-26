@@ -48,6 +48,14 @@ export type PosterColours = Readonly<{
   // Share of the sampled pixels with enough chroma to carry a hue (0..1). A very low value means
   // an almost colourless poster, which makes `hueBucket` weakly supported.
   colourfulness: number;
+  // Mean perceptual lightness (OKLab L, 0..1) over the whole sample. Added 2026-09-26 for the
+  // fresh social lane's LIGHT-GROUND rule: the ground bins below only ever consider pixels with
+  // l >= GROUND_LIGHTNESS_FLOOR, so a black or charcoal poster has NO ground bin at all and this
+  // measure could not see it. Monitoring only — nothing is retried on it.
+  lightness: number;
+  // Share of sampled pixels (0..1) whose OKLab L is below DARK_L. A light-ground poster with dark
+  // type and a few dark accents sits well under 0.4; a dark-ground poster is well over it.
+  darkShare: number;
 }>;
 
 // Sample grid. Small on purpose: this is a colour question, not a detail question, and a 64x80
@@ -66,6 +74,25 @@ const SAMPLE_HEIGHT = 80;
 const CHROMA_FLOOR = 0.15;
 // Above this lightness a low-chroma pixel is background rather than dark text.
 const GROUND_LIGHTNESS_FLOOR = 0.62;
+// Below this OKLab L a pixel counts as DARK for `darkShare`. OKLab rather than HSL lightness so a
+// saturated mid-tone is not miscounted as dark: #111827 is L~0.21, #1E3A8A L~0.37, a mid saffron
+// #E07B00 L~0.68.
+const DARK_L = 0.35;
+
+// Perceptual lightness (OKLab L, 0..1) of one sRGB pixel.
+export function oklabLightness(r: number, g: number, b: number): number {
+  const lin = (v: number): number => {
+    const x = v / 255;
+    return x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+  };
+  const rl = lin(r);
+  const gl = lin(g);
+  const bl = lin(b);
+  const l = Math.cbrt(0.4122214708 * rl + 0.5363325363 * gl + 0.0514459929 * bl);
+  const m = Math.cbrt(0.2119034982 * rl + 0.6806995451 * gl + 0.1073969566 * bl);
+  const s = Math.cbrt(0.0883024619 * rl + 0.2817188376 * gl + 0.6299787005 * bl);
+  return 0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s;
+}
 
 type Hsl = Readonly<{ h: number; c: number; l: number }>;
 
@@ -137,6 +164,8 @@ export async function measurePosterColours(png: Buffer): Promise<PosterColours> 
   // Light, low-chroma pixels vote for the ground, unweighted — the ground is defined by area.
   const groundBins = new Map<number, { n: number; r: number; g: number; b: number }>();
   let chromatic = 0;
+  let lightnessSum = 0;
+  let dark = 0;
 
   for (let i = 0; i < total; i += 1) {
     const o = i * channels;
@@ -144,6 +173,9 @@ export async function measurePosterColours(png: Buffer): Promise<PosterColours> 
     const g = data[o + 1] as number;
     const b = data[o + 2] as number;
     const { c, l } = rgbToHsl(r, g, b);
+    const okL = oklabLightness(r, g, b);
+    lightnessSum += okL;
+    if (okL < DARK_L) dark += 1;
 
     if (c >= CHROMA_FLOOR) {
       chromatic += 1;
@@ -220,6 +252,8 @@ export async function measurePosterColours(png: Buffer): Promise<PosterColours> 
     dominantHex,
     hueBucket: bestWeight === 0 ? 'neutral' : hueBucketOf(dominantHue, dominantChroma),
     colourfulness: total === 0 ? 0 : chromatic / total,
+    lightness: total === 0 ? 1 : lightnessSum / total,
+    darkShare: total === 0 ? 0 : dark / total,
   };
 }
 
@@ -233,7 +267,51 @@ export async function measurePosterColours(png: Buffer): Promise<PosterColours> 
 // Baseline measured on eight live posters, 2026-07-24, BEFORE the palette/composition rework:
 // 5/8 warm cream grounds, and orange+red dominants 5/8 — which is what "they all look the same"
 // looks like as a number.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+//
+//   tsx src/poster-colours.ts --check
+// Free offline check of the light-ground measure: a synthetic dark poster must read as dark, a
+// light one as light, and a light poster carrying a dark band and type must stay under 0.4.
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href &&
+  process.argv.includes('--check')
+) {
+  const failures: string[] = [];
+  const solid = (hex: string, width = 320, height = 400): Promise<Buffer> =>
+    sharp({ create: { width, height, channels: 3, background: hex } })
+      .png()
+      .toBuffer();
+  const dark = await measurePosterColours(await solid('#141820'));
+  const light = await measurePosterColours(await solid('#F4F7FB'));
+  const typed = await sharp(await solid('#FAFAF5'))
+    .composite([{ input: await solid('#1B2A4A', 320, 100), top: 40, left: 0 }])
+    .png()
+    .toBuffer();
+  const mixed = await measurePosterColours(typed);
+  if (dark.darkShare < 0.9) failures.push(`dark poster darkShare=${dark.darkShare}`);
+  if (dark.lightness > 0.3) failures.push(`dark poster lightness=${dark.lightness}`);
+  if (light.darkShare > 0.01) failures.push(`light poster darkShare=${light.darkShare}`);
+  if (light.lightness < 0.9) failures.push(`light poster lightness=${light.lightness}`);
+  if (mixed.darkShare >= 0.4) failures.push(`light poster with a dark band: ${mixed.darkShare}`);
+  if (Math.abs(oklabLightness(255, 255, 255) - 1) > 0.001) failures.push('white is not L=1');
+  if (oklabLightness(0, 0, 0) > 0.001) failures.push('black is not L=0');
+  for (const [name, m] of [
+    ['dark', dark],
+    ['light', light],
+    ['typed', mixed],
+  ] as const) {
+    console.log(
+      `${name.padEnd(6)} L=${m.lightness.toFixed(3)} darkShare=${m.darkShare.toFixed(3)}`,
+    );
+  }
+  if (failures.length > 0) {
+    console.error(`\n${failures.length} FAILURE(S):`);
+    for (const f of failures) console.error(`  - ${f}`);
+    process.exitCode = 1;
+  } else {
+    console.log('\nAll poster-colour assertions passed.');
+  }
+} else if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const files = process.argv.slice(2).filter((a) => !a.startsWith('-'));
   const load = async (source: string): Promise<Buffer> => {
     if (/^https?:\/\//i.test(source)) {
@@ -262,7 +340,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
           `${file}\n` +
             `  ground     ${measured.groundHex}${measured.groundIsWarm ? '  (WARM / cream-paper)' : ''}\n` +
             `  dominant   ${measured.dominantHex}  bucket=${measured.hueBucket}\n` +
-            `  colourful  ${(measured.colourfulness * 100).toFixed(1)}%\n`,
+            `  colourful  ${(measured.colourfulness * 100).toFixed(1)}%\n` +
+            `  lightness  ${measured.lightness.toFixed(3)}  dark=${(measured.darkShare * 100).toFixed(1)}%${measured.darkShare > 0.4 ? '  (DARK POSTER)' : ''}\n`,
         );
       } catch (error) {
         console.error(`${file}: ${(error as Error).message}`);

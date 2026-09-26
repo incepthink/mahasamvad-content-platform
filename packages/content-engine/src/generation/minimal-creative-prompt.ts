@@ -10,6 +10,10 @@
 // 8. The text to put on the poster
 //
 // No extra creative direction essay, no color palettes, no forced layout templates.
+//
+// Two OPTIONAL blocks were added 2026-09-26 (see poster-design-director.ts), both after the opening
+// line and before the rules above, which are unchanged: DESIGN DIRECTION (a short per-poster brief
+// in words, no hex) and LIGHT BACKGROUND. With neither option set the output is byte-identical.
 
 import { pathToFileURL } from 'node:url';
 
@@ -26,7 +30,27 @@ export type MinimalCreativePromptInput = Readonly<{
   bottomMargin?: number | undefined;
   badgeWidth?: number | undefined;
   badgeHeight?: number | undefined;
+  // The design director's brief for THIS poster (poster-design-director.ts) — English style prose,
+  // already sanitised. Emitted as a DESIGN DIRECTION block right after the opening line.
+  designDirection?: string | undefined;
+  // Emit LIGHT_GROUND_RULE. The fresh social lane always sets it, with or without a direction.
+  lightGround?: boolean | undefined;
 }>;
+
+// The fresh social lane's light-ground rule (2026-09-26). Every poster sits on a light ground; the
+// rule names which side of the contrast the large areas are on, so "strong contrast" cannot be
+// satisfied by white type on black.
+export const LIGHT_GROUND_RULE = `LIGHT BACKGROUND:
+- Use a light, luminous ground — white, off-white or a pale tint — covering most of the canvas.
+- Dark tones are only for text and small accents.
+- No dark, black, charcoal or night-mode poster, and no large dark panel as the main surface.
+- Photographs are bright and naturally lit, with no dark scrim over them.`;
+
+function designDirectionBlock(brief: string): string {
+  return `DESIGN DIRECTION:
+- This is the visual direction for THIS poster. It never overrides any rule below; where they differ, the rules below win.
+${brief}`;
+}
 
 export const NUMBERS_RULE = `NUMBERS:
 - Use only Devanagari numerals: ० १ २ ३ ४ ५ ६ ७ ८ ९.
@@ -87,8 +111,13 @@ export function buildMinimalCreativePrompt(
   const areaRule = buildAreaRule(width, height, bottomMargin);
   const headlineMarginsRule = buildHeadlineMarginsRule(badgeWidth, badgeHeight);
 
+  const designDirection = input.designDirection?.trim() ?? '';
+  // Both optional blocks sit between the opening line and the existing rules, so a prompt with
+  // neither is byte-identical to the one that shipped before them.
   const sections = [
     opening,
+    ...(designDirection ? ['', designDirectionBlock(designDirection)] : []),
+    ...(input.lightGround ? ['', LIGHT_GROUND_RULE] : []),
     '',
     NUMBERS_RULE,
     '',
@@ -127,6 +156,9 @@ if (
 
   const prompt = buildMinimalCreativePrompt({
     text: sampleText,
+    lightGround: true,
+    designDirection:
+      'Let the figures carry the design: set the central amount as large confident type on a pale sky-tinted ground. Arrange the supporting points as two grouped sections with clear headings and generous spacing, and use a bright naturally lit photograph of a solar pump in a field as a wide band across the lower third.',
   });
 
   console.log('=== ASSEMBLED MINIMAL PROMPT ===\n');

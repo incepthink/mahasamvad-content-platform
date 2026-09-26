@@ -117,18 +117,12 @@ export const STR = {
   carouselNext: 'पुढील स्लाइड',
   carouselGoTo: (n: number) => `स्लाइड ${n.toLocaleString('mr-IN')} वर जा`,
   carouselRedoSlide: 'हा स्लाइड पुन्हा तयार करा',
-  carouselRedoCoverHint:
-    'फक्त मुखपृष्ठ पुन्हा केल्यास इतर स्लाइडचे रूप वेगळे दिसू शकते — सर्व स्लाइड एकत्र पुन्हा तयार करणे चांगले.',
   carouselRedoAll: 'सर्व स्लाइड पुन्हा तयार करा',
   carouselRedoAllConfirm: 'सर्व स्लाइड नव्याने तयार होतील. पुढे जायचे?',
-  carouselEditSlide: 'या स्लाइडवर खूण करून बदल करा',
-  carouselEditSlideOn: 'खूण करणे चालू आहे — स्लाइडवर क्लिक करा',
+  carouselEditSlide: 'ही स्लाइड संपादित करा',
   carouselEditingTitle: (n: number) =>
     `स्लाइड ${n.toLocaleString('mr-IN')} मध्ये बदल`,
-  carouselEditClose: 'बंद करा',
   carouselVersions: (n: number) => `${n.toLocaleString('mr-IN')} आवृत्त्या`,
-  carouselPublishPending:
-    'कॅरोसेल थेट प्रकाशित करण्याची सुविधा लवकरच येत आहे — सध्या प्रत्येक स्लाइड डाउनलोड करून वापरा.',
   mediaFormatDynamicPoster: 'डायनॅमिक पोस्टर (beta)',
   mediaFormatDynamicPosterDesc: 'तयार पोस्टरला हालचाल देऊन व्हिडिओ',
   // ---- the upload card that replaces the note box on that lane ----
@@ -1438,6 +1432,8 @@ export const STR = {
   // queued + running as one bucket: "still working on it" is one question for the officer.
   historyStatusWorking: 'सुरू आहे',
   historyClearFilters: 'फिल्टर काढा',
+  // Off = cards with a picture show only the picture; cards without one keep their text.
+  historyShowCardText: 'कार्डवरील मजकूर दाखवा',
   historySort: 'क्रम',
   historySortNewest: 'नवीन आधी',
   historySortOldest: 'जुने आधी',
