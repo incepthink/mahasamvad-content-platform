@@ -265,9 +265,9 @@ export function useCreateForm() {
   // thumbnail boxes, whose wording is not this checkbox's to change.
   // ...and TRUE on the caption lane unconditionally: the box there is source material by
   // definition — the caption is written out of it and nothing in it is printed anywhere.
-  // ...and on the carousel: the box is the note the slides are PLANNED out of, never printed
-  // as it stands.
-  const fromArticle = (isSocial && !verbatimText) || isCaption || isCarousel;
+  // ...and on the carousel the same checkbox decides it: unticked, the box is the note the
+  // slides' copy is PLANNED out of; ticked, its lines ARE the slides' text, only distributed.
+  const fromArticle = ((isSocial || isCarousel) && !verbatimText) || isCaption;
 
   // Which library the template picker shows: twitter masters for the social format,
   // article masters for Banner, youtube masters for the thumbnail.
@@ -401,6 +401,8 @@ export function useCreateForm() {
             : undefined,
         // कॅरोसेल only: स्वयं / ३ / ४.
         carouselSlides: isCarousel ? carouselSlides : undefined,
+        // कॅरोसेल only, and only when ticked: the box's lines are the slides' final text.
+        carouselVerbatim: isCarousel && verbatimText ? true : undefined,
         // Banner only, and only when actually typed — an empty string would be a
         // meaningless "clear" on a run that has nothing to clear.
         posterHeading:

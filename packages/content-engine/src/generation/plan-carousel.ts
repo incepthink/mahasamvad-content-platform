@@ -30,6 +30,16 @@
 // plans still parse. Every new string passes the same guards as the lines: digits grounded in the
 // note, a quote's speaker present in the note verbatim, emphasis a substring of its own text — and assignCarouselLayouts makes the layouts
 // differ across slides whatever the model proposed.
+//
+// जसाच्या तसा मजकूर — VERBATIM MODE (2026-09-26). When the officer's text IS the slides' text, the
+// planner must not write copy at all, so it is never given the chance: the note is split into
+// numbered lines (segmentCarouselText — the officer's own line breaks, a long paragraph split at
+// its sentence ends, list glyphs stripped) and the model answers with line NUMBERS — which line is
+// each slide's title, subheading, section heading, list line or closing line. Every printed string
+// is therefore one of the officer's lines by construction (the video planner's fact_index move).
+// normalizeVerbatimPlan then guarantees COVERAGE: a line used twice keeps its first place, and a
+// line the model left out is put back beside its neighbour in the text — nothing the officer wrote
+// is dropped. No digit guard and no scheme-name lock run here: the text is the officer's, unchanged.
 
 import { pathToFileURL } from 'node:url';
 import {
@@ -60,6 +70,8 @@ export type PlanCarouselInput = Readonly<{
   requestedSlides: CarouselSlideCount;
   // Full scheme/org names known to occur verbatim in the note (verified glossary rows).
   lockedSchemeNames?: readonly string[] | undefined;
+  // जसाच्या तसा मजकूर: distribute the note's own lines, write nothing.
+  verbatim?: boolean | undefined;
 }>;
 
 export type PlanCarouselResult = Readonly<{
@@ -89,7 +101,7 @@ const PLAN_SCHEMA = {
     design_system: {
       type: 'string',
       description:
-        'One short English paragraph describing the ONE look every slide shares, as an art director would brief a designer: the background, how the two-tone headline is coloured, the card and panel style, and the colour scheme named in words. Colours by name only — no numbers or codes. Icons stay small and plain. Flat, clean styling: no coloured bars, borders, stripes or underlines under icons, cards or headings. No header band or title bar across the top. No logos, emblems, maps, datelines or slide numbers.',
+        'One short English paragraph describing the ONE look every slide shares, as an art director would brief a designer: the background, how the two-tone headline is coloured, the card and panel style, and the colour scheme named in words. Colours by name only — no numbers or codes. Structure comes from spacing, alignment, typography and colour: no outline around every block, no divider lines between items, no coloured bars, borders, stripes or underlines under cards or headings. Icons only where they add meaning, small and plain. No header band or title bar across the top. No logos, emblems, maps, datelines or slide numbers.',
     },
     slides: {
       type: 'array',
@@ -327,7 +339,11 @@ function spreadOverflow(slides: CarouselPlanSlide[]): void {
 // split the fullest detail slide in half. Never merges into or out of the cover, and never
 // invents a slide with no content — a thin note may end below the floor, which is reported by
 // the caller's log rather than padded.
-function fitSlideCount(slides: CarouselPlanSlide[], target: number): void {
+function fitSlideCount(
+  slides: CarouselPlanSlide[],
+  target: number,
+  verbatim = false,
+): void {
   while (slides.length > target && slides.length > 2) {
     const last = slides.pop()!;
     const previous = slides[slides.length - 1]!;
@@ -337,7 +353,24 @@ function fitSlideCount(slides: CarouselPlanSlide[], target: number): void {
       ...item,
       section: item.section || last.title,
     }));
-    previous.items = [...previous.items, ...moved];
+    // On a verbatim plan nothing the officer wrote may disappear in a merge: a subheading or a
+    // closing line with no place left on the previous slide becomes one of its lines, and the
+    // merged slide's title survives as their section heading (or as a line of its own).
+    const keep = (text: string): CarouselItem[] =>
+      verbatim && text ? [{ text, emphasis: [], section: last.title }] : [];
+    const carried = [
+      ...keep(last.subtitle),
+      ...moved,
+      ...(previous.closing ? keep(last.closing) : []),
+    ];
+    if (
+      verbatim &&
+      last.title &&
+      !carried.some((item) => item.section === last.title)
+    ) {
+      carried.unshift({ text: last.title, emphasis: [], section: '' });
+    }
+    previous.items = [...previous.items, ...carried];
     if (!previous.quote) previous.quote = last.quote;
     if (!previous.closing) previous.closing = last.closing;
   }
@@ -365,10 +398,20 @@ function fitSlideCount(slides: CarouselPlanSlide[], target: number): void {
   }
 }
 
+function targetSlideCount(
+  requested: CarouselSlideCount,
+  planned: number,
+): number {
+  return requested === 'auto'
+    ? Math.min(CAROUSEL_MAX_SLIDES, Math.max(CAROUSEL_MIN_SLIDES, planned))
+    : requested;
+}
+
 export function normalizeCarouselPlan(
   raw: unknown,
   input: PlanCarouselInput,
 ): PlanCarouselResult {
+  if (input.verbatim) return normalizeVerbatimPlan(raw, input);
   const record = (raw ?? {}) as Record<string, unknown>;
   const note = input.note;
   const dropped: string[] = [];
@@ -417,14 +460,7 @@ export function normalizeCarouselPlan(
   }
 
   spreadOverflow(slides);
-  const target =
-    input.requestedSlides === 'auto'
-      ? Math.min(
-          CAROUSEL_MAX_SLIDES,
-          Math.max(CAROUSEL_MIN_SLIDES, slides.length),
-        )
-      : input.requestedSlides;
-  fitSlideCount(slides, target);
+  fitSlideCount(slides, targetSlideCount(input.requestedSlides, slides.length));
   slides.forEach((slide, i) => {
     slide.role = i === 0 ? 'cover' : 'detail';
   });
@@ -437,6 +473,7 @@ export function normalizeCarouselPlan(
   const locked = lockSchemeNames(
     {
       seriesTitle,
+      verbatim: false,
       dateline: '',
       designSystem: cleanDesignSystem(record.design_system, note),
       slides,
@@ -455,6 +492,364 @@ export function normalizeCarouselPlan(
   };
 }
 
+// --- verbatim mode (जसाच्या तसा मजकूर) -----------------------------------------------------
+
+// A pasted line longer than this is split at its sentence ends, so one paragraph can spread over
+// slides; a shorter line is the officer's own unit and is never cut.
+const VERBATIM_SPLIT_CHARS = 140;
+
+// Abbreviations whose full stop does not end a sentence ("श्री. देवेंद्र फडणवीस", "दि. २५").
+const ABBREVIATIONS = new Set([
+  'श्री',
+  'श्रीमती',
+  'सौ',
+  'कु',
+  'डॉ',
+  'दि',
+  'क्र',
+  'मा',
+  'ना',
+  'प्रा',
+  'स',
+  'रु',
+  'Dr',
+  'Mr',
+  'Mrs',
+  'Ms',
+  'No',
+  'St',
+]);
+
+function splitSentences(line: string): string[] {
+  const parts: string[] = [];
+  let start = 0;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i]!;
+    const next = line[i + 1];
+    let end = false;
+    if (ch === '।' || ch === '॥' || ch === '!' || ch === '?') {
+      end = next === undefined || /\s/.test(next);
+    } else if (ch === '.' && next !== undefined && /\s/.test(next)) {
+      const word = /([^\s.]+)$/.exec(line.slice(start, i))?.[1] ?? '';
+      // A bare number ("1." / "१.") or a known abbreviation does not end a sentence.
+      end =
+        word.length > 0 &&
+        !/^[0-9०-९]+$/.test(word) &&
+        !ABBREVIATIONS.has(word);
+    }
+    if (end) {
+      const piece = line.slice(start, i + 1).trim();
+      if (piece) parts.push(piece);
+      start = i + 1;
+    }
+  }
+  const tail = line.slice(start).trim();
+  if (tail) parts.push(tail);
+  return parts;
+}
+
+// The officer's text as the lines a slide may print: their own line breaks, with list glyphs and
+// Markdown markers removed (the slide sets its own list style), and a long paragraph split at its
+// sentence ends. Nothing else about a line changes — its words, numerals and punctuation stay.
+export function segmentCarouselText(note: string): string[] {
+  const units: string[] = [];
+  for (const rawLine of note.replace(/\r\n?/g, '\n').split('\n')) {
+    const line = rawLine
+      .replace(/^\s*#{1,6}\s+/, '')
+      .replace(/^\s*[-*•●▪◦▸►➢➤✓✔·]\s*/, '')
+      .replace(/^\*\*(.+)\*\*$/, '$1')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!line || /^[-=_*~.·]{3,}$/.test(line)) continue;
+    if (line.length > VERBATIM_SPLIT_CHARS) units.push(...splitSentences(line));
+    else units.push(line);
+  }
+  return units;
+}
+
+function numberedLines(units: readonly string[]): string {
+  return units.map((unit, i) => `[${i}] ${unit}`).join('\n');
+}
+
+const VERBATIM_PLAN_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    series_title: PLAN_SCHEMA.properties.series_title,
+    design_system: PLAN_SCHEMA.properties.design_system,
+    slides: {
+      type: 'array',
+      description:
+        'The slides in order. The first slide is the cover. Every line number of the text is used exactly once across all slides.',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          title_line: {
+            type: 'integer',
+            description:
+              "The number of a short heading line that is this slide's title (never a full sentence), or -1 when no line suits a title.",
+          },
+          title_emphasis: {
+            type: 'array',
+            description:
+              'One or two words copied exactly from that title line to set in the accent colour. Empty for none.',
+            items: { type: 'string' },
+          },
+          subtitle_line: {
+            type: 'integer',
+            description:
+              'The number of a short line shown as the subheading under the title, or -1 for none.',
+          },
+          layout: PLAN_SCHEMA.properties.slides.items.properties.layout,
+          sections: {
+            type: 'array',
+            description:
+              'The lines shown on this slide, by number, in the order of the text, grouped under a heading line where the text has natural groups. heading_line is -1 for a plain list.',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                heading_line: { type: 'integer' },
+                lines: { type: 'array', items: { type: 'integer' } },
+              },
+              required: ['heading_line', 'lines'],
+            },
+          },
+          closing_line: {
+            type: 'integer',
+            description:
+              'The number of a line that closes this slide as a call to action, or -1 for none.',
+          },
+          visual: PLAN_SCHEMA.properties.slides.items.properties.visual,
+        },
+        required: [
+          'title_line',
+          'title_emphasis',
+          'subtitle_line',
+          'layout',
+          'sections',
+          'closing_line',
+          'visual',
+        ],
+      },
+    },
+  },
+  required: ['series_title', 'design_system', 'slides'],
+} as const;
+
+export function buildVerbatimCarouselPlanSystemPrompt(
+  requested: CarouselSlideCount,
+): string {
+  const n = slideCountText(requested);
+  const article = /^(8|11|18)\b/.test(n) ? 'an' : 'a';
+  return [
+    'You are making a social media carousel for the Directorate General of Information and Public Relations (DGIPR), Government of Maharashtra.',
+    `The provided Marathi text is the FINAL text of ${article} ${n}-slide post and is printed exactly as written. It is split into numbered lines. Arrange ALL of the lines across the slides by their numbers: the cover carries the opening headline, and each later slide carries one part of the text, keeping the text's own order. Use every line exactly once; never rewrite, shorten, merge, translate or add text.`,
+  ].join('\n');
+}
+
+// Where one of the officer's lines ended up — what a line the model left out is put back beside.
+type LinePlace = {
+  slide: CarouselPlanSlide;
+  item?: CarouselItem;
+  // The line is a section heading: its lines are the slide's items tagged with it.
+  heading?: string;
+  // The line is the slide's closing line (so anything after it goes at the end).
+  closing?: boolean;
+};
+
+function emptySlide(): CarouselPlanSlide {
+  return {
+    role: 'detail',
+    title: '',
+    titleEmphasis: [],
+    subtitle: '',
+    layout: '',
+    items: [],
+    quote: null,
+    closing: '',
+    visual: '',
+  };
+}
+
+// A line may be a slide's title only if it reads as one: short, and not a full sentence. A
+// sentence set as a headline is the wrong emphasis for the officer's text, so the guard keeps it
+// on the slide as its first line instead (the same text, in the right place).
+const TITLE_MAX_CHARS = 90;
+
+function readsAsTitle(line: string): boolean {
+  return line.length <= TITLE_MAX_CHARS && !/[.।]$/.test(line);
+}
+
+export function normalizeVerbatimPlan(
+  raw: unknown,
+  input: PlanCarouselInput,
+): PlanCarouselResult {
+  const record = (raw ?? {}) as Record<string, unknown>;
+  const note = input.note;
+  const units = segmentCarouselText(note);
+  if (units.length === 0) {
+    throw new Error('The carousel text has no lines to place on slides.');
+  }
+  const places: Array<LinePlace | undefined> = new Array(units.length);
+  // Claims a line for one place. A number out of range, or already used, claims nothing — so a
+  // line can never be printed twice.
+  const indexOf = (value: unknown): number => {
+    const n = typeof value === 'number' ? value : Number.NaN;
+    return Number.isInteger(n) && n >= 0 && n < units.length && !places[n]
+      ? n
+      : -1;
+  };
+
+  const slides: CarouselPlanSlide[] = [];
+  const rawSlides = Array.isArray(record.slides) ? record.slides : [];
+  for (const rawSlide of rawSlides) {
+    const r = (rawSlide ?? {}) as Record<string, unknown>;
+    const slide = emptySlide();
+    const claim = (value: unknown, place: Omit<LinePlace, 'slide'>): string => {
+      const n = indexOf(value);
+      if (n < 0) return '';
+      places[n] = { slide, ...place };
+      return units[n]!;
+    };
+    const titleIndex = indexOf(r.title_line);
+    slide.title = claim(r.title_line, {});
+    // Not a title after all: it opens the slide's lines instead (unshifted below, once the
+    // sections are in, so it stays first).
+    let demoted: CarouselItem | null = null;
+    if (slide.title && !readsAsTitle(slide.title)) {
+      demoted = { text: slide.title, emphasis: [], section: '' };
+      places[titleIndex] = { slide, item: demoted };
+      slide.title = '';
+    }
+    slide.subtitle = claim(r.subtitle_line, {});
+    for (const rawSection of Array.isArray(r.sections) ? r.sections : []) {
+      const section = (rawSection ?? {}) as Record<string, unknown>;
+      const headingIndex = indexOf(section.heading_line);
+      const heading = claim(section.heading_line, {});
+      const lines = Array.isArray(section.lines) ? section.lines : [];
+      let placed = 0;
+      for (const value of lines) {
+        const item: CarouselItem = { text: '', emphasis: [], section: heading };
+        item.text = claim(value, { item });
+        if (item.text) {
+          slide.items.push(item);
+          placed += 1;
+        }
+      }
+      if (headingIndex < 0) continue;
+      if (placed > 0) {
+        places[headingIndex] = { slide, heading };
+      } else {
+        // A heading with nothing under it is still the officer's text: it stays, as a line.
+        const item: CarouselItem = { text: heading, emphasis: [], section: '' };
+        slide.items.push(item);
+        places[headingIndex] = { slide, item };
+      }
+    }
+    if (demoted) slide.items.unshift(demoted);
+    slide.closing = claim(r.closing_line, { closing: true });
+    if (
+      !slide.title &&
+      !slide.subtitle &&
+      slide.items.length === 0 &&
+      !slide.closing
+    ) {
+      continue;
+    }
+    slide.titleEmphasis = cleanEmphasis(r.title_emphasis, slide.title);
+    slide.visual = cleanVisual(r.visual, note);
+    slide.layout =
+      CAROUSEL_LAYOUT_ENUM.find((id) => id === clean(r.layout)) ?? '';
+    slides.push(slide);
+  }
+
+  // COVERAGE: every line the model did not place goes back beside its nearest placed neighbour in
+  // the text — after the line before it, else before the line after it.
+  const missing: string[] = [];
+  for (let u = 0; u < units.length; u += 1) {
+    if (places[u]) continue;
+    missing.push(units[u]!);
+    if (slides.length === 0) slides.push(emptySlide());
+    let before: LinePlace | undefined;
+    for (let b = u - 1; b >= 0 && !before; b -= 1) before = places[b];
+    let after: LinePlace | undefined;
+    for (let a = u + 1; a < units.length && !after; a += 1) after = places[a];
+    const item: CarouselItem = { text: units[u]!, emphasis: [], section: '' };
+    let slide: CarouselPlanSlide;
+    if (before?.item) {
+      slide = before.slide;
+      item.section = before.item.section;
+      slide.items.splice(slide.items.indexOf(before.item) + 1, 0, item);
+    } else if (before?.heading !== undefined) {
+      const heading = before.heading;
+      slide = before.slide;
+      item.section = heading;
+      const first = slide.items.findIndex((i) => i.section === heading);
+      slide.items.splice(first < 0 ? slide.items.length : first, 0, item);
+    } else if (before && !before.closing) {
+      // Right after a title or subheading: that slide's lines start here. Checked before the
+      // line AFTER it, which may already sit on the next slide.
+      slide = before.slide;
+      slide.items.unshift(item);
+    } else if (after?.item) {
+      slide = after.slide;
+      item.section = after.item.section;
+      slide.items.splice(slide.items.indexOf(after.item), 0, item);
+    } else {
+      slide = (before ?? after)?.slide ?? slides[slides.length - 1]!;
+      if (after && !before) slide.items.unshift(item);
+      else slide.items.push(item);
+    }
+    places[u] = { slide, item };
+  }
+
+  // The cover opens the post: with no title line chosen, its first short line becomes the title.
+  const cover = slides[0]!;
+  const lead = cover.items[0];
+  if (!cover.title && lead && !lead.section && readsAsTitle(lead.text)) {
+    cover.title = lead.text;
+    cover.items.shift();
+  }
+
+  slides.forEach((slide, i) => {
+    slide.role = i === 0 ? 'cover' : 'detail';
+  });
+  spreadOverflow(slides);
+  fitSlideCount(
+    slides,
+    targetSlideCount(input.requestedSlides, slides.length),
+    true,
+  );
+  slides.forEach((slide, i) => {
+    slide.role = i === 0 ? 'cover' : 'detail';
+  });
+  assignCarouselLayouts(slides);
+
+  const series = clean(record.series_title);
+  const seriesTitle =
+    (series && digitsAreGrounded(series, note) ? series : '') ||
+    cover.title ||
+    units[0]!;
+  if (missing.length > 0) {
+    console.warn(
+      `[carousel-plan] verbatim: ${missing.length} line(s) the planner left out were put back: ${missing.join(' | ')}`,
+    );
+  }
+  return {
+    plan: {
+      seriesTitle,
+      verbatim: true,
+      dateline: '',
+      designSystem: cleanDesignSystem(record.design_system, note),
+      slides,
+    },
+    droppedItems: [],
+    unpreservedSchemeNames: [],
+  };
+}
+
 function parseJson(raw: string): unknown {
   try {
     return JSON.parse(raw);
@@ -469,13 +864,22 @@ function parseJson(raw: string): unknown {
 export async function planCarousel(
   input: PlanCarouselInput,
 ): Promise<PlanCarouselResult> {
+  const verbatim = input.verbatim === true;
   const raw = await chatComplete(
     [
       {
         role: 'system',
-        content: buildCarouselPlanSystemPrompt(input.requestedSlides),
+        content: verbatim
+          ? buildVerbatimCarouselPlanSystemPrompt(input.requestedSlides)
+          : buildCarouselPlanSystemPrompt(input.requestedSlides),
       },
-      { role: 'user', content: input.note },
+      {
+        role: 'user',
+        // Verbatim: the model sees the lines it may place, numbered, and answers with numbers.
+        content: verbatim
+          ? numberedLines(segmentCarouselText(input.note))
+          : input.note,
+      },
     ],
     {
       model: POSTER_COPY_MODEL,
@@ -483,7 +887,9 @@ export async function planCarousel(
       reasoningEffort: 'medium',
       // The art direction, sections and per-slide parts roughly double the answer.
       maxTokens: 8192,
-      jsonSchema: { name: 'carousel_plan', schema: PLAN_SCHEMA },
+      jsonSchema: verbatim
+        ? { name: 'carousel_verbatim_plan', schema: VERBATIM_PLAN_SCHEMA }
+        : { name: 'carousel_plan', schema: PLAN_SCHEMA },
     },
   );
   const result = normalizeCarouselPlan(parseJson(raw), input);
@@ -503,7 +909,7 @@ export async function planCarousel(
 // ---------------------------------------------------------------------------
 // Harness:
 //   npx tsx src/generation/plan-carousel.ts --check              (free — the guarantee half)
-//   npx tsx --env-file=../../.env src/generation/plan-carousel.ts --file=note.txt [auto|3|4]
+//   npx tsx --env-file=../../.env src/generation/plan-carousel.ts --file=note.txt [auto|3|4] [--verbatim]
 // ---------------------------------------------------------------------------
 if (
   process.argv[1] &&
@@ -875,6 +1281,163 @@ if (
       merged.plan.slides[2]!.items.map((i) => i.section).join() === ',क',
     );
 
+    // 9b. verbatim mode: the lines are the officer's, placed by number, and none is lost.
+    const vNote = [
+      'विधान परिषद निवडणूक २०२६',
+      '- ५ जागांसाठी मतदान',
+      '• अधिसूचना २ जून',
+      '३. छाननी १० जून',
+      'मतदान २५ जून रोजी सकाळी ८ ते सायंकाळी ४ या वेळेत होईल. मतमोजणी २८ जून रोजी होईल. श्री. पाटील यांनी सर्वांना मतदान करण्याचे आवाहन केले आणि दि. २५ रोजी सुट्टी जाहीर केली.',
+      '',
+      'मतदान करा',
+    ].join('\n');
+    const vUnits = segmentCarouselText(vNote);
+    check(
+      'segment: list glyphs are stripped, numbering is kept',
+      vUnits[1] === '५ जागांसाठी मतदान' &&
+        vUnits[2] === 'अधिसूचना २ जून' &&
+        vUnits[3] === '३. छाननी १० जून',
+    );
+    check(
+      'segment: a long paragraph splits at sentence ends, not at श्री./दि.',
+      vUnits.length === 8 &&
+        vUnits[6]!.startsWith('श्री. पाटील') &&
+        vUnits[6]!.includes('दि. २५'),
+    );
+    const vPlan = normalizeCarouselPlan(
+      {
+        series_title: 'निवडणूक',
+        design_system: '',
+        slides: [
+          {
+            title_line: 0,
+            title_emphasis: ['निवडणूक', 'नाही'],
+            subtitle_line: 1,
+            layout: 'hero_cards',
+            sections: [],
+            closing_line: -1,
+            visual: 'A polling booth',
+          },
+          {
+            title_line: -1,
+            title_emphasis: [],
+            subtitle_line: -1,
+            layout: 'timeline',
+            // 3 is left out by the model; 2 is claimed twice.
+            sections: [{ heading_line: -1, lines: [2, 2, 99] }],
+            closing_line: -1,
+            visual: '',
+          },
+          {
+            title_line: -1,
+            title_emphasis: [],
+            subtitle_line: -1,
+            layout: 'icon_list',
+            sections: [{ heading_line: -1, lines: [4, 5, 6] }],
+            closing_line: 7,
+            visual: '',
+          },
+        ],
+      },
+      { note: vNote, requestedSlides: 'auto', verbatim: true },
+    );
+    const printed = vPlan.plan.slides.flatMap((sl) => [
+      sl.title,
+      sl.subtitle,
+      ...sl.items.map((i) => i.text),
+      sl.closing,
+    ]);
+    check('verbatim plan is marked verbatim', vPlan.plan.verbatim === true);
+    check(
+      'verbatim: every printed string is one of the lines',
+      printed.filter(Boolean).every((t) => vUnits.includes(t)),
+    );
+    check(
+      'verbatim: every line is printed exactly once',
+      vUnits.every((u) => printed.filter((t) => t === u).length === 1),
+    );
+    check(
+      'verbatim: a left-out line goes back after its neighbour',
+      vPlan.plan.slides[1]!.items.map((i) => i.text).join('|') ===
+        'अधिसूचना २ जून|३. छाननी १० जून',
+    );
+    check(
+      'verbatim: title emphasis is limited to the title line',
+      vPlan.plan.slides[0]!.titleEmphasis.join() === 'निवडणूक',
+    );
+    check(
+      'verbatim: no quote is ever attached',
+      vPlan.plan.slides.every((sl) => sl.quote === null),
+    );
+    const vEmpty = normalizeCarouselPlan(
+      { series_title: '', design_system: '', slides: [] },
+      { note: vNote, requestedSlides: 3, verbatim: true },
+    );
+    const vEmptyPrinted = vEmpty.plan.slides.flatMap((sl) => [
+      sl.title,
+      sl.subtitle,
+      ...sl.items.map((i) => i.text),
+      sl.closing,
+    ]);
+    check(
+      'verbatim: a plan with no slides still prints every line',
+      vUnits.every((u) => vEmptyPrinted.includes(u)),
+    );
+    check(
+      'verbatim: the cover takes the opening line as its title',
+      vEmpty.plan.slides[0]!.title === 'विधान परिषद निवडणूक २०२६',
+    );
+    check(
+      'verbatim: an explicit 3 is reached by splitting',
+      vEmpty.plan.slides.length === 3,
+    );
+    const titled = (title: number, subtitle = -1, closing = -1) => ({
+      title_line: title,
+      title_emphasis: [],
+      subtitle_line: subtitle,
+      layout: 'icon_list',
+      sections: [],
+      closing_line: closing,
+      visual: '',
+    });
+    const vMerge = normalizeCarouselPlan(
+      {
+        series_title: 'x',
+        design_system: '',
+        slides: [0, 1, 2, 3, 4].map((n) => titled(n)).concat(titled(5, 6, 7)),
+      },
+      { note: vNote, requestedSlides: 3, verbatim: true },
+    );
+    const vSentence = normalizeCarouselPlan(
+      {
+        series_title: 'x',
+        design_system: '',
+        slides: [
+          titled(0),
+          { ...titled(4), sections: [{ heading_line: -1, lines: [5] }] },
+        ],
+      },
+      { note: vNote, requestedSlides: 'auto', verbatim: true },
+    );
+    check(
+      'verbatim: a sentence chosen as a title is kept as the first line instead',
+      vSentence.plan.slides[1]!.title === '' &&
+        vSentence.plan.slides[1]!.items[0]!.text === vUnits[4] &&
+        vSentence.plan.slides[1]!.items[1]!.text === vUnits[5],
+    );
+    // A merged slide's title is printed as the section heading of the lines it carried.
+    const mergedPrinted = vMerge.plan.slides.flatMap((sl) => [
+      sl.title,
+      sl.subtitle,
+      ...sl.items.flatMap((i) => [i.section, i.text]),
+      sl.closing,
+    ]);
+    check(
+      'verbatim: merging down to 3 slides loses no line',
+      vMerge.plan.slides.length === 3 &&
+        vUnits.every((u) => mergedPrinted.includes(u)),
+    );
+
     // 10. an empty plan is an error, not an empty carousel.
     let threw = false;
     try {
@@ -902,7 +1465,11 @@ if (
       : 'विधान परिषदेच्या ५ जागांसाठी निवडणूक कार्यक्रम जाहीर. अधिसूचना २ जून, अर्ज भरण्याची अंतिम मुदत ९ जून, छाननी १० जून, माघार १२ जून. मतदान २५ जून २०२६ रोजी सकाळी ८ ते सायंकाळी ४ या वेळेत होईल व मतमोजणी २८ जून रोजी होईल. मतदारसंघ: मुंबई, पुणे, नाशिक, नागपूर, औरंगाबाद.';
     const requestedSlides: CarouselSlideCount =
       countArg === '3' ? 3 : countArg === '4' ? 4 : 'auto';
-    planCarousel({ note, requestedSlides })
+    planCarousel({
+      note,
+      requestedSlides,
+      verbatim: process.argv.includes('--verbatim'),
+    })
       .then((r) => console.log(JSON.stringify(r, null, 2)))
       .catch((e: unknown) => {
         console.error(e);

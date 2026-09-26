@@ -214,9 +214,9 @@ const BRIGHT_LOOK_RULE =
 const PLACEHOLDER_WITH_PHOTO =
   'The master template you are editing still carries PLACEHOLDER content from a previous poster: sample Marathi text in every text zone (headline, tag, bullets, figures, dates) and a sample photo/illustration in the image zone. NONE of that content relates to this poster. ERASE every piece of existing sample text and ERASE the existing photo/illustration completely before adding the new content — no word, number, person, or pictorial element from the placeholder may survive into the output. ALSO ERASE the branding chrome the master carries: the महाराष्ट्र शासन emblem-and-wordmark lockup in the top-right and the department footer band + social-handle strip along the bottom — fill those areas by continuing the surrounding colour band or background naturally, as if that branding was never there. Only the layout frame stays: colour bands and panel shapes.';
 const PLACEHOLDER_TEXT_ONLY =
-  'The master template you are editing still carries PLACEHOLDER text from a previous poster in every text zone (headline, tag, cards, bullets, figures, dates). NONE of that wording relates to this poster. ERASE every piece of existing sample text before adding the new content — no word or number from the placeholder may survive into the output. ALSO ERASE the branding chrome the master carries: the महाराष्ट्र शासन emblem-and-wordmark lockup in the top-right and the department footer band + social-handle strip along the bottom — fill those areas by continuing the surrounding colour band or background naturally, as if that branding was never there. Everything else stays exactly as it is: colour bands, card shapes, icons, and the existing background.';
+  'The master template you are editing still carries PLACEHOLDER text from a previous poster in every text zone (headline, tag, cards, bullets, figures, dates). NONE of that wording relates to this poster. ERASE every piece of existing sample text before adding the new content — no word or number from the placeholder may survive into the output. ALSO ERASE the branding chrome the master carries: the महाराष्ट्र शासन emblem-and-wordmark lockup in the top-right and the department footer band + social-handle strip along the bottom — fill those areas by continuing the surrounding colour band or background naturally, as if that branding was never there. Everything else stays as it is: colour bands, card shapes and the existing background.';
 const TEXT_ONLY_LOCK =
-  "THIS MASTER IS A TEXT-ONLY TEMPLATE: it has NO photograph, NO portrait and NO illustration zone. Do NOT add any photograph, person, hero image, or pictorial subject anywhere on the poster. Keep the master's existing background exactly as it is (including any faded or ghosted backdrop wash) and keep its existing icons, symbols and card shapes. The ONLY things you change are the Marathi text inside the existing text zones and the branding-chrome erasure described above.";
+  "THIS MASTER IS A TEXT-ONLY TEMPLATE: it has NO photograph, NO portrait and NO illustration zone. Do NOT add any photograph, person, hero image, or pictorial subject anywhere on the poster. Keep the master's existing background exactly as it is (including any faded or ghosted backdrop wash) and keep its existing card shapes. The ONLY things you change are the Marathi text inside the existing text zones and the branding-chrome erasure described above.";
 
 function fmtBullets(arr: unknown): string {
   const items = Array.isArray(arr) ? arr : [];
@@ -258,13 +258,8 @@ function buildChange(copyStyle: string, c: PosterCopy): string {
       `TIME: ${sch.time || ''}`,
       `AUDIENCE / ELIGIBILITY: ${get<string>('audience') || ''}`,
       `CALL TO ACTION (make it prominent): ${get<string>('cta') || ''}`,
-      'STAT CALLOUTS (each as icon + figure + label):',
-      stats
-        .map(
-          (s, i) =>
-            `  ${i + 1}. ${s.value} — ${s.label}  [icon: ${s.icon_hint}]`,
-        )
-        .join('\n'),
+      'STAT CALLOUTS (each as figure + label):',
+      stats.map((s, i) => `  ${i + 1}. ${s.value} — ${s.label}`).join('\n'),
     ];
   } else if (copyStyle === 'quote') {
     const at =
@@ -278,10 +273,8 @@ function buildChange(copyStyle: string, c: PosterCopy): string {
       `HEADLINE (subject line): ${get<string>('headline')}`,
       `QUOTE (main text, inside large quotation marks): ${get<string>('quote_text')}`,
       `ATTRIBUTION (name then designation): ${at.name || ''}, ${at.title || ''}`,
-      'SUPPORTING POINTS (each as icon + text):',
-      points
-        .map((p, i) => `  ${i + 1}. ${p.text}  [icon: ${p.icon_hint}]`)
-        .join('\n'),
+      'SUPPORTING POINTS:',
+      points.map((p, i) => `  ${i + 1}. ${p.text}`).join('\n'),
     ];
   } else if (copyStyle === 'timeline') {
     const milestones = Array.isArray(get('milestones'))
@@ -465,6 +458,13 @@ const USE_EACH_ITEM_ONCE_RULE =
 
 // Pasted text arrives with the source document's furniture attached — this keeps वृत्त. क्र. and
 // page numbers off an official poster even though they are, strictly, in the supplied text.
+// The template lanes' form of DECORATION_RULE (minimal-creative-prompt.ts). It has to say one more
+// thing the fresh lane does not: a reference or master is called the structural guide, and its
+// outlines, dividers and icons are exactly what a model copies as "structure" — so this states that
+// they are decoration, kept only where they serve a purpose.
+const TEMPLATE_DECORATION_RULE =
+  "BORDERS, DIVIDERS AND ICONS ARE NOT STRUCTURE. The template's outlines, divider lines, coloured frames and icons are decoration, not part of the layout you must keep: keep or add one only where it serves a clear purpose — separating genuinely distinct sections, clarifying hierarchy, or making the information easier to scan. Do not outline every section or card and do not draw a divider between every item; build the structure with spacing, alignment, type size and weight, colour and imagery instead. Do not add icons by default beside headings or individual points: use one only when it tells the reader something useful at a glance that the words beside it do not — never an icon that merely repeats its heading, and none where a photograph or illustration already gives the visual context. Any icon that is used stays small and secondary to the text. Aim for a clean, editorial government design: if removing a border, divider or icon would not make the poster less clear, leave it out.";
+
 const DOCUMENT_ARTIFACT_RULE =
   'DOCUMENT-ARTIFACT FILTER: never put source-document production metadata on the poster—page numbers, वृत्त. क्र., issue/report/file/document numbers, running headers or footers, filenames, scan marks, OCR artifacts, or similar administrative labels are not poster information, even if they appear in the supplied text.';
 
@@ -570,6 +570,7 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
       "The reference image controls STRUCTURE ONLY, not colour. Choose the poster's colour palette freely and creatively; ensure strong contrast and easy readability for every Marathi word and Devanagari numeral.",
       // …and "strong contrast" alone is what let a real render come back charcoal-on-black.
       BRIGHT_LOOK_RULE,
+      TEMPLATE_DECORATION_RULE,
       // "...or fill it only with other source-supported poster content" was the third licence to
       // duplicate, and the most direct of the three: by the time a slot is unsupported, every
       // source-supported item is already on the poster, so "other source-supported content" can
@@ -650,6 +651,8 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
     );
   }
   lines.push(
+    '',
+    TEMPLATE_DECORATION_RULE,
     '',
     'Do not add any English text. Do not paint any logos, emblems, footer bands or social handles — the official branding is stamped on afterwards by software. Keep one single poster within the canvas, no outer borders.',
     '',
@@ -1209,9 +1212,10 @@ if (
           `the compact fresh prompt restored retired wording "${retired}"`,
         );
     }
-    if (freshPrompt.length > 3_500)
+    // Raised 3,500 -> 4,000 deliberately (2026-09-26) for DECORATION_RULE (borders/dividers/icons).
+    if (freshPrompt.length > 4_000)
       failures.push(
-        `the compact fresh prompt grew beyond 3,500 characters (${freshPrompt.length})`,
+        `the compact fresh prompt grew beyond 4,000 characters (${freshPrompt.length})`,
       );
 
     // A scene brief is no longer a hidden fifth instruction in the officer's replacement prompt.
@@ -1800,9 +1804,9 @@ if (
         }
         if (at('TEXT TO PUT ON THE POSTER:') < at('AREA RULES:'))
           failures.push(`${mode}: the poster text is no longer last`);
-        if (directed.length > 3_500)
+        if (directed.length > 4_000)
           failures.push(
-            `${mode}: the directed fresh prompt exceeds 3,500 chars (${directed.length})`,
+            `${mode}: the directed fresh prompt exceeds 4,000 chars (${directed.length})`,
           );
         // A failed director still yields the light rule, and no empty direction heading.
         const undirected = buildPosterPrompt({

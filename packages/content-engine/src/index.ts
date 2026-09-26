@@ -632,6 +632,14 @@ export {
   type BuildCustomPosterPromptInput,
   type BuildFeedbackPromptInput,
 } from './generation/build-poster-prompt.js';
+// The officer's attached pictures (migration 0056), declared to the image model: prepended to
+// any lane's prompt when pictures ride the edit call; a no-op when none do.
+export {
+  officerImagesBlock,
+  withOfficerImages,
+  type OfficerImagesMode,
+  type OfficerImagesOptions,
+} from './generation/officer-images-rule.js';
 export {
   buildMinimalCreativePrompt,
   LIGHT_GROUND_RULE,
@@ -652,6 +660,7 @@ export {
   buildCarouselDetailPrompt,
   carouselSlideText,
   carouselSeriesFrame,
+  DIRECTED_LOOK_RULE,
   FLAT_STYLE_RULE,
   SERIES_REFERENCE_RULE,
   type CarouselCoverPromptInput,
@@ -663,6 +672,16 @@ export {
   carouselLayoutById,
   type CarouselLayout,
 } from './generation/carousel-layouts.js';
+// The carousel's design director (2026-09-26): the fresh social poster's open-ended direction at
+// two levels — one series look every slide shares, one design per slide from its own content.
+export {
+  carouselCoverDesign,
+  carouselDesignDirectionEnabled,
+  directCarouselDesign,
+  lacksVariety,
+  parseCarouselDesign,
+  type DirectCarouselDesignInput,
+} from './generation/carousel-design-director.js';
 export {
   digitsAreGrounded,
   toDevanagariDigits,

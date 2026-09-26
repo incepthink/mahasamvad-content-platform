@@ -3111,6 +3111,62 @@ client id/secret — see the milestone below.
 
 ## Latest Implementation Milestone
 
+- **Carousels take the officer's text AS IT IS (जसाच्या तसा मजकूर)** (2026-09-26, no migration,
+  no n8n). The carousel lane used to always PLAN copy out of the note, so an officer whose text
+  was already final had it rewritten. The create form now shows the same जसाच्या तसा मजकूर
+  checkbox on कॅरोसेल (shared `contentSource` state; own tooltip `carouselSourceVerbatimDesc`),
+  sent as `carouselVerbatim: true` and stored at insert as `carousel.verbatim` so a retry plans
+  the same way. In that mode the planner never writes text: `segmentCarouselText` splits the note
+  into lines (own line breaks; list glyphs/Markdown markers stripped, numbering kept; a line over
+  140 chars split at sentence ends, not at श्री./दि.), the model sees them numbered and returns
+  only NUMBERS for each slide's title/subheading/section heading/lines/closing. The guarantee is
+  `normalizeVerbatimPlan`: out-of-range or reused numbers claim nothing, every unplaced line is put
+  back beside its neighbour in the text, a sentence chosen as a title becomes the slide's first
+  line, and a verbatim slide-count merge keeps the merged slide's title/subheading/closing as
+  lines — so every line appears exactly once. No quotes, digit guard or scheme-name lock on this
+  path (the text is the officer's). A slide may be untitled (the stored strip title falls back to
+  the series title), and every slide prompt gets `VERBATIM_TEXT_RULE` (print every line in full,
+  shrink type rather than drop one) BEFORE the text block. Verified: plan-carousel `--check`
+  (+13 verbatim cases), build-carousel-prompt (+3), design-director check, engine/API/web
+  typecheck, eslint; live planner run (cents) on an 8-line note placed every line once, in order,
+  with no invented titles. **Left for a real run**: one verbatim carousel render, checking the
+  image model prints each line in full. Deploy `@dgipr/schemas` → `@dgipr/content-engine` → API
+  + web together.
+
+- **Carousels get the social poster's open-ended design director, at two levels** (2026-09-26,
+  no migration, no n8n, no web change). The fresh social poster had just moved from assigned
+  recipes to a per-poster design brief chosen from its content; the carousel still took its look
+  from the planner's one `designSystem` sentence and its body from a seven-entry layout library.
+  `generation/carousel-design-director.ts` (new) applies the same director to a whole post in ONE
+  utility-tier strict-JSON call, reusing `poster-design-director.ts`'s `DESIGN_PRINCIPLES` (split
+  out of its system prompt — **the social prompt is byte-identical, verified by hash**), enums and
+  sentence sanitiser (`sanitizeBrief` gained optional word limits; defaults unchanged).
+  - **Continuity is the SERIES look**: ground, colour roles, typography and title treatment, panel
+    language, imagery treatment, spacing — never an arrangement — emitted as THE POST'S LOOK
+    identically in every slide's prompt, plus `DIRECTED_LOOK_RULE` (same colours in the same roles;
+    only the arrangement changes; never overrides the rules below). This is the only continuity a
+    set of separately painted slides can have, so a thin series brief nulls the whole direction.
+  - **Variation is per slide**: form, weight and imagery chosen from that slide's own content
+    (counts of lines, figures, sections, quote, closing are handed to the director), replacing the
+    layout recipe. A `none`/`graphic_only` slide gets no picture request; an `illustration` slide
+    asks for one. A post whose slides all share one form+composition is asked again once. A null
+    slide keeps its assigned layout inside the same look; a null direction renders exactly as
+    before. The pinned-master cover takes the look but not its own slide design.
+  - **Lifecycle**: stored as `carousel.design` (jsonb, `CarouselDesignSchema`), decided only when NO
+    slide is rendered yet (directing only the missing slides of a half-rendered post would split it
+    into two looks), reused by every single-slide redo, and re-decided by "सर्व स्लाइड पुन्हा" with
+    the old direction as `previous` (new colour family, new cover arrangement, one retry).
+  - Every carousel prompt now carries the social lane's `LIGHT_GROUND_RULE`. The cover's design and
+    measured colours are written to `poster_style` (best-effort), and carousels spread against
+    twitter + facebook + carousel history; the social lane's own history read is unchanged.
+  Verified free: workspace typecheck 7/7, ESLint clean, `carousel-design-director.ts --check`
+  (parsing, padding, per-slide sanitising, both retries, history design), `build-carousel-prompt.ts`
+  (+10 directed checks), plus the plan/layout/style/poster-prompt/social-director harnesses
+  unchanged. **Left for a real run** (image spend): one directed carousel on स्वयं and one "सर्व
+  स्लाइड पुन्हा", judging whether the slides read as one set while differing in arrangement.
+  Rollback `CAROUSEL_DESIGN_DIRECTION=off`. Deploy: `@dgipr/schemas` → `@dgipr/content-engine`
+  dists → API.
+
 - **A design director for fresh DGIPR social posters, and a light ground on every one**
   (2026-09-26, no migration, no n8n, no web change). A contact sheet of the last 13 fully-AI
   twitter/facebook renders (incl. generation `c0e28c9d`) showed one poster almost every time:

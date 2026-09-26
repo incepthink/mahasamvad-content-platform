@@ -447,6 +447,9 @@ export const CreateGenerationRequestSchema = z
     // 4 from the amount of content. Stored on the row at insert, so a retry reproduces it.
     // Absent ⇒ 'auto'.
     carouselSlides: CarouselSlideCountSchema.optional(),
+    // Carousel runs only: जसाच्या तसा मजकूर — the note is the slides' final text, distributed
+    // across them unchanged instead of rewritten into slide copy. Absent ⇒ false.
+    carouselVerbatim: z.boolean().optional(),
   })
   .superRefine((value, ctx) => {
     // The note floor, applied per lane. A Dynamic Poster is sourced from the uploaded image,
@@ -518,6 +521,13 @@ export const CreateGenerationRequestSchema = z
         code: z.ZodIssueCode.custom,
         message: 'carouselSlides is only accepted on a carousel run.',
         path: ['carouselSlides'],
+      });
+    }
+    if (value.carouselVerbatim !== undefined && value.category !== 'carousel') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'carouselVerbatim is only accepted on a carousel run.',
+        path: ['carouselVerbatim'],
       });
     }
     // A carousel IS its slides: a run asking for none of them asks for nothing.

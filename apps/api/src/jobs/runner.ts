@@ -52,6 +52,7 @@ import {
   resolvePosterSubject,
   resolveThumbnailPeople,
   toStyleHistory,
+  withOfficerImages,
   recordImageCost,
   resolveCmoReference,
   resolvePinnedImage,
@@ -124,6 +125,8 @@ import {
   MAX_INJECTED_PREFERENCES,
   NameDesignationsSchema,
   SelectedFactsSchema,
+  GENERATION_PROMPT_IMAGE_LIMIT,
+  isPromptImagePath,
   isSocialCategory,
   isYoutubeCategory,
   type Copy,
@@ -1336,6 +1339,15 @@ async function renderAndStoreArticlePoster(
 ): Promise<void> {
   const { designMode, version, seed } = options;
 
+  // 0. The officer's own pictures (migration 0056), read off the row HERE rather than passed in,
+  //    so all three callers — the initial run, the attach-poster job and पुन्हा तयार करा — carry
+  //    them without each having to remember to. Loaded before the paid copy call, so a missing
+  //    object fails the run before anything is spent.
+  const officerRow = await getGeneration(client, id);
+  const officerImages = officerRow
+    ? await loadOfficerImages(client, officerRow)
+    : [];
+
   // 1. Copy. The article poster shows ONE headline, but generateCopy also yields the
   //    scene_brief the imagery is painted from, so the whole object is still produced (and
   //    persisted, so a later manual copy-edit in 'html' mode still has something to edit).
@@ -1483,7 +1495,7 @@ async function renderAndStoreArticlePoster(
   );
 
   // 6. Prompt (pure string assembly, no model call) → render.
-  const prompt = buildArticlePosterPrompt({
+  const lanePrompt = buildArticlePosterPrompt({
     headline,
     sceneBrief:
       typeof copy.scene_brief === 'string' ? copy.scene_brief : undefined,
@@ -1501,10 +1513,26 @@ async function renderAndStoreArticlePoster(
     artDirection: artDirection ?? undefined,
     textLocked,
   });
+  // The officer's pictures, declared ahead of the lane's prompt (unchanged when there are none).
+  // A fresh render sends them as its only images; the master-edit mode appends them after it.
+  const prompt = withOfficerImages(lanePrompt, {
+    count: officerImages.length,
+    leadingImages: isFresh
+      ? []
+      : [
+          'the reference template this poster is built from, as described below',
+        ],
+    mode: 'render',
+  });
 
   const rawPoster = isFresh
-    ? await generateImage(prompt, { size: '1536x1024' })
-    : await renderArticlePosterEdit(reference.url, prompt);
+    ? await renderWithOfficerImages({
+        leading: [],
+        officer: officerImages,
+        prompt,
+        size: '1536x1024',
+      })
+    : await renderArticlePosterEdit(reference.url, prompt, officerImages);
   // gpt-image-2 @ 1536x1024 — attribute the fixed tier price (image usage isn't measurable
   // whether it ran in n8n or the direct call).
   recordImageCost('article', imageQuality());
@@ -1625,9 +1653,17 @@ export function startArticlePosterJob(
 async function renderArticlePosterEdit(
   imageUrl: string,
   prompt: string,
+  // The officer's attached pictures, appended after the edited image (see
+  // renderWithOfficerImages). The caller has already prefixed `prompt` to declare them.
+  officer: readonly Buffer[] = [],
 ): Promise<Buffer> {
   const current = await fetchReferencePng(imageUrl);
-  return editImage(current, prompt, { size: '1536x1024' });
+  return renderWithOfficerImages({
+    leading: [current],
+    officer,
+    prompt,
+    size: '1536x1024',
+  });
 }
 
 // The social twin of renderArticlePosterEdit, and likewise a direct edit rather than the
@@ -1644,9 +1680,11 @@ async function renderSocialPosterEdit(
   imageUrl: string,
   prompt: string,
   size: string,
+  // As renderArticlePosterEdit's: appended after the edited image, declared by the caller.
+  officer: readonly Buffer[] = [],
 ): Promise<Buffer> {
   const current = await fetchReferencePng(imageUrl);
-  return editImage(current, prompt, { size });
+  return renderWithOfficerImages({ leading: [current], officer, prompt, size });
 }
 
 // The social lane the caption is being written for. The row's category already is one
@@ -1686,16 +1724,27 @@ export async function renderSocialPosterFeedbackEdit(
     actions?: readonly PosterClearAction[];
     inventory?: readonly string[];
   } = {},
+  // The officer's original attached pictures (migration 0056), sent beside the poster so a
+  // feedback edit — which repaints the whole canvas — keeps each subject identical to the
+  // original rather than drifting a face a little further every round.
+  officer: readonly Buffer[] = [],
   // Both halves: `png` is what the officer receives, `raw` the same edit BEFORE the chrome
   // goes back on — which is the un-branded copy the plain download serves.
 ): Promise<{ png: Buffer; raw: Buffer }> {
-  const prompt = buildFeedbackPrompt({
-    imageFeedback: feedback,
-    brand,
-    markerCount,
-    clearActions: clear.actions ?? [],
-    contentInventory: clear.inventory ?? [],
-  });
+  const prompt = withOfficerImages(
+    buildFeedbackPrompt({
+      imageFeedback: feedback,
+      brand,
+      markerCount,
+      clearActions: clear.actions ?? [],
+      contentInventory: clear.inventory ?? [],
+    }),
+    {
+      count: officer.length,
+      leadingImages: ['the current poster, which is the image being edited'],
+      mode: 'feedback',
+    },
+  );
   // Same per-brand sizes as the initial render: a DGIPR feedback round edits the finished
   // 1280x1600 poster, the model erases the branding it can see (stampedChromeRule) and returns
   // artwork, and overlayTwitterChrome joins a fresh band back on — so the poster stays exactly
@@ -1704,6 +1753,7 @@ export async function renderSocialPosterFeedbackEdit(
     currentPosterUrl,
     prompt,
     brand === 'cmo' ? CMO_POSTER_SIZE : SOCIAL_ARTWORK_SIZE,
+    officer,
   );
   // The workflow leaves the reserved chrome zones untouched; re-stamp the chrome so
   // any drift from the edit is corrected (mirrors the article path). CMO re-stamps
@@ -1988,6 +2038,12 @@ async function renderAndStoreSocialPoster(
   // model. Same contract as the fixed-template lane below, minus the template.
   const isFreshVerbatim = isFresh && designMode === 'fresh_verbatim';
 
+  // The officer's own pictures (migration 0056), loaded FIRST so a missing object fails the run
+  // before the copy call or the render is paid for. Both render paths below carry them — the
+  // fresh one turns into an edit call whose only images are these, the template one appends
+  // them after the master — so a picture reaches the model with or without a pinned template.
+  const officerImages = await loadOfficerImages(client, row);
+
   // THE OFFICER WROTE THE PROMPT (migration 0045). Everything this function assembles for the
   // image model is then skipped — see buildCustomPosterPrompt for what is sent instead, and why
   // the reserved-zone blocks are the one thing that still travels.
@@ -2212,7 +2268,7 @@ async function renderAndStoreSocialPoster(
   }
 
   // 4. Image prompt (pure string assembly, no model call).
-  const prompt = customPrompt
+  const lanePrompt = customPrompt
     ? buildCustomPosterPrompt({
         imagePrompt: customPrompt,
         information: row.note,
@@ -2245,6 +2301,17 @@ async function renderAndStoreSocialPoster(
         // Fresh branch only: the DESIGN DIRECTION block (when present) + LIGHT BACKGROUND always.
         designDirection,
       });
+  // Declares the officer's pictures ahead of everything else; unchanged when there are none.
+  // On a template render the master is image 1 and the pictures follow it.
+  const prompt = withOfficerImages(lanePrompt, {
+    count: officerImages.length,
+    leadingImages: isFresh
+      ? []
+      : [
+          'the reference template this poster is built from, as described below',
+        ],
+    mode: 'render',
+  });
 
   // 5. Render. 'fresh' paints from scratch via the direct image call — no master, and no n8n;
   //    the template modes edit the chosen master through the thin workflow.
@@ -2256,12 +2323,23 @@ async function renderAndStoreSocialPoster(
   //    exception — its chrome is overlaid, so its render IS the finished poster. `isFresh` is
   //    false for CMO by construction, so the direct call never needs that branch.
   const rawPoster = isFresh
-    ? await generateImage(prompt, { size: SOCIAL_ARTWORK_SIZE })
+    ? await renderWithOfficerImages({
+        leading: [],
+        officer: officerImages,
+        prompt,
+        size: SOCIAL_ARTWORK_SIZE,
+      })
     : await renderSocialPosterEdit(
         resolved!.master.url,
         prompt,
         brand === 'cmo' ? CMO_POSTER_SIZE : SOCIAL_ARTWORK_SIZE,
+        officerImages,
       );
+  if (officerImages.length > 0) {
+    console.log(
+      `[job ${id}] officer pictures attached to the render: ${officerImages.length}`,
+    );
+  }
   // gpt-image-2 on the social canvas — attribute the fixed tier price (image usage isn't measurable
   // whether it ran in n8n or the direct call). The copy above is metered by chatComplete.
   recordImageCost('twitter', imageQuality());
@@ -2471,6 +2549,11 @@ async function renderAndStoreYoutubeThumbnail(
   // v1 only — see the note on renderAndStoreSocialPoster's own flag.
   upsert = false,
 ): Promise<{ title: string | null }> {
+  // 0. The officer's own pictures (migration 0056) — a portrait attached here is what the
+  //    thumbnail's person should BE, in place of a likeness painted from their name. Loaded
+  //    before any paid call so a missing object fails the run first.
+  const officerImages = await loadOfficerImages(client, row);
+
   // 1. Which reference. A pinned exact image wins outright (resolvePinnedImage is
   //    category-agnostic and resolves the type off the image itself); otherwise the whole
   //    enabled youtube library is ranked against the officer's information.
@@ -2537,12 +2620,22 @@ async function renderAndStoreYoutubeThumbnail(
   });
 
   // 3. Prompt (pure string assembly, no model call). The officer's note IS the content.
-  const prompt = buildYoutubeThumbnailPrompt({
-    information: row.note,
-    itemCount: resolved.itemCount,
-    slotShortfall: resolved.shortfall,
-    people,
-  });
+  //    The officer's pictures are declared first; the reference stays image 1, the canvas.
+  const prompt = withOfficerImages(
+    buildYoutubeThumbnailPrompt({
+      information: row.note,
+      itemCount: resolved.itemCount,
+      slotShortfall: resolved.shortfall,
+      people,
+    }),
+    {
+      count: officerImages.length,
+      leadingImages: [
+        'the reference template this thumbnail is built from, as described below',
+      ],
+      mode: 'render',
+    },
+  );
 
   // 4. Render: edit the chosen reference. The reference is fetched here rather than handed to
   //    a workflow as a URL, so the only thing that can fail is a fetch we control.
@@ -2551,7 +2644,10 @@ async function renderAndStoreYoutubeThumbnail(
   //    covered by branding. Sending '1280x720' here is what buried the officer's own text.
   await updateGeneration(client, id, { step: 'image' });
   const reference = await fetchReferencePng(resolved.master.url);
-  const edited = await editImage(reference, prompt, {
+  const edited = await renderWithOfficerImages({
+    leading: [reference],
+    officer: officerImages,
+    prompt,
     size: YOUTUBE_ARTWORK_SIZE,
   });
   recordImageCost('youtube', imageQuality());
@@ -2583,6 +2679,73 @@ export async function fetchReferencePng(url: string): Promise<Buffer> {
     );
   }
   return Buffer.from(await response.arrayBuffer());
+}
+
+// ---------- The officer's own pictures (migration 0056) ----------
+//
+// Pictures attached on the create form ride the IMAGE call itself, after whatever image the
+// lane already sends (the reference template, the current poster), and the prompt is prefixed
+// with withOfficerImages so the model knows they are real content to place — cropped, cut out,
+// resized, positioned — never a likeness to repaint.
+//
+// Read off the ROW on every render, which is what makes a retry, पुन्हा तयार करा and every
+// feedback round carry the same pictures: none of those paths receives the create request.
+// Parsed rather than cast — these paths point a paid render at objects, so a hand-edited row
+// cannot slip an arbitrary string in (the prefix guard the create route applies, again here).
+function officerImagePaths(row: GenerationRow): string[] {
+  const value = row.promptImagePaths;
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter(
+      (path): path is string =>
+        typeof path === 'string' && isPromptImagePath(path),
+    )
+    .slice(0, GENERATION_PROMPT_IMAGE_LIMIT);
+}
+
+// NOT best-effort, deliberately. Rendering without a picture the officer attached would hand
+// them exactly what this feature exists to prevent — a poster with an AI-invented stand-in, or
+// none — and nothing on screen would say why. A failure here fails the job with a readable
+// Marathi reason BEFORE any paid call, and the retry button reads the same row again.
+export async function loadOfficerImages(
+  client: SupabaseClient,
+  row: GenerationRow,
+): Promise<Buffer[]> {
+  const paths = officerImagePaths(row);
+  if (paths.length === 0) return [];
+  try {
+    return await Promise.all(paths.map((path) => downloadPng(client, path)));
+  } catch (error) {
+    console.error(
+      `[job ${row.id}] could not load the officer's attached pictures:`,
+      error,
+    );
+    throw new Error(
+      'तुम्ही जोडलेली प्रतिमा वाचता आली नाही, त्यामुळे पोस्टर तयार केले नाही. कृपया पुन्हा प्रयत्न करा.',
+    );
+  }
+}
+
+// ONE render call for every lane: the lane's own images first (the canvas stays first — see
+// editImage), the officer's pictures after them. With no image at all it is the plain
+// from-scratch generation, byte-for-byte the old request; with officer pictures and nothing
+// else it becomes an edit call whose images are all context — which is how a from-scratch
+// poster gets to SEE the photograph it must contain. input_fidelity 'high' is asked for only
+// when the officer's pictures are present, since that is where a face must survive.
+export async function renderWithOfficerImages(input: {
+  leading: readonly Buffer[];
+  officer: readonly Buffer[];
+  prompt: string;
+  size: string;
+}): Promise<Buffer> {
+  const images = [...input.leading, ...input.officer];
+  if (images.length === 0) {
+    return generateImage(input.prompt, { size: input.size });
+  }
+  return editImage(images, input.prompt, {
+    size: input.size,
+    ...(input.officer.length > 0 ? { inputFidelity: 'high' as const } : {}),
+  });
 }
 
 // The YouTube-thumbnail pipeline. One image, nothing else.
@@ -3458,6 +3621,15 @@ export function startPosterImageFeedbackJob(
       (c) => c.action,
     );
     const version = await nextVersion(client, id);
+    // The officer's original pictures (migration 0056), loaded before the paid vision pass so a
+    // missing object fails the round first. Every lane below sends them beside the poster.
+    const officerImages = await loadOfficerImages(client, row);
+    const officerFeedback = (prompt: string): string =>
+      withOfficerImages(prompt, {
+        count: officerImages.length,
+        leadingImages: ['the current poster, which is the image being edited'],
+        mode: 'feedback',
+      });
     let inputUrl = publicUrl(client, row.posterPath);
     let feedbackText = input.feedback ?? '';
     // Revision history keeps the user's own words, never the machine text.
@@ -3529,12 +3701,14 @@ export function startPosterImageFeedbackJob(
       // Thumbnail lane: edit the CURRENT thumbnail directly (no n8n). The marker and
       // clear-space semantics are the shared ones — clearSpaceRule is the same block
       // all three lanes get — so a gesture the officer drew means the same thing here.
-      const prompt = buildYoutubeFeedbackPrompt({
-        imageFeedback: feedbackText,
-        markerCount: annotations.length,
-        clearActions,
-        contentInventory,
-      });
+      const prompt = officerFeedback(
+        buildYoutubeFeedbackPrompt({
+          imageFeedback: feedbackText,
+          markerCount: annotations.length,
+          clearActions,
+          contentInventory,
+        }),
+      );
       // The input is the poster ALREADY carrying the chrome (or the marked-up copy of it),
       // and the chrome is re-stamped after the edit — which is what keeps it crisp through
       // repeated rounds, exactly as the two poster lanes do. So this asks for the FINISHED
@@ -3542,7 +3716,12 @@ export function startPosterImageFeedbackJob(
       // overlayYoutubeChrome recognises it by aspect and re-stamps the band in place rather
       // than joining a second strip on.
       const current = await fetchReferencePng(inputUrl);
-      const edited = await editImage(current, prompt, { size: '1280x720' });
+      const edited = await renderWithOfficerImages({
+        leading: [current],
+        officer: officerImages,
+        prompt,
+        size: '1280x720',
+      });
       recordImageCost('youtube', imageQuality());
       posterPng = await overlayYoutubeChrome(
         await fitToYoutubeThumbnail(edited),
@@ -3561,6 +3740,7 @@ export function startPosterImageFeedbackJob(
         row.templateBrand,
         cmoPhoto,
         { actions: clearActions, inventory: contentInventory },
+        officerImages,
       );
       posterPng = rendered.png;
       rawPoster = rendered.raw;
@@ -3570,16 +3750,22 @@ export function startPosterImageFeedbackJob(
       // workflow's Code node). It edits the CURRENT poster, so it carries no palette or
       // composition — the assignment belongs to the render that produced this poster, and a
       // feedback edit must change only what was asked for.
-      const prompt = buildArticleFeedbackPrompt({
-        imageFeedback: feedbackText,
-        markerCount: annotations.length,
-        clearActions,
-        contentInventory,
-      });
+      const prompt = officerFeedback(
+        buildArticleFeedbackPrompt({
+          imageFeedback: feedbackText,
+          markerCount: annotations.length,
+          clearActions,
+          contentInventory,
+        }),
+      );
       // The stamped chrome is erased by the edit (stampedChromeRule) and composited again
       // here, which is what keeps it crisp through repeated rounds — and leaves `rawPoster`
       // as a genuine un-branded copy of this version.
-      rawPoster = await renderArticlePosterEdit(inputUrl, prompt);
+      rawPoster = await renderArticlePosterEdit(
+        inputUrl,
+        prompt,
+        officerImages,
+      );
       posterPng = await overlayArticleChrome(rawPoster);
       recordImageCost('article', imageQuality());
     }

@@ -760,7 +760,28 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   per line), a speaker-checked quote, a closing line and a LAYOUT from `generation/carousel-layouts.ts`
   (`assignCarouselLayouts` makes them differ across slides); detail slides get slide 1 as a CONTEXT
   image with `SERIES_REFERENCE_RULE` (frame only, never its photo or body; `CAROUSEL_SERIES_REFERENCE=off`
-  = blind generation). ICONS and DO NOT USE (no maps) stay verbatim. **Each slide is persisted the moment it
+  = blind generation). ICONS and DO NOT USE (no maps) stay verbatim. **A DESIGN DIRECTOR now overrides
+  both the look and the recipes** (2026-09-26, `generation/carousel-design-director.ts`): the fresh
+  social poster's open-ended director (it shares `DESIGN_PRINCIPLES`, the enums and the sentence
+  sanitiser with `poster-design-director.ts`) run ONCE per post at two levels — a SERIES look
+  (ground, colour roles, type, panels, imagery treatment; never an arrangement) that replaces
+  `designSystem` word for word in every prompt, and one brief per slide from that slide's own content
+  that replaces its layout recipe (an image-free or illustrated slide gets the matching picture line).
+  Stored as `carousel.design` (jsonb, no migration), decided only before ANY slide exists, reused by
+  single-slide redos, re-decided away from the old colour/cover by "सर्व स्लाइड पुन्हा"; a flat
+  one-arrangement answer is asked again once. A null slide keeps its assigned layout; a null
+  direction renders exactly as before. Every carousel prompt now carries `LIGHT_GROUND_RULE`. The
+  cover's design + measured colours go to `poster_style`, and carousels spread against
+  twitter/facebook/carousel history. Rollback `CAROUSEL_DESIGN_DIRECTION=off`. Free harness:
+  `tsx src/generation/carousel-design-director.ts --check`; live (cents): `--file=note.txt [3|4]`.
+  **जसाच्या तसा मजकूर on the carousel** (2026-09-26, `carouselVerbatim` → `carousel.verbatim`,
+  jsonb, no migration): the note is split into numbered lines (`segmentCarouselText`) and the
+  planner answers with line NUMBERS only (`VERBATIM_PLAN_SCHEMA`), so every printed string is the
+  officer's own line; `normalizeVerbatimPlan` puts back any line the model left out, never prints
+  one twice, demotes a sentence chosen as a title to the slide's first line, and verbatim merges
+  keep subtitle/closing/title as lines. Untitled slides are allowed (no invented titles); prompts
+  carry `VERBATIM_TEXT_RULE` before the text block. Live: `plan-carousel.ts --file=… [auto|3|4] --verbatim`.
+  **Each slide is persisted the moment it
   lands** and the whole state is one jsonb column (`generations.carousel`), written through a
   per-generation serialized chain because detail slides land concurrently (2 at a time) and each
   write replaces the whole value; the retry route RESUMES a failed carousel (only missing slides
@@ -1191,8 +1212,21 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   pictures were attached, so an un-applied 0056 fails only a create that carries some
   (verified live). Scoped to a lane that renders a poster from them — the caption lane paints
   nothing and a Dynamic Poster's source IS a picture — and the control is not rendered
-  elsewhere, though the state survives a format switch. **Nothing reads the paths yet**: the
-  forwarding to the image model is a change in the poster prompt builders.
+  elsewhere, though the state survives a format switch. **The pictures ride the IMAGE CALL**
+  (2026-09-26): `loadOfficerImages` (runner.ts) reads them off the ROW on every render — so a
+  retry, पुन्हा तयार करा and every feedback round carry them — and `renderWithOfficerImages`
+  appends them after the lane's own image (template/current poster stays first = the canvas);
+  a from-scratch render with pictures becomes an edit call whose only images are these, with
+  `input_fidelity: 'high'` (learned: dropped for the process on a 400 naming it). The prompt is
+  PREFIXED by `withOfficerImages` (`generation/officer-images-rule.ts`): use the actual pixels,
+  preserve identity, only crop / cut out / resize / position as the officer's text says, and
+  it outranks the lanes' imagery, text-only and reference-firewall rules. Prefixed, not threaded
+  into each builder, because their LAST blocks are harness-asserted. No pictures ⇒ prompt and
+  request byte-identical. Wired on social (fresh + template), article banner, YouTube thumbnail
+  and the carousel COVER only (detail slides must not reuse slide 1's picture). A picture that
+  cannot be loaded FAILS the run in Marathi before any paid call, never renders without it.
+  Not in `ARTICLE_POSTER_MODE=html` or the CMO circle photo. Free harness:
+  `tsx src/generation/officer-images-rule.ts`.
 - **फक्त कॅप्शन is a card on the create form again (2026-08-22), and it needed no server change:**
   it submits `category: 'facebook'` + `outputType: 'article'` + `generateCaption: true`, which is
   the caption-only lane described above. `facebook` deliberately, for the long-form caption —

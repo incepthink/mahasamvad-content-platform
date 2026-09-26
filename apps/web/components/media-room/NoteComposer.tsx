@@ -275,12 +275,21 @@ export function NoteComposer({ form }: { form: Form }) {
           articleBusy={form.hasActiveArticleTask}
         />
 
-        {/* कॅरोसेल: how many slides, and the same caption opt-in a social poster has. No
-            verbatim toggle — a carousel's text is always PLANNED across slides, so the box
-            is never printed as it stands. */}
+        {/* कॅरोसेल: how many slides, the same जसाच्या तसा मजकूर checkbox the Creative poster has
+            (ticked, the box's lines are distributed across the slides unchanged instead of
+            being rewritten into slide copy), and the caption opt-in. */}
         {form.isCarousel ? (
           <>
             <SlideCountControl form={form} />
+            <CheckOption
+              checked={form.verbatimText}
+              disabled={form.submitting}
+              onChange={(checked) =>
+                form.setContentSource(checked ? 'verbatim' : 'ai')
+              }
+              label={STR.posterSourceVerbatim}
+              title={STR.carouselSourceVerbatimDesc}
+            />
             <CheckOption
               checked={form.wantCaption}
               disabled={form.submitting}

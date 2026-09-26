@@ -11,7 +11,7 @@ export {
   buildCmoCirclePhotoPrompt,
 } from './build-scene-prompt.js';
 export { generateImage, editImage, IMAGE_MODEL } from './openai-image.js';
-export type { GenerateImageOptions } from './openai-image.js';
+export type { EditImageOptions, GenerateImageOptions } from './openai-image.js';
 export { loadBrandAssets, loadArticleAssets } from './assets.js';
 export type { BrandAssets } from './assets.js';
 export { loadArticlePdfAssets } from './assets.js';

@@ -139,9 +139,10 @@ export const BRIEF_MIN_WORDS = 25;
 // The prompt asks for ~90; this is the hard ceiling, trimmed at a sentence boundary.
 export const BRIEF_MAX_WORDS = 120;
 
-const SYSTEM_PROMPT = [
-  'You are the design director for DGIPR, the Directorate General of Information and Public Relations, Government of Maharashtra. For each social-media poster you decide its visual direction in a few English sentences, which an image model then follows. You never write the poster text: that is supplied separately and is not yours to touch.',
-  '',
+// The design principles every DGIPR director works to — the single poster's and the carousel's
+// (carousel-design-director.ts). One list, so the two lanes cannot drift about what "creative but
+// official" means, what the overused default is, or what may never be proposed.
+export const DESIGN_PRINCIPLES: readonly string[] = [
   'TONE: official government communication. Dignified, uncluttered, trustworthy, and easy to read on a phone at a glance. Professional and contemporary, never gimmicky.',
   '',
   'CHOOSE HOW THE INFORMATION IS SHOWN FROM WHAT IT CONTAINS:',
@@ -154,11 +155,18 @@ const SYSTEM_PROMPT = [
   '',
   'COMPOSITION: decide where the visual weight sits and how the canvas is divided. The shape that has been repeated far too often is: headline at the top left, a list down the left, a photograph at the bottom right. Do not fall back on it.',
   'IMAGERY: decide whether to use any, of what kind (photograph, illustration, or purely graphic), and how large. Imagery is bright and naturally lit.',
-  'Also direct typography and hierarchy (what is largest, what is secondary), spacing, and graphic treatment (panels, rules, blocks, texture).',
+  'Also direct typography and hierarchy (what is largest, what is secondary), spacing, and graphic treatment (panels, blocks, texture).',
+  'RESTRAINT: build structure with spacing, alignment, typography, colour and imagery. Do not propose a border or outline around every section, divider lines between items, or icons beside headings and points by default. Mention a border, divider or icon only where it has a clear function (separating genuinely distinct sections, or telling the reader something the words do not); never icons alongside imagery that already gives the visual context. The look is clean and editorial.',
   '',
   'COLOUR: describe a colour mood in words, ALWAYS on a LIGHT ground (white, off-white, or a pale tint). Saturated colour belongs in panels, headings and accents. Never propose a dark, black, charcoal, navy or night-mode background. Never give hex codes. Do not default to cream with saffron and maroon.',
   '',
-  'NEVER PROPOSE: maps or state/territory outlines; waves, swooshes or curved ribbons along the bottom; large or bulky icons (icons stay small); anything in the top-right corner, which is reserved for an official badge; logos, emblems, seals or QR codes.',
+  'NEVER PROPOSE: maps or state/territory outlines; waves, swooshes or curved ribbons along the bottom; large or bulky icons (icons stay small); outlined boxes around every block, decorative divider lines, or an icon beside every heading or point; anything in the top-right corner, which is reserved for an official badge; logos, emblems, seals or QR codes.',
+];
+
+const SYSTEM_PROMPT = [
+  'You are the design director for DGIPR, the Directorate General of Information and Public Relations, Government of Maharashtra. For each social-media poster you decide its visual direction in a few English sentences, which an image model then follows. You never write the poster text: that is supplied separately and is not yours to touch.',
+  '',
+  ...DESIGN_PRINCIPLES,
   '',
   'OUTPUT RULES: style only, in English. Never write any poster text, headline, words to print, numbers, names, dates or places, and never quote anything. Where the content allows, make this poster clearly different from the recent posters listed in the message.',
   '',
@@ -230,7 +238,8 @@ export function buildDesignDirectorUserPrompt(
   return lines.join('\n');
 }
 
-function parseJson(raw: string): Record<string, unknown> | null {
+// Exported for carousel-design-director.ts, which answers in the same tolerant JSON.
+export function parseJson(raw: string): Record<string, unknown> | null {
   try {
     return JSON.parse(raw) as Record<string, unknown>;
   } catch {
@@ -247,7 +256,7 @@ function parseJson(raw: string): Record<string, unknown> | null {
   }
 }
 
-function oneOf<T extends string>(
+export function oneOf<T extends string>(
   values: readonly T[],
   value: unknown,
 ): T | null {
@@ -301,8 +310,14 @@ function wordCount(text: string): number {
   return text.split(/\s+/).filter(Boolean).length;
 }
 
-// Returns the cleaned brief, or null when too little survives.
-export function sanitizeBrief(brief: string): string | null {
+// Returns the cleaned brief, or null when too little survives. The limits default to the single
+// poster's; the carousel's per-slide briefs are shorter and pass their own.
+export function sanitizeBrief(
+  brief: string,
+  limits: Readonly<{ minWords?: number; maxWords?: number }> = {},
+): string | null {
+  const minWords = limits.minWords ?? BRIEF_MIN_WORDS;
+  const maxWords = limits.maxWords ?? BRIEF_MAX_WORDS;
   const sentences = brief
     .replace(/\s+/g, ' ')
     .trim()
@@ -314,11 +329,11 @@ export function sanitizeBrief(brief: string): string | null {
   for (const sentence of sentences) {
     if (DROP_SENTENCE.some((re) => re.test(sentence))) continue;
     const n = wordCount(sentence);
-    if (words + n > BRIEF_MAX_WORDS) break;
+    if (words + n > maxWords) break;
     kept.push(sentence);
     words += n;
   }
-  if (words < BRIEF_MIN_WORDS) return null;
+  if (words < minWords) return null;
   return kept.join(' ');
 }
 

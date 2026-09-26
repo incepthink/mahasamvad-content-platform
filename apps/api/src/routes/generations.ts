@@ -875,10 +875,11 @@ export function registerGenerationRoutes(
       motionRegion: isDynamicPosterCategory(body.category)
         ? body.motionRegion
         : undefined,
-      // The carousel's slide count (migration 0059), on the row so a retry reproduces it.
-      // Omitted on every other lane, so an un-applied 0059 costs only a carousel create.
+      // The carousel's slide count and verbatim choice (migration 0059), on the row so a retry
+      // reproduces them. Omitted on every other lane, so an un-applied 0059 costs only a
+      // carousel create.
       carousel: isCarouselCategory(body.category)
-        ? initialCarouselState(body.carouselSlides)
+        ? initialCarouselState(body.carouselSlides, body.carouselVerbatim)
         : undefined,
     });
     // Opened in progress; the job settles it under the same key (runJob's task).

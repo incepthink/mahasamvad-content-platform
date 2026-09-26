@@ -17,6 +17,13 @@
 //      that one told the model to keep the cover's background, and the cover's photograph and
 //      layout survived onto every slide (generation 4b18548a). CAROUSEL_SERIES_REFERENCE=off
 //      restores blind generation (generateImage) with the same prompt minus the reference.
+//   2a. The post's DESIGN DIRECTION (directCarouselDesign, 2026-09-26) — the fresh social poster's
+//      open-ended director at two levels: ONE series look every slide's prompt repeats word for
+//      word (the continuity), and one design per slide chosen from that slide's own content (the
+//      variation). Decided once, before the first slide, stored on `carousel.design` and reused by
+//      every single-slide redo; "सर्व स्लाइड पुन्हा" asks for a new one. Best-effort: null renders
+//      exactly as before (planner's designSystem + assigned layouts). CAROUSEL_DESIGN_DIRECTION=off
+//      is the rollback.
 //   5. Every slide is finished by overlayTwitterChrome (badge + appended footer → 1280x1600), the
 //      same chrome a social poster gets.
 //   6. Optionally, the caption — AFTER the slides, so a caption failure never costs a paid render.
@@ -32,6 +39,11 @@
 import {
   buildCarouselCoverPrompt,
   buildCarouselDetailPrompt,
+  buildDesignPosterStyle,
+  carouselCoverDesign,
+  carouselDesignDirectionEnabled,
+  directCarouselDesign,
+  withOfficerImages,
   generateSocialCaption,
   interpretImageFeedback,
   paletteById,
@@ -60,11 +72,13 @@ import {
   annotateFeedbackRegions,
   editImage,
   generateImage,
+  measurePosterColours,
   overlayTwitterChrome,
 } from '@dgipr/poster-renderer';
 import {
   CarouselStateSchema,
   isCarouselCategory,
+  type CarouselDesign,
   type CarouselSlideDetail,
   type CarouselState,
   type PosterClearAction,
@@ -75,8 +89,10 @@ import {
   armEditRetry,
   fetchReferencePng,
   imageQuality,
+  loadOfficerImages,
   recentStyleHistory,
   renderSocialPosterFeedbackEdit,
+  renderWithOfficerImages,
   runJob,
 } from './runner.js';
 
@@ -110,12 +126,15 @@ export function carouselStateOf(row: GenerationRow): CarouselState {
   return CarouselStateSchema.parse({});
 }
 
-// The initial state written at insert: only the officer's slide count.
+// The initial state written at insert: the officer's slide count, and whether their text is the
+// slides' final text (जसाच्या तसा मजकूर) — both on the row so a retry plans the same way.
 export function initialCarouselState(
   requestedSlides: CarouselState['requestedSlides'] | undefined,
+  verbatim?: boolean | undefined,
 ): CarouselState {
   return CarouselStateSchema.parse({
     requestedSlides: requestedSlides ?? 'auto',
+    verbatim: verbatim === true,
   });
 }
 
@@ -268,6 +287,91 @@ async function assignPalette(
 }
 
 // ---------------------------------------------------------------------------
+// Design direction
+// ---------------------------------------------------------------------------
+
+// Whose recent looks a carousel is spread against: the single social posters AND earlier
+// carousels (whose cover design is recorded in poster_style below). The social lane's own read is
+// deliberately left as it was.
+const CAROUSEL_STYLE_CATEGORIES = ['twitter', 'facebook', 'carousel'] as const;
+
+// Decide (or, on a whole-post redo, re-decide) the post's direction and persist it, so a retry
+// and every later single-slide redo render inside the same look. `previous` is the direction
+// being replaced on "सर्व स्लाइड पुन्हा"; null on a first render.
+async function directDesign(
+  client: SupabaseClient,
+  id: string,
+  state: CarouselState,
+  previous: CarouselDesign | null,
+): Promise<void> {
+  if (!state.plan || !carouselDesignDirectionEnabled()) {
+    state.design = null;
+    return;
+  }
+  const plan = state.plan;
+  const history = await recentStyleHistory(client, CAROUSEL_STYLE_CATEGORIES);
+  const design = await runInCostTask('carousel_plan', () =>
+    directCarouselDesign({
+      plan,
+      recent: history.designs,
+      recentMeasuredBuckets: history.measuredBuckets,
+      previous,
+    }),
+  );
+  state.design = design;
+  console.log(
+    `[job ${id}] carousel design: ${
+      design
+        ? `colourMood=${design.colourMood} slides=[${design.slides
+            .map((s) =>
+              s ? `${s.form}/${s.composition}/${s.imagery}` : 'layout',
+            )
+            .join(', ')}]`
+        : 'none (rendering with the planned look and assigned layouts)'
+    }` +
+      ` | recent=[${history.designs.map((d) => `${d.form}/${d.composition}`).join(',')}]` +
+      ` measured=[${history.measuredBuckets.join(',')}]` +
+      (previous ? ` redo from ${previous.colourMood}` : ''),
+  );
+  await saveState(client, id, state);
+}
+
+// Record the cover's direction and what it MEASURED as the row's poster_style — what lets the next
+// carousel (and its director) see what this post looked like. Monitoring and memory only, so it is
+// best-effort and never costs the paid render; skipped when direction is switched off.
+async function recordCoverStyle(
+  client: SupabaseClient,
+  id: string,
+  state: CarouselState,
+  coverRaw: Buffer,
+): Promise<void> {
+  if (!carouselDesignDirectionEnabled()) return;
+  try {
+    const measured = await measurePosterColours(coverRaw).catch(
+      () => undefined,
+    );
+    const posterStyle = buildDesignPosterStyle(
+      carouselCoverDesign(state.design),
+      measured,
+    );
+    if (measured) {
+      console.log(
+        `[job ${id}] carousel cover measured: ground=${measured.groundHex} bucket=${measured.hueBucket}` +
+          ` lightness=${measured.lightness.toFixed(3)} dark=${(measured.darkShare * 100).toFixed(1)}%` +
+          (state.design &&
+          measured.hueBucket !== 'neutral' &&
+          measured.hueBucket !== state.design.colourMood
+            ? ` (directed ${state.design.colourMood})`
+            : ''),
+      );
+    }
+    await updateGeneration(client, id, { posterStyle });
+  } catch (error) {
+    console.warn(`[job ${id}] could not record the carousel's style:`, error);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Rendering
 // ---------------------------------------------------------------------------
 
@@ -289,19 +393,51 @@ async function renderCoverRaw(
       ? await resolvePinnedType(client, row.referenceTypeId, seed, row.note)
       : null;
 
+  // The officer's own pictures (migration 0056) go on the COVER — the slide that leads the post
+  // and the one every redo of the whole carousel re-renders. Detail slides are deliberately not
+  // given them: they are told NOT to reuse slide 1's photograph, and repeating the officer's
+  // portrait on every slide is the "four copies of one picture" defect the series was fixed for.
+  const officerImages = await loadOfficerImages(client, row);
+
   // The pinned master is a LAYOUT reference only. No palette reaches the prompt (the model
   // chooses colours, as on the fresh social poster); `paletteId` is logged for history.
   let raw: Buffer;
   if (pinned) {
-    const prompt = buildCarouselCoverPrompt({ plan, editsReference: true });
-    raw = await editImage(await fetchReferencePng(pinned.master.url), prompt, {
+    const prompt = withOfficerImages(
+      buildCarouselCoverPrompt({
+        plan,
+        design: state.design,
+        editsReference: true,
+      }),
+      {
+        count: officerImages.length,
+        leadingImages: [
+          'the reference template this slide is built from, as described below',
+        ],
+        mode: 'render',
+      },
+    );
+    raw = await renderWithOfficerImages({
+      leading: [await fetchReferencePng(pinned.master.url)],
+      officer: officerImages,
+      prompt,
       size: SOCIAL_ARTWORK_SIZE,
     });
     console.log(
       `[job ${row.id}] carousel cover edited from pinned master ${pinned.master.id} (palette ${state.paletteId ?? 'none'})`,
     );
   } else {
-    raw = await generateImage(buildCarouselCoverPrompt({ plan }), {
+    raw = await renderWithOfficerImages({
+      leading: [],
+      officer: officerImages,
+      prompt: withOfficerImages(
+        buildCarouselCoverPrompt({ plan, design: state.design }),
+        {
+          count: officerImages.length,
+          leadingImages: [],
+          mode: 'render',
+        },
+      ),
       size: SOCIAL_ARTWORK_SIZE,
     });
     console.log(
@@ -346,6 +482,7 @@ async function renderDetailRaw(
   const prompt = buildCarouselDetailPrompt({
     plan,
     index,
+    design: state.design,
     seriesReference: coverRaw !== null,
   });
   const raw = coverRaw
@@ -436,24 +573,34 @@ export function startCarouselJob(
             note: row.note,
             requestedSlides: state.requestedSlides,
             lockedSchemeNames,
+            // जसाच्या तसा मजकूर: place the note's own lines, write no copy.
+            verbatim: state.verbatim,
           }),
         );
         state.plan = result.plan;
         state.slides = result.plan.slides.map((slide, index) => ({
           index,
           role: slide.role,
-          title: slide.title,
+          // A verbatim slide may be untitled; the strip still needs a name for it.
+          title: slide.title || result.plan.seriesTitle,
           path: null,
           plainPath: null,
           version: 0,
           versions: [],
         }));
         console.log(
-          `[job ${id}] carousel plan: ${state.slides.length} slides (asked ${state.requestedSlides}) — "${result.plan.seriesTitle}"`,
+          `[job ${id}] carousel plan${state.verbatim ? ' (verbatim)' : ''}: ${state.slides.length} slides (asked ${state.requestedSlides}) — "${result.plan.seriesTitle}"`,
         );
         await saveState(client, id, state, {
           referenceTitle: result.plan.seriesTitle || null,
         });
+      }
+
+      // The direction is decided once, before ANY slide exists. A carousel that already has a
+      // rendered slide keeps whatever it rendered with (including none, for a pre-2026-09-26 or
+      // undirected post) — directing only the missing slides would split the post in two looks.
+      if (!state.design && !state.slides.some((slide) => slide.path)) {
+        await directDesign(client, id, state, null);
       }
 
       await updateGeneration(client, id, { step: 'carousel_render' });
@@ -471,6 +618,7 @@ export function startCarouselJob(
           const rendered = await renderCoverRaw(client, row, state, id);
           await storeSlide(client, id, state, 0, rendered, null, null);
           clearBusy(id, 1);
+          await recordCoverStyle(client, id, state, rendered);
           if (carouselSeriesReferenceEnabled()) coverRaw = rendered;
         }
         const missing = state.slides
@@ -531,6 +679,12 @@ export function startCarouselSlideRegenerateJob(
     if (target === 'all') state.slides.forEach((_, i) => markBusy(id, i + 1));
     else markBusy(id, target);
     try {
+      // A whole-post redo is a request for a NEW look, so it gets a new direction that moves away
+      // from the current one. A single-slide redo keeps the stored direction, so the redrawn slide
+      // rejoins the post's look rather than drifting from it.
+      if (target === 'all') {
+        await directDesign(client, id, state, state.design);
+      }
       await runInCostTask('carousel_slide', async () => {
         if (target === 'all' || target === 1) {
           // A new seed per cover version, so the redo is a different design rather than the same
@@ -540,6 +694,7 @@ export function startCarouselSlideRegenerateJob(
           const coverRaw = await renderCoverRaw(client, row, state, seed);
           await storeSlide(client, id, state, 0, coverRaw, null, feedback);
           clearBusy(id, 1);
+          await recordCoverStyle(client, id, state, coverRaw);
           if (target === 'all') {
             await renderDetails(
               client,
@@ -651,6 +806,10 @@ export function startCarouselSlideFeedbackJob(
         );
       }
 
+      // The cover carries the officer's pictures (see renderCoverRaw), so its marker round gets
+      // the originals beside it; a detail slide never had them.
+      const officerImages =
+        index === 0 ? await loadOfficerImages(client, row) : [];
       const rendered = await runInCostTask('carousel_slide', async () => {
         const result = await renderSocialPosterFeedbackEdit(
           inputUrl,
@@ -659,6 +818,7 @@ export function startCarouselSlideFeedbackJob(
           'dgipr',
           undefined,
           { actions: clearActions, inventory: contentInventory },
+          officerImages,
         );
         recordImageCost('twitter', imageQuality());
         return result;

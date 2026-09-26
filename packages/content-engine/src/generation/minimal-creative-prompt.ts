@@ -3,7 +3,7 @@
 // 1. "Make a creative poster for social media platforms in the size {width} × {height}. It must look very professional and not be congested."
 // 2. Numbers rule (Devanagari numerals ०-९ only, no English numerals)
 // 3. Text accuracy rules (including preserving the loop in 'श')
-// 4. Icons rule (compact, small, secondary)
+// 4. Borders/dividers/icons rule (only when functional; icons small and secondary)
 // 5. Do not use (logos, watermarks, maps, wave patterns at bottom)
 // 6. Headline & margins (font scaled/wrapped to clear top-right badge)
 // 7. Area rules (bottom text cushion, no wave patterns)
@@ -65,9 +65,18 @@ export const TEXT_ACCURACY_RULE = `TEXT ACCURACY:
 - Do not rewrite, translate, autocorrect, abbreviate or approximate any word.
 - Before finishing, compare every rendered word and number with the supplied content and correct all differences.`;
 
-export const ICONS_RULE = `ICONS:
-- Keep all icons and icon badge containers small, compact, and subtle.
-- Never use oversized icons or bulky circular badges that dominate the layout; the written text must remain the main visual focus.`;
+// Borders, dividers, outlined boxes and icons (2026-09-26, the department's design note). Renders
+// were coming back with a coloured outline round every block, a divider between every item and an
+// icon beside every heading — templated clutter. Stated positively first (what builds structure
+// instead), because a bare "no borders" leaves the model nothing to do with a section boundary.
+// No Devanagari examples here on purpose: Devanagari inside a rule block is text a model may print.
+export const DECORATION_RULE = `BORDERS, DIVIDERS AND ICONS — ONLY WHEN THEY HELP:
+- Build structure with spacing, alignment, type, colour and imagery. Do not outline every section or block and do not draw decorative divider lines; use a border or divider only where distinct sections would otherwise be hard to tell apart.
+- No icons by default beside headings or points. Use one only when it says something useful the words do not — never one that repeats its heading, and none where a photograph or illustration already gives the context. Any icon stays small and secondary to the text.
+- Aim for a clean, editorial government design: if removing a border, divider or icon loses no clarity, leave it out.`;
+
+// Backwards compatibility alias: the block used to be icons-only.
+export const ICONS_RULE = DECORATION_RULE;
 
 export const DO_NOT_USE_RULE = `DO NOT USE:
 - Do not add or paint any logo, emblem, seal, QR code, government wordmark, or watermark.

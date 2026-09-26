@@ -107,6 +107,8 @@ export const STR = {
   carouselSlidesAuto: 'स्वयं',
   carouselSlidesHint:
     'स्वयं निवडल्यास मजकुराच्या प्रमाणात ३ किंवा ४ स्लाइड तयार होतील.',
+  carouselSourceVerbatimDesc:
+    'वर लिहिलेली प्रत्येक ओळ जशीच्या तशी स्लाइडवर छापली जाते — AI फक्त कोणती ओळ कोणत्या स्लाइडवर जाईल ते ठरवते, एकही शब्द बदलत किंवा वगळत नाही. निवडले नाही तर त्यातून स्लाइडचा मजकूर AI तयार करते.',
   carouselTitle: 'कॅरोसेल',
   carouselSlideOf: (n: number, total: number) =>
     `स्लाइड ${n.toLocaleString('mr-IN')}/${total.toLocaleString('mr-IN')}`,

@@ -44,25 +44,25 @@ export const CAROUSEL_LAYOUTS: readonly CarouselLayout[] = [
   {
     id: 'hero_cards',
     purpose:
-      'a large photograph plus the key facts as two or three cards — best for the cover',
+      'a large photograph plus the key facts as two or three blocks — best for the cover',
     instruction:
-      'A large photograph takes about half of the body. The title (and subheading, if any) sits beside or above it, and the lines are set as two or three side-by-side cards, each led by a small icon; any line that does not fit a card follows as a short paragraph.',
+      'A large photograph takes about half of the body. The title (and subheading, if any) sits beside or above it, and the lines are set as two or three side-by-side blocks separated by spacing or a plain tint; any line that does not fit a card follows as a short paragraph.',
     fits: (slide) => slide.items.length <= 6,
   },
   {
     id: 'sectioned_cards',
     purpose:
-      'two or more titled section cards, each with its own short list — for content grouped under headings',
+      'two or more titled sections, each with its own short list — for content grouped under headings',
     instruction:
-      'The body is divided into titled SECTION CARDS, one per section heading, stacked or side by side; each card shows its heading and its own lines as a short list. The photograph sits as a circular inset between or beside the cards.',
+      'The body is divided into titled SECTIONS, one per section heading, stacked or side by side and set apart by spacing or a plain tint rather than outlines; each section shows its heading and its own lines as a short list. The photograph sits as a circular inset between or beside the sections.',
     fits: (slide) => sectionCount(slide) >= 2,
   },
   {
     id: 'icon_list',
     purpose:
-      'a vertical list of rows, each led by a small plain icon, ending in a plain closing panel',
+      'a vertical list of well-spaced rows, ending in a plain closing panel',
     instruction:
-      'The lines form ONE vertical list of well-spaced rows, each row led by a small plain icon. The photograph is a narrower panel to one side or a band above the list. A plain panel at the end carries the closing line, if there is one.',
+      'The lines form ONE vertical list of well-spaced rows, separated by spacing rather than lines or boxes; a small plain icon leads a row only where it adds meaning the words do not. The photograph is a narrower panel to one side or a band above the list. A plain panel at the end carries the closing line, if there is one.',
     fits: (slide) => slide.items.length >= 2,
   },
   {

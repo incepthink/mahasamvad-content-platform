@@ -137,6 +137,21 @@ export type GenerateImageOptions = {
   size?: string;
 };
 
+export type EditImageOptions = GenerateImageOptions & {
+  // gpt-image's `input_fidelity`: how hard the model works to keep the input images' features
+  // — above all FACES and logos. 'high' is what an officer's own photograph needs, since the
+  // whole point of attaching it is that the subject comes out unchanged. Optional: omitted,
+  // the request is byte-for-byte what it always was.
+  //
+  // LEARNED, not declared (the veo-client doctrine): a model that rejects the field (some
+  // always process inputs at high fidelity and refuse the parameter) is remembered for the
+  // life of the process and the call is re-sent without it — never failed.
+  inputFidelity?: 'high' | 'low';
+};
+
+// Models that answered a 400 naming `input_fidelity`. See EditImageOptions.inputFidelity.
+const modelsRejectingInputFidelity = new Set<string>();
+
 // Generates a text-free PNG for a poster from a prompt. Default size is the landscape
 // background band; pass { size } for other aspect ratios (e.g. a square CMO circle photo).
 export async function generateImage(
@@ -179,19 +194,49 @@ export async function generateImage(
 export async function editImage(
   imagePng: Buffer | readonly Buffer[],
   prompt: string,
-  opts: GenerateImageOptions = {},
+  opts: EditImageOptions = {},
 ): Promise<Buffer> {
   const apiKey = requireApiKey();
   const images = Array.isArray(imagePng) ? imagePng : [imagePng as Buffer];
   if (images.length === 0) {
     throw new Error('editImage was called with no image.');
   }
+  const fidelity =
+    opts.inputFidelity && !modelsRejectingInputFidelity.has(IMAGE_MODEL)
+      ? opts.inputFidelity
+      : undefined;
+  const response = await postEdit(apiKey, images, prompt, opts, fidelity);
+  if (fidelity && response.status === 400) {
+    const detail = await response.clone().text();
+    if (/input_fidelity/i.test(detail)) {
+      modelsRejectingInputFidelity.add(IMAGE_MODEL);
+      console.warn(
+        `[openai-image] ${IMAGE_MODEL} rejected input_fidelity; re-sending the edit without it.`,
+      );
+      await response.body?.cancel().catch(() => undefined);
+      return decode(
+        await postEdit(apiKey, images, prompt, opts, undefined),
+        'image edit',
+      );
+    }
+  }
+  return decode(response, 'image edit');
+}
+
+async function postEdit(
+  apiKey: string,
+  images: readonly Buffer[],
+  prompt: string,
+  opts: EditImageOptions,
+  fidelity: 'high' | 'low' | undefined,
+): Promise<Response> {
   const form = new FormData();
   form.append('model', IMAGE_MODEL);
   form.append('prompt', prompt);
   form.append('size', opts.size ?? SIZE);
   form.append('quality', QUALITY);
   form.append('n', '1');
+  if (fidelity) form.append('input_fidelity', fidelity);
   // A single image keeps the scalar `image` field (byte-for-byte the old
   // request); only a multi-image call uses the array form, so nothing that
   // works today changes shape.
@@ -204,7 +249,7 @@ export async function editImage(
     );
   });
   // FormData is re-serialized on every fetch, so the same `form` is safe to resend.
-  const response = await postWithRetry(
+  return postWithRetry(
     EDITS_URL,
     {
       method: 'POST',
@@ -213,5 +258,4 @@ export async function editImage(
     },
     'image edit',
   );
-  return decode(response, 'image edit');
 }

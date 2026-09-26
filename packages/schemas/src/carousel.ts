@@ -90,6 +90,11 @@ export type CarouselPlanSlide = z.infer<typeof CarouselPlanSlideSchema>;
 // band repeats ("निवडणूक कार्यक्रम"), which is most of what makes four images read as one post.
 export const CarouselPlanSchema = z.object({
   seriesTitle: z.string(),
+  // जसाच्या तसा मजकूर (2026-09-26): the officer's text IS the slides' text. The planner only
+  // DISTRIBUTES it — every printed string is one of the note's own lines, chosen by number — and
+  // every slide prompt is told to print its lines in full, exactly as written. False on every
+  // plan made before it existed.
+  verbatim: z.boolean().default(false),
   // "बुलढाणा, दि. २४" — the place and date from the note, printed in the same pill on every
   // slide. '' when the note gives no place, or on a plan made before it existed.
   dateline: z.string().default(''),
@@ -129,6 +134,31 @@ export const CarouselStoredSlideSchema = z.object({
 });
 export type CarouselStoredSlide = z.infer<typeof CarouselStoredSlideSchema>;
 
+// The DESIGN DIRECTION of one post (content-engine's carousel-design-director.ts, 2026-09-26): the
+// fresh social poster's open-ended director, applied at two levels. `brief` is the SERIES look —
+// ground, colour roles, typography, panel and imagery treatment — stated identically in every
+// slide's prompt, which is what holds the post together. Each slide then gets its OWN direction,
+// chosen from that slide's content, for how it presents itself inside that look.
+//
+// The enum-like fields are plain strings here because their vocabularies live in content-engine
+// (DESIGN_FORMS etc.), which apps/web cannot import; the engine parses them tolerantly on read.
+// A null slide entry means the director gave that slide nothing usable, and the slide falls back
+// to its assigned layout (carousel-layouts.ts) inside the same series look.
+export const CarouselSlideDesignSchema = z.object({
+  form: z.string(),
+  composition: z.string(),
+  imagery: z.string(),
+  brief: z.string(),
+});
+export type CarouselSlideDesign = z.infer<typeof CarouselSlideDesignSchema>;
+
+export const CarouselDesignSchema = z.object({
+  colourMood: z.string(),
+  brief: z.string(),
+  slides: z.array(CarouselSlideDesignSchema.nullable()).default([]),
+});
+export type CarouselDesign = z.infer<typeof CarouselDesignSchema>;
+
 // generations.carousel (jsonb). `requestedSlides` is written at INSERT, so a retry reproduces
 // the officer's choice (the style_reference rule); the plan and the slides are written as the
 // job produces them. `paletteId` is the ONE colour plan every slide is given (a
@@ -136,9 +166,17 @@ export type CarouselStoredSlide = z.infer<typeof CarouselStoredSlideSchema>;
 // holds the post together, so it is assigned once and reused by every later redo.
 export const CarouselStateSchema = z.object({
   requestedSlides: CarouselSlideCountSchema.default('auto'),
+  // The officer ticked जसाच्या तसा मजकूर: plan by distributing the note's own lines rather than
+  // writing slide copy. Written at INSERT with requestedSlides, so a retry plans the same way.
+  verbatim: z.boolean().default(false),
   plan: CarouselPlanSchema.nullable().default(null),
   slides: z.array(CarouselStoredSlideSchema).default([]),
   paletteId: z.string().nullable().default(null),
+  // Decided once, before the first slide renders, and reused by every single-slide redo so a
+  // redrawn slide stays in the post's look; "सर्व स्लाइड पुन्हा" asks for a new one. Null on a
+  // carousel made before 2026-09-26, or when the director produced nothing — the prompts then use
+  // the planner's `designSystem` and the assigned layouts, exactly as before.
+  design: CarouselDesignSchema.nullable().default(null),
 });
 export type CarouselState = z.infer<typeof CarouselStateSchema>;
 
