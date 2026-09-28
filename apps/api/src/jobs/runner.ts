@@ -554,7 +554,9 @@ export function imageQuality(): ImageQuality {
 // writers per generation to keep the additive total from losing an update.
 const costChain = new Map<string, Promise<void>>();
 
-async function persistCost(
+// Exported for the edit assistant's planning call (routes/edit-assistant.ts), which spends
+// on a generation outside any job and must join the same per-generation write chain.
+export async function persistCost(
   client: SupabaseClient,
   id: string,
   cost: GenerationCostIncrement,

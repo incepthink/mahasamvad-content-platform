@@ -30,8 +30,10 @@ import {
   editCharacter,
   getConversationCharacters,
   listCharacters,
+  markStoryboardTurnCompleted,
   markTurnCompleted,
   markTurnFailed,
+  storyboardHistory,
   removeCharacter,
   resolveCharacters,
   resolveForkPoint,
@@ -405,6 +407,7 @@ async function main(): Promise<void> {
       videoUrl: null,
       interactionId: 'interactions/whatever',
       modelText: null,
+      generatedImages: [],
       error: null,
       createdAt: '',
       updatedAt: '',
@@ -710,6 +713,87 @@ async function main(): Promise<void> {
   );
   const long = newVideoTitleFrom('क '.repeat(120));
   check('a long prompt is cut', long.length <= 81 && long.endsWith('…'), long);
+
+  // --- conversation modes (migration 0060) ------------------------------------
+
+  const videoByDefault = await createConversation(client);
+  check(
+    'a conversation is a video conversation by default',
+    videoByDefault.mode === 'video',
+  );
+  check(
+    'a video create does not name the 0060 column',
+    !(
+      'mode' in
+      (tableOf('new_video_conversations').get(videoByDefault.id) ?? {})
+    ),
+  );
+
+  const board = await createConversation(client, 'storyboard');
+  check(
+    'a storyboard conversation is created as one',
+    board.mode === 'storyboard',
+  );
+  const boardTurn1 = await appendTurn(client, board, 'स्टोरीबोर्ड करा', [], 0);
+  await markStoryboardTurnCompleted(client, board.id, boardTurn1.id, {
+    responseId: 'resp_1',
+    text: '### दृश्य १',
+    images: [
+      {
+        id: 'g1',
+        url: 'https://example.test/g1.png',
+        label: 'दृश्य १',
+        prompt: 'A farmer',
+      },
+    ],
+  });
+  check(
+    'a completed storyboard answer advances the chain to its response id',
+    (await getConversation(client, board.id))?.lastInteractionId === 'resp_1',
+  );
+  const boardTurn2 = await appendTurn(client, board, 'चुकीचे', [], 1);
+  await markTurnFailed(client, boardTurn2.id, 'boom');
+  check(
+    'a failed storyboard turn leaves the chain where it was',
+    (await getConversation(client, board.id))?.lastInteractionId === 'resp_1',
+  );
+  const boardTurn3 = await appendTurn(client, board, 'दृश्य १ लहान करा', [], 2);
+  const boardTurns = await getConversationTurns(client, board.id);
+  const current = boardTurns.find(
+    (t) => t.id === boardTurn3.id,
+  ) as NewVideoTurnRow;
+  const history = storyboardHistory(boardTurns, current, []);
+  check(
+    'the replayed history skips the failed turn and ends on the new message',
+    history.length === 3 &&
+      history[0]?.content === 'स्टोरीबोर्ड करा' &&
+      history[1]?.role === 'assistant' &&
+      history[1]?.generatedImages?.[0]?.label === 'दृश्य १' &&
+      history[2]?.content === 'दृश्य १ लहान करा',
+    history,
+  );
+
+  const boardDetail = toConversationDetail(
+    (await getConversation(client, board.id)) as NonNullable<
+      Awaited<ReturnType<typeof getConversation>>
+    >,
+    boardTurns,
+  );
+  check('the detail payload names the mode', boardDetail.mode === 'storyboard');
+  check(
+    'a storyboard answer carries its generated pictures',
+    boardDetail.turns[0]?.generatedImages[0]?.url ===
+      'https://example.test/g1.png',
+  );
+  check(
+    'the storyboard response id never reaches the payload',
+    !JSON.stringify(boardDetail).includes('resp_1'),
+  );
+  const modeSummaries = await listConversationSummaries(client);
+  check(
+    'the rail names each conversation’s mode',
+    modeSummaries.find((row) => row.id === board.id)?.mode === 'storyboard',
+  );
 
   console.log(
     failed === 0

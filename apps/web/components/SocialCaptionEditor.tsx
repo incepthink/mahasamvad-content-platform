@@ -9,12 +9,12 @@
 // The hand edit has no save button: leaving the box is the commit. A run created without a
 // caption gets an empty read-only box with a generate button over it.
 //
-// `revision` adds the caption's own AI-revision fold under the box. SocialPostView does not
-// ask for it — its "बदल हवा आहे?" fold serves the caption and the poster from one set of pills
-// — while the carousel, whose slide edits live on the slides, has nothing else to put it in.
+// `revision` adds the edit assistant (EditChat, caption-only) under the box. SocialPostView
+// does not ask for it — its own assistant serves the caption and the poster together — while
+// the carousel, whose slide edits live on the slides, has nothing else to put it in.
 
 import { useState } from 'react';
-import type { GenerationDetail } from '@dgipr/schemas';
+import type { EditAssistantAction, GenerationDetail } from '@dgipr/schemas';
 import { Copy } from 'lucide-react';
 import {
   generateCaption,
@@ -26,6 +26,7 @@ import { errorMessage } from '../lib/errorMessage';
 // Written in Marathi on an InScript keyboard, which a controlled box can overwrite
 // half-formed. See ComposeSafeInput.
 import { ComposeSafeTextarea } from './ComposeSafeInput';
+import { EditChat } from './EditChat';
 import { ErrorNotice } from './ErrorNotice';
 
 export function SocialCaptionEditor({
@@ -53,9 +54,6 @@ export function SocialCaptionEditor({
   // Asking for the first caption on a run created without one. Local only until the 202
   // lands; after that detail.captionRevising drives the state, like the AI revision.
   const [startingCaption, setStartingCaption] = useState(false);
-  const [change, setChange] = useState('');
-  const [sendingChange, setSendingChange] = useState(false);
-  const [changeError, setChangeError] = useState<string | null>(null);
 
   const captionDirty = captionDraft !== captionBaseline;
   if (
@@ -129,23 +127,15 @@ export function SocialCaptionEditor({
     }
   };
 
-  const sendChange = async () => {
-    if (sendingChange) return;
-    const text = change.trim();
-    if (text.length < 3) {
-      setChangeError(STR.feedbackTooShort);
-      return;
-    }
-    setChangeError(null);
-    setSendingChange(true);
-    try {
-      await sendCaptionFeedback(detail.id, text);
-      setChange('');
+  // One step of the edit assistant's plan. On this surface it can only touch the caption,
+  // through the same routes the old revision fold used.
+  const executeAction = async (action: EditAssistantAction) => {
+    if (action.type === 'caption_revise') {
+      await sendCaptionFeedback(detail.id, action.instruction);
       await onChanged();
-    } catch (e) {
-      setChangeError(errorMessage(e));
-    } finally {
-      setSendingChange(false);
+    } else if (action.type === 'caption_generate') {
+      await generateCaption(detail.id);
+      await onChanged();
     }
   };
 
@@ -221,56 +211,14 @@ export function SocialCaptionEditor({
         <ErrorNotice message={detail.captionReviseError} />
       ) : null}
 
-      {revision && !captionMissing ? (
-        <details className="fold change-request">
-          <summary>{STR.changeRequestTitle}</summary>
-          <div className="fold-body">
-            <p className="hint">{STR.captionFeedbackHint}</p>
-            {STR.chipsCaption.length > 0 ? (
-              <div className="suggestion-row">
-                <span className="suggestion-label">
-                  {STR.feedbackSuggestionsLabel}
-                </span>
-                {STR.chipsCaption.map((suggestion) => (
-                  <button
-                    key={suggestion}
-                    type="button"
-                    className="suggestion-chip"
-                    disabled={sendingChange || captionRevising}
-                    onClick={() => {
-                      setChange(suggestion);
-                      setChangeError(null);
-                    }}
-                  >
-                    {suggestion}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-            <ComposeSafeTextarea
-              value={change}
-              onChange={(next) => {
-                setChange(next);
-                setChangeError(null);
-              }}
-              placeholder={STR.changeCaptionPlaceholder}
-              rows={3}
-              disabled={sendingChange || captionRevising}
-              style={{ marginTop: 10 }}
-            />
-            <div className="btn-row" style={{ marginTop: 12 }}>
-              <button
-                type="button"
-                className="btn btn-primary"
-                disabled={sendingChange || captionRevising}
-                onClick={() => void sendChange()}
-              >
-                {sendingChange ? STR.sendingFeedback : STR.sendFeedback}
-              </button>
-            </div>
-            {changeError ? <ErrorNotice message={changeError} /> : null}
-          </div>
-        </details>
+      {revision ? (
+        <EditChat
+          generationId={detail.id}
+          surface="caption"
+          onExecute={executeAction}
+          hint={STR.editChatHintCaption}
+          placeholder={STR.editChatPlaceholderCaption}
+        />
       ) : null}
     </div>
   );

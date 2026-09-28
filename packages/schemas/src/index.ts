@@ -110,3 +110,8 @@ export * from './editorial-preference.js';
 // Activity / audit log (/activity, migration 0058): who (IP + browser device id, never auth)
 // did what. Exported last — nothing else in this barrel imports from it.
 export * from './activity.js';
+
+// The poster/caption edit assistant (the conversational box that replaced "AI ला सूचना द्या"):
+// the request, and the plan the web carries out through the existing routes. Imports only
+// PosterClearActionSchema from api.ts, so it sits after it with no other ordering constraint.
+export * from './edit-assistant.js';

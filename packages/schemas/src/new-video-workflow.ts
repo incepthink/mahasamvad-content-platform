@@ -119,6 +119,55 @@ export type NewVideoCharacterPatch = z.infer<
   typeof NewVideoCharacterPatchSchema
 >;
 
+// ---------------------------------------------------------------------------
+// Conversation MODE (migration 0060)
+// ---------------------------------------------------------------------------
+//
+// A conversation is either a Gemini VIDEO conversation (everything above and below this block
+// was written for it) or a STORYBOARD chat on OpenAI: scripts, storyboards, whole-storyboard
+// revisions, changes to named scenes, questions about them, and images when asked for.
+//
+// Chosen before the first message and FIXED by it. The two modes keep different provider
+// chain handles in the same columns, so mixing them in one conversation would hand one
+// provider the other's handle — the route refuses a follow-up that names a different mode,
+// and the way to switch is a new conversation.
+//
+// A storyboard is stored as an ORDINARY CHAT — the officer's message, the assistant's Markdown
+// answer, the pictures either side attached — never as structured scene records. There are no
+// scene fields to fill and no scene table to keep in step with a revision.
+export const NEW_VIDEO_MODES = ['video', 'storyboard'] as const;
+export const NewVideoModeSchema = z.enum(NEW_VIDEO_MODES);
+export type NewVideoMode = z.infer<typeof NewVideoModeSchema>;
+export const DEFAULT_NEW_VIDEO_MODE: NewVideoMode = 'video';
+
+// Pictures the storyboard assistant generates in one answer. A bound on spend: each is a paid
+// image render, and "an image for every scene" of a twelve-scene storyboard is a request the
+// assistant is told to split rather than a bill the officer did not see coming.
+export const STORYBOARD_MAX_GENERATED_IMAGES = 4;
+
+// One picture the storyboard assistant generated. `label` is what it was for ("दृश्य ३"),
+// `prompt` the description it was drawn from — shown on the page so the officer can see what
+// was asked for, and so a revision can say "like image 2 but…".
+export const NewVideoGeneratedImageSchema = z.object({
+  id: z.string(),
+  url: z.string().url(),
+  label: z.string(),
+  prompt: z.string(),
+});
+export type NewVideoGeneratedImage = z.infer<
+  typeof NewVideoGeneratedImageSchema
+>;
+
+// A picture the storyboard assistant is drawing RIGHT NOW. Not stored: it comes from an
+// in-process registry in the API job and exists only so the page can show an image-shaped
+// placeholder of the right proportions while the render (tens of seconds) is in flight —
+// otherwise the only sign of it is the text having stopped moving.
+export const NewVideoPendingImageSchema = z.object({
+  label: z.string(),
+  orientation: z.enum(['landscape', 'portrait', 'square']),
+});
+export type NewVideoPendingImage = z.infer<typeof NewVideoPendingImageSchema>;
+
 // How a turn is progressing, exactly as the brief asks. `queued` is set by the ROUTE before
 // it answers 202 — the client refreshes the moment the 202 lands, and a turn with no status
 // yet would read as finished (the /dlo re-extract rule).
@@ -147,8 +196,16 @@ export const NewVideoTurnSchema = z.object({
   status: NewVideoTurnStatusSchema,
   // A public URL for the re-hosted MP4. Present only once the turn completes.
   videoUrl: z.string().url().nullable(),
-  // Any prose the model returned beside the video — a refusal explains itself here.
+  // Any prose the model returned beside the video — a refusal explains itself here. In
+  // STORYBOARD mode this is the assistant's whole Markdown answer, written into the row as it
+  // streams so the poll shows it arriving.
   modelText: z.string().nullable(),
+  // Storyboard mode only: the pictures the assistant generated for this turn. Always empty on
+  // a video turn. Defaulted so an older payload still parses.
+  generatedImages: z.array(NewVideoGeneratedImageSchema).default([]),
+  // Storyboard mode only: pictures being rendered at this moment (see the schema above).
+  // Defaulted so an older API's payload still parses.
+  pendingImages: z.array(NewVideoPendingImageSchema).default([]),
   // The provider's own words on failure. Shown as-is on this page: the experiment exists to
   // read what the API says, so a canned sentence would defeat it.
   error: z.string().nullable(),
@@ -158,6 +215,9 @@ export type NewVideoTurn = z.infer<typeof NewVideoTurnSchema>;
 
 export const NewVideoConversationSchema = z.object({
   id: z.string().uuid(),
+  // Fixed by the first turn; see NEW_VIDEO_MODES. Defaulted so a payload from before 0060
+  // reads as the video conversation it was.
+  mode: NewVideoModeSchema.default(DEFAULT_NEW_VIDEO_MODE),
   // Derived from the first prompt and truncated, so the rail has a handle for finding this
   // conversation again. Empty until the first turn lands.
   title: z.string(),
@@ -178,6 +238,8 @@ export type NewVideoConversation = z.infer<typeof NewVideoConversationSchema>;
 export const NewVideoConversationSummarySchema = z.object({
   id: z.string().uuid(),
   title: z.string(),
+  // So the rail can say which kind of conversation a row is before it is opened.
+  mode: NewVideoModeSchema.default(DEFAULT_NEW_VIDEO_MODE),
   turnCount: z.number().int().nonnegative(),
   lastTurnAt: z.string().nullable(),
   createdAt: z.string(),
@@ -247,6 +309,12 @@ export const NewVideoTurnRequestSchema = z.object({
   // the route supplies DEFAULT_NEW_VIDEO_ASPECT in its place rather than leaving the shape to
   // whatever the model feels like.
   aspect: NewVideoAspectSchema.optional(),
+  // THE CONVERSATION'S MODE (migration 0060). Decides a NEW conversation's mode; on a
+  // follow-up it may only echo the stored one — a different value is a Marathi 400, because
+  // the two modes cannot be mixed in one conversation. Omitted means video, so an older
+  // client is unchanged. In storyboard mode `characterIds`, `fromTurnId` and `intent` are
+  // refused (they have nothing to act on) and `aspect` is ignored.
+  mode: NewVideoModeSchema.optional(),
 });
 export type NewVideoTurnRequest = z.infer<typeof NewVideoTurnRequestSchema>;
 export type NewVideoTurnIntentChoice = NonNullable<

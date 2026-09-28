@@ -24,6 +24,19 @@ export const NEW_VIDEO_IMAGES_TABLE = 'new_video_images';
 export type NewVideoTurnStatusValue =
   'queued' | 'generating' | 'completed' | 'failed';
 
+// Migration 0060. 'video' is the Gemini conversation; 'storyboard' is the OpenAI storyboard
+// chat, which reuses these same rows as an ordinary chat — see the migration's header.
+export type NewVideoModeValue = 'video' | 'storyboard';
+
+// A picture the storyboard assistant generated (0060). Public URL only; the storage path is
+// derivable and never needed back.
+export type NewVideoGeneratedImage = Readonly<{
+  id: string;
+  url: string;
+  label: string;
+  prompt: string;
+}>;
+
 // What a stored turn remembers about a reference picture. Denormalized off new_video_images so
 // re-opening an old conversation needs no join — and still renders if the image row is gone.
 export type NewVideoTurnImage = Readonly<{
@@ -34,6 +47,7 @@ export type NewVideoTurnImage = Readonly<{
 
 export type NewVideoConversationRow = Readonly<{
   id: string;
+  mode: NewVideoModeValue;
   title: string;
   turnCount: number;
   lastTurnAt: string | null;
@@ -51,6 +65,7 @@ export type NewVideoTurnRow = Readonly<{
   videoUrl: string | null;
   interactionId: string | null;
   modelText: string | null;
+  generatedImages: readonly NewVideoGeneratedImage[];
   error: string | null;
   createdAt: string;
   updatedAt: string;
@@ -67,6 +82,8 @@ export type NewVideoImageRow = Readonly<{
 
 type ConversationDbRow = {
   id: string;
+  // Absent on a database without 0060, which `select *` simply does not return.
+  mode?: string | null;
   title: string | null;
   turn_count: number | null;
   last_turn_at: string | null;
@@ -84,6 +101,7 @@ type TurnDbRow = {
   video_url: string | null;
   interaction_id: string | null;
   model_text: string | null;
+  generated_images?: NewVideoGeneratedImage[] | null;
   error: string | null;
   created_at: string;
   updated_at: string;
@@ -103,6 +121,9 @@ function conversationFromDbRow(
 ): NewVideoConversationRow {
   return {
     id: row.id,
+    // Anything but an explicit 'storyboard' is the video conversation every row before 0060
+    // was.
+    mode: row.mode === 'storyboard' ? 'storyboard' : 'video',
     title: row.title ?? '',
     turnCount: row.turn_count ?? 0,
     lastTurnAt: row.last_turn_at ?? null,
@@ -122,6 +143,9 @@ function turnFromDbRow(row: TurnDbRow): NewVideoTurnRow {
     videoUrl: row.video_url ?? null,
     interactionId: row.interaction_id ?? null,
     modelText: row.model_text ?? null,
+    generatedImages: Array.isArray(row.generated_images)
+      ? row.generated_images
+      : [],
     error: row.error ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -139,24 +163,33 @@ function imageFromDbRow(row: ImageDbRow): NewVideoImageRow {
   };
 }
 
-// Everything the rail shows and nothing more — never a prompt, which is the whole reason the
-// counters above are columns.
-const CONVERSATION_COLUMNS =
-  'id,title,turn_count,last_turn_at,last_interaction_id,created_at,updated_at';
+// `*` ON PURPOSE, and it is the one departure from the explicit column lists every other
+// module here uses. Migration 0060 added `mode` and `generated_images`; naming them in a list
+// would make every read of these tables fail on a database without 0060 — the whole page down
+// for the lack of a feature (the blast radius 0054 was shaped to avoid). `*` returns whatever
+// columns exist and the mappers above default the missing ones, so an un-applied 0060 costs a
+// storyboard create and nothing else.
+//
+// What the RAIL must still never read is new_video_turns, whose prompts run to 20,000
+// characters; new_video_conversations holds no prompt, so `*` on it is the same row the old
+// list selected plus `mode`.
+const CONVERSATION_COLUMNS = '*';
 
-const TURN_COLUMNS =
-  'id,conversation_id,prompt,images,status,video_url,interaction_id,model_text,error,created_at,updated_at';
+const TURN_COLUMNS = '*';
 
 // ---------------------------------------------------------------------------
 // Conversations
 // ---------------------------------------------------------------------------
 
+// `mode` is written only for a storyboard conversation — omit-unless-present, so a database
+// without 0060 still creates every video conversation it always has.
 export async function insertNewVideoConversation(
   client: SupabaseClient,
+  mode: NewVideoModeValue = 'video',
 ): Promise<NewVideoConversationRow> {
   const { data, error } = await client
     .from(NEW_VIDEO_CONVERSATIONS_TABLE)
-    .insert({})
+    .insert(mode === 'storyboard' ? { mode } : {})
     .select(CONVERSATION_COLUMNS)
     .single();
   if (error) {
@@ -286,7 +319,12 @@ export async function insertNewVideoTurn(
 export type NewVideoTurnPatch = Partial<
   Pick<
     NewVideoTurnRow,
-    'status' | 'videoUrl' | 'interactionId' | 'modelText' | 'error'
+    | 'status'
+    | 'videoUrl'
+    | 'interactionId'
+    | 'modelText'
+    | 'generatedImages'
+    | 'error'
   >
 >;
 
@@ -302,6 +340,10 @@ export async function updateNewVideoTurn(
     row.interaction_id = patch.interactionId;
   }
   if (patch.modelText !== undefined) row.model_text = patch.modelText;
+  // Written only by a storyboard turn, so a video turn's update never names the 0060 column.
+  if (patch.generatedImages !== undefined) {
+    row.generated_images = patch.generatedImages;
+  }
   if (patch.error !== undefined) row.error = patch.error;
   const { error } = await client
     .from(NEW_VIDEO_TURNS_TABLE)

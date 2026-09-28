@@ -17,7 +17,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type {
   NewVideoAspect,
-  NewVideoTurnIntentChoice,
+  NewVideoConversationSummary,
 } from '@dgipr/schemas';
 import { ConversationWorkspace } from './conversation/ConversationWorkspace';
 import type { ConversationRailGroup } from './conversation/ConversationRail';
@@ -27,6 +27,17 @@ import { forgetMyVideoConversationId } from '../lib/newVideoDraft';
 import { STR } from '../lib/strings';
 import { useNewVideoConversationList } from '../lib/useNewVideoConversationList';
 import { useNewVideoWorkflow } from '../lib/useNewVideoWorkflow';
+
+// One rail row. The mode is named on every row so an officer can tell a storyboard from a
+// video before opening it.
+function railItem(row: NewVideoConversationSummary) {
+  return {
+    id: row.id,
+    title: row.title || STR.nvwNewConversation,
+    href: `/new-video-workflow/${row.id}`,
+    badge: row.mode === 'storyboard' ? STR.nvwModeStoryboard : STR.nvwModeVideo,
+  };
+}
 
 export function NewVideoWorkspace({
   conversationId,
@@ -48,12 +59,8 @@ export function NewVideoWorkspace({
   const workflow = useNewVideoWorkflow(conversationId, onConversationCreated);
 
   const send = useCallback(
-    async (
-      prompt: string,
-      aspect: NewVideoAspect,
-      intent: NewVideoTurnIntentChoice,
-    ): Promise<boolean> => {
-      const sent = await workflow.send(prompt, aspect, intent);
+    async (prompt: string, aspect: NewVideoAspect): Promise<boolean> => {
+      const sent = await workflow.send(prompt, aspect);
       // The rail's title and ordering only exist once the turn has landed.
       if (sent) void list.refresh();
       return sent;
@@ -85,19 +92,11 @@ export function NewVideoWorkspace({
     () => [
       {
         label: STR.nvwYours,
-        items: list.mine.map((row) => ({
-          id: row.id,
-          title: row.title || STR.nvwNewConversation,
-          href: `/new-video-workflow/${row.id}`,
-        })),
+        items: list.mine.map(railItem),
       },
       {
         label: STR.nvwOthers,
-        items: list.others.map((row) => ({
-          id: row.id,
-          title: row.title || STR.nvwNewConversation,
-          href: `/new-video-workflow/${row.id}`,
-        })),
+        items: list.others.map(railItem),
       },
     ],
     [list.mine, list.others],
@@ -124,6 +123,9 @@ export function NewVideoWorkspace({
     >
       <NewVideoConversationView
         conversation={workflow.conversation}
+        mode={workflow.mode}
+        modeLocked={workflow.modeLocked}
+        onModeChange={workflow.setMode}
         images={workflow.images}
         loading={workflow.loading}
         sending={workflow.sending}

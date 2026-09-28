@@ -13,11 +13,11 @@ import type {
   NewVideoAspect,
   NewVideoCharacter,
   NewVideoConversation as Conversation,
+  NewVideoMode,
   NewVideoTurn,
-  NewVideoTurnIntentChoice,
 } from '@dgipr/schemas';
 import { ErrorNotice } from './ErrorNotice';
-import { NewVideoComposer } from './NewVideoComposer';
+import { NewVideoComposer, NewVideoModePicker } from './NewVideoComposer';
 import { NewVideoTurnView } from './NewVideoTurnView';
 import { STR } from '../lib/strings';
 import type { StagedImage } from '../lib/useNewVideoWorkflow';
@@ -47,6 +47,9 @@ function chainPointIdOf(turns: readonly NewVideoTurn[]): string | null {
 
 export function NewVideoConversationView({
   conversation,
+  mode,
+  modeLocked,
+  onModeChange,
   images,
   loading,
   sending,
@@ -64,6 +67,9 @@ export function NewVideoConversationView({
   onSend,
 }: {
   conversation: Conversation | null;
+  mode: NewVideoMode;
+  modeLocked: boolean;
+  onModeChange: (mode: NewVideoMode) => void;
   images: readonly StagedImage[];
   loading: boolean;
   sending: boolean;
@@ -78,11 +84,7 @@ export function NewVideoConversationView({
   onRetry?: () => void;
   onAddImages: (files: readonly File[]) => void;
   onRemoveImage: (key: string) => void;
-  onSend: (
-    prompt: string,
-    aspect: NewVideoAspect,
-    intent: NewVideoTurnIntentChoice,
-  ) => Promise<boolean>;
+  onSend: (prompt: string, aspect: NewVideoAspect) => Promise<boolean>;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const [stick, setStick] = useState(true);
@@ -96,6 +98,7 @@ export function NewVideoConversationView({
   };
 
   const turns = conversation?.turns ?? [];
+  const storyboard = mode === 'storyboard';
   const chainPointId = chainPointIdOf(turns);
   // The ordinal of the armed turn, for the composer's banner. Derived here, where the list
   // is, so the banner and the button cannot disagree about which video is meant.
@@ -104,13 +107,21 @@ export function NewVideoConversationView({
       ? null
       : turns.findIndex((turn) => turn.id === forkFromTurnId) + 1 || null;
 
+  // A storyboard answer GROWS while it streams, so its length is part of what follows the
+  // bottom; a video turn only changes when it finishes.
+  const lastText = turns.at(-1)?.modelText?.length ?? 0;
+  // Pending pictures count too: their placeholder card appears before the picture does.
+  const lastImages =
+    (turns.at(-1)?.generatedImages.length ?? 0) +
+    (turns.at(-1)?.pendingImages.length ?? 0);
+
   // Guarded by `stick` rather than scrolling unconditionally: an officer who has scrolled up
   // to re-watch an earlier video must not be yanked down when a poll lands.
   useEffect(() => {
     if (!stick) return;
     const element = scroller.current;
     if (element) element.scrollTop = element.scrollHeight;
-  }, [turns.length, busy, stick]);
+  }, [turns.length, busy, stick, lastText, lastImages]);
 
   // A conversation opened from the rail starts at its end, where the work left off.
   useEffect(() => {
@@ -146,8 +157,19 @@ export function NewVideoConversationView({
 
           {centred ? (
             <div className="chat-empty nvw-empty">
-              <h2 className="chat-empty-title">{STR.nvwEmptyTitle}</h2>
-              <p className="chat-empty-hint">{STR.nvwEmptyHint}</p>
+              <h2 className="chat-empty-title">
+                {storyboard ? STR.nvwStoryboardEmptyTitle : STR.nvwEmptyTitle}
+              </h2>
+              <p className="chat-empty-hint">
+                {storyboard ? STR.nvwStoryboardEmptyHint : STR.nvwEmptyHint}
+              </p>
+              {/* The mode only matters before the first message — once sent it is fixed, and
+                  the rail's badge names it — so it lives here in the greeting. */}
+              <NewVideoModePicker
+                mode={mode}
+                modeLocked={modeLocked}
+                onModeChange={onModeChange}
+              />
             </div>
           ) : null}
 
@@ -155,8 +177,10 @@ export function NewVideoConversationView({
             <NewVideoTurnView
               key={turn.id}
               turn={turn}
+              mode={mode}
               ordinal={index + 1}
               canFork={
+                !storyboard &&
                 turn.status === 'completed' &&
                 turn.videoUrl !== null &&
                 turn.id !== chainPointId
@@ -179,6 +203,7 @@ export function NewVideoConversationView({
       <div className="chat-composer-wrap">
         <div className="chat-column">
           <NewVideoComposer
+            mode={mode}
             images={images}
             busy={busy}
             sending={sending}

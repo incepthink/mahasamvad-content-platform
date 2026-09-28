@@ -11,7 +11,7 @@ import type {
 export const NOTE_VIDEO_TASK = 'make a script from the provided text';
 
 export const READY_SCRIPT_VIDEO_TASK =
-  'make a storyboard from the Provided script. Each scene can only be up to 5 seconds, so divide the narration accordingly and create more scenes.';
+  'make a storyboard from the Provided script.';
 
 // Attach reference pictures to the final user input without adding another
 // textual instruction.
@@ -58,7 +58,7 @@ function check(): void {
   assert(
     'the ready-script lane uses only the requested instruction',
     READY_SCRIPT_VIDEO_TASK ===
-      'make a storyboard from the Provided script. Each scene can only be up to 5 seconds, so divide the narration accordingly and create more scenes.',
+      'make a storyboard from the Provided script.',
   );
 
   const messages: AnyChatMessage[] = [

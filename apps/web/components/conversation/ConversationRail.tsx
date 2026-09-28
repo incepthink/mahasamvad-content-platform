@@ -32,6 +32,9 @@ export type ConversationRailItem = Readonly<{
   id: string;
   title: string;
   href: string;
+  // A short tag shown after the title — /new-video-workflow names each conversation's mode
+  // with it. Omitted, the row renders exactly as before.
+  badge?: string;
 }>;
 
 export type ConversationRailGroup = Readonly<{
@@ -64,7 +67,10 @@ function RailLink({
         onClick={onOpen}
         aria-current={isActive ? 'page' : undefined}
       >
-        {item.title}
+        <span className="conv-rail-title">{item.title}</span>
+        {item.badge ? (
+          <span className="conv-rail-badge">{item.badge}</span>
+        ) : null}
       </Link>
       {onDelete ? (
         <button

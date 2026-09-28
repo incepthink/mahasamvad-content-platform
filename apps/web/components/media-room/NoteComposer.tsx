@@ -389,9 +389,10 @@ export function NoteComposer({ form }: { form: Form }) {
  * A checkbox that reads as a chip beside the format button, so the row is one band of
  * controls rather than a button and then a form. The description is a `title` rather
  * than a second line: at full height these two opt-ins were taller than the text box
- * they qualify, and almost every run wants both defaults.
+ * they qualify, and almost every run wants both defaults. Also used by /video's source
+ * choice, so the two create surfaces share one chip.
  */
-function CheckOption({
+export function CheckOption({
   checked,
   disabled,
   onChange,

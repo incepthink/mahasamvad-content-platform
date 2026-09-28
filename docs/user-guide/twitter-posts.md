@@ -8,7 +8,7 @@ The caption box is editable. Changes are saved automatically when you leave the 
 
 If no caption was requested originally, choose **"कॅप्शन तयार करा"** or **"स्वतः कॅप्शन लिहा"**. AI caption generation uses only the source article; it must not add a fact that was absent from the article.
 
-Open **"AI ला सूचना द्या"** and select the **"कॅप्शन"** tab for an AI-assisted rewrite. The **"पोस्टर"** tab applies the instruction to the visual instead. Drafts in the two tabs are kept separate.
+For an AI-assisted change, write what you want in the **"AI सोबत बदल करा"** box under the caption, in your own words — for example “कॅप्शन थोडे लहान करा”, “पोस्टरवरचा फोटो बदला”, or both in one sentence. There is nothing to select first: the assistant works out whether you mean the caption, the poster, a completely new design, or both, and starts the change. If it cannot tell, it asks one short question; answer it in the same box. The conversation is remembered on this computer, so a follow-up such as “आता आणखी थोडे लहान” builds on what you already asked. The bin icon clears it.
 
 ![Poster and caption together](.gitbook/assets/06-social--result.png)
 

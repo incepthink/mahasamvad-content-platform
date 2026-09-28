@@ -6,6 +6,13 @@
 // Five routes:
 //   POST   /new-video-workflow/images             one reference image  -> { id, name, url }
 //   POST   /new-video-workflow/turns              prompt (+ image ids) -> 202 { conversationId, turnId }
+//
+// TWO CONVERSATION MODES (migration 0060): a turn names `mode` on a conversation's first
+// message — 'video' (Gemini, everything below that is not marked otherwise) or 'storyboard'
+// (an OpenAI chat for scripts and storyboards, jobs/new-video-workflow.ts's
+// startStoryboardTurn). The mode is fixed by that first message and a follow-up naming the
+// other one is refused: the two keep different provider handles in the same columns.
+//
 //   GET    /new-video-workflow/conversations                           -> the rail's list
 //   GET    /new-video-workflow/conversations/:id                       -> the conversation, polled
 //   DELETE /new-video-workflow/conversations/:id                       -> 204
@@ -57,6 +64,7 @@ import {
   resolveReferenceImages,
   setConversationCast,
   startNewVideoTurn,
+  startStoryboardTurn,
   storeReferenceImage,
   toCharacterPayload,
   toConversationDetail,
@@ -152,6 +160,44 @@ export function registerNewVideoWorkflowRoutes(
       });
     }
 
+    // THE CONVERSATION'S MODE. Read off the stored row for a follow-up and off the request
+    // for a new conversation, and resolved FIRST because it decides which guards below apply.
+    // A conversation cannot change mode: a storyboard's chain handle is an OpenAI response
+    // id and a video's a Gemini interaction id, kept in the same column, so letting one follow
+    // the other would hand a provider a handle it never issued.
+    const existing = body.conversationId
+      ? await getConversation(client, body.conversationId)
+      : null;
+    if (body.conversationId !== undefined && !existing) {
+      return reply.code(404).send(conversationGoneError());
+    }
+    if (existing && body.mode !== undefined && body.mode !== existing.mode) {
+      return reply.code(400).send({
+        error: {
+          message:
+            existing.mode === 'storyboard'
+              ? 'हे स्टोरीबोर्ड संभाषण आहे. व्हिडिओ तयार करण्यासाठी नवीन संभाषण सुरू करा.'
+              : 'हे व्हिडिओ संभाषण आहे. स्टोरीबोर्डसाठी नवीन संभाषण सुरू करा.',
+        },
+      });
+    }
+    const mode = existing?.mode ?? body.mode ?? 'video';
+    if (
+      mode === 'storyboard' &&
+      ((body.characterIds ?? []).length > 0 ||
+        body.fromTurnId !== undefined ||
+        (body.intent !== undefined && body.intent !== 'auto'))
+    ) {
+      // Refused rather than ignored: each of these changes what a VIDEO render does, and a
+      // storyboard turn silently dropping one would look like the assistant ignoring it.
+      return reply.code(400).send({
+        error: {
+          message:
+            'स्टोरीबोर्ड संभाषणात पात्रे, जुन्या व्हिडिओवरून बदल किंवा बदलाचा प्रकार निवडता येत नाही.',
+        },
+      });
+    }
+
     if ((body.characterIds ?? []).length > NEW_VIDEO_MAX_CAST) {
       return reply.code(400).send({
         error: {
@@ -222,10 +268,9 @@ export function registerNewVideoWorkflowRoutes(
       });
     }
 
-    // Omitting conversationId starts a new, independent conversation.
-    const conversation = body.conversationId
-      ? await getConversation(client, body.conversationId)
-      : await createConversation(client);
+    // Omitting conversationId starts a new, independent conversation — in the mode the
+    // request names, fixed from here on.
+    const conversation = existing ?? (await createConversation(client, mode));
     if (!conversation) {
       return reply.code(404).send(conversationGoneError());
     }
@@ -247,6 +292,35 @@ export function registerNewVideoWorkflowRoutes(
           message: 'हे संभाषण खूप मोठे झाले आहे. कृपया नवीन संभाषण सुरू करा.',
         },
       });
+    }
+
+    // STORYBOARD MODE branches off here: no fork, no cast, no aspect and no edit/new intent —
+    // an ordinary chat turn whose pictures are context for this one message. Appended as
+    // `queued` before the 202 for the same reason a video turn is.
+    if (mode === 'storyboard') {
+      const turn = await appendTurn(
+        client,
+        conversation,
+        body.prompt,
+        resolved,
+        turns.length,
+      );
+      startStoryboardTurn(client, conversation, turn, resolved);
+      trackActivity(client, request, {
+        feature: 'video',
+        action: 'nvw_turn',
+        status: 'in_progress',
+        subject: { kind: 'nvw_turn', id: turn.id },
+        summary: activitySummary(firstLine(body.prompt)),
+        detail: {
+          conversation: conversation.id,
+          mode: 'storyboard',
+          images: resolved.length,
+        },
+      });
+      return reply
+        .code(202)
+        .send({ conversationId: conversation.id, turnId: turn.id });
     }
 
     // FORKING (Step 4). Resolved out of the turns just listed — no extra query — and
@@ -394,6 +468,7 @@ export function registerNewVideoWorkflowRoutes(
       summary: activitySummary(firstLine(body.prompt)),
       detail: {
         conversation: conversation.id,
+        mode: 'video',
         images: resolved.length,
         characters: cast.length,
         intent: body.intent ?? 'auto',

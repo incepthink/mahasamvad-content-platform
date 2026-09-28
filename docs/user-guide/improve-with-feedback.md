@@ -19,10 +19,8 @@ The revised article again receives the required news dateline when applicable.
 Select the edit icon labelled **"चित्रात बदल करा (पोस्टरवर खूण करा)"**.
 
 1. Click a point, or drag a small red box, over the element to change.
-2. Write a separate instruction for that numbered mark.
-3. Add up to three marks.
-4. Optionally add one instruction for the whole poster.
-5. Select **"बदल करा"**.
+2. Add up to three marks.
+3. Either write an instruction beside each numbered mark and select **"बदल करा"**, or describe the change in the **"AI सोबत बदल करा"** box below — for example “१ वरचा फोटो बदला आणि २ मधला मजकूर मोठा करा”. The marks travel with your message.
 
 ![Red change markers and a blue free-space box](.gitbook/assets/06-social--markers.png)
 
@@ -39,9 +37,9 @@ For each box choose:
 
 The selected area is left as natural background so you can add your own item later. This tool does not upload or place that item for you.
 
-## Request a different visual
+## Describe any change in your own words
 
-The result actions can create a different layout or colour treatment. Use this when the entire direction is unsuitable; use red markers for a local correction. A new visual render can incur image-generation cost.
+The **"AI सोबत बदल करा"** box under a poster accepts any request in plain Marathi or English — a local correction (“शीर्षक मोठे करा”), a completely new design (“हे आवडले नाही, पूर्ण नवीन डिझाइन करा”) or, on an article poster, the exact text to print (“पोस्टरवर फक्त ‘भारत टॅक्सी’ एवढेच लिहा”). You do not choose an action; the assistant decides and asks one short question only when it cannot tell what you mean. It never adds a name, number or date you did not write, and exact poster text must be text you typed. A new visual render can incur image-generation cost.
 
 ## Versions
 

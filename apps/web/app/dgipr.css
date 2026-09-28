@@ -2655,7 +2655,7 @@ details.fold[aria-disabled='true'] summary {
 }
 
 /* A कॅप्शन-only run renders nothing in the poster column, so the caption and its
-   "AI ला सूचना द्या" fold would otherwise be laid out inside the narrow 420px track. */
+   edit assistant would otherwise be laid out inside the narrow 420px track. */
 .poster-layout.is-caption-only {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -3690,34 +3690,155 @@ details.fold[aria-disabled='true'] summary {
   margin-top: 14px;
 }
 
-/* One fold, two change requests (कॅप्शन / पोस्टर), switched by these pills. */
-.change-request {
+/* The edit assistant (EditChat): a compact conversation under the poster/caption. The
+   officer describes a change in their own words; the assistant routes it. Bubbles, not a
+   form — there is one box and one send button, nothing to choose first. */
+.edit-chat {
   margin-top: 18px;
-}
-
-.change-pills {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-bottom: 12px;
-}
-
-.change-pill {
-  padding: 7px 18px;
+  padding: 14px;
   border: 1px solid var(--border);
-  border-radius: 999px;
-  background: #fff;
+  border-radius: var(--r-md);
+  background: var(--card);
+  box-shadow: var(--shadow-sm);
+}
+
+.edit-chat-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: var(--accent-dark);
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.edit-chat-title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.edit-chat-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
   color: var(--muted);
-  font-family: inherit;
-  font-size: 0.92rem;
-  font-weight: 600;
   cursor: pointer;
 }
 
-.change-pill[aria-selected='true'] {
+.edit-chat-clear:hover:not(:disabled) {
+  border-color: var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.edit-chat-hint {
+  margin: 0;
+}
+
+.edit-chat-starters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+/* The conversation scrolls inside itself so a long exchange never pushes the page. */
+.edit-chat-log {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 260px;
+  margin: 0;
+  padding: 2px 2px 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+}
+
+.edit-chat-turn {
+  max-width: 88%;
+  padding: 8px 12px;
+  border-radius: 14px;
+  font-size: 0.95rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.edit-chat-turn.is-user {
+  align-self: flex-end;
+  border-bottom-right-radius: 4px;
   background: var(--accent);
-  border-color: var(--accent);
   color: #fff;
+}
+
+.edit-chat-turn.is-assistant {
+  align-self: flex-start;
+  border-bottom-left-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.edit-chat-turn.is-error {
+  background: var(--err-soft);
+  color: var(--err);
+}
+
+.edit-chat-turn.is-thinking {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+
+.edit-chat-marks {
+  margin: 10px 0 0;
+}
+
+.edit-chat-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.edit-chat-composer textarea {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 52px;
+  padding: 10px 14px;
+  resize: vertical;
+}
+
+.edit-chat-send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  flex: none;
+  padding: 0;
+  border: none;
+  border-radius: 12px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+
+.edit-chat-send:hover:not(:disabled) {
+  background: var(--accent-dark);
+}
+
+.edit-chat-send:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 /* "Print exactly this line" — the third redo, under the two style ones (article runs). */
@@ -8188,6 +8309,32 @@ body:has(.conv-page.viewport-locked) .app-main {
   text-overflow: ellipsis;
 }
 
+/* The title carries the ellipsis itself, so an optional badge after it (the video
+   workspace's mode tag) is never the thing that gets cut. A row with no badge looks exactly
+   as it did. */
+.conv-rail-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.conv-rail-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.conv-rail-badge {
+  flex: none;
+  padding: 1px 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
 .conv-rail-item.active .conv-rail-link {
   font-weight: 600;
   color: var(--accent-dark);
@@ -9631,49 +9778,245 @@ a.file-row-link > svg:last-child {
   color: var(--accent-dark);
 }
 
-/* Edit this video / new clip. Above the box for the fork banner's reason: it decides what the
-   words about to be typed will do. Wraps on a phone rather than widening the composer. */
-.nvw-intent {
+/* THE CONVERSATION MODE (migration 0060) — video or storyboard. Sits in the empty greeting,
+   under the example prompt: it decides the whole conversation and only matters before the
+   first message. Centred with the greeting; the hint (storyboard only) wraps under it. */
+.nvw-mode {
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   align-items: center;
-  gap: 6px 10px;
-  margin: 0 0 10px;
+  gap: 8px 12px;
+  margin: 18px 0 0;
   min-width: 0;
 }
 
-.nvw-intent-options {
+.nvw-mode-options {
   display: inline-flex;
-  flex-wrap: wrap;
   gap: 4px;
   padding: 3px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
   background: var(--surface);
 }
 
-.nvw-intent-option {
-  padding: 5px 12px;
+.nvw-mode-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 38px;
+  padding: 6px 14px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--r-sm);
   background: transparent;
   color: var(--text);
   font: inherit;
-  font-size: 0.85rem;
+  font-size: 0.92rem;
+  font-weight: 600;
   cursor: pointer;
 }
 
-.nvw-intent-option.is-active {
+.nvw-mode-option.is-active {
   background: var(--accent);
   color: #fff;
+  box-shadow: var(--shadow-sm);
 }
 
-.nvw-intent-hint {
-  flex: 1 1 14rem;
+.nvw-mode-option:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.nvw-mode-option[aria-disabled='true'].is-active {
+  cursor: default;
+}
+
+.nvw-mode-hint {
+  flex: 1 1 100%;
   min-width: 0;
-  font-size: 0.8rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+/* A storyboard answer. The assistant writes each scene under its own heading with a rule
+   between scenes; these make that structure easy to scan without imposing any fields. */
+.nvw-storyboard h2,
+.nvw-storyboard h3 {
+  color: var(--accent-dark);
+}
+
+.nvw-storyboard h3 {
+  padding-inline-start: 10px;
+  border-inline-start: 3px solid var(--accent);
+}
+
+.nvw-storyboard > :first-child {
+  margin-top: 0;
+}
+
+.nvw-storyboard hr {
+  margin: 1.6em 0;
+  border-top: 1px dashed var(--border-strong);
+}
+
+/* Pictures a storyboard answer generated, under its text. */
+.nvw-sb-images {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr));
+  gap: 12px;
+  margin: 12px 0 0;
+}
+
+.nvw-sb-image {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  text-decoration: none;
   color: var(--text);
-  opacity: 0.7;
+}
+
+.nvw-sb-image img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.nvw-sb-image:hover img {
+  border-color: var(--accent);
+}
+
+.nvw-sb-image-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+/* A picture being drawn — the image-shaped placeholder that takes the finished picture's
+   place and proportions, so nothing jumps when it lands. Three layers: slowly drifting soft
+   colour blobs (the "something is forming" look), a light sweep across them, and the
+   caption row on top. */
+.nvw-sb-pending {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.nvw-sb-pending-canvas {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  aspect-ratio: 3 / 2;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  isolation: isolate;
+}
+
+.nvw-sb-pending-canvas[data-orientation='portrait'] {
+  aspect-ratio: 2 / 3;
+}
+
+.nvw-sb-pending-canvas[data-orientation='square'] {
+  aspect-ratio: 1 / 1;
+}
+
+.nvw-sb-pending-blob {
+  position: absolute;
+  inset: -30%;
+  z-index: -1;
+  background:
+    radial-gradient(
+      closest-side at 30% 35%,
+      color-mix(in srgb, var(--accent) 38%, transparent),
+      transparent
+    ),
+    radial-gradient(
+      closest-side at 72% 60%,
+      color-mix(in srgb, #e08a2e 34%, transparent),
+      transparent
+    ),
+    radial-gradient(
+      closest-side at 45% 80%,
+      color-mix(in srgb, #3f7fbf 26%, transparent),
+      transparent
+    );
+  filter: blur(28px);
+  opacity: 0.75;
+  animation: nvw-sb-drift 7s ease-in-out infinite alternate;
+}
+
+.nvw-sb-pending-canvas::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    105deg,
+    transparent 30%,
+    rgb(255 255 255 / 0.45) 50%,
+    transparent 70%
+  );
+  transform: translateX(-100%);
+  animation: nvw-sb-sweep 2.2s ease-in-out infinite;
+}
+
+.nvw-sb-pending-badge {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.82);
+  backdrop-filter: blur(6px);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
+}
+
+.nvw-sb-pending-badge svg {
+  color: var(--accent);
+  animation: nvw-sb-twinkle 1.6s ease-in-out infinite;
+}
+
+@keyframes nvw-sb-drift {
+  from {
+    transform: translate(-6%, -4%) rotate(0deg) scale(1);
+  }
+  to {
+    transform: translate(6%, 5%) rotate(25deg) scale(1.12);
+  }
+}
+
+@keyframes nvw-sb-sweep {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes nvw-sb-twinkle {
+  50% {
+    opacity: 0.45;
+    transform: scale(0.85) rotate(15deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nvw-sb-pending-blob,
+  .nvw-sb-pending-canvas::after,
+  .nvw-sb-pending-badge svg {
+    animation: none;
+  }
 }
 
 .nvw-model-label {

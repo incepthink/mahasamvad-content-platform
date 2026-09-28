@@ -733,6 +733,40 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   one field that points a paid render at an object. Deliberately absent: no reference library,
   no poster copy, no chrome, no caption, no publishing, no Canva, no n8n — and `NextActions`
   renders nothing here, since its edit-note re-run would submit a run with no poster.
+- **/new-video-workflow has TWO conversation modes: Video and Storyboard (2026-09-28, migration
+  0060).** Picked in `NewVideoComposer`'s top row before the first message; fixed by it (the
+  route refuses a follow-up naming the other mode — both keep their provider chain handle in the
+  same `interaction_id`/`last_interaction_id` columns). Storyboard = an OpenAI Responses chat
+  (`content-engine/src/video/storyboard-chat.ts`, `OPENAI_STORYBOARD_MODEL`, default /chat's
+  model) scoped to scripts, storyboards, scene revisions and — only on an explicit ask — pictures
+  via a `generate_image` FUNCTION tool the job runs on our gpt-image path
+  (`startStoryboardTurn` in `jobs/new-video-workflow.ts`; attached pictures go to `editImage` when
+  asked; `STORYBOARD_IMAGE_RULES` appended in code; ≤4 per answer; last round `tool_choice:
+  'none'` so a turn never ends on an unanswered call). Stored as an ORDINARY CHAT in the same
+  rows: `prompt`, `images`, Markdown `model_text` (streamed into the row every ~0.7 s, page polls
+  at 1.2 s), `generated_images` (0060). No scene model. Both tables are read with `select *` so an
+  un-applied 0060 fails only a storyboard create. Rail rows carry a mode badge
+  (`ConversationRailItem.badge`). Harnesses: `pnpm --filter @dgipr/content-engine
+  storyboard:test` (free), `tsx --env-file=../../.env src/video/storyboard-chat.live.ts` (cents,
+  image stubbed), and the job check below.
+- **Poster/caption change requests are a CONVERSATION, not a fold (2026-09-27, no migration).**
+  `EditChat` (`apps/web/components/EditChat.tsx`) replaced "AI ला सूचना द्या" on `SocialPostView`
+  (surface `social`), the carousel caption (`SocialCaptionEditor revision`, surface `caption`) and
+  `PosterPanel`'s pixel lane (surface `poster`). Each turn sends the whole conversation + the
+  poster's marks to `POST /api/generations/:id/assist` (`apps/api/src/routes/edit-assistant.ts`),
+  which returns a PLAN and EXECUTES NOTHING — the web carries it out through the existing
+  caption-feedback / caption-generate / image-feedback / regenerate routes, so their guards,
+  activity rows and jobs are unchanged. Planner → `content-engine/src/generation/edit-assistant.ts`
+  (one strict-JSON call on `OPENAI_EDIT_ASSISTANT_MODEL`, default the poster-copy tier, low effort,
+  then the pure `finalizeEditPlan`: unavailable/busy actions dropped with a Marathi reason, an
+  instruction with an ungrounded digit replaced by the officer's words, an exact heading must be
+  text the officer typed, an officer's own mark note wins, and nothing-to-do becomes ONE
+  question); shapes → `packages/schemas/src/edit-assistant.ts`. Conversation lives in
+  localStorage per run+surface (`dgipr.edit-chat.*`) — convenience, never state of record. Marks
+  rows → `PosterMarkNotes`, payload → `lib/posterRound.ts`, both shared by the two poster cards.
+  The legacy `html` lane's copy/scene fold and the carousel SLIDE folds are unchanged. Free
+  harnesses: `tsx src/generation/edit-assistant.ts --check` (+ `--live`, cents) and, from
+  content-engine, `npx tsx ../../apps/api/src/routes/edit-assistant.check.ts`.
 - **Carousel posters (कॅरोसेल, `category: 'carousel'`, migration 0059) — one note, a cover + 2-3
   detail slides in one look.** Its own lane, the `dynamic_poster` precedent, so no single-poster
   reader (one `poster_path`, the version strip, publish, Canva, pixel feedback) had to change. Plan

@@ -24,6 +24,13 @@
 // request field (`response_format.aspect_ratio`), never as a sentence appended to the prompt,
 // which is what lets this page gain a control over the render without giving up its one rule.
 //
+// TWO CONVERSATION MODES (migration 0060) are chosen at the TOP of this card: VIDEO (everything
+// described above) and STORYBOARD, an OpenAI chat for scripts, storyboards, scene revisions
+// and storyboard pictures. The choice belongs to the whole conversation, so it is offered only
+// before the first message and shown locked afterwards, with the way out (a new conversation)
+// said in words. Storyboard mode keeps the text, the picture upload, paste, expand and send,
+// and drops what only a video render can use: the edit/new choice, the cast and the shape.
+//
 // A reference picture can also be PASTED, exactly as on /chat and through the same helper:
 // a React handler on this card for a paste into the box, and a document listener for a paste
 // made without clicking into it first. See ChatComposer's header for why both are needed and
@@ -42,10 +49,12 @@ import {
   Image as ImageIcon,
   Maximize2,
   Minimize2,
+  PanelsTopLeft,
   RectangleHorizontal,
   RectangleVertical,
   Send,
   Users,
+  Video,
   X,
 } from 'lucide-react';
 import {
@@ -54,7 +63,7 @@ import {
   NEW_VIDEO_MAX_IMAGES,
   type NewVideoAspect,
   type NewVideoCharacter,
-  type NewVideoTurnIntentChoice,
+  type NewVideoMode,
 } from '@dgipr/schemas';
 import { ComposeSafeTextarea, isComposingEvent } from './ComposeSafeInput';
 import {
@@ -65,15 +74,6 @@ import { NewVideoCharacters } from './NewVideoCharacters';
 import { imageFilesFromClipboard, isEditableTarget } from '../lib/pastedImages';
 import { STR } from '../lib/strings';
 import type { StagedImage } from '../lib/useNewVideoWorkflow';
-
-const INTENT_OPTIONS: ReadonlyArray<{
-  value: NewVideoTurnIntentChoice;
-  label: string;
-}> = [
-  { value: 'auto', label: STR.nvwIntentAuto },
-  { value: 'edit', label: STR.nvwIntentEdit },
-  { value: 'new', label: STR.nvwIntentNew },
-];
 
 // Both shapes the API accepts, in the order they are offered. Landscape leads because it is
 // the default — the button that is already pressed when the page opens.
@@ -90,6 +90,72 @@ const ASPECT_OPTIONS: ReadonlyArray<{
   { value: '9:16', label: STR.nvwAspectPortrait, Icon: RectangleVertical },
 ];
 
+// Video first: it is the default, and the mode this page has always been.
+const MODE_OPTIONS: ReadonlyArray<{
+  value: NewVideoMode;
+  label: string;
+  Icon: typeof Video;
+}> = [
+  { value: 'video', label: STR.nvwModeVideo, Icon: Video },
+  { value: 'storyboard', label: STR.nvwModeStoryboard, Icon: PanelsTopLeft },
+];
+
+// THE MODE — video or storyboard. Rendered in the empty greeting, under the example prompt,
+// because it decides what the first message will become and only matters before one is sent:
+// once the conversation exists the mode is fixed, and the rail's badge says which it is. A
+// radiogroup: exactly one is always chosen. If it is ever shown locked, the chosen option stays
+// enabled so it reads as the answer, and the hint says how to switch.
+export function NewVideoModePicker({
+  mode,
+  modeLocked,
+  onModeChange,
+}: {
+  mode: NewVideoMode;
+  /** True once the conversation exists: the mode is fixed by its first message. */
+  modeLocked: boolean;
+  onModeChange: (mode: NewVideoMode) => void;
+}) {
+  const hint = modeLocked
+    ? STR.nvwModeLocked
+    : mode === 'storyboard'
+      ? STR.nvwModeStoryboardHint
+      : null;
+  return (
+    <div className={modeLocked ? 'nvw-mode is-locked' : 'nvw-mode'}>
+      <div
+        className="nvw-mode-options"
+        role="radiogroup"
+        aria-label={STR.nvwModeLabel}
+      >
+        {MODE_OPTIONS.map(({ value, label, Icon }) => {
+          const active = mode === value;
+          return (
+            <button
+              key={value}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              aria-disabled={modeLocked || undefined}
+              disabled={modeLocked && !active}
+              title={modeLocked ? STR.nvwModeLocked : label}
+              className={
+                active ? 'nvw-mode-option is-active' : 'nvw-mode-option'
+              }
+              onClick={() => {
+                if (!modeLocked) onModeChange(value);
+              }}
+            >
+              <Icon size={16} aria-hidden="true" />
+              {label}
+            </button>
+          );
+        })}
+      </div>
+      {hint !== null ? <span className="nvw-mode-hint">{hint}</span> : null}
+    </div>
+  );
+}
+
 function stateLabel(image: StagedImage): string {
   if (image.state === 'failed') return image.error ?? STR.nvwImageFailed;
   if (image.state === 'uploading') return STR.nvwImageUploading;
@@ -97,6 +163,7 @@ function stateLabel(image: StagedImage): string {
 }
 
 export function NewVideoComposer({
+  mode,
   images,
   busy,
   sending,
@@ -111,6 +178,8 @@ export function NewVideoComposer({
   onRemoveImage,
   onSend,
 }: {
+  /** The conversation's mode — video or storyboard. */
+  mode: NewVideoMode;
   images: readonly StagedImage[];
   /** A generation is already running in this conversation — the server refuses a second. */
   busy: boolean;
@@ -132,21 +201,12 @@ export function NewVideoComposer({
   onAddImages: (files: readonly File[]) => void;
   onRemoveImage: (key: string) => void;
   /** Resolves true once the turn has left, which is when the box may be cleared. */
-  onSend: (
-    prompt: string,
-    aspect: NewVideoAspect,
-    intent: NewVideoTurnIntentChoice,
-  ) => Promise<boolean>;
+  onSend: (prompt: string, aspect: NewVideoAspect) => Promise<boolean>;
 }) {
   const [text, setText] = useState('');
   const [aspect, setAspect] = useState<NewVideoAspect>(
     DEFAULT_NEW_VIDEO_ASPECT,
   );
-  // EDIT THE VIDEO ON SCREEN, OR MAKE A NEW CLIP. `auto` lets the API read the instruction and
-  // decide — a short change is an edit, a whole new scene is a new clip. The two explicit
-  // choices are the officer's override for when that call is wrong. Per instruction, so it
-  // resets to `auto` once a turn has left.
-  const [intent, setIntent] = useState<NewVideoTurnIntentChoice>('auto');
   const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [castOpen, setCastOpen] = useState(false);
@@ -185,13 +245,23 @@ export function NewVideoComposer({
   // inside the turn, but here the turn is a paid render and starting one without the reference
   // picture the officer attached would look like the model ignoring it.
   const canSend = !sending && !busy && !uploading && text.trim() !== '';
+  const storyboard = mode === 'storyboard';
+  const sendLabel = storyboard
+    ? STR.nvwStoryboardSend
+    : isFollowUp
+      ? STR.nvwSendFollowUp
+      : STR.nvwSend;
+  const placeholder = storyboard
+    ? STR.nvwStoryboardPlaceholder
+    : STR.nvwPlaceholder;
 
   const submit = () => {
     if (!canSend) return;
-    void onSend(text, aspect, intent).then((sent) => {
+    // EDIT THE VIDEO ON SCREEN, OR MAKE A NEW CLIP is always the API's call (`auto`): it reads
+    // the instruction and decides — a short change is an edit, a whole new scene a new clip.
+    void onSend(text, aspect).then((sent) => {
       if (!sent) return;
       setText('');
-      setIntent('auto');
       // The chosen shape is deliberately NOT reset: the next instruction in a conversation is
       // an edit of the video just made, and handing it back at a different ratio would undo a
       // choice nobody changed.
@@ -282,7 +352,7 @@ export function NewVideoComposer({
             be typed will apply to, so an officer must meet it before writing rather than
             after. Dismissible in place as well as by re-pressing the turn's own button —
             scrolling back up to disarm something is not a thing to make anyone do. */}
-        {forkOrdinal !== null ? (
+        {!storyboard && forkOrdinal !== null ? (
           <div className="nvw-fork-banner" role="status">
             <CornerDownRight size={16} aria-hidden="true" />
             <span className="nvw-fork-banner-text">
@@ -306,42 +376,6 @@ export function NewVideoComposer({
           </div>
         ) : null}
 
-        {/* Only once there IS a video to edit, and not beside a fork — a fork names the video
-            to change, which is already the answer to this question. */}
-        {isFollowUp && forkOrdinal === null ? (
-          <div className="nvw-intent">
-            <div
-              className="nvw-intent-options"
-              role="radiogroup"
-              aria-label={STR.nvwIntentLabel}
-            >
-              {INTENT_OPTIONS.map(({ value, label }) => (
-                <button
-                  key={value}
-                  type="button"
-                  role="radio"
-                  aria-checked={intent === value}
-                  className={
-                    intent === value
-                      ? 'nvw-intent-option is-active'
-                      : 'nvw-intent-option'
-                  }
-                  onClick={() => setIntent(value)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <span className="nvw-intent-hint">
-              {intent === 'auto'
-                ? STR.nvwIntentAutoHint
-                : intent === 'edit'
-                  ? STR.nvwIntentEditHint
-                  : STR.nvwIntentNewHint}
-            </span>
-          </div>
-        ) : null}
-
         <AttachmentTray items={trayItems} />
 
         <div className="chat-input-row">
@@ -350,9 +384,9 @@ export function NewVideoComposer({
             value={text}
             onChange={setText}
             onKeyDown={onKeyDown}
-            placeholder={STR.nvwPlaceholder}
+            placeholder={placeholder}
             rows={1}
-            aria-label={STR.nvwPlaceholder}
+            aria-label={placeholder}
           />
           <div className="chat-tools">
             <button
@@ -370,28 +404,30 @@ export function NewVideoComposer({
                 description. Never disabled: the panel is also the registry's editor, and an
                 officer may be tidying it up while a render is in flight. The count is on the
                 button because a cast is invisible in the prompt and is easy to forget. */}
-            <button
-              type="button"
-              className={
-                castIds.length > 0
-                  ? 'btn-ghost chat-tool is-active'
-                  : 'btn-ghost chat-tool'
-              }
-              onClick={() => setCastOpen(true)}
-              title={STR.nvwCharactersTitle}
-              aria-label={
-                castIds.length > 0
-                  ? `${STR.nvwCharactersTitle} (${castIds.length.toLocaleString('mr-IN')})`
-                  : STR.nvwCharactersTitle
-              }
-            >
-              <Users size={20} aria-hidden="true" />
-              {castIds.length > 0 ? (
-                <span className="chat-tool-count">
-                  {castIds.length.toLocaleString('mr-IN')}
-                </span>
-              ) : null}
-            </button>
+            {storyboard ? null : (
+              <button
+                type="button"
+                className={
+                  castIds.length > 0
+                    ? 'btn-ghost chat-tool is-active'
+                    : 'btn-ghost chat-tool'
+                }
+                onClick={() => setCastOpen(true)}
+                title={STR.nvwCharactersTitle}
+                aria-label={
+                  castIds.length > 0
+                    ? `${STR.nvwCharactersTitle} (${castIds.length.toLocaleString('mr-IN')})`
+                    : STR.nvwCharactersTitle
+                }
+              >
+                <Users size={20} aria-hidden="true" />
+                {castIds.length > 0 ? (
+                  <span className="chat-tool-count">
+                    {castIds.length.toLocaleString('mr-IN')}
+                  </span>
+                ) : null}
+              </button>
+            )}
             <button
               type="button"
               className="btn-ghost chat-tool"
@@ -410,40 +446,42 @@ export function NewVideoComposer({
                 chosen, and arrow keys move between them for free. Never disabled while a
                 render runs — this belongs to the message being written, not to the one in
                 flight. */}
-            <div
-              className="chat-aspect"
-              role="radiogroup"
-              aria-label={STR.nvwAspectLabel}
-            >
-              {ASPECT_OPTIONS.map(({ value, label, Icon }) => {
-                const active = aspect === value;
-                return (
-                  <button
-                    key={value}
-                    type="button"
-                    role="radio"
-                    aria-checked={active}
-                    className={
-                      active
-                        ? 'chat-aspect-option is-active'
-                        : 'chat-aspect-option'
-                    }
-                    onClick={() => setAspect(value)}
-                    title={label}
-                    aria-label={label}
-                  >
-                    <Icon size={17} aria-hidden="true" />
-                  </button>
-                );
-              })}
-            </div>
+            {storyboard ? null : (
+              <div
+                className="chat-aspect"
+                role="radiogroup"
+                aria-label={STR.nvwAspectLabel}
+              >
+                {ASPECT_OPTIONS.map(({ value, label, Icon }) => {
+                  const active = aspect === value;
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      className={
+                        active
+                          ? 'chat-aspect-option is-active'
+                          : 'chat-aspect-option'
+                      }
+                      onClick={() => setAspect(value)}
+                      title={label}
+                      aria-label={label}
+                    >
+                      <Icon size={17} aria-hidden="true" />
+                    </button>
+                  );
+                })}
+              </div>
+            )}
             <button
               type="button"
               className="btn chat-send"
               onClick={submit}
               disabled={!canSend}
-              title={isFollowUp ? STR.nvwSendFollowUp : STR.nvwSend}
-              aria-label={isFollowUp ? STR.nvwSendFollowUp : STR.nvwSend}
+              title={sendLabel}
+              aria-label={sendLabel}
             >
               {sending ? (
                 <span className="spinner" aria-hidden="true" />
@@ -456,26 +494,32 @@ export function NewVideoComposer({
 
         {/* Who is in this video, named under the box: a cast is invisible in the prompt, and
             an officer who cannot see it cannot tell whether the model was told about it. */}
-        {castLocked && characters.length > 0 ? (
+        {!storyboard && castLocked && characters.length > 0 ? (
           <p className="chat-composer-note">
             {STR.nvwCastSelected}: {characters.map((c) => c.name).join(', ')}
           </p>
         ) : null}
 
-        {busy ? <p className="chat-composer-note">{STR.nvwBusy}</p> : null}
+        {busy ? (
+          <p className="chat-composer-note">
+            {storyboard ? STR.nvwStoryboardBusy : STR.nvwBusy}
+          </p>
+        ) : null}
         {error !== null ? (
           <p className="chat-composer-error" role="alert">
             {error}
           </p>
         ) : null}
 
-        <NewVideoCharacters
-          open={castOpen}
-          onOpenChange={setCastOpen}
-          selectedIds={castIds}
-          onSelectedIdsChange={onCastIdsChange}
-          castLocked={castLocked}
-        />
+        {storyboard ? null : (
+          <NewVideoCharacters
+            open={castOpen}
+            onOpenChange={setCastOpen}
+            selectedIds={castIds}
+            onSelectedIdsChange={onCastIdsChange}
+            castLocked={castLocked}
+          />
+        )}
 
         <input
           ref={imageInput}

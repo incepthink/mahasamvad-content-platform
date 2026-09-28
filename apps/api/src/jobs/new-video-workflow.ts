@@ -35,7 +35,12 @@ import {
   newVideoPromptMode,
   newVideoTaskFor,
   promptModeAuthors,
+  buildStoryboardImagePrompt,
+  runStoryboardTurn,
   type InteractionImage,
+  type StoryboardChatTurn,
+  type StoryboardGeneratedImage,
+  type StoryboardImageRequest,
   type NewVideoIntentDecision,
   type ScaffoldCharacter,
 } from '@dgipr/content-engine';
@@ -67,9 +72,15 @@ import {
   type NewVideoCharacterRow,
   type NewVideoConversationRow,
   type NewVideoImageRow,
+  type NewVideoModeValue,
   type NewVideoTurnRow,
   type SupabaseClient,
 } from '@dgipr/database';
+import {
+  editImage,
+  generateImage,
+  normalizeReferenceImage,
+} from '@dgipr/poster-renderer';
 import { settleJobActivity } from '../activity/actor.js';
 import {
   NEW_VIDEO_MAX_IMAGES,
@@ -79,6 +90,7 @@ import {
   type NewVideoConversation,
   type NewVideoConversationSummary,
   type NewVideoImage,
+  type NewVideoPendingImage,
   type NewVideoTurn,
   type NewVideoTurnIntentChoice,
 } from '@dgipr/schemas';
@@ -306,10 +318,12 @@ export async function removeCharacter(
 // Conversations
 // ---------------------------------------------------------------------------
 
+// The mode is fixed here, at creation, and never written again (migration 0060).
 export async function createConversation(
   client: SupabaseClient,
+  mode: NewVideoModeValue = 'video',
 ): Promise<NewVideoConversationRow> {
-  return insertNewVideoConversation(client);
+  return insertNewVideoConversation(client, mode);
 }
 
 export async function getConversation(
@@ -402,6 +416,7 @@ export async function listConversationSummaries(
     .map((row) => ({
       id: row.id,
       title: row.title,
+      mode: row.mode,
       turnCount: row.turnCount,
       lastTurnAt: row.lastTurnAt,
       createdAt: row.createdAt,
@@ -470,6 +485,7 @@ export function toConversationDetail(
 ): NewVideoConversation {
   return {
     id: conversation.id,
+    mode: conversation.mode,
     title: conversation.title,
     // Read fresh from the registry rather than denormalized onto the conversation, so an
     // edit to a character shows here — and so the composer can tell that this conversation's
@@ -488,6 +504,13 @@ export function toConversationDetail(
       status: turn.status,
       videoUrl: turn.videoUrl,
       modelText: turn.modelText,
+      generatedImages: turn.generatedImages.map((image) => ({
+        id: image.id,
+        url: image.url,
+        label: image.label,
+        prompt: image.prompt,
+      })),
+      pendingImages: pendingStoryboardImages(turn.id),
       error: turn.error,
       createdAt: turn.createdAt,
     })),
@@ -891,6 +914,272 @@ export function startNewVideoTurn(
       } catch (writeError) {
         // The row is the only place a failure can be reported, so losing this write is worth
         // a log line of its own: the turn will sit at `generating` until it is re-read.
+        console.error(
+          `[new-video-workflow ${conversation.id}/${turn.id}] could not record the failure:`,
+          writeError,
+        );
+      }
+    }
+  })();
+}
+
+// ---------------------------------------------------------------------------
+// STORYBOARD MODE (migration 0060)
+// ---------------------------------------------------------------------------
+//
+// The second kind of conversation on this page: an ordinary chat on OpenAI, scoped to
+// scripts, storyboards, scene revisions and — when asked — storyboard pictures. Every model
+// decision is in @dgipr/content-engine (video/storyboard-chat.ts); this sequences, streams the
+// answer into the turn row and stores the pictures.
+//
+// It reuses the video lane's rows and columns deliberately: the officer's message is `prompt`,
+// their pictures are `images`, the assistant's Markdown is `model_text`, the pictures it drew
+// are `generated_images`, and the chain handle — an OpenAI response id here, a Gemini
+// interaction id there — lives in the same `interaction_id` / `last_interaction_id` columns.
+// That sharing is exactly why a conversation's mode is fixed by its first turn.
+
+// How often the streaming answer is written to the row. The page polls while a turn is busy,
+// so this is the granularity at which the officer watches it arrive; every write is one
+// PostgREST update, so it is not made per token.
+const STORYBOARD_FLUSH_MS = 700;
+
+// The pictures being rendered RIGHT NOW, per turn. In process, not on the row: it is a live
+// signal for the page's placeholder, worthless after a restart (the job it describes is gone
+// with the process), and a column would be one more thing the polled read has to name. Set
+// when a render starts and cleared in a `finally`, so a failed render cannot leave a
+// placeholder spinning forever.
+const pendingImagesByTurn = new Map<string, NewVideoPendingImage[]>();
+
+export function pendingStoryboardImages(
+  turnId: string,
+): NewVideoPendingImage[] {
+  return [...(pendingImagesByTurn.get(turnId) ?? [])];
+}
+
+// The stored conversation, as the model sees it: only COMPLETED turns before this one. A failed
+// turn's message was never answered — and the response chain never advanced past it — so
+// replaying it would put a question the assistant never saw into a rebuilt transcript.
+export function storyboardHistory(
+  turns: readonly NewVideoTurnRow[],
+  current: NewVideoTurnRow,
+  currentImages: readonly NewVideoImageRow[],
+): StoryboardChatTurn[] {
+  const history: StoryboardChatTurn[] = [];
+  for (const turn of turns) {
+    if (turn.id === current.id) break;
+    if (turn.status !== 'completed') continue;
+    history.push({
+      role: 'user',
+      content: turn.prompt,
+      imageUrls: turn.images.map((image) => image.url),
+    });
+    history.push({
+      role: 'assistant',
+      content: turn.modelText ?? '',
+      generatedImages: turn.generatedImages.map((image) => ({
+        label: image.label,
+        prompt: image.prompt,
+      })),
+    });
+  }
+  history.push({
+    role: 'user',
+    content: current.prompt,
+    imageUrls: currentImages.map((image) => image.url),
+  });
+  return history;
+}
+
+// Only a completed answer advances the chain — the /chat rule and this lane's own.
+export async function markStoryboardTurnCompleted(
+  client: SupabaseClient,
+  conversationId: string,
+  turnId: string,
+  result: Readonly<{
+    responseId: string;
+    text: string;
+    images: readonly StoryboardGeneratedImage[];
+  }>,
+): Promise<void> {
+  await updateNewVideoTurn(client, turnId, {
+    status: 'completed',
+    interactionId: result.responseId,
+    modelText: result.text,
+    generatedImages: result.images,
+    error: null,
+  });
+  await updateNewVideoConversation(client, conversationId, {
+    lastInteractionId: result.responseId,
+  });
+  settleJobActivity(
+    client,
+    { kind: 'nvw_turn', id: turnId },
+    'nvw_turn',
+    'success',
+  );
+}
+
+// Fire and forget, like startNewVideoTurn: the route has answered 202 and the page is polling.
+export function startStoryboardTurn(
+  client: SupabaseClient,
+  conversation: NewVideoConversationRow,
+  turn: NewVideoTurnRow,
+  referenceRows: readonly NewVideoImageRow[],
+): void {
+  void (async () => {
+    // The answer so far, and the pictures so far. Kept here so a failure can still leave
+    // what was written on the row — those tokens were paid for and the officer watched them.
+    let text = '';
+    const images: StoryboardGeneratedImage[] = [];
+
+    // Writes are SERIALISED through one promise chain: a later flush must never land before
+    // an earlier one and roll the visible text backwards.
+    let writes: Promise<void> = Promise.resolve();
+    let dirty = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const flush = () => {
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+      if (!dirty) return;
+      dirty = false;
+      const snapshot = text;
+      const pictures = [...images];
+      writes = writes
+        .then(() =>
+          updateNewVideoTurn(client, turn.id, {
+            modelText: snapshot,
+            generatedImages: pictures,
+          }),
+        )
+        .catch((error: unknown) => {
+          // A lost interim write costs the live view, never the answer — the completed write
+          // below carries everything.
+          console.warn(
+            `[new-video-workflow ${conversation.id}/${turn.id}] storyboard flush failed:`,
+            error,
+          );
+        });
+    };
+    const schedule = () => {
+      dirty = true;
+      if (timer === null) timer = setTimeout(flush, STORYBOARD_FLUSH_MS);
+    };
+    // Stops the timer and waits for every write already queued, so the final write below is
+    // the last one to land.
+    const settle = async () => {
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+      dirty = false;
+      await writes;
+    };
+
+    try {
+      await updateNewVideoTurn(client, turn.id, { status: 'generating' });
+
+      // Read here rather than at request time, for the video lane's reason: the value may
+      // have moved since the request was accepted.
+      const current = await getNewVideoConversationRow(client, conversation.id);
+      const chain = current?.lastInteractionId ?? undefined;
+      const allTurns = await listNewVideoTurns(client, conversation.id);
+      const history = storyboardHistory(allTurns, turn, referenceRows);
+
+      // The officer's pictures as PNG bytes, fetched once and only if a picture is asked to be
+      // based on them. Normalised (EXIF-rotated, bounded, PNG) because the edit endpoint is
+      // sent them as PNG blobs, while these were stored exactly as uploaded.
+      let attached: Promise<Buffer[]> | null = null;
+      const attachedPngs = (): Promise<Buffer[]> => {
+        attached ??= Promise.all(
+          referenceRows.map(async (row) =>
+            normalizeReferenceImage(
+              await downloadFile(client, POSTERS_BUCKET, row.storagePath),
+            ),
+          ),
+        );
+        return attached;
+      };
+
+      const renderPicture = async (
+        request: StoryboardImageRequest,
+      ): Promise<StoryboardGeneratedImage> => {
+        const pending: NewVideoPendingImage = {
+          label: request.label,
+          orientation: request.orientation,
+        };
+        pendingImagesByTurn.set(turn.id, [
+          ...(pendingImagesByTurn.get(turn.id) ?? []),
+          pending,
+        ]);
+        try {
+          const prompt = buildStoryboardImagePrompt(request.prompt);
+          const png =
+            request.useAttachedImages && referenceRows.length > 0
+              ? await editImage(await attachedPngs(), prompt, {
+                  size: request.size,
+                })
+              : await generateImage(prompt, { size: request.size });
+          const id = randomUUID();
+          // Versioned by turn and a fresh id: the public bucket is CDN-cached, so no path is
+          // ever reused.
+          const path = `new-video-workflow/${conversation.id}/${turn.id}-${id.slice(0, 8)}.png`;
+          await uploadFile(client, POSTERS_BUCKET, path, png, 'image/png');
+          return {
+            id,
+            url: publicUrl(client, path),
+            label: request.label,
+            prompt: request.prompt,
+          };
+        } finally {
+          const rest = (pendingImagesByTurn.get(turn.id) ?? []).filter(
+            (entry) => entry !== pending,
+          );
+          if (rest.length > 0) pendingImagesByTurn.set(turn.id, rest);
+          else pendingImagesByTurn.delete(turn.id);
+        }
+      };
+
+      console.log(
+        `[new-video-workflow ${conversation.id}/${turn.id}] mode=storyboard ` +
+          `images=${referenceRows.length} history=${history.length} ` +
+          `chain=${chain !== undefined ? 'continuing' : 'fresh'}`,
+      );
+
+      const reply = await runStoryboardTurn({
+        turns: history,
+        previousResponseId: chain,
+        onDelta: (chunk) => {
+          text += chunk;
+          schedule();
+        },
+        generateImage: renderPicture,
+        onImage: (image) => {
+          images.push(image);
+          // A picture is worth showing the moment it lands, not at the next text flush.
+          dirty = true;
+          flush();
+        },
+      });
+
+      await settle();
+      await markStoryboardTurnCompleted(client, conversation.id, turn.id, {
+        responseId: reply.responseId,
+        text: reply.text,
+        images: reply.images,
+      });
+    } catch (error) {
+      console.error(
+        `[new-video-workflow ${conversation.id}/${turn.id}] storyboard turn failed:`,
+        error,
+      );
+      try {
+        await settle();
+        if (text !== '' || images.length > 0) {
+          await updateNewVideoTurn(client, turn.id, {
+            modelText: text,
+            generatedImages: images,
+          });
+        }
+        await markTurnFailed(client, turn.id, errorMessage(error));
+      } catch (writeError) {
         console.error(
           `[new-video-workflow ${conversation.id}/${turn.id}] could not record the failure:`,
           writeError,

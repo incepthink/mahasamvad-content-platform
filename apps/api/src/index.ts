@@ -13,6 +13,7 @@ import { registerDloRoutes } from './routes/dlo.js';
 import { registerNewDloRoutes } from './routes/new-dlo.js';
 import { registerDocumentRoutes } from './routes/documents.js';
 import { registerGenerationRoutes } from './routes/generations.js';
+import { registerEditAssistantRoutes } from './routes/edit-assistant.js';
 import { registerGlossaryRoutes } from './routes/glossary.js';
 import { registerEditorialPreferenceRoutes } from './routes/editorial-preferences.js';
 import { registerTranslateRoutes } from './routes/translate.js';
@@ -143,6 +144,9 @@ export async function createServer() {
       // this scope so /health gets none; it can never reject a request.
       registerActorHook(instance);
       registerGenerationRoutes(instance, client);
+      // The conversational poster/caption edit box. Plans only — execution goes through the
+      // generation routes above.
+      registerEditAssistantRoutes(instance, client);
       registerCanvaRoutes(instance, client);
       // The social poster's emblem badge and footer band as plain PNGs. Persists nothing
       // and reads nothing — the Dynamic Poster crop preview lays them over an unbranded clip.

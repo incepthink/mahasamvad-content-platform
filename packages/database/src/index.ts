@@ -182,6 +182,8 @@ export {
   insertNewVideoImage,
   listNewVideoImagesByIds,
   type NewVideoTurnStatusValue,
+  type NewVideoModeValue,
+  type NewVideoGeneratedImage,
   type NewVideoTurnImage,
   type NewVideoConversationRow,
   type NewVideoConversationPatch,

@@ -59,6 +59,9 @@ import {
   TranslateDocumentDetailSchema,
   TranslateTextResponseSchema,
   UpdateCaptionResponseSchema,
+  EditAssistantPlanSchema,
+  type EditAssistantPlan,
+  type EditAssistantRequest,
   type Copy,
   type CreateGenerationRequest,
   type DloGenerateRequest,
@@ -637,6 +640,20 @@ export async function sendCaptionFeedback(
     method: 'POST',
     body: JSON.stringify({ feedback }),
   });
+}
+
+// One turn of the poster/caption edit assistant: the whole conversation (plus what is marked
+// on the poster) in, a PLAN out. Synchronous and executes nothing — EditChat carries the plan
+// out through the routes beside this one.
+export async function planEdit(
+  id: string,
+  request: EditAssistantRequest,
+): Promise<EditAssistantPlan> {
+  const body = await requestJson(`/api/generations/${id}/assist`, {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+  return EditAssistantPlanSchema.parse(body);
 }
 
 // Write the first caption for a social run created poster-only. 202 — the job reports

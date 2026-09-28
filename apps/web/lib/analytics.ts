@@ -124,6 +124,7 @@ const TASK_LABELS: Readonly<Record<string, string>> = {
   carousel_slide: STR.analyticsTaskCarouselSlide,
   social_caption_creation: STR.analyticsTaskSocialCaption,
   social_caption_revision: STR.analyticsTaskSocialCaptionRevision,
+  edit_assistant: STR.analyticsTaskEditAssistant,
   youtube_thumbnail_creation: STR.analyticsTaskYoutubeThumbnail,
   poster_regeneration: STR.analyticsTaskPosterRegeneration,
   poster_content_revision: STR.analyticsTaskPosterContentRevision,

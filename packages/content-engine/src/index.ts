@@ -396,6 +396,28 @@ export {
   newVideoTaskFor,
   type NewVideoTaskInput,
 } from './video/new-video-task.js';
+// STORYBOARD MODE of /new-video-workflow (migration 0060): a scoped OpenAI chat for scripts,
+// storyboards, scene revisions and — only when asked — storyboard pictures.
+export {
+  STORYBOARD_CHAT_MODEL,
+  STORYBOARD_IMAGE_LIMIT,
+  STORYBOARD_IMAGE_RULES,
+  STORYBOARD_SYSTEM_INSTRUCTION,
+  buildStoryboardImagePrompt,
+  buildStoryboardInput,
+  buildStoryboardRequestBody,
+  functionCallsOf,
+  isMissingPreviousResponse,
+  parseImageCallArguments,
+  runStoryboardTurn,
+  storyboardImageSize,
+  type StoryboardChatTurn,
+  type StoryboardGeneratedImage,
+  type StoryboardImageOrientation,
+  type StoryboardImageRequest,
+  type StoryboardTurnReply,
+  type StoryboardTurnRequest,
+} from './video/storyboard-chat.js';
 export {
   renderFrame,
   frameProviderApiKeyEnv,
@@ -867,6 +889,16 @@ export {
   type ConsolidationDecision,
   type ExtractPreferencesInput,
 } from './generation/learn-editorial-preferences.js';
+
+// The poster/caption edit assistant: plans what an officer's conversational request should
+// do (the API returns the plan; the web carries it out through the existing routes).
+export {
+  planEditRequest,
+  finalizeEditPlan,
+  EDIT_ASSISTANT_MODEL,
+  type EditAssistantContext,
+  type EditAssistantLane,
+} from './generation/edit-assistant.js';
 
 export type ContentChunk = Readonly<{
   id: string; // `${articleId}-${chunkIndex}`

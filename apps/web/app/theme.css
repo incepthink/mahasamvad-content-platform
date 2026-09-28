@@ -420,9 +420,9 @@ body:not(:has(.sidebar)) {
   color: var(--rail-fg-strong);
 }
 
-/* The carousel's स्वयं / ३ / ४ control reads as one toggle chip with three segments: the
-   chip takes the check-option's glass, the segments sit clear inside it, and the chosen one
-   takes the checked colour. Its segments are <button>s, so without this the composer's
+/* The tool row's segmented controls (carousel स्वयं / ३ / ४, /video आडवा / उभा) read as one
+   slate chip: the segments sit clear inside it and the chosen one is a white pill with dark
+   text. Its segments are <button>s, so without this the composer's
    generic button rule above would give every segment its own boxed control. */
 .page:not(.page-plain) .mr-note-composer .mr-slide-count {
   border-color: var(--glass-toggle-border);
@@ -436,15 +436,34 @@ body:not(:has(.sidebar)) {
   button:not(.mr-submit-button) {
   border: 1px solid transparent;
   background: transparent;
-  color: var(--rail-fg-strong);
+  color: var(--rail-fg);
 }
 
 .page:not(.page-plain)
   .mr-note-composer
   .mr-slide-count
-  button[aria-checked='true']:not(.mr-submit-button) {
-  border-color: var(--glass-toggle-border-checked);
-  background: var(--glass-toggle-bg-checked);
+  button[aria-checked='true']:not(.mr-submit-button),
+.page:not(.page-plain)
+  .mr-note-composer
+  .mr-slide-count
+  button[aria-checked='true']:not(.mr-submit-button):hover {
+  /* The chosen segment is INVERTED — a white pill with dark text. It used to take
+     --glass-toggle-bg-checked (chrome-800 in a chrome-700 track, white text on both),
+     which is also the hover colour, so the selection could not be seen. */
+  border-color: #ffffff;
+  background: #ffffff;
+  color: var(--chrome-800);
+  font-weight: 700;
+  box-shadow: 0 1px 3px rgba(17, 30, 38, 0.35);
+}
+
+.page:not(.page-plain)
+  .mr-note-composer
+  .mr-slide-count
+  button:not(.mr-submit-button):not([aria-checked='true']):hover {
+  border-color: transparent;
+  background: var(--rail-hover-bg);
+  color: var(--rail-fg-strong);
 }
 
 /* ---------------------------------------------------------------------------

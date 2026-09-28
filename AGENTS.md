@@ -24,8 +24,7 @@ it are implemented and working end-to-end:
   (2026-09-03, no migration; supersedes the prompt/rules portion of the 2026-09-02
   migration-0051 milestone): `टिपणीवरून` first sends exactly `make a script from the
   provided text`, then sends the generated script through exactly `make a storyboard from
-  the Provided script. Each scene can only be up to 5 seconds, so divide the narration
-  accordingly and create more scenes.`; `तयार संहितेवरून` uses only the storyboard
+  the Provided script.`; `तयार संहितेवरून` uses only the storyboard
   instruction. The note lane no longer runs fact extraction, plan-first writing,
   historical-style retrieval,
   coverage grading or repair prompts. Storyboard metadata and the later motion-direction
@@ -3110,6 +3109,80 @@ client id/secret — see the milestone below.
 2. `AGENTS.md` must be updated whenever a major architectural decision or implementation milestone changes.
 
 ## Latest Implementation Milestone
+
+- **/new-video-workflow gains a Storyboard mode beside Video** (2026-09-28, migration 0060, no
+  n8n). A clearly visible Video / Storyboard switch now sits at the top of the composer; it is
+  chosen before the first message, belongs to the whole conversation and is locked afterwards
+  (the other option disabled, a hint naming "start a new conversation" as the way to switch);
+  every rail row shows its mode as a badge. Video mode is byte-for-byte the existing Gemini lane.
+  - **Storyboard mode is an ordinary OpenAI chat**, scoped by its instruction to writing scripts,
+    creating storyboards, whole-storyboard revisions, changes to named scenes, storyboard
+    questions, and pictures only when explicitly asked; anything else is politely declined.
+    Replies match the officer's language; facts come only from the officer (placeholders for
+    anything missing). Scenes are separated for reading — a heading each, a rule between — as a
+    PRESENTATION instruction, never a schema: there is no scene model, no required fields, and a
+    revision is simply the next assistant message (renumbered whole storyboard when scenes are
+    added/removed/reordered).
+  - **Pictures are a function tool we run**, not OpenAI's built-in image tool, so they render on
+    the product's own gpt-image path at our quality, the officer's attached pictures can be sent
+    to `editImage` as real pixels (`use_attached_images`), and the no-writing/Maharashtra rules are
+    appended in code (`STORYBOARD_IMAGE_RULES`, phrased positively). At most 4 per answer; every
+    call is answered (generated / failed / declined over the limit), and the final round is sent
+    with `tool_choice: 'none'` because a stored response left with a pending call breaks the
+    next turn's `previous_response_id`. An expired chain is rebuilt once from completed turns.
+  - **Storage reuses the video rows**: `prompt`, `images`, `model_text` (the Markdown answer,
+    written into the row as it streams, serialised writes every ~0.7 s; the page polls at 1.2 s
+    in this mode), plus `new_video_turns.generated_images` and `new_video_conversations.mode`
+    (0060). The OpenAI response id lives in the same chain columns as a Gemini interaction id —
+    which is exactly why a conversation cannot change mode. **Both tables are now read with
+    `select *`** and `mode` is inserted only for a storyboard, so an un-applied 0060 fails a
+    storyboard create and nothing else (0054's blast-radius lesson). In Storyboard mode the
+    route refuses characters, forks and edit/new intent; the composer hides them and the aspect
+    ratio, keeping text, image upload, paste, expand and send, plus a scope line.
+  - Not metered: this lane has no cost scope (pre-existing gap), so storyboard text and pictures
+    do not reach `/analytics` yet.
+  Verified 2026-09-28: workspace typecheck (schemas, database, content-engine build; api + web
+  typecheck) green; eslint clean on every touched file; prettier clean on my hunks (ConversationRail
+  and the job check differ from prettier only in CRLF; `strings.ts` carries someone else's
+  unformatted lines — do NOT `--write` it); `storyboard:test` **13/13** (a scripted Responses
+  server: streaming across chunk splits, the tool loop, the tool_choice ladder, the 4-picture
+  limit with a failed render, the expired-chain replay); the offline job check extended by 10
+  mode checks (default video create names no 0060 column, chain advances only on a completed
+  answer, history skips failed turns, mode on detail + rail, response id never in a payload);
+  **50 Playwright assertions** at 1360 and 390 against the real web app with the API mocked (the
+  switch, hidden video controls, the request body carrying `mode: 'storyboard'` and no video-only
+  field, the lock, scene headings/rules, the picture gallery, copy, rail badges, no overflow, no
+  page errors); and a **live engine run on gpt-5.6-sol** (cents, image stubbed): a 4-scene
+  Marathi storyboard with every fact verbatim, no picture on the ordinary answer, one tool call
+  on "सुरुवातीच्या दृश्याचे एक चित्र तयार करा" with a landscape, Maharashtra-set, text-free prompt,
+  and an out-of-scope weather question declined. **Left for a real run**: apply 0060, then one
+  storyboard conversation end to end on the deployed stack (a real picture render and upload,
+  a follow-up revision, an attached reference picture). **Deploy: 0060 → `@dgipr/schemas` →
+  `@dgipr/database` → `@dgipr/content-engine` dists → API + web together.** New env (optional):
+  `OPENAI_STORYBOARD_MODEL`, `OPENAI_STORYBOARD_REASONING_EFFORT`, `OPENAI_STORYBOARD_TIMEOUT_MS`,
+  `OPENAI_STORYBOARD_MAX_OUTPUT_TOKENS`.
+
+- **"AI ला सूचना द्या" became a conversation that routes itself** (2026-09-27, no migration, no
+  n8n). The fold made the officer pick a target pill (कॅप्शन / पोस्टर) and phrase an instruction;
+  it now reads as a compact chat (`EditChat`) where they say what they want in any words, across
+  turns, and the assistant decides caption revise, first caption, poster edit, full redesign,
+  exact article-poster heading, or both caption and poster — asking one short question only when
+  it cannot tell. **The assistant decides, the existing workflows execute**: `POST
+  /generations/:id/assist` returns a plan and runs nothing; the web calls the same routes the fold
+  did (caption first, then poster), so no guard, job or activity row moved. The planner is one
+  strict-JSON call followed by the deterministic `finalizeEditPlan`, the repo's instruct-then-
+  guarantee shape: capability and busy checks in code, digits in an instruction must appear in the
+  officer's words / caption / note or the officer's own words are sent instead, an exact heading
+  must be text the officer typed, and a blank red mark's note is filled from the conversation
+  while a typed one is kept. Metered as task `edit_assistant` (analytics + the run's cost).
+  Verified: harness 18/18, `--live` 5/5 on real Marathi requests (caption, poster, both, redesign,
+  and a vague one that came back as a single question), an offline route check 9/9, workspace
+  typecheck + lint on every touched file, and 30 Playwright assertions at 1360/390 with the API
+  mocked (request shape, question executes nothing, caption→poster order through the existing
+  routes, reload keeps the conversation, no overflow, no page errors). **Left for a real run**:
+  one live conversation on a deployed social and article poster. Deploy `@dgipr/schemas` →
+  `@dgipr/content-engine` dists → API + web together (the plan is a shared contract). New env
+  (optional): `OPENAI_EDIT_ASSISTANT_MODEL`, `OPENAI_EDIT_ASSISTANT_REASONING_EFFORT`.
 
 - **Carousels take the officer's text AS IT IS (जसाच्या तसा मजकूर)** (2026-09-26, no migration,
   no n8n). The carousel lane used to always PLAN copy out of the note, so an officer whose text

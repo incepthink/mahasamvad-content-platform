@@ -1,7 +1,9 @@
 'use client';
 
-// Poster display + download + manual text edit + the two-choice feedback loop
-// ("मजकूर सुधारा" cheap re-render vs "चित्र बदला" new background image).
+// Poster display + download + manual text edit. Change requests go through the edit
+// assistant (EditChat): the officer says what they want in their own words and it becomes a
+// pixel edit, a fresh design or an exact poster heading. The legacy `html` lane keeps its
+// two-choice fold ("मजकूर सुधारा" cheap re-render vs "चित्र बदला" new background image).
 
 import { useState } from 'react';
 import {
@@ -13,7 +15,7 @@ import {
   SquarePen,
 } from 'lucide-react';
 import { POSTER_HEADING_MAX_CHARS, isYoutubeCategory } from '@dgipr/schemas';
-import type { GenerationDetail } from '@dgipr/schemas';
+import type { EditAssistantAction, GenerationDetail } from '@dgipr/schemas';
 import {
   plainPosterDownloadUrl,
   posterDownloadUrl,
@@ -23,6 +25,8 @@ import {
   updatePosterCopy,
 } from '../lib/api';
 import { STR } from '../lib/strings';
+import { errorMessage } from '../lib/errorMessage';
+import { posterRoundPayload } from '../lib/posterRound';
 import { usePosterMarkers } from '../lib/usePosterMarkers';
 import { CopyEditForm } from './CopyEditForm';
 import { CrossFormatLinks } from './CrossFormatLinks';
@@ -34,7 +38,9 @@ import {
   markerInZones,
   type AnnotatorMode,
 } from './PosterAnnotator';
-import { PosterImageFeedbackBox } from './PosterImageFeedbackBox';
+import { EditChat } from './EditChat';
+import { ErrorNotice } from './ErrorNotice';
+import { PosterMarkNotes } from './PosterMarkNotes';
 import { PosterVersionStrip } from './PosterVersionStrip';
 import { CanvaLink } from './CanvaLink';
 // The poster heading is the officer's own Marathi line, typed on an InScript keyboard, which
@@ -88,6 +94,9 @@ export function PosterPanel({
   // flag that could disagree with it.
   const [annotMode, setAnnotMode] = useState<AnnotatorMode | null>(null);
   const annotOpen = annotMode !== null;
+  // The marks' own send button (the edit assistant reports its own failures in the chat).
+  const [sendingMarks, setSendingMarks] = useState(false);
+  const [marksError, setMarksError] = useState<string | null>(null);
 
   if (!detail.posterUrl) return null;
 
@@ -119,6 +128,75 @@ export function PosterPanel({
   const downloadLabel = isThumbnail
     ? STR.downloadThumbnail
     : STR.downloadPoster;
+
+  // A fresh render of this run: a new design, or (article lane) exactly `posterHeading`.
+  const regenerate = async (options: { posterHeading?: string } = {}) => {
+    setPending(true);
+    try {
+      await regeneratePoster(detail.id, options);
+      onImageWorkStarted?.();
+      await onChanged();
+    } finally {
+      setPending(false);
+    }
+  };
+
+  // One pixel-feedback round, shared by the marks' send button and the edit assistant.
+  const submitPosterRound = async (
+    payload: Parameters<typeof sendPosterImageFeedback>[1],
+  ) => {
+    setSendingMarks(true);
+    setPending(true);
+    try {
+      await sendPosterImageFeedback(detail.id, payload);
+      markSubmitted();
+      setAnnotMode(null);
+      onImageWorkStarted?.();
+      await onChanged();
+    } finally {
+      // The refreshed row now drives `busy` until the edit finishes, so the overlay does
+      // not flicker between states.
+      setSendingMarks(false);
+      setPending(false);
+    }
+  };
+
+  const sendMarks = async () => {
+    if (sendingMarks) return;
+    setMarksError(null);
+    if (markers.some((m) => m.note.trim().length < 3)) {
+      setMarksError(STR.markerNoteTooShort);
+      return;
+    }
+    try {
+      await submitPosterRound(posterRoundPayload(markers, clearRegions));
+    } catch (e) {
+      setMarksError(errorMessage(e));
+    }
+  };
+
+  // Carry out one step of the edit assistant's plan through the existing poster routes.
+  const executeAction = async (action: EditAssistantAction) => {
+    switch (action.type) {
+      case 'poster_edit':
+        await submitPosterRound(
+          posterRoundPayload(markers, clearRegions, {
+            feedback: action.instruction,
+            markerNotes: action.markerNotes,
+          }),
+        );
+        return;
+      case 'poster_redesign':
+        await regenerate();
+        return;
+      case 'poster_heading':
+        await regenerate({ posterHeading: action.heading });
+        return;
+      default:
+        // Caption actions are never planned for this card — it has no caption.
+        return;
+    }
+  };
 
   return (
     <section className="card">
@@ -191,16 +269,7 @@ export function PosterPanel({
                 title={STR.posterRedesign}
                 aria-label={STR.posterRedesign}
                 disabled={!posterEditable}
-                onClick={async () => {
-                  setPending(true);
-                  try {
-                    await regeneratePoster(detail.id);
-                    onImageWorkStarted?.();
-                    await onChanged();
-                  } finally {
-                    setPending(false);
-                  }
-                }}
+                onClick={() => void regenerate()}
               >
                 <RotateCw size={18} strokeWidth={1.9} aria-hidden="true" />
               </button>
@@ -235,7 +304,7 @@ export function PosterPanel({
             ) : null}
             */}
             {/* The two annotator gestures. They only ARM the poster — the notes are
-                typed in the fold below, exactly as on a social run. */}
+                typed in the rows below, exactly as on a social run. */}
             {!canRevise ? (
               <>
                 <button
@@ -408,60 +477,56 @@ export function PosterPanel({
                     <PosterHeadingEditor
                       current={detail.posterHeading}
                       disabled={showSpinner}
-                      onApply={async (heading) => {
-                        setPending(true);
-                        try {
-                          await regeneratePoster(detail.id, {
-                            posterHeading: heading,
-                          });
-                          onImageWorkStarted?.();
-                          await onChanged();
-                        } finally {
-                          setPending(false);
-                        }
-                      }}
+                      onApply={(heading) =>
+                        regenerate({ posterHeading: heading })
+                      }
                     />
                   )}
                 </div>
               ) : null}
-              <PosterImageFeedbackBox
+              {/* What is marked on the poster, a note beside each mark. */}
+              <PosterMarkNotes
                 markers={markers}
+                submittedMarkers={submittedMarkers}
+                clearRegions={clearRegions}
+                submittedClearRegions={submittedClearRegions}
                 onNoteChange={setNote}
                 onRemoveMarker={removeMarker}
-                // Opening the fold arms the poster if an icon has not already done so;
-                // closing it disarms. So the fold and the two icons are two ways into
-                // one state rather than two states that can disagree.
-                onOpenChange={(open) =>
-                  setAnnotMode((current) => (open ? (current ?? 'mark') : null))
-                }
-                disabled={showSpinner}
-                showReservedWarning={markers.some((m) =>
-                  markerInZones(m.region, reservedZones),
-                )}
-                submittedMarkers={submittedMarkers}
-                mode={annotMode ?? 'mark'}
-                onModeChange={setAnnotMode}
-                clearRegions={clearRegions}
                 onClearNoteChange={setClearNote}
                 onClearActionChange={setClearAction}
                 onRemoveClearRegion={removeClearRegion}
-                submittedClearRegions={submittedClearRegions}
+                disabled={showSpinner || sendingMarks}
+                showReservedWarning={markers.some((m) =>
+                  markerInZones(m.region, reservedZones),
+                )}
                 showClearReservedWarning={clearRegions.some((c) =>
                   markerInZones(c.region, reservedZones),
                 )}
-                onSubmit={async (payload) => {
-                  setPending(true);
-                  try {
-                    await sendPosterImageFeedback(detail.id, payload);
-                    markSubmitted();
-                    onImageWorkStarted?.();
-                    await onChanged();
-                  } finally {
-                    // The refreshed row now drives `busy` until the n8n edit
-                    // finishes, so the overlay does not flicker between states.
-                    setPending(false);
-                  }
-                }}
+              />
+              {markers.length > 0 || clearRegions.length > 0 ? (
+                <div className="btn-row marker-submit-action">
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    aria-busy={sendingMarks}
+                    disabled={showSpinner || sendingMarks}
+                    onClick={() => void sendMarks()}
+                  >
+                    {sendingMarks ? STR.sendingFeedback : STR.sendFeedback}
+                  </button>
+                </div>
+              ) : null}
+              {marksError ? <ErrorNotice message={marksError} /> : null}
+              {/* The edit assistant: say what to change, in any words. */}
+              <EditChat
+                generationId={detail.id}
+                surface="poster"
+                marks={{ markers, clearRegions }}
+                onExecute={executeAction}
+                hint={STR.editChatHintPoster}
+                placeholder={STR.editChatPlaceholderPoster}
+                starters={STR.editChatStartersPoster}
+                disabled={sendingMarks}
               />
             </div>
           )}

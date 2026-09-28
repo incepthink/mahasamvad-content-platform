@@ -1117,11 +1117,9 @@ export const STR = {
   posterFeedbackTargetScene: 'चित्र बदला',
   posterFeedbackTargetSceneDesc: 'मागील चित्र नव्याने तयार होईल (काही मिनिटे)',
   posterImageFeedbackTitle: 'चित्रात बदल हवा आहे?',
-  posterImageFeedbackHint:
-    'हवा असलेला दृश्यात्मक बदल स्पष्ट लिहा. प्रत्येक नवीन सूचना सध्याच्या पोस्टरवर लागू होईल; बाकीचे चित्र, मजकूर आणि मांडणी जशीच्या तशी ठेवायची असल्यास तसे नमूद करा.',
   // Click-to-point marker feedback (PosterAnnotator + PosterImageFeedbackBox)
   posterAnnotateHint:
-    'पोस्टरवर जिथे बदल हवा तिथे क्लिक करा किंवा ओढून चौकट काढा — प्रत्येक खुणेसाठी वेगळी सूचना लिहा (जास्तीत जास्त ३ खुणा). खूण न करता फक्त लिहूनही चालेल.',
+    'पोस्टरवर जिथे बदल हवा तिथे क्लिक करा किंवा ओढून चौकट काढा (जास्तीत जास्त ३ खुणा) — काय बदलायचे ते खुणेजवळ किंवा खालील संदेशात लिहा.',
   markerLabel: 'खूण',
   markerNotePlaceholder: 'या जागी काय बदलायचे ते लिहा…',
   markerRemove: 'खूण काढा',
@@ -1210,16 +1208,7 @@ export const STR = {
   // The caption box is always editable now, so the hand edit saves itself when focus
   // leaves the textarea — there is no "जतन करा" button to press.
   captionSavingShort: 'जतन करत आहोत…',
-  captionFeedbackTitle: 'कॅप्शनमध्ये बदल हवा आहे?',
-  captionFeedbackHint:
-    'काय बदलायचे ते आपल्या शब्दांत लिहा. AI आपली विनंती समजून कॅप्शनमध्ये बदल करेल.',
   revisingCaption: 'कॅप्शन सुधारली जात आहे…',
-  chipsCaption: [
-    'कॅप्शन अधिक स्पष्ट आणि सोपे करा',
-    'महत्त्वाच्या माहितीवर अधिक भर द्या',
-    'भाषा आणखी सोपी करा',
-    'शेवटी योग्य हॅशटॅग जोडा',
-  ],
 
   // Icon-button row under a social poster + the icon pair inside the caption box.
   // Icon-only controls, so every one of these is its title/aria-label — never visible text.
@@ -1236,15 +1225,35 @@ export const STR = {
   iconCopyCaption: 'कॅप्शन कॉपी करा',
   iconGenerateCaption: 'कॅप्शन तयार करा',
 
-  // One fold for both change requests, switched by the pills at its top. The two
-  // drafts are kept apart, so switching a pill never discards what was typed.
-  changeRequestTitle: 'AI ला सूचना द्या',
-  changeTabCaption: 'कॅप्शन',
-  changeTabPoster: 'पोस्टर',
-  changeCaptionPlaceholder:
-    'कॅप्शनमध्ये काय बदलायचे ते लिहा — उदा. "भाषा आणखी सोपी करा"…',
-  changePosterPlaceholder:
-    'पोस्टरमध्ये काय बदलायचे ते लिहा — उदा. "मजकूर आणखी मोठा करा"…',
+  // The edit assistant (EditChat) — the conversation that replaced the "AI ला सूचना द्या"
+  // fold. The officer describes the change in their own words; the assistant decides whether
+  // it is the caption, the poster, a fresh design or both, and asks one question when unsure.
+  editChatTitle: 'AI सोबत बदल करा',
+  editChatInputLabel: 'तुम्हाला काय बदलायचे आहे?',
+  editChatSend: 'पाठवा',
+  editChatClear: 'संभाषण पुसा',
+  editChatThinking: 'समजून घेत आहे…',
+  editChatHintSocial:
+    'कॅप्शन, पोस्टर किंवा दोन्हीमध्ये काय बदलायचे ते तुमच्या शब्दांत सांगा. हवे असल्यास पोस्टरवर खूण करूनही सांगा.',
+  editChatHintCaption: 'कॅप्शनमध्ये काय बदलायचे ते तुमच्या शब्दांत सांगा.',
+  editChatHintPoster:
+    'पोस्टरमध्ये काय बदलायचे ते तुमच्या शब्दांत सांगा — मजकूर, फोटो, रंग किंवा पूर्ण नवीन डिझाइन. हवे असल्यास पोस्टरवर खूण करूनही सांगा.',
+  editChatPlaceholderSocial:
+    'उदा. कॅप्शन थोडे लहान करा आणि पोस्टरवरचा फोटो बदला…',
+  editChatPlaceholderCaption: 'उदा. भाषा आणखी सोपी करा…',
+  editChatPlaceholderPoster: 'उदा. शीर्षक आणखी मोठे आणि ठळक करा…',
+  editChatStartersSocial: [
+    'कॅप्शन थोडे लहान करा',
+    'पोस्टरवरील मजकूर मोठा करा',
+    'पूर्ण नवीन डिझाइन करा',
+  ] as readonly string[],
+  editChatStartersPoster: [
+    'शीर्षक मोठे करा',
+    'फोटो बदला',
+    'पूर्ण नवीन डिझाइन करा',
+  ] as readonly string[],
+  editChatMarksNote: (count: number) =>
+    `पोस्टरवरील ${count.toLocaleString('mr-IN')} खुणा पुढच्या संदेशासोबत पाठवल्या जातील.`,
 
   // Poster version history (every render is kept; the strip lets users compare/download)
   posterVersionsTitle: 'आधीच्या आवृत्त्या',
@@ -1755,16 +1764,16 @@ export const STR = {
 
   // Explainer videos (/video)
   navVideo: 'स्टोरीबोर्ड',
-  videoTitle: 'नवीन व्हिडिओ तयार करा',
+  videoTitle: 'नवीन स्टोरीबोर्ड तयार करा',
   videoIntro:
-    'टिपणीवरून दोन स्वतंत्र गोष्टी तयार होतील: मराठी निवेदन आणि आवाज बंद असतानाही माहिती समजावणारी साधी दृश्य-कथा. आधी दोन्ही तपासा — व्हिडिओ तयार करण्याचा खर्च फक्त तुमच्या मंजुरीनंतरच होतो.',
-  videoInputModeLabel: 'व्हिडिओ कशावरून तयार करायचा?',
+    'टिपणी किंवा तयार मराठी निवेदनावरून दृश्यनिहाय स्टोरीबोर्ड तयार होतो — प्रत्येक दृश्याचे निवेदन, दृश्य-वर्णन आणि प्रारंभ व अंतिम फ्रेम. आधी संहिता तपासा, मग स्टोरीबोर्ड.',
+  videoInputModeLabel: 'स्टोरीबोर्ड कशावरून तयार करायचा?',
   videoInputModeNote: 'टिपणीवरून',
   videoInputModeNoteDesc:
-    'टिपणीतील माहितीतून संहिता तयार करून ती जास्तीत जास्त ५ सेकंदांच्या दृश्यांमध्ये विभागली जाईल.',
+    'टिपणीतील माहितीतून संहिता लिहून ती जास्तीत जास्त ५ सेकंदांच्या स्टोरीबोर्ड दृश्यांमध्ये विभागली जाईल.',
   videoInputModeScript: 'तयार संहितेवरून',
   videoInputModeScriptDesc:
-    'मराठी निवेदनातील प्रत्येक शब्द जशाचा तसा ठेवून व्हिडिओची वेळ ठरवली जाईल.',
+    'मराठी निवेदनातील प्रत्येक शब्द जशाचा तसा ठेवून स्टोरीबोर्डची दृश्ये ठरवली जातील.',
   videoNoteLabel: 'टिपणी येथे लिहा किंवा चिकटवा',
   videoScriptInputLabel: 'तयार मराठी निवेदन येथे लिहा किंवा चिकटवा',
   videoScriptInputHint:
@@ -1776,7 +1785,7 @@ export const STR = {
   // entirely and decides the video's length.
   videoNarrationAudioLabel: 'निवेदनाची ध्वनिफीत (ऐच्छिक)',
   videoNarrationAudioHint:
-    'तुमच्याकडे या निवेदनाची तयार ध्वनिफीत असेल तर ती द्या — तीच व्हिडिओत वापरली जाईल आणि तिच्या लांबीवरून दृश्ये ठरतील. काहीही न दिल्यास आवाज आपोआप तयार होईल.',
+    'तुमच्याकडे या निवेदनाची तयार ध्वनिफीत असेल तर ती जोडा — तीच वापरली जाईल आणि तिच्या लांबीवरून स्टोरीबोर्डची दृश्ये ठरतील. काहीही न दिल्यास आवाज आपोआप तयार होईल.',
   videoNarrationAudioRemove: 'ध्वनिफीत काढा',
   videoNarrationAudioMeasured: 'दिलेल्या ध्वनिफीतीवरून',
   videoNarrationAudioUnreadable:
@@ -1800,7 +1809,9 @@ export const STR = {
   videoPromptImageTooBig: 'चित्र ५० MB पेक्षा मोठे असू शकत नाही.',
   videoPromptImageWrongType: 'फक्त JPG, PNG किंवा WEBP चित्रे जोडता येतात.',
   videoPromptImageAlt: (index: number) => `जोडलेले संदर्भ चित्र ${index}`,
-  videoOrientationLabel: 'आकार',
+  videoNotePlaceholder: 'योजना, निर्णय किंवा बातमीची माहिती येथे लिहा किंवा चिकटवा…',
+  videoScriptPlaceholder: 'आवाजात वाचायचे मराठी निवेदन येथे लिहा किंवा चिकटवा…',
+  videoOrientationLabel: 'फ्रेमचा आकार',
   videoOrientationLandscape: 'आडवा (16:9)',
   videoOrientationLandscapeHint: 'YouTube, वेबसाईट',
   videoOrientationVertical: 'उभा (9:16)',
@@ -1814,14 +1825,14 @@ export const STR = {
   // resolution pinned server-side the two tiers cost the same, and the estimate
   // rendered beside each option now says so on its own.
   videoTierStandardHint: 'उच्च दर्जा — सर्व्हर सेटिंगनुसार लागू',
-  videoCreate: 'संहिता तयार करा',
-  videoCreateFromScript: 'दृश्य आराखडा तयार करा',
-  videoCreateHint: 'या टप्प्यावर व्हिडिओचा खर्च होत नाही.',
+  videoCreate: 'संहिता व स्टोरीबोर्ड तयार करा',
+  videoCreateFromScript: 'स्टोरीबोर्ड तयार करा',
+  videoCreateHint: 'येथे फक्त संहिता व स्टोरीबोर्ड तयार होतो; व्हिडिओचा खर्च होत नाही.',
   videoEstimateApprox:
     'खर्च अंदाजे आहे — नक्की खर्च स्टोरीबोर्ड मंजुरीच्या वेळी दिसेल.',
   videoActiveBlocked:
-    'दुसरा व्हिडिओ प्रकल्प सध्या तयार होत आहे. तो पूर्ण झाल्यावर नवीन सुरू करता येईल.',
-  videoRecent: 'मागील व्हिडिओ',
+    'दुसरा स्टोरीबोर्ड सध्या तयार होत आहे. तो पूर्ण झाल्यावर नवीन सुरू करता येईल.',
+  videoRecent: 'मागील स्टोरीबोर्ड',
   videoNoteTooShort: 'टिपणी किमान २० अक्षरांची हवी.',
   videoScriptTooShort: 'तयार निवेदन किमान २० अक्षरांचे हवे.',
 
@@ -2137,18 +2148,6 @@ export const STR = {
   nvwForkActiveHint:
     'नवीनतम व्हिडिओऐवजी निवडलेल्या व्हिडिओवरून पुढचा बदल केला जाईल.',
   nvwForkCancel: 'रद्द करा',
-  // Edit the video on screen, or make a new clip. Every follow-up used to be sent as an edit,
-  // so "दृश्य २: …" reached Gemini as a rewrite of scene 1 and failed after minutes.
-  nvwIntentLabel: 'ही सूचना कशासाठी?',
-  nvwIntentAuto: 'आपोआप ओळखा',
-  nvwIntentEdit: 'हाच व्हिडिओ बदला',
-  nvwIntentNew: 'नवीन क्लिप',
-  nvwIntentAutoHint:
-    'छोटा बदल असेल तर हाच व्हिडिओ बदलला जाईल; वेगळे दृश्य असेल तर नवीन क्लिप तयार होईल.',
-  nvwIntentEditHint:
-    'आधीच्या व्हिडिओत फक्त सांगितलेला बदल होईल. बाकी सर्व तसेच राहील.',
-  nvwIntentNewHint:
-    'आधीच्या व्हिडिओपासून स्वतंत्र नवीन क्लिप तयार होईल. निवडलेली पात्रे व आकार तसेच राहतील.',
   // Turns are not numbered anywhere else on this page, so the ordinal exists for this one
   // job: naming which video a pending change will continue from.
   nvwForkTurn: 'सूचना',
@@ -2208,6 +2207,30 @@ export const STR = {
     'या संभाषणातील पात्रे आता बदलता येत नाहीत. वेगळी पात्रे हवी असल्यास नवीन संभाषण सुरू करा — साठवलेली पात्रे तिथे पुन्हा निवडता येतील.',
   nvwCastFull: 'एका संभाषणात कमाल ४ पात्रे निवडता येतात.',
   nvwCastDone: 'पूर्ण झाले',
+
+  // Two conversation MODES (migration 0060). Chosen before the first message and fixed by
+  // it — the two cannot be mixed in one conversation, so switching is a new conversation.
+  nvwModeLabel: 'संभाषणाचा प्रकार',
+  nvwModeVideo: 'व्हिडिओ',
+  nvwModeStoryboard: 'स्टोरीबोर्ड',
+  nvwModeStoryboardHint:
+    'संहिता व स्टोरीबोर्ड लिहा, दृश्ये बदला आणि सांगितल्यास दृश्यांची चित्रे तयार करा.',
+  nvwModeLocked:
+    'या संभाषणाचा प्रकार पहिल्या संदेशासोबत ठरला आहे. दुसऱ्या प्रकारासाठी नवीन संभाषण सुरू करा.',
+  nvwStoryboardPlaceholder:
+    'उदा. “या टिपणीवरून ६० सेकंदांच्या व्हिडिओचा स्टोरीबोर्ड तयार करा” किंवा “दृश्य २ लहान करा”…',
+  nvwStoryboardSend: 'पाठवा',
+  nvwStoryboardEmptyTitle: 'कोणत्या व्हिडिओचा स्टोरीबोर्ड तयार करायचा?',
+  nvwStoryboardEmptyHint:
+    'टिपणी किंवा कल्पना लिहा. नंतर “दृश्य ४ नंतर आणखी एक दृश्य जोडा”, “संपूर्ण स्टोरीबोर्ड अधिक भावनिक करा” किंवा “सुरुवातीच्या दृश्याचे चित्र तयार करा” असे सांगता येईल.',
+  nvwStoryboardWriting: 'लिहित आहे…',
+  nvwStoryboardImageCreating: 'चित्र तयार होत आहे…',
+  nvwStoryboardImageCreatingHint:
+    'चित्र तयार व्हायला साधारण अर्धा ते एक मिनिट लागू शकतो.',
+  nvwStoryboardFailed: 'हे उत्तर पूर्ण होऊ शकले नाही.',
+  nvwStoryboardBusy: 'आधीचे उत्तर पूर्ण होईपर्यंत थांबा.',
+  nvwStoryboardImages: 'तयार केलेली चित्रे',
+  nvwStoryboardImageOpen: 'चित्र मोठे करून पाहा',
 
   // ---------- वापर विश्लेषण (/analytics) ----------
   navAnalytics: 'वापर विश्लेषण',
@@ -2286,6 +2309,7 @@ export const STR = {
   analyticsTaskHindiTranslation: 'हिंदी भाषांतर',
   analyticsTaskMarathiTranslation: 'मराठी भाषांतर',
   analyticsTaskProofreading: 'मुद्रितशोधन व भाषा तपासणी',
+  analyticsTaskEditAssistant: 'बदलांची विनंती समजून घेणे',
   analyticsTaskSocialPost: 'सोशल मीडिया पोस्टर तयार करणे',
   analyticsTaskCarouselPlan: 'कॅरोसेल स्लाइडची आखणी',
   analyticsTaskCarouselSlide: 'कॅरोसेल स्लाइड तयार करणे',

@@ -675,6 +675,8 @@ const TASK_ORDER = [
   'carousel_slide',
   'social_caption_creation',
   'social_caption_revision',
+  // The conversational edit box's planning call; the edit it plans is metered separately.
+  'edit_assistant',
   'youtube_thumbnail_creation',
   'poster_regeneration',
   'poster_content_revision',

@@ -7,12 +7,14 @@
 // redesign / recolour / mark-for-image-edit / free-this-space, then one brand-mark
 // publish button per platform — फेसबुक live, X disabled), the caption as an ALWAYS-EDITABLE
 // textarea with copy (and, on a run that has none, generate) icons in its bottom-right
-// corner, the marker notes for whatever the user has marked on the poster, and one
-// "बदल हवा आहे?" fold whose two pills switch between the caption and the poster change
-// request. The hand edit has no save button: it autosaves when focus leaves the box.
+// corner, the marker notes for whatever the user has marked on the poster, and the edit
+// assistant (EditChat): one conversation in which the officer says what they want changed —
+// caption, poster, a fresh design or both — and the assistant routes it to the right edit.
+// The hand edit has no save button: it autosaves when focus leaves the box.
 
 import { useState } from 'react';
 import type {
+  EditAssistantAction,
   GenerationDetail,
   PosterImageFeedbackRequest,
 } from '@dgipr/schemas';
@@ -26,6 +28,7 @@ import {
   SquarePen,
 } from 'lucide-react';
 import {
+  generateCaption,
   plainPosterDownloadUrl,
   posterDownloadUrl,
   publishGeneration,
@@ -36,23 +39,16 @@ import {
 import { STR } from '../lib/strings';
 import { errorMessage } from '../lib/errorMessage';
 import { usePosterMarkers } from '../lib/usePosterMarkers';
-import { ClearActionToggle, clearActionLabel } from './ClearActionToggle';
+import { posterRoundPayload } from '../lib/posterRound';
 import { FacebookLogo } from './FacebookLogo';
 import { XLogo } from './XLogo';
-import {
-  CLEAR_LETTERS,
-  PosterAnnotator,
-  type AnnotatorMode,
-} from './PosterAnnotator';
+import { PosterAnnotator, type AnnotatorMode } from './PosterAnnotator';
+import { PosterMarkNotes } from './PosterMarkNotes';
 import { PosterVersionStrip } from './PosterVersionStrip';
 import { CanvaLink } from './CanvaLink';
-// The caption, the marker notes and the change note are all written in Marathi on an InScript
-// keyboard, which a controlled box can overwrite half-formed. See ComposeSafeInput.
-import { ComposeSafeInput, ComposeSafeTextarea } from './ComposeSafeInput';
+import { EditChat } from './EditChat';
 import { ErrorNotice } from './ErrorNotice';
 import { SocialCaptionEditor } from './SocialCaptionEditor';
-
-type ChangeTab = 'caption' | 'poster';
 
 export function SocialPostView({
   detail,
@@ -105,18 +101,11 @@ export function SocialPostView({
   const [annotMode, setAnnotMode] = useState<AnnotatorMode | null>(null);
   const annotOpen = annotMode !== null;
   // The caption box itself — its draft, autosave and generate button — is
-  // SocialCaptionEditor, shared with the carousel card.
-  // One fold, two change requests. Both drafts live here so switching a pill is a
-  // pure view change — nothing typed is thrown away.
-  const [changeTab, setChangeTab] = useState<ChangeTab>('caption');
-  const [captionChange, setCaptionChange] = useState('');
-  const [posterChange, setPosterChange] = useState('');
+  // SocialCaptionEditor, shared with the carousel card. Change REQUESTS go through the edit
+  // assistant below; this state only serves the marks' own send button under the poster.
   const [sendingChange, setSendingChange] = useState(false);
   const [changeError, setChangeError] = useState<string | null>(null);
 
-  // The caption revision runs off the row's status (like translation), so it is read
-  // from the payload flag rather than from `busy`.
-  const captionRevising = detail.captionRevising;
   const showSpinner = busy || pending;
   // Poster edits do NOT need a completed row — every poster route (image-feedback,
   // regenerate, restore) asks only for a poster and no running job. Gating them on
@@ -157,73 +146,64 @@ export function SocialPostView({
     }
   };
 
-  const sendChange = async (target: ChangeTab = changeTab) => {
-    if (sendingChange) return;
-    setChangeError(null);
-    if (target === 'caption') {
-      const text = captionChange.trim();
-      if (text.length < 3) {
-        setChangeError(STR.feedbackTooShort);
-        return;
-      }
-      setSendingChange(true);
-      try {
-        await sendCaptionFeedback(detail.id, text);
-        setCaptionChange('');
-        await onChanged();
-      } catch (e) {
-        setChangeError(errorMessage(e));
-      } finally {
-        setSendingChange(false);
-      }
-      return;
-    }
-    const text = posterChange.trim();
-    if (markers.length === 0 && clearRegions.length === 0 && text.length < 3) {
-      setChangeError(STR.feedbackTooShort);
-      return;
-    }
-    if (markers.some((m) => m.note.trim().length < 3)) {
-      setChangeError(STR.markerNoteTooShort);
-      return;
-    }
-    // The schema wants absent keys, not '' / [] (min lengths reject those). A
-    // clear region's note is genuinely optional — an empty one means "you decide
-    // where that content goes" — so it is omitted rather than sent blank.
-    const payload: PosterImageFeedbackRequest = {
-      ...(text.length >= 3 ? { feedback: text } : {}),
-      ...(markers.length > 0
-        ? {
-            annotations: markers.map((m) => ({
-              region: m.region,
-              note: m.note.trim(),
-            })),
-          }
-        : {}),
-      ...(clearRegions.length > 0
-        ? {
-            clearRegions: clearRegions.map((c) => ({
-              region: c.region,
-              action: c.action,
-              ...(c.note.trim().length > 0 ? { note: c.note.trim() } : {}),
-            })),
-          }
-        : {}),
-    };
+  // One poster round, shared by the marks' send button and the edit assistant. Throws on
+  // failure so each caller reports it where the officer is looking.
+  const submitPosterRound = async (payload: PosterImageFeedbackRequest) => {
     setSendingChange(true);
     setPending(true);
     try {
       await sendPosterImageFeedback(detail.id, payload);
       markSubmitted();
-      setPosterChange('');
       setAnnotMode(null);
       onImageWorkStarted?.();
       await onChanged();
-    } catch (e) {
-      setChangeError(errorMessage(e));
     } finally {
       setSendingChange(false);
       setPending(false);
+    }
+  };
+
+  // The marks, sent on their own with the notes typed beside them.
+  const sendMarks = async () => {
+    if (sendingChange) return;
+    setChangeError(null);
+    if (markers.some((m) => m.note.trim().length < 3)) {
+      setChangeError(STR.markerNoteTooShort);
+      return;
+    }
+    try {
+      await submitPosterRound(posterRoundPayload(markers, clearRegions));
+    } catch (e) {
+      setChangeError(errorMessage(e));
+    }
+  };
+
+  // Carry out one step of the edit assistant's plan, through the same routes the old
+  // "AI ला सूचना द्या" fold used. The assistant only ever proposes what this card can do.
+  const executeAction = async (action: EditAssistantAction) => {
+    switch (action.type) {
+      case 'caption_revise':
+        await sendCaptionFeedback(detail.id, action.instruction);
+        await onChanged();
+        return;
+      case 'caption_generate':
+        await generateCaption(detail.id);
+        await onChanged();
+        return;
+      case 'poster_edit':
+        await submitPosterRound(
+          posterRoundPayload(markers, clearRegions, {
+            feedback: action.instruction,
+            markerNotes: action.markerNotes,
+          }),
+        );
+        return;
+      case 'poster_redesign':
+        await redoPoster(false);
+        return;
+      case 'poster_heading':
+        // Article posters only — never planned for a social card.
+        return;
     }
   };
 
@@ -237,11 +217,6 @@ export function SocialPostView({
   // What is left is the one press that could not recover: a publish already in flight —
   // posting is irreversible, so a second click must never make a second live post.
   const publishBlocked = publishingPost;
-  const changeSuggestions =
-    changeTab === 'caption' ? STR.chipsCaption : STR.chipsPosterImage;
-  const changeDraft = changeTab === 'caption' ? captionChange : posterChange;
-  const setChangeDraft =
-    changeTab === 'caption' ? setCaptionChange : setPosterChange;
 
   return (
     <section className="card">
@@ -366,12 +341,9 @@ export function SocialPostView({
                     : STR.iconEditPoster
                 }
                 disabled={showSpinner}
-                onClick={() => {
-                  const next = annotMode === 'mark' ? null : 'mark';
-                  setAnnotMode(next);
-                  // Marking only feeds the poster request, so send the fold there too.
-                  if (next) setChangeTab('poster');
-                }}
+                onClick={() =>
+                  setAnnotMode(annotMode === 'mark' ? null : 'mark')
+                }
               >
                 <SquarePen size={18} strokeWidth={1.9} aria-hidden="true" />
               </button>
@@ -394,11 +366,9 @@ export function SocialPostView({
                     : STR.iconClearSpace
                 }
                 disabled={showSpinner}
-                onClick={() => {
-                  const next = annotMode === 'clear' ? null : 'clear';
-                  setAnnotMode(next);
-                  if (next) setChangeTab('poster');
-                }}
+                onClick={() =>
+                  setAnnotMode(annotMode === 'clear' ? null : 'clear')
+                }
               >
                 <SquareDashed size={18} strokeWidth={1.9} aria-hidden="true" />
               </button>
@@ -439,7 +409,7 @@ export function SocialPostView({
                   className="btn btn-primary"
                   aria-busy={sendingChange}
                   disabled={showSpinner || sendingChange}
-                  onClick={() => void sendChange('poster')}
+                  onClick={() => void sendMarks()}
                 >
                   {sendingChange ? STR.sendingFeedback : STR.sendFeedback}
                 </button>
@@ -503,244 +473,37 @@ export function SocialPostView({
             busy={showSpinner}
           />
 
-          {/* Marker notes: shown only once something is actually marked on the poster
-              (or a marked round was just sent). Their submit action sits below the
-              poster icons; the fold below remains for optional whole-poster feedback. */}
-          {detail.posterUrl &&
-          (markers.length > 0 || submittedMarkers.length > 0) ? (
-            <div className="marker-notes">
-              <p className="hint">
-                {markers.length > 0
-                  ? STR.posterAnnotateHint
-                  : STR.markersSubmittedHint}
-              </p>
-              {markers.length === 0 ? (
-                submittedMarkers.map((marker, i) => (
-                  <div
-                    className="marker-note-row marker-note-submitted"
-                    key={`s-${marker.id}`}
-                  >
-                    <span className="marker-note-badge" aria-hidden="true">
-                      {i + 1}
-                    </span>
-                    <span className="marker-note-text">{marker.note}</span>
-                  </div>
-                ))
-              ) : (
-                <>
-                  {markers.map((marker, i) => (
-                    <div className="marker-note-row" key={marker.id}>
-                      <span className="marker-note-badge" aria-hidden="true">
-                        {i + 1}
-                      </span>
-                      <ComposeSafeInput
-                        type="text"
-                        value={marker.note}
-                        placeholder={STR.markerNotePlaceholder}
-                        aria-label={`${STR.markerLabel} ${i + 1}`}
-                        maxLength={500}
-                        disabled={showSpinner || sendingChange}
-                        onChange={(next) => setNote(marker.id, next)}
-                      />
-                      <button
-                        type="button"
-                        className="marker-note-remove"
-                        aria-label={STR.markerRemove}
-                        disabled={showSpinner || sendingChange}
-                        onClick={() => removeMarker(marker.id)}
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ))}
-                </>
-              )}
-            </div>
+          {/* What is marked on the poster, with a note beside each mark. */}
+          {detail.posterUrl ? (
+            <PosterMarkNotes
+              markers={markers}
+              submittedMarkers={submittedMarkers}
+              clearRegions={clearRegions}
+              submittedClearRegions={submittedClearRegions}
+              onNoteChange={setNote}
+              onRemoveMarker={removeMarker}
+              onClearNoteChange={setClearNote}
+              onClearActionChange={setClearAction}
+              onRemoveClearRegion={removeClearRegion}
+              disabled={showSpinner || sendingChange}
+            />
           ) : null}
 
-          {/* The blue "free this space" boxes. Their note is OPTIONAL — an empty
-              one means "you decide where that content goes" — so there is no
-              too-short validation here and none of these rows can block a send. */}
-          {detail.posterUrl &&
-          (clearRegions.length > 0 || submittedClearRegions.length > 0) ? (
-            <div className="marker-notes">
-              <p className="hint">
-                {clearRegions.length > 0
-                  ? STR.clearRegionHint
-                  : STR.clearRegionSubmittedHint}
-              </p>
-              {clearRegions.length === 0
-                ? submittedClearRegions.map((c, i) => (
-                    <div
-                      className="marker-note-row marker-note-submitted"
-                      key={`sc-${c.id}`}
-                    >
-                      <span
-                        className="marker-note-badge clear-badge"
-                        aria-hidden="true"
-                      >
-                        {CLEAR_LETTERS[i] ?? i + 1}
-                      </span>
-                      <span className="marker-note-text">
-                        {clearActionLabel(c.action)}
-                        {c.note ? ` — ${c.note}` : ''}
-                      </span>
-                    </div>
-                  ))
-                : clearRegions.map((c, i) => (
-                    <div key={c.id}>
-                      <div className="marker-note-row">
-                        <span
-                          className="marker-note-badge clear-badge"
-                          aria-hidden="true"
-                        >
-                          {CLEAR_LETTERS[i] ?? i + 1}
-                        </span>
-                        <ComposeSafeInput
-                          type="text"
-                          value={c.note}
-                          placeholder={STR.clearRegionNotePlaceholder}
-                          aria-label={`${STR.clearRegionLabel} ${CLEAR_LETTERS[i] ?? i + 1}`}
-                          maxLength={500}
-                          disabled={showSpinner || sendingChange}
-                          onChange={(next) => setClearNote(c.id, next)}
-                        />
-                        <button
-                          type="button"
-                          className="marker-note-remove"
-                          aria-label={STR.clearRegionRemove}
-                          disabled={showSpinner || sendingChange}
-                          onClick={() => removeClearRegion(c.id)}
-                        >
-                          ✕
-                        </button>
-                      </div>
-                      <ClearActionToggle
-                        value={c.action}
-                        letter={String(CLEAR_LETTERS[i] ?? i + 1)}
-                        disabled={showSpinner || sendingChange}
-                        onChange={(action) => setClearAction(c.id, action)}
-                      />
-                    </div>
-                  ))}
-            </div>
-          ) : null}
+          {/* The marks' own send button reports here. */}
+          {changeError ? <ErrorNotice message={changeError} /> : null}
 
-          {/* One place for the error whenever anything is annotated — the submit
-              button for that case sits under the poster, and the fold below shows
-              it instead when there is nothing annotated. */}
-          {changeError && (markers.length > 0 || clearRegions.length > 0) ? (
-            <ErrorNotice message={changeError} />
-          ) : null}
-
-          {/* One fold for both change requests. The pills only swap the view — each
-              draft is kept, so a half-typed caption note survives a look at the poster. */}
-          {detail.article !== null || detail.posterUrl ? (
-            <details
-              className="fold change-request"
-              aria-disabled={showSpinner}
-            >
-              <summary>{STR.changeRequestTitle}</summary>
-              <div className="fold-body">
-                <div className="change-pills" role="tablist">
-                  {detail.article !== null ? (
-                    <button
-                      type="button"
-                      role="tab"
-                      className="change-pill"
-                      aria-selected={changeTab === 'caption'}
-                      onClick={() => {
-                        setChangeTab('caption');
-                        setChangeError(null);
-                      }}
-                    >
-                      {STR.changeTabCaption}
-                    </button>
-                  ) : null}
-                  {detail.posterUrl ? (
-                    <button
-                      type="button"
-                      role="tab"
-                      className="change-pill"
-                      aria-selected={changeTab === 'poster'}
-                      onClick={() => {
-                        setChangeTab('poster');
-                        setChangeError(null);
-                      }}
-                    >
-                      {STR.changeTabPoster}
-                    </button>
-                  ) : null}
-                </div>
-                <p className="hint">
-                  {changeTab === 'caption'
-                    ? STR.captionFeedbackHint
-                    : STR.posterImageFeedbackHint}
-                </p>
-                {changeSuggestions.length > 0 ? (
-                  <div className="suggestion-row">
-                    <span className="suggestion-label">
-                      {STR.feedbackSuggestionsLabel}
-                    </span>
-                    {changeSuggestions.map((suggestion) => (
-                      <button
-                        key={suggestion}
-                        type="button"
-                        className="suggestion-chip"
-                        disabled={showSpinner || sendingChange}
-                        onClick={() => {
-                          setChangeDraft(suggestion);
-                          setChangeError(null);
-                        }}
-                      >
-                        {suggestion}
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-                <ComposeSafeTextarea
-                  value={changeDraft}
-                  onChange={(next) => {
-                    setChangeDraft(next);
-                    setChangeError(null);
-                  }}
-                  placeholder={
-                    changeTab === 'caption'
-                      ? STR.changeCaptionPlaceholder
-                      : markers.length > 0
-                        ? STR.posterOverallNotePlaceholder
-                        : STR.changePosterPlaceholder
-                  }
-                  rows={3}
-                  disabled={
-                    showSpinner ||
-                    sendingChange ||
-                    (changeTab === 'caption' && captionRevising)
-                  }
-                  style={{ marginTop: 10 }}
-                />
-                <div className="btn-row" style={{ marginTop: 12 }}>
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    disabled={
-                      showSpinner ||
-                      sendingChange ||
-                      (changeTab === 'caption' && captionRevising)
-                    }
-                    onClick={() => void sendChange()}
-                  >
-                    {sendingChange ? STR.sendingFeedback : STR.sendFeedback}
-                  </button>
-                </div>
-                {changeError &&
-                markers.length === 0 &&
-                clearRegions.length === 0 ? (
-                  <ErrorNotice message={changeError} />
-                ) : null}
-              </div>
-            </details>
-          ) : null}
+          {/* The edit assistant: say what to change, in any words, and it works out whether
+              that is the caption, the poster, a fresh design or both. */}
+          <EditChat
+            generationId={detail.id}
+            surface="social"
+            marks={detail.posterUrl ? { markers, clearRegions } : undefined}
+            onExecute={executeAction}
+            hint={STR.editChatHintSocial}
+            placeholder={STR.editChatPlaceholderSocial}
+            starters={detail.posterUrl ? STR.editChatStartersSocial : []}
+            disabled={sendingChange}
+          />
         </div>
       </div>
       {/* Switching version reuses `pending` — it means the same thing here as it does for a

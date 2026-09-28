@@ -14,11 +14,12 @@
 // navigation would remount the tree in the middle of a generation the officer is watching.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type {
-  NewVideoAspect,
-  NewVideoCharacter,
-  NewVideoConversation,
-  NewVideoTurnIntentChoice,
+import {
+  DEFAULT_NEW_VIDEO_MODE,
+  type NewVideoAspect,
+  type NewVideoCharacter,
+  type NewVideoConversation,
+  type NewVideoMode,
 } from '@dgipr/schemas';
 import {
   getNewVideoConversation,
@@ -31,6 +32,11 @@ import { rememberMyVideoConversationId } from './newVideoDraft';
 // Video generation runs for minutes, so a chat-speed poll would be thousands of requests for
 // one answer. 3 s is still well inside "did something just happen?" for a person watching.
 const POLL_INTERVAL_MS = 3000;
+
+// A STORYBOARD answer is text written into the row as it streams (every ~0.7 s on the API
+// side), so the poll is what the officer watches it arrive through. Faster than the video
+// poll, and still only while something is actually being written.
+const STORYBOARD_POLL_INTERVAL_MS = 1200;
 
 // One image being staged for the next turn. `id` is present once the upload lands; until then
 // the chip shows the local preview and the send waits for it.
@@ -50,6 +56,11 @@ export function useNewVideoWorkflow(
 ): {
   conversationId: string | null;
   conversation: NewVideoConversation | null;
+  // THE CONVERSATION'S MODE (migration 0060). Picked before the first message and fixed by
+  // it: once a conversation exists its stored mode is the answer and `setMode` is a no-op.
+  mode: NewVideoMode;
+  setMode: (mode: NewVideoMode) => void;
+  modeLocked: boolean;
   images: readonly StagedImage[];
   loading: boolean;
   sending: boolean;
@@ -68,11 +79,7 @@ export function useNewVideoWorkflow(
   setForkFromTurnId: (turnId: string | null) => void;
   addImages: (files: readonly File[]) => void;
   removeImage: (key: string) => void;
-  send: (
-    prompt: string,
-    aspect: NewVideoAspect,
-    intent?: NewVideoTurnIntentChoice,
-  ) => Promise<boolean>;
+  send: (prompt: string, aspect: NewVideoAspect) => Promise<boolean>;
   refresh: () => Promise<void>;
 } {
   // Seeded from the URL and then owned locally, so a conversation created by the first turn
@@ -89,6 +96,11 @@ export function useNewVideoWorkflow(
   // establishes them and stacking a reference into the middle of an edit chain is a
   // documented failure mode.
   const [pickedCastIds, setPickedCastIds] = useState<readonly string[]>([]);
+  // The mode picked for a conversation that has not started yet. Once it has, the stored
+  // mode wins — see `mode` below.
+  const [pickedMode, setPickedMode] = useState<NewVideoMode>(
+    DEFAULT_NEW_VIDEO_MODE,
+  );
   // Armed by clicking a turn, cleared once the instruction it applied to has left. Held here
   // rather than in the composer because it belongs to the CONVERSATION being read — the
   // officer arms it by pressing a button on a turn well above the box.
@@ -116,6 +128,9 @@ export function useNewVideoWorkflow(
     // Nor a fork point: a turn id belongs to one conversation, and carrying it across would
     // send the next request an id the server would rightly refuse.
     setForkFromTurnId(null);
+    // A new conversation starts on the default mode rather than on whatever the last one
+    // was: the choice is made on the empty page, where the selector is the first thing seen.
+    setPickedMode(DEFAULT_NEW_VIDEO_MODE);
   }, [conversationId]);
 
   const refresh = useCallback(async () => {
@@ -136,6 +151,19 @@ export function useNewVideoWorkflow(
   }, [refresh]);
 
   const busy = conversation?.busy ?? false;
+  // Locked as soon as there IS a conversation — including while an opened one is still being
+  // fetched, so the selector never offers a choice the server would refuse. Until the fetch
+  // lands the picked value shows; it is the stored one from then on.
+  const modeLocked = activeId !== null;
+  const mode: NewVideoMode = conversation?.mode ?? pickedMode;
+  const modeRef = useRef<NewVideoMode>(mode);
+  modeRef.current = mode;
+  const setMode = useCallback(
+    (next: NewVideoMode) => {
+      if (!modeLocked) setPickedMode(next);
+    },
+    [modeLocked],
+  );
   // Locked once there is a video to edit. Read off the TURNS rather than off the cast itself:
   // a conversation that started with nobody in it must not become pickable later, or the
   // picker would offer to add a character to a chain that cannot receive one.
@@ -156,6 +184,8 @@ export function useNewVideoWorkflow(
 
   // Polls only while something is actually generating. A finished conversation is static —
   // nothing on the server can change it — so an idle page makes no requests at all.
+  const pollInterval =
+    mode === 'storyboard' ? STORYBOARD_POLL_INTERVAL_MS : POLL_INTERVAL_MS;
   useEffect(() => {
     if (!activeId || !busy) return;
 
@@ -165,15 +195,15 @@ export function useNewVideoWorkflow(
     const tick = async () => {
       await refresh();
       if (cancelled) return;
-      timer = setTimeout(tick, POLL_INTERVAL_MS);
+      timer = setTimeout(tick, pollInterval);
     };
-    timer = setTimeout(tick, POLL_INTERVAL_MS);
+    timer = setTimeout(tick, pollInterval);
 
     return () => {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [activeId, busy, refresh]);
+  }, [activeId, busy, refresh, pollInterval]);
 
   const addImages = useCallback((files: readonly File[]) => {
     if (files.length === 0) return;
@@ -226,11 +256,7 @@ export function useNewVideoWorkflow(
   }, []);
 
   const send = useCallback(
-    async (
-      prompt: string,
-      aspect: NewVideoAspect,
-      intent: NewVideoTurnIntentChoice = 'auto',
-    ): Promise<boolean> => {
+    async (prompt: string, aspect: NewVideoAspect): Promise<boolean> => {
       if (prompt.trim() === '') return false;
       setSending(true);
       setError(null);
@@ -255,24 +281,41 @@ export function useNewVideoWorkflow(
         // already holds the cast and would refuse a DIFFERENT one, so there is nothing for a
         // client to add by echoing it back.
         const castToSend = lockedRef.current ? [] : castRef.current;
+        const storyboard = modeRef.current === 'storyboard';
 
-        const result = await sendNewVideoTurn({
-          // Verbatim. Not trimmed here either — the API sends exactly this string to Gemini,
-          // and the contract of this lane is that nothing on our side edits it.
-          prompt,
-          // The output shape, always sent: it travels as a request field, so it never touches
-          // the prompt above.
-          aspect,
-          ...(activeId ? { conversationId: activeId } : {}),
-          ...(imageIds.length > 0 ? { imageIds } : {}),
-          ...(castToSend.length > 0 ? { characterIds: [...castToSend] } : {}),
-          // Omitted unless armed, so the ordinary turn's request is byte-for-byte what it
-          // has always been.
-          ...(forkRef.current !== null ? { fromTurnId: forkRef.current } : {}),
-          // Edit the video on screen or make a new clip. Omitted for `auto` (the API decides
-          // from the instruction) and on a fork, which is always an edit.
-          ...(intent !== 'auto' && forkRef.current === null ? { intent } : {}),
-        });
+        const result = await sendNewVideoTurn(
+          storyboard
+            ? {
+                // A storyboard turn is an ordinary chat message: text, and the pictures that
+                // are context for it. No shape, cast, fork or edit/new choice — the API
+                // refuses the last three in this mode.
+                prompt,
+                mode: 'storyboard',
+                ...(activeId ? { conversationId: activeId } : {}),
+                ...(imageIds.length > 0 ? { imageIds } : {}),
+              }
+            : {
+                // Verbatim. Not trimmed here either — the API sends exactly this string to
+                // Gemini, and the contract of this lane is that nothing on our side edits it.
+                prompt,
+                mode: 'video',
+                // The output shape, always sent: it travels as a request field, so it never
+                // touches the prompt above.
+                aspect,
+                ...(activeId ? { conversationId: activeId } : {}),
+                ...(imageIds.length > 0 ? { imageIds } : {}),
+                ...(castToSend.length > 0
+                  ? { characterIds: [...castToSend] }
+                  : {}),
+                // Omitted unless armed, so the ordinary turn's request is byte-for-byte what
+                // it has always been.
+                ...(forkRef.current !== null
+                  ? { fromTurnId: forkRef.current }
+                  : {}),
+                // No `intent`: whether this edits the video on screen or makes a new clip is
+                // always the API's call (`auto`), read off the instruction itself.
+              },
+        );
 
         // Only cleared once the turn is on its way — the fork with it, since it described
         // this one instruction and the next one starts from what this produces. A FAILED
@@ -318,6 +361,9 @@ export function useNewVideoWorkflow(
   return {
     conversationId: activeId,
     conversation,
+    mode,
+    setMode,
+    modeLocked,
     images,
     loading,
     sending,
