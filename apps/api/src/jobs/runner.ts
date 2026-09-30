@@ -1060,8 +1060,8 @@ export function startGenerationJob(client: SupabaseClient, id: string): void {
     // ARTICLE_GENERATION_MODE. Keep it on the single-call path even when another article surface
     // opts back into the legacy full pipeline.
     const dloArticle = Boolean(row.dloIntakeId);
-    // /dlo is written ONLY by the fine-tuned gemma adapter: refuse before any download or
-    // spend if this deployment cannot do that, rather than quietly writing on another model.
+    // On gemma, /dlo is written only by the fine-tuned adapter: refuse before any download
+    // or spend if that is misconfigured. Other providers (OpenAI in production) pass.
     if (dloArticle) assertDloArticleProvider();
     const mode = dloArticle ? 'simple' : articleGenerationMode();
     const result =

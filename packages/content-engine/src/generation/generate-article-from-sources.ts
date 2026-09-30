@@ -114,7 +114,7 @@ export async function generateArticleFromSources(
   const statements = options?.statements ?? [];
   const designations = options?.designations ?? [];
   const dloPrompt = options?.promptMode === 'dlo';
-  // /dlo is adapter-only: never let this lane fall through to the Responses API.
+  // On gemma, /dlo must use the adapter (never the base); other providers pass.
   if (dloPrompt) assertDloArticleProvider();
 
   // References stay behind the same flag as the text lane, including /dlo. The embedding is

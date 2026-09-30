@@ -118,21 +118,18 @@ export function articleProviderReadsSources(): boolean {
 }
 
 /**
- * /dlo articles are written ONLY by the fine-tuned gemma adapter (2026-09-29). A /dlo run on
- * any other provider is refused rather than quietly written by a model the department did not
- * choose. The adapter half of that rule is gemmaDloModel's; this is the provider half.
+ * Pre-flight for a /dlo article. On gemma, /dlo is written ONLY by the fine-tuned adapter
+ * (never the base), so a gemma deployment with no endpoint or with GEMMA_DLO_MODEL naming the
+ * base is refused here, before any spend.
  *
- * Throws before any spend. Called by the runner ahead of the source downloads, and again by
- * both generators, so a caller that forgets the first check still cannot slip past.
+ * Any other provider is allowed (2026-09-30): the 2026-09-29 rule that refused /dlo on every
+ * provider but gemma stopped production, which runs ARTICLE_PROVIDER=openai. OpenAI reads the
+ * officer's files itself; a qwen run carrying files falls back to OpenAI in the runner.
+ *
+ * Called by the runner ahead of the source downloads, and again by both generators.
  */
 export function assertDloArticleProvider(): void {
-  const provider = articleProvider();
-  if (provider !== 'gemma') {
-    throw new Error(
-      `/dlo articles are written only by the fine-tuned gemma adapter, but ` +
-        `ARTICLE_PROVIDER=${provider}. Set ARTICLE_PROVIDER=gemma.`,
-    );
-  }
+  if (articleProvider() !== 'gemma') return;
   if (!isGemmaConfigured()) throw new GemmaNotConfiguredError('GEMMA_BASE_URL');
   // Resolves (and validates) the adapter name, so GEMMA_DLO_MODEL naming the base fails here.
   gemmaModelFor('dlo');
@@ -361,6 +358,13 @@ if (
 
   process.env.ARTICLE_PROVIDER = 'openai';
   check('so does openai', articleProviderReadsSources());
+  let dloOnOpenai: unknown = null;
+  try {
+    assertDloArticleProvider();
+  } catch (error) {
+    dloOnOpenai = error;
+  }
+  check('a /dlo article on openai is allowed (production)', dloOnOpenai === null);
   process.env.ARTICLE_PROVIDER = 'qwen';
   check(
     'qwen does NOT — it serves a text model, so a run with files stays on OpenAI',

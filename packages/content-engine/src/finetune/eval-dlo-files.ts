@@ -201,9 +201,23 @@ export function articleParts(article: string): {
   return { headings, paragraphs };
 }
 
-/** The first body paragraph — the lead, after any headline stack. */
+/**
+ * A standalone dateline paragraph — `**पुणे, दि. १३ ऑगस्ट २०२६ :**`. Learned rule 2 asks for
+ * exactly this on its own line, so it is furniture, never the lead: short, ends in a colon
+ * once the bold markers are gone.
+ */
+function isDatelineParagraph(paragraph: string): boolean {
+  const bare = paragraph.replace(/[*_]/gu, '').trim();
+  return (
+    /[:：]$/u.test(bare) && bare.split(/\s+/u).length <= 10 && !/[.।]\s/u.test(bare)
+  );
+}
+
+/** The first body paragraph — the lead, after any headline stack and standalone dateline. */
 export function leadParagraph(article: string): string {
-  return articleParts(article).paragraphs[0] ?? '';
+  return (
+    articleParts(article).paragraphs.find((p) => !isDatelineParagraph(p)) ?? ''
+  );
 }
 
 /** Sentences of the body, split on the Marathi and Latin terminators. */
@@ -293,6 +307,12 @@ export function attributionHeadings(article: string): string[] {
 export type FileCase = Readonly<{
   /** Tokens the article must carry (script- and hyphen-normalised). */
   mustContain?: readonly string[];
+  /**
+   * Tokens that must be read correctly IF the article mentions their context at all. An
+   * annex is detail rule 4 lets a news article condense away, so omitting it is fine; what
+   * this catches is the misread (`परिशिष्ट-६` for `परिशिष्ट ६क`).
+   */
+  mustReadIfMentioned?: readonly Readonly<{ trigger: string; token: string }>[];
   /** Names that must appear (the signatory, on a signed note). */
   signatories?: readonly string[];
   /** Tokens that must appear in the lead paragraph. */
@@ -309,7 +329,8 @@ export type FileCase = Readonly<{
  */
 export const FILE_CASES: Readonly<Record<string, FileCase>> = {
   'Press_Note_General.pdf': {
-    mustContain: ['६क', '३१ ऑगस्ट २०२६'],
+    mustContain: ['३१ ऑगस्ट २०२६'],
+    mustReadIfMentioned: [{ trigger: 'परिशिष्ट', token: '६क' }],
     signatories: ['कृष्णकुमार पाटील'],
     leadMustContain: ['३१ ऑगस्ट'],
     maxAppeals: 1,
@@ -354,6 +375,15 @@ export function structuralChecks(
     caseChecks.push({
       label: `contains ${token}`,
       ok: containsToken(article, token),
+    });
+  }
+  for (const { trigger, token } of fileCase.mustReadIfMentioned ?? []) {
+    const mentioned = article.includes(trigger);
+    caseChecks.push({
+      label: mentioned
+        ? `reads ${token} (article mentions ${trigger})`
+        : `reads ${token} (${trigger} omitted — ok)`,
+      ok: !mentioned || containsToken(article, token),
     });
   }
   for (const name of fileCase.signatories ?? []) {
@@ -1110,6 +1140,31 @@ export function fileModeChecks(): Array<[string, boolean]> {
   check(
     'files: the lead is the first body paragraph',
     leadParagraph(good).startsWith('पात्र'),
+  );
+  // The shape the GPT teacher actually returned on 2026-09-30: a standalone dateline line
+  // (learned rule 2) and the annex condensed away (rule 4). Both used to fail the case.
+  const condensed = [
+    '### *प्रस्ताव तातडीने सादर करा – शिक्षण संचालक कृष्णकुमार पाटील*',
+    '',
+    '**पुणे, दि. १३ ऑगस्ट २०२६ :**',
+    '',
+    'पात्र लाभार्थ्यांना ३१ ऑगस्ट २०२६ पर्यंत लाभ देण्यासाठी परिपूर्ण प्रस्ताव सादर करावेत, असे आवाहन शिक्षण संचालक कृष्णकुमार पाटील यांनी केले आहे.',
+    '',
+    'पात्र उमेदवारांनी विहित नमुन्यात अर्ज सादर करावा.',
+  ].join('\n');
+  check(
+    'files: a standalone dateline is not the lead',
+    leadParagraph(condensed).startsWith('पात्र लाभार्थ्यांना'),
+  );
+  check(
+    'files: an omitted annex passes the ६क read check',
+    structuralChecks(condensed, 'Press_Note_General.pdf', '').caseChecks.every(
+      (c) => c.ok,
+    ),
+  );
+  check(
+    'files: a sentence ending in a colon is still a lead',
+    leadParagraph('पुढील अटी लागू आहेत. त्या अशा:\n\nदुसरा.').startsWith('पुढील'),
   );
   check(
     'files: the terminator is not a paragraph',
