@@ -1,8 +1,8 @@
 """QLoRA distillation of the DGIPR article teacher into google/gemma-4-31B-it.
 
 Phase 3 of the distillation plan. Phase 1 captured teacher pairs, Phase 2 assembled them into
-`train.jsonl` / `eval.jsonl` plus a `dataset-report.json`; this trains a text-only LoRA adapter
-on them and writes the adapter alone — never a merged 62.5 GB checkpoint.
+`train.jsonl` / `eval.jsonl` plus a `dataset-report.json`; this trains a language-only LoRA adapter
+(vision tower frozen) on them and writes the adapter alone — never a merged 62.5 GB checkpoint.
 
 Run it on an on-demand A100/H100 80GB pod, not on serverless: training is a persistent process.
 
@@ -40,6 +40,19 @@ keeps the seven projection names only where they sit under the language model. S
 same `q_proj`/`k_proj`/`v_proj`/`o_proj` names, so a plain suffix list — which is what almost
 every QLoRA example passes — would adapt the image encoder too. That is what would change image
 reading from today's behaviour, and what would stop vLLM loading the adapter beside the base.
+
+MULTIMODAL EXAMPLES (2026-09-29). A pair captured with `--student vision` carries its user turn
+as ordered text and image parts, the images as files beside the JSONL. Such an example is
+rendered through the model's PROCESSOR, not the tokenizer alone: `apply_chat_template` places
+the image slots and the processor expands each into its soft tokens at `--max-soft-tokens`
+(default: the budget dataset-report.json records, which is the one the endpoint serves at via
+vLLM's `mm_processor_kwargs.max_soft_tokens`). The processor's per-token side inputs
+(`token_type_ids` and kin) are carried through and extended over the answer; `pixel_values`
+travels as-is. The vision tower stays FROZEN — the module filter below is unchanged, the base is
+frozen by `prepare_model_for_kbit_training`, and the encoder is left unquantised by default so
+the frozen image features are the ones the served bf16 model computes. The loss mask is the same
+one: scored from the article to `<turn|>`, never on an image token. A multimodal example that
+overflows is always DROPPED — a middle cut would slice an image's soft-token run in half.
 
 OVERFLOW IS A DROP, NOT A TRUNCATION. Cutting an over-long example from the right removes the
 end of the article AND its turn-end token, which teaches the model to stop mid-sentence without
@@ -97,6 +110,10 @@ NON_LANGUAGE_MARKERS = (
     "siglip",
     "patch_embed",
 )
+
+# The encoder modules left unquantised when a dataset carries images. Substring-matched by
+# bitsandbytes, so a name that does not exist in the checkpoint is simply inert.
+VISION_SKIP_QUANT = ("vision_tower", "multi_modal_projector", "embed_vision", "vision_model")
 
 SENTINEL_USER = "ZZUSERZZ"
 SENTINEL_ASSISTANT = "ZZASSISTANTZZ"
@@ -295,6 +312,11 @@ class AssembledExample:
     prompt_tokens: int
     answer_tokens: int
     truncated: bool
+    seq_extras: dict[str, list[int]] = field(default_factory=dict)
+    """Per-token processor inputs (`token_type_ids` …), aligned with input_ids."""
+    tensor_extras: dict[str, Any] = field(default_factory=dict)
+    """Everything else the processor returned — `pixel_values` — passed through untouched."""
+    images: int = 0
 
 
 def assemble_example(
@@ -303,23 +325,35 @@ def assemble_example(
     end_of_turn: Sequence[int],
     max_seq_length: int,
     on_overflow: str,
+    seq_extras: Mapping[str, Sequence[int]] | None = None,
+    tensor_extras: Mapping[str, Any] | None = None,
+    images: int = 0,
 ) -> AssembledExample | None:
     """Join a prompt and an answer into one masked training sequence.
 
     The label mask is the whole point: -100 everywhere except the article and its turn-end
     token. Returns None when the example cannot be kept.
+
+    `seq_extras` must be aligned with `prompt_ids`; each is extended with zeros over the answer,
+    which is text. An example carrying images is never truncated, whatever the policy.
     """
     prompt = list(prompt_ids)
     answer = list(answer_ids) + list(end_of_turn)
 
     if not answer:
         return None
+    for key, values in (seq_extras or {}).items():
+        if len(values) != len(prompt):
+            raise ValueError(
+                f"processor input {key!r} has {len(values)} entries for a "
+                f"{len(prompt)}-token prompt; it is not aligned with the tokens."
+            )
 
     total = len(prompt) + len(answer)
     truncated = False
 
     if total > max_seq_length:
-        if on_overflow == "drop":
+        if on_overflow == "drop" or images > 0:
             return None
         if on_overflow != "truncate":
             raise ValueError(f"Unknown overflow policy {on_overflow!r}.")
@@ -343,6 +377,12 @@ def assemble_example(
         prompt_tokens=len(prompt),
         answer_tokens=len(answer),
         truncated=truncated,
+        seq_extras={
+            key: list(values) + [0] * len(answer)
+            for key, values in (seq_extras or {}).items()
+        },
+        tensor_extras=dict(tensor_extras or {}),
+        images=images,
     )
 
 
@@ -510,15 +550,156 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
                     f"whatever the last message is, so this would train on the wrong text."
                 )
             for message in messages:
-                if not isinstance(message.get("content"), str):
+                content = message.get("content")
+                if isinstance(content, list):
+                    if message.get("role") != "user":
+                        raise RuntimeError(
+                            f"{path.name}:{number}: only the user turn may carry image parts."
+                        )
+                    message["content"] = resolve_parts(content, path.parent, f"{path.name}:{number}")
+                    texts = [part["text"] for part in message["content"] if part["type"] == "text"]
+                elif isinstance(content, str):
+                    texts = [content]
+                else:
                     raise RuntimeError(f"{path.name}:{number} has a non-string message content.")
-                if "\u0000" in message["content"]:
+                if any("\u0000" in text for text in texts):
                     raise RuntimeError(
                         f"{path.name}:{number} carries a NUL — the source-file marker leaked "
                         f"into the dataset. Re-capture; do not train on this."
                     )
             rows.append(row)
     return rows
+
+
+def resolve_parts(parts: list[Any], base: Path, where: str) -> list[dict[str, Any]]:
+    """Validate a user turn's parts and resolve each image path against the JSONL's directory.
+
+    A path must be relative and stay inside that directory — the dataset builder writes
+    `images/<id>/NNN.png` — and the file must exist, or the run would die on the pod after the
+    weights had downloaded.
+    """
+    out: list[dict[str, Any]] = []
+    if not parts:
+        raise RuntimeError(f"{where} has an empty part list.")
+    root = base.resolve()
+    for part in parts:
+        if not isinstance(part, dict):
+            raise RuntimeError(f"{where} has a part that is not an object.")
+        kind = part.get("type")
+        if kind == "text":
+            if not isinstance(part.get("text"), str):
+                raise RuntimeError(f"{where} has a text part with no text.")
+            out.append({"type": "text", "text": part["text"]})
+            continue
+        if kind != "image":
+            raise RuntimeError(f"{where} has an unknown part type {kind!r}.")
+        rel = part.get("path")
+        if not isinstance(rel, str) or not rel:
+            raise RuntimeError(f"{where} has an image part with no path.")
+        candidate = (root / rel).resolve()
+        if Path(rel).is_absolute() or ".." in Path(rel).parts or root not in candidate.parents:
+            raise RuntimeError(f"{where}: image path {rel!r} escapes the dataset directory.")
+        if not candidate.is_file():
+            raise RuntimeError(f"{where}: image {rel!r} is missing.")
+        out.append({"type": "image", "path": rel, "image": str(candidate)})
+    return out
+
+
+def is_multimodal(messages: Sequence[Mapping[str, Any]]) -> bool:
+    return any(isinstance(message.get("content"), list) for message in messages)
+
+
+def to_template_messages(
+    messages: Sequence[Mapping[str, Any]], load_image: Any
+) -> tuple[list[dict[str, Any]], list[Any]]:
+    """The chat-template form of a multimodal conversation, plus its images in order.
+
+    Text parts are kept as parts — consecutive text parts are NOT merged, because production
+    sends them separately and the template renders what it is given.
+    """
+    out: list[dict[str, Any]] = []
+    images: list[Any] = []
+    for message in messages:
+        content = message["content"]
+        if isinstance(content, str):
+            out.append({"role": message["role"], "content": content})
+            continue
+        parts: list[dict[str, Any]] = []
+        for part in content:
+            if part["type"] == "text":
+                parts.append({"type": "text", "text": part["text"]})
+            else:
+                images.append(load_image(part["image"]))
+                parts.append({"type": "image"})
+        out.append({"role": message["role"], "content": parts})
+    return out, images
+
+
+def _as_int_list(value: Any) -> list[int] | None:
+    """A 1-row sequence as a flat int list, or None when it is not one."""
+    if hasattr(value, "tolist") and getattr(value, "ndim", 2) <= 2:
+        value = value.tolist()
+    if isinstance(value, (list, tuple)) and len(value) == 1 and isinstance(value[0], (list, tuple)):
+        value = value[0]
+    if isinstance(value, (list, tuple)) and all(
+        isinstance(item, int) and not isinstance(item, bool) for item in value
+    ):
+        return [int(item) for item in value]
+    return None
+
+
+def render_multimodal(
+    processor: Any,
+    history: Sequence[Mapping[str, Any]],
+    load_image: Any,
+    max_soft_tokens: int | None,
+) -> tuple[list[int], dict[str, list[int]], dict[str, Any], int]:
+    """Render a multimodal prompt through the processor, as vLLM does at serving.
+
+    Returns the ids, the per-token side inputs aligned with them, the remaining processor
+    outputs (pixel_values), and the image count. The rendered text already carries `<bos>`,
+    so it is tokenized WITHOUT special tokens — a second `<bos>` would be a prompt the server
+    never builds.
+    """
+    template, images = to_template_messages(history, load_image)
+    text = processor.apply_chat_template(
+        template, tokenize=False, add_generation_prompt=False
+    )
+    kwargs: dict[str, Any] = {
+        "text": text,
+        "images": images or None,
+        "add_special_tokens": False,
+        "return_tensors": "pt",
+    }
+    if max_soft_tokens:
+        try:
+            encoded = processor(**kwargs, max_soft_tokens=max_soft_tokens)
+        except TypeError:
+            encoded = processor(**kwargs, images_kwargs={"max_soft_tokens": max_soft_tokens})
+    else:
+        encoded = processor(**kwargs)
+
+    ids = _as_int_list(encoded["input_ids"])
+    if ids is None:
+        raise RuntimeError("the processor did not return one sequence of input ids.")
+    seq: dict[str, list[int]] = {}
+    other: dict[str, Any] = {}
+    for key in encoded.keys():
+        if key in ("input_ids", "attention_mask"):
+            continue
+        value = encoded[key]
+        flat = _as_int_list(value)
+        if flat is not None and len(flat) == len(ids):
+            seq[key] = flat
+        else:
+            other[key] = value
+    return ids, seq, other, len(images)
+
+
+def count_image_tokens(ids: Sequence[int], image_token_id: int | None) -> int:
+    if image_token_id is None:
+        return 0
+    return sum(1 for token in ids if token == image_token_id)
 
 
 def manifest_ids_for(manifest: dict[str, Any] | None, split: str, count: int) -> list[str]:
@@ -546,6 +727,14 @@ class BuiltSplit:
     dropped_ids: list[str] = field(default_factory=list)
     truncated_ids: list[str] = field(default_factory=list)
     token_lengths: list[int] = field(default_factory=list)
+    image_tokens_per_image: list[float] = field(default_factory=list)
+
+
+def _open_image(path: str) -> Any:
+    from PIL import Image
+
+    with Image.open(path) as image:
+        return image.convert("RGB")
 
 
 def build_split(
@@ -557,9 +746,13 @@ def build_split(
     max_seq_length: int,
     on_overflow: str,
     turn_mode: str,
+    processor: Any = None,
+    max_soft_tokens: int | None = None,
+    load_image: Any = _open_image,
 ) -> BuiltSplit:
     built = BuiltSplit(name=name)
     prefix = turns.serving_suffix if turn_mode == "serving" else turns.header
+    image_token_id = getattr(processor, "image_token_id", None) if processor else None
 
     for row, example_id in zip(rows, ids):
         messages = row["messages"]
@@ -572,12 +765,32 @@ def build_split(
         # The prompt is rendered WITHOUT the generation prompt and the chosen prefix appended
         # explicitly, so both turn modes go through one code path and the difference between
         # them is one variable rather than two renderings that could drift.
-        history_ids = chat_template_ids(tokenizer, history, False)
+        seq_extras: dict[str, list[int]] = {}
+        tensor_extras: dict[str, Any] = {}
+        images = 0
+        if is_multimodal(history):
+            if processor is None:
+                raise RuntimeError(
+                    f"{example_id} carries images but no processor was loaded."
+                )
+            history_ids, seq_extras, tensor_extras, images = render_multimodal(
+                processor, history, load_image, max_soft_tokens
+            )
+            if images:
+                built.image_tokens_per_image.append(
+                    count_image_tokens(history_ids, image_token_id) / images
+                )
+            seq_extras = {
+                key: values + [0] * len(prefix) for key, values in seq_extras.items()
+            }
+        else:
+            history_ids = chat_template_ids(tokenizer, history, False)
         prompt_ids = history_ids + list(prefix)
         answer_ids = list(tokenizer(answer_text, add_special_tokens=False)["input_ids"])
 
         assembled = assemble_example(
-            prompt_ids, answer_ids, turns.end_of_turn, max_seq_length, on_overflow
+            prompt_ids, answer_ids, turns.end_of_turn, max_seq_length, on_overflow,
+            seq_extras=seq_extras, tensor_extras=tensor_extras, images=images,
         )
         if assembled is None:
             built.dropped_ids.append(example_id)
@@ -640,6 +853,16 @@ def load_tokenizer(base_model: str, revision: str | None) -> Any:
             f"against. Point --base-model at the served checkpoint."
         )
     return tokenizer
+
+
+def load_processor(base_model: str, revision: str | None) -> Any:
+    """The multimodal processor — the same image path vLLM runs at serving."""
+    from transformers import AutoProcessor
+
+    kwargs: dict[str, Any] = {"trust_remote_code": True}
+    if revision:
+        kwargs["revision"] = revision
+    return AutoProcessor.from_pretrained(base_model, **kwargs)
 
 
 def load_model(base_model: str, revision: str | None, skip_quant: Sequence[str]) -> Any:
@@ -727,8 +950,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--warmup-ratio", type=float, default=0.1)
     parser.add_argument("--warmup-steps", type=int, default=None)
     parser.add_argument("--seed", type=int, default=20260920)
-    parser.add_argument("--skip-quant-modules", default="",
-                        help="Comma-separated module names left unquantised.")
+    parser.add_argument("--skip-quant-modules", default=None,
+                        help="Comma-separated module names left unquantised. Default: none for "
+                             "a text dataset; the vision encoder for one carrying images.")
+    parser.add_argument("--max-soft-tokens", type=int, default=None,
+                        help="Per-image vision budget for image examples. Default: the one "
+                             "dataset-report.json records — it must equal the endpoint's.")
 
     parser.add_argument("--smoke", type=int, default=0,
                         help="Train on the first N examples only. The plan's 20-example run.")
@@ -876,14 +1103,38 @@ def main(argv: Sequence[str] | None = None) -> int:
         tokenizer, turns, report, args.allow_template_mismatch
     )
 
+    multimodal = any(is_multimodal(row["messages"]) for row in train_rows + eval_rows)
+    processor = None
+    max_soft_tokens = args.max_soft_tokens
+    if multimodal:
+        processor = load_processor(args.base_model, args.revision)
+        if max_soft_tokens is None:
+            recorded = (((report.get("counts") or {}).get("vision") or {}).get("softTokens"))
+            max_soft_tokens = recorded if isinstance(recorded, int) else None
+        print(f"[dataset] image examples present; max_soft_tokens "
+              f"{max_soft_tokens or 'processor default'} (must equal the endpoint's)")
+
     train_split = build_split(
         "train", train_rows, train_ids, tokenizer, turns, max_seq_length,
-        args.on_overflow, args.turn_mode,
+        args.on_overflow, args.turn_mode, processor, max_soft_tokens,
     )
     eval_split = build_split(
         "eval", eval_rows, eval_ids, tokenizer, turns, max_seq_length,
-        args.on_overflow, args.turn_mode,
+        args.on_overflow, args.turn_mode, processor, max_soft_tokens,
     )
+    measured = train_split.image_tokens_per_image + eval_split.image_tokens_per_image
+    if measured:
+        mean = sum(measured) / len(measured)
+        print(f"[dataset] {mean:.0f} image tokens per image (processor)")
+        # The processor silently ignoring the budget would train every image at the default
+        # 280 while the endpoint serves 1120 — the exact train/serve split this run exists to
+        # remove. Measured counts sit just under the nominal budget (270 at 280).
+        if max_soft_tokens and mean < max_soft_tokens / 2:
+            raise SystemExit(
+                f"The processor produced {mean:.0f} image tokens per image, but "
+                f"max_soft_tokens is {max_soft_tokens}: it ignored the budget. Check the "
+                f"processor's kwarg name for this checkpoint before training."
+            )
 
     print("")
     print("DATASET")
@@ -964,7 +1215,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         def __getitem__(self, index: int) -> AssembledExample:
             return self.items[index]
 
-    skip_quant = [part.strip() for part in args.skip_quant_modules.split(",") if part.strip()]
+    if args.skip_quant_modules is None:
+        skip_quant = list(VISION_SKIP_QUANT) if multimodal else []
+    else:
+        skip_quant = [part.strip() for part in args.skip_quant_modules.split(",") if part.strip()]
     model = load_model(args.base_model, args.revision, skip_quant)
     model.config.use_cache = False
 
@@ -1024,18 +1278,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         pad_id = 0
 
     def collate(batch: list[AssembledExample]) -> dict[str, Any]:
-        longest = max(len(item.input_ids) for item in batch)
-        input_ids, labels, attention = [], [], []
-        for item in batch:
-            padding = longest - len(item.input_ids)
-            input_ids.append(item.input_ids + [pad_id] * padding)
-            labels.append(item.labels + [-100] * padding)
-            attention.append([1] * len(item.input_ids) + [0] * padding)
-        return {
-            "input_ids": torch.tensor(input_ids, dtype=torch.long),
-            "labels": torch.tensor(labels, dtype=torch.long),
-            "attention_mask": torch.tensor(attention, dtype=torch.long),
-        }
+        return collate_examples(batch, pad_id, torch)
 
     training_kwargs: dict[str, Any] = {
         "output_dir": str(output_dir / "checkpoints"),
@@ -1101,6 +1344,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             "smoke": args.smoke or None,
         },
         "chatTemplate": template_check,
+        "vision": {
+            "multimodal": multimodal,
+            "maxSoftTokens": max_soft_tokens,
+            "skipQuant": skip_quant,
+            "visionTowerTrained": False,
+        },
         "turnMode": args.turn_mode,
         "maxSeqLength": max_seq_length,
         "onOverflow": args.on_overflow,
@@ -1133,6 +1382,35 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"  --enable-lora --max-lora-rank {args.lora_r} \\")
     print(f"  --lora-modules {args.adapter_name}={output_dir}")
     return 0
+
+
+def collate_examples(batch: Sequence[AssembledExample], pad_id: int, torch: Any) -> dict[str, Any]:
+    """Pad a batch. Per-token processor inputs pad with 0; pixel_values concatenate on dim 0,
+    one row per image, which is the layout the multimodal forward pass expects."""
+    longest = max(len(item.input_ids) for item in batch)
+    input_ids, labels, attention = [], [], []
+    for item in batch:
+        padding = longest - len(item.input_ids)
+        input_ids.append(item.input_ids + [pad_id] * padding)
+        labels.append(item.labels + [-100] * padding)
+        attention.append([1] * len(item.input_ids) + [0] * padding)
+    out: dict[str, Any] = {
+        "input_ids": torch.tensor(input_ids, dtype=torch.long),
+        "labels": torch.tensor(labels, dtype=torch.long),
+        "attention_mask": torch.tensor(attention, dtype=torch.long),
+    }
+    seq_keys = sorted({key for item in batch for key in item.seq_extras})
+    for key in seq_keys:
+        rows = []
+        for item in batch:
+            values = item.seq_extras.get(key) or [0] * len(item.input_ids)
+            rows.append(values + [0] * (longest - len(values)))
+        out[key] = torch.tensor(rows, dtype=torch.long)
+    tensor_keys = sorted({key for item in batch for key in item.tensor_extras})
+    for key in tensor_keys:
+        values = [item.tensor_extras[key] for item in batch if key in item.tensor_extras]
+        out[key] = values[0] if len(values) == 1 else torch.cat(values, dim=0)
+    return out
 
 
 # --------------------------------------------------------------------------------------------
@@ -1497,6 +1775,141 @@ def run_self_test() -> int:
         completed_example.prompt_tokens != example.prompt_tokens,
     )
 
+    print("multimodal examples")
+
+    class _FakeProcessor:
+        """Renders parts like a Gemma processor: each image becomes BOI, N image tokens, EOI,
+        and token_type_ids marks the image tokens. Text goes through the fake tokenizer."""
+
+        IMAGE = 262144
+        BOI = 255999
+        EOI = 256000
+        image_token_id = IMAGE
+
+        def __init__(self) -> None:
+            self.tokenizer = _FakeGemmaTokenizer()
+            self.saw_soft: list[Any] = []
+
+        def apply_chat_template(self, messages, tokenize=False, add_generation_prompt=False):
+            return json.dumps(messages)
+
+        def __call__(self, text, images=None, add_special_tokens=False, return_tensors=None,
+                     max_soft_tokens=None, **kwargs):
+            self.saw_soft.append(max_soft_tokens)
+            soft = max_soft_tokens or 4
+            messages = json.loads(text)
+            ids = [self.tokenizer.BOS]
+            types = [0]
+            for message in messages:
+                ids += [self.tokenizer.TURN_OPEN, self.tokenizer.ROLE[message["role"]],
+                        self.tokenizer.NEWLINE]
+                types += [0, 0, 0]
+                content = message["content"]
+                parts = [{"type": "text", "text": content}] if isinstance(content, str) else content
+                for part in parts:
+                    if part["type"] == "text":
+                        piece = self.tokenizer._text_ids(part["text"])
+                        ids += piece
+                        types += [0] * len(piece)
+                    else:
+                        ids += [self.BOI] + [self.IMAGE] * soft + [self.EOI]
+                        types += [0] + [1] * soft + [0]
+                if message["role"] == "system":
+                    ids.append(self.tokenizer.SPACE)
+                    types.append(0)
+                ids += [self.tokenizer.TURN_CLOSE, self.tokenizer.NEWLINE]
+                types += [0, 0]
+            return {
+                "input_ids": [ids],
+                "attention_mask": [[1] * len(ids)],
+                "token_type_ids": [types],
+                "pixel_values": {"images": list(images or [])},
+            }
+
+    fake_processor = _FakeProcessor()
+    image_rows = [
+        {
+            "messages": [
+                {"role": "system", "content": "SYSTEM"},
+                {"role": "user", "content": [
+                    {"type": "text", "text": "SOURCE"},
+                    {"type": "image", "path": "images/x/000.png", "image": "/tmp/000.png"},
+                    {"type": "text", "text": "END"},
+                ]},
+                {"role": "assistant", "content": "ARTICLE"},
+            ]
+        }
+    ]
+    check("a part-list user turn is multimodal", is_multimodal(image_rows[0]["messages"]))
+    check("a string turn is not", not is_multimodal(rows[0]["messages"]))
+    loaded: list[str] = []
+    vision_built = build_split(
+        "train", image_rows, ["img"], tokenizer, turns, 4096, "drop", "serving",
+        fake_processor, 8, load_image=lambda path: loaded.append(path) or path,
+    )
+    check("the image example is kept", len(vision_built.kept) == 1)
+    vision_example = vision_built.kept[0]
+    check("the image was loaded from its resolved path", loaded == ["/tmp/000.png"])
+    check("the budget reached the processor", fake_processor.saw_soft == [8])
+    check(
+        "every image token is in the masked prompt",
+        all(label == -100 for token, label in zip(vision_example.input_ids, vision_example.labels)
+            if token == _FakeProcessor.IMAGE),
+    )
+    check(
+        "eight image tokens for one image at budget 8",
+        sum(1 for token in vision_example.input_ids if token == _FakeProcessor.IMAGE) == 8,
+    )
+    check("the per-image count is measured", vision_built.image_tokens_per_image == [8.0])
+    check(
+        "the masked prompt still ends in the SERVING prefix",
+        vision_example.input_ids[
+            vision_example.prompt_tokens - len(turns.serving_suffix): vision_example.prompt_tokens
+        ] == list(turns.serving_suffix),
+    )
+    check("the answer still ends in the stop token", vision_example.labels[-1] == 106)
+    types = vision_example.seq_extras.get("token_type_ids", [])
+    check("token_type_ids is aligned with the full sequence",
+          len(types) == len(vision_example.input_ids))
+    check("token_type_ids marks exactly the image tokens",
+          [t for t, token in zip(types, vision_example.input_ids) if token == _FakeProcessor.IMAGE]
+          == [1] * 8 and sum(types) == 8)
+    check("pixel_values travel as a tensor extra",
+          "pixel_values" in vision_example.tensor_extras and vision_example.images == 1)
+    check("no double <bos>", vision_example.input_ids[:2] != [2, 2])
+    check(
+        "an overflowing image example is DROPPED even under truncate",
+        len(build_split(
+            "train", image_rows, ["img"], tokenizer, turns, 20, "truncate", "serving",
+            fake_processor, 8, load_image=lambda path: path,
+        ).kept) == 0,
+    )
+    missing_processor = False
+    try:
+        build_split("train", image_rows, ["img"], tokenizer, turns, 4096, "drop", "serving")
+    except RuntimeError:
+        missing_processor = True
+    check("an image example with no processor is refused", missing_processor)
+
+    class _Torch:
+        """Enough of torch for the collator: tensor() keeps the list, cat() joins."""
+
+        long = "long"
+
+        @staticmethod
+        def tensor(values, dtype=None):
+            return values
+
+        @staticmethod
+        def cat(values, dim=0):
+            return [item for value in values for item in value]
+
+    batch = collate_examples([vision_example, built.kept[0]], 0, _Torch)
+    check("the collator pads token_type_ids to the batch",
+          len(batch["token_type_ids"][0]) == len(batch["token_type_ids"][1])
+          == len(batch["input_ids"][0]))
+    check("a text example's token_type_ids are zeros", set(batch["token_type_ids"][1]) == {0})
+
     print("read_jsonl guards")
     import tempfile
 
@@ -1539,6 +1952,48 @@ def run_self_test() -> int:
             encoding="utf-8",
         )
         check("a clean file reads", len(read_jsonl(path)) == 1)
+
+        images_dir = Path(directory) / "images" / "x"
+        images_dir.mkdir(parents=True)
+        (images_dir / "000.png").write_bytes(b"png")
+
+        def image_row(image_path: str) -> str:
+            return json.dumps({"messages": [
+                {"role": "system", "content": "S"},
+                {"role": "user", "content": [
+                    {"type": "text", "text": "SOURCE"},
+                    {"type": "image", "path": image_path},
+                ]},
+                {"role": "assistant", "content": "c"},
+            ]}) + "\n"
+
+        path.write_text(image_row("images/x/000.png"), encoding="utf-8")
+        parsed = read_jsonl(path)
+        resolved = parsed[0]["messages"][1]["content"][1]["image"]
+        check("an image path resolves against the JSONL's directory",
+              Path(resolved) == (images_dir / "000.png").resolve())
+
+        for label, bad_path in (
+            ("a missing image is refused", "images/x/404.png"),
+            ("an image path escaping the directory is refused", "../outside.png"),
+        ):
+            path.write_text(image_row(bad_path), encoding="utf-8")
+            try:
+                read_jsonl(path)
+                check(label, False)
+            except RuntimeError:
+                check(label, True)
+
+        path.write_text(json.dumps({"messages": [
+            {"role": "system", "content": [{"type": "text", "text": "S"}]},
+            {"role": "user", "content": "u"},
+            {"role": "assistant", "content": "c"},
+        ]}) + "\n", encoding="utf-8")
+        try:
+            read_jsonl(path)
+            check("parts on a non-user turn are refused", False)
+        except RuntimeError:
+            check("parts on a non-user turn are refused", True)
 
     print("")
     if failures:

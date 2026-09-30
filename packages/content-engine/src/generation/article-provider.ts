@@ -117,6 +117,27 @@ export function articleProviderReadsSources(): boolean {
   return provider === 'openai' || provider === 'gemma';
 }
 
+/**
+ * /dlo articles are written ONLY by the fine-tuned gemma adapter (2026-09-29). A /dlo run on
+ * any other provider is refused rather than quietly written by a model the department did not
+ * choose. The adapter half of that rule is gemmaDloModel's; this is the provider half.
+ *
+ * Throws before any spend. Called by the runner ahead of the source downloads, and again by
+ * both generators, so a caller that forgets the first check still cannot slip past.
+ */
+export function assertDloArticleProvider(): void {
+  const provider = articleProvider();
+  if (provider !== 'gemma') {
+    throw new Error(
+      `/dlo articles are written only by the fine-tuned gemma adapter, but ` +
+        `ARTICLE_PROVIDER=${provider}. Set ARTICLE_PROVIDER=gemma.`,
+    );
+  }
+  if (!isGemmaConfigured()) throw new GemmaNotConfiguredError('GEMMA_BASE_URL');
+  // Resolves (and validates) the adapter name, so GEMMA_DLO_MODEL naming the base fails here.
+  gemmaModelFor('dlo');
+}
+
 export type ArticleDraftOptions = Readonly<{
   // Room for the ANSWER, as everywhere else in this package.
   maxTokens: number;
@@ -144,6 +165,7 @@ export async function writeArticleDraft(
   messages: readonly ChatMessage[],
   options: ArticleDraftOptions,
 ): Promise<string> {
+  if (options.promptMode === 'dlo') assertDloArticleProvider();
   if (articleProvider() === 'qwen') {
     // Certain BEFORE the request, and the one failure on this path that is: an operator who
     // set ARTICLE_PROVIDER but not QWEN_BASE_URL gets the typed 'notConfigured' sentence
@@ -309,8 +331,8 @@ if (
   const savedDloModel = process.env.GEMMA_DLO_MODEL;
   delete process.env.GEMMA_DLO_MODEL;
   check(
-    'with no adapter deployed both lanes report the base',
-    articleProviderModel('dlo') === 'google/gemma-4-31B-it' &&
+    'unset, the DLO lane still reports the adapter — no base fallback',
+    articleProviderModel('dlo') === 'dgipr-dlo-v1' &&
       articleProviderModel('default') === 'google/gemma-4-31B-it',
   );
   process.env.GEMMA_DLO_MODEL = 'dgipr-dlo-v1';

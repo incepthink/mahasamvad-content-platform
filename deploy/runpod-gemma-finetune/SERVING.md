@@ -8,6 +8,32 @@ Nothing here is a second deployment. vLLM loads the adapter alongside the base a
 the request's `model` field, so both are reachable at the same URL — which is also what makes
 the Phase 5 A/B free: two arms, one endpoint, no redeploy between them.
 
+> **How production is actually configured (2026-09-29): from a private Hugging Face repo, not a
+> network volume.** No data centre offers both A100-80GB serverless capacity and network volumes
+> (the volume-capable ones were all LOW stock), so a volume would pin the endpoint to one scarce
+> DC. Instead the adapter is in the private repo `incepthink/dgipr-dlo-v1`, and endpoint
+> `mnipu7ao8cf6bg` carries three env vars, which worker-vllm maps onto the flags in §2:
+> `ENABLE_LORA=true`, `MAX_LORA_RANK=32`, `LORA_MODULES=dgipr-dlo-v1=incepthink/dgipr-dlo-v1`.
+> vLLM resolves the non-local path as a HF repo and downloads it with the endpoint's `HF_TOKEN`
+> at worker start (~1 GB). A retrain is published as a NEW repo/name (`dgipr-dlo-v2`), never
+> pushed over v1. A Runpod `env` PATCH replaces the whole map — resend every existing key.
+
+> **Adding `dgipr-dlo-v2` beside v1 (2026-09-29).** Push the new adapter to the private repo
+> `incepthink/dgipr-dlo-v2`, then PATCH the endpoint env with EVERY existing key plus
+> `LORA_MODULES=dgipr-dlo-v1=incepthink/dgipr-dlo-v1 dgipr-dlo-v2=incepthink/dgipr-dlo-v2`
+> (space-separated; `MAX_LORAS` ≥ 2 if the build sets it). A PATCH replaces the whole map, so
+> omitting `HF_TOKEN`, `ENABLE_LORA`, `MAX_LORA_RANK` or the model keys breaks the endpoint.
+> v2 was trained on image tiles at one `max_soft_tokens`: the API must send the same value
+> (`GEMMA_MAX_SOFT_TOKENS`). A/B before switching the lane — one endpoint, both adapters:
+>
+> ```bash
+> pnpm --filter @dgipr/content-engine finetune:eval -- --files --run >   --arms=teacher,tuned --adapters=dgipr-dlo-v1,dgipr-dlo-v2
+> ```
+>
+> Switch with `GEMMA_DLO_MODEL=dgipr-dlo-v2` only when v2 names the signatory on signed notes,
+> passes the fixed cases, and its unsupported-claim and ungrounded-numeral rates are no worse
+> than v1's.
+
 ---
 
 ## 1. Put the adapter on the network volume
@@ -106,6 +132,11 @@ the constant it used to print.
 
 Usage rows are likewise recorded under the model that answered, so the adapter's traffic is
 distinguishable from the base's in `/analytics` — the reason to serve them together at all.
+
+> **Superseded 2026-09-29: `/dlo` is adapter-only.** `GEMMA_DLO_MODEL` now defaults to
+> `dgipr-dlo-v1`, a value naming the base is refused, and a `/dlo` run on any provider other
+> than gemma is refused. There is no base-model rollback for `/dlo` any more: an endpoint that
+> does not serve the adapter fails every `/dlo` article. The section below is history.
 
 ## Rollback
 

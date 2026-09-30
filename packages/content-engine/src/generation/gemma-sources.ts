@@ -210,18 +210,33 @@ export function gemmaModel(): string {
  */
 export type GemmaLane = 'default' | 'dlo';
 
+/** The fine-tuned adapter's name — the NAME side of vLLM's `--lora-modules <name>=<path>`. */
+export const DEFAULT_GEMMA_DLO_MODEL = 'dgipr-dlo-v1';
+
 /**
- * The adapter that writes /dlo articles, when one is deployed.
+ * The fine-tuned adapter that writes EVERY /dlo article. There is no base-model fallback.
  *
- * Unset ⇒ `gemmaModel()`, so an endpoint serving only the base behaves exactly as it does
- * today and the rollback is deleting one line from the environment. When set it must name a
- * model the endpoint actually serves — with vLLM that is the NAME side of
- * `--lora-modules <name>=<path>`, not a Hugging Face id — because the server 404s on
- * anything else. See modelNotServedHint below, which turns that 404 into a sentence naming
- * this variable.
+ * Until 2026-09-29 an unset GEMMA_DLO_MODEL fell back to `gemmaModel()`. That made the
+ * endpoint's LoRA config and this variable two separate switches that both had to be on, and
+ * when either was off the article was quietly written by the base model. Generation 399159b0
+ * was written that way, on an endpoint that had never loaded the adapter. The product decision
+ * is that /dlo is written ONLY by the fine-tuned model, so the default is now the adapter's
+ * name, and a value that resolves to the base is refused rather than obeyed. GEMMA_DLO_MODEL
+ * can still rename the adapter (a merged or retrained id) but can no longer point at the base.
+ *
+ * An endpoint that does not serve the adapter now FAILS every /dlo article, loudly:
+ * diagnoseGemmaModel asks the endpoint and names what is missing.
  */
 export function gemmaDloModel(): string {
-  return process.env.GEMMA_DLO_MODEL?.trim() || gemmaModel();
+  const model = process.env.GEMMA_DLO_MODEL?.trim() || DEFAULT_GEMMA_DLO_MODEL;
+  if (model === gemmaModel()) {
+    throw new Error(
+      `GEMMA_DLO_MODEL names the base model "${model}". /dlo articles are written only by ` +
+        `the fine-tuned adapter; unset GEMMA_DLO_MODEL (default "${DEFAULT_GEMMA_DLO_MODEL}") ` +
+        'or set it to the adapter name the endpoint serves.',
+    );
+  }
+  return model;
 }
 
 /** The one place a lane becomes a model id. */
@@ -271,6 +286,26 @@ function tilesPerPage(): number | undefined {
   return Number.isFinite(configured) && configured >= 1
     ? Math.floor(configured)
     : defaultTilesPerPage();
+}
+
+/**
+ * The settings that decide what `prepareGemmaSources` sends, as one record. The distillation
+ * capture stores it beside every vision pair, because an adapter trained on tiles cut at one
+ * budget and served at another is trained on a different input from the one it will read.
+ * `tilesPerPage` null means pdf-raster's own default.
+ */
+export function gemmaSourceSettings(): Readonly<{
+  maxSoftTokens: GemmaSoftTokens | null;
+  tokensPerImage: number;
+  tilesPerPage: number | null;
+  maxTiles: number;
+}> {
+  return {
+    maxSoftTokens: gemmaMaxSoftTokens(),
+    tokensPerImage: gemmaTokensPerImage(),
+    tilesPerPage: tilesPerPage() ?? null,
+    maxTiles: gemmaMaxSourceTiles(),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -693,11 +728,12 @@ export function missingGemmaModelMessage(
   baseModel: string,
 ): string {
   return (
-    `The gemma endpoint does not serve "${model}", which GEMMA_DLO_MODEL names. ` +
-    'Either the adapter is not loaded (vLLM needs --enable-lora and ' +
-    '--lora-modules <name>=<path>, and the name must match this value exactly), or the ' +
-    'endpoint was recreated without it. Unset GEMMA_DLO_MODEL to write /dlo articles on ' +
-    `the base model "${baseModel}" again.`
+    `The gemma endpoint does not serve the fine-tuned /dlo adapter "${model}" (it serves ` +
+    `the base "${baseModel}"). /dlo articles are written only by the adapter, so this run ` +
+    'cannot proceed. Load it on the endpoint: worker-vllm ENABLE_LORA=true, ' +
+    `MAX_LORA_RANK=32, LORA_MODULES with the name "${model}" (vLLM --enable-lora ` +
+    '--lora-modules <name>=<path>); the name must equal GEMMA_DLO_MODEL (default ' +
+    `"${DEFAULT_GEMMA_DLO_MODEL}") exactly.`
   );
 }
 
@@ -1004,19 +1040,13 @@ if (
   };
 
   let ok = report('base (GEMMA_MODEL)', base);
-  if (dlo === base) {
+  ok = report('/dlo adapter (GEMMA_DLO_MODEL)', dlo) && ok;
+  if (!served.includes(dlo)) {
     console.log(
-      '\nGEMMA_DLO_MODEL is unset, so /dlo articles are written by the base model. ' +
-        'That is the rollback state, and it is a valid one.',
+      '  vLLM needs --enable-lora and --lora-modules <name>=<path>, and <name> must ' +
+        'equal GEMMA_DLO_MODEL exactly. /dlo has no base-model fallback, so until it ' +
+        'does, EVERY /dlo article fails.',
     );
-  } else {
-    ok = report('/dlo adapter (GEMMA_DLO_MODEL)', dlo) && ok;
-    if (!served.includes(dlo)) {
-      console.log(
-        '  vLLM needs --enable-lora and --lora-modules <name>=<path>, and <name> must ' +
-          'equal GEMMA_DLO_MODEL exactly. Until it does, EVERY /dlo article fails.',
-      );
-    }
   }
   process.exitCode = ok ? 0 : 1;
 } else if (
@@ -1067,10 +1097,22 @@ if (
   process.env.GEMMA_MODEL = 'google/gemma-4-31B-it';
   delete process.env.GEMMA_DLO_MODEL;
   check(
-    'unset GEMMA_DLO_MODEL leaves the DLO lane on the base — the rollback',
-    gemmaDloModel() === gemmaModel() &&
-      gemmaModelFor('dlo') === 'google/gemma-4-31B-it',
+    'unset GEMMA_DLO_MODEL still puts the DLO lane on the adapter — no base fallback',
+    gemmaDloModel() === DEFAULT_GEMMA_DLO_MODEL &&
+      gemmaModelFor('dlo') === 'dgipr-dlo-v1',
   );
+  process.env.GEMMA_DLO_MODEL = 'google/gemma-4-31B-it';
+  let pointedAtBase = '';
+  try {
+    gemmaModelFor('dlo');
+  } catch (error) {
+    pointedAtBase = error instanceof Error ? error.message : '';
+  }
+  check(
+    'GEMMA_DLO_MODEL naming the base is refused, not obeyed',
+    pointedAtBase.includes('fine-tuned adapter'),
+  );
+  delete process.env.GEMMA_DLO_MODEL;
   check(
     'and an omitted lane is the base too',
     gemmaModelFor() === 'google/gemma-4-31B-it' &&
@@ -1089,8 +1131,8 @@ if (
   );
   process.env.GEMMA_DLO_MODEL = '   ';
   check(
-    'a blank value is not a model id, it is unset',
-    gemmaModelFor('dlo') === 'google/gemma-4-31B-it',
+    'a blank value is not a model id, it is unset — the adapter default',
+    gemmaModelFor('dlo') === DEFAULT_GEMMA_DLO_MODEL,
   );
   delete process.env.GEMMA_DLO_MODEL;
 
@@ -1111,7 +1153,7 @@ if (
   );
   delete process.env.GEMMA_DLO_MODEL;
   check(
-    'and with the override rolled back, nothing on any lane is',
+    'nothing on the base model is ever blamed on the adapter',
     !overridesGemmaModel('dlo', 'google/gemma-4-31B-it') &&
       !overridesGemmaModel('default', 'google/gemma-4-31B-it'),
   );
@@ -1129,9 +1171,9 @@ if (
     missing.includes('--enable-lora') && missing.includes('--lora-modules'),
   );
   check(
-    'and the rollback, with the base model it returns to',
-    missing.includes('Unset GEMMA_DLO_MODEL') &&
-      missing.includes('google/gemma-4-31B-it'),
+    'and offers NO base-model rollback — /dlo is adapter-only',
+    !missing.includes('Unset GEMMA_DLO_MODEL to write') &&
+      missing.includes('written only by the adapter'),
   );
 
   delete process.env.GEMMA_MAX_SOURCE_TILES;

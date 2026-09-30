@@ -26,7 +26,9 @@ export const ANALYTICS_FEATURE_LABELS: Readonly<
   transcribe: STR.navTranscribe,
   translate: STR.navTranslate,
   proofread: STR.navProofread,
-  video: STR.navVideo,
+  // Not navVideo (the /video page is titled स्टोरीबोर्ड): this card counts every video the
+  // department produced, /video projects and /new-video-workflow renders alike.
+  video: STR.analyticsFeatureVideo,
 };
 
 // Where each card's "तपशील पाहा" goes, and which page the sidebar highlights.
@@ -89,6 +91,7 @@ const SLICE_LABELS: Readonly<Record<string, string>> = {
   marathi: STR.analyticsSliceMarathi,
   videoNote: STR.analyticsSliceVideoNote,
   videoScript: STR.analyticsSliceVideoScript,
+  videoConversation: STR.analyticsSliceVideoConversation,
 };
 
 // Service rows name a CAPABILITY, not a provider — "ध्वनिलेखन" stays ध्वनिलेखन across a

@@ -56,7 +56,11 @@ import {
   type SimpleGeneratedArticle,
 } from './generate-article-simple.js';
 import type { SourceFileRef } from '../intake/openai-source-files.js';
-import { articleProvider, articleProviderModel } from './article-provider.js';
+import {
+  articleProvider,
+  articleProviderModel,
+  assertDloArticleProvider,
+} from './article-provider.js';
 import {
   respondWithSourcesViaGemma,
   type SourceDocument,
@@ -110,6 +114,8 @@ export async function generateArticleFromSources(
   const statements = options?.statements ?? [];
   const designations = options?.designations ?? [];
   const dloPrompt = options?.promptMode === 'dlo';
+  // /dlo is adapter-only: never let this lane fall through to the Responses API.
+  if (dloPrompt) assertDloArticleProvider();
 
   // References stay behind the same flag as the text lane, including /dlo. The embedding is
   // taken from whatever text the intake has: a run whose sources are entirely files has

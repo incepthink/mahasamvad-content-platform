@@ -24,7 +24,6 @@ import {
   Mic,
   PanelLeftClose,
   PanelLeftOpen,
-  ScrollText,
   SpellCheck,
   Video,
   X,
@@ -54,8 +53,7 @@ const NAV_LINKS = [
   { href: '/proofread', label: STR.navProofread, Icon: SpellCheck },
   { href: '/glossary', label: STR.navGlossary, Icon: BookOpen },
   { href: '/references', label: STR.navReferences, Icon: LayoutTemplate },
-  // Both video lanes are labelled beta in the sidebar only — `navVideo` is
-  // also the analytics feature name, which is not a beta badge.
+  // Both video lanes are labelled beta in the sidebar only.
   { href: '/video', label: `${STR.navVideo} (beta)`, Icon: Clapperboard },
   {
     href: '/new-video-workflow',
@@ -67,9 +65,8 @@ const NAV_LINKS = [
   { href: '/chat', label: STR.navChat, Icon: MessagesSquare },
   { href: '/generations', label: STR.navHistory, Icon: History },
   { href: '/analytics', label: STR.navAnalytics, Icon: ChartColumn },
-  // Last, with the other "look back at what happened" entries: these rules are a record of
-  // what the department has asked for, not a tool an officer opens to make something.
-  { href: '/preferences', label: STR.navPreferences, Icon: ScrollText },
+  // /preferences (संपादकीय नियम) is deliberately NOT here: reached by URL and from the
+  // ArticleView "rule learned" callout only.
 ] as const;
 
 export function AppSidebar() {

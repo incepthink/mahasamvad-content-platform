@@ -19,6 +19,7 @@ import {
 import { DLO_INTAKES_TABLE } from './dlo-intakes.js';
 import { TRANSCRIPTIONS_TABLE } from './transcriptions.js';
 import { VIDEO_PROJECTS_TABLE } from './video-projects.js';
+import { NEW_VIDEO_TURNS_TABLE } from './new-video.js';
 
 // PostgREST caps a select at 1000 rows by default, silently. A department's busy quarter is
 // more than that, and a silently truncated analytics page reports a decline that did not
@@ -270,6 +271,33 @@ export async function listVideoProjectsForAnalytics(
     inputMode: row.input_mode ?? null,
     costUsd: Number(row.cost_usd ?? 0) || 0,
     costBreakdown: row.cost_breakdown ?? null,
+    createdAt: row.created_at,
+  }));
+}
+
+export type AnalyticsNewVideoTurnRow = Readonly<{
+  status: string;
+  // Whether this turn produced a video. A Storyboard-mode turn (0060) completes with no
+  // video, which is what keeps chat answers out of the video count.
+  hasVideo: boolean;
+  createdAt: string;
+}>;
+
+// /new-video-workflow turns. `prompt` and `model_text` are NOT selected (up to 20,000
+// characters each); `video_url` is a short public URL whose presence is the answer.
+export async function listNewVideoTurnsForAnalytics(
+  client: SupabaseClient,
+  from: string,
+  to: string,
+): Promise<AnalyticsNewVideoTurnRow[]> {
+  const rows = await fetchPaged<{
+    status: string;
+    video_url: string | null;
+    created_at: string;
+  }>(client, NEW_VIDEO_TURNS_TABLE, 'status,video_url,created_at', from, to);
+  return rows.map((row) => ({
+    status: row.status,
+    hasVideo: row.video_url !== null && row.video_url !== '',
     createdAt: row.created_at,
   }));
 }

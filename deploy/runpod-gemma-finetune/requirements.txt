@@ -45,6 +45,8 @@ huggingface_hub>=1.0,<2
 # `Fast download using 'hf_transfer' is enabled but 'hf_transfer' package is not available`
 # rather than falling back. It also makes the 63 GB base download materially faster.
 hf_transfer>=0.1.8,<1
+# Image examples (capture --student vision) are opened with PIL before the processor sees them.
+pillow>=10,<13
 
 # NOT used and NOT installed, on purpose:
 #   trl  — its assistant_only_loss renders the COMPLETED conversation, which is the wrong

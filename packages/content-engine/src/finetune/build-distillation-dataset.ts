@@ -37,16 +37,40 @@
 // exists to prevent, arriving by a second route. Identical user prompts are unioned into one
 // group before the split, so they cannot be separated.
 
-import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+// VISION PAIRS (2026-09-29). A pair captured with `--student vision` carries its user turn as
+// ordered text and image parts, the images as files beside the pair (distill-content.ts). This
+// builder copies them to `<out>/images/<id>/` and rewrites the paths to be relative to the
+// JSONL it writes, so train.py resolves them against its own data directory. Every vision pair
+// in one dataset must have been cut at ONE soft-token budget, and that budget must be the one
+// this environment serves at: an adapter trained on tiles read at 1120 tokens and served at
+// 280 has been trained on an input it will never see. The token report counts each image at
+// that budget, since the text tokenizer cannot see an image.
+
+import {
+  copyFile,
+  mkdir,
+  readFile,
+  readdir,
+  writeFile,
+} from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { dirname, resolve } from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import {
+  GEMMA_TOKENS_PER_IMAGE,
   gemmaBaseUrl,
+  gemmaMaxSoftTokens,
   gemmaModel,
   isGemmaConfigured,
 } from '../generation/gemma-sources.js';
+import {
+  contentImagePaths,
+  contentProblem,
+  contentText,
+  mapImagePaths,
+  type PairContent,
+} from './distill-content.js';
 import {
   DGIPR_EDITORIAL_SYSTEM_PROMPT,
   DLO_SOURCE_FILES_MARKER,
@@ -109,7 +133,7 @@ export const SEQ_LENGTH_BUCKETS: readonly number[] = [
 
 export type PairRole = 'system' | 'user' | 'assistant';
 
-export type PairMessage = Readonly<{ role: PairRole; content: string }>;
+export type PairMessage = Readonly<{ role: PairRole; content: PairContent }>;
 
 export type CapturedPair = Readonly<{ messages: readonly PairMessage[] }>;
 
@@ -130,6 +154,12 @@ export type SidecarSummary = Readonly<{
   intakeFileCount: number;
   hasArticleRevision: boolean;
   styleReferencesPassed: number;
+  /** 'vision' when the student's user turn carries image tiles. Older sidecars: 'text'. */
+  studentFormat: 'text' | 'vision';
+  /** The per-image budget the tiles were cut at; null = the server default (280). */
+  softTokens: number | null;
+  /** What one image costs in the prompt at that budget. */
+  tokensPerImage: number;
 }>;
 
 export type LoadedExample = Readonly<{
@@ -138,6 +168,12 @@ export type LoadedExample = Readonly<{
   messages: readonly PairMessage[];
   userChars: number;
   assistantChars: number;
+  /** A vision pair's image files, resolved and hashed at load. Absent on a text pair. */
+  images?: readonly Readonly<{
+    path: string;
+    absolute: string;
+    sha256: string;
+  }>[];
 }>;
 
 export type Split = 'train' | 'eval';
@@ -233,7 +269,13 @@ export function mergeDuplicatePrompts(
   )) {
     const group = example.sidecar.groupKey;
     union.union(group, group);
-    const digest = sha256Hex(userContentOf(example.messages));
+    // A vision prompt's identity includes its pages: two intakes holding the same scan are the
+    // same example even though their image files have different names.
+    const digest = sha256Hex(
+      `${userContentOf(example.messages)}\u0000${(example.images ?? [])
+        .map((image) => image.sha256)
+        .join(',')}`,
+    );
     const seen = byPrompt.get(digest);
     if (seen === undefined) {
       byPrompt.set(digest, group);
@@ -248,14 +290,15 @@ export function mergeDuplicatePrompts(
   return out;
 }
 
+/** The user turn's TEXT; a vision turn's images contribute nothing here. */
 export function userContentOf(messages: readonly PairMessage[]): string {
-  return messages.find((message) => message.role === 'user')?.content ?? '';
+  const user = messages.find((message) => message.role === 'user');
+  return user ? contentText(user.content) : '';
 }
 
 export function assistantContentOf(messages: readonly PairMessage[]): string {
-  return (
-    messages.find((message) => message.role === 'assistant')?.content ?? ''
-  );
+  const assistant = messages.find((message) => message.role === 'assistant');
+  return assistant ? contentText(assistant.content) : '';
 }
 
 /**
@@ -281,35 +324,49 @@ export function validatePair(pair: CapturedPair): string[] {
     );
   }
   const [system, user, assistant] = messages;
-  if (system && !system.content.startsWith(EXPECTED_SYSTEM_MESSAGE)) {
+  // Only the USER turn may carry parts (a vision pair's tiles). The system turn and the
+  // target are always plain text: a part list there is a malformed file, not a feature.
+  for (const message of [system, assistant]) {
+    if (message && typeof message.content !== 'string') {
+      problems.push(`the ${message.role} turn must be plain text`);
+    }
+  }
+  const systemText =
+    system && typeof system.content === 'string' ? system.content : '';
+  if (system && !systemText.startsWith(EXPECTED_SYSTEM_MESSAGE)) {
     problems.push(
-      `system turn does not open with the builder's own editorial rules: ${JSON.stringify(system.content.slice(0, 60))}`,
+      `system turn does not open with the builder's own editorial rules: ${JSON.stringify(systemText.slice(0, 60))}`,
     );
   }
-  if (user && !user.content.includes('### SOURCE INFORMATION')) {
+  const userText = user ? contentText(user.content) : '';
+  if (user && !userText.includes('### SOURCE INFORMATION')) {
     problems.push('the user turn carries no SOURCE INFORMATION block');
   }
-  if (user && user.content.includes('MAHASAMVAD STYLE REFERENCES')) {
+  if (user && userText.includes('MAHASAMVAD STYLE REFERENCES')) {
     problems.push(
       'the user turn carries a style-reference block; the dataset must be uniform',
     );
   }
-  if (assistant && assistant.content.trim().length === 0) {
+  const assistantText =
+    assistant && typeof assistant.content === 'string' ? assistant.content : '';
+  if (assistant && assistantText.trim().length === 0) {
     problems.push('the assistant turn is empty, so there is nothing to learn');
   }
-  if (assistant && assistant.content.includes(FACT_CHECK_DELIMITER)) {
+  if (assistant && assistantText.includes(FACT_CHECK_DELIMITER)) {
     problems.push(
       'the assistant turn carries a traceability appendix, which splitContent should have removed',
     );
   }
   for (const message of messages) {
-    if (typeof message.content !== 'string') {
-      problems.push(`the ${message.role} turn has no string content`);
+    const problem = contentProblem(message.content);
+    if (problem) {
+      problems.push(`the ${message.role} turn: ${problem}`);
       continue;
     }
-    if (message.content.includes(DLO_SOURCE_FILES_MARKER)) {
+    const text = contentText(message.content);
+    if (text.includes(DLO_SOURCE_FILES_MARKER)) {
       problems.push(`the ${message.role} turn carries the source-file marker`);
-    } else if (message.content.includes('\u0000')) {
+    } else if (text.includes('\u0000')) {
       problems.push(`the ${message.role} turn carries a NUL byte`);
     }
   }
@@ -457,14 +514,41 @@ export function assignSplits(
   return out;
 }
 
-/** One JSONL line, with a fixed key order so a rebuild is byte-identical. */
-export function serializePair(messages: readonly PairMessage[]): string {
+/**
+ * One JSONL line, with a fixed key order so a rebuild is byte-identical. `mapPath` rewrites a
+ * vision turn's image paths to where the images sit beside the written file.
+ */
+export function serializePair(
+  messages: readonly PairMessage[],
+  mapPath: (path: string) => string = (path) => path,
+): string {
   return JSON.stringify({
     messages: messages.map((message) => ({
       role: message.role,
-      content: message.content,
+      content: mapImagePaths(message.content, mapPath),
     })),
   });
+}
+
+/** Where a vision pair's image lands under the dataset directory, relative to it. */
+export function datasetImagePath(id: string, pairImagePath: string): string {
+  return `images/${id}/${basename(pairImagePath.replace(/\\/g, '/'))}`;
+}
+
+/** The distinct soft-token budgets the vision examples were cut at. */
+export function visionBudgets(
+  examples: readonly LoadedExample[],
+): Array<number | null> {
+  const seen = new Set<string>();
+  const out: Array<number | null> = [];
+  for (const example of examples) {
+    if (example.sidecar.studentFormat !== 'vision') continue;
+    const key = String(example.sidecar.softTokens);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(example.sidecar.softTokens);
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -485,6 +569,14 @@ function readSidecar(id: string, raw: unknown): SidecarSummary {
     unknown
   >;
   const style = (record['styleReferences'] ?? {}) as Record<string, unknown>;
+  const vision =
+    student['vision'] !== null && typeof student['vision'] === 'object'
+      ? (student['vision'] as Record<string, unknown>)
+      : null;
+  const soft =
+    vision && typeof vision['maxSoftTokens'] === 'number'
+      ? vision['maxSoftTokens']
+      : null;
   const str = (value: unknown, fallback: string): string =>
     typeof value === 'string' && value.length > 0 ? value : fallback;
   const nullableStr = (value: unknown): string | null =>
@@ -509,6 +601,12 @@ function readSidecar(id: string, raw: unknown): SidecarSummary {
     hasArticleRevision: record['hasArticleRevision'] === true,
     styleReferencesPassed:
       typeof style['passed'] === 'number' ? style['passed'] : 0,
+    studentFormat: student['format'] === 'vision' ? 'vision' : 'text',
+    softTokens: soft,
+    tokensPerImage:
+      vision && typeof vision['tokensPerImage'] === 'number'
+        ? vision['tokensPerImage']
+        : (soft ?? GEMMA_TOKENS_PER_IMAGE),
   };
 }
 
@@ -572,12 +670,44 @@ export async function loadPairs(
       continue;
     }
 
+    const userTurn = pair.messages.find((message) => message.role === 'user');
+    const imagePaths = userTurn ? contentImagePaths(userTurn.content) : [];
+    if (imagePaths.length > 0 && sidecar.studentFormat !== 'vision') {
+      problems.push({
+        id,
+        reason:
+          'the pair carries images but its sidecar does not say it is a vision pair',
+      });
+      continue;
+    }
+    const images: { path: string; absolute: string; sha256: string }[] = [];
+    let missing: string | null = null;
+    for (const path of imagePaths) {
+      const absolute = resolve(dir, path);
+      try {
+        const bytes = await readFile(absolute);
+        images.push({
+          path,
+          absolute,
+          sha256: createHash('sha256').update(bytes).digest('hex'),
+        });
+      } catch {
+        missing = path;
+        break;
+      }
+    }
+    if (missing) {
+      problems.push({ id, reason: `image ${missing} is missing — excluded` });
+      continue;
+    }
+
     examples.push({
       id,
       sidecar,
       messages: pair.messages,
       userChars: userContentOf(pair.messages).length,
       assistantChars: assistantContentOf(pair.messages).length,
+      ...(images.length > 0 ? { images } : {}),
     });
   }
   return { examples, problems };
@@ -670,10 +800,13 @@ export async function measureTokenLengths(
   const url = await resolveTokenizeUrl();
   const tokens = new Map<string, number>();
   for (const [index, example] of examples.entries()) {
+    // The tokenizer is handed TEXT; each image is then counted at the budget it was cut at.
     const turns = example.messages.map((message) => ({
       role: message.role,
-      content: message.content,
+      content: contentText(message.content),
     }));
+    const imageTokens =
+      (example.images?.length ?? 0) * example.sidecar.tokensPerImage;
     for (
       let attempt = 0;
       attempt <= TOKENIZE_RETRIES_PER_EXAMPLE;
@@ -681,7 +814,7 @@ export async function measureTokenLengths(
     ) {
       try {
         const result = await tokenizeMessages(url, turns, false);
-        tokens.set(example.id, result.count);
+        tokens.set(example.id, result.count + imageTokens);
         break;
       } catch (error) {
         if (attempt === TOKENIZE_RETRIES_PER_EXAMPLE) {
@@ -720,6 +853,9 @@ const USAGE = [
   '  --salt S               hash salt; changing it RESHUFFLES the split (default dgipr-dlo-v1)',
   '  --no-tokenize          skip the tokenizer; the report then carries no token lengths',
   '  --allow-mixed-teacher  do not refuse a dataset written by more than one teacher',
+  '  --serving-soft-tokens N  the vision budget the adapter will be SERVED at (default:',
+  '                         GEMMA_MAX_SOFT_TOKENS, or the server default 280 when unset);',
+  '                         vision pairs cut at any other budget are refused',
   '  --dry-run              print the report and write nothing',
   '  --check                run the offline assertions and exit — free, no network',
 ].join('\n');
@@ -735,6 +871,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
       salt: { type: 'string' },
       'no-tokenize': { type: 'boolean' },
       'allow-mixed-teacher': { type: 'boolean' },
+      'serving-soft-tokens': { type: 'string' },
       'dry-run': { type: 'boolean' },
       check: { type: 'boolean' },
       help: { type: 'boolean', short: 'h' },
@@ -806,6 +943,31 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   }
   const withStyle = examples.filter(
     (example) => example.sidecar.styleReferencesPassed > 0,
+  );
+
+  // --- the vision budget: one, and the served one ---
+  const servingSoft = values['serving-soft-tokens']
+    ? Number.parseInt(values['serving-soft-tokens'], 10)
+    : gemmaMaxSoftTokens();
+  const budgets = visionBudgets(examples);
+  const budgetLabel = (value: number | null): string =>
+    value === null ? 'server default (280)' : String(value);
+  if (budgets.length > 1) {
+    throw new Error(
+      `The vision pairs were cut at ${budgets.length} different soft-token budgets ` +
+        `(${budgets.map(budgetLabel).join(', ')}). One adapter reads one budget; re-capture ` +
+        'the odd ones out at the serving budget.',
+    );
+  }
+  if (budgets.length === 1 && budgets[0] !== servingSoft) {
+    throw new Error(
+      `The vision pairs were cut at ${budgetLabel(budgets[0]!)} soft tokens per image, but ` +
+        `the adapter will be served at ${budgetLabel(servingSoft)}. Set GEMMA_MAX_SOFT_TOKENS ` +
+        "(or --serving-soft-tokens) to the endpoint's value, or re-capture at it.",
+    );
+  }
+  const visionExamples = examples.filter(
+    (example) => example.sidecar.studentFormat === 'vision',
   );
 
   // --- grouping and split ---
@@ -934,6 +1096,15 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
       withArticleRevision: placed.filter(
         (example) => example.sidecar.hasArticleRevision,
       ).length,
+      vision: {
+        examples: visionExamples.length,
+        images: visionExamples.reduce(
+          (sum, example) => sum + (example.images?.length ?? 0),
+          0,
+        ),
+        softTokens: budgets[0] ?? null,
+        note: 'Token counts include each image at this budget; the text tokenizer cannot see images.',
+      },
     },
     teachers,
     lanes: countBy(placed, (example) => example.sidecar.lane),
@@ -1019,8 +1190,24 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     name: string,
     set: readonly PlacedExample[],
   ): Promise<void> => {
+    // Images are copied beside the JSONL and re-pointed there, so the dataset directory is
+    // self-contained — it is what gets copied onto the training pod's volume.
+    for (const example of set) {
+      if (!example.images || example.images.length === 0) continue;
+      await mkdir(resolve(outDir, 'images', example.id), { recursive: true });
+      for (const image of example.images) {
+        await copyFile(
+          image.absolute,
+          resolve(outDir, datasetImagePath(example.id, image.path)),
+        );
+      }
+    }
     const body = set
-      .map((example) => serializePair(example.messages))
+      .map((example) =>
+        serializePair(example.messages, (path) =>
+          datasetImagePath(example.id, path),
+        ),
+      )
       .join('\n');
     await writeFile(
       resolve(outDir, name),
@@ -1397,6 +1584,9 @@ export function runChecks(): void {
       intakeFileCount: files,
       hasArticleRevision: false,
       styleReferencesPassed: 0,
+      studentFormat: 'text',
+      softTokens: null,
+      tokensPerImage: 270,
     },
     messages: [
       { role: 'system', content: EXPECTED_SYSTEM_MESSAGE },
@@ -1567,6 +1757,133 @@ export function runChecks(): void {
   check(
     serializePair(goodMessages) === serializePair([...goodMessages]),
     'serialization is not stable',
+  );
+
+  // --- vision pairs (2026-09-29) ---
+  const visionMessages: PairMessage[] = [
+    goodMessages[0]!,
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text: '### SOURCE INFORMATION\n\nटिपणी\n' },
+        { type: 'text', text: '=== स्रोत: gr.pdf · पृष्ठ 1 ===' },
+        { type: 'image', path: 'abc.images/000.png' },
+        { type: 'text', text: '\n### HEADLINE / ANGLE\n\nशीर्षक' },
+      ],
+    },
+    goodMessages[2]!,
+  ];
+  check(
+    validatePair({ messages: visionMessages }).length === 0,
+    'a valid vision pair was rejected',
+  );
+  check(
+    validatePair({
+      messages: [
+        {
+          role: 'system',
+          content: [{ type: 'text', text: EXPECTED_SYSTEM_MESSAGE }],
+        },
+        visionMessages[1]!,
+        goodMessages[2]!,
+      ],
+    }).some((problem) => problem.includes('plain text')),
+    'a part-list SYSTEM turn was accepted',
+  );
+  check(
+    validatePair({
+      messages: [
+        goodMessages[0]!,
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: '### SOURCE INFORMATION' },
+            { type: 'image', path: '../../etc/passwd' },
+          ],
+        },
+        goodMessages[2]!,
+      ],
+    }).some((problem) => problem.includes('not a relative path')),
+    'an image path escaping the pair directory was accepted',
+  );
+  check(
+    validatePair({
+      messages: [
+        goodMessages[0]!,
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: `### SOURCE INFORMATION${DLO_SOURCE_FILES_MARKER}`,
+            },
+            { type: 'image', path: 'a.images/000.png' },
+          ],
+        },
+        goodMessages[2]!,
+      ],
+    }).some((problem) => problem.includes('marker')),
+    'a vision pair carrying the marker in a text part was accepted',
+  );
+  const visionLine = JSON.parse(
+    serializePair(visionMessages, (path) => datasetImagePath('abc', path)),
+  ) as { messages: Array<{ content: unknown }> };
+  const visionParts = visionLine.messages[1]!.content as Array<{
+    type: string;
+    path?: string;
+  }>;
+  check(
+    visionParts[2]?.path === 'images/abc/000.png',
+    `a vision image was not re-pointed beside the dataset: ${JSON.stringify(visionParts[2])}`,
+  );
+  check(
+    userContentOf(visionMessages).includes('टिपणी') &&
+      !userContentOf(visionMessages).includes('000.png'),
+    'the text of a vision user turn is wrong',
+  );
+  const visionExample = (id: string, soft: number | null): LoadedExample => ({
+    ...exampleWith(id, id, 'x'),
+    sidecar: {
+      ...exampleWith(id, id, 'x').sidecar,
+      studentFormat: 'vision',
+      softTokens: soft,
+      tokensPerImage: soft ?? 270,
+    },
+  });
+  check(
+    JSON.stringify(
+      visionBudgets([
+        visionExample('a', 1120),
+        visionExample('b', 1120),
+        exampleWith('c', 'c', 'x'),
+      ]),
+    ) === '[1120]',
+    'a uniform vision budget was not reported as one',
+  );
+  check(
+    visionBudgets([visionExample('a', 1120), visionExample('b', null)])
+      .length === 2,
+    'mixed vision budgets were not detected',
+  );
+  const sameScan = [
+    {
+      ...visionExample('p', 1120),
+      images: [{ path: 'p.images/000.png', absolute: '', sha256: 'aa' }],
+    },
+    {
+      ...visionExample('q', 1120),
+      images: [{ path: 'q.images/000.png', absolute: '', sha256: 'aa' }],
+    },
+    {
+      ...visionExample('r', 1120),
+      images: [{ path: 'r.images/000.png', absolute: '', sha256: 'bb' }],
+    },
+  ];
+  const scanGroups = mergeDuplicatePrompts(sameScan);
+  check(
+    scanGroups.get('p') === scanGroups.get('q') &&
+      scanGroups.get('p') !== scanGroups.get('r'),
+    'the same scan in two intakes was not merged into one group, or different scans were',
   );
 
   // --- countBy ---

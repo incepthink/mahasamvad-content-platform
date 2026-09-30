@@ -14,8 +14,19 @@ import {
 import type { ChatMessage } from './openai-chat.js';
 import type { StyleReferenceArticle } from './select-style-reference.js';
 
-export const DLO_ARTICLE_PROMPT_VERSION = 'dlo-rag-v5';
+export const DLO_ARTICLE_PROMPT_VERSION = 'dlo-rag-v6';
 
+// v6 (2026-09-29) — ISSUED BY A NAMED OFFICIAL. v5 defined DOCUMENT as "no such named speaker",
+// so a press note SIGNED by a named officer (Press_Note_General.pdf, signed by the शिक्षण संचालक
+// (योजना)) was sorted as an anonymous document and its attribution line was forbidden. GPT
+// reasoned past that; the Gemma adapter followed it literally, wrote an impersonal
+// `असे आवाहन करण्यात आले आहे` and never named the officer. So there is now a THIRD kind: a press
+// note, letter, circular or appeal issued or signed by a named official is ATTRIBUTED to that
+// official, and only a GR / notification with no named issuing person stays impersonal. Rule 4
+// also gains a positive "state each appeal once", after that article repeated its appeal three
+// times. The examples use placeholders, never a real test case's name: a 31B model copies an
+// example's name as readily as its shape.
+//
 // v5 (2026-09-24) — DOCUMENT-TYPE AWARE. v4's rules 1/2/3/5 were written for a meeting: they
 // REQUIRED an attributed Tier-1 statement, attribution to a Minister and a
 // `यावेळी … उपस्थित होते` close. Three of the five /dlo sources of 2026-09-23 were GRs with no
@@ -36,11 +47,13 @@ export const DGIPR_EDITORIAL_SYSTEM_PROMPT = [
   '',
   'FIRST DECIDE WHAT KIND OF SOURCE THIS IS — rules 1, 2, 3 and 5 depend on it:',
   '   - MEETING / EVENT: SOURCE INFORMATION records a named Minister, Chief Minister, Deputy Chief Minister or other named official speaking, directing, reviewing, inaugurating or attending.',
-  '   - DOCUMENT: a Government Resolution (शासन निर्णय), circular, notification, order, scheme guideline, report or press clarification with no such named speaker.',
+  '   - ISSUED BY A NAMED OFFICIAL: a press note, letter, circular or appeal that SOURCE INFORMATION shows being issued or signed by a named official, or whose body says that named official directed, appealed or informed. A signature block counts: it names who is speaking.',
+  '   - DOCUMENT: a Government Resolution (शासन निर्णय), notification, order, scheme guideline or report with no named issuing person. A GR or notification signed "राज्यपालांच्या आदेशानुसार व नावाने" speaks for the government, not for the officer who signs it, so it is a DOCUMENT too. Only this kind stays impersonal.',
   '   Only SOURCE INFORMATION decides this. Never add a speaker, a Minister, a quotation, a meeting or attendees that it does not contain.',
   '',
   '1. LEAD WITH THE NEWS:',
   '   - MEETING / EVENT: the directive, decision or announcement of the Minister or official is the primary news angle and leads the article. Logistics, dates, organisers and venues are supporting context.',
+  '   - ISSUED BY A NAMED OFFICIAL: lead with that official\'s directive or appeal and its deadline, attributed to them in the first paragraph by the name and designation exactly as the source prints them (उदा. "…असे आवाहन <पदनाम> <नाव> यांनी केले आहे.").',
   '   - DOCUMENT: open with the decision itself and what it means for citizens — what is being done, for whom, from when, and at what scale. Give the reason or background in the next paragraph, then how it will be implemented.',
   '',
   '2. HEADLINES:',
@@ -48,10 +61,12 @@ export const DGIPR_EDITORIAL_SYSTEM_PROMPT = [
   '     * Tier 1: key statement with attribution (e.g., ### *[मुख्य घोषणा / व्हिजन] – मुख्यमंत्री देवेंद्र फडणवीस*), attributed only to a person SOURCE INFORMATION names as saying it',
   '     * Tier 2: main news / decision headline (e.g., ## *[प्रमुख बातमी किंवा धोरणात्मक निर्णय]*)',
   '     * Tier 3: context, venue or occasion subheadline (e.g., ### *[कार्यक्रम / बैठकीचा संदर्भ]*)',
+  '   - ISSUED BY A NAMED OFFICIAL: the same stack, with Tier 1 optional; when used, it attributes the directive or appeal to that official by the designation and name the source prints.',
   '   - DOCUMENT: a decision headline (## *[निर्णय आणि त्याचा लाभ]*), optionally followed by one subheadline (### *[कोणाला, केव्हापासून, किती]*). No attributed statement line.',
   '',
   '3. ACTIVE VOICE:',
   '   - Attribute statements and directions to the named person who made them, by name and portfolio (उदा. "मुख्यमंत्र्यांनी स्पष्ट केले", "असे निर्देश वनमंत्री गणेश नाईक यांनी दिले", "डॉ. पाटील यांनी सांगितले").',
+  "   - For a source ISSUED BY A NAMED OFFICIAL, that official is the subject of the directive or appeal. Do not reproduce the signature block, address or contact lines, but do use the signing officer's name and designation for attribution.",
   '   - For a DOCUMENT, make the government or the issuing department the subject (उदा. "राज्य शासनाने … निर्णय घेतला आहे", "महसूल विभागाने … मोहीम जाहीर केली आहे"). Name the document once; after that state its provisions directly instead of repeating "शासन निर्णयात नमूद करण्यात आले आहे".',
   '   - Avoid impersonal passive constructions like "यावेळी सांगण्यात आले", "अधोरेखित करण्यात आले" or "म्हटले गेले".',
   '',
@@ -59,11 +74,12 @@ export const DGIPR_EDITORIAL_SYSTEM_PROMPT = [
   "   - The source's sequence is NOT news order. Lead with the biggest citizen-facing decision or public outcome, then background, then procedure.",
   '   - Condense annexures, application-form fields, checklists, lists of officers and step-by-step procedure into one or two sentences that tell a citizen what to do. Leave out file, reference and outward numbers.',
   '   - State facts plainly: every sentence carries information from SOURCE INFORMATION, and the decision, its beneficiaries and its figures speak for themselves.',
+  '   - State each appeal, directive or deadline ONCE, in the paragraph where it first matters; do not restate it in a later paragraph or in the closing.',
   '   - Do not write a dateline (स्थळ, दिनांक) line; the platform adds it to the first paragraph.',
   '',
   '5. CLOSING:',
   '   - MEETING / EVENT: when the source lists other attendees or dignitaries, close with the standard attendance line: "यावेळी <नावे व पदनामे> उपस्थित होते."',
-  '   - DOCUMENT: end on the last source-supported provision a reader can act on — a deadline, where or how to apply, a helpline, or the date the decision takes effect.',
+  '   - ISSUED BY A NAMED OFFICIAL or DOCUMENT: no attendance line. End on the last source-supported provision a reader can act on — a deadline, where or how to apply, a helpline, or the date the decision takes effect.',
   '   - Conclude with the official DGIPR release terminator: ०००००',
 ].join('\n');
 

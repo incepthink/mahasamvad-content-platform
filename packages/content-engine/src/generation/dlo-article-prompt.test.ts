@@ -11,7 +11,7 @@ import { EDITORIAL_PREFERENCES_HEADING } from './editorial-preferences-block.js'
 import { buildSourcesRequest } from './responses-with-sources.js';
 
 test('DLO uses the officer-approved complete prompt', () => {
-  assert.equal(DLO_ARTICLE_PROMPT_VERSION, 'dlo-rag-v5');
+  assert.equal(DLO_ARTICLE_PROMPT_VERSION, 'dlo-rag-v6');
   assert.deepEqual(
     buildDloArticleMessages({
       sourceInformation: 'बैठकीची टिपणी',
@@ -67,11 +67,59 @@ test('the system prompt branches on MEETING / EVENT vs DOCUMENT sources', () => 
     assert.match(body, /DOCUMENT/u, `rule ${rule.trim()} has a DOCUMENT case`);
   }
   assert.match(system, /No attributed statement line/u);
-  assert.match(system, /end on the last source-supported provision/u);
+  assert.match(system, /[Ee]nd on the last source-supported provision/u);
   // The attendance close is scoped to meetings, not unconditional.
   assert.match(
     system,
     /MEETING \/ EVENT: when the source lists other attendees/u,
+  );
+});
+
+// v6: a press note SIGNED by a named officer was sorted as an anonymous DOCUMENT under v5, so
+// the Gemma adapter never named the signatory. A third kind attributes it to that official.
+test('a source issued or signed by a named official is attributed, not impersonal', () => {
+  const system = DGIPR_EDITORIAL_SYSTEM_PROMPT;
+  assert.match(
+    system,
+    /- ISSUED BY A NAMED OFFICIAL: a press note, letter, circular/u,
+  );
+  assert.match(system, /A signature block counts: it names who is speaking/u);
+  // Only a GR / notification with no named issuing person stays impersonal, and a press
+  // note / circular is no longer listed as a DOCUMENT.
+  assert.match(system, /Only this kind stays impersonal/u);
+  // A GR signed "in the name of the Governor" is the government's, so its signing secretary
+  // must not become a speaker — the invented-speaker failure v5 was written to stop.
+  assert.match(
+    system,
+    /signed "राज्यपालांच्या आदेशानुसार व नावाने" speaks for the government, not for the officer who signs it/u,
+  );
+  const documentLine =
+    system
+      .split('\n')
+      .find((line) => line.startsWith('   - DOCUMENT: a Government')) ?? '';
+  assert.doesNotMatch(documentLine, /circular|press clarification/u);
+  // Rules 1, 2, 3 and 5 each say what to do with the new kind.
+  for (const rule of ['1. ', '2. ', '3. ', '5. ']) {
+    const at = system.indexOf(`\n${rule}`);
+    const next = system.indexOf('\n\n', at + 1);
+    const body = system.slice(at, next === -1 ? undefined : next);
+    assert.match(body, /ISSUED BY A NAMED OFFICIAL/u, `rule ${rule.trim()}`);
+  }
+  // Signature blocks are not reproduced, but the signer's name IS used — the opposite of what
+  // the learned "do not expand on signatures" rule had pushed the model into.
+  assert.match(
+    system,
+    /Do not reproduce the signature block, address or contact lines, but do use the signing officer's name and designation for attribution/u,
+  );
+  // The example is a placeholder: a model copies an example's name as readily as its shape.
+  assert.match(system, /<पदनाम> <नाव> यांनी केले आहे/u);
+  assert.doesNotMatch(system, /कृष्णकुमार/u);
+});
+
+test('each appeal or directive is stated once', () => {
+  assert.match(
+    DGIPR_EDITORIAL_SYSTEM_PROMPT,
+    /State each appeal, directive or deadline ONCE, in the paragraph where it first matters/u,
   );
 });
 

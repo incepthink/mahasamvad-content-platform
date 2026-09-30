@@ -51,6 +51,16 @@
 // its own harness to be byte-identical to a plain text call, so the prompt is unchanged; what
 // differs is that the system message travels as `instructions` rather than as a `system` turn.
 
+// VISION STUDENT (2026-09-29, `--student vision`, the default). The first adapter was trained
+// on text-lane rows alone, under the old one-line prompt, while production now hands it image
+// TILES of a scan under the long editorial prompt plus the learned rules — so it learned the
+// output format and not how to read a page. A vision pair's student turn is therefore built by
+// the SAME two functions production calls, `prepareGemmaSources` and `buildGemmaMessages`, at
+// the SAME GEMMA_MAX_SOFT_TOKENS / tile settings, with the tiles written as files beside the
+// pair (see distill-content.ts). No OCR is run for the student at all. The teacher still reads
+// the real files, and both halves carry the active learned editorial rules — read once from
+// the database, exactly as `articleEditorialPreferences` does for a live /dlo run.
+
 import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -61,12 +71,14 @@ import {
   downloadFile,
   getDloIntake,
   getGeneration,
+  listActiveEditorialPreferences,
   type DloIntakeFileEntry,
   type DloIntakeRow,
   type GenerationRow,
   type SupabaseClient,
 } from '@dgipr/database';
 import {
+  MAX_INJECTED_PREFERENCES,
   NameDesignationsSchema,
   intakeFileMimeForFileName,
 } from '@dgipr/schemas';
@@ -94,6 +106,18 @@ import {
 } from '../generation/openai-chat.js';
 import { articleStyleReferencesEnabled } from '../generation/no-reference-article-prompt.js';
 import { respondWithSources } from '../generation/responses-with-sources.js';
+import {
+  buildGemmaMessages,
+  gemmaSourceSettings,
+  prepareGemmaSources,
+  type GemmaMessage,
+  type SourceDocument,
+} from '../generation/gemma-sources.js';
+import {
+  dataUriBytes,
+  extensionForDataUri,
+  type PairPart,
+} from './distill-content.js';
 import { documentKindOf, extractDocument } from '../intake/document.js';
 import {
   extractImageTextViaProvider,
@@ -170,6 +194,14 @@ export type CaptureLane = 'text' | 'native' | 'all';
  */
 export type CaptureOrder = 'newest' | 'oldest';
 
+/**
+ * What the student is trained to read. `vision` (the CLI default): a native-lane row's
+ * documents as the image tiles production sends. `text`: the documents OCR'd into
+ * characters — the first adapter's format, kept for comparison. Text-lane rows are text
+ * either way.
+ */
+export type StudentFormat = 'text' | 'vision';
+
 // ---------------------------------------------------------------------------
 // Pure core — everything below is exercised by `--check` with no database, no network and
 // no spend. These are the functions that decide what a training pair CONTAINS, which is the
@@ -230,6 +262,14 @@ export type CapturePromptInputs = Readonly<{
   designations: readonly DesignationPair[];
   heading: string | null;
   officerInstructions: string | null;
+  /** The active learned editorial rules — both halves carry them, as production does. */
+  editorialPreferences?: readonly string[] | undefined;
+  /**
+   * How many documents the STUDENT receives as image tiles. Zero (the default) keeps the
+   * student text-only and marker-free; above zero it carries the marker, which
+   * `buildGemmaMessages` then replaces with the tiles.
+   */
+  studentAttachedFileCount?: number | undefined;
 }>;
 
 /**
@@ -252,6 +292,7 @@ export function buildCapturePrompts(inputs: CapturePromptInputs): Readonly<{
     designations: inputs.designations,
     heading: inputs.heading,
     officerInstructions: inputs.officerInstructions,
+    editorialPreferences: inputs.editorialPreferences ?? [],
   } as const;
   return {
     teacher: buildDloArticleMessages({
@@ -265,10 +306,10 @@ export function buildCapturePrompts(inputs: CapturePromptInputs): Readonly<{
     student: buildDloArticleMessages({
       ...shared,
       sourceInformation: inputs.studentSource,
-      // The student is trained on text and attaches nothing, so it must never carry the
-      // marker. Guarded again below, because a NUL baked into an adapter is unrecoverable
-      // without a re-capture.
-      attachedSourceFiles: false,
+      // A text student attaches nothing, so it must never carry the marker — guarded again
+      // below, because a NUL baked into an adapter is unrecoverable without a re-capture. A
+      // vision student carries it only until buildGemmaMessages splices the tiles in.
+      attachedSourceFiles: (inputs.studentAttachedFileCount ?? 0) > 0,
     }),
   };
 }
@@ -335,6 +376,71 @@ export function markerCount(text: string): number {
     at = text.indexOf(DLO_SOURCE_FILES_MARKER, at + 1);
   }
   return count;
+}
+
+/** A vision pair: the JSONL line plus the image files its user turn references. */
+export type VisionCapturePair = Readonly<{
+  messages: readonly Readonly<{
+    role: 'system' | 'user' | 'assistant';
+    content: string | readonly PairPart[];
+  }>[];
+  images: readonly Readonly<{ path: string; bytes: Buffer }>[];
+}>;
+
+/**
+ * Turn production's image-conditioned messages into a pair whose tiles are FILES.
+ *
+ * `gemmaMessages` is exactly what `buildGemmaMessages` returned, so the part order — prompt
+ * text, each tile's `=== स्रोत: … ===` label, the tile, then the rest of the prompt — is the
+ * order the served model reads. Each data URI is decoded and named `<stem>.images/NNN.<ext>`,
+ * a path relative to the pair's directory.
+ */
+export function buildVisionCapturePair(
+  gemmaMessages: readonly GemmaMessage[],
+  article: string,
+  stem: string,
+): VisionCapturePair {
+  const system = gemmaMessages.find((message) => message.role === 'system');
+  const user = gemmaMessages.find((message) => message.role === 'user');
+  if (!system || typeof system.content !== 'string' || !user) {
+    throw new Error(
+      'The vision student prompt is missing a system or user turn; refusing to write a pair.',
+    );
+  }
+  const body = article.trim();
+  if (!body) throw new Error('The teacher returned an empty article.');
+
+  const images: { path: string; bytes: Buffer }[] = [];
+  const parts: PairPart[] = [];
+  const source =
+    typeof user.content === 'string'
+      ? [{ type: 'text' as const, text: user.content }]
+      : user.content;
+  for (const part of source) {
+    if (part.type === 'text') {
+      assertNoMarker(part.text, 'vision student user turn');
+      parts.push({ type: 'text', text: part.text });
+      continue;
+    }
+    const url = part.image_url.url;
+    const path = `${stem}.images/${String(images.length).padStart(3, '0')}.${extensionForDataUri(url)}`;
+    images.push({ path, bytes: dataUriBytes(url) });
+    parts.push({ type: 'image', path });
+  }
+  if (images.length === 0) {
+    throw new Error(
+      'The vision student turn carries no image; a text row must be captured as text.',
+    );
+  }
+  assertNoMarker(system.content, 'student system turn');
+  return {
+    messages: [
+      { role: 'system', content: system.content },
+      { role: 'user', content: parts },
+      { role: 'assistant', content: body },
+    ],
+    images,
+  };
 }
 
 /**
@@ -568,6 +674,84 @@ async function uploadTeacherFiles(
   return refs;
 }
 
+/**
+ * The native lane's documents as bytes, read once and shared by the teacher's upload and the
+ * vision student's tiles — so both halves are provably built from the same file.
+ */
+async function downloadDocuments(
+  client: SupabaseClient,
+  files: readonly DloIntakeFileEntry[],
+  warnings: string[],
+): Promise<SourceDocument[]> {
+  const documents: SourceDocument[] = [];
+  for (const file of readableDocuments(files)) {
+    try {
+      documents.push({
+        name: file.name,
+        kind: file.kind as SourceDocument['kind'],
+        data: await downloadFile(client, DLO_UPLOADS_BUCKET, file.storagePath!),
+      });
+    } catch (error) {
+      warnings.push(
+        `${file.name}: could not be downloaded (${
+          error instanceof Error ? error.message : String(error)
+        }).`,
+      );
+    }
+  }
+  return documents;
+}
+
+async function uploadDocumentsForTeacher(
+  documents: readonly SourceDocument[],
+  warnings: string[],
+): Promise<SourceFileRef[]> {
+  const refs: SourceFileRef[] = [];
+  for (const document of documents) {
+    try {
+      const fileId = await uploadSourceFile(
+        document.data,
+        document.name,
+        intakeFileMimeForFileName(document.name),
+      );
+      refs.push({
+        fileId,
+        kind: document.kind === 'image' ? 'image' : 'document',
+        name: document.name,
+      });
+    } catch (error) {
+      warnings.push(
+        `${document.name}: could not be uploaded for the teacher (${
+          error instanceof Error ? error.message : String(error)
+        }).`,
+      );
+    }
+  }
+  return refs;
+}
+
+/** The active learned rules per scope, read once per capture run. */
+export type PreferencesByScope = Readonly<
+  Record<'news' | 'scheme', readonly string[]>
+>;
+
+export async function loadActivePreferences(
+  client: SupabaseClient,
+): Promise<PreferencesByScope> {
+  const [news, scheme] = await Promise.all(
+    (['news', 'scheme'] as const).map(async (scope) =>
+      (
+        await listActiveEditorialPreferences(
+          client,
+          scope,
+          MAX_INJECTED_PREFERENCES,
+        )
+      ).map((row) => row.rule),
+    ),
+  );
+  return { news: news ?? [], scheme: scheme ?? [] };
+}
+
 // ---------------------------------------------------------------------------
 // Capture
 // ---------------------------------------------------------------------------
@@ -576,6 +760,10 @@ export type CaptureOptions = Readonly<{
   out: string;
   reasoningEffort: 'none' | 'low' | 'medium' | 'high';
   minSourceChars: number;
+  /** 'vision' is the CLI default. Absent here means 'text', the pre-2026-09-29 behaviour. */
+  studentFormat?: StudentFormat | undefined;
+  /** Active learned rules by scope. Absent means none. */
+  preferences?: PreferencesByScope | undefined;
 }>;
 
 export type CaptureOutcome = Readonly<{
@@ -632,17 +820,30 @@ export async function captureOne(
 
   const files = intake?.files ?? [];
   const native = context.lane === 'native' || context.lane === 'mixed';
-  // Documents the student needs as characters. On the text lane these come back straight off
-  // the intake entries and cost nothing; `generations.note` already contains them, so they are
-  // read only to RECORD provenance and are not appended again below.
-  const sections = native
-    ? await readDocumentSections(client, files, warnings)
+  const vision = native && (options.studentFormat ?? 'text') === 'vision';
+  const scope = row.category === 'scheme' ? 'scheme' : 'news';
+  const editorialPreferences = options.preferences?.[scope] ?? [];
+  // A vision student reads the documents as tiles, so nothing is OCR'd for it; the bytes are
+  // downloaded once and shared with the teacher's upload.
+  const visionDocuments = vision
+    ? await downloadDocuments(client, files, warnings)
     : [];
+  // Documents the student needs as characters (text format only). On the text lane these
+  // come back straight off the intake entries and cost nothing; `generations.note` already
+  // contains them, so they are read only to RECORD provenance and are not appended again.
+  const sections =
+    native && !vision
+      ? await readDocumentSections(client, files, warnings)
+      : [];
 
-  const studentSource = native
-    ? appendDocumentSources(row.note, sections)
-    : row.note;
-  if (studentSource.trim().length < options.minSourceChars) {
+  const studentSource =
+    native && !vision ? appendDocumentSources(row.note, sections) : row.note;
+  // The floor is on the SOURCE. A vision row's documents are its source and cannot be
+  // measured in characters, so the floor applies only when nothing is attached.
+  if (
+    visionDocuments.length === 0 &&
+    studentSource.trim().length < options.minSourceChars
+  ) {
     return {
       ...base,
       status: 'skipped',
@@ -658,7 +859,26 @@ export async function captureOne(
   let teacherFiles: SourceFileRef[] = [];
   const accumulator: CostAccumulator = createCostAccumulator();
   try {
-    if (native) {
+    // The vision student's tiles are prepared BEFORE anything is uploaded or billed: a
+    // document that will not render must not cost a teacher article that can then never be
+    // paired.
+    const studentVision = vision
+      ? await prepareGemmaSources(visionDocuments)
+      : null;
+    if (studentVision) {
+      warnings.push(...studentVision.warnings);
+      if (studentVision.imageCount === 0) {
+        return {
+          ...base,
+          status: 'skipped',
+          reason:
+            'no document rendered to an image tile for the vision student',
+        };
+      }
+    }
+    if (vision) {
+      teacherFiles = await uploadDocumentsForTeacher(visionDocuments, warnings);
+    } else if (native) {
       teacherFiles = await uploadTeacherFiles(client, files, warnings);
     }
     const prompts = buildCapturePrompts({
@@ -670,6 +890,8 @@ export async function captureOne(
       designations,
       heading: row.heading,
       officerInstructions: row.instructions,
+      editorialPreferences,
+      studentAttachedFileCount: studentVision ? visionDocuments.length : 0,
     });
 
     // Structural guards, before anything is billed. A teacher prompt that lost its marker
@@ -708,14 +930,40 @@ export async function captureOne(
           'production discards it.',
       );
     }
-    const pair = buildCapturePair(prompts.student, article);
-
     await mkdir(options.out, { recursive: true });
     const stem = resolve(options.out, id.toLowerCase());
-    await writeFile(`${stem}.jsonl`, JSON.stringify(pair) + '\n', {
-      encoding: 'utf8',
-      flag: 'wx',
-    });
+    let pair: CapturePair | VisionCapturePair;
+    if (studentVision) {
+      const visionPair = buildVisionCapturePair(
+        buildGemmaMessages(prompts.student, studentVision.parts),
+        article,
+        id.toLowerCase(),
+      );
+      // Images first: the .jsonl is the "captured" marker, so it must never exist while a
+      // file it references does not.
+      await mkdir(`${stem}.images`, { recursive: true });
+      for (const image of visionPair.images) {
+        await writeFile(resolve(options.out, image.path), image.bytes, {
+          flag: 'wx',
+        });
+      }
+      pair = visionPair;
+    } else {
+      pair = buildCapturePair(prompts.student, article);
+    }
+    await writeFile(
+      `${stem}.jsonl`,
+      JSON.stringify({ messages: pair.messages }) + '\n',
+      { encoding: 'utf8', flag: 'wx' },
+    );
+    const userTurn = pair.messages[1]!.content;
+    const userChars =
+      typeof userTurn === 'string'
+        ? userTurn.length
+        : userTurn.reduce(
+            (sum, part) => sum + (part.type === 'text' ? part.text.length : 0),
+            0,
+          );
 
     const costUsd = totalCostUsd(accumulator);
     const review = {
@@ -742,9 +990,21 @@ export async function captureOne(
       },
       studentPrompt: {
         promptVersion: DLO_ARTICLE_PROMPT_VERSION,
-        attachedSourceFiles: false,
+        format: studentVision ? 'vision' : 'text',
+        attachedSourceFiles: Boolean(studentVision),
         sourceChars: studentSource.length,
-        userChars: pair.messages[1]!.content.length,
+        userChars,
+        editorialPreferenceCount: editorialPreferences.length,
+        editorialPreferences,
+        // What the tiles were cut at. The dataset builder refuses to mix budgets, and the
+        // adapter must be served at this one.
+        vision: studentVision
+          ? {
+              ...gemmaSourceSettings(),
+              imageCount: studentVision.imageCount,
+              documents: visionDocuments.map((document) => document.name),
+            }
+          : null,
       },
       styleReferences: {
         // Recorded so a later reader can tell a uniformly-empty dataset from one whose
@@ -844,6 +1104,10 @@ const USAGE = [
   `  --min-source-chars N  skip a source shorter than this (default ${DEFAULT_MIN_SOURCE_CHARS})`,
   '  --max-intakes N       refuse above this many intakes (default 800)',
   '  --out <dir>           where pairs are written (default data/finetune/distill/pairs)',
+  '  --student S           vision (default) | text — how a native row reaches the student:',
+  '                        as production image tiles, or as OCR text (the v1 adapter format)',
+  '  --prefs P             db (default) | none — the active learned editorial rules, which',
+  '                        production injects into every /dlo prompt',
   '  --check               run the offline assertions and exit — free, no database',
 ].join('\n');
 
@@ -861,6 +1125,8 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
       'min-source-chars': { type: 'string' },
       'max-intakes': { type: 'string' },
       out: { type: 'string' },
+      student: { type: 'string' },
+      prefs: { type: 'string' },
       check: { type: 'boolean' },
       help: { type: 'boolean', short: 'h' },
     },
@@ -887,6 +1153,16 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   if (!['none', 'low', 'medium', 'high'].includes(effort)) {
     throw new Error(`Unknown --effort "${effort}".`);
   }
+  const studentFormat = (values.student ?? 'vision') as StudentFormat;
+  if (!['text', 'vision'].includes(studentFormat)) {
+    throw new Error(
+      `Unknown --student "${studentFormat}". Supported: vision, text.`,
+    );
+  }
+  const prefsMode = values.prefs ?? 'db';
+  if (prefsMode !== 'db' && prefsMode !== 'none') {
+    throw new Error(`Unknown --prefs "${prefsMode}". Supported: db, none.`);
+  }
   const limit = values.limit ? Number.parseInt(values.limit, 10) : Infinity;
   const minSourceChars = values['min-source-chars']
     ? Number.parseInt(values['min-source-chars'], 10)
@@ -901,6 +1177,14 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     : null;
 
   const client = createServiceRoleClient();
+
+  // Read ONCE and applied to every pair, so a batch is one prompt. A failed read is fatal:
+  // a capture without the rules production injects would train the adapter on a prompt no
+  // officer's run receives. `--prefs none` is the explicit opt-out.
+  const preferences: PreferencesByScope =
+    prefsMode === 'db'
+      ? await loadActivePreferences(client)
+      : { news: [], scheme: [] };
 
   // The SAME predicate the pool survey counts with, reused rather than re-expressed: a
   // capture that selected a different set from the one Phase 0.3 sized would make the group
@@ -984,6 +1268,16 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
       `   (${ARTICLE_MODEL}, effort=${effort})`,
   );
   console.log(`  output directory:          ${out}`);
+  console.log(
+    `  student format:            ${studentFormat}` +
+      (studentFormat === 'vision'
+        ? `   (native rows as tiles; ${JSON.stringify(gemmaSourceSettings())})`
+        : '   (native rows as OCR text)'),
+  );
+  console.log(
+    `  learned rules:             ${prefsMode === 'db' ? `news ${preferences.news.length}, scheme ${preferences.scheme.length}` : 'none (--prefs none)'}`,
+  );
+  console.log(`  prompt version:            ${DLO_ARTICLE_PROMPT_VERSION}`);
   if (batchDates.length > 0) {
     console.log(
       `  batch spans:               ${batchDates[0]!.slice(0, 10)} .. ` +
@@ -1046,7 +1340,13 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
           group: groupKeyOf(row),
           hasArticleRevision: revised.has(row.id),
         },
-        { out, reasoningEffort: effort, minSourceChars },
+        {
+          out,
+          reasoningEffort: effort,
+          minSourceChars,
+          studentFormat,
+          preferences,
+        },
       );
       if (outcome.status === 'captured') {
         captured += 1;
@@ -1220,6 +1520,88 @@ export function runChecks(): void {
     !nativeLane.student.some((m) => m.content.includes('\u0000')),
     'a NUL byte survived into the native-lane student prompt',
   );
+
+  // --- the vision student (2026-09-29) ---
+  const RULES = ['शीर्षक १० शब्दांच्या आत ठेवा.'];
+  const visionLane = buildCapturePrompts({
+    studentSource: 'टिपणी',
+    teacherSource: 'टिपणी',
+    attachedFileCount: 1,
+    designations: [],
+    heading: null,
+    officerInstructions: null,
+    editorialPreferences: RULES,
+    studentAttachedFileCount: 1,
+  });
+  check(
+    JSON.stringify(visionLane.teacher) === JSON.stringify(visionLane.student),
+    'the vision student and the teacher see different prompts; only the transport may differ',
+  );
+  check(
+    visionLane.student.every((m) =>
+      m.role === 'system' ? m.content.includes(RULES[0]!) : true,
+    ) && visionLane.teacher[0]!.content.includes(RULES[0]!),
+    'the learned rules did not reach both halves',
+  );
+  check(
+    markerCount(visionLane.student.find((m) => m.role === 'user')!.content) ===
+      1,
+    'the vision student prompt must carry the marker until the tiles are spliced in',
+  );
+  // A 1x1 PNG and a JPEG header, as prepareGemmaSources would hand them over.
+  const png = `data:image/png;base64,${Buffer.from('fake-png').toString('base64')}`;
+  const jpg = `data:image/jpeg;base64,${Buffer.from('fake-jpg').toString('base64')}`;
+  const gemmaMessages = buildGemmaMessages(visionLane.student, [
+    { type: 'text', text: '=== स्रोत: gr.pdf · पृष्ठ 1 ===' },
+    { type: 'image_url', image_url: { url: png } },
+    { type: 'text', text: '=== स्रोत: photo.jpg ===' },
+    { type: 'image_url', image_url: { url: jpg } },
+  ]);
+  const visionPair = buildVisionCapturePair(gemmaMessages, ' लेख ', 'abc');
+  const visionUser = visionPair.messages[1]!.content as readonly PairPart[];
+  check(
+    visionPair.images.length === 2 &&
+      visionPair.images[0]!.path === 'abc.images/000.png' &&
+      visionPair.images[1]!.path === 'abc.images/001.jpg',
+    'vision images are not numbered in order with their MIME extension',
+  );
+  check(
+    visionPair.images[0]!.bytes.toString() === 'fake-png',
+    'a vision image was not decoded from its data URI',
+  );
+  check(
+    visionUser.filter((part) => part.type === 'image').length === 2 &&
+      !JSON.stringify(visionUser).includes('base64'),
+    'the vision user turn inlined an image instead of naming a file',
+  );
+  check(
+    visionUser.every(
+      (part) => part.type !== 'text' || markerCount(part.text) === 0,
+    ),
+    'the marker survived the splice into the vision user turn',
+  );
+  const firstText = visionUser[0];
+  check(
+    firstText?.type === 'text' &&
+      firstText.text.includes('### SOURCE INFORMATION') &&
+      visionUser.findIndex((part) => part.type === 'image') > 0,
+    'the tiles were not spliced INSIDE SOURCE INFORMATION, after its heading',
+  );
+  check(
+    visionPair.messages[2]!.content === 'लेख',
+    'the vision target was not trimmed',
+  );
+  let visionThrew = false;
+  try {
+    buildVisionCapturePair(
+      buildGemmaMessages(visionLane.student, []),
+      'लेख',
+      'abc',
+    );
+  } catch {
+    visionThrew = true;
+  }
+  check(visionThrew, 'a vision pair with no image was written');
 
   // --- buildCapturePair ---
   const pair = buildCapturePair(textLane.student, '  लेख  ');

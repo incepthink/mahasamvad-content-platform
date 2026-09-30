@@ -1658,7 +1658,8 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   call sites reach the helper). New env: `EDITORIAL_LEARNING_ENABLED`,
   `OPENAI_PREFERENCE_MODEL`, `OPENAI_PREFERENCE_REASONING_EFFORT`,
   `EDITORIAL_LEARNING_TIMEOUT_MS`. The review page (Phase 3) is `apps/web/app/preferences/page.tsx`
-  (sidebar **संपादकीय नियम**) over the `/api/preferences` routes; turn the flag on only where
+  (**संपादकीय नियम** — NOT in the sidebar since 2026-09-30; reached by URL and from
+  `ArticleView`'s "rule learned" callout) over the `/api/preferences` routes; turn the flag on only where
   that page is deployed, since it is the only way to see and disable a learned rule.
 
 **Data & schema:** `supabase/migrations/0001…0004_*.sql` — pgvector Mahasamvad

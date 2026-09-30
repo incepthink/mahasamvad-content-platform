@@ -688,6 +688,14 @@ async function loadEvalItems(
       problems.push(`${row.id}: pair is missing a user or assistant turn`);
       continue;
     }
+    // A vision pair (capture --student vision) carries its pages as image parts, which this
+    // held-out harness cannot replay as text. Its measurement is the file mode.
+    if (typeof user.content !== 'string') {
+      problems.push(
+        `${row.id}: a vision pair — measure it with --files, which runs the production path`,
+      );
+      continue;
+    }
     const sections = splitDloPrompt(user.content);
     if (!sections.ok) {
       problems.push(
@@ -875,6 +883,16 @@ Phase 5 — three-arm evaluation of the distilled /dlo adapter.
   --out=<file>          report path (default: <data>/eval-report-<path>.json)
   --check, --self-test  offline assertions, no network, no spend
   -h, --help
+
+FILE MODE (--files): real documents through the production /dlo path. See eval-dlo-files.ts.
+  --files               evaluate test-assets/pdfs/* + images/* instead of the held-out set
+  --arms=a,b            teacher,tuned,think,base          (default: teacher,tuned)
+  --adapters=a,b        adapters for tuned/think arms     (default: GEMMA_DLO_MODEL)
+  --prefs=db|none       inject the active learned rules as production does (default: db)
+  --teacher-effort=E    low|medium|high                   (default: high)
+  --category=news|scheme                                  (default: news)
+  --assets=<dir>        documents directory               (default: <repo>/test-assets)
+  --only=a.pdf,b.jpg    named files only; --limit=N the first N
 `.trim();
 
 async function main(argv: readonly string[]): Promise<void> {
@@ -889,6 +907,12 @@ async function main(argv: readonly string[]): Promise<void> {
       refresh: { type: 'boolean' },
       data: { type: 'string' },
       out: { type: 'string' },
+      files: { type: 'boolean' },
+      adapters: { type: 'string' },
+      prefs: { type: 'string' },
+      'teacher-effort': { type: 'string' },
+      category: { type: 'string' },
+      assets: { type: 'string' },
       check: { type: 'boolean' },
       'self-test': { type: 'boolean' },
       help: { type: 'boolean', short: 'h' },
@@ -900,7 +924,49 @@ async function main(argv: readonly string[]): Promise<void> {
     return;
   }
   if (values.check || values['self-test']) {
-    runCheck();
+    // Dynamic, so the file-mode module (which imports this one) is never part of a cycle.
+    const { fileModeChecks } = await import('./eval-dlo-files.js');
+    runCheck(fileModeChecks());
+    return;
+  }
+
+  if (values.files) {
+    const { runFileEval } = await import('./eval-dlo-files.js');
+    const list = (raw: string | undefined, fallback: string[]): string[] =>
+      raw
+        ? raw
+            .split(',')
+            .map((item) => item.trim())
+            .filter((item) => item.length > 0)
+        : fallback;
+    const prefs = values.prefs ?? 'db';
+    if (prefs !== 'db' && prefs !== 'none') {
+      throw new Error(`--prefs must be "db" or "none", not "${prefs}".`);
+    }
+    const effort = values['teacher-effort'] ?? 'high';
+    if (effort !== 'low' && effort !== 'medium' && effort !== 'high') {
+      throw new Error('--teacher-effort must be low, medium or high.');
+    }
+    const category = values.category ?? 'news';
+    if (category !== 'news' && category !== 'scheme') {
+      throw new Error('--category must be "news" or "scheme".');
+    }
+    const limit = values.limit ? Number.parseInt(values.limit, 10) : undefined;
+    await runFileEval({
+      run: Boolean(values.run),
+      refresh: Boolean(values.refresh),
+      arms: list(values.arms, ['teacher', 'tuned']),
+      adapters: list(values.adapters, [gemmaDloModel()]),
+      only: values.only,
+      limit: Number.isFinite(limit) ? limit : undefined,
+      assetsDir: values.assets,
+      outDir: values.out,
+      prefs,
+      teacherEffort: effort,
+      category,
+    });
+    // Plan mode may leave a cold endpoint's /models request pending; do not wait on it.
+    if (!values.run) process.exit(process.exitCode ?? 0);
     return;
   }
 
@@ -928,17 +994,12 @@ async function main(argv: readonly string[]): Promise<void> {
   console.log(`arms         ${[...selected].join(', ')}`);
   console.log(`judge model  ${CHAT_MODEL}`);
 
-  // The silent failure this refuses: GEMMA_DLO_MODEL unset falls back to the base, so a
-  // "tuned" arm would quietly be a second base run and the report would show a perfect tie
-  // that reads as "the adapter changed nothing".
-  if (selected.has('tuned')) {
-    if (gemmaDloModel() === gemmaModel()) {
-      throw new Error(
-        'GEMMA_DLO_MODEL is unset, so the "tuned" arm would address the BASE model and the ' +
-          'report would compare the base with itself. Set it to the adapter the endpoint ' +
-          'serves, or run with --arms=base,teacher.',
-      );
-    }
+  // The silent failure this refuses: a "tuned" arm addressing the base would quietly be a
+  // second base run and the report would show a perfect tie that reads as "the adapter
+  // changed nothing". gemmaDloModel() itself now refuses to resolve to the base (it defaults
+  // to the adapter), so resolving it here is the check.
+  if (selected.has('tuned') && gemmaDloModel() === gemmaModel()) {
+    throw new Error('the "tuned" arm resolved to the base model.');
   }
   const needsGemma = selected.has('base') || selected.has('tuned');
   if (needsGemma && !isGemmaConfigured()) {
@@ -1378,8 +1439,8 @@ function printReport(
 // Free offline harness
 // ---------------------------------------------------------------------------------------
 
-function runCheck(): void {
-  const checks: Array<[string, boolean]> = [];
+function runCheck(extra: ReadonlyArray<[string, boolean]> = []): void {
+  const checks: Array<[string, boolean]> = [...extra];
   const check = (label: string, ok: boolean): void => {
     checks.push([label, ok]);
   };

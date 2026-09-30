@@ -231,6 +231,7 @@ export {
   listIntakesForAnalytics,
   listTranscriptionsForAnalytics,
   listVideoProjectsForAnalytics,
+  listNewVideoTurnsForAnalytics,
   countGenerationTexts,
   type AnalyticsCostBreakdown,
   type AnalyticsGenerationRow,
@@ -238,6 +239,7 @@ export {
   type AnalyticsIntakeRow,
   type AnalyticsTranscriptionRow,
   type AnalyticsVideoRow,
+  type AnalyticsNewVideoTurnRow,
   type AnalyticsTextCounts,
 } from './analytics.js';
 export {

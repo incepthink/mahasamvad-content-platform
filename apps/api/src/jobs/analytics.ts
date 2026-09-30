@@ -25,6 +25,7 @@ import {
   countGenerationTexts,
   listGenerationsForAnalytics,
   listIntakesForAnalytics,
+  listNewVideoTurnsForAnalytics,
   listRevisionsForAnalytics,
   listTranscriptionsForAnalytics,
   listUsageEvents,
@@ -33,6 +34,7 @@ import {
   taskFromAction,
   type AnalyticsCostBreakdown,
   type AnalyticsGenerationRow,
+  type AnalyticsNewVideoTurnRow,
   type AnalyticsVideoRow,
   type SupabaseClient,
   type UsageEventRow,
@@ -187,6 +189,9 @@ type WindowData = Readonly<{
     createdAt: string;
   }>;
   videos: AnalyticsVideoRow[];
+  // /new-video-workflow turns. Counted beside `videos` on the video card: both are videos
+  // the department produced, whichever page made them.
+  newVideoTurns: AnalyticsNewVideoTurnRow[];
   events: UsageEventRow[];
   eventsAvailable: boolean;
   texts: {
@@ -215,6 +220,7 @@ async function collect(
     intakes,
     transcriptions,
     videos,
+    newVideoTurns,
     texts,
     eventsResult,
   ] = await Promise.all([
@@ -223,6 +229,17 @@ async function collect(
     listIntakesForAnalytics(client, from, to),
     listTranscriptionsForAnalytics(client, from, to),
     listVideoProjectsForAnalytics(client, from, to),
+    // Degrades to empty like usage_events: the conversational video tables (0050) are a
+    // secondary source for one card, and an un-applied migration must not take the whole
+    // page down.
+    listNewVideoTurnsForAnalytics(client, from, to).catch((error: unknown) => {
+      console.warn(
+        `[analytics] new_video_turns unavailable: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return [] as AnalyticsNewVideoTurnRow[];
+    }),
     countGenerationTexts(
       client,
       from,
@@ -255,11 +272,17 @@ async function collect(
     intakes,
     transcriptions,
     videos,
+    newVideoTurns,
     events,
     eventsAvailable,
     texts,
   };
 }
+
+// A /new-video-workflow turn that rendered a video. Storyboard-mode turns complete with no
+// video and are therefore not counted.
+const isRenderedVideoTurn = (row: AnalyticsNewVideoTurnRow) =>
+  row.status === 'completed' && row.hasVideo;
 
 // ---------------------------------------------------------------------------
 // Counting
@@ -318,7 +341,9 @@ function countOutputs(data: WindowData): Counts {
   const transcripts = data.transcriptions.filter(
     (row) => row.status === 'ready',
   ).length;
-  const videos = data.videos.filter((row) => row.status === 'completed').length;
+  const videos =
+    data.videos.filter((row) => row.status === 'completed').length +
+    data.newVideoTurns.filter(isRenderedVideoTurn).length;
   // Generation translations come from the columns; ad-hoc /translate work has no row and is
   // counted from usage_events.
   const translations =
@@ -374,6 +399,9 @@ function buildDaily(days: readonly string[], data: WindowData): AnalyticsDay[] {
   }
   for (const row of data.videos) {
     if (row.status === 'completed') bump(row.createdAt, 'video');
+  }
+  for (const row of data.newVideoTurns) {
+    if (isRenderedVideoTurn(row)) bump(row.createdAt, 'video');
   }
   for (const event of data.events) {
     if (event.feature === 'translate' && event.action === 'translate_text') {
@@ -1095,6 +1123,11 @@ function buildFeatures(
     (total, row) => total + row.costUsd,
     0,
   );
+  const completedProjects = current.videos.filter(
+    (row) => row.status === 'completed',
+  );
+  const conversationVideos =
+    current.newVideoTurns.filter(isRenderedVideoTurn).length;
   // Use metered rendered seconds. Old rows without that detail contribute no
   // guessed duration; the retired short/long bucket is not a generation limit
   // and is no longer presented as one in analytics.
@@ -1115,15 +1148,18 @@ function buildFeatures(
         'minutes',
       ),
     ],
+    // COMPLETED videos by where they came from, so the slices add up to the headline: the
+    // two /video input modes, then /new-video-workflow's rendered turns.
     breakdown: breakdown([
       [
         'videoNote',
-        current.videos.filter((row) => row.inputMode === 'note').length,
+        completedProjects.filter((row) => row.inputMode !== 'script').length,
       ],
       [
         'videoScript',
-        current.videos.filter((row) => row.inputMode === 'script').length,
+        completedProjects.filter((row) => row.inputMode === 'script').length,
       ],
+      ['videoConversation', conversationVideos],
     ]),
     // The only feature whose table records clip seconds and TTS characters of its own, so
     // `includeVideo` is true here and nowhere else. Frames use the video lane's own image
@@ -1135,9 +1171,14 @@ function buildFeatures(
       true,
       frameImageProvider,
     ),
+    // /new-video-workflow runs outside a cost scope, so only /video projects carry a cost.
+    // The per-video figure divides by THOSE videos alone — dividing by the combined count
+    // would report the unmetered conversation renders as nearly free.
     costInr: round2(usdToInr(videoCost)),
     costPerOutputInr:
-      now.videos > 0 ? round2(usdToInr(videoCost) / now.videos) : null,
+      completedProjects.length > 0
+        ? round2(usdToInr(videoCost) / completedProjects.length)
+        : null,
     eventBacked: false,
   };
 

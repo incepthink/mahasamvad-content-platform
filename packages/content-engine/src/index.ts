@@ -28,6 +28,7 @@ export {
 export {
   articleProvider,
   articleProviderModel,
+  assertDloArticleProvider,
   articleProviderReadsSources,
   writeArticleDraft,
   type ArticleDraftOptions,

@@ -2385,6 +2385,9 @@ export const STR = {
   analyticsSliceMarathi: 'मराठी',
   analyticsSliceVideoNote: 'टिपणीवरून',
   analyticsSliceVideoScript: 'तयार संहितेवरून',
+  analyticsSliceVideoConversation: 'AI संवादातून',
+  // The video card's own name — not navVideo, which titles the /video storyboard page.
+  analyticsFeatureVideo: 'व्हिडिओ',
 
   // ---------- संपादकीय नियम (/preferences) ----------
   //

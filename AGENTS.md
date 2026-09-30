@@ -3110,6 +3110,54 @@ client id/secret — see the milestone below.
 
 ## Latest Implementation Milestone
 
+- **Closing the Gemma adapter's gap to GPT on /dlo: prompt v6, a file-mode eval, and a vision
+  re-distillation pipeline** (2026-09-29, no migration, no n8n; plan
+  `~/.claude/plans/golden-nibbling-floyd.md`). The same scanned `Press_Note_General.pdf` came
+  back from the `dgipr-dlo-v1` adapter (c7a6a929) with the signatory never named, the deadline
+  buried in paragraph 6, `परिशिष्ट ६क` misread as `परिशिष्ट-६` and the appeal stated three
+  times, where GPT (1912694b) got all four right. Root causes: v1 was trained on 47 text pairs
+  under the old one-line prompt while production sends image tiles under the long prompt plus
+  learned rules; the vision budget was the 280 default; and v5's DOCUMENT kind ("no named
+  speaker") forbade attributing a SIGNED press note.
+  - **`dlo-rag-v6`** (`dlo-article-prompt.ts`): a third kind, ISSUED BY A NAMED OFFICIAL — a press
+    note, letter, circular or appeal issued or signed by a named official (a signature block
+    counts) is attributed to that official, name and designation as printed; signature blocks
+    and addresses are not reproduced. A GR signed "राज्यपालांच्या आदेशानुसार व नावाने" is still a
+    DOCUMENT (the government speaks, not the signing secretary). Rule 4 gains "state each appeal,
+    directive or deadline ONCE". Examples use `<पदनाम> <नाव>` placeholders — a 31B model copies an
+    example's name. Still five numbered rules.
+  - **Eval FILE mode** (`finetune/eval-dlo-files.ts`, `finetune:eval -- --files`): real documents
+    from `test-assets/` through the PRODUCTION path — `generateArticleFromSources` on the adapter
+    lane (one `tuned@<adapter>` arm per `--adapters`, plus `think@` with thinking on and `base`),
+    GPT on the same prompt as the reference, the active learned rules read from the DB (fatal if
+    unreadable; `--prefs=none` opts out). Grading reuses the style judge, `findUnsupportedClaims`
+    and the numeral gate against a banked OCR grounding (a `<file>.truth.txt` overrides), and adds
+    signatory-named (a parenthesised signature line, or the case's list), appeal-sentence count,
+    repeated-sentence pairs, and fixed cases (`FILE_CASES`: Press_Note_General must carry `६क`,
+    `३१ ऑगस्ट २०२६`, `कृष्णकुमार पाटील`, the deadline in the lead and ≤1 appeal; GRs by filename
+    may carry no attributed heading). Generations are banked by prompt version, rule count and
+    soft-token budget, so a stale article is never reused.
+  - **Capture `--student vision`** (default): a native row's student turn is built by
+    `prepareGemmaSources` + `buildGemmaMessages` — the production splice — with tiles written as
+    files beside the pair (`finetune/distill-content.ts`), no OCR for the student, and both halves
+    carrying the v6 prompt and the active learned rules. The sidecar records the tile settings
+    (`gemmaSourceSettings()`, new export). **Dataset** copies tiles to `distill/images/<id>/`,
+    dedupes by text + image hashes, counts each image at its recorded budget, and REFUSES mixed
+    budgets or a budget ≠ the serving one (`GEMMA_MAX_SOFT_TOKENS` / `--serving-soft-tokens`).
+    **train.py** renders image examples through `AutoProcessor` at `--max-soft-tokens` (default:
+    the report's), carries `token_type_ids`-style side inputs and `pixel_values`, keeps the vision
+    tower frozen and unquantised, always DROPS an overflowing image example, and refuses a run
+    whose processor ignored the budget (image tokens < half of it).
+  - **Step B** is env-only: local `.env` now sets `GEMMA_MAX_SOFT_TOKENS=1120` (1 tile/page, 14-tile
+    cap). The deployed API box is untouched — set it there only after the file-mode eval confirms it.
+  Verified free: prompt tests 15/15, eval `--check` 98/98 (23 file-mode), capture and dataset
+  `--check` (new vision cases), `train.py --self-test` (new image cases), gemma-sources 58/58,
+  workspace typecheck 7/7, eslint clean. **Not done (paid or DB writes)**: the file-mode eval runs
+  after B and C; refining learned rule #4 (`स्वाक्षऱ्या … विस्ताराने देऊ नका`) on `/preferences` so it
+  no longer suppresses the signatory; the v2 capture (~$6-12), training on the pod, pushing
+  `incepthink/dgipr-dlo-v2` and adding it to `LORA_MODULES` (see SERVING.md). Reusing existing
+  v5+ OpenAI runs as ready-made pairs and preferring officer-edited finals were NOT built.
+
 - **/new-video-workflow gains a Storyboard mode beside Video** (2026-09-28, migration 0060, no
   n8n). A clearly visible Video / Storyboard switch now sits at the top of the composer; it is
   chosen before the first message, belongs to the whole conversation and is locked afterwards

@@ -8,6 +8,33 @@ What it produces is an adapter directory — roughly 200-400 MB of `adapter_mode
 plus `adapter_config.json` — never a merged 62.5 GB checkpoint. That is what makes the A/B in
 Phase 5 free: one endpoint, both models, chosen by the request's `model` field.
 
+## dgipr-dlo-v2: retraining on what production actually sends (2026-09-29)
+
+`dgipr-dlo-v1` was trained on 47 text-lane pairs under the old one-line `dlo-rag-v2` prompt,
+with no documents and no learned rules. Production sends image TILES of a scan under the long
+`dlo-rag-v6` prompt plus the active learned rules — so v1 learned the output format, not the
+rules or how to read a page. v2 is trained on the production input:
+
+```bash
+# 1. Capture: v6 prompt + active learned rules, native rows as tiles at the SERVING budget.
+#    Set GEMMA_MAX_SOFT_TOKENS to the endpoint's value first (1120 recommended for OCR).
+pnpm --filter @dgipr/content-engine finetune:capture -- --lane all          # plan, free
+pnpm --filter @dgipr/content-engine finetune:capture -- --lane all --run --limit 250
+# 2. Dataset: copies the tiles to distill/images/<id>/ and refuses a mixed or mismatched budget.
+pnpm --filter @dgipr/content-engine finetune:dataset -- --eval-fraction-files 0.2
+# 3. Train (on the pod). Image examples go through the processor at the recorded budget; the
+#    vision encoder stays frozen and unquantised.
+python train.py --prepare-only --data-dir /workspace/distill      # check the image-token count
+python train.py --data-dir /workspace/distill --adapter-name dgipr-dlo-v2
+```
+
+The pre-v6 pairs under `distill/pairs/` are refused by the dataset builder (their system turn is
+the old prompt), so capture v2 into a fresh `--out` directory or move the old pairs aside.
+`--prepare-only` prints `N image tokens per image (processor)`; it must sit just under the
+budget (≈1,100 at 1120). A value near 270 means the processor ignored `max_soft_tokens` and the
+run is refused. Publish as a NEW repo (`incepthink/dgipr-dlo-v2`), never over v1 — see
+SERVING.md.
+
 ## Hardware and cost
 
 |           |                                                                                                                  |
