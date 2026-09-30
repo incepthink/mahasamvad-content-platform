@@ -44,6 +44,8 @@
 
 import { pathToFileURL } from 'node:url';
 
+import type { NewVideoImageRole } from '@dgipr/schemas';
+
 import { chatComplete } from '../generation/openai-chat.js';
 import type { ReasoningEffort } from '../generation/openai-chat.js';
 import { INTERACTION_PROMPT_MAX_CHARS } from './gemini-interactions-client.js';
@@ -83,6 +85,10 @@ export type NewVideoAuthoringInput = Readonly<{
   // it is told they exist so it does not ask for a subject the model has no picture of, and
   // so it does not try to write the declaration itself.
   imageCount: number;
+  // How many of those are cast portraits (always references), and what the officer said their
+  // own picture is for. Both omitted means no portraits and `auto`, the scaffold's defaults.
+  portraitCount?: number | undefined;
+  imageRole?: NewVideoImageRole | undefined;
   // The conversation's cast, by name only.
   characters?: readonly AuthoringCharacter[] | undefined;
 }>;
@@ -175,8 +181,41 @@ function castRule(characters: readonly AuthoringCharacter[]): string[] {
   ];
 }
 
-function referencesRule(imageCount: number): string[] {
+// Role-aware, so this pass can never contradict the task the job declares. The `auto` case is
+// the one that matters: with no role chosen the officer's own words decide what a picture is
+// for (generation 83a2602b's "make a video from this image"), so this pass must keep that
+// intent exactly and must not turn it into a reference-or-first-frame ruling of its own.
+function referencesRule(
+  imageCount: number,
+  imageRole: NewVideoImageRole,
+  portraitCount: number,
+): string[] {
   if (imageCount <= 0) return [];
+  const officerImages = imageCount - Math.min(imageCount, portraitCount);
+  if (imageRole === 'animate' && officerImages > 0) {
+    return [
+      '',
+      'THE ATTACHED PICTURE',
+      '- The officer asked for the attached picture itself to be animated: it is the first',
+      '  frame of the video, and a rule saying so is added automatically. Describe the motion',
+      '  and camera movement that bring it to life. Do not re-describe, replace or restyle',
+      '  what the picture shows, and do not refer to it by tag or by number.',
+    ];
+  }
+  if (imageRole === 'auto' && officerImages > 0) {
+    const one = officerImages === 1;
+    return [
+      '',
+      'ATTACHED PICTURES',
+      `- The officer attached ${officerImages} ${one ? 'picture' : 'pictures'}, and what ${
+        one ? 'it is' : 'they are'
+      } for is`,
+      '  decided by the officer’s own words. Keep what they said about the picture exactly',
+      '  as meant — "make a video from this image" means animate that image, "use this',
+      '  person" means keep that person — and do not add a ruling of your own about whether a',
+      '  picture is a reference or a first frame. Do not refer to a picture by tag or number.',
+    ];
+  }
   const one = imageCount === 1;
   return [
     '',
@@ -220,7 +259,11 @@ export function buildNewVideoAuthoringRequest(
     '',
     TIMING_RULE,
     ...castRule(input.characters ?? []),
-    ...referencesRule(input.imageCount),
+    ...referencesRule(
+      input.imageCount,
+      input.imageRole ?? 'auto',
+      input.portraitCount ?? 0,
+    ),
     '',
     NOT_YOURS_RULE,
     '',
@@ -466,18 +509,41 @@ if (
   );
 
   // --- reference pictures ----------------------------------------------------------------------
+  const referenced = buildNewVideoAuthoringRequest({
+    prompt: MARATHI,
+    isEdit: false,
+    imageCount: 2,
+    imageRole: 'reference',
+  });
   check(
-    'attached pictures are counted, and their declaration is left to the scaffold',
-    cast.includes('2 reference pictures are attached') &&
-      cast.includes('Do not write that block'),
+    "'reference' pictures are counted, and their declaration is left to the scaffold",
+    referenced.includes('2 reference pictures are attached') &&
+      referenced.includes('Do not write that block'),
   );
   check(
-    'one picture reads as one picture',
+    'portraits alone read as reference pictures by default',
     buildNewVideoAuthoringRequest({
       prompt: MARATHI,
       isEdit: false,
       imageCount: 1,
+      portraitCount: 1,
     }).includes('1 reference picture is attached'),
+  );
+  // The 83a2602b fix, on this path too: with no role chosen the officer's words decide.
+  check(
+    "by default an officer's picture is left to the officer's own words",
+    cast.includes('decided by the officer’s own words') &&
+      cast.includes('make a video from this image') &&
+      !cast.includes('reference pictures are attached'),
+  );
+  check(
+    "'animate' tells the author the picture is the first frame, not to be restyled",
+    buildNewVideoAuthoringRequest({
+      prompt: MARATHI,
+      isEdit: false,
+      imageCount: 1,
+      imageRole: 'animate',
+    }).includes('first\n  frame of the video'),
   );
   check(
     'no pictures: nothing is said about pictures at all',

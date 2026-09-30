@@ -208,8 +208,12 @@ export function articleParts(article: string): {
  */
 function isDatelineParagraph(paragraph: string): boolean {
   const bare = paragraph.replace(/[*_]/gu, '').trim();
+  // `दि.` is an abbreviation, not a sentence break; a real sentence ending in a colon has one.
+  const unabbreviated = bare.replace(/दि\.\s*/gu, '');
   return (
-    /[:：]$/u.test(bare) && bare.split(/\s+/u).length <= 10 && !/[.।]\s/u.test(bare)
+    /[:：]$/u.test(bare) &&
+    bare.split(/\s+/u).length <= 10 &&
+    !/[.।]\s/u.test(unabbreviated)
   );
 }
 
@@ -1164,7 +1168,9 @@ export function fileModeChecks(): Array<[string, boolean]> {
   );
   check(
     'files: a sentence ending in a colon is still a lead',
-    leadParagraph('पुढील अटी लागू आहेत. त्या अशा:\n\nदुसरा.').startsWith('पुढील'),
+    leadParagraph('पुढील अटी लागू आहेत. त्या अशा:\n\nदुसरा.').startsWith(
+      'पुढील',
+    ),
   );
   check(
     'files: the terminator is not a paragraph',

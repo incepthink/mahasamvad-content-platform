@@ -2152,6 +2152,33 @@ export const STR = {
   // job: naming which video a pending change will continue from.
   nvwForkTurn: 'सूचना',
 
+  // THE PICTURE'S ROLE. Optional: by default nothing is said about an attached picture and
+  // Gemini reads its role from the prompt. The two choices are for when the prompt is unclear
+  // or Gemini chose wrongly — "make a video from this image" came back as a new realistic
+  // scene when every picture was forced to be a reference (generation 83a2602b).
+  nvwImageRoleLabel: 'चित्राचा वापर',
+  nvwImageRoleAuto: 'प्रॉम्प्टनुसार',
+  nvwImageRoleAnimate: 'चित्र सजीव करा',
+  nvwImageRoleReference: 'संदर्भ म्हणून वापरा',
+  nvwImageRoleAutoHint:
+    'तुमच्या प्रॉम्प्टवरून चित्र कसे वापरायचे ते Gemini ठरवेल.',
+  nvwImageRoleAnimateHint:
+    'हेच चित्र व्हिडिओची पहिली फ्रेम होईल व तेच हलते केले जाईल. यामुळे नवीन क्लिप तयार होते.',
+  nvwImageRoleReferenceHint:
+    'चित्रातील व्यक्ती, वस्तू किंवा शैली कायम ठेवून प्रॉम्प्टनुसार नवीन दृश्य तयार होईल.',
+  nvwImageRoleAnimateOne: '"चित्र सजीव करा" साठी एकच चित्र ठेवा.',
+
+  // RETRY FROM THE ORIGINAL PICTURE. A follow-up such as "you did not use my image" is an
+  // edit of the video that already drifted away from it; this starts a NEW clip from the
+  // picture the officer first attached instead.
+  nvwRetryFromOriginal: 'मूळ चित्रावरून पुन्हा तयार करा',
+  nvwRetryFromOriginalHint:
+    'हा व्हिडिओ बदलण्याऐवजी या सूचनेत जोडलेल्या मूळ चित्रावरून नवीन क्लिप तयार करा.',
+  nvwRetryActive: 'मूळ चित्रावरून नवीन क्लिप',
+  nvwRetryActiveHint:
+    'मूळ चित्र पुन्हा जोडले आहे. आधीचा व्हिडिओ बदलला जाणार नाही — नवीन क्लिप तयार होईल.',
+  nvwRetrySuggest: 'चित्र वापरले गेले नाही? मूळ चित्रावरून नवीन क्लिप तयार करा',
+
   // The rail (migration 0050). Its own labels rather than the chat ones: an officer scanning
   // this list is looking for a video they made, not for a chat.
   nvwYours: 'तुमची संभाषणे',

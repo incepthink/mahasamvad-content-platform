@@ -219,6 +219,8 @@ test("the lane's own scaffold composes into a real request", () => {
     scaffold: buildNewVideoScaffold({
       imageCount: images.length,
       isEdit: true,
+      // Explicit: since 2026-09-30 an officer's picture is tagged only when marked a reference.
+      imageRole: 'reference',
     }),
   });
 
@@ -354,7 +356,12 @@ test('an authored turn replaces the text in the middle and nothing else', () => 
       isEdit: false,
       characters,
     }),
-    videoTask: newVideoTaskFor({ imageCount: 1, isEdit: false }),
+    // The one picture is Priya's portrait — a reference whatever the officer's role says.
+    videoTask: newVideoTaskFor({
+      imageCount: 1,
+      portraitCount: 1,
+      isEdit: false,
+    }),
   });
   const parts = textPartsOf(body);
   assert.equal(parts.length, 1, 'one text part, as in every other stance');
@@ -454,14 +461,56 @@ test('the declared task is a request field, and never rides with an edit chain',
   }
 });
 
-test('the lane declares reference-to-video for a picture, and nothing for a follow-up', () => {
+test("an officer's picture with no role chosen declares no task and no reference rule", () => {
+  // THE FIX FOR GENERATION 83a2602b. "make a video from this image, keep cinematic" came back
+  // as a new realistic scene because every picture was forced to be a reference — in the
+  // field AND in prose. With no role chosen neither is sent, and Gemini reads the role from
+  // the officer's own words, exactly as the Gemini app does.
+  const turn = { imageCount: 1, isEdit: false };
+  const body = buildInteractionRequest({
+    prompt: 'make a video from this image, keep cinematic',
+    images: [{ data: Buffer.from('artwork'), mimeType: 'image/png' }],
+    mode: 'scaffolded',
+    scaffold: buildNewVideoScaffold(turn),
+    videoTask: newVideoTaskFor(turn),
+  });
+  const text = textPartsOf(body)[0]?.text ?? '';
+  assert.ok(!('generation_config' in body), 'no declared task');
+  assert.doesNotMatch(text, /literal initial frames/);
+  assert.doesNotMatch(text, /IMAGE_REF/);
+  assert.ok(text.startsWith('make a video from this image, keep cinematic'));
+  assert.equal(body.input.filter((part) => part.type === 'image').length, 1);
+});
+
+test("'animate' declares image-to-video and says the picture is the first frame", () => {
+  const turn = { imageCount: 1, isEdit: false, imageRole: 'animate' as const };
+  const body = buildInteractionRequest({
+    prompt: 'keep cinematic',
+    images: [{ data: Buffer.from('artwork'), mimeType: 'image/png' }],
+    mode: 'scaffolded',
+    scaffold: buildNewVideoScaffold(turn),
+    videoTask: newVideoTaskFor(turn),
+  });
+  const text = textPartsOf(body)[0]?.text ?? '';
+  assert.equal(body.generation_config?.video_config.task, 'image_to_video');
+  assert.ok(text.includes('first frame of this video'));
+  // Nothing in the prose contradicts the field.
+  assert.doesNotMatch(text, /literal initial frames/);
+  assert.doesNotMatch(text, /IMAGE_REF/);
+});
+
+test("'reference' declares reference-to-video for a picture, and nothing for a follow-up", () => {
   // The task and the scaffold's <IMAGE_REF_n> tags are two statements of ONE decision, so
   // they are derived from the same two facts about a turn. This asserts the pair agrees in
   // the assembled request — the per-value cases live in new-video-task.ts's own harness.
   const images = [
     { data: Buffer.from('portrait'), mimeType: 'image/png' as const },
   ];
-  const turn = { imageCount: images.length, isEdit: false };
+  const turn = {
+    imageCount: images.length,
+    isEdit: false,
+    imageRole: 'reference' as const,
+  };
   const body = buildInteractionRequest({
     prompt: MARATHI,
     images,
@@ -531,12 +580,20 @@ test('a cast rides every turn, and its tags line up with the parts actually sent
     prompt: MARATHI,
     images,
     mode: 'scaffolded',
+    // The office photo is marked a reference, so all three pictures are tagged; with no role
+    // it would go untagged and only the two portraits would be declared.
     scaffold: buildNewVideoScaffold({
       imageCount: images.length,
       isEdit: false,
       characters: cast,
+      imageRole: 'reference',
     }),
-    videoTask: newVideoTaskFor({ imageCount: images.length, isEdit: false }),
+    videoTask: newVideoTaskFor({
+      imageCount: images.length,
+      portraitCount: 2,
+      imageRole: 'reference',
+      isEdit: false,
+    }),
   });
 
   const text = textPartsOf(body)[0]?.text ?? '';

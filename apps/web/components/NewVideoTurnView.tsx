@@ -10,7 +10,13 @@
 // normalising that away would defeat the whole experiment.
 
 import { useState } from 'react';
-import { Check, Copy, CornerDownRight, Sparkles } from 'lucide-react';
+import {
+  Check,
+  Copy,
+  CornerDownRight,
+  ImagePlus,
+  Sparkles,
+} from 'lucide-react';
 import type {
   NewVideoGeneratedImage,
   NewVideoMode,
@@ -182,6 +188,9 @@ export function NewVideoTurnView({
   canFork,
   forkArmed,
   onFork,
+  canRetryFromOriginal = false,
+  retryArmed = false,
+  onRetryFromOriginal,
 }: {
   turn: NewVideoTurn;
   /** Which kind of conversation this turn belongs to — decides how the answer is shown. */
@@ -196,8 +205,16 @@ export function NewVideoTurnView({
   canFork: boolean;
   forkArmed: boolean;
   onFork?: (turnId: string | null) => void;
+  /**
+   * RETRY FROM THE ORIGINAL PICTURE: offered on a settled video turn that carried pictures.
+   * Starts a NEW clip from them rather than editing a video that drifted away from them.
+   */
+  canRetryFromOriginal?: boolean;
+  retryArmed?: boolean;
+  onRetryFromOriginal?: (turnId: string | null) => void;
 }) {
   const forkable = canFork && onFork !== undefined;
+  const retryable = canRetryFromOriginal && onRetryFromOriginal !== undefined;
 
   return (
     <>
@@ -268,6 +285,29 @@ export function NewVideoTurnView({
             >
               <CornerDownRight size={16} aria-hidden="true" />
               {forkArmed ? STR.nvwForkCancel : STR.nvwForkFrom}
+              <span className="visually-hidden">
+                {' '}
+                ({STR.nvwForkTurn} {ordinal.toLocaleString('mr-IN')})
+              </span>
+            </button>
+          ) : null}
+
+          {/* Offered on a FAILED turn too: a render that died is as good a reason as a
+              render that ignored the picture to start again from the picture itself. */}
+          {retryable ? (
+            <button
+              type="button"
+              className={
+                retryArmed
+                  ? 'btn-ghost nvw-fork is-active'
+                  : 'btn-ghost nvw-fork'
+              }
+              onClick={() => onRetryFromOriginal?.(retryArmed ? null : turn.id)}
+              aria-pressed={retryArmed}
+              title={STR.nvwRetryFromOriginalHint}
+            >
+              <ImagePlus size={16} aria-hidden="true" />
+              {retryArmed ? STR.nvwForkCancel : STR.nvwRetryFromOriginal}
               <span className="visually-hidden">
                 {' '}
                 ({STR.nvwForkTurn} {ordinal.toLocaleString('mr-IN')})

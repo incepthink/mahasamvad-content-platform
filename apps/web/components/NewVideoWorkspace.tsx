@@ -137,6 +137,11 @@ export function NewVideoWorkspace({
         onCastIdsChange={workflow.setCastIds}
         forkFromTurnId={workflow.forkFromTurnId}
         onForkFromTurnIdChange={workflow.setForkFromTurnId}
+        imageRole={workflow.imageRole}
+        onImageRoleChange={workflow.setImageRole}
+        retryFromTurnId={workflow.retryFromTurnId}
+        onRetryFromOriginal={workflow.retryFromOriginal}
+        onCancelRetry={workflow.cancelRetry}
         {...(workflow.conversationId
           ? { onRetry: () => void workflow.refresh() }
           : {})}

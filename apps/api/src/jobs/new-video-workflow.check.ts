@@ -27,6 +27,7 @@ import {
   getConversationTurns,
   listConversationSummaries,
   createCharacter,
+  decideTurnIntent,
   editCharacter,
   getConversationCharacters,
   listCharacters,
@@ -347,6 +348,56 @@ async function main(): Promise<void> {
   // both produce a plausible-looking clip that answers a question nobody asked.
 
   const forkTurns = await getConversationTurns(client, first.id);
+
+  // --- THE PICTURE'S ROLE ------------------------------------------------------
+  //
+  // `animate` makes the picture the first frame, which exists only at the start of a clip, so
+  // it must never be sent as an edit — and it is decided without a classifier call. None of
+  // these branches reach a model.
+  const animateTurn = forkTurns[0] as NewVideoTurnRow;
+  const animateOnFollowUp = await decideTurnIntent(client, {
+    conversationId: first.id,
+    turn: animateTurn,
+    chainPoint: 'interactions/one',
+    forked: false,
+    choice: 'auto',
+    imageCount: 1,
+    imageRole: 'animate',
+  });
+  check(
+    "'animate' on a follow-up is always a NEW clip, decided without a model call",
+    animateOnFollowUp.intent === 'new' &&
+      animateOnFollowUp.source === 'officer',
+    animateOnFollowUp,
+  );
+  const animateOverEdit = await decideTurnIntent(client, {
+    conversationId: first.id,
+    turn: animateTurn,
+    chainPoint: 'interactions/one',
+    forked: false,
+    choice: 'edit',
+    imageCount: 1,
+    imageRole: 'animate',
+  });
+  check(
+    "'animate' wins over a stray 'edit' choice (the route refuses the pair; the job stays safe)",
+    animateOverEdit.intent === 'new',
+    animateOverEdit,
+  );
+  const referenceEdit = await decideTurnIntent(client, {
+    conversationId: first.id,
+    turn: animateTurn,
+    chainPoint: 'interactions/one',
+    forked: false,
+    choice: 'edit',
+    imageCount: 1,
+    imageRole: 'reference',
+  });
+  check(
+    "'reference' leaves the edit/new choice to the officer",
+    referenceEdit.intent === 'edit' && referenceEdit.source === 'officer',
+    referenceEdit,
+  );
 
   const forkToFirst = resolveForkPoint(forkTurns, turn1.id);
   check(

@@ -9838,6 +9838,37 @@ a.file-row-link > svg:last-child {
   color: var(--muted);
 }
 
+/* THE PICTURE'S ROLE — "as the prompt says / animate this image / use as reference". Shown
+   inside the composer once a picture is staged, reusing the mode picker's pill track so the
+   page has one segmented-control look. Left-aligned (it belongs to the box, not the greeting)
+   and allowed to wrap, so three Marathi labels fit a phone without widening the composer. */
+.nvw-image-role {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin: 0 0 10px;
+  min-width: 0;
+}
+
+.nvw-image-role-options {
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+
+.nvw-image-role-options .nvw-mode-option {
+  min-height: 34px;
+  padding: 5px 12px;
+  font-size: 0.86rem;
+}
+
+/* The composer's "the picture was not used?" shortcut: the fork button's quiet look, sat
+   above the box rather than under a video. */
+.nvw-retry-suggest {
+  margin: 0 0 8px;
+  text-align: start;
+}
+
 /* A storyboard answer. The assistant writes each scene under its own heading with a rule
    between scenes; these make that structure easy to scan without imposing any fields. */
 .nvw-storyboard h2,

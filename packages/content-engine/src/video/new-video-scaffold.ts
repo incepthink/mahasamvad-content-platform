@@ -30,7 +30,11 @@
 //   the reference declaration + role rule -> "characters are not consistent". Omni binds a
 //   reference image to a ROLE with an inline <IMAGE_REF_n> tag declared in a leading block.
 //   We were sending bare, untagged image parts, so nothing said the picture was a character
-//   to hold steady rather than a frame to start from.
+//   to hold steady rather than a frame to start from. AMENDED 2026-09-30: that is only true
+//   of a CAST PORTRAIT or of a picture the officer marked `reference`. An officer's own picture
+//   with no role chosen is sent untagged with no role sentence, because it is as often the
+//   artwork to animate (generation 83a2602b) — the role is read off the officer's words, and
+//   `animate` gets a sentence of its own that agrees with its declared task.
 //
 //   the CHARACTER BLOCK -> "characters are not consistent, especially when chats are
 //   switched, and each character's voice is wrong". See its own note below; it is the reason
@@ -45,6 +49,8 @@
 //   "Keep everything else the same."
 
 import { pathToFileURL } from 'node:url';
+
+import type { NewVideoImageRole } from '@dgipr/schemas';
 
 import type { InteractionScaffold } from './gemini-interactions-client.js';
 
@@ -70,12 +76,36 @@ export function referenceDeclaration(imageCount: number): string {
 // the literal opening frame. The second half is this repo's long-standing reference doctrine
 // (video-prompts.ts' SUPPLIED_REFERENCE_RULE) — reference MATERIAL, not a frame to reproduce,
 // or an attached picture quietly overrides the shot that was asked for.
+//
+// EMITTED ONLY WHEN IT IS TRUE. It used to ride every turn with a picture, which is what made
+// generation 83a2602b's "make a video from this image" come back as a new realistic scene: an
+// officer's picture is often the artwork to ANIMATE, and this sentence forbids exactly that.
+// It is now sent when the officer chose `reference`, or when every picture is a cast portrait
+// (a person to keep, never artwork to animate). An officer's own picture with no role chosen
+// gets no role sentence at all — Gemini reads the role from the instruction.
 const REFERENCE_ROLE_RULE =
   'Use the given image(s) as references for video generation. The images should not be ' +
   'used as literal initial frames. Each <IMAGE_REF_n> shows a character, subject or style ' +
   'to keep consistent for the whole video: reproduce that appearance faithfully wherever ' +
   'the instruction refers to it, and take the framing, action, camera and lighting from ' +
   'the instruction rather than from the picture.';
+
+// Cast portraits beside an officer picture whose role was left to Gemini. Scoped to the TAGGED
+// pictures by name, so it says nothing about the officer's own picture — a global "the images
+// are not initial frames" here would be the 83a2602b instruction coming back by another road.
+const PORTRAIT_ROLE_RULE =
+  'Each <IMAGE_REF_n> named in the character list above is that character’s portrait: use ' +
+  'it only to keep that person’s appearance consistent, never as a frame of the video.';
+
+// `animate`: the officer said the picture IS the video. The declared task says image-to-video
+// and this says the same thing in words, including the one failure it exists to prevent —
+// re-imagining the artwork as a different (for example live-action) scene.
+const ANIMATE_ROLE_RULE =
+  'The attached image is the first frame of this video. Animate that image itself: keep its ' +
+  'composition, artwork, art style, colours, people, objects and any lettering exactly as ' +
+  'they are, and bring it to life with motion and camera movement. Do not replace it with a ' +
+  'different scene or re-imagine it in another style, such as live-action footage, unless ' +
+  'the instruction asks for that.';
 
 // Phrased with the officer's own instruction OUTRANKING it, which is the whole difficulty.
 // A blanket "no text" would be the wrong rule on this lane: one of the four reported
@@ -86,12 +116,20 @@ const REFERENCE_ROLE_RULE =
 // the production /video lane): a bare prohibition contradicts a scene that contains a
 // signboard or a form, so the model paints one anyway and fills it with gibberish — a real
 // render read `मरी रूटूम`, which is not a word. Say what to show INSTEAD.
-const ON_SCREEN_TEXT_RULE =
-  'Do not add subtitles, captions, titles or any on-screen words that the instruction ' +
-  'above did not ask for: spoken dialogue is heard, never displayed. Where the instruction ' +
-  'does call for on-screen text, show exactly the words it names and nothing else. Signs, ' +
-  'door plates, forms, documents and screens that merely furnish the scene are plain ' +
-  'painted panels, blank sheets and switched-off displays.';
+//
+// With a picture attached, the "furnish the scene" sentence is scoped away from it: an
+// attached artwork's own lettering is part of what the officer supplied, and blanking it
+// would fight an animate request (the same conflict the role rule had).
+function onScreenTextRule(hasImages: boolean): string {
+  return (
+    'Do not add subtitles, captions, titles or any on-screen words that the instruction ' +
+    'above did not ask for: spoken dialogue is heard, never displayed. Where the instruction ' +
+    'does call for on-screen text, show exactly the words it names and nothing else. Signs, ' +
+    'door plates, forms, documents and screens that merely furnish the scene' +
+    (hasImages ? ' and are not already part of an attached image' : '') +
+    ' are plain painted panels, blank sheets and switched-off displays.'
+  );
+}
 
 // Follow-up turns only. The documented sentence stands ALONE as its own sentence — that is
 // the form it was reported working in, and folding it into a longer clause
@@ -154,6 +192,9 @@ const VOICE_LOCK_RULE =
 function characterBlock(
   characters: readonly ScaffoldCharacter[],
   isEdit: boolean,
+  // `animate`: the attached image decides how everything looks, so a registry appearance is
+  // not restated beside it — the same reason it is dropped on an edit.
+  animating = false,
 ): string {
   if (characters.length === 0) return '';
 
@@ -173,7 +214,8 @@ function characterBlock(
     // edit is a documented cause of unintended changes ("overly descriptive prompts"), and
     // the edit-discipline rule already says the face, build and clothing must not move — so
     // restating them here would be spending the model's attention to fight its own diff.
-    if (!isEdit && appearance !== '') parts.push(`Appearance: ${appearance}.`);
+    if (!isEdit && !animating && appearance !== '')
+      parts.push(`Appearance: ${appearance}.`);
     if (voice !== '') parts.push(`Voice: ${voice}.`);
     return parts.join(' ');
   });
@@ -204,6 +246,11 @@ export type NewVideoScaffoldInput = Readonly<{
   // are attached in. Optional so every existing caller is unchanged and a turn with no cast
   // composes exactly the blocks it did before Step 3.
   characters?: readonly ScaffoldCharacter[] | undefined;
+  // What the officer said their OWN picture is for (see NewVideoImageRoleSchema). Omitted
+  // means `auto`: no role sentence for it and no tag, so Gemini reads the role from the words.
+  // Cast portraits are references whatever this says. Must agree with the task the caller
+  // declares — both come from newVideoTaskFor's inputs.
+  imageRole?: NewVideoImageRole | undefined;
 }>;
 
 /**
@@ -217,10 +264,34 @@ export function buildNewVideoScaffold({
   imageCount,
   isEdit,
   characters = [],
+  imageRole = 'auto',
 }: NewVideoScaffoldInput): InteractionScaffold {
+  const images = Math.max(0, imageCount);
+  // Portraits are sent FIRST, so they are always the leading images; the officer's own
+  // pictures follow them.
+  const portraitCount = Math.min(
+    images,
+    characters.filter((character) => character.hasPortrait).length,
+  );
+  const officerImages = images - portraitCount;
+  const animating = imageRole === 'animate' && officerImages > 0;
+
+  // Which images get a <IMAGE_REF_n> tag: all of them when the officer chose `reference`,
+  // otherwise only the portraits. An untagged officer picture is exactly what the Gemini app
+  // sends — a picture and the words, with the role left to the words.
+  const taggedCount = imageRole === 'reference' ? images : portraitCount;
+
+  const roleRule = animating
+    ? ANIMATE_ROLE_RULE
+    : taggedCount === 0
+      ? null
+      : taggedCount === images
+        ? REFERENCE_ROLE_RULE
+        : PORTRAIT_ROLE_RULE;
+
   const suffix = [
-    ...(imageCount > 0 ? [REFERENCE_ROLE_RULE] : []),
-    ON_SCREEN_TEXT_RULE,
+    ...(roleRule !== null ? [roleRule] : []),
+    onScreenTextRule(images > 0),
     ...(isEdit ? [EDIT_DISCIPLINE_RULE] : []),
   ].join('\n\n');
 
@@ -231,8 +302,8 @@ export function buildNewVideoScaffold({
     // which is the position these models weight most and the position the "not literal
     // initial frames" boilerplate is documented in.
     prefix: [
-      referenceDeclaration(imageCount),
-      characterBlock(characters, isEdit),
+      referenceDeclaration(taggedCount),
+      characterBlock(characters, isEdit, animating),
     ]
       .filter((block) => block !== '')
       .join('\n\n'),
@@ -278,7 +349,21 @@ if (
     isEdit: false,
   });
   const editNoImages = buildNewVideoScaffold({ imageCount: 0, isEdit: true });
-  const editWithImages = buildNewVideoScaffold({ imageCount: 2, isEdit: true });
+  const firstWithReference = buildNewVideoScaffold({
+    imageCount: 1,
+    isEdit: false,
+    imageRole: 'reference',
+  });
+  const firstAnimating = buildNewVideoScaffold({
+    imageCount: 1,
+    isEdit: false,
+    imageRole: 'animate',
+  });
+  const editWithImages = buildNewVideoScaffold({
+    imageCount: 2,
+    isEdit: true,
+    imageRole: 'reference',
+  });
   const suffixOf = (s: InteractionScaffold): string => s.suffix ?? '';
   const prefixOf = (s: InteractionScaffold): string => s.prefix ?? '';
 
@@ -291,17 +376,46 @@ if (
     !suffixOf(firstNoImages).includes('IMAGE_REF_n') &&
       !suffixOf(editNoImages).includes('literal initial frames'),
   );
+  // THE FIX FOR 83a2602b. With no role chosen, an officer's picture is neither tagged nor
+  // explained: nothing tells Gemini it is not the frame to animate.
   check(
-    'an attached picture is declared AND explained',
-    firstWithImage.prefix === '[# References <IMAGE_REF_0>@Image1]' &&
-      suffixOf(firstWithImage).includes('literal initial frames'),
+    "by default an officer's picture gets no tag and no role sentence",
+    firstWithImage.prefix === '' &&
+      !suffixOf(firstWithImage).includes('literal initial frames') &&
+      !suffixOf(firstWithImage).includes('IMAGE_REF') &&
+      !suffixOf(firstWithImage).includes('first frame of this video'),
   );
   check(
-    'an attached picture is named a character to hold, not a frame to start from',
-    suffixOf(firstWithImage).includes('keep consistent for the whole video') &&
-      suffixOf(firstWithImage).includes(
+    "by default the text rule leaves an attached image's own lettering alone",
+    suffixOf(firstWithImage).includes(
+      'not already part of an attached image',
+    ) && !suffixOf(firstNoImages).includes('attached image'),
+  );
+  check(
+    "'reference': the picture is declared AND explained as a reference",
+    firstWithReference.prefix === '[# References <IMAGE_REF_0>@Image1]' &&
+      suffixOf(firstWithReference).includes('literal initial frames'),
+  );
+  check(
+    "'reference': it is a subject to hold, not a frame to start from",
+    suffixOf(firstWithReference).includes(
+      'keep consistent for the whole video',
+    ) &&
+      suffixOf(firstWithReference).includes(
         'take the framing, action, camera and lighting from the instruction',
       ),
+  );
+  check(
+    "'animate': the picture is the first frame, and nothing says otherwise",
+    firstAnimating.prefix === '' &&
+      suffixOf(firstAnimating).includes('first frame of this video') &&
+      suffixOf(firstAnimating).includes('Animate that image itself') &&
+      !suffixOf(firstAnimating).includes('literal initial frames') &&
+      !suffixOf(firstAnimating).includes('IMAGE_REF'),
+  );
+  check(
+    "'animate' names the reported failure: re-imagining the artwork as live action",
+    suffixOf(firstAnimating).includes('live-action'),
   );
 
   // --- the on-screen-text rule ---------------------------------------------------------
@@ -362,8 +476,13 @@ if (
   // around-never-through rule.
   check(
     'the scaffold is pure: the same inputs give the same blocks',
-    JSON.stringify(buildNewVideoScaffold({ imageCount: 2, isEdit: true })) ===
-      JSON.stringify(editWithImages),
+    JSON.stringify(
+      buildNewVideoScaffold({
+        imageCount: 2,
+        isEdit: true,
+        imageRole: 'reference',
+      }),
+    ) === JSON.stringify(editWithImages),
   );
 
   // --- the character block (Step 3) ------------------------------------------------------
@@ -393,11 +512,44 @@ if (
     characters: [priya, rahul],
   });
   const firstCastPrefix = prefixOf(firstCast);
+  // Two images: Priya's portrait (a reference, always) and an officer picture whose role was
+  // left to Gemini — so only the portrait is tagged, and the role sentence names only it.
   check(
     'a first turn declares the cast after the reference block',
-    firstCastPrefix.startsWith(
-      '[# References <IMAGE_REF_0>@Image1 <IMAGE_REF_1>@Image2]',
-    ) && firstCastPrefix.includes('CHARACTERS IN THIS VIDEO'),
+    firstCastPrefix.startsWith('[# References <IMAGE_REF_0>@Image1]') &&
+      !firstCastPrefix.includes('<IMAGE_REF_1>') &&
+      firstCastPrefix.includes('CHARACTERS IN THIS VIDEO'),
+  );
+  check(
+    'portraits beside an unroled officer picture get a rule scoped to the portraits',
+    suffixOf(firstCast).includes('named in the character list above') &&
+      !suffixOf(firstCast).includes('literal initial frames'),
+  );
+  check(
+    "'reference' tags the officer picture too, after the portraits",
+    prefixOf(
+      buildNewVideoScaffold({
+        imageCount: 2,
+        isEdit: false,
+        characters: [priya, rahul],
+        imageRole: 'reference',
+      }),
+    ).startsWith('[# References <IMAGE_REF_0>@Image1 <IMAGE_REF_1>@Image2]'),
+  );
+  check(
+    "'animate' does not restate a registry appearance beside the artwork, but keeps the voice",
+    ((text) =>
+      !text.includes('Appearance:') &&
+      text.includes('Voice: low and gravelly, unhurried.'))(
+      prefixOf(
+        buildNewVideoScaffold({
+          imageCount: 1,
+          isEdit: false,
+          characters: [rahul],
+          imageRole: 'animate',
+        }),
+      ),
+    ),
   );
   check(
     'every character is named, Devanagari included',

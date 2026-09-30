@@ -13,6 +13,7 @@ import type {
   NewVideoAspect,
   NewVideoCharacter,
   NewVideoConversation as Conversation,
+  NewVideoImageRole,
   NewVideoMode,
   NewVideoTurn,
 } from '@dgipr/schemas';
@@ -61,6 +62,11 @@ export function NewVideoConversationView({
   onCastIdsChange,
   forkFromTurnId,
   onForkFromTurnIdChange,
+  imageRole,
+  onImageRoleChange,
+  retryFromTurnId,
+  onRetryFromOriginal,
+  onCancelRetry,
   onRetry,
   onAddImages,
   onRemoveImage,
@@ -81,6 +87,11 @@ export function NewVideoConversationView({
   onCastIdsChange: (ids: readonly string[]) => void;
   forkFromTurnId: string | null;
   onForkFromTurnIdChange: (turnId: string | null) => void;
+  imageRole: NewVideoImageRole;
+  onImageRoleChange: (role: NewVideoImageRole) => void;
+  retryFromTurnId: string | null;
+  onRetryFromOriginal: (turnId: string) => void;
+  onCancelRetry: () => void;
   onRetry?: () => void;
   onAddImages: (files: readonly File[]) => void;
   onRemoveImage: (key: string) => void;
@@ -106,6 +117,29 @@ export function NewVideoConversationView({
     forkFromTurnId === null
       ? null
       : turns.findIndex((turn) => turn.id === forkFromTurnId) + 1 || null;
+
+  // RETRY FROM THE ORIGINAL PICTURE. A settled video turn that carried pictures can be
+  // started again from them as a new clip. The latest such turn is also offered in the
+  // composer, because the moment it is wanted is while writing "you did not use my image".
+  const canRetryTurn = (turn: NewVideoTurn): boolean =>
+    !storyboard &&
+    turn.images.length > 0 &&
+    (turn.status === 'completed' || turn.status === 'failed');
+  const retryIndex =
+    retryFromTurnId === null
+      ? -1
+      : turns.findIndex((turn) => turn.id === retryFromTurnId);
+  const retryOrdinal = retryIndex >= 0 ? retryIndex + 1 : null;
+  const retryPrompt =
+    retryIndex >= 0 ? (turns[retryIndex]?.prompt ?? null) : null;
+  let retrySuggestion: { turnId: string; ordinal: number } | null = null;
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    const turn = turns[index];
+    if (turn && canRetryTurn(turn)) {
+      retrySuggestion = { turnId: turn.id, ordinal: index + 1 };
+      break;
+    }
+  }
 
   // A storyboard answer GROWS while it streams, so its length is part of what follows the
   // bottom; a video turn only changes when it finishes.
@@ -187,6 +221,12 @@ export function NewVideoConversationView({
               }
               forkArmed={turn.id === forkFromTurnId}
               onFork={onForkFromTurnIdChange}
+              canRetryFromOriginal={canRetryTurn(turn)}
+              retryArmed={turn.id === retryFromTurnId}
+              onRetryFromOriginal={(turnId) => {
+                if (turnId === null) onCancelRetry();
+                else onRetryFromOriginal(turnId);
+              }}
             />
           ))}
 
@@ -214,6 +254,13 @@ export function NewVideoConversationView({
             onCastIdsChange={onCastIdsChange}
             forkOrdinal={forkOrdinal}
             onClearFork={() => onForkFromTurnIdChange(null)}
+            imageRole={imageRole}
+            onImageRoleChange={onImageRoleChange}
+            retryOrdinal={retryOrdinal}
+            retryPrompt={retryPrompt}
+            onCancelRetry={onCancelRetry}
+            retrySuggestion={retrySuggestion}
+            onRetryFromOriginal={onRetryFromOriginal}
             onAddImages={onAddImages}
             onRemoveImage={onRemoveImage}
             onSend={onSend}

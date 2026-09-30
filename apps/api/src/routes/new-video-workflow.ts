@@ -186,14 +186,15 @@ export function registerNewVideoWorkflowRoutes(
       mode === 'storyboard' &&
       ((body.characterIds ?? []).length > 0 ||
         body.fromTurnId !== undefined ||
-        (body.intent !== undefined && body.intent !== 'auto'))
+        (body.intent !== undefined && body.intent !== 'auto') ||
+        (body.imageRole !== undefined && body.imageRole !== 'auto'))
     ) {
       // Refused rather than ignored: each of these changes what a VIDEO render does, and a
       // storyboard turn silently dropping one would look like the assistant ignoring it.
       return reply.code(400).send({
         error: {
           message:
-            'स्टोरीबोर्ड संभाषणात पात्रे, जुन्या व्हिडिओवरून बदल किंवा बदलाचा प्रकार निवडता येत नाही.',
+            'स्टोरीबोर्ड संभाषणात पात्रे, जुन्या व्हिडिओवरून बदल, बदलाचा प्रकार किंवा चित्राची भूमिका निवडता येत नाही.',
         },
       });
     }
@@ -226,6 +227,39 @@ export function registerNewVideoWorkflowRoutes(
           message: 'जोडलेले एखादे चित्र आता उपलब्ध नाही. कृपया ते पुन्हा जोडा.',
         },
       });
+    }
+
+    // THE PICTURE'S ROLE. Checked before anything is created, like every guard here, and
+    // refused rather than quietly dropped: a role the render cannot honour would look like the
+    // model ignoring the officer's choice — the very complaint the control exists to fix.
+    const imageRole = body.imageRole ?? 'auto';
+    if (imageRole !== 'auto' && imageIds.length === 0) {
+      return reply.code(400).send({
+        error: {
+          message: 'चित्राची भूमिका निवडण्यासाठी आधी चित्र जोडा.',
+        },
+      });
+    }
+    if (imageRole === 'animate') {
+      // Image-to-video animates ONE picture as the video's first frame.
+      if (imageIds.length > 1) {
+        return reply.code(400).send({
+          error: {
+            message:
+              '"चित्र सजीव करा" साठी एकच चित्र जोडा. अनेक चित्रे वापरायची असल्यास "संदर्भ म्हणून वापरा" निवडा.',
+          },
+        });
+      }
+      // A first frame exists only at the start of a clip, so `animate` is always a new clip.
+      // A fork, or an explicit "edit", asks for the opposite in the same breath.
+      if (body.fromTurnId !== undefined || body.intent === 'edit') {
+        return reply.code(400).send({
+          error: {
+            message:
+              '"चित्र सजीव करा" मुळे नवीन क्लिप तयार होते, त्यामुळे जुन्या व्हिडिओमध्ये बदल म्हणून ते पाठवता येत नाही.',
+          },
+        });
+      }
     }
 
     // The CAST, de-duplicated: the same character named twice would be declared twice and
@@ -396,8 +430,12 @@ export function registerNewVideoWorkflowRoutes(
     // a turn that STARTS a chain — which is exactly the condition the job re-reads. The chain
     // point only ever moves from null to set, never back, so a decision taken here can only
     // over-estimate what the job will attach, never under-estimate it.
+    // `animate` attaches no portraits at all (image-to-video takes one picture), so it spends
+    // no slots on them.
     const portraitSlots =
-      conversation.lastInteractionId === null ? castPortraitCount(cast) : 0;
+      conversation.lastInteractionId === null && imageRole !== 'animate'
+        ? castPortraitCount(cast)
+        : 0;
     if (portraitSlots + imageIds.length > NEW_VIDEO_MAX_IMAGES) {
       return reply.code(400).send({
         error: {
@@ -458,6 +496,9 @@ export function registerNewVideoWorkflowRoutes(
       // Edit the video on screen or make a new clip. `auto` is decided in the job, from the
       // instruction itself, because it is a model call and must not hold this request open.
       body.intent ?? 'auto',
+      // The picture's role — `auto` (say nothing, Gemini decides from the words) unless the
+      // officer chose one. Validated above.
+      imageRole,
     );
 
     trackActivity(client, request, {
@@ -472,6 +513,7 @@ export function registerNewVideoWorkflowRoutes(
         images: resolved.length,
         characters: cast.length,
         intent: body.intent ?? 'auto',
+        imageRole,
         fork: forkFromInteractionId !== null,
       },
     });

@@ -90,6 +90,7 @@ import {
   type NewVideoConversation,
   type NewVideoConversationSummary,
   type NewVideoImage,
+  type NewVideoImageRole,
   type NewVideoPendingImage,
   type NewVideoTurn,
   type NewVideoTurnIntentChoice,
@@ -570,11 +571,25 @@ export async function decideTurnIntent(
     forked: boolean;
     choice: NewVideoTurnIntentChoice;
     imageCount: number;
+    // `animate` says the attached picture is the FIRST FRAME, which exists only at the start
+    // of a clip — so it is always a new clip, decided without a classifier call. Optional so
+    // the offline check's existing calls are unchanged.
+    imageRole?: NewVideoImageRole;
   }>,
 ): Promise<NewVideoIntentDecision> {
   if (input.chainPoint === null) {
     // Nothing on screen to edit: every such turn is a first turn, whatever was chosen.
     return { intent: 'new', source: 'first-turn', reason: '' };
+  }
+  if (input.imageRole === 'animate') {
+    // Checked before the fork: the route refuses a fork beside `animate`, so reaching here with
+    // both would be a bug, and the safe reading of it is the one that does not edit a video
+    // with a first frame it cannot have.
+    return {
+      intent: 'new',
+      source: 'officer',
+      reason: 'animate the attached image',
+    };
   }
   if (input.forked) {
     return { intent: 'edit', source: 'fork', reason: '' };
@@ -650,6 +665,11 @@ export function startNewVideoTurn(
   // Edit the video on screen, or make a NEW clip. `auto` is decided below, per turn; see
   // video/new-video-intent.ts for why every follow-up can no longer be assumed to be an edit.
   intentChoice: NewVideoTurnIntentChoice = 'auto',
+  // What the officer said their attached picture is for — see NewVideoImageRoleSchema. `auto`
+  // says nothing and lets Gemini read it from the words; the two explicit values set the
+  // declared task and the scaffold's sentence together, so they can never disagree. A job
+  // argument for the reason `aspect` is: nothing re-runs a turn.
+  imageRole: NewVideoImageRole = 'auto',
 ): void {
   void (async () => {
     try {
@@ -687,6 +707,7 @@ export function startNewVideoTurn(
         forked: forkFromInteractionId !== null,
         choice: intentChoice,
         imageCount: referenceRows.length,
+        imageRole,
       });
       const previousInteractionId = intent.intent === 'new' ? null : chainPoint;
       const isEdit = previousInteractionId !== null;
@@ -704,11 +725,19 @@ export function startNewVideoTurn(
       // turn, so the cap is applied here, and the officer's own pictures win: they were
       // attached for this very clip. Trailing portraits are dropped, never re-ordered, so the
       // scaffold's tag arithmetic still counts from the front.
-      const portraitCharacters = isEdit
-        ? []
-        : characters
-            .filter((character) => character.portraitPath !== null)
-            .slice(0, Math.max(0, NEW_VIDEO_MAX_IMAGES - referenceRows.length));
+      //
+      // `animate` attaches NO portraits either: image-to-video takes the officer's picture as
+      // the first frame, and a portrait beside it would be a second image with no place in
+      // that task. The cast's voices are still restated below.
+      const portraitCharacters =
+        isEdit || imageRole === 'animate'
+          ? []
+          : characters
+              .filter((character) => character.portraitPath !== null)
+              .slice(
+                0,
+                Math.max(0, NEW_VIDEO_MAX_IMAGES - referenceRows.length),
+              );
 
       // Downloaded now rather than held since the upload: a reference image may have been
       // attached minutes ago, and holding several of them per conversation is how a page
@@ -763,6 +792,7 @@ export function startNewVideoTurn(
               imageCount: referenceImages.length,
               isEdit,
               characters: scaffoldCharacters,
+              imageRole,
             })
           : null;
 
@@ -794,6 +824,8 @@ export function startNewVideoTurn(
             prompt: turn.prompt,
             isEdit,
             imageCount: referenceImages.length,
+            portraitCount: portraitCharacters.length,
+            imageRole,
             characters: characters.map((character) => ({
               name: character.name,
             })),
@@ -819,14 +851,20 @@ export function startNewVideoTurn(
       // and sent in BOTH prompt modes — a field adds no character to the officer's prompt, so
       // it leaves the scaffolded-vs-verbatim comparison about the text alone (the
       // aspect-ratio precedent). Null on a follow-up, where a task breaks the edit chain.
+      //
+      // AMENDED 2026-09-30: an officer's own picture is no longer forced to be a reference —
+      // with `imageRole: 'auto'` no task is declared for it and Gemini reads the role from the
+      // words (generation 83a2602b animated nothing because this said `reference_to_video`).
       const videoTask = newVideoTaskFor({
         imageCount: referenceImages.length,
+        portraitCount: portraitCharacters.length,
+        imageRole,
         isEdit,
       });
 
       console.log(
         `[new-video-workflow ${conversation.id}/${turn.id}] mode=${promptMode} ` +
-          `images=${referenceImages.length} edit=${isEdit} ` +
+          `images=${referenceImages.length} role=${imageRole} edit=${isEdit} ` +
           `intent=${intent.intent}(${intent.source}${intent.reason !== '' ? `: ${intent.reason}` : ''}) ` +
           `${forkFromInteractionId !== null ? 'forked ' : ''}` +
           `cast=${characters.length} portraits=${portraitCharacters.length} ` +

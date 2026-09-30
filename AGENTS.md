@@ -3110,6 +3110,55 @@ client id/secret — see the milestone below.
 
 ## Latest Implementation Milestone
 
+- **/new-video-workflow stops forcing an attached picture to be a REFERENCE** (2026-09-30, no
+  migration, no n8n; SUPERSEDES the "an attached picture is always `reference_to_video`" half of
+  Step 2 and the unconditional reference rule of Step 1). Generation 83a2602b attached artwork
+  and asked "make a video from this image, keep cinematic"; the lane declared
+  `reference_to_video` AND told Gemini "the images should not be used as literal initial
+  frames", so it rendered a new realistic scene, and the follow-up "you did not use the image"
+  was an EDIT of that drifted video, which could never bring the picture back.
+  - **Default (`imageRole: 'auto'`) says nothing about the officer's picture**: no declared task
+    (`newVideoTaskFor` returns null), no `<IMAGE_REF_n>` tag, no role sentence — Gemini reads the
+    role from the words, as the Gemini app does. No classifier call was added. Still declared by
+    default: no picture → `text_to_video`; only CAST PORTRAITS → `reference_to_video` (a portrait
+    is always a person to keep). Portraits beside an unroled picture get a rule scoped to the
+    portraits by name (`PORTRAIT_ROLE_RULE`), never the global "not initial frames" sentence. The
+    on-screen-text rule no longer blanks lettering that is part of an attached image.
+  - **Optional explicit role** (`NewVideoImageRoleSchema` in `@dgipr/schemas`, `imageRole` on the
+    turn request, a job argument like `aspect`, no column): `animate` → `image_to_video` +
+    `ANIMATE_ROLE_RULE` ("the attached image is the first frame … do not re-imagine it as
+    live-action"); `reference` → `reference_to_video` + the old reference rule and tags. The task
+    field and the prose are derived from the same inputs, so they cannot disagree. `animate` is
+    always a NEW clip (a first frame exists only at a clip's start — `decideTurnIntent` returns
+    `new` without a model call), needs exactly one picture, attaches no cast portraits and drops
+    the registry appearance (the image decides the look; voices still ride). The route refuses in
+    Marathi: a role with no picture, `animate` with >1 picture, `animate` + `fromTurnId`,
+    `animate` + `intent: 'edit'`, and any non-auto role in storyboard mode. `reference` on an
+    edit sends the prose only — a task beside `previous_interaction_id` still breaks chains.
+    The Step 5 authoring pass is told the role too (`referencesRule`), so it cannot rule on it.
+  - **Retry from the original picture** (web only; the API already accepted reused image ids and
+    `intent: 'new'`): a "मूळ चित्रावरून पुन्हा तयार करा" button on every settled video turn that
+    carried pictures, plus a composer suggestion while writing a follow-up with nothing attached.
+    It re-stages that turn's picture ids (no re-upload), defaults the role to `animate` for one
+    picture / `reference` for several, fills an EMPTY box with that turn's prompt, and sends
+    `intent: 'new'` so it cannot be classified into another edit. A fork and `animate`/retry
+    disarm each other in the hook rather than letting the API refuse the pair.
+  Verified 2026-09-30, all free: workspace typecheck **7/7 green**, eslint clean, prettier clean
+  on my hunks (`strings.ts`'s 6 residual complaints are identical at HEAD — do not `--write` it);
+  `new-video-task` (10), `new-video-scaffold` (+11), `new-video-prompt` (+4), intent and
+  prompt-mode harnesses green; `video:interactions:test` **34/34** (two new seam tests: the
+  default declares no task and no reference rule; `animate` declares `image_to_video` with
+  matching prose); the job check +3 (`animate` → new clip without a model call, winning over a
+  stray `edit`; `reference` leaves edit/new to the officer); and **46 mocked Playwright
+  assertions at 1360 and 390** (retry button only on the pictured turn, the suggestion, banner,
+  animate preselected, prompt prefilled, request body `{imageIds:[original], imageRole:'animate',
+  intent:'new'}` with no fork, default upload sends no `imageRole`/`intent`, reference sent,
+  two pictures + animate holds the send, fork/animate mutual disarm, no overflow, no page
+  errors). **Left for a real run** (Gemini spend): re-run 83a2602b's picture with the default and
+  with `animate`, confirming the artwork itself moves. Deploy: `@dgipr/schemas` →
+  `@dgipr/content-engine` dists → API + web together (`imageRole` is optional, so a half-deploy
+  just behaves as `auto`).
+
 - **Closing the Gemma adapter's gap to GPT on /dlo: prompt v6, a file-mode eval, and a vision
   re-distillation pipeline** (2026-09-29, no migration, no n8n; plan
   `~/.claude/plans/golden-nibbling-floyd.md`). The same scanned `Press_Note_General.pdf` came

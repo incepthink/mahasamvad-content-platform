@@ -268,6 +268,26 @@ export function newVideoTitleFrom(prompt: string): string {
   return `${(space > NEW_VIDEO_TITLE_MAX_CHARS * 0.6 ? cut.slice(0, space) : cut).trimEnd()}…`;
 }
 
+// WHAT THE OFFICER'S ATTACHED PICTURE IS FOR. Optional, and `auto` (the default) means we
+// say nothing about it: no declared task and no role instruction, so Gemini reads the role
+// off the officer's own words ("make a video from this image" animates it; "use this woman"
+// keeps her). It used to be forced to a REFERENCE on every turn — `reference_to_video` plus
+// "the images should not be used as literal initial frames" — which turned generation
+// 83a2602b's "make a video from this image, keep cinematic" into an unrelated live-action
+// scene instead of the supplied artwork.
+//
+// The two explicit values are the officer's override when the request is unclear or Gemini
+// chose wrongly, and each makes the declared task and the prompt instruction agree:
+//   animate   -> `image_to_video`, and the picture is the video's first frame. Always a NEW
+//                clip (a first frame exists only at the start of one), exactly one picture,
+//                and cast portraits are not attached beside it.
+//   reference -> `reference_to_video` (on a turn that starts a clip) and the reference rule.
+// Character portraits from the cast are ALWAYS references, whatever this says — they are a
+// person to keep, never artwork to animate.
+export const NEW_VIDEO_IMAGE_ROLES = ['auto', 'animate', 'reference'] as const;
+export const NewVideoImageRoleSchema = z.enum(NEW_VIDEO_IMAGE_ROLES);
+export type NewVideoImageRole = z.infer<typeof NewVideoImageRoleSchema>;
+
 // The turn. Omitting `conversationId` starts a NEW, independent conversation — which is all
 // the "New conversation" button does, so there is no separate route to get wrong.
 //
@@ -305,6 +325,11 @@ export const NewVideoTurnRequestSchema = z.object({
   // override when the automatic call is wrong. A fork is always an edit, so `new` beside
   // `fromTurnId` is refused.
   intent: z.enum(['auto', 'edit', 'new']).optional(),
+  // The attached picture's role — see NewVideoImageRoleSchema. Omitted means `auto`, so an
+  // older client is unchanged. A non-auto value needs at least one attached picture; `animate`
+  // needs exactly one and cannot ride with `fromTurnId` or `intent: 'edit'` (the route answers
+  // a Marathi 400 rather than guessing which instruction to drop).
+  imageRole: NewVideoImageRoleSchema.optional(),
   // Optional so an older client — or a request written by hand — still sends a valid turn;
   // the route supplies DEFAULT_NEW_VIDEO_ASPECT in its place rather than leaving the shape to
   // whatever the model feels like.

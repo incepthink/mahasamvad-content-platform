@@ -31,6 +31,13 @@
 // said in words. Storyboard mode keeps the text, the picture upload, paste, expand and send,
 // and drops what only a video render can use: the edit/new choice, the cast and the shape.
 //
+// THE PICTURE'S ROLE appears once a picture is staged: an optional "animate this image / use
+// it as a reference" choice, defaulting to letting Gemini read the role from the prompt. It
+// used to be forced to "reference" on every turn, which is how "make a video from this image"
+// came back as an unrelated realistic scene (generation 83a2602b). Beside it, RETRY FROM THE
+// ORIGINAL PICTURE: when a follow-up says the picture was not used, editing the drifted video
+// cannot bring it back, so the composer offers to start a new clip from the picture itself.
+//
 // A reference picture can also be PASTED, exactly as on /chat and through the same helper:
 // a React handler on this card for a paste into the box, and a document listener for a paste
 // made without clicking into it first. See ChatComposer's header for why both are needed and
@@ -47,6 +54,7 @@ import {
 import {
   CornerDownRight,
   Image as ImageIcon,
+  ImagePlus,
   Maximize2,
   Minimize2,
   PanelsTopLeft,
@@ -63,6 +71,7 @@ import {
   NEW_VIDEO_MAX_IMAGES,
   type NewVideoAspect,
   type NewVideoCharacter,
+  type NewVideoImageRole,
   type NewVideoMode,
 } from '@dgipr/schemas';
 import { ComposeSafeTextarea, isComposingEvent } from './ComposeSafeInput';
@@ -156,6 +165,30 @@ export function NewVideoModePicker({
   );
 }
 
+// The role choices, default first. Labels say what happens to the PICTURE, because that is
+// the decision being made; the hint under the group says what each one means for the video.
+const IMAGE_ROLE_OPTIONS: ReadonlyArray<{
+  value: NewVideoImageRole;
+  label: string;
+  hint: string;
+}> = [
+  {
+    value: 'auto',
+    label: STR.nvwImageRoleAuto,
+    hint: STR.nvwImageRoleAutoHint,
+  },
+  {
+    value: 'animate',
+    label: STR.nvwImageRoleAnimate,
+    hint: STR.nvwImageRoleAnimateHint,
+  },
+  {
+    value: 'reference',
+    label: STR.nvwImageRoleReference,
+    hint: STR.nvwImageRoleReferenceHint,
+  },
+];
+
 function stateLabel(image: StagedImage): string {
   if (image.state === 'failed') return image.error ?? STR.nvwImageFailed;
   if (image.state === 'uploading') return STR.nvwImageUploading;
@@ -174,6 +207,13 @@ export function NewVideoComposer({
   onCastIdsChange,
   forkOrdinal,
   onClearFork,
+  imageRole,
+  onImageRoleChange,
+  retryOrdinal,
+  retryPrompt,
+  onCancelRetry,
+  retrySuggestion,
+  onRetryFromOriginal,
   onAddImages,
   onRemoveImage,
   onSend,
@@ -198,6 +238,20 @@ export function NewVideoComposer({
    */
   forkOrdinal: number | null;
   onClearFork: () => void;
+  /** What the staged picture is for; `auto` lets Gemini read it from the prompt. */
+  imageRole: NewVideoImageRole;
+  onImageRoleChange: (role: NewVideoImageRole) => void;
+  /** The 1-based number of the turn whose original picture is staged for a new clip, or null. */
+  retryOrdinal: number | null;
+  /** That turn's own prompt, used to fill an EMPTY box so the retry can be sent as it stands. */
+  retryPrompt: string | null;
+  onCancelRetry: () => void;
+  /**
+   * The latest earlier turn that carried a picture, offered as a one-click retry while the
+   * officer writes a follow-up with nothing attached (the "you did not use my image" moment).
+   */
+  retrySuggestion: { turnId: string; ordinal: number } | null;
+  onRetryFromOriginal: (turnId: string) => void;
   onAddImages: (files: readonly File[]) => void;
   onRemoveImage: (key: string) => void;
   /** Resolves true once the turn has left, which is when the box may be cleared. */
@@ -216,6 +270,17 @@ export function NewVideoComposer({
   // forward one.
   const card = useRef<HTMLDivElement>(null);
   const wasExpanded = useRef(expanded);
+
+  // Arming a retry fills an EMPTY box with the prompt that turn was sent with, so the new clip
+  // can go as it stands. A box the officer has already written in is left alone: what they
+  // typed ("keep cinematic, and animate the artwork") is the better instruction.
+  const lastRetry = useRef<number | null>(null);
+  useEffect(() => {
+    if (retryOrdinal === lastRetry.current) return;
+    lastRetry.current = retryOrdinal;
+    if (retryOrdinal === null || retryPrompt === null) return;
+    setText((current) => (current.trim() === '' ? retryPrompt : current));
+  }, [retryOrdinal, retryPrompt]);
 
   // Escape closes it, like every other overlay in the product (the rail drawer, TasksMenu).
   // Guarded by isComposing on the textarea's own handler instead would be wrong: this is a
@@ -244,8 +309,16 @@ export function NewVideoComposer({
   // An image still uploading holds the send, unlike /chat: there the attachment is waited for
   // inside the turn, but here the turn is a paid render and starting one without the reference
   // picture the officer attached would look like the model ignoring it.
-  const canSend = !sending && !busy && !uploading && text.trim() !== '';
   const storyboard = mode === 'storyboard';
+  // Image-to-video animates ONE picture; the API refuses more, so the send waits and says why.
+  const animateBlocked =
+    !storyboard && imageRole === 'animate' && images.length > 1;
+  const canSend =
+    !sending && !busy && !uploading && !animateBlocked && text.trim() !== '';
+  const showRole = !storyboard && images.length > 0;
+  const roleHint =
+    IMAGE_ROLE_OPTIONS.find((option) => option.value === imageRole)?.hint ??
+    STR.nvwImageRoleAutoHint;
   const sendLabel = storyboard
     ? STR.nvwStoryboardSend
     : isFollowUp
@@ -376,7 +449,91 @@ export function NewVideoComposer({
           </div>
         ) : null}
 
+        {/* RETRY FROM THE ORIGINAL PICTURE, armed. Above the box for the fork banner's
+            reason: it changes what the words about to be sent will do. */}
+        {!storyboard && retryOrdinal !== null ? (
+          <div className="nvw-fork-banner" role="status">
+            <ImagePlus size={16} aria-hidden="true" />
+            <span className="nvw-fork-banner-text">
+              <strong>
+                {STR.nvwRetryActive} · {STR.nvwForkTurn}{' '}
+                {retryOrdinal.toLocaleString('mr-IN')}
+              </strong>
+              <span className="nvw-fork-banner-hint">
+                {STR.nvwRetryActiveHint}
+              </span>
+            </span>
+            <button
+              type="button"
+              className="btn-ghost nvw-fork-clear"
+              onClick={onCancelRetry}
+              title={STR.nvwForkCancel}
+              aria-label={STR.nvwForkCancel}
+            >
+              <X size={16} aria-hidden="true" />
+            </button>
+          </div>
+        ) : null}
+
+        {/* The one-click way back to the picture, offered while a follow-up is being written
+            with nothing attached. Quiet, and gone the moment anything is armed or attached. */}
+        {!storyboard &&
+        isFollowUp &&
+        retrySuggestion !== null &&
+        images.length === 0 &&
+        retryOrdinal === null &&
+        forkOrdinal === null ? (
+          <button
+            type="button"
+            className="btn-ghost nvw-fork nvw-retry-suggest"
+            onClick={() => onRetryFromOriginal(retrySuggestion.turnId)}
+            title={STR.nvwRetryFromOriginalHint}
+          >
+            <ImagePlus size={16} aria-hidden="true" />
+            {STR.nvwRetrySuggest}
+            <span className="visually-hidden">
+              {' '}
+              ({STR.nvwForkTurn}{' '}
+              {retrySuggestion.ordinal.toLocaleString('mr-IN')})
+            </span>
+          </button>
+        ) : null}
+
         <AttachmentTray items={trayItems} />
+
+        {/* THE PICTURE'S ROLE. Only once a picture is staged, and optional: the default says
+            nothing and lets Gemini decide from the prompt. A radiogroup, so exactly one is
+            always chosen and arrow keys move between them. */}
+        {showRole ? (
+          <div className="nvw-image-role">
+            <div
+              className="nvw-mode-options nvw-image-role-options"
+              role="radiogroup"
+              aria-label={STR.nvwImageRoleLabel}
+            >
+              {IMAGE_ROLE_OPTIONS.map(({ value, label }) => {
+                const active = imageRole === value;
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    className={
+                      active ? 'nvw-mode-option is-active' : 'nvw-mode-option'
+                    }
+                    onClick={() => onImageRoleChange(value)}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+            <span className="nvw-mode-hint">
+              {animateBlocked ? STR.nvwImageRoleAnimateOne : roleHint}
+            </span>
+          </div>
+        ) : null}
 
         <div className="chat-input-row">
           <ComposeSafeTextarea

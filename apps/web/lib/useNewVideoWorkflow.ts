@@ -19,6 +19,7 @@ import {
   type NewVideoAspect,
   type NewVideoCharacter,
   type NewVideoConversation,
+  type NewVideoImageRole,
   type NewVideoMode,
 } from '@dgipr/schemas';
 import {
@@ -77,6 +78,17 @@ export function useNewVideoWorkflow(
   // would recognise: the interaction handle never leaves the API.
   forkFromTurnId: string | null;
   setForkFromTurnId: (turnId: string | null) => void;
+  // What the staged picture is for. `auto` (the default) says nothing and lets Gemini read it
+  // from the prompt; the two explicit values are the officer's override. Per message: cleared
+  // once the turn has left, with the pictures it described.
+  imageRole: NewVideoImageRole;
+  setImageRole: (role: NewVideoImageRole) => void;
+  // RETRY FROM THE ORIGINAL PICTURE. The turn whose attached pictures have been staged again
+  // for a NEW clip, or null. Armed from a turn's button (or the composer's suggestion); the
+  // next send goes as `intent: 'new'`, so it does not edit the video that drifted.
+  retryFromTurnId: string | null;
+  retryFromOriginal: (turnId: string) => void;
+  cancelRetry: () => void;
   addImages: (files: readonly File[]) => void;
   removeImage: (key: string) => void;
   send: (prompt: string, aspect: NewVideoAspect) => Promise<boolean>;
@@ -104,7 +116,11 @@ export function useNewVideoWorkflow(
   // Armed by clicking a turn, cleared once the instruction it applied to has left. Held here
   // rather than in the composer because it belongs to the CONVERSATION being read — the
   // officer arms it by pressing a button on a turn well above the box.
-  const [forkFromTurnId, setForkFromTurnId] = useState<string | null>(null);
+  const [forkFromTurnId, setForkFromTurnIdState] = useState<string | null>(
+    null,
+  );
+  const [imageRole, setImageRoleState] = useState<NewVideoImageRole>('auto');
+  const [retryFromTurnId, setRetryFromTurnId] = useState<string | null>(null);
   const [loading, setLoading] = useState(conversationId !== null);
   const [error, setError] = useState<string | null>(null);
   // Read inside `send` without making it depend on the list — a picked file must not
@@ -127,7 +143,9 @@ export function useNewVideoWorkflow(
     setPickedCastIds([]);
     // Nor a fork point: a turn id belongs to one conversation, and carrying it across would
     // send the next request an id the server would rightly refuse.
-    setForkFromTurnId(null);
+    setForkFromTurnIdState(null);
+    setRetryFromTurnId(null);
+    setImageRoleState('auto');
     // A new conversation starts on the default mode rather than on whatever the last one
     // was: the choice is made on the empty page, where the selector is the first thing seen.
     setPickedMode(DEFAULT_NEW_VIDEO_MODE);
@@ -181,6 +199,61 @@ export function useNewVideoWorkflow(
   // Same reason again: arming a fork must not re-create the callback the composer holds.
   const forkRef = useRef<string | null>(forkFromTurnId);
   forkRef.current = forkFromTurnId;
+  const roleRef = useRef<NewVideoImageRole>(imageRole);
+  roleRef.current = imageRole;
+  const retryRef = useRef<string | null>(retryFromTurnId);
+  retryRef.current = retryFromTurnId;
+  const conversationRef = useRef<NewVideoConversation | null>(conversation);
+  conversationRef.current = conversation;
+
+  // A fork EDITS an older video, and "animate" or a retry both start a NEW clip. The API
+  // refuses the pairs, so arming one disarms the other instead of letting a send fail.
+  const setForkFromTurnId = useCallback((turnId: string | null) => {
+    setForkFromTurnIdState(turnId);
+    if (turnId !== null) {
+      setRetryFromTurnId(null);
+      setImageRoleState((role) => (role === 'animate' ? 'auto' : role));
+    }
+  }, []);
+  const setImageRole = useCallback((role: NewVideoImageRole) => {
+    setImageRoleState(role);
+    if (role === 'animate') setForkFromTurnIdState(null);
+  }, []);
+
+  // Stages the pictures that turn was sent with (ids this API already minted, so nothing is
+  // uploaded again), replacing whatever was staged. One picture defaults to "animate", because
+  // the report this exists for is a picture that was NOT animated; several default to
+  // "reference", since only one picture can be a first frame. Either can be changed before
+  // sending.
+  const retryFromOriginal = useCallback((turnId: string) => {
+    const turn = conversationRef.current?.turns.find((t) => t.id === turnId);
+    if (!turn || turn.images.length === 0) return;
+    setImages((prev) => {
+      prev.forEach((item) => URL.revokeObjectURL(item.previewUrl));
+      return turn.images.map((image): StagedImage => ({
+        key: `retry-${turnId}-${image.id}`,
+        name: image.name,
+        // A public URL rather than an object URL; revoking it later is a harmless no-op.
+        previewUrl: image.url,
+        state: 'ready',
+        id: image.id,
+        error: null,
+      }));
+    });
+    setImageRoleState(turn.images.length === 1 ? 'animate' : 'reference');
+    setForkFromTurnIdState(null);
+    setRetryFromTurnId(turnId);
+  }, []);
+
+  const cancelRetry = useCallback(() => {
+    const turnId = retryRef.current;
+    setRetryFromTurnId(null);
+    setImageRoleState('auto');
+    if (turnId === null) return;
+    setImages((prev) =>
+      prev.filter((item) => !item.key.startsWith(`retry-${turnId}-`)),
+    );
+  }, []);
 
   // Polls only while something is actually generating. A finished conversation is static —
   // nothing on the server can change it — so an idle page makes no requests at all.
@@ -255,6 +328,12 @@ export function useNewVideoWorkflow(
     });
   }, []);
 
+  // A role describes the staged pictures, so it goes when the last of them does. Otherwise a
+  // stale "animate" would be waiting for the next picture the officer attaches.
+  useEffect(() => {
+    if (images.length === 0) setImageRoleState('auto');
+  }, [images.length]);
+
   const send = useCallback(
     async (prompt: string, aspect: NewVideoAspect): Promise<boolean> => {
       if (prompt.trim() === '') return false;
@@ -282,6 +361,14 @@ export function useNewVideoWorkflow(
         // client to add by echoing it back.
         const castToSend = lockedRef.current ? [] : castRef.current;
         const storyboard = modeRef.current === 'storyboard';
+        // Only with a picture to describe: the API refuses a role with none attached.
+        const roleToSend =
+          imageIds.length > 0 && roleRef.current !== 'auto'
+            ? roleRef.current
+            : null;
+        // A retry is a NEW clip from the original picture, never an edit of the video that
+        // drifted away from it. Only meaningful once there is a video to not edit.
+        const freshClip = retryRef.current !== null && activeId !== null;
 
         const result = await sendNewVideoTurn(
           storyboard
@@ -309,11 +396,18 @@ export function useNewVideoWorkflow(
                   : {}),
                 // Omitted unless armed, so the ordinary turn's request is byte-for-byte what
                 // it has always been.
-                ...(forkRef.current !== null
+                ...(forkRef.current !== null && !freshClip
                   ? { fromTurnId: forkRef.current }
                   : {}),
-                // No `intent`: whether this edits the video on screen or makes a new clip is
-                // always the API's call (`auto`), read off the instruction itself.
+                // Omitted (`auto`) unless the officer chose a role, so an ordinary turn's
+                // request is byte-for-byte what it was.
+                ...(roleToSend !== null ? { imageRole: roleToSend } : {}),
+                // No `intent` on an ordinary turn: whether it edits the video on screen or
+                // makes a new clip is the API's call (`auto`), read off the instruction. A
+                // retry from the original picture is the exception: it is a new clip by
+                // definition, and letting the classifier call it an edit would repeat the
+                // very drift being corrected.
+                ...(freshClip ? { intent: 'new' as const } : {}),
               },
         );
 
@@ -324,7 +418,9 @@ export function useNewVideoWorkflow(
           prev.forEach((item) => URL.revokeObjectURL(item.previewUrl));
           return [];
         });
-        setForkFromTurnId(null);
+        setForkFromTurnIdState(null);
+        setRetryFromTurnId(null);
+        setImageRoleState('auto');
 
         const isNew = activeId === null;
         setActiveId(result.conversationId);
@@ -375,6 +471,11 @@ export function useNewVideoWorkflow(
     castLocked,
     forkFromTurnId,
     setForkFromTurnId,
+    imageRole,
+    setImageRole,
+    retryFromTurnId,
+    retryFromOriginal,
+    cancelRetry,
     addImages,
     removeImage,
     send,

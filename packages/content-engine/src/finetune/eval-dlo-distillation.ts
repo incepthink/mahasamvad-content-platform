@@ -327,7 +327,9 @@ export function ungroundedNumerals(
   const seen = new Set<string>();
   const checked: string[] = [];
   const ungrounded: string[] = [];
-  for (const token of numeralTokens(stripListMarkers(article))) {
+  // `०००००` on its own line is DGIPR's end-of-copy mark, not a figure.
+  const body = article.replace(/^[ \t]*(?:०{3,}|0{3,})[ \t]*$/gmu, '');
+  for (const token of numeralTokens(stripListMarkers(body))) {
     if (seen.has(token)) continue;
     seen.add(token);
     checked.push(token);
@@ -1585,6 +1587,11 @@ function runCheck(extra: ReadonlyArray<[string, boolean]> = []): void {
     'a faithful article has no ungrounded numeral',
     ungroundedNumerals('५०० कोटींची तरतूद, ३१ ऑगस्ट २०२६ पर्यंत.', source)
       .ungrounded.length === 0,
+  );
+  check(
+    'the ००००० end-of-copy mark is not a figure',
+    ungroundedNumerals('५०० कोटींची तरतूद.\n\n०००००', source).checked.join() ===
+      '500',
   );
   const misread = ungroundedNumerals('४०० कोटींची तरतूद.', source);
   check('a misread amount is caught', misread.ungrounded.join() === '400');
