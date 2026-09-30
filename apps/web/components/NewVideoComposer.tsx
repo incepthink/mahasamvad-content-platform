@@ -211,7 +211,6 @@ export function NewVideoComposer({
   onImageRoleChange,
   retryOrdinal,
   retryPrompt,
-  onCancelRetry,
   retrySuggestion,
   onRetryFromOriginal,
   onAddImages,
@@ -245,7 +244,6 @@ export function NewVideoComposer({
   retryOrdinal: number | null;
   /** That turn's own prompt, used to fill an EMPTY box so the retry can be sent as it stands. */
   retryPrompt: string | null;
-  onCancelRetry: () => void;
   /**
    * The latest earlier turn that carried a picture, offered as a one-click retry while the
    * officer writes a follow-up with nothing attached (the "you did not use my image" moment).
@@ -441,32 +439,6 @@ export function NewVideoComposer({
               type="button"
               className="btn-ghost nvw-fork-clear"
               onClick={onClearFork}
-              title={STR.nvwForkCancel}
-              aria-label={STR.nvwForkCancel}
-            >
-              <X size={16} aria-hidden="true" />
-            </button>
-          </div>
-        ) : null}
-
-        {/* RETRY FROM THE ORIGINAL PICTURE, armed. Above the box for the fork banner's
-            reason: it changes what the words about to be sent will do. */}
-        {!storyboard && retryOrdinal !== null ? (
-          <div className="nvw-fork-banner" role="status">
-            <ImagePlus size={16} aria-hidden="true" />
-            <span className="nvw-fork-banner-text">
-              <strong>
-                {STR.nvwRetryActive} · {STR.nvwForkTurn}{' '}
-                {retryOrdinal.toLocaleString('mr-IN')}
-              </strong>
-              <span className="nvw-fork-banner-hint">
-                {STR.nvwRetryActiveHint}
-              </span>
-            </span>
-            <button
-              type="button"
-              className="btn-ghost nvw-fork-clear"
-              onClick={onCancelRetry}
               title={STR.nvwForkCancel}
               aria-label={STR.nvwForkCancel}
             >

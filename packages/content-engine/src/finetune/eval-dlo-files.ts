@@ -37,6 +37,7 @@
 //
 // On this dev machine every OpenAI call needs NODE_OPTIONS=--use-system-ca (Kaspersky).
 
+import { createHash } from 'node:crypto';
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -64,6 +65,7 @@ import {
   gemmaDloModel,
   gemmaMaxSoftTokens,
   gemmaModel,
+  gemmaSourceSettings,
   isGemmaConfigured,
   listGemmaModels,
   respondWithSourcesViaGemma,
@@ -307,6 +309,29 @@ export function attributionHeadings(article: string): string[] {
   );
 }
 
+/**
+ * The learned rules' part of a bank key: their COUNT plus a hash of their TEXT. A count alone
+ * reused an article written under a rule that was since reworded (rule #4, 2026-09-30).
+ */
+export function prefsBankKey(rules: readonly string[]): string {
+  if (rules.length === 0) return 'p0';
+  const hash = createHash('sha256').update(rules.join('\n')).digest('hex');
+  return `p${rules.length}-${hash.slice(0, 8)}`;
+}
+
+/**
+ * The vision part: the soft-token budget, plus tiles per page when it is set explicitly —
+ * both change the pixels a gemma arm reads, so neither may reuse the other's article.
+ * `tilesPerPage` null (pdf-raster's own default) keeps the pre-existing `s1120` form.
+ */
+export function visionBankKey(
+  softTokens: number | null,
+  tilesPerPage: number | null,
+): string {
+  const soft = `s${softTokens ?? 'd'}`;
+  return tilesPerPage === null ? soft : `${soft}t${tilesPerPage}`;
+}
+
 /** Hand-verified expectations for a named asset. */
 export type FileCase = Readonly<{
   /** Tokens the article must carry (script- and hyphen-normalised). */
@@ -506,16 +531,24 @@ export function summarizeFileArm(
 export function diagnoseFiles(
   summaries: readonly FileArmSummary[],
   teacher: FileArmSummary | null,
+  softTokens: number | null = null,
 ): string[] {
   const out: string[] = [];
   for (const summary of summaries) {
     if (summary.arm === 'teacher') continue;
     const lines: string[] = [];
     if (summary.caseChecksPassed < summary.caseChecks) {
+      // At 1120 the per-image budget is already at its ceiling, so the remaining lever for
+      // a small glyph is more pixels per page: cut each page into more tiles.
+      const lever =
+        softTokens !== null && softTokens >= 1120
+          ? 'GEMMA_MAX_SOFT_TOKENS is already 1120, so raise GEMMA_TILES_PER_PAGE (2-3) ' +
+            'to give each page more image tokens'
+          : 'set GEMMA_MAX_SOFT_TOKENS=1120 (Step B)';
       lines.push(
         `${summary.caseChecks - summary.caseChecksPassed} fixed-case assertion(s) fail. A ` +
-          'misread figure or token (६क → ६) is the vision budget: set GEMMA_MAX_SOFT_TOKENS=1120 ' +
-          '(Step B) before touching the prompt or the adapter.',
+          `misread figure or token (६क → ६) is the vision budget: ${lever} before touching ` +
+          'the prompt or the adapter.',
       );
     }
     if (summary.signatoryNamed < summary.signatoryCases) {
@@ -843,8 +876,11 @@ export async function runFileEval(options: FileEvalOptions): Promise<void> {
     return;
   }
 
-  const prefsKey = options.prefs === 'db' ? `p${preferences.length}` : 'p0';
-  const soft = `s${gemmaMaxSoftTokens() ?? 'd'}`;
+  const prefsKey = prefsBankKey(options.prefs === 'db' ? preferences : []);
+  const soft = visionBankKey(
+    gemmaMaxSoftTokens(),
+    gemmaSourceSettings().tilesPerPage,
+  );
   const genDir = resolve(outDir, 'generations');
   const gradeDir = resolve(outDir, 'grades');
   const ocrDir = resolve(outDir, 'ocr');
@@ -1016,7 +1052,7 @@ export async function runFileEval(options: FileEvalOptions): Promise<void> {
         `repeats ${s.repeatedPairs}  cases ${s.caseChecksPassed}/${s.caseChecks}`,
     );
   }
-  const diagnosis = diagnoseFiles(summaries, teacher);
+  const diagnosis = diagnoseFiles(summaries, teacher, gemmaMaxSoftTokens());
   console.log('');
   for (const line of diagnosis) console.log(`  ${line}`);
 
@@ -1145,6 +1181,19 @@ export function fileModeChecks(): Array<[string, boolean]> {
     'files: the lead is the first body paragraph',
     leadParagraph(good).startsWith('पात्र'),
   );
+  check(
+    'files: a reworded rule changes the bank key though the count does not',
+    prefsBankKey(['नियम अ', 'नियम ब']) !== prefsBankKey(['नियम अ', 'नियम क']) &&
+      prefsBankKey(['नियम अ', 'नियम ब']).startsWith('p2-'),
+  );
+  check('files: no rules is p0', prefsBankKey([]) === 'p0');
+  check(
+    'files: tiles per page is part of the vision key',
+    visionBankKey(1120, 1) === 's1120t1' &&
+      visionBankKey(1120, 2) === 's1120t2' &&
+      visionBankKey(null, null) === 'sd',
+  );
+
   // The shape the GPT teacher actually returned on 2026-09-30: a standalone dateline line
   // (learned rule 2) and the annex condensed away (rule 4). Both used to fail the case.
   const condensed = [

@@ -323,7 +323,9 @@ export function ungroundedNumerals(
   article: string,
   source: string,
 ): { checked: string[]; ungrounded: string[] } {
-  const haystack = normalizeNumerals(source);
+  // Whole tokens, not a substring search: `२६ जानेवारी` for a source's `२७/१/२०२६` is a
+  // misread, and `26` is a substring of `2026` (Press_Note_General, 2026-09-30).
+  const haystack = new Set(numeralTokens(source));
   const seen = new Set<string>();
   const checked: string[] = [];
   const ungrounded: string[] = [];
@@ -333,7 +335,7 @@ export function ungroundedNumerals(
     if (seen.has(token)) continue;
     seen.add(token);
     checked.push(token);
-    if (!haystack.includes(token)) ungrounded.push(token);
+    if (!haystack.has(token)) ungrounded.push(token);
   }
   return { checked, ungrounded };
 }
@@ -1587,6 +1589,17 @@ function runCheck(extra: ReadonlyArray<[string, boolean]> = []): void {
     'a faithful article has no ungrounded numeral',
     ungroundedNumerals('५०० कोटींची तरतूद, ३१ ऑगस्ट २०२६ पर्यंत.', source)
       .ungrounded.length === 0,
+  );
+  check(
+    'a misread day is caught even when it is a substring of the year',
+    ungroundedNumerals(
+      '२६ जानेवारी २०२६ चा शासन निर्णय',
+      'दि.२७/१/२०२६',
+    ).ungrounded.join() === '26',
+  );
+  check(
+    'a grouped amount matches its ungrouped form',
+    ungroundedNumerals('१००० कोटी', 'रु. १,००० कोटी').ungrounded.length === 0,
   );
   check(
     'the ००००० end-of-copy mark is not a figure',

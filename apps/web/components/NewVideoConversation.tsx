@@ -258,7 +258,6 @@ export function NewVideoConversationView({
             onImageRoleChange={onImageRoleChange}
             retryOrdinal={retryOrdinal}
             retryPrompt={retryPrompt}
-            onCancelRetry={onCancelRetry}
             retrySuggestion={retrySuggestion}
             onRetryFromOriginal={onRetryFromOriginal}
             onAddImages={onAddImages}

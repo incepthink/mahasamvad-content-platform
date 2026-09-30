@@ -2174,9 +2174,6 @@ export const STR = {
   nvwRetryFromOriginal: 'मूळ चित्रावरून पुन्हा तयार करा',
   nvwRetryFromOriginalHint:
     'हा व्हिडिओ बदलण्याऐवजी या सूचनेत जोडलेल्या मूळ चित्रावरून नवीन क्लिप तयार करा.',
-  nvwRetryActive: 'मूळ चित्रावरून नवीन क्लिप',
-  nvwRetryActiveHint:
-    'मूळ चित्र पुन्हा जोडले आहे. आधीचा व्हिडिओ बदलला जाणार नाही — नवीन क्लिप तयार होईल.',
   nvwRetrySuggest: 'चित्र वापरले गेले नाही? मूळ चित्रावरून नवीन क्लिप तयार करा',
 
   // The rail (migration 0050). Its own labels rather than the chat ones: an officer scanning
