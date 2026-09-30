@@ -867,6 +867,16 @@ export async function captureOne(
       : null;
     if (studentVision) {
       warnings.push(...studentVision.warnings);
+      // prepareGemmaSources warns only when a document did not reach the student (most often
+      // a PDF over the tile cap). The teacher would still read it, so the pair would teach
+      // facts the student was never shown — skip rather than capture a mismatched pair.
+      if (studentVision.warnings.length > 0) {
+        return {
+          ...base,
+          status: 'skipped',
+          reason: `a document did not reach the vision student (${studentVision.warnings.join('; ')})`,
+        };
+      }
       if (studentVision.imageCount === 0) {
         return {
           ...base,
