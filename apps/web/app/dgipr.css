@@ -10513,3 +10513,342 @@ a.file-row-link > svg:last-child {
     flex-basis: 100%;
   }
 }
+
+/* ---------- /learn — practice lessons ----------
+   The lesson page is the REAL Creative page and poster card; everything here is drawn over
+   them: the practice badge, the glowing ring round the one control a step teaches (its
+   spread shadow dims the rest of the page), and the coach's callout attached to it. */
+
+.learn-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--warn);
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 0.85rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.learn-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.learn-index-intro {
+  margin-bottom: 18px;
+}
+
+.learn-lesson-card {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.learn-lesson-icon {
+  color: var(--accent);
+  flex: none;
+}
+
+.learn-lesson-text {
+  flex: 1 1 280px;
+  min-width: 0;
+}
+
+.learn-lesson-text h2 {
+  margin: 0 0 4px;
+}
+
+.learn-lesson-meta {
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 0.95rem;
+}
+
+.learn-more-soon {
+  margin-top: 16px;
+}
+
+.learn-intro {
+  max-width: 720px;
+}
+
+.learn-intro-steps {
+  margin: 8px 0 16px;
+  padding-left: 1.4em;
+  line-height: 1.8;
+}
+
+.learn-intro-practice {
+  margin-bottom: 18px;
+}
+
+/* The coach's words, in a callout attached to the lit control. Above the dim (and above the
+   ring), below Radix portals (z-50) so a menu opened from the taught control is never under
+   it. Portalled to <body> by Spotlight, so `fixed` is relative to the screen. */
+.learn-callout {
+  position: fixed;
+  z-index: 46;
+  width: min(380px, calc(100vw - 24px));
+  max-height: calc(100vh - 24px);
+  /* Visible, so the arrow can sit outside the edge; .learn-callout-body scrolls. */
+  display: flex;
+  flex-direction: column;
+  background: var(--card);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-xl);
+  box-shadow:
+    var(--shadow-lg),
+    0 10px 36px var(--accent-glow);
+  padding: 16px 18px;
+  transition:
+    top 0.18s ease,
+    left 0.18s ease;
+}
+
+.learn-callout-body {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.learn-callout.is-measuring {
+  visibility: hidden;
+}
+
+.learn-callout.is-center {
+  width: min(560px, calc(100vw - 24px));
+}
+
+.learn-callout.is-nudged {
+  animation: learn-callout-nudge 0.5s ease;
+}
+
+/* A small diamond on the side facing the ring; Spotlight sets its offset along that side. */
+.learn-callout-arrow {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  background: var(--card);
+  border: 1px solid var(--border-strong);
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.learn-callout.is-below .learn-callout-arrow {
+  top: 0;
+  border-right: 0;
+  border-bottom: 0;
+}
+
+.learn-callout.is-above .learn-callout-arrow {
+  top: 100%;
+  border-left: 0;
+  border-top: 0;
+}
+
+.learn-callout.is-right .learn-callout-arrow {
+  left: 0;
+  border-top: 0;
+  border-right: 0;
+}
+
+.learn-callout.is-left .learn-callout-arrow {
+  left: 100%;
+  border-bottom: 0;
+  border-left: 0;
+}
+
+.learn-coach-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.learn-coach-tools {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+
+.learn-coach-tools a.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.learn-coach-stage {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+/* Four short bars under the head: the stages, done / current / to come. */
+.learn-stages {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+}
+
+.learn-stages li {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--border);
+}
+
+.learn-stages li.is-done {
+  background: var(--accent-soft);
+}
+
+.learn-stages li.is-current {
+  background: var(--accent);
+}
+
+.learn-coach-body {
+  margin-top: 12px;
+}
+
+.learn-coach-instruction {
+  margin: 0;
+  font-size: 1.05rem;
+  line-height: 1.6;
+}
+
+.learn-coach-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.learn-coach-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  text-decoration: none;
+}
+
+.learn-intro h2 {
+  margin: 0 0 6px;
+}
+
+.learn-intro .btn-row .btn {
+  text-decoration: none;
+}
+
+.learn-recap {
+  margin-top: 12px;
+}
+
+.learn-recap ol {
+  margin: 6px 0 0;
+  padding-left: 1.3em;
+  line-height: 1.7;
+}
+
+/* The lit control: a glowing ring, transparent inside so the control shows at full
+   brightness. The glow is the product's own highlight — the same --accent-glow halo the
+   Creative submit carries when it is the thing to press. It never takes a click
+   (pointer-events off); what keeps the rest of the page inert is useLessonGate. */
+.learn-spot {
+  position: fixed;
+  z-index: 45;
+  pointer-events: none;
+  border-radius: 10px;
+  border: 2px solid var(--accent);
+  box-shadow:
+    0 0 0 4px var(--accent-soft),
+    0 0 22px 6px var(--accent-glow);
+  transition:
+    top 0.18s ease,
+    left 0.18s ease,
+    width 0.18s ease,
+    height 0.18s ease;
+  animation: learn-spot-glow 2.2s ease-in-out infinite;
+}
+
+/* मला दाखवा: two stronger pulses, then the usual glow. */
+.learn-spot.is-emphasised {
+  animation:
+    learn-spot-flash 0.9s ease-out 2,
+    learn-spot-glow 2.2s ease-in-out 1.8s infinite;
+}
+
+/* The dim over everything else — sidebar included — with a hole cut for each lit control
+   (Spotlight's SVG mask). With nothing lit (the intro, the recap) it covers the screen. */
+.learn-dim {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 44;
+  pointer-events: none;
+}
+
+.learn-dim-fill {
+  fill: rgba(20, 26, 30, 0.52);
+}
+
+@keyframes learn-spot-glow {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 4px var(--accent-soft),
+      0 0 22px 6px var(--accent-glow);
+  }
+  50% {
+    box-shadow:
+      0 0 0 6px var(--accent-soft),
+      0 0 38px 14px var(--accent-glow);
+  }
+}
+
+@keyframes learn-spot-flash {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 4px var(--accent-soft),
+      0 0 22px 6px var(--accent-glow);
+  }
+  50% {
+    box-shadow:
+      0 0 0 12px var(--accent-soft),
+      0 0 60px 26px var(--accent-glow);
+  }
+}
+
+@keyframes learn-callout-nudge {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  20% {
+    translate: -6px 0;
+  }
+  40% {
+    translate: 6px 0;
+  }
+  60% {
+    translate: -4px 0;
+  }
+  80% {
+    translate: 3px 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .learn-spot,
+  .learn-spot.is-emphasised,
+  .learn-callout,
+  .learn-callout.is-nudged {
+    animation: none;
+    transition: none;
+  }
+}

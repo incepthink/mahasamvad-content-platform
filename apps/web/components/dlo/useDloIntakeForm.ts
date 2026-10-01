@@ -32,7 +32,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { DloCategory, YouTubeVideo } from '@dgipr/schemas';
 import { ARTICLE_INSTRUCTIONS_MAX_CHARS } from '@dgipr/schemas';
-import { createDloIntake } from '@/lib/api';
+import { useApi } from '@/lib/apiContext';
 import {
   EMPTY_DRAFT,
   clearDraft,
@@ -57,35 +57,65 @@ import { STR } from '@/lib/strings';
 // draft saved before that change (category: 'scheme') is simply not read back.
 const DLO_CATEGORY: DloCategory = 'news';
 
-export function useDloIntakeForm() {
+// What a submit carries, as counts — what a sandbox needs to decide whether to let it go.
+export type DloIntakeRequestSummary = Readonly<{
+  notes: string;
+  instructions: string;
+  recordings: number;
+  images: number;
+  documents: number;
+  links: number;
+}>;
+
+export type DloIntakeFormOptions = {
+  // SANDBOX ONLY (/learn). Replaces what a real create does next — remembering the intake as
+  // this browser's and opening /dlo/[id] — so a practice run stays on its lesson. Setting it
+  // also keeps the form out of the real /dlo draft (sessionStorage and the picked-file
+  // module variables): practice text must never turn up on the officer's real form later,
+  // and the officer's real draft must never be pulled into a practice.
+  onCreated?: (id: string, summary: DloIntakeRequestSummary) => void;
+  // SANDBOX ONLY. One more refusal, checked after the form's own rules and reported in the
+  // same error slot. Returns the message to show, or null to let the submit go.
+  validate?: (summary: DloIntakeRequestSummary) => string | null;
+};
+
+// No options (the /dlo page, this hook's only production caller) = exactly the behaviour
+// this hook always had.
+export function useDloIntakeForm(options: DloIntakeFormOptions = {}) {
+  const { onCreated, validate } = options;
+  const sandbox = onCreated !== undefined;
   const router = useRouter();
+  const { createDloIntake } = useApi();
   const restored = useRef<ReturnType<typeof readDraft>>(null);
-  if (restored.current === null) restored.current = readDraft();
+  if (restored.current === null)
+    restored.current = sandbox ? EMPTY_DRAFT : readDraft();
   const draft = restored.current ?? EMPTY_DRAFT;
+  // What survives a navigation in this session — never read into a sandbox.
+  const pendingAudio = () => (sandbox ? [] : getPendingAudio());
+  const pendingImages = () => (sandbox ? [] : getPendingImages());
+  const pendingDocuments = () => (sandbox ? [] : getPendingDocuments());
 
   const [notes, setNotes] = useState(draft.notes);
-  const [files, setFiles] = useState<File[]>(() => getPendingAudio());
+  const [files, setFiles] = useState<File[]>(() => pendingAudio());
   // Recordings that were picked before a reload and could not survive it — names only, so
   // the form can ask for them back instead of silently submitting without them.
   const [lostAudioNames, setLostAudioNames] = useState<readonly string[]>(() =>
-    getPendingAudio().length === 0 ? draft.audioNames : [],
+    pendingAudio().length === 0 ? draft.audioNames : [],
   );
   // Photographs of documents. They ride the SAME multipart `files` field as the
   // recordings — the API classifies an upload by its extension — so this is a second
   // picker, not a second upload path; the two are separate state only because they are
   // shown differently (a name for a recording, a thumbnail for a photograph).
-  const [images, setImages] = useState<File[]>(() => getPendingImages());
+  const [images, setImages] = useState<File[]>(() => pendingImages());
   const [lostImageNames, setLostImageNames] = useState<readonly string[]>(() =>
-    getPendingImages().length === 0 ? draft.imageNames : [],
+    pendingImages().length === 0 ? draft.imageNames : [],
   );
   // Documents. The same shape as the photographs above, and for the same reason: since
   // nothing is read at this step, a document is just a picked file waiting to be uploaded
   // with the run.
-  const [documents, setDocuments] = useState<File[]>(() =>
-    getPendingDocuments(),
-  );
+  const [documents, setDocuments] = useState<File[]>(() => pendingDocuments());
   const [lostDocumentNames, setLostDocumentNames] = useState<readonly string[]>(
-    () => (getPendingDocuments().length === 0 ? draft.documentNames : []),
+    () => (pendingDocuments().length === 0 ? draft.documentNames : []),
   );
   // YouTube sources. Restored from the draft in full, unlike the recordings — a link is a
   // string, so a reload loses nothing.
@@ -106,6 +136,7 @@ export function useDloIntakeForm() {
 
   // Keep the draft current. Debounced, because this fires on every keystroke.
   useEffect(() => {
+    if (sandbox) return;
     const timer = setTimeout(() => {
       writeDraft({
         notes,
@@ -121,21 +152,21 @@ export function useDloIntakeForm() {
       });
     }, 500);
     return () => clearTimeout(timer);
-  }, [notes, instructions, documents, files, images, youtube]);
+  }, [sandbox, notes, instructions, documents, files, images, youtube]);
 
   // Picked files ride in a module variable so client-side navigation away and back keeps
   // them.
   useEffect(() => {
-    setPendingAudio(files);
-  }, [files]);
+    if (!sandbox) setPendingAudio(files);
+  }, [sandbox, files]);
 
   useEffect(() => {
-    setPendingImages(images);
-  }, [images]);
+    if (!sandbox) setPendingImages(images);
+  }, [sandbox, images]);
 
   useEffect(() => {
-    setPendingDocuments(documents);
-  }, [documents]);
+    if (!sandbox) setPendingDocuments(documents);
+  }, [sandbox, documents]);
 
   // The picker decides which picks are allowed in and reports the rest; this only has to
   // notice that a recording a reload could not keep has been attached again.
@@ -183,6 +214,7 @@ export function useDloIntakeForm() {
     setDocuments([]);
     setYoutube([]);
     setImages([]);
+    if (sandbox) return;
     clearPendingAudio();
     clearPendingImages();
     clearPendingDocuments();
@@ -203,6 +235,19 @@ export function useDloIntakeForm() {
     // an opaque 400 after the whole upload has gone up.
     if (instructions.trim().length > ARTICLE_INSTRUCTIONS_MAX_CHARS) {
       setError(STR.aiInstructionsTooLong);
+      return;
+    }
+    const summary: DloIntakeRequestSummary = {
+      notes,
+      instructions,
+      recordings: files.length,
+      images: images.length,
+      documents: documents.length,
+      links: youtube.length,
+    };
+    const refusal = validate?.(summary) ?? null;
+    if (refusal) {
+      setError(refusal);
       return;
     }
     setSubmitting(true);
@@ -241,6 +286,11 @@ export function useDloIntakeForm() {
       }
       const id = await createDloIntake(form);
       clearInputs();
+      if (onCreated) {
+        onCreated(id, summary);
+        setSubmitting(false);
+        return;
+      }
       // Ordering only — see lib/dloDraft. This never becomes a permission.
       rememberMyIntakeId(id);
       router.push(`/dlo/${id}`);

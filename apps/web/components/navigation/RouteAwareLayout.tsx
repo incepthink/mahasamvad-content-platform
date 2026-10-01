@@ -1,5 +1,5 @@
 'use client';
-import React from 'react';
+import React, { Suspense } from 'react';
 import { TasksProvider } from '../../lib/TasksProvider';
 import { usePathname } from 'next/dist/client/components/navigation';
 import { AppSidebar } from '../AppSidebar';
@@ -12,7 +12,13 @@ const RouteAwareLayout = ({ children }: { children: React.ReactNode }) => {
 
   return (
     <TasksProvider>
-      {path !== '/media-room' && path !== '/new-dlo' ? <AppSidebar /> : null}
+      {/* /learn keeps the sidebar: a lesson looks exactly like the real screen, and the
+          lesson itself makes everything but the taught control inert. */}
+      {path !== '/media-room' && path !== '/new-dlo' ? (
+        <Suspense fallback={null}>
+          <AppSidebar />
+        </Suspense>
+      ) : null}
       <div className="app-main">
         <InstallAppPrompt />
         {/* /dlo used to be mounted here permanently and hidden with CSS, so that

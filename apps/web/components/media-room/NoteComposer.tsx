@@ -46,11 +46,19 @@ import { useFilePreviews } from '@/lib/useFilePreviews';
 import { STR } from '@/lib/strings';
 import { cn } from '@/lib/utils';
 import { FormatMenu } from './FormatMenu';
+import type { SelectableFormat } from './formats';
 import { DOC_STORAGE_KEY, type useCreateForm } from './useCreateForm';
 
 type Form = ReturnType<typeof useCreateForm>;
 
-export function NoteComposer({ form }: { form: Form }) {
+export function NoteComposer({
+  form,
+  onlyFormats,
+}: {
+  form: Form;
+  // Passed through to the format menu — /learn's practice teaches Creative alone.
+  onlyFormats?: readonly SelectableFormat[] | undefined;
+}) {
   const imageInput = useRef<HTMLInputElement>(null);
   // Object URLs for the thumbnails, minted and revoked together — a picture is told apart by
   // what it SHOWS and never by IMG_20260916.jpg.
@@ -173,7 +181,7 @@ export function NoteComposer({ form }: { form: Form }) {
       {/* The text has the full width of the card. The textarea grows with its content
           up to a cap and then scrolls, so a short poster line and a pasted article both
           look right in the same control. */}
-      <div className="mt-4">
+      <div className="mt-4" data-learn="note">
         <PromptTextarea
           id="note"
           value={form.note}
@@ -273,6 +281,7 @@ export function NoteComposer({ form }: { form: Form }) {
           disabled={form.submitting}
           socialBusy={form.hasActiveSocialTask}
           articleBusy={form.hasActiveArticleTask}
+          onlyFormats={onlyFormats}
         />
 
         {/* कॅरोसेल: how many slides, the same जसाच्या तसा मजकूर checkbox the Creative poster has
@@ -310,6 +319,7 @@ export function NoteComposer({ form }: { form: Form }) {
               }
               label={STR.posterSourceVerbatim}
               title={STR.posterSourceVerbatimDesc}
+              learn="check-verbatim"
             />
             <CheckOption
               checked={form.wantCaption}
@@ -317,6 +327,7 @@ export function NoteComposer({ form }: { form: Form }) {
               onChange={form.setWantCaption}
               label={STR.captionToggleLabel}
               title={STR.captionToggleHint}
+              learn="check-caption"
             />
           </>
         ) : null}
@@ -329,6 +340,7 @@ export function NoteComposer({ form }: { form: Form }) {
             is quiet and still. The condition is the form's, unchanged. */}
         <button
           type="button"
+          data-learn="submit"
           onClick={() => void form.startSubmit()}
           disabled={form.submitBusy || !form.canSubmit}
           className={cn(
@@ -398,16 +410,20 @@ export function CheckOption({
   onChange,
   label,
   title,
+  learn,
 }: {
   checked: boolean;
   disabled: boolean;
   onChange: (checked: boolean) => void;
   label: string;
   title: string;
+  // What /learn's coach points at. Inert everywhere else.
+  learn?: string;
 }) {
   return (
     <label
       title={title}
+      data-learn={learn}
       className={cn(
         'mr-check-option inline-flex h-9 shrink-0 cursor-pointer select-none items-center gap-2 rounded-md border px-3 text-sm transition-colors',
         'bg-secondary text-secondary-foreground hover:bg-[var(--chrome-800)]',

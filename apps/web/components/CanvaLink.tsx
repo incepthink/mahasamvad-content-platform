@@ -13,11 +13,8 @@
 // poster lands in their own Canva.
 
 import { useEffect, useState } from 'react';
-import {
-  getCanvaAccounts,
-  posterCanvaUrl,
-  type CanvaAccount,
-} from '../lib/api';
+import type { CanvaAccount } from '../lib/api';
+import { useApi, type WebApi } from '../lib/apiContext';
 import { STR } from '../lib/strings';
 
 // Which integration this browser used last. Ordering/convenience only, never authorization —
@@ -26,11 +23,21 @@ const CHOICE_KEY = 'dgipr.canva.account';
 
 // The list is a deployment-level fact, so it is fetched ONCE per page load however many
 // posters are on screen, and a failure degrades to the single plain link rather than
-// hiding the button.
-let pending: Promise<CanvaAccount[]> | null = null;
-function loadAccounts(): Promise<CanvaAccount[]> {
-  if (!pending) pending = getCanvaAccounts().catch(() => []);
-  return pending;
+// hiding the button. Keyed by the fetcher so a page on a different API (/learn's sandbox)
+// never shares the real deployment's answer.
+const pending = new WeakMap<
+  WebApi['getCanvaAccounts'],
+  Promise<CanvaAccount[]>
+>();
+function loadAccounts(
+  getCanvaAccounts: WebApi['getCanvaAccounts'],
+): Promise<CanvaAccount[]> {
+  let request = pending.get(getCanvaAccounts);
+  if (!request) {
+    request = getCanvaAccounts().catch(() => []);
+    pending.set(getCanvaAccounts, request);
+  }
+  return request;
 }
 
 function remembered(): string | null {
@@ -42,12 +49,18 @@ function remembered(): string | null {
 }
 
 export function CanvaLink({ generationId }: { generationId: string }) {
+  const { getCanvaAccounts, posterCanvaUrl } = useApi();
   const [accounts, setAccounts] = useState<CanvaAccount[]>([]);
   const [account, setAccount] = useState('');
+  // Null = this surface offers no Canva handoff at all (the /learn practice), so there is
+  // nothing to render and no account list worth fetching.
+  const href = posterCanvaUrl(generationId, account || undefined);
+  const offered = href !== null;
 
   useEffect(() => {
+    if (!offered) return;
     let alive = true;
-    void loadAccounts().then((list) => {
+    void loadAccounts(getCanvaAccounts).then((list) => {
       if (!alive) return;
       setAccounts(list);
       // With one account the link carries no key at all and the API uses its default, so a
@@ -63,12 +76,14 @@ export function CanvaLink({ generationId }: { generationId: string }) {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [offered, getCanvaAccounts]);
+
+  if (href === null) return null;
 
   const link = (
     <a
       className="icon-btn canva-link"
-      href={posterCanvaUrl(generationId, account || undefined)}
+      href={href}
       target="_blank"
       rel="noopener noreferrer"
       title={STR.iconOpenPosterInCanva}

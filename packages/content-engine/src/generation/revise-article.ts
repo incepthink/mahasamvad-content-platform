@@ -73,7 +73,18 @@ import {
 // article. Passing the current article is what makes the test directional: asking for 400
 // characters when the draft is 1200 is a request to SHRINK, and must not turn on the machinery
 // for pulling more facts in.
+//
+// «आणखी», «अधिक» and «जास्त» mean "more" and are INTENSIFIERS: «आणखी थोडक्यात लिहा» is "more
+// concise", «भाषा आणखी सोपी करा» is "simpler still". Matched bare, they made three of the four
+// quick suggestions under «बातमीत बदल हवा आहे?» into expansion requests, so asking for a
+// SHORTER article turned on the expansion instruction and the missing-information sweep, and
+// the article came back longer. They count now only beside a word for more material, and any
+// word for less vetoes expansion outright.
+const SHRINK_REQUEST =
+  /थोडक्यात|लहान|छोट|संक्षिप्त|आटोपशीर|कमी\s*(शब्द|अक्षर|मजकूर)|\b(shorter|shorten|concise|brief|briefer|trim|condense)\b/i;
+
 export function wantsExpansion(feedback: string, currentArticle = ''): boolean {
+  if (SHRINK_REQUEST.test(feedback)) return false;
   const f = feedback.toLowerCase();
   const keyword =
     /\b(bigger|larger|longer|lengthen|expand|elaborate|detailed|comprehensive|in[- ]?depth)\b/.test(
@@ -81,9 +92,8 @@ export function wantsExpansion(feedback: string, currentArticle = ''): boolean {
     ) ||
     /\bmore (info|information|details?|content|points|facts)\b/.test(f) ||
     /\b(add|use|include|give|want) more\b/.test(f) ||
-    /मोठ|बिगर|अधिक|सविस्तर|लांब|जास्त|विस्तृत|विस्तार|आणखी|भरपूर/.test(
-      feedback,
-    );
+    /मोठ|बिगर|सविस्तर|लांब|विस्तृत|विस्तार|भरपूर/.test(feedback) ||
+    /(आणखी|अधिक|जास्त)\s*(माहिती|तपशील|मुद्दे|मजकूर|आकडे)/.test(feedback);
   if (keyword) return true;
 
   const request = parseLengthRequest(feedback);
@@ -713,6 +723,39 @@ if (
   check(
     'an ordinary style request is not an expansion request',
     !wantsExpansion('शासकीय शैलीत बातमी तयार करा.', draft400),
+  );
+  // The article view's own quick suggestions (STR.chipsArticle). Only the second asks for more.
+  check(
+    '«आणखी थोडक्यात लिहा» (more concise) is NOT an expansion request',
+    !wantsExpansion('आणखी थोडक्यात लिहा', draft1200),
+  );
+  check(
+    '«आणखी सविस्तर लिहा» is an expansion request',
+    wantsExpansion('आणखी सविस्तर लिहा', draft400),
+  );
+  check(
+    '«भाषा आणखी सोपी करा» (simpler still) is NOT an expansion request',
+    !wantsExpansion('भाषा आणखी सोपी करा', draft400),
+  );
+  check(
+    '«सुरुवात आणखी आकर्षक करा» is NOT an expansion request',
+    !wantsExpansion('सुरुवात आणखी आकर्षक करा', draft400),
+  );
+  check(
+    '«आणखी माहिती द्या» still is one',
+    wantsExpansion('आणखी माहिती द्या', draft400),
+  );
+  check(
+    '«अधिक तपशील द्या» still is one',
+    wantsExpansion('अधिक तपशील द्या', draft400),
+  );
+  check(
+    'a word for less vetoes a word for more',
+    !wantsExpansion('बातमी लहान करा, सविस्तर मुद्दे नकोत', draft400),
+  );
+  check(
+    '"make it shorter" is not',
+    !wantsExpansion('make it shorter', draft400),
   );
 
   console.log('\n=== the officer’s inputs reach the rewriting model ===');

@@ -16,11 +16,7 @@
 import { useState } from 'react';
 import type { EditAssistantAction, GenerationDetail } from '@dgipr/schemas';
 import { Copy } from 'lucide-react';
-import {
-  generateCaption,
-  sendCaptionFeedback,
-  updateCaption,
-} from '../lib/api';
+import { useApi } from '../lib/apiContext';
 import { STR } from '../lib/strings';
 import { errorMessage } from '../lib/errorMessage';
 // Written in Marathi on an InScript keyboard, which a controlled box can overwrite
@@ -42,6 +38,7 @@ export function SocialCaptionEditor({
   busy?: boolean;
   revision?: boolean;
 }) {
+  const { generateCaption, sendCaptionFeedback, updateCaption } = useApi();
   const [copied, setCopied] = useState(false);
   // `baseline` is the server's text: when it changes — an AI revision landed, or the page
   // reloaded — both reset, but ONLY while the box is clean, so a refresh can never wipe

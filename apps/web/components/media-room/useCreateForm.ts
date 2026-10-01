@@ -27,12 +27,13 @@ import {
 } from '@dgipr/schemas';
 import type {
   CarouselSlideCount,
+  CreateGenerationRequest,
   DesignMode,
   MotionAspect,
   MotionRegion,
   MotionSourceResponse,
 } from '@dgipr/schemas';
-import { createGeneration, getGeneration } from '@/lib/api';
+import { useApi } from '@/lib/apiContext';
 import { useTasks } from '@/lib/TasksProvider';
 import { STR } from '@/lib/strings';
 import { errorMessage } from '@/lib/errorMessage';
@@ -60,9 +61,28 @@ export const OFFERED_MOTION_ASPECTS = MOTION_ASPECTS;
 
 export type PrefillState = 'none' | 'loading' | 'applied' | 'failed';
 
-export function useCreateForm() {
+export type CreateFormOptions = {
+  // SANDBOX ONLY (/learn). Replaces what a real create does next — registering the run with
+  // the tasks panel and opening its progress page — so a practice run stays on its lesson.
+  // Setting it also treats both busy gates as open: a real task running in another tab has
+  // nothing to do with a practice run that sends no request.
+  onCreated?: (id: string, request: CreateGenerationRequest) => void;
+  // SANDBOX ONLY. One more refusal, checked after every rule of the form's own and reported
+  // in the same error slot. Returns the message to show, or null to let the submit go.
+  validate?: (request: CreateGenerationRequest) => string | null;
+};
+
+// No options (the create form's only production caller) = exactly the behaviour this hook
+// always had.
+export function useCreateForm(options: CreateFormOptions = {}) {
+  const { onCreated, validate } = options;
+  const sandbox = onCreated !== undefined;
   const router = useRouter();
-  const { addTask, hasActiveSocialTask, hasActiveArticleTask } = useTasks();
+  const { createGeneration, getGeneration } = useApi();
+  const tasks = useTasks();
+  const { addTask } = tasks;
+  const hasActiveSocialTask = sandbox ? false : tasks.hasActiveSocialTask;
+  const hasActiveArticleTask = sandbox ? false : tasks.hasActiveArticleTask;
 
   const [note, setNote] = useState('');
   // The uploaded file's text, kept BESIDE the textarea rather than pushed into it: the
@@ -202,7 +222,7 @@ export function useCreateForm() {
         setPrefill('failed');
       }
     })();
-  }, []);
+  }, [getGeneration]);
 
   // The caption-only lane. Tested FIRST and excluded from every flag below it, because
   // it is a social run by category and would otherwise inherit the whole poster form —
@@ -375,71 +395,75 @@ export function useCreateForm() {
       setError(STR.busyError);
       return;
     }
+    const request: CreateGenerationRequest = {
+      // On डायनॅमिक पोस्टर the note IS the motion direction, and an empty one is a
+      // complete request — the schema drops the floor for this lane and caps it at
+      // MOTION_DIRECTION_MAX_CHARS instead.
+      note: isDynamicPoster ? motionDirection.trim() : combinedNote,
+      category: submitCategory,
+      // 'article' means "this run renders NO poster" on both lanes — the caption-only
+      // entry. Every other format here renders one.
+      outputType: isCaption ? 'article' : 'poster',
+      // The Banner path uses the pasted article verbatim (skip generateArticle); inert
+      // for social, whose caption is always written fresh.
+      providedArticle: isArticle,
+      // Social only. Opt-in beside a poster (the checkbox); MANDATORY on the
+      // caption-only lane, where the caption is the run's entire output — the API
+      // rejects a caption-only request that does not ask for one, since it would be a
+      // request for nothing at all.
+      generateCaption: isCaption
+        ? true
+        : isSocial || isCarousel
+          ? wantCaption
+          : undefined,
+      // कॅरोसेल only: स्वयं / ३ / ४.
+      carouselSlides: isCarousel ? carouselSlides : undefined,
+      // कॅरोसेल only, and only when ticked: the box's lines are the slides' final text.
+      carouselVerbatim: isCarousel && verbatimText ? true : undefined,
+      // Banner only, and only when actually typed — an empty string would be a
+      // meaningless "clear" on a run that has nothing to clear.
+      posterHeading:
+        isArticle && posterHeading.trim() ? posterHeading.trim() : undefined,
+      // The template-brand question stays fixed (always the DGIPR family); designMode
+      // is derived from the template pick above, so it is 'fresh' unless the officer
+      // chose a template. The reference ids below are null in that case by
+      // construction — designMode and the pin can never disagree, because one is
+      // computed from the other.
+      designMode: isSocial ? designMode : undefined,
+      templateBrand: isSocial ? 'dgipr' : undefined,
+      // The officer's own image prompt (migration 0045) — Creative only, and only
+      // when actually typed. Sent trimmed, because it is stored on the row and read
+      // back verbatim by every later render of this poster.
+      imagePrompt:
+        isSocial && imagePrompt.trim() ? imagePrompt.trim() : undefined,
+      // The officer's attached pictures (migration 0056) — paths, never URLs, and only
+      // the ones that actually landed. Omitted rather than sent empty on a lane that
+      // cannot use them, so a caption run's request is byte-for-byte what it was.
+      promptImagePaths:
+        acceptsPromptImages && promptImages.paths.length > 0
+          ? [...promptImages.paths]
+          : undefined,
+      referenceImageId: reference?.kind === 'image' ? reference.id : undefined,
+      referenceTypeId: reference?.kind === 'type' ? reference.id : undefined,
+      // डायनॅमिक पोस्टर only. A PATH, not a URL: it is checked against
+      // MOTION_SOURCE_PREFIX by the schema and again by the route, so a browser cannot
+      // point a paid render at an arbitrary object.
+      sourceImagePath:
+        isDynamicPoster && motionSource ? motionSource.path : undefined,
+      motionAspect: isDynamicPoster ? motionAspect : undefined,
+      // Only when they actually marked one: absent means "do not restore", and sending a
+      // full-frame rectangle instead would cost an encode to produce the same picture.
+      motionRegion: isDynamicPoster && motionRegion ? motionRegion : undefined,
+    };
+    const refusal = validate?.(request) ?? null;
+    if (refusal) {
+      setError(refusal);
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
-      const id = await createGeneration({
-        // On डायनॅमिक पोस्टर the note IS the motion direction, and an empty one is a
-        // complete request — the schema drops the floor for this lane and caps it at
-        // MOTION_DIRECTION_MAX_CHARS instead.
-        note: isDynamicPoster ? motionDirection.trim() : combinedNote,
-        category: submitCategory,
-        // 'article' means "this run renders NO poster" on both lanes — the caption-only
-        // entry. Every other format here renders one.
-        outputType: isCaption ? 'article' : 'poster',
-        // The Banner path uses the pasted article verbatim (skip generateArticle); inert
-        // for social, whose caption is always written fresh.
-        providedArticle: isArticle,
-        // Social only. Opt-in beside a poster (the checkbox); MANDATORY on the
-        // caption-only lane, where the caption is the run's entire output — the API
-        // rejects a caption-only request that does not ask for one, since it would be a
-        // request for nothing at all.
-        generateCaption: isCaption
-          ? true
-          : isSocial || isCarousel
-            ? wantCaption
-            : undefined,
-        // कॅरोसेल only: स्वयं / ३ / ४.
-        carouselSlides: isCarousel ? carouselSlides : undefined,
-        // कॅरोसेल only, and only when ticked: the box's lines are the slides' final text.
-        carouselVerbatim: isCarousel && verbatimText ? true : undefined,
-        // Banner only, and only when actually typed — an empty string would be a
-        // meaningless "clear" on a run that has nothing to clear.
-        posterHeading:
-          isArticle && posterHeading.trim() ? posterHeading.trim() : undefined,
-        // The template-brand question stays fixed (always the DGIPR family); designMode
-        // is derived from the template pick above, so it is 'fresh' unless the officer
-        // chose a template. The reference ids below are null in that case by
-        // construction — designMode and the pin can never disagree, because one is
-        // computed from the other.
-        designMode: isSocial ? designMode : undefined,
-        templateBrand: isSocial ? 'dgipr' : undefined,
-        // The officer's own image prompt (migration 0045) — Creative only, and only
-        // when actually typed. Sent trimmed, because it is stored on the row and read
-        // back verbatim by every later render of this poster.
-        imagePrompt:
-          isSocial && imagePrompt.trim() ? imagePrompt.trim() : undefined,
-        // The officer's attached pictures (migration 0056) — paths, never URLs, and only
-        // the ones that actually landed. Omitted rather than sent empty on a lane that
-        // cannot use them, so a caption run's request is byte-for-byte what it was.
-        promptImagePaths:
-          acceptsPromptImages && promptImages.paths.length > 0
-            ? [...promptImages.paths]
-            : undefined,
-        referenceImageId:
-          reference?.kind === 'image' ? reference.id : undefined,
-        referenceTypeId: reference?.kind === 'type' ? reference.id : undefined,
-        // डायनॅमिक पोस्टर only. A PATH, not a URL: it is checked against
-        // MOTION_SOURCE_PREFIX by the schema and again by the route, so a browser cannot
-        // point a paid render at an arbitrary object.
-        sourceImagePath:
-          isDynamicPoster && motionSource ? motionSource.path : undefined,
-        motionAspect: isDynamicPoster ? motionAspect : undefined,
-        // Only when they actually marked one: absent means "do not restore", and sending a
-        // full-frame rectangle instead would cost an encode to produce the same picture.
-        motionRegion:
-          isDynamicPoster && motionRegion ? motionRegion : undefined,
-      });
+      const id = await createGeneration(request);
       // Every format opens its own progress page. Keep tracking the run so the navbar
       // tasks panel still offers a shortcut, but do not open that panel automatically.
       // The document has been consumed and must not be re-attached to the next
@@ -449,6 +473,11 @@ export function useCreateForm() {
       // owns them now, and leaving them on the form would silently attach them to the next
       // run as well.
       promptImages.clear();
+      if (onCreated) {
+        onCreated(id, request);
+        setSubmitting(false);
+        return;
+      }
       addTask(id);
       router.push(`/generations/${id}`);
     } catch (e) {

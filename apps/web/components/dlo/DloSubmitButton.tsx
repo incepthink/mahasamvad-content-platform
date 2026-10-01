@@ -16,18 +16,22 @@ export function DloSubmitButton({
   disabled = false,
   onClick,
   className,
+  learn,
 }: {
   label: string;
   submitting: boolean;
   disabled?: boolean | undefined;
   onClick: () => void;
   className?: string | undefined;
+  // What /learn's coach points at. Inert everywhere else.
+  learn?: string | undefined;
 }) {
   const unavailable = submitting || disabled;
 
   return (
     <button
       type="button"
+      data-learn={learn}
       onClick={onClick}
       disabled={unavailable}
       className={cn(

@@ -213,55 +213,64 @@ export function DloComposer({ form }: { form: DloIntakeFormState }) {
       info={<InfoHint text={STR.infoDloSources} />}
     >
       <div className="mt-4">
-        <PromptTextarea
-          id="dlo-notes"
-          value={form.notes}
-          onChange={(next) => {
-            form.setNotes(next);
-            if (next.trim()) form.setError(null);
-          }}
-          placeholder={STR.dloNotesPlaceholder}
-          disabled={form.submitting}
-          className="w-full"
-        />
+        {/* `data-learn` names what /learn's coach points at; inert everywhere else. */}
+        <div data-learn="dlo-note">
+          <PromptTextarea
+            id="dlo-notes"
+            value={form.notes}
+            onChange={(next) => {
+              form.setNotes(next);
+              if (next.trim()) form.setError(null);
+            }}
+            placeholder={STR.dloNotesPlaceholder}
+            disabled={form.submitting}
+            className="w-full"
+          />
+        </div>
 
         {/* The tools, in the order the sources are listed below the box. Each is icon-only
             and carries its Marathi label as title + aria-label — the row is scanned rather
             than read, and four worded buttons across a composer is a second form. */}
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <ComposerToolbarButton
-            icon={Mic}
-            label={STR.dloAudioUpload}
-            disabled={form.submitting}
-            onClick={() => audioInput.current?.click()}
-          />
-          <ComposerToolbarButton
-            icon={ImageIcon}
-            label={STR.dloImagesUpload}
-            disabled={form.submitting}
-            onClick={() => imageInput.current?.click()}
-          />
-          {/* Opens the file dialog directly, exactly as the two tools above it do. It used
-              to add an empty document block below instead, because that block owned the
-              file control and then asked which pages to read; the pages question is gone
-              and the block went with it, so the dialog is this button's own. */}
-          <ComposerToolbarButton
-            icon={FileText}
-            label={STR.dloDocsUpload}
-            disabled={form.submitting}
-            onClick={() => documentInput.current?.click()}
-          />
-          {/* Dimmed rather than hidden while the link source is switched off product-wide:
-              an officer who has used it should see that the capability exists and is
-              unavailable, not find it silently missing. */}
-          <ComposerToolbarButton
-            icon={CirclePlay}
-            label={STR.ytTitle}
-            disabled={form.submitting || YOUTUBE_INPUT_OFF}
-            active={showLinks}
-            controls={YOUTUBE_PANEL_ID}
-            onClick={() => setLinkOpen((open) => !open)}
-          />
+          {/* The four source tools as one group, so the coach can light them together. */}
+          <div
+            className="flex flex-wrap items-center gap-2"
+            data-learn="dlo-sources"
+          >
+            <ComposerToolbarButton
+              icon={Mic}
+              label={STR.dloAudioUpload}
+              disabled={form.submitting}
+              onClick={() => audioInput.current?.click()}
+            />
+            <ComposerToolbarButton
+              icon={ImageIcon}
+              label={STR.dloImagesUpload}
+              disabled={form.submitting}
+              onClick={() => imageInput.current?.click()}
+            />
+            {/* Opens the file dialog directly, exactly as the two tools above it do. It used
+                to add an empty document block below instead, because that block owned the
+                file control and then asked which pages to read; the pages question is gone
+                and the block went with it, so the dialog is this button's own. */}
+            <ComposerToolbarButton
+              icon={FileText}
+              label={STR.dloDocsUpload}
+              disabled={form.submitting}
+              onClick={() => documentInput.current?.click()}
+            />
+            {/* Dimmed rather than hidden while the link source is switched off product-wide:
+                an officer who has used it should see that the capability exists and is
+                unavailable, not find it silently missing. */}
+            <ComposerToolbarButton
+              icon={CirclePlay}
+              label={STR.ytTitle}
+              disabled={form.submitting || YOUTUBE_INPUT_OFF}
+              active={showLinks}
+              controls={YOUTUBE_PANEL_ID}
+              onClick={() => setLinkOpen((open) => !open)}
+            />
+          </div>
 
           {/* The count and the page's one action, held together and pushed to the end of
               the same row — so they wrap onto a line of their own rather than the button
@@ -290,6 +299,7 @@ export function DloComposer({ form }: { form: DloIntakeFormState }) {
             {/* Also held while a video is still being converted: pressed then, the run
                 would leave without the recording the officer is watching appear. */}
             <DloSubmitButton
+              learn="dlo-submit"
               label={STR.dloSubmit}
               submitting={form.submitting}
               disabled={!form.hasInput || extraction.busy}

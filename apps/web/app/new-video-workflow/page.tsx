@@ -1,5 +1,3 @@
-'use client';
-
 // /new-video-workflow — a new Gemini video conversation.
 //
 // The conversation row is NOT created here. It is created by the first turn (see
@@ -8,6 +6,16 @@
 
 import { NewVideoWorkspace } from '../../components/NewVideoWorkspace';
 
-export default function NewVideoWorkflowPage() {
-  return <NewVideoWorkspace conversationId={null} />;
+export default async function NewVideoWorkflowPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ mode?: string }>;
+}) {
+  const { mode } = await searchParams;
+  return (
+    <NewVideoWorkspace
+      conversationId={null}
+      initialMode={mode === 'storyboard' ? 'storyboard' : 'video'}
+    />
+  );
 }

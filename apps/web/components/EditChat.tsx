@@ -21,7 +21,7 @@ import {
   type EditAssistantSurface,
   type PosterClearAction,
 } from '@dgipr/schemas';
-import { planEdit } from '../lib/api';
+import { useApi } from '../lib/apiContext';
 import { STR } from '../lib/strings';
 import { errorMessage } from '../lib/errorMessage';
 import { ComposeSafeTextarea, isComposingEvent } from './ComposeSafeInput';
@@ -43,7 +43,11 @@ export type EditChatMarks = Readonly<{
 
 const STORAGE_PREFIX = 'dgipr.edit-chat';
 
-function storageKey(generationId: string, surface: EditAssistantSurface) {
+// Exported so /learn can clear its sample run's conversation when a lesson starts over.
+export function editChatStorageKey(
+  generationId: string,
+  surface: EditAssistantSurface,
+) {
   return `${STORAGE_PREFIX}.${generationId}.${surface}`;
 }
 
@@ -103,7 +107,8 @@ export function EditChat({
   starters?: readonly string[];
   disabled?: boolean;
 }) {
-  const key = storageKey(generationId, surface);
+  const { planEdit } = useApi();
+  const key = editChatStorageKey(generationId, surface);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [draft, setDraft] = useState('');
   const [working, setWorking] = useState(false);

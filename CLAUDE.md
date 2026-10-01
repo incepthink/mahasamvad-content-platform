@@ -1522,6 +1522,50 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   Busy gating: the पोस्टर level-1 card is never disabled (its children straddle both lanes),
   कॅप्शन is gated on `hasActiveSocialTask`, and the per-lane rule lives on the level-2 cards) →
   `apps/web/app/page.tsx`
+- **`/learn` — hands-on practice on the REAL screens, with no network (2026-09-30).** URL only,
+  WITH the sidebar. Lesson 1 (`/learn/creative`) is the Creative page exactly as at "/" (composer,
+  image brief, template picker) and then the run's page: insert the sample text (lit until पुढे),
+  see जसाच्या तसा मजकूर and कॅप्शनही तयार करा explained (lit, inert, पुढे — never ticked), make it,
+  mark its headline, write the change (a coach button fills the example via
+  `SocialPostView.fillFirstMarkNote`), press «बदल करा» as its own step, compare versions, then see
+  the redo and download buttons explained; the recap links to /learn — rendered with the actual `NoteComposer` + `SocialPostView` inside
+  `<ApiProvider api={sandbox}>`. **No coach column**: `Spotlight` (portalled to `<body>`) dims the
+  page through an SVG mask with a hole + glowing `--accent-glow` ring per lit control, and
+  attaches the coach's callout (`CoachPanel`) beside it; **`useLessonGate`** swallows every
+  press/typing/activation key at the window capture phase unless the target matches the step's
+  selectors (`allowedSelectors`, `LessonStep.allow`) or carries `data-learn-allow` — so only the
+  taught control works, sidebar included. **`lib/apiContext.tsx`** is the seam:
+  `useApi()` (default `REAL_API` = lib/api itself, so no provider = production unchanged) now
+  serves `SocialPostView`, `SocialCaptionEditor`, `PosterVersionStrip`, `CanvaLink` (renders
+  nothing when `posterCanvaUrl` returns null), `EditChat`, `usePromptImages`, `useCreateForm`.
+  **A new API call on those screens must be added to `WebApi`** — `lib/learn/sandboxApi.ts` is
+  typed `WebApi`, so typecheck then demands its fake. Sandbox-only props: `useCreateForm({
+  onCreated, validate })`, `FormatMenu`/`NoteComposer` `onlyFormats`, `SocialPostView`
+  `beforeSendMarks` (may return a suggested note, shown as "हे उदाहरण वापरा") and
+  `onAnnotationChange`; `data-learn="…"` attributes are the coach's inert targets. Lesson =
+  data (`lib/learn/creativeLesson.ts`, state-derived `done`), fake run
+  (`creativeSandbox.ts`), honesty filter (`matchScriptedEdit.ts`: headline size or red colour
+  only — the two edits pre-rendered once through the real pipeline, committed under
+  `public/learn/creative/`, sample note `SAMPLE_NOTE`). Coach → `components/learn/*`; strings →
+  `LEARN` at the end of `strings.ts`; CSS → the `/learn` block at the end of `dgipr.css`.
+  Free harness: `npx tsx --tsconfig apps/web/tsconfig.check.json
+  apps/web/lib/learn/creative.check.ts` (from content-engine, 70 checks).
+  **Lesson 2 (`/learn/dlo`, 2026-10-01) is the same machinery on the /dlo lane**: the real
+  `DloComposer` + `DloAiPromptBox`, then the generation page's `ProgressSteps` + streaming
+  `ArticleDraft`, then the real `ArticleView`. Insert the sample note (lit until पुढे), see the
+  source tools and the AI box explained (lit, inert), press «पुढे जा →», watch the article
+  write itself, read it and «मूळ टिपणी» (info), open «बातमीत बदल हवा आहे?», ask «आणखी थोडक्यात
+  लिहा» (coach fills it via `ArticleView.feedbackLesson` → `FeedbackBox.fill`), then versions,
+  downloads and भाषांतर/क्रिएटिव्ह explained. **Shared parts**: `lib/learn/lesson.ts` (step
+  shape, `allowedSelectors`, `firstUndoneStep`, `sampleTextMatcher` — both lessons run on it),
+  `CoachPanel` takes the lesson's `stages`, `LessonCallouts` (intro + recap). DLO-only:
+  `dloLesson.ts`, `dloSandbox.ts`, `dloSandboxApi.ts`, `matchArticleEdit.ts` (ONE edit: shorter;
+  «भाषा आणखी सोपी करा» was rendered and invented two sentences, so it is refused),
+  `dloSamples.ts` (v1 + short, written by the real engine via
+  `packages/content-engine/src/scripts/learn-dlo-samples.ts` — regenerate there, never hand-edit),
+  PDFs from `pdf:preview` under `public/learn/dlo/`. `useDloIntakeForm({ onCreated, validate })`
+  in sandbox mode never reads or writes the real /dlo sessionStorage draft or pending files.
+  `WebApi` gained the /dlo + article calls. Harness: same command with `dlo.check.ts` (91).
 - Generation detail (progress, article, poster, feedback) →
   `apps/web/app/generations/[id]/page.tsx`; history list →
   `apps/web/app/generations/page.tsx`

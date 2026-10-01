@@ -54,6 +54,7 @@ export type StagedImage = {
 export function useNewVideoWorkflow(
   conversationId: string | null,
   onConversationCreated?: (id: string) => void,
+  initialMode: NewVideoMode = DEFAULT_NEW_VIDEO_MODE,
 ): {
   conversationId: string | null;
   conversation: NewVideoConversation | null;
@@ -111,7 +112,7 @@ export function useNewVideoWorkflow(
   // The mode picked for a conversation that has not started yet. Once it has, the stored
   // mode wins — see `mode` below.
   const [pickedMode, setPickedMode] = useState<NewVideoMode>(
-    DEFAULT_NEW_VIDEO_MODE,
+    initialMode,
   );
   // Armed by clicking a turn, cleared once the instruction it applied to has left. Held here
   // rather than in the composer because it belongs to the CONVERSATION being read — the
@@ -146,10 +147,10 @@ export function useNewVideoWorkflow(
     setForkFromTurnIdState(null);
     setRetryFromTurnId(null);
     setImageRoleState('auto');
-    // A new conversation starts on the default mode rather than on whatever the last one
-    // was: the choice is made on the empty page, where the selector is the first thing seen.
-    setPickedMode(DEFAULT_NEW_VIDEO_MODE);
-  }, [conversationId]);
+    // A new conversation starts on the mode requested by its entry URL rather than on
+    // whatever the last conversation used. The selector can still change it before sending.
+    setPickedMode(initialMode);
+  }, [conversationId, initialMode]);
 
   const refresh = useCallback(async () => {
     if (!activeId) return;

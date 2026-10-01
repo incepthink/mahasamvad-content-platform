@@ -32,7 +32,7 @@ import {
   isImageFileName,
   type PromptImageUpload,
 } from '@dgipr/schemas';
-import { uploadPromptImage } from '@/lib/api';
+import { useApi } from '@/lib/apiContext';
 import { acceptFilePicks } from '@/lib/filePicks';
 import { errorMessage } from '@/lib/errorMessage';
 import { STR } from '@/lib/strings';
@@ -69,6 +69,7 @@ export function usePromptImages({
   // start, rather than beside a picker halfway up the card.
   onError: (message: string) => void;
 }): PromptImages {
+  const { uploadPromptImage } = useApi();
   const [slots, setSlots] = useState<readonly PromptImageSlot[]>([]);
   // What `add` compares a new pick against, and what `remove` filters. A ref as well as
   // state because the acceptance check reports refusals, and a state updater may legitimately
@@ -152,7 +153,7 @@ export function usePromptImages({
         })();
       }
     },
-    [onError, patch, write],
+    [onError, patch, write, uploadPromptImage],
   );
 
   const remove = useCallback(

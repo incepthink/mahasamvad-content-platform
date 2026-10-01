@@ -13,11 +13,12 @@
 // generation the officer is watching and paying for. The rail is refreshed explicitly
 // instead.
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type {
   NewVideoAspect,
   NewVideoConversationSummary,
+  NewVideoMode,
 } from '@dgipr/schemas';
 import { ConversationWorkspace } from './conversation/ConversationWorkspace';
 import type { ConversationRailGroup } from './conversation/ConversationRail';
@@ -34,29 +35,41 @@ function railItem(row: NewVideoConversationSummary) {
   return {
     id: row.id,
     title: row.title || STR.nvwNewConversation,
-    href: `/new-video-workflow/${row.id}`,
+    href: `/new-video-workflow/${row.id}${row.mode === 'storyboard' ? '?mode=storyboard' : ''}`,
     badge: row.mode === 'storyboard' ? STR.nvwModeStoryboard : STR.nvwModeVideo,
   };
 }
 
 export function NewVideoWorkspace({
   conversationId,
+  initialMode = 'video',
 }: {
   conversationId: string | null;
+  initialMode?: NewVideoMode;
 }) {
   const router = useRouter();
   const list = useNewVideoConversationList();
   const [deleting, setDeleting] = useState<string | null>(null);
+  const modeRef = useRef<NewVideoMode>(initialMode);
 
   const onConversationCreated = useCallback(
     (id: string) => {
-      window.history.replaceState(null, '', `/new-video-workflow/${id}`);
+      window.history.replaceState(
+        null,
+        '',
+        `/new-video-workflow/${id}${modeRef.current === 'storyboard' ? '?mode=storyboard' : ''}`,
+      );
       void list.refresh();
     },
     [list],
   );
 
-  const workflow = useNewVideoWorkflow(conversationId, onConversationCreated);
+  const workflow = useNewVideoWorkflow(
+    conversationId,
+    onConversationCreated,
+    initialMode,
+  );
+  modeRef.current = workflow.mode;
 
   const send = useCallback(
     async (prompt: string, aspect: NewVideoAspect): Promise<boolean> => {

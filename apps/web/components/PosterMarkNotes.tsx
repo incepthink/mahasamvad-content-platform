@@ -76,7 +76,12 @@ export function PosterMarkNotes({
                 </div>
               ))
             : markers.map((marker, i) => (
-                <div className="marker-note-row" key={marker.id}>
+                <div
+                  className="marker-note-row"
+                  key={marker.id}
+                  // Mark ① is what /learn's coach points at. Inert everywhere else.
+                  data-learn={i === 0 ? 'marker-note' : undefined}
+                >
                   <span className="marker-note-badge" aria-hidden="true">
                     {i + 1}
                   </span>

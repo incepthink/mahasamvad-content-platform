@@ -24,6 +24,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { LEARN } from '@/lib/strings';
 import { FORMATS, formatName, type SelectableFormat } from './formats';
 
 export function FormatMenu({
@@ -33,6 +34,7 @@ export function FormatMenu({
   disabled = false,
   socialBusy,
   articleBusy,
+  onlyFormats,
 }: {
   value: SelectableFormat;
   onSelect: (format: SelectableFormat) => void;
@@ -45,6 +47,10 @@ export function FormatMenu({
   // under their cursor would be worse than a refusal they can read.
   socialBusy: boolean;
   articleBusy: boolean;
+  // /learn's practice teaches one format. The others stay in the list — hiding them would
+  // teach a menu that does not exist — but disabled, with the reason in place of their
+  // description. Unset (every production caller) = every format as before.
+  onlyFormats?: readonly SelectableFormat[] | undefined;
 }) {
   return (
     <DropdownMenu>
@@ -77,10 +83,14 @@ export function FormatMenu({
               option.value === 'carousel'
                 ? socialBusy
                 : articleBusy);
+            const outsideLesson =
+              onlyFormats !== undefined &&
+              (isLink ||
+                !onlyFormats.includes(option.value as SelectableFormat));
             return (
               <DropdownMenuItem
                 key={option.value}
-                disabled={busy}
+                disabled={busy || outsideLesson}
                 className="flex-col items-start gap-0.5 py-2"
                 onSelect={() => {
                   if (isLink) onNavigate('/video');
@@ -89,7 +99,7 @@ export function FormatMenu({
               >
                 <span className="font-medium">{option.name}</span>
                 <span className="text-muted-foreground text-xs">
-                  {option.desc}
+                  {outsideLesson ? LEARN.formatOutsideLesson : option.desc}
                 </span>
               </DropdownMenuItem>
             );

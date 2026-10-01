@@ -3110,6 +3110,99 @@ client id/secret — see the milestone below.
 
 ## Latest Implementation Milestone
 
+- **`/learn/dlo` — the second practice lesson, and a revision bug it exposed** (2026-10-01, no
+  migration, no n8n). The DLO lane gets the Creative lesson's treatment on the same machinery:
+  the real /dlo form (`DloComposer` + `DloAiPromptBox`), the generation page's `ProgressSteps`
+  and live `ArticleDraft`, then the real `ArticleView`, all inside `<ApiProvider>` with a
+  sandbox that makes no request. Four stages, thirteen steps: insert the sample note; the
+  source tools and «AI साठी सूचना» explained (lit, inert, पुढे); «पुढे जा →»; the article
+  streams in; the article and «मूळ टिपणी» explained; open «बातमीत बदल हवा आहे?», ask
+  «आणखी थोडक्यात लिहा», «बदल करा»; versions, downloads and भाषांतर/क्रिएटिव्ह explained; recap.
+  - **The step machinery is now shared** (`lib/learn/lesson.ts`); `creativeLesson.ts` keeps its
+    exports as thin wrappers, `CoachPanel` takes the lesson's `stages`, and the intro/recap are
+    one component (`LessonCallouts`). `WebApi` gained `createDloIntake`, `sendArticleFeedback`,
+    `getArticleVersions`, `restoreArticleVersion`, `getGenerationSourceFiles`,
+    `generationSourceFileUrl`, `articlePdfDownloadUrl`; `ArticleView` and `useDloIntakeForm` now
+    call through `useApi()` (no provider = the real calls). Sandbox-only props:
+    `useDloIntakeForm({ onCreated, validate })` — which also keeps a practice out of the real
+    /dlo sessionStorage draft and pending-file variables in BOTH directions — and
+    `ArticleView.feedbackLesson` → `FeedbackBox` `learn`/`onOpenChange`/`onDraftChange`/`fill`.
+  - **Honesty rule kept**: the sample articles were written by the real engine
+    (`content-engine/src/scripts/learn-dlo-samples.ts`: `generateArticleSimple` with the dlo
+    prompt, then `reviseArticle` as the feedback job calls it) and the PDFs by `pdf:preview`.
+    Only ONE edit is shown. «भाषा आणखी सोपी करा» was rendered too and the real revision added
+    two sentences the note does not contain (a line on students' safety and a closing "purpose"
+    sentence) that no guard caught — so the lesson refuses it rather than teach it.
+  - **Product fix in `revise-article.ts` → `wantsExpansion`**: bare «आणखी»/«अधिक»/«जास्त»
+    ("more") counted as a request for a LONGER article, so three of the four quick suggestions
+    under «बातमीत बदल हवा आहे?» — including «आणखी थोडक्यात लिहा» — turned on the expansion
+    instruction and the missing-information sweep. Measured on Gemma AND OpenAI drafts: "shorter"
+    came back 959 → ~1,300 chars. Now those words count only beside a word for more material
+    and any shrink word vetoes expansion; after the fix the same request gives 959 → 696 chars,
+    no invention. Harness pins all four chips.
+  - **Found, NOT fixed (reported)**: every article revision drops the headline (it comes back
+    dateline-first, the full pipeline's shape); the «सोपी भाषा» revision invents sentences; and
+    the /dlo draft's `### *…*` heading markers print as literal asterisks in the exported PDF.
+  Verified 2026-10-01: workspace typecheck 7/7; eslint clean; prettier clean on my hunks;
+  `dlo.check.ts` 91/91, `creative.check.ts` 70/70, `revise-article --check` green; a Playwright
+  walk of the whole lesson at 1360 and 390 — 54 assertions incl. zero API requests, no page
+  errors, no overflow, the gate swallowing typing in the AI box, the unsupported-change refusal,
+  and reload resuming at the article; plus the real /dlo still drafting to sessionStorage.
+  Deploy: `@dgipr/content-engine` dist → API (the `wantsExpansion` fix) and web.
+
+- **`/learn` — hands-on training on the real screens, costing nothing** (2026-09-30, no
+  migration, no n8n, web only). First-time officers learn क्रिएटिव्ह's core loop by DOING it:
+  `/learn/creative` renders the actual `NoteComposer` and `SocialPostView` (real marker tool,
+  marker notes, version strip) against an in-memory sandbox, with a coach beside them (four
+  stages, one instruction, मला दाखवा, a spotlight that never takes a click, a bottom sheet on a
+  phone). Four actions: make a Creative from the sample text, mark the headline, ask for a
+  change, compare the new version with the old. Nothing else is taught; everything else on the
+  real card answers "हा भाग या सरावात नाही — पुढील धड्यात" through its own error slot, publish
+  never posts and the Canva link is hidden.
+  - **AMENDED 2026-09-30, same day: the page IS the real screen, and only the taught control
+    works.** The docked coach column is gone and the sidebar is back. Before the run exists
+    `/learn/creative` renders the Creative page exactly as "/" does (NoteComposer, ImagePromptBox,
+    TemplateSelect, same PageShell title; only the practice badge added), and after it the run's
+    page as /generations/[id] shows it. The coach is a callout attached to the lit control
+    (`Spotlight`, portalled to `<body>` because the glass cards' backdrop-filter would re-anchor
+    `fixed`); the rest of the page is dimmed through an SVG mask with one hole and one glowing
+    `--accent-glow` ring per lit control (a spread box-shadow cannot light two controls without
+    dimming one with the other). `components/learn/useLessonGate.ts` makes everything else INERT
+    at the window capture phase — click/pointer/mouse/context/drag/drop/submit, beforeinput/
+    paste/cut, and Enter/Space/Arrow on a focused control — unless the target is inside the
+    step's selectors (`allowedSelectors`) or `[data-learn-allow]`; scrolling and Tab/Escape are
+    never blocked, and a swallowed press shakes the callout (no hint text). Two steps SHOW the
+    checkboxes (`CheckOption` takes an optional `learn` id): lit, inert, explained, left with पुढे
+    (`LessonStep.next` + `LessonFacts.acknowledged`) — never ticked, since the sample poster has
+    both off, which `validate` also enforces. No "छान!" success lines. The text step stays lit
+    until पुढे; «बदल करा» is its own step after the note (a coach button fills mark ① through
+    `SocialPostView.fillFirstMarkNote`); two info steps after compare light redo and the
+    downloads; the recap links to /learn. The intro and recap are the callout centred over a
+    fully dimmed page. Harness now 71 checks.
+  - **The seam is `lib/apiContext.tsx`**: `WebApi` is a `Pick` of lib/api, `useApi()` defaults
+    to `REAL_API` (the lib/api functions themselves), so **no provider = production byte-for-
+    byte unchanged** — verified by a mocked-write browser check that `/` still POSTs
+    `/api/generations` and navigates, and that a real detail page's marker send, redo, restore
+    and edit chat hit their real endpoints. `sandboxApi.ts` is typed `WebApi`, so any call added
+    to those screens later fails typecheck until the sandbox answers it — never a silent
+    real request from a practice page.
+  - **Honesty rule**: the practice never pretends. The posters were rendered ONCE through the
+    real pipeline (generation 7008442e: a fresh Creative from `SAMPLE_NOTE`, then two marker
+    edits from v1 — headline bigger/bolder, headline red) and committed as WebP under
+    `apps/web/public/learn/creative/`. So the lesson asks for the sample text (a different note
+    is refused with the reason), and `matchScriptedEdit` accepts only a headline size or red
+    colour request — anything else ("फोटो बदला", "निळा", both at once, smaller) is refused with
+    the example offered as a button, never typed over the learner's words, and an edit of a
+    version other than the original is refused because no render of it exists.
+  - Also fixed on the way: `SocialPostView`'s redesign button had no catch (an unhandled
+    rejection); its failure now lands in the marks' error slot.
+  Verified 2026-09-30: workspace typecheck **7/7**, eslint clean, prettier clean on my hunks
+  (`NoteComposer.tsx`/`strings.ts` carry pre-existing complaints — do not `--write` them); free
+  harness **65/65**; Playwright **72/72** at 1360 and 390 (full run, text rule, wrong-place mark,
+  cannot-simulate + example, redesign/publish refusals, reload resumes the stage, restart,
+  **zero requests to the API**, no overflow, no page errors); regression **8/8**. The sample
+  images and note await the user's approval before commit. Deploy is web only.
+
 - **/new-video-workflow stops forcing an attached picture to be a REFERENCE** (2026-09-30, no
   migration, no n8n; SUPERSEDES the "an attached picture is always `reference_to_video`" half of
   Step 2 and the unconditional reference rule of Step 1). Generation 83a2602b attached artwork

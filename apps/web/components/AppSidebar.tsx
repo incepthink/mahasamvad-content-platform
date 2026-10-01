@@ -9,7 +9,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import {
   AudioLines,
   BookOpen,
@@ -54,7 +54,11 @@ const NAV_LINKS = [
   { href: '/glossary', label: STR.navGlossary, Icon: BookOpen },
   { href: '/references', label: STR.navReferences, Icon: LayoutTemplate },
   // Both video lanes are labelled beta in the sidebar only.
-  { href: '/video', label: `${STR.navVideo} (beta)`, Icon: Clapperboard },
+  {
+    href: '/new-video-workflow?mode=storyboard',
+    label: `${STR.navVideo} (beta)`,
+    Icon: Clapperboard,
+  },
   {
     href: '/new-video-workflow',
     label: `${STR.navNewVideo} (beta)`,
@@ -71,6 +75,7 @@ const NAV_LINKS = [
 
 export function AppSidebar() {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [mobileOpen, setMobileOpen] = useState(false);
   // Default expanded; the stored preference is read post-hydration so the
   // server and first client render agree.
@@ -105,8 +110,18 @@ export function AppSidebar() {
     };
   }, [mobileOpen]);
 
-  const isActive = (href: string) =>
-    href === '/' ? pathname === '/' : pathname.startsWith(href);
+  const isActive = (href: string) => {
+    if (href === '/') return pathname === '/';
+    if (href === '/new-video-workflow?mode=storyboard') {
+      return pathname.startsWith('/new-video-workflow') &&
+        searchParams.get('mode') === 'storyboard';
+    }
+    if (href === '/new-video-workflow') {
+      return pathname.startsWith(href) &&
+        searchParams.get('mode') !== 'storyboard';
+    }
+    return pathname.startsWith(href);
+  };
 
   return (
     <>

@@ -43,14 +43,7 @@ import type {
   GenerationSourceFile,
   TranslationLanguage,
 } from '@dgipr/schemas';
-import {
-  articlePdfDownloadUrl,
-  generationSourceFileUrl,
-  getArticleVersions,
-  getGenerationSourceFiles,
-  restoreArticleVersion,
-  sendArticleFeedback,
-} from '../lib/api';
+import { useApi } from '../lib/apiContext';
 import { FileName } from './FileName';
 import { STR } from '../lib/strings';
 import { errorMessage } from '../lib/errorMessage';
@@ -92,17 +85,38 @@ const LEARNED_PREF_SCOPES: Record<
   both: STR.learnedPrefsScopeBoth,
 };
 
+// The feedback fold's hooks for /learn's DLO lesson (see FeedbackBox) — what the coach needs
+// to know about the fold, and its "write the example" button. Absent everywhere else.
+export type ArticleFeedbackLessonHooks = Readonly<{
+  onOpenChange: (open: boolean) => void;
+  onDraftChange: (text: string) => void;
+  fill: Readonly<{ text: string; seq: number }> | null;
+}>;
+
 export function ArticleView({
   detail,
   onFeedbackSent,
   embedded = false,
+  feedbackLesson,
 }: {
   detail: GenerationDetail;
   onFeedbackSent: () => Promise<void>;
   // Poster-focused runs keep the source article in a closed disclosure below the poster.
   // In that case the parent already owns the visible title and card shell.
   embedded?: boolean;
+  // SANDBOX ONLY (/learn).
+  feedbackLesson?: ArticleFeedbackLessonHooks | undefined;
 }) {
+  // Through the API context rather than imported, so /learn can hand this view a sandbox.
+  // No provider = the real calls (lib/apiContext).
+  const {
+    articlePdfDownloadUrl,
+    generationSourceFileUrl,
+    getArticleVersions,
+    getGenerationSourceFiles,
+    restoreArticleVersion,
+    sendArticleFeedback,
+  } = useApi();
   const [copied, setCopied] = useState(false);
   const [lang, setLang] = useState<'mr' | TranslationLanguage>('mr');
   // The intake's own uploads, loaded the first time the note fold is opened rather than with
@@ -407,6 +421,7 @@ export function ArticleView({
       {shownLang === 'mr' && versions.length > 1 ? (
         <div
           className="article-versions"
+          data-learn="article-versions"
           role="group"
           aria-label={STR.articleVersionsLabel}
         >
@@ -480,10 +495,18 @@ export function ArticleView({
       {/* Display only — the generator's Markdown structure rendered as real headings,
           lists and paragraphs. Copy, .txt/.md download and the PDF export below all
           keep reading `shown` raw, so what leaves the page is unchanged. */}
-      <MarkdownText text={shown} className="article-body" />
+      {/* The wrapper only names the body for /learn's coach. */}
+      <div data-learn="article-body">
+        <MarkdownText text={shown} className="article-body" />
+      </div>
 
       <div className="btn-row" style={{ marginTop: 18 }}>
-        <button type="button" className="btn" onClick={copyToClipboard}>
+        <button
+          type="button"
+          className="btn"
+          data-learn="article-copy"
+          onClick={copyToClipboard}
+        >
           {copied ? STR.copied : STR.copyText}
         </button>
         {/* THREE FORMATS, ONE BUTTON. .txt and .md are written in the browser from the
@@ -496,7 +519,7 @@ export function ArticleView({
             thing this control must not do. */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button type="button" className="btn">
+            <button type="button" className="btn" data-learn="article-download">
               <Download size={16} strokeWidth={2} aria-hidden="true" />
               <span>{STR.downloadMenu}</span>
               <ChevronDown size={15} strokeWidth={2.2} aria-hidden="true" />
@@ -546,6 +569,7 @@ export function ArticleView({
         {!detail.posterUrl && !viewingOlder ? (
           <Link
             className="btn"
+            data-learn="article-creative"
             href={`/?from=${encodeURIComponent(detail.id)}&format=twitter&use=article`}
             title={STR.crossFormatToCreative}
             aria-label={STR.crossFormatToCreative}
@@ -561,6 +585,7 @@ export function ArticleView({
         {viewingOlder ? null : (
           <Link
             className="btn"
+            data-learn="article-translate"
             href={translateHref}
             title={STR.articleTranslateLinkTitle}
             aria-label={STR.articleTranslateLinkTitle}
@@ -585,6 +610,7 @@ export function ArticleView({
           fetches them — see loadSourceFiles. */}
       <details
         className="fold"
+        data-learn="article-note"
         onToggle={(event) => {
           if (event.currentTarget.open) void loadSourceFiles();
         }}
@@ -647,6 +673,10 @@ export function ArticleView({
             title={STR.articleFeedbackTitle}
             hint={STR.articleFeedbackHint}
             suggestions={STR.chipsArticle}
+            learn="article-feedback"
+            onOpenChange={feedbackLesson?.onOpenChange}
+            onDraftChange={feedbackLesson?.onDraftChange}
+            fill={feedbackLesson?.fill}
             onSubmit={async (feedback) => {
               await sendArticleFeedback(detail.id, feedback);
               await onFeedbackSent();

@@ -3,7 +3,7 @@
 // Free-text feedback box. `onSubmit` sends the feedback to the API; the parent
 // refreshes the generation afterwards so the page flips into progress view.
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { STR } from '../lib/strings';
 import { errorMessage } from '../lib/errorMessage';
 // Feedback is written in Marathi on an InScript keyboard, which a controlled box can
@@ -18,6 +18,10 @@ export function FeedbackBox({
   disabled = false,
   suggestions,
   children,
+  learn,
+  onOpenChange,
+  onDraftChange,
+  fill,
 }: {
   title: string;
   hint?: string;
@@ -29,10 +33,32 @@ export function FeedbackBox({
   // Optional extra controls rendered above the textarea (e.g. the poster's
   // text-vs-picture choice).
   children?: React.ReactNode;
+  // The four below exist for /learn's practice lessons and are inert everywhere else.
+  // `learn` names the fold for the coach (the fold, `-chips`, `-text` and `-send`).
+  learn?: string | undefined;
+  // Reported whenever the fold opens or closes, and whenever the typed text changes.
+  onOpenChange?: ((open: boolean) => void) | undefined;
+  onDraftChange?: ((text: string) => void) | undefined;
+  // Replaces the typed text with `text` each time `seq` changes — the coach's "write the
+  // example" button. The seq, not the text, is the trigger: the same example can be asked
+  // for twice.
+  fill?: Readonly<{ text: string; seq: number }> | null | undefined;
 }) {
   const [feedback, setFeedback] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const onDraftChangeRef = useRef(onDraftChange);
+  onDraftChangeRef.current = onDraftChange;
+  useEffect(() => onDraftChangeRef.current?.(feedback), [feedback]);
+
+  const fillSeq = fill?.seq;
+  const fillText = fill?.text;
+  useEffect(() => {
+    if (fillSeq === undefined || fillText === undefined) return;
+    setFeedback(fillText);
+    setError(null);
+  }, [fillSeq, fillText]);
 
   const submit = async () => {
     if (disabled || sending) return;
@@ -53,13 +79,25 @@ export function FeedbackBox({
   };
 
   return (
-    <details className="fold" aria-disabled={disabled}>
+    <details
+      className="fold"
+      aria-disabled={disabled}
+      data-learn={learn}
+      onToggle={
+        onOpenChange
+          ? (event) => onOpenChange(event.currentTarget.open)
+          : undefined
+      }
+    >
       <summary>{title}</summary>
       <div className="fold-body">
         {hint ? <p className="hint">{hint}</p> : null}
         {children}
         {suggestions && suggestions.length > 0 ? (
-          <div className="suggestion-row">
+          <div
+            className="suggestion-row"
+            data-learn={learn ? `${learn}-chips` : undefined}
+          >
             <span className="suggestion-label">
               {STR.feedbackSuggestionsLabel}
             </span>
@@ -79,17 +117,20 @@ export function FeedbackBox({
             ))}
           </div>
         ) : null}
-        <ComposeSafeTextarea
-          value={feedback}
-          onChange={setFeedback}
-          placeholder={STR.feedbackPlaceholder}
-          rows={3}
-          disabled={disabled || sending}
-          style={{ marginTop: 10 }}
-        />
+        <div data-learn={learn ? `${learn}-text` : undefined}>
+          <ComposeSafeTextarea
+            value={feedback}
+            onChange={setFeedback}
+            placeholder={STR.feedbackPlaceholder}
+            rows={3}
+            disabled={disabled || sending}
+            style={{ marginTop: 10 }}
+          />
+        </div>
         <div className="btn-row" style={{ marginTop: 12 }}>
           <button
             type="button"
+            data-learn={learn ? `${learn}-send` : undefined}
             className="btn btn-primary"
             onClick={submit}
             disabled={disabled || sending}

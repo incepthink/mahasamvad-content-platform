@@ -17,7 +17,7 @@
 
 import { useState } from 'react';
 import type { GenerationDetail } from '@dgipr/schemas';
-import { restorePosterVersion } from '../lib/api';
+import { useApi } from '../lib/apiContext';
 import { STR, formatDate } from '../lib/strings';
 import { errorMessage } from '../lib/errorMessage';
 import { ErrorNotice } from './ErrorNotice';
@@ -40,6 +40,7 @@ export function PosterVersionStrip({
   // True while the server is already re-rendering this poster.
   busy?: boolean;
 }) {
+  const { restorePosterVersion } = useApi();
   // The version being restored (1-based), so only that thumbnail shows the pending state.
   const [restoring, setRestoring] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -80,7 +81,7 @@ export function PosterVersionStrip({
   }
 
   return (
-    <div className="poster-versions">
+    <div className="poster-versions" data-learn="versions">
       <h3 className="poster-versions-title">{STR.posterVersionsTitle}</h3>
       {onChanged ? (
         <p className="hint poster-versions-hint">{STR.posterVersionsHint}</p>

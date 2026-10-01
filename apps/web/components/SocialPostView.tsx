@@ -12,7 +12,7 @@
 // caption, poster, a fresh design or both — and the assistant routes it to the right edit.
 // The hand edit has no save button: it autosaves when focus leaves the box.
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type {
   EditAssistantAction,
   GenerationDetail,
@@ -27,22 +27,20 @@ import {
   SquareDashed,
   SquarePen,
 } from 'lucide-react';
-import {
-  generateCaption,
-  plainPosterDownloadUrl,
-  posterDownloadUrl,
-  publishGeneration,
-  regeneratePoster,
-  sendCaptionFeedback,
-  sendPosterImageFeedback,
-} from '../lib/api';
+// Through the API context rather than imported directly, so /learn can render this card
+// against its no-network sandbox. With no provider it is lib/api itself.
+import { useApi } from '../lib/apiContext';
 import { STR } from '../lib/strings';
 import { errorMessage } from '../lib/errorMessage';
 import { usePosterMarkers } from '../lib/usePosterMarkers';
 import { posterRoundPayload } from '../lib/posterRound';
 import { FacebookLogo } from './FacebookLogo';
 import { XLogo } from './XLogo';
-import { PosterAnnotator, type AnnotatorMode } from './PosterAnnotator';
+import {
+  PosterAnnotator,
+  type AnnotatorMode,
+  type PosterMarkerDraft,
+} from './PosterAnnotator';
 import { PosterMarkNotes } from './PosterMarkNotes';
 import { PosterVersionStrip } from './PosterVersionStrip';
 import { CanvaLink } from './CanvaLink';
@@ -50,15 +48,41 @@ import { EditChat } from './EditChat';
 import { ErrorNotice } from './ErrorNotice';
 import { SocialCaptionEditor } from './SocialCaptionEditor';
 
+export type MarksRefusal =
+  string | { message: string; suggestion: { label: string; note: string } };
+
 export function SocialPostView({
   detail,
   onChanged,
   busy = false,
   onImageWorkStarted,
+  beforeSendMarks,
+  onAnnotationChange,
+  fillFirstMarkNote,
 }: {
   detail: GenerationDetail;
   onChanged: () => Promise<void>;
   busy?: boolean;
+  // An extra refusal for the marks' own send button, checked beside the note-length rule and
+  // reported in the same place. Returns the message to show, or null to let the round go.
+  // Only /learn passes one (its practice can only simulate a headline edit); unset, the
+  // button behaves exactly as it always has. A refusal may carry a suggested note, offered
+  // as a button that fills mark ① — never applied silently over the officer's own words.
+  beforeSendMarks?:
+    | ((markers: readonly PosterMarkerDraft[]) => MarksRefusal | null)
+    | undefined;
+  // Told whenever marking is armed/disarmed or the red marks change. Only /learn listens —
+  // its coach advances on "marking is on" and "a mark sits on the headline". Pass a stable
+  // function: it is an effect dependency.
+  onAnnotationChange?:
+    | ((state: {
+        marking: boolean;
+        markers: readonly PosterMarkerDraft[];
+      }) => void)
+    | undefined;
+  // Writes `note` into mark ①'s note each time `seq` changes. Only /learn passes one (its
+  // coach offers a button that writes the example for the learner).
+  fillFirstMarkNote?: { note: string; seq: number } | null | undefined;
   // Fired once a POSTER edit has been accepted by the API, handing the run to the navbar's
   // सुरू असलेली कामे panel so it can be followed after leaving this page. Poster work only:
   // a caption edit or revision touches no image, and this run's caption is already on screen
@@ -66,6 +90,15 @@ export function SocialPostView({
   // running before their 202, and the panel files a still-`completed` row as terminal.
   onImageWorkStarted?: (() => void) | undefined;
 }) {
+  const {
+    generateCaption,
+    plainPosterDownloadUrl,
+    posterDownloadUrl,
+    publishGeneration,
+    regeneratePoster,
+    sendCaptionFeedback,
+    sendPosterImageFeedback,
+  } = useApi();
   const [pending, setPending] = useState(false);
   // Direct publish to the official account: two-step confirm (posting is
   // outward-facing and irreversible), then a synchronous API call. The live-post
@@ -100,11 +133,28 @@ export function SocialPostView({
   // round, so switching between them never discards anything.
   const [annotMode, setAnnotMode] = useState<AnnotatorMode | null>(null);
   const annotOpen = annotMode !== null;
+  useEffect(() => {
+    onAnnotationChange?.({ marking: annotMode === 'mark', markers });
+  }, [onAnnotationChange, annotMode, markers]);
+  const filledSeq = useRef(0);
+  const firstMarkerId = markers[0]?.id;
+  useEffect(() => {
+    if (!fillFirstMarkNote || fillFirstMarkNote.seq === filledSeq.current)
+      return;
+    if (firstMarkerId === undefined) return;
+    filledSeq.current = fillFirstMarkNote.seq;
+    setNote(firstMarkerId, fillFirstMarkNote.note);
+  }, [fillFirstMarkNote, firstMarkerId, setNote]);
   // The caption box itself — its draft, autosave and generate button — is
   // SocialCaptionEditor, shared with the carousel card. Change REQUESTS go through the edit
   // assistant below; this state only serves the marks' own send button under the poster.
   const [sendingChange, setSendingChange] = useState(false);
   const [changeError, setChangeError] = useState<string | null>(null);
+  // A refusal's suggested note for mark ①, shown as a button beside the refusal.
+  const [changeSuggestion, setChangeSuggestion] = useState<{
+    label: string;
+    note: string;
+  } | null>(null);
 
   const showSpinner = busy || pending;
   // Poster edits do NOT need a completed row — every poster route (image-feedback,
@@ -167,8 +217,18 @@ export function SocialPostView({
   const sendMarks = async () => {
     if (sendingChange) return;
     setChangeError(null);
+    setChangeSuggestion(null);
     if (markers.some((m) => m.note.trim().length < 3)) {
       setChangeError(STR.markerNoteTooShort);
+      return;
+    }
+    const refusal = beforeSendMarks?.(markers) ?? null;
+    if (refusal) {
+      if (typeof refusal === 'string') setChangeError(refusal);
+      else {
+        setChangeError(refusal.message);
+        setChangeSuggestion(refusal.suggestion);
+      }
       return;
     }
     try {
@@ -247,7 +307,7 @@ export function SocialPostView({
       >
         {detail.posterUrl ? (
           <div>
-            <div className="poster-frame">
+            <div className="poster-frame" data-learn="poster">
               <img
                 src={detail.posterUrl}
                 alt={STR.posterTitle}
@@ -283,6 +343,7 @@ export function SocialPostView({
             <div className="poster-icon-actions">
               <a
                 className="icon-btn"
+                data-learn="download"
                 href={posterDownloadUrl(detail.id)}
                 title={STR.iconDownloadPoster}
                 aria-label={STR.iconDownloadPoster}
@@ -292,6 +353,7 @@ export function SocialPostView({
               {/* The artwork alone, without the stamped badge and footer band. */}
               <a
                 className="icon-btn"
+                data-learn="download-plain"
                 href={plainPosterDownloadUrl(detail.id)}
                 title={STR.iconDownloadPosterPlain}
                 aria-label={STR.iconDownloadPosterPlain}
@@ -302,10 +364,18 @@ export function SocialPostView({
               <button
                 type="button"
                 className="icon-btn"
+                data-learn="redo"
                 title={STR.iconRedesignPoster}
                 aria-label={STR.iconRedesignPoster}
                 disabled={!posterEditable}
-                onClick={() => void redoPoster(false)}
+                // The error slot the marks use: a failed redesign used to be an unhandled
+                // rejection, which on /learn is also where "not in this lesson" is said.
+                onClick={() => {
+                  setChangeError(null);
+                  void redoPoster(false).catch((e: unknown) =>
+                    setChangeError(errorMessage(e)),
+                  );
+                }}
               >
                 <RotateCw size={18} strokeWidth={1.9} aria-hidden="true" />
               </button>
@@ -328,6 +398,7 @@ export function SocialPostView({
               <button
                 type="button"
                 className="icon-btn"
+                data-learn="mark-button"
                 // Pressed state = marking is armed, so the poster reads as editable.
                 aria-pressed={annotMode === 'mark'}
                 title={
@@ -407,6 +478,7 @@ export function SocialPostView({
                 <button
                   type="button"
                   className="btn btn-primary"
+                  data-learn="send"
                   aria-busy={sendingChange}
                   disabled={showSpinner || sendingChange}
                   onClick={() => void sendMarks()}
@@ -491,6 +563,23 @@ export function SocialPostView({
 
           {/* The marks' own send button reports here. */}
           {changeError ? <ErrorNotice message={changeError} /> : null}
+          {changeSuggestion && markers[0] ? (
+            <div className="btn-row" style={{ marginTop: 8 }}>
+              <button
+                type="button"
+                className="btn btn-small"
+                data-learn="use-example"
+                onClick={() => {
+                  const first = markers[0];
+                  if (first) setNote(first.id, changeSuggestion.note);
+                  setChangeSuggestion(null);
+                  setChangeError(null);
+                }}
+              >
+                {changeSuggestion.label}
+              </button>
+            </div>
+          ) : null}
 
           {/* The edit assistant: say what to change, in any words, and it works out whether
               that is the caption, the poster, a fresh design or both. */}
