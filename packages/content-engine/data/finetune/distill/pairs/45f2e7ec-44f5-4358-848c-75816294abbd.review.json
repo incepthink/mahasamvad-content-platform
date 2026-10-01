@@ -1,0 +1,86 @@
+{
+  "formatVersion": "dlo-distill-v1",
+  "capturedAt": "2026-10-01T10:16:02.992Z",
+  "rowCreatedAt": "2026-09-30T08:52:21.295044+00:00",
+  "generationId": "45f2e7ec-44f5-4358-848c-75816294abbd",
+  "dloIntakeId": "1c9394cd-be96-460e-a604-ac6b2e2f91c5",
+  "threadRootId": null,
+  "sourceGenerationId": null,
+  "groupKey": "1c9394cd-be96-460e-a604-ac6b2e2f91c5",
+  "category": "news",
+  "lane": "notes-only",
+  "teacher": {
+    "model": "gpt-5.6-sol",
+    "reasoningEffort": "high",
+    "maxOutputTokens": 8192,
+    "transport": "responses-with-sources",
+    "promptVersion": "dlo-rag-v6",
+    "sawFiles": []
+  },
+  "studentPrompt": {
+    "promptVersion": "dlo-rag-v6",
+    "format": "text",
+    "attachedSourceFiles": false,
+    "sourceChars": 1179,
+    "userChars": 1203,
+    "editorialPreferenceCount": 6,
+    "editorialPreferences": [
+      "शैलीगत सजावटीपेक्षा तथ्यांची अचूकता, प्रशासकीय संज्ञांचे नेमकेपण आणि स्रोताशी निष्ठा यांना प्राधान्य द्या, स्रोताबाहेरील तपशील जोडू नका आणि संक्षिप्त करतानाही महत्त्वाचे विशेषणात्मक व मर्यादादर्शक तपशील कायम ठेवा.",
+      "मथळा, ऐच्छिक उपमथळा, दिनांक-स्थळ ओळ व पहिला परिच्छेद असा क्रम ठेवा; दिनांक-स्थळ ओळ मजकुराच्या सुरुवातीस एकदाच स्वतंत्र द्या, मथळा वा उपमथळ्याला जोडू नका आणि शासन निर्णयाची निर्गमन तारीख तिच्यात न देता पहिल्या परिच्छेदाच्या आरंभी एकदाच द्या.",
+      "बातमीतील माहिती तार्किक व सुसंगत क्रमाने मांडा आणि लीडनंतर निर्णय, पार्श्वभूमी किंवा समस्या, कारणमीमांसा, व्याप्ती, नागरिकांची प्रक्रिया, अंमलबजावणी किंवा प्रसिद्धी आणि अहवाल किंवा समारोप असा क्रम प्राधान्याने ठेवा.",
+      "परिशिष्टे, अर्ज, तक्ते, क्षेत्रीय सूचना, स्वाक्षरी-खंड, पत्ते, संपर्क रकाने, वितरण सूची व कारकुनी तपशील विस्ताराने देऊ नका; मात्र स्वाक्षरी करणाऱ्या अधिकाऱ्याचे नाव व पदनाम श्रेयासाठी वापरा आणि आवश्यक प्रक्रिया संक्षेपाने मांडा.",
+      "प्राथमिक बातमीमूल्य ओळखून संपूर्ण बातमीची मांडणी त्या मुख्य अंगाभोवती करा.",
+      "वेगवेगळ्या प्रशासकीय जबाबदाऱ्या एकत्र करू नका आणि प्रत्येक जबाबदारी स्वतंत्रपणे स्पष्ट करा."
+    ],
+    "vision": null
+  },
+  "styleReferences": {
+    "passed": 0,
+    "deploymentFlag": false,
+    "officerStyleReferenceChars": 0,
+    "note": "No exemplars are ever retrieved by this harness; see the module header."
+  },
+  "officerInputs": {
+    "headingChars": 0,
+    "instructionsChars": 0,
+    "designationCount": 0
+  },
+  "sourceProvenance": {
+    "noteChars": 1179,
+    "ocrProvider": null,
+    "imageOcrProvider": null,
+    "documents": [],
+    "intakeFileCount": 0,
+    "intakeUpdatedAt": "2026-09-30T08:52:19.642+00:00"
+  },
+  "target": {
+    "articleChars": 1166,
+    "rawChars": 1166,
+    "postProcessing": "none — raw splitContent(raw).article, before applyDesignations / ensureArticleHeading / ensureArticleDateline"
+  },
+  "usage": {
+    "chatCalls": 1,
+    "inputTokens": 1963,
+    "cachedInputTokens": 1651,
+    "outputTokens": 1959,
+    "costUsd": 0.0611555,
+    "ocrPages": 0
+  },
+  "storedArticle": "### *नवोन्मेषासाठी शासन, उद्योग आणि बाजारपेठेने समन्वयाने काम करावे – मुख्य सचिव राजेश अग्रवाल*\n\n## *नवोन्मेष परिसंस्थेत शासनाची निधीपुरवठादार आणि सुलभकर्ता म्हणून महत्त्वाची भूमिका*\n\n### *संरक्षण क्षेत्रातील ‘आयडेक्स’ उपक्रमाच्या यशाचा उल्लेख*\n\nमुंबई, दि. ३० : समाजाच्या विविध गरजा पूर्ण करण्यासाठी शासन, कॉर्पोरेट क्षेत्र आणि बाजारपेठ या तिन्ही घटकांनी परस्परपूरक भूमिका बजावणे आवश्यक आहे. नवोन्मेष स्वबळावर उभे राहण्यास सक्षम असावेत, असे मुख्य सचिव राजेश अग्रवाल यांनी सांगितले.\n\nनवोन्मेष परिसंस्थेच्या उभारणीसाठी शासन निधी उपलब्ध करून देण्याबरोबरच सुलभकर्त्याची भूमिकाही बजावत आहे. त्याचवेळी बाजारपेठेत सक्षम असलेल्या नवकल्पनांना अनावश्यक शासकीय हस्तक्षेपाविना विकसित होण्याची संधी मिळाली पाहिजे, असे मुख्य सचिव श्री. अग्रवाल यांनी स्पष्ट केले.\n\nनवकल्पनांची शासकीय खरेदी कशा प्रकारे करता येते, याचे संरक्षण क्षेत्रातील स्टार्टअप्स आणि खरेदीसाठी राबविण्यात येणारा ‘आयडेक्स’ उपक्रम हे यशस्वी उदाहरण आहे. शासन, उद्योग आणि बाजारपेठ या तिन्ही घटकांच्या एकत्रित सहभागातून नवोन्मेषाला चालना मिळू शकते, असेही त्यांनी सांगितले.\n\n०००००",
+  "storedArticleChars": 1029,
+  "hasArticleRevision": false,
+  "historicalStyleReferenceMeta": {
+    "url": null,
+    "mode": "simple",
+    "chars": 0,
+    "title": null,
+    "source": "none",
+    "articleId": null,
+    "similarity": null,
+    "articleCount": 0,
+    "promptVersion": "dlo-rag-v6",
+    "editorialPreferenceCount": 6
+  },
+  "approvalStatus": "needs-review",
+  "warnings": []
+}

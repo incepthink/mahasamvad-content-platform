@@ -1,0 +1,86 @@
+{
+  "formatVersion": "dlo-distill-v1",
+  "capturedAt": "2026-10-01T10:23:54.514Z",
+  "rowCreatedAt": "2026-09-30T06:54:38.868634+00:00",
+  "generationId": "feae2884-7be1-4c61-a370-3142ed0b3673",
+  "dloIntakeId": "92c3c6f7-237e-4f70-8192-45111b074159",
+  "threadRootId": null,
+  "sourceGenerationId": null,
+  "groupKey": "92c3c6f7-237e-4f70-8192-45111b074159",
+  "category": "news",
+  "lane": "notes-only",
+  "teacher": {
+    "model": "gpt-5.6-sol",
+    "reasoningEffort": "high",
+    "maxOutputTokens": 8192,
+    "transport": "responses-with-sources",
+    "promptVersion": "dlo-rag-v6",
+    "sawFiles": []
+  },
+  "studentPrompt": {
+    "promptVersion": "dlo-rag-v6",
+    "format": "text",
+    "attachedSourceFiles": false,
+    "sourceChars": 552,
+    "userChars": 617,
+    "editorialPreferenceCount": 6,
+    "editorialPreferences": [
+      "शैलीगत सजावटीपेक्षा तथ्यांची अचूकता, प्रशासकीय संज्ञांचे नेमकेपण आणि स्रोताशी निष्ठा यांना प्राधान्य द्या, स्रोताबाहेरील तपशील जोडू नका आणि संक्षिप्त करतानाही महत्त्वाचे विशेषणात्मक व मर्यादादर्शक तपशील कायम ठेवा.",
+      "मथळा, ऐच्छिक उपमथळा, दिनांक-स्थळ ओळ व पहिला परिच्छेद असा क्रम ठेवा; दिनांक-स्थळ ओळ मजकुराच्या सुरुवातीस एकदाच स्वतंत्र द्या, मथळा वा उपमथळ्याला जोडू नका आणि शासन निर्णयाची निर्गमन तारीख तिच्यात न देता पहिल्या परिच्छेदाच्या आरंभी एकदाच द्या.",
+      "बातमीतील माहिती तार्किक व सुसंगत क्रमाने मांडा आणि लीडनंतर निर्णय, पार्श्वभूमी किंवा समस्या, कारणमीमांसा, व्याप्ती, नागरिकांची प्रक्रिया, अंमलबजावणी किंवा प्रसिद्धी आणि अहवाल किंवा समारोप असा क्रम प्राधान्याने ठेवा.",
+      "परिशिष्टे, अर्ज, तक्ते, क्षेत्रीय सूचना, स्वाक्षरी-खंड, पत्ते, संपर्क रकाने, वितरण सूची व कारकुनी तपशील विस्ताराने देऊ नका; मात्र स्वाक्षरी करणाऱ्या अधिकाऱ्याचे नाव व पदनाम श्रेयासाठी वापरा आणि आवश्यक प्रक्रिया संक्षेपाने मांडा.",
+      "प्राथमिक बातमीमूल्य ओळखून संपूर्ण बातमीची मांडणी त्या मुख्य अंगाभोवती करा.",
+      "वेगवेगळ्या प्रशासकीय जबाबदाऱ्या एकत्र करू नका आणि प्रत्येक जबाबदारी स्वतंत्रपणे स्पष्ट करा."
+    ],
+    "vision": null
+  },
+  "styleReferences": {
+    "passed": 0,
+    "deploymentFlag": false,
+    "officerStyleReferenceChars": 0,
+    "note": "No exemplars are ever retrieved by this harness; see the module header."
+  },
+  "officerInputs": {
+    "headingChars": 0,
+    "instructionsChars": 18,
+    "designationCount": 0
+  },
+  "sourceProvenance": {
+    "noteChars": 552,
+    "ocrProvider": null,
+    "imageOcrProvider": null,
+    "documents": [],
+    "intakeFileCount": 0,
+    "intakeUpdatedAt": "2026-09-30T06:54:37.704+00:00"
+  },
+  "target": {
+    "articleChars": 829,
+    "rawChars": 829,
+    "postProcessing": "none — raw splitContent(raw).article, before applyDesignations / ensureArticleHeading / ensureArticleDateline"
+  },
+  "usage": {
+    "chatCalls": 1,
+    "inputTokens": 1872,
+    "cachedInputTokens": 0,
+    "outputTokens": 836,
+    "costUsd": 0.03444,
+    "ocrPages": 0
+  },
+  "storedArticle": "## *‘क्रांतीज्योती सावित्रीबाई फुले बालसंगोपन योजने’तून दरमहा २,२५० रुपयांचे आर्थिक सहाय्य*\n\n### *राज्यातील १ लाख ७२ हजार ४९६ बालकांना लाभ*\n\nमुंबई, दि. ३० : अनाथ, बेघर, एकल पालक असलेली तसेच गंभीर परिस्थितीत सापडलेली ० ते १८ वर्षे वयोगटातील पात्र बालके आणि त्यांच्या संगोपनकर्त्यांना ‘क्रांतीज्योती सावित्रीबाई फुले बालसंगोपन योजने’अंतर्गत दरमहा २ हजार २५० रुपयांचे आर्थिक सहाय्य देण्यात येते.\n\nपात्र बालकांच्या पालनपोषणासाठी ही रक्कम थेट लाभ हस्तांतरणाद्वारे (डीबीटी) लाभार्थी किंवा संगोपनकर्त्याच्या बँक खात्यात जमा केली जाते.\n\nराज्यात आतापर्यंत १ लाख ७२ हजार ४९६ बालकांना या योजनेचा लाभ मिळाला आहे. यामध्ये मुंबई शहरातील ४०० आणि मुंबई उपनगरातील ९२१ बालकांचा समावेश आहे. अन्य पात्र बालकांना लाभ देण्याची कार्यवाही निरंतर सुरू आहे.\n\n०००००",
+  "storedArticleChars": 738,
+  "hasArticleRevision": false,
+  "historicalStyleReferenceMeta": {
+    "url": null,
+    "mode": "simple",
+    "chars": 0,
+    "title": null,
+    "source": "none",
+    "articleId": null,
+    "similarity": null,
+    "articleCount": 0,
+    "promptVersion": "dlo-rag-v6",
+    "editorialPreferenceCount": 6
+  },
+  "approvalStatus": "needs-review",
+  "warnings": []
+}

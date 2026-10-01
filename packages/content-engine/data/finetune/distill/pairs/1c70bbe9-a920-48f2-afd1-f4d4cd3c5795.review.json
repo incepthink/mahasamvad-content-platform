@@ -1,0 +1,97 @@
+{
+  "formatVersion": "dlo-distill-v1",
+  "capturedAt": "2026-10-01T10:00:09.159Z",
+  "rowCreatedAt": "2026-09-30T11:12:10.718028+00:00",
+  "generationId": "1c70bbe9-a920-48f2-afd1-f4d4cd3c5795",
+  "dloIntakeId": "47a0d880-7a18-4cd2-bfb1-e8cf46a0f21b",
+  "threadRootId": null,
+  "sourceGenerationId": null,
+  "groupKey": "47a0d880-7a18-4cd2-bfb1-e8cf46a0f21b",
+  "category": "news",
+  "lane": "native",
+  "teacher": {
+    "model": "gpt-5.6-sol",
+    "reasoningEffort": "high",
+    "maxOutputTokens": 8192,
+    "transport": "responses-with-sources",
+    "promptVersion": "dlo-rag-v6",
+    "sawFiles": [
+      "NODAl Officer list & info dt.29.9.26 (1).pdf"
+    ]
+  },
+  "studentPrompt": {
+    "promptVersion": "dlo-rag-v6",
+    "format": "vision",
+    "attachedSourceFiles": true,
+    "sourceChars": 0,
+    "userChars": 95,
+    "editorialPreferenceCount": 6,
+    "editorialPreferences": [
+      "शैलीगत सजावटीपेक्षा तथ्यांची अचूकता, प्रशासकीय संज्ञांचे नेमकेपण आणि स्रोताशी निष्ठा यांना प्राधान्य द्या, स्रोताबाहेरील तपशील जोडू नका आणि संक्षिप्त करतानाही महत्त्वाचे विशेषणात्मक व मर्यादादर्शक तपशील कायम ठेवा.",
+      "मथळा, ऐच्छिक उपमथळा, दिनांक-स्थळ ओळ व पहिला परिच्छेद असा क्रम ठेवा; दिनांक-स्थळ ओळ मजकुराच्या सुरुवातीस एकदाच स्वतंत्र द्या, मथळा वा उपमथळ्याला जोडू नका आणि शासन निर्णयाची निर्गमन तारीख तिच्यात न देता पहिल्या परिच्छेदाच्या आरंभी एकदाच द्या.",
+      "बातमीतील माहिती तार्किक व सुसंगत क्रमाने मांडा आणि लीडनंतर निर्णय, पार्श्वभूमी किंवा समस्या, कारणमीमांसा, व्याप्ती, नागरिकांची प्रक्रिया, अंमलबजावणी किंवा प्रसिद्धी आणि अहवाल किंवा समारोप असा क्रम प्राधान्याने ठेवा.",
+      "परिशिष्टे, अर्ज, तक्ते, क्षेत्रीय सूचना, स्वाक्षरी-खंड, पत्ते, संपर्क रकाने, वितरण सूची व कारकुनी तपशील विस्ताराने देऊ नका; मात्र स्वाक्षरी करणाऱ्या अधिकाऱ्याचे नाव व पदनाम श्रेयासाठी वापरा आणि आवश्यक प्रक्रिया संक्षेपाने मांडा.",
+      "प्राथमिक बातमीमूल्य ओळखून संपूर्ण बातमीची मांडणी त्या मुख्य अंगाभोवती करा.",
+      "वेगवेगळ्या प्रशासकीय जबाबदाऱ्या एकत्र करू नका आणि प्रत्येक जबाबदारी स्वतंत्रपणे स्पष्ट करा."
+    ],
+    "vision": {
+      "maxSoftTokens": 1120,
+      "tokensPerImage": 1120,
+      "tilesPerPage": 1,
+      "maxTiles": 14,
+      "imageCount": 1,
+      "documents": [
+        "NODAl Officer list & info dt.29.9.26 (1).pdf"
+      ]
+    }
+  },
+  "styleReferences": {
+    "passed": 0,
+    "deploymentFlag": false,
+    "officerStyleReferenceChars": 0,
+    "note": "No exemplars are ever retrieved by this harness; see the module header."
+  },
+  "officerInputs": {
+    "headingChars": 0,
+    "instructionsChars": 0,
+    "designationCount": 0
+  },
+  "sourceProvenance": {
+    "noteChars": 0,
+    "ocrProvider": "sarvam",
+    "imageOcrProvider": "sarvam",
+    "documents": [],
+    "intakeFileCount": 1,
+    "intakeUpdatedAt": "2026-09-30T11:12:09.393+00:00"
+  },
+  "target": {
+    "articleChars": 1071,
+    "rawChars": 1071,
+    "postProcessing": "none — raw splitContent(raw).article, before applyDesignations / ensureArticleHeading / ensureArticleDateline"
+  },
+  "usage": {
+    "chatCalls": 1,
+    "inputTokens": 7401,
+    "cachedInputTokens": 7398,
+    "outputTokens": 2469,
+    "costUsd": 0.077784,
+    "ocrPages": 0
+  },
+  "storedArticle": "## *पंडित दीनदयाळ उपाध्याय रोजगार महाकुंभात ३७५ उमेदवारांची अंतिम निवड*\n\n### *मुंबई उपनगरातील २९ मेळाव्यांत १ हजार ७२८ उमेदवारांची प्राथमिक निवड; ३७ जणांना नियुक्तिपत्रे*\n\nमुंबई, दि. ३० : पंडित दीनदयाळ उपाध्याय रोजगार महाकुंभांतर्गत मुंबई उपनगर जिल्ह्यात झालेल्या २९ रोजगार मेळाव्यांमध्ये १ हजार ७२८ उमेदवार प्राथमिक, तर ३७५ उमेदवार अंतिम निवडीत यशस्वी ठरले. यापैकी ३७ उमेदवारांना नियुक्तिपत्रे मिळाली.\n\nया रोजगार मेळाव्यांमध्ये ३०५ उद्योजक सहभागी झाले. त्यांनी ७ हजार ६७० रिक्त पदे उपलब्ध केली. मेळाव्यांना २ हजार ९१ महिला आणि २ हजार ८५ पुरुष असे एकूण ४ हजार १७६ उमेदवार उपस्थित होते.\n\nप्राथमिक निवड झालेल्यांमध्ये ८४६ महिला आणि ८८२ पुरुषांचा समावेश आहे. अंतिम निवड झालेल्या उमेदवारांमध्ये १६९ महिला आणि २०६ पुरुष आहेत. नियुक्तिपत्र मिळालेल्यांमध्ये १३ महिला आणि २४ पुरुषांचा समावेश आहे.\n\nमुंबई उपनगरातील विविध महाविद्यालये, पॉलिटेक्निक, औद्योगिक प्रशिक्षण संस्था, विद्यापीठाशी संबंधित केंद्रे आणि अन्य संस्थांमध्ये हे रोजगार मेळावे झाले.\n\nकाही उमेदवारांची एकापेक्षा अधिक उद्योजकांनी निवड केल्यामुळे प्राथमिक निवडीची संख्या काही ठिकाणी वाढली आहे. तसेच काही उद्योजकांनी उमेदवारांचा प्राथमिक आणि अंतिम अशा दोन्ही निवड आकडेवारीत समावेश केला आहे.\n\n०००००",
+  "storedArticleChars": 1150,
+  "hasArticleRevision": false,
+  "historicalStyleReferenceMeta": {
+    "url": null,
+    "mode": "simple",
+    "chars": 0,
+    "title": null,
+    "source": "none",
+    "articleId": null,
+    "similarity": null,
+    "articleCount": 0,
+    "promptVersion": "dlo-rag-v6",
+    "editorialPreferenceCount": 6
+  },
+  "approvalStatus": "needs-review",
+  "warnings": []
+}

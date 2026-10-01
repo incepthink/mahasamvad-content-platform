@@ -1,0 +1,97 @@
+{
+  "formatVersion": "dlo-distill-v1",
+  "capturedAt": "2026-10-01T09:58:42.000Z",
+  "rowCreatedAt": "2026-09-30T11:16:05.292343+00:00",
+  "generationId": "f03cb47f-f1ca-49e5-9740-5e175d47f11a",
+  "dloIntakeId": "da3c9a3c-69b3-4114-83bd-1e39a501a560",
+  "threadRootId": null,
+  "sourceGenerationId": null,
+  "groupKey": "da3c9a3c-69b3-4114-83bd-1e39a501a560",
+  "category": "news",
+  "lane": "native",
+  "teacher": {
+    "model": "gpt-5.6-sol",
+    "reasoningEffort": "high",
+    "maxOutputTokens": 8192,
+    "transport": "responses-with-sources",
+    "promptVersion": "dlo-rag-v6",
+    "sawFiles": [
+      "NODAl Officer list & info dt.29.9.26 (1).pdf"
+    ]
+  },
+  "studentPrompt": {
+    "promptVersion": "dlo-rag-v6",
+    "format": "vision",
+    "attachedSourceFiles": true,
+    "sourceChars": 0,
+    "userChars": 95,
+    "editorialPreferenceCount": 6,
+    "editorialPreferences": [
+      "शैलीगत सजावटीपेक्षा तथ्यांची अचूकता, प्रशासकीय संज्ञांचे नेमकेपण आणि स्रोताशी निष्ठा यांना प्राधान्य द्या, स्रोताबाहेरील तपशील जोडू नका आणि संक्षिप्त करतानाही महत्त्वाचे विशेषणात्मक व मर्यादादर्शक तपशील कायम ठेवा.",
+      "मथळा, ऐच्छिक उपमथळा, दिनांक-स्थळ ओळ व पहिला परिच्छेद असा क्रम ठेवा; दिनांक-स्थळ ओळ मजकुराच्या सुरुवातीस एकदाच स्वतंत्र द्या, मथळा वा उपमथळ्याला जोडू नका आणि शासन निर्णयाची निर्गमन तारीख तिच्यात न देता पहिल्या परिच्छेदाच्या आरंभी एकदाच द्या.",
+      "बातमीतील माहिती तार्किक व सुसंगत क्रमाने मांडा आणि लीडनंतर निर्णय, पार्श्वभूमी किंवा समस्या, कारणमीमांसा, व्याप्ती, नागरिकांची प्रक्रिया, अंमलबजावणी किंवा प्रसिद्धी आणि अहवाल किंवा समारोप असा क्रम प्राधान्याने ठेवा.",
+      "परिशिष्टे, अर्ज, तक्ते, क्षेत्रीय सूचना, स्वाक्षरी-खंड, पत्ते, संपर्क रकाने, वितरण सूची व कारकुनी तपशील विस्ताराने देऊ नका; मात्र स्वाक्षरी करणाऱ्या अधिकाऱ्याचे नाव व पदनाम श्रेयासाठी वापरा आणि आवश्यक प्रक्रिया संक्षेपाने मांडा.",
+      "प्राथमिक बातमीमूल्य ओळखून संपूर्ण बातमीची मांडणी त्या मुख्य अंगाभोवती करा.",
+      "वेगवेगळ्या प्रशासकीय जबाबदाऱ्या एकत्र करू नका आणि प्रत्येक जबाबदारी स्वतंत्रपणे स्पष्ट करा."
+    ],
+    "vision": {
+      "maxSoftTokens": 1120,
+      "tokensPerImage": 1120,
+      "tilesPerPage": 1,
+      "maxTiles": 14,
+      "imageCount": 1,
+      "documents": [
+        "NODAl Officer list & info dt.29.9.26 (1).pdf"
+      ]
+    }
+  },
+  "styleReferences": {
+    "passed": 0,
+    "deploymentFlag": false,
+    "officerStyleReferenceChars": 0,
+    "note": "No exemplars are ever retrieved by this harness; see the module header."
+  },
+  "officerInputs": {
+    "headingChars": 0,
+    "instructionsChars": 0,
+    "designationCount": 0
+  },
+  "sourceProvenance": {
+    "noteChars": 0,
+    "ocrProvider": "sarvam",
+    "imageOcrProvider": "sarvam",
+    "documents": [],
+    "intakeFileCount": 1,
+    "intakeUpdatedAt": "2026-09-30T11:16:04.281+00:00"
+  },
+  "target": {
+    "articleChars": 1065,
+    "rawChars": 1065,
+    "postProcessing": "none — raw splitContent(raw).article, before applyDesignations / ensureArticleHeading / ensureArticleDateline"
+  },
+  "usage": {
+    "chatCalls": 1,
+    "inputTokens": 7401,
+    "cachedInputTokens": 1651,
+    "outputTokens": 2471,
+    "costUsd": 0.1037055,
+    "ocrPages": 0
+  },
+  "storedArticle": "## *मुंबई उपनगरातील रोजगार मेळाव्यांत १ हजार ७२८ उमेदवारांची प्राथमिक; ३७५ उमेदवारांची अंतिम निवड*\n\n### *७ हजार ६७० रिक्तपदांसाठी ३०५ उद्योजकांचा सहभाग; ३७ उमेदवारांना नियुक्तिपत्रांचे वाटप*\n\nमुंबई, दि. ३० : पंडित दीनदयाळ उपाध्याय रोजगार महाकुंभांतर्गत मुंबई उपनगर जिल्ह्यात आयोजित २९ रोजगार मेळाव्यांमध्ये ४ हजार १७६ उमेदवार सहभागी झाले. त्यापैकी १ हजार ७२८ उमेदवारांची प्राथमिक, तर ३७५ उमेदवारांची अंतिम निवड झाली. अंतिम निवड झालेल्यांपैकी ३७ उमेदवारांना नियुक्तिपत्रांचे वाटप करण्यात आले.\n\nया मेळाव्यांमध्ये ३०५ उद्योजक सहभागी झाले होते. त्यांनी एकूण ७ हजार ६७० रिक्तपदे उपलब्ध करून दिली. सहभागी उमेदवारांमध्ये २ हजार ९१ महिला आणि २ हजार ८५ पुरुषांचा समावेश होता.\n\nप्राथमिक निवड झालेल्यांमध्ये ८४६ महिला आणि ८८२ पुरुष, तर अंतिम निवड झालेल्यांमध्ये १६९ महिला आणि २०६ पुरुषांचा समावेश आहे. नियुक्तिपत्र मिळालेल्यांमध्ये १३ महिला आणि २४ पुरुष आहेत.\n\nएका उमेदवाराची एकापेक्षा अधिक नियोक्त्यांकडून निवड झाल्याने काही ठिकाणी प्राथमिक निवडीची संख्या वाढलेली आहे. तसेच काही नियोक्त्यांनी एकाच उमेदवाराचा प्राथमिक आणि अंतिम निवड अशा दोन्ही आकडेवारीत समावेश केला आहे.\n\n०००००",
+  "storedArticleChars": 1067,
+  "hasArticleRevision": false,
+  "historicalStyleReferenceMeta": {
+    "url": null,
+    "mode": "simple",
+    "chars": 0,
+    "title": null,
+    "source": "none",
+    "articleId": null,
+    "similarity": null,
+    "articleCount": 0,
+    "promptVersion": "dlo-rag-v6",
+    "editorialPreferenceCount": 6
+  },
+  "approvalStatus": "needs-review",
+  "warnings": []
+}
