@@ -22,6 +22,8 @@ export function CoachPanel({
   canShowMe,
   onShowMe,
   onRestart,
+  tools,
+  status,
   children,
 }: {
   // The lesson's own stages (every lesson has four today, but the count is the lesson's).
@@ -31,6 +33,10 @@ export function CoachPanel({
   canShowMe: boolean;
   onShowMe: () => void;
   onRestart: (() => void) | null;
+  // Extra head buttons (autoplay's ▶/⏸ and mute), placed before restart and exit.
+  tools?: ReactNode;
+  // A line above the instruction (autoplay's "running" / "paused" state).
+  status?: ReactNode;
   children?: ReactNode;
 }) {
   return (
@@ -40,6 +46,7 @@ export function CoachPanel({
           {LEARN.stageOf(stage, stages.length)} · {stages[stage - 1]?.label}
         </p>
         <div className="learn-coach-tools">
+          {tools}
           {onRestart ? (
             <button
               type="button"
@@ -73,6 +80,7 @@ export function CoachPanel({
       </ol>
 
       <div className="learn-coach-body" aria-live="polite">
+        {status}
         <p className="learn-coach-instruction">{instruction}</p>
         {children}
         {canShowMe ? (

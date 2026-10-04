@@ -6,6 +6,13 @@
 // (twitter-chrome.ts / cmo-geometry.ts).
 
 import { pathToFileURL } from 'node:url';
+import {
+  DEFAULT_SOCIAL_LOGO_STYLE,
+  SOCIAL_LOGO_RESERVE,
+  socialLogoShape,
+  socialLogoSide,
+  type SocialLogoStyle,
+} from '@dgipr/schemas';
 import type { PosterCopy, TemplateBrand } from './generate-poster-copy.js';
 import type { ArtDirection } from './art-direction.js';
 import type { PosterPalette } from './poster-palettes.js';
@@ -100,6 +107,41 @@ export const SOCIAL_CHROME: StampedChrome = {
     'full-width department footer band and social-handle strip along the bottom',
 };
 
+// THE LOGO ROTATION (2026-10-03). The badge is no longer always the top-right card: a run carries
+// one of six styles (SOCIAL_LOGO_STYLES in @dgipr/schemas) and the prompt has to reserve THAT
+// corner at THAT size and describe THAT badge — a feedback round erases what it is told is the
+// badge, so describing a card in the top-right while a circle sits top-left leaves the circle on
+// the canvas beside the re-stamped one. These two helpers are the only way a lane should derive
+// its zones and chrome; with no style (or the default card-right) they return the pre-rotation
+// constants themselves, so every prompt built without a style is byte-identical.
+export function socialZonesFor(
+  style?: SocialLogoStyle | undefined,
+): ReservedZoneGeometry {
+  if (!style || style === DEFAULT_SOCIAL_LOGO_STYLE) return SOCIAL_ZONES;
+  const reserve = SOCIAL_LOGO_RESERVE[socialLogoShape(style)];
+  return {
+    ...SOCIAL_ZONES,
+    lockupWidth: reserve.width,
+    lockupHeight: reserve.height,
+    lockupSide: socialLogoSide(style),
+  };
+}
+
+export function socialChromeFor(
+  style?: SocialLogoStyle | undefined,
+): StampedChrome {
+  if (!style || style === DEFAULT_SOCIAL_LOGO_STYLE) return SOCIAL_CHROME;
+  const side = socialLogoSide(style);
+  const shape = socialLogoShape(style);
+  const lockup =
+    shape === 'circle'
+      ? `white circular महाराष्ट्र शासन emblem-and-wordmark badge in the top-${side} corner`
+      : shape === 'quarter'
+        ? `white quarter-circle महाराष्ट्र शासन emblem-and-wordmark badge fitted into the top-${side} corner (its straight edges along the top edge and the ${side} edge)`
+        : `white rounded-square महाराष्ट्र शासन emblem-and-wordmark badge in the top-${side} corner`;
+  return { ...SOCIAL_CHROME, lockup };
+}
+
 // The CMO brand's chrome is a different shape — a full-width leader header rather than a corner
 // badge — but it is stamped by overlayCmoChrome on exactly the same schedule, so it carries the
 // same rule. Keep in sync with packages/poster-renderer/src/cmo-geometry.ts.
@@ -169,6 +211,10 @@ export type BuildPosterPromptInput = Readonly<{
   // the LIGHT BACKGROUND rule, so a failed director still yields a light-ground poster. Ignored
   // by every other branch.
   designDirection?: PosterDesignDirection | null | undefined;
+  // Which badge this run is stamped with (socialLogoStyleFor in apps/api). Moves the reserved
+  // corner and the chrome description on every DGIPR branch; ignored by CMO, whose chrome is its
+  // own header. Absent = the pre-rotation top-right card.
+  logoStyle?: SocialLogoStyle | undefined;
 }>;
 
 // BRIGHTNESS. Only for the lane where the image model chooses the colours itself — the
@@ -471,6 +517,7 @@ const DOCUMENT_ARTIFACT_RULE =
 export function buildPosterPrompt(input: BuildPosterPromptInput): string {
   const { copy, copyStyle, brand, hasPhoto } = input;
   const designMode = input.designMode;
+  const zones = socialZonesFor(input.logoStyle);
   const masterFile = (input.masterUrl ?? '').trim();
   const layoutSummary = (input.layoutSummary ?? '').trim();
   if (!isFreshDesign(designMode) && brand !== 'cmo' && !masterFile) {
@@ -566,7 +613,7 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
       // none, so the model reused what it already had (generation 7c33fa93). Density is now
       // explicitly subordinate to the exactly-once rule; the canvas definition stays, because it
       // is what keeps "usable" from meaning the full artwork height.
-      "Use the provided reference image as the PRIMARY STRUCTURAL GUIDE for the poster, not as a pixel-locked blueprint. Preserve its recognisable overall composition, visual hierarchy and design idea wherever they work for the supplied information. STRUCTURE means geometry and visual hierarchy—not the meaning, factual content, or element type of any reference slot. Content completeness, readability and reserved-zone safety OUTRANK the reference's exact widths, heights, proportions, section boundaries and imagery zones. You may intelligently resize, widen, move or extend components when the supplied information needs a different amount of space; do not redesign unnecessarily and do not compress everything onto one side. Distribute the supplied information across the usable canvas — the USABLE CANVAS is the area above the bottom margin described at the end of these instructions and outside the reserved top-right corner. Match the reference's density ONLY as far as the supplied information reaches: where it runs out, stop. Never repeat or invent content to match the reference's fullness.",
+      `Use the provided reference image as the PRIMARY STRUCTURAL GUIDE for the poster, not as a pixel-locked blueprint. Preserve its recognisable overall composition, visual hierarchy and design idea wherever they work for the supplied information. STRUCTURE means geometry and visual hierarchy—not the meaning, factual content, or element type of any reference slot. Content completeness, readability and reserved-zone safety OUTRANK the reference's exact widths, heights, proportions, section boundaries and imagery zones. You may intelligently resize, widen, move or extend components when the supplied information needs a different amount of space; do not redesign unnecessarily and do not compress everything onto one side. Distribute the supplied information across the usable canvas — the USABLE CANVAS is the area above the bottom margin described at the end of these instructions and outside the reserved ${zones.lockupSide === 'left' ? 'top-left' : 'top-right'} corner. Match the reference's density ONLY as far as the supplied information reaches: where it runs out, stop. Never repeat or invent content to match the reference's fullness.`,
       "The reference image controls STRUCTURE ONLY, not colour. Choose the poster's colour palette freely and creatively; ensure strong contrast and easy readability for every Marathi word and Devanagari numeral.",
       // …and "strong contrast" alone is what let a real render come back charcoal-on-black.
       BRIGHT_LOOK_RULE,
@@ -584,14 +631,17 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
       // the badge it could see and the API then stamped the real one beside it. Every other
       // DGIPR path says ERASE the master's chrome; this branch never did. See
       // reserved-zone-rule.ts.
+      // The REFERENCE's own branding: a library master always carries the top-right card,
+      // wherever THIS run's badge is stamped — so this describes the master, and the zone
+      // block below says where the new badge goes.
       referenceChromeRule(SOCIAL_CHROME),
       'Use only Marathi text and Devanagari numerals in the output. Use Nirmala UI for all text.',
       // The zone geometry, then the rule that makes it win, LAST — the position these models
       // weight most, and the position the clear-space rule already holds for the same reason.
       // Before this the reserve sat second-to-last under three louder completeness clauses and
       // lost by one line on a long note (generation cc283a63).
-      reservedZoneBlock(SOCIAL_ZONES, SOCIAL_FOOTER_NOTE),
-      fitToReserveRule(SOCIAL_ZONES, { allowStructuralReflow: true }),
+      reservedZoneBlock(zones, SOCIAL_FOOTER_NOTE),
+      fitToReserveRule(zones, { allowStructuralReflow: true }),
     ].join('\n');
   }
 
@@ -611,6 +661,15 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
       height: 1504,
       designDirection: input.designDirection?.brief,
       lightGround: true,
+      // Absent style ⇒ the minimal prompt's own defaults, byte-identical to before the rotation.
+      ...(input.logoStyle && input.logoStyle !== DEFAULT_SOCIAL_LOGO_STYLE
+        ? {
+            badgeWidth: zones.lockupWidth,
+            badgeHeight: zones.lockupHeight,
+            badgeSide: socialLogoSide(input.logoStyle),
+            badgeShape: socialLogoShape(input.logoStyle),
+          }
+        : {}),
     });
   }
 
@@ -624,7 +683,7 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
     // Already tells the model to ERASE the master's own chrome, so this branch needs the zone
     // geometry rather than a second erase rule.
     hasPhoto ? PLACEHOLDER_WITH_PHOTO : PLACEHOLDER_TEXT_ONLY,
-    reservedZoneBlock(SOCIAL_ZONES, SOCIAL_FOOTER_NOTE),
+    reservedZoneBlock(zones, SOCIAL_FOOTER_NOTE),
   ];
   if (!hasPhoto) locked.push(TEXT_ONLY_LOCK);
   locked.push(
@@ -656,7 +715,7 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
     '',
     'Do not add any English text. Do not paint any logos, emblems, footer bands or social handles — the official branding is stamped on afterwards by software. Keep one single poster within the canvas, no outer borders.',
     '',
-    fitToReserveRule(SOCIAL_ZONES),
+    fitToReserveRule(zones),
   );
   return lines.join('\n');
 }
@@ -693,6 +752,9 @@ export type BuildCustomPosterPromptInput = Readonly<{
   // and a copied badge survives BESIDE the stamped one. With no pin the poster is generated from
   // scratch and the rule is the opposite one: do not invent a badge at all.
   editsReference: boolean;
+  // The run's badge (see BuildPosterPromptInput.logoStyle). The reserved zone travels on this lane
+  // too, so it must name the corner the badge is actually stamped into.
+  logoStyle?: SocialLogoStyle | undefined;
 }>;
 
 export function buildCustomPosterPrompt(
@@ -700,6 +762,7 @@ export function buildCustomPosterPrompt(
 ): string {
   const brief = input.imagePrompt.trim();
   const information = input.information.trim();
+  const zones = socialZonesFor(input.logoStyle);
   if (!brief) {
     throw new Error('buildCustomPosterPrompt: imagePrompt is empty.');
   }
@@ -718,15 +781,16 @@ export function buildCustomPosterPrompt(
     ...(information ? ['', 'TEXT TO PUT ON THE POSTER:', information] : []),
     '',
     input.editsReference
-      ? referenceChromeRule(SOCIAL_CHROME)
-      : paintNoChromeRule(SOCIAL_CHROME),
+      ? // A pinned master's own branding is the top-right card, whatever this run carries.
+        referenceChromeRule(SOCIAL_CHROME)
+      : paintNoChromeRule(socialChromeFor(input.logoStyle)),
     '',
-    reservedZoneBlock(SOCIAL_ZONES, SOCIAL_FOOTER_NOTE),
+    reservedZoneBlock(zones, SOCIAL_FOOTER_NOTE),
     '',
     // WITHOUT allowStructuralReflow on either branch: that option licences departing from a
     // REFERENCE's geometry, and on this lane the geometry is the officer's brief, not a
     // library master's. Shrink-to-fit is the recovery here, as on the fresh lane.
-    fitToReserveRule(SOCIAL_ZONES),
+    fitToReserveRule(zones),
   ].join('\n');
 }
 
@@ -744,6 +808,10 @@ export type BuildFeedbackPromptInput = Readonly<{
   // What the vision pass read off the CURRENT poster: the checklist a displace
   // re-layout must not lose. Only emitted when a displace box is present.
   contentInventory?: readonly string[] | undefined;
+  // The badge stamped on the poster being edited — the SAME style the run was first stamped with,
+  // or the model is told to erase a badge that is not where it says, and the real one survives
+  // beside the re-stamped copy. Ignored for CMO.
+  logoStyle?: SocialLogoStyle | undefined;
 }>;
 
 // The prompt that edits an EXISTING poster to apply a requested visual change. Mirrors the
@@ -781,12 +849,13 @@ export function buildFeedbackPrompt(input: BuildFeedbackPromptInput): string {
   // content drawn there really is covered. SOCIAL_ZONES.footerHeight is the band's true
   // footprint (~91px), which is what this lane needs; do not "restore" it to the old 120, which
   // would push content up by 30px on every feedback round and drift the layout.
+  const zones = socialZonesFor(input.logoStyle);
   const reservedZones =
     input.brand === 'cmo'
       ? 'RESERVED ZONES: the TOP HEADER BAND (the full-width blue leader lockup and the महाराष्ट्र शासन emblem) occupies the top ~19% of the poster, the full-width BOTTOM ~8% footer strip, and the UPPER-RIGHT PHOTO CIRCLE — all three are placed onto the poster by software (the circle holds a photograph placed by software). Keep all three clear: leave the upper-right circle a quiet plain background with no text, subject, ring or outline, and do NOT move any text or important content into those areas.'
-      : `RESERVED ZONES: the top-right ${SOCIAL_ZONES.lockupWidth} x ${SOCIAL_ZONES.lockupHeight} px corner and the full-width bottom ${SOCIAL_ZONES.footerHeight} px strip are reserved for official branding that software places onto the finished poster. Keep both clear, and do NOT move any text or important content into them.`;
+      : `RESERVED ZONES: the top-${zones.lockupSide ?? 'right'} ${zones.lockupWidth} x ${zones.lockupHeight} px corner and the full-width bottom ${zones.footerHeight} px strip are reserved for official branding that software places onto the finished poster. Keep both clear, and do NOT move any text or important content into them.`;
   const chromeRule = stampedChromeRule(
-    input.brand === 'cmo' ? CMO_CHROME : SOCIAL_CHROME,
+    input.brand === 'cmo' ? CMO_CHROME : socialChromeFor(input.logoStyle),
   );
 
   // A DISPLACE round cannot keep the exact layout — that is the point of it — so the
@@ -1881,6 +1950,106 @@ if (
         )
           failures.push(`the ${lane} prompt picked up a fresh-lane block`);
       }
+    }
+
+    // --- the logo rotation (2026-10-03) ----------------------------------------
+    // A run stamped with a left-hand badge must have EVERY corner the prompt reserves or names
+    // moved to the left, on every DGIPR lane, or the model writes the headline under the badge
+    // and a feedback round erases the wrong corner. An explicit card-right must change nothing.
+    {
+      const info = 'मुंबई येथे नवीन आरोग्य केंद्र सुरू होणार आहे.';
+      const lanes = (logoStyle?: SocialLogoStyle) =>
+        [
+          [
+            'onbrand',
+            buildPosterPrompt({
+              copy: {},
+              information: info,
+              itemCount: 1,
+              copyStyle: 'info_bullets',
+              designMode: 'onbrand',
+              brand: 'dgipr',
+              masterUrl: 'https://example.test/master.png',
+              hasPhoto: true,
+              logoStyle,
+            }),
+          ],
+          [
+            'fresh',
+            buildPosterPrompt({
+              copy: COPY,
+              copyStyle: 'info_bullets',
+              designMode: 'fresh',
+              brand: 'dgipr',
+              hasPhoto: true,
+              logoStyle,
+            }),
+          ],
+          [
+            'custom',
+            buildCustomPosterPrompt({
+              imagePrompt: 'A bright poster.',
+              information: info,
+              editsReference: false,
+              logoStyle,
+            }),
+          ],
+          [
+            'feedback',
+            buildFeedbackPrompt({
+              imageFeedback: 'शीर्षक मोठे करा',
+              brand: 'dgipr',
+              logoStyle,
+            }),
+          ],
+        ] as const;
+      const before = lanes();
+      const explicit = lanes('card-right');
+      before.forEach(([lane, text], i) => {
+        if (explicit[i]![1] !== text)
+          failures.push(`${lane}: an explicit card-right changed the prompt`);
+      });
+      for (const style of [
+        'circle-left',
+        'quarter-left',
+        'card-left',
+      ] as const) {
+        for (const [lane, text] of lanes(style)) {
+          if (!text.includes('top-left'))
+            failures.push(
+              `${lane}/${style}: the badge corner is not named top-left`,
+            );
+          // The one legitimate top-right: the REFERENCE master's own badge, which the onbrand
+          // lane tells the model to copy none of.
+          if (text.replaceAll(SOCIAL_CHROME.lockup, '').includes('top-right'))
+            failures.push(`${lane}/${style}: still names the top-right corner`);
+        }
+      }
+      const quarterFeedback = buildFeedbackPrompt({
+        imageFeedback: 'शीर्षक मोठे करा',
+        brand: 'dgipr',
+        logoStyle: 'quarter-right',
+      });
+      if (!quarterFeedback.includes('quarter-circle'))
+        failures.push(
+          'feedback on a quarter badge does not describe the quarter-circle it must erase',
+        );
+      if (!quarterFeedback.includes('240 x 240'))
+        failures.push(
+          'feedback on a quarter badge does not reserve its 240 x 240 corner',
+        );
+      const circleFresh = buildPosterPrompt({
+        copy: COPY,
+        copyStyle: 'info_bullets',
+        designMode: 'fresh',
+        brand: 'dgipr',
+        hasPhoto: true,
+        logoStyle: 'circle-right',
+      });
+      if (!circleFresh.includes('A round official emblem badge (210 × 210 px)'))
+        failures.push(
+          'fresh prompt does not describe the circle badge at its reserve',
+        );
     }
 
     if (failures.length > 0) {

@@ -19,7 +19,18 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import {
+  SOCIAL_LOGO_FOOTPRINT,
+  SOCIAL_LOGO_RESERVE,
+  SOCIAL_LOGO_STYLES,
+  pickSocialLogoStyle,
+  socialLogoShape,
+  socialLogoSide,
+  type SocialLogoStyle,
+} from '@dgipr/schemas';
+import {
+  detectSocialLogoStyle,
   overlayTwitterChrome,
+  placeSocialLogo,
   SOCIAL_ARTWORK_HEIGHT,
   SOCIAL_POSTER_HEIGHT,
 } from '../src/twitter-chrome.js';
@@ -87,6 +98,7 @@ async function main(): Promise<void> {
     failures.push(
       `re-stamping grew the poster to ${await size(restamped)} — feedback rounds would stack strips`,
     );
+  await checkLogoStyles(poster, png, failures);
   if (failures.length > 0) {
     console.error(`\n${failures.length} failure(s):`);
     for (const f of failures) console.error(`  - ${f}`);
@@ -95,6 +107,135 @@ async function main(): Promise<void> {
     console.log(
       `OK: artwork ${WIDTH}x${SOCIAL_ARTWORK_HEIGHT} -> finished ${finished} (4:5), and re-stamping is a no-op.`,
     );
+  }
+}
+
+// THE LOGO ROTATION (2026-10-03). Every style is stamped onto the stand-in and written out, plus
+// a contact sheet of all six, and the properties an eyeball is bad at are asserted:
+//   - the default stamp is still byte-identical to an explicit card-right (no silent change for
+//     a caller that passes no style);
+//   - each badge reaches exactly SOCIAL_LOGO_FOOTPRINT from its own corner and stays inside the
+//     prompt's SOCIAL_LOGO_RESERVE — or the prompt reserves the wrong size;
+//   - nothing the badge paints falls outside its shape (a wordmark spilling past a circle's edge
+//     would show as a stray piece of text on the artwork);
+//   - the rotation reaches all six styles over ordinary uuids, and is stable per id.
+async function checkLogoStyles(
+  artwork: Buffer,
+  defaultStamp: Buffer,
+  failures: string[],
+): Promise<void> {
+  const explicit = await overlayTwitterChrome(artwork, {
+    logoStyle: 'card-right',
+  });
+  if (!explicit.equals(defaultStamp))
+    failures.push(
+      'the default stamp is no longer identical to an explicit card-right',
+    );
+
+  if ((await detectSocialLogoStyle(artwork)) !== null)
+    failures.push('unstamped artwork was detected as carrying a badge');
+  const tiles: Buffer[] = [];
+  for (const style of SOCIAL_LOGO_STYLES) {
+    const stamped = await overlayTwitterChrome(artwork, { logoStyle: style });
+    const out = join(DEFAULT_OUT_DIR, `twitter-chrome-${style}.png`);
+    await writeFile(out, stamped);
+    tiles.push(stamped);
+    const detected = await detectSocialLogoStyle(stamped);
+    if (detected !== style)
+      failures.push(
+        `${style}: detected as ${detected ?? 'nothing'} on its own stamped poster`,
+      );
+
+    const placed = await placeSocialLogo(style, WIDTH);
+    const side = socialLogoSide(style);
+    const shape = socialLogoShape(style);
+    const reachX =
+      side === 'right' ? WIDTH - placed.left : placed.left + placed.width;
+    const reachY = placed.top + placed.height;
+    const foot = SOCIAL_LOGO_FOOTPRINT[shape];
+    const reserve = SOCIAL_LOGO_RESERVE[shape];
+    if (Math.abs(reachX - foot.width) > 1 || Math.abs(reachY - foot.height) > 1)
+      failures.push(
+        `${style}: badge reaches ${reachX}x${reachY} from its corner, schemas says ${foot.width}x${foot.height}`,
+      );
+    if (reachX > reserve.width || reachY > reserve.height)
+      failures.push(
+        `${style}: badge (${reachX}x${reachY}) overflows the prompt reserve`,
+      );
+
+    if (shape !== 'card') {
+      const alpha = await sharp(placed.data)
+        .ensureAlpha()
+        .extractChannel(3)
+        .raw()
+        .toBuffer();
+      const [cx, cy, r] =
+        shape === 'circle'
+          ? [placed.width / 2, placed.height / 2, placed.width / 2]
+          : [side === 'right' ? placed.width : 0, 0, placed.width];
+      let outside = 0;
+      for (let y = 0; y < placed.height; y += 1) {
+        for (let x = 0; x < placed.width; x += 1) {
+          if (alpha[y * placed.width + x]! === 0) continue;
+          // 1.5px of tolerance for the antialiased edge.
+          if (Math.hypot(x + 0.5 - cx, y + 0.5 - cy) > r + 1.5) outside += 1;
+        }
+      }
+      if (outside > 0)
+        failures.push(
+          `${style}: ${outside} badge pixels fall outside its ${shape}`,
+        );
+    }
+    console.log(
+      `  ${style.padEnd(14)} ${placed.width}x${placed.height} at (${placed.left}, ${placed.top}) -> ${out}`,
+    );
+  }
+
+  // Contact sheet: the top 420px of each stamped poster, 2 per row at half size.
+  const crop = 420;
+  const cellW = WIDTH / 2;
+  const cellH = crop / 2;
+  const cells = await Promise.all(
+    tiles.map((t) =>
+      sharp(t)
+        .extract({ left: 0, top: 0, width: WIDTH, height: crop })
+        .resize(cellW, cellH)
+        .png()
+        .toBuffer(),
+    ),
+  );
+  const sheet = await sharp({
+    create: {
+      width: cellW * 2 + 10,
+      height: cellH * 3 + 20,
+      channels: 3,
+      background: '#888888',
+    },
+  })
+    .composite(
+      cells.map((input, i) => ({
+        input,
+        left: (i % 2) * (cellW + 10),
+        top: Math.floor(i / 2) * (cellH + 10),
+      })),
+    )
+    .png()
+    .toBuffer();
+  const sheetPath = join(DEFAULT_OUT_DIR, 'twitter-chrome-styles.png');
+  await writeFile(sheetPath, sheet);
+  console.log(`Wrote ${sheetPath}`);
+
+  const seen = new Map<SocialLogoStyle, number>();
+  for (let i = 0; i < 600; i += 1) {
+    const id = crypto.randomUUID();
+    const style = pickSocialLogoStyle(id);
+    seen.set(style, (seen.get(style) ?? 0) + 1);
+    if (pickSocialLogoStyle(id) !== style)
+      failures.push('rotation is not deterministic for one id');
+  }
+  for (const style of SOCIAL_LOGO_STYLES) {
+    const n = seen.get(style) ?? 0;
+    if (n < 50) failures.push(`rotation reaches ${style} only ${n}/600 times`);
   }
 }
 

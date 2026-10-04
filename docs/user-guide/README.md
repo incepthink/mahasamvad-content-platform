@@ -1,6 +1,6 @@
-# Introduction — महासंवाद मजकूर मंच
+# Introduction — एआय न्यूजरूम (AI Newsroom)
 
-**महासंवाद मजकूर मंच** (Mahasamvad Content Platform) helps Government of Maharashtra communication teams turn official source material into publication-ready content. The interface is Marathi-first and does not require a sign-in.
+**एआय न्यूजरूम** (AI Newsroom) helps Government of Maharashtra communication teams turn official source material into publication-ready content. The interface is Marathi-first and does not require a sign-in.
 
 ![The current home page](.gitbook/assets/01-overview--home.png)
 

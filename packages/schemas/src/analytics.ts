@@ -203,6 +203,12 @@ export const AnalyticsResponseSchema = z.object({
   // The KPI strip, in display order.
   headline: z.array(MetricSchema),
   daily: z.array(AnalyticsDaySchema),
+  // The window before `daily`, day for day, so the landing page can draw the previous period
+  // as a dashed line under the current one. Empty for `all`. Defaulted so an older API parses.
+  previousDaily: z.array(AnalyticsDaySchema).default([]),
+  // The last 52 weeks, day by day, for the landing page's heatmap. Filled only on the `all`
+  // response (whose rows already cover a year); empty on every other range.
+  yearDaily: z.array(AnalyticsDaySchema).default([]),
   features: z.array(AnalyticsFeatureSchema),
   // Every rate behind a `costEstimated: true` service row, so the page prints the numbers it
   // used rather than asking the reader to trust them.

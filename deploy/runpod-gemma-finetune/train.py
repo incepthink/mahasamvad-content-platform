@@ -887,7 +887,11 @@ def load_model(base_model: str, revision: str | None, skip_quant: Sequence[str])
         "device_map": "auto",
         "dtype": torch.bfloat16,
         "trust_remote_code": True,
-        "attn_implementation": "eager",
+        # SDPA, not eager: eager materialises heads x N x N scores, which for one page image
+        # (~10k vision patches) or an 18k-token example is tens of GB and OOMs an 80 GB card.
+        # Gemma 4's text and vision attention use no logit soft-capping (only the audio tower
+        # does), so SDPA computes the same function.
+        "attn_implementation": "sdpa",
     }
     if revision:
         kwargs["revision"] = revision
@@ -1219,6 +1223,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         skip_quant = list(VISION_SKIP_QUANT) if multimodal else []
     else:
         skip_quant = [part.strip() for part in args.skip_quant_modules.split(",") if part.strip()]
+    # A non-empty list REPLACES transformers' default, which keeps the output layer
+    # unquantised. Gemma ties lm_head to the embeddings, so a quantised lm_head fails
+    # bitsandbytes' `weight.shape[1] == 1` assertion on the first forward pass.
+    if skip_quant and "lm_head" not in skip_quant:
+        skip_quant.append("lm_head")
     model = load_model(args.base_model, args.revision, skip_quant)
     model.config.use_cache = False
 
@@ -1307,7 +1316,40 @@ def main(argv: Sequence[str] | None = None) -> int:
         key = "eval_strategy" if "eval_strategy" in accepted else "evaluation_strategy"
         training_kwargs[key] = "epoch"
 
-    trainer = Trainer(
+    training_kwargs["prediction_loss_only"] = True
+
+    class _ScoredWindowTrainer(Trainer):
+        """Compute logits for the scored tail only.
+
+        Every example is prompt-then-answer with the prompt masked, so the loss needs logits
+        only from the position before the first scored token to the end. Gemma's vocabulary is
+        262k entries: full-sequence fp32 logits for a 15k-token example are ~15 GB before
+        cross_entropy copies them, which OOMs an 80 GB card. `logits_to_keep` keeps the last N
+        positions, so this is the same loss at a fraction of the memory.
+        """
+
+        def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+            labels = inputs.pop("labels")
+            first = first_scored_index(labels.tolist())
+            keep = labels.shape[1] - first + 1
+            outputs = model(**inputs, logits_to_keep=keep)
+            logits = outputs.logits[:, :-1, :].float()
+            targets = labels[:, first:].to(logits.device)
+            loss = torch.nn.functional.cross_entropy(
+                logits.reshape(-1, logits.shape[-1]),
+                targets.reshape(-1),
+                ignore_index=-100,
+                reduction="sum",
+            )
+            denominator = (
+                num_items_in_batch
+                if num_items_in_batch is not None
+                else (targets != -100).sum()
+            )
+            loss = loss / denominator
+            return (loss, outputs) if return_outputs else loss
+
+    trainer = _ScoredWindowTrainer(
         model=model,
         args=TrainingArguments(**training_kwargs),
         train_dataset=_Examples(train_split.kept),
@@ -1382,6 +1424,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"  --enable-lora --max-lora-rank {args.lora_r} \\")
     print(f"  --lora-modules {args.adapter_name}={output_dir}")
     return 0
+
+
+def first_scored_index(label_rows: Sequence[Sequence[int]]) -> int:
+    """The earliest position any row of a batch scores. Position 0 can never be scored (there
+    is no token before it to predict from), so a row scoring nothing raises rather than
+    silently training on an empty window."""
+    first: int | None = None
+    for row in label_rows:
+        for index, label in enumerate(row):
+            if label != -100:
+                first = index if first is None else min(first, index)
+                break
+    if first is None:
+        raise ValueError("a batch with no scored tokens reached the loss")
+    if first == 0:
+        raise ValueError("a scored token at position 0 has no context to be predicted from")
+    return first
 
 
 def collate_examples(batch: Sequence[AssembledExample], pad_id: int, torch: Any) -> dict[str, Any]:
@@ -1606,6 +1665,17 @@ def run_self_test() -> int:
     check("prompt fully masked", assembled.labels[:3] == [-100, -100, -100])
     check("answer and stop scored", assembled.labels[3:] == [7, 8, 106])
     check("lengths line up", len(assembled.input_ids) == len(assembled.labels))
+    check("scored window starts at the first answer token",
+          first_scored_index([assembled.labels]) == 3)
+    check("scored window takes the earliest row of a batch",
+          first_scored_index([[-100, -100, 5, 6], [-100, 7, 8, -100]]) == 1)
+    for bad in ([[-100, -100]], [[4, 5]]):
+        try:
+            first_scored_index(bad)
+        except ValueError:
+            check(f"unscorable labels {bad} are refused", True)
+        else:
+            check(f"unscorable labels {bad} are refused", False)
     check("counts reported", (assembled.prompt_tokens, assembled.answer_tokens) == (3, 3))
     check("not flagged truncated", assembled.truncated is False)
     check(

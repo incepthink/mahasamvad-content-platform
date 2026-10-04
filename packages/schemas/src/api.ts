@@ -404,6 +404,12 @@ export const CreateGenerationRequestSchema = z
     // used as the edit canvas; with no pin the poster is generated from scratch.
     // Absent/empty ⇒ today's built prompt.
     imagePrompt: z.string().trim().max(IMAGE_PROMPT_MAX_CHARS).optional(),
+    // The नवीन checkbox (migration 0061): render this run's poster with the NEWER OpenAI image
+    // model (OPENAI_IMAGE_MODEL_NEW on the API, default gpt-image-2.5-flare) instead of the
+    // deployment default. A boolean, not a model id — which model "new" means is the API's
+    // decision, never the browser's. Ignored on a lane that renders no gpt-image poster.
+    // Absent/false ⇒ the default model.
+    newImageModel: z.boolean().optional(),
     // Dynamic Poster runs only (migration 0052): the storage path of the poster the officer
     // uploaded, as returned by POST /generations/motion-image. A PATH rather than a URL
     // because the route checks it against MOTION_SOURCE_PREFIX — a public URL is a string

@@ -12,6 +12,7 @@ import {
   buildArticleFeedbackPrompt,
   buildArticlePosterPrompt,
   buildFeedbackPrompt,
+  socialChromeFor,
   buildCustomPosterPrompt,
   buildPosterPrompt,
   buildYoutubeThumbnailPrompt,
@@ -98,11 +99,13 @@ import {
   overlayArticleChrome,
   overlayCmoChrome,
   overlayTwitterChrome,
+  runWithImageModel,
 } from '@dgipr/poster-renderer';
 import {
   addGenerationCost,
   findGlossaryTermsInText,
   getGeneration,
+  getGenerationImageModel,
   listActiveEditorialPreferences,
   insertGlossaryCandidates,
   insertRevision,
@@ -154,6 +157,8 @@ import {
   sourceFilesForGeneration,
 } from './source-files.js';
 import { listKnownDesignations } from './translation-terms.js';
+import type { SocialLogoStyle } from '@dgipr/schemas';
+import { currentSocialLogoStyle, socialLogoStyleFor } from './social-logo.js';
 
 const running = new Set<string>();
 
@@ -654,7 +659,15 @@ export function runJob(
     // accumulator) plus the fixed image-render cost the job records explicitly.
     const cost = createCostAccumulator();
     try {
-      await runInCostScope(cost, () => runInCostTask(task, job));
+      // The image model this run opted into with the नवीन checkbox (migration 0061), scoped
+      // over the WHOLE job so every gpt-image call inside it — initial render, redo, pixel
+      // feedback, carousel slides — uses it without a model argument being threaded through.
+      // Best-effort: null (unticked, un-applied 0061, or a read error) is the default model.
+      const imageModel = await getGenerationImageModel(client, id);
+      if (imageModel) console.log(`[job ${id}] image model: ${imageModel}`);
+      await runInCostScope(cost, () =>
+        runWithImageModel(imageModel, () => runInCostTask(task, job)),
+      );
       await updateGeneration(client, id, {
         status: 'completed',
         step: 'done',
@@ -1734,6 +1747,10 @@ export async function renderSocialPosterFeedbackEdit(
   // feedback edit — which repaints the whole canvas — keeps each subject identical to the
   // original rather than drifting a face a little further every round.
   officer: readonly Buffer[] = [],
+  // The badge the poster being edited carries (currentSocialLogoStyle). The prompt tells the model
+  // to erase exactly that badge and the stamp puts the same one back, so it cannot move between
+  // versions. Absent = the pre-rotation top-right card. Ignored for CMO.
+  logoStyle?: SocialLogoStyle,
   // Both halves: `png` is what the officer receives, `raw` the same edit BEFORE the chrome
   // goes back on — which is the un-branded copy the plain download serves.
 ): Promise<{ png: Buffer; raw: Buffer }> {
@@ -1744,6 +1761,7 @@ export async function renderSocialPosterFeedbackEdit(
       markerCount,
       clearActions: clear.actions ?? [],
       contentInventory: clear.inventory ?? [],
+      logoStyle,
     }),
     {
       count: officer.length,
@@ -1773,7 +1791,10 @@ export async function renderSocialPosterFeedbackEdit(
     }
     return { png: await overlayCmoChrome(rawPoster, cmoPhoto), raw: rawPoster };
   }
-  return { png: await overlayTwitterChrome(rawPoster), raw: rawPoster };
+  return {
+    png: await overlayTwitterChrome(rawPoster, { logoStyle }),
+    raw: rawPoster,
+  };
 }
 
 // In-process recency ring: the master ids the last few DGIPR runs of a given type used, so
@@ -2274,10 +2295,17 @@ async function renderAndStoreSocialPoster(
   }
 
   // 4. Image prompt (pure string assembly, no model call).
+  //
+  // The run's badge (social-logo.ts): a card, circle or quarter-circle, top-left or top-right.
+  // The prompt reserves that corner and the stamp below puts that badge there. CMO has its own
+  // full-width header and takes none.
+  const logoStyle = brand === 'cmo' ? undefined : socialLogoStyleFor(row);
+  if (logoStyle) console.log(`[job ${id}] logo style: ${logoStyle}`);
   const lanePrompt = customPrompt
     ? buildCustomPosterPrompt({
         imagePrompt: customPrompt,
         information: row.note,
+        logoStyle,
         // A resolved reference on this lane can only be the officer's own pin (a fresh run
         // resolves nothing at all), so this is exactly "is the model editing an image?".
         editsReference: resolved !== null,
@@ -2306,6 +2334,7 @@ async function renderAndStoreSocialPoster(
         hasPhoto: copyResult?.hasPhoto ?? false,
         // Fresh branch only: the DESIGN DIRECTION block (when present) + LIGHT BACKGROUND always.
         designDirection,
+        logoStyle,
       });
   // Declares the officer's pictures ahead of everything else; unchanged when there are none.
   // On a template render the master is image 1 and the pictures follow it.
@@ -2404,7 +2433,7 @@ async function renderAndStoreSocialPoster(
     await uploadPng(client, cmoPhotoPath(id), photo, true);
     posterPng = await overlayCmoChrome(rawPoster, photo);
   } else {
-    posterPng = await overlayTwitterChrome(rawPoster);
+    posterPng = await overlayTwitterChrome(rawPoster, { logoStyle });
   }
   const posterObjectPath = posterPath(id, version);
   await uploadPng(client, posterObjectPath, posterPng, upsert);
@@ -2512,12 +2541,14 @@ export function startSocialPostJob(
     }
 
     // Caption → article column (the social lane's convention). The supplied note is sent
-    // directly to the deliberately simple caption prompt; poster copy is not included.
+    // directly to the caption prompt; poster copy is not included. A caption-only run gets
+    // the standalone news-report shape, one beside a poster the one-or-two-sentence shape.
     await updateGeneration(client, id, { step: 'caption' });
     const caption = await runInCostTask('social_caption_creation', () =>
       generateSocialCaption({
         note: row.note,
         platform: socialPlatformOf(row.category),
+        mode: captionOnly ? 'standalone' : 'with_poster',
       }),
     );
     await updateGeneration(client, id, { article: caption });
@@ -2954,9 +2985,12 @@ export function startGenerateCaptionJob(
           const row = await getGeneration(client, id);
           if (!row) throw new Error(`Generation ${id} not found.`);
 
+          // A caption-only row whose caption failed lands here too, so the mode is read
+          // off the row rather than assumed to accompany a poster.
           const caption = await generateSocialCaption({
             note: row.note,
             platform: socialPlatformOf(row.category),
+            mode: row.outputType === 'article' ? 'standalone' : 'with_poster',
           });
           await updateGeneration(client, id, { article: caption });
         }),
@@ -3636,6 +3670,17 @@ export function startPosterImageFeedbackJob(
         leadingImages: ['the current poster, which is the image being edited'],
         mode: 'feedback',
       });
+    // The badge on the poster being edited, read off its own pixels (social-logo.ts): the prompt
+    // must describe the badge that is actually there, or the model leaves it beside the
+    // re-stamped one. Social DGIPR only — CMO, the article poster and the thumbnail have fixed
+    // chrome of their own.
+    const socialPoster =
+      isSocialCategory(row.category) && row.templateBrand !== 'cmo'
+        ? await downloadPng(client, row.posterPath)
+        : undefined;
+    const logoStyle = socialPoster
+      ? await currentSocialLogoStyle(socialPoster, row)
+      : undefined;
     let inputUrl = publicUrl(client, row.posterPath);
     let feedbackText = input.feedback ?? '';
     // Revision history keeps the user's own words, never the machine text.
@@ -3644,7 +3689,8 @@ export function startPosterImageFeedbackJob(
     let contentInventory: readonly string[] = [];
 
     if (annotations.length > 0 || clearRegions.length > 0) {
-      const cleanPoster = await downloadPng(client, row.posterPath);
+      const cleanPoster =
+        socialPoster ?? (await downloadPng(client, row.posterPath));
       const marked = await annotateFeedbackRegions(
         cleanPoster,
         annotations.map((a) => a.region),
@@ -3678,6 +3724,7 @@ export function startPosterImageFeedbackJob(
         // The interpreter only needs to know the canvas it is looking at. A thumbnail is
         // landscape like the article poster, so it reads that way.
         posterKind: isSocialCategory(row.category) ? 'twitter' : 'article',
+        socialLockup: logoStyle ? socialChromeFor(logoStyle).lockup : undefined,
       });
       contentInventory = interpreted.contentInventory;
       console.log(
@@ -3747,6 +3794,7 @@ export function startPosterImageFeedbackJob(
         cmoPhoto,
         { actions: clearActions, inventory: contentInventory },
         officerImages,
+        logoStyle,
       );
       posterPng = rendered.png;
       rawPoster = rendered.raw;

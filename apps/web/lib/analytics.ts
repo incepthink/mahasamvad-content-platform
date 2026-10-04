@@ -77,6 +77,11 @@ const METRIC_LABELS: Readonly<Record<string, string>> = {
   fromGenerations: STR.analyticsMetricFromGenerations,
   issuesFound: STR.analyticsMetricIssuesFound,
   projectsStarted: STR.analyticsMetricProjectsStarted,
+  dynamicPosters: STR.analyticsMetricDynamicPosters,
+  carouselPosts: STR.analyticsMetricCarouselPosts,
+  framesRendered: STR.analyticsMetricFramesRendered,
+  storyboardAnswers: STR.analyticsMetricStoryboardAnswers,
+  storyboardImages: STR.analyticsMetricStoryboardImages,
 };
 
 const SLICE_LABELS: Readonly<Record<string, string>> = {
@@ -84,6 +89,7 @@ const SLICE_LABELS: Readonly<Record<string, string>> = {
   facebook: STR.analyticsSliceFacebook,
   articlePoster: STR.analyticsSliceArticlePoster,
   youtubeThumb: STR.analyticsSliceYoutubeThumb,
+  carouselSlides: STR.analyticsSliceCarouselSlides,
   news: STR.analyticsSliceNews,
   scheme: STR.analyticsSliceScheme,
   english: STR.analyticsSliceEnglish,
@@ -125,6 +131,12 @@ const TASK_LABELS: Readonly<Record<string, string>> = {
   social_post_creation: STR.analyticsTaskSocialPost,
   carousel_plan: STR.analyticsTaskCarouselPlan,
   carousel_slide: STR.analyticsTaskCarouselSlide,
+  carousel_creation: STR.analyticsTaskCarouselCreation,
+  carousel_slide_regeneration: STR.analyticsTaskCarouselSlideRegeneration,
+  carousel_slide_revision: STR.analyticsTaskCarouselSlideRevision,
+  dynamic_poster_creation: STR.analyticsTaskDynamicPoster,
+  dynamic_poster_revision: STR.analyticsTaskDynamicPosterRevision,
+  dynamic_poster_crop: STR.analyticsTaskDynamicPosterCrop,
   social_caption_creation: STR.analyticsTaskSocialCaption,
   social_caption_revision: STR.analyticsTaskSocialCaptionRevision,
   edit_assistant: STR.analyticsTaskEditAssistant,
@@ -139,6 +151,8 @@ const TASK_LABELS: Readonly<Record<string, string>> = {
   video_clip_creation: STR.analyticsTaskVideoClips,
   video_scene_reanimation: STR.analyticsTaskVideoSceneRevision,
   video_narration: STR.analyticsTaskVideoNarration,
+  new_video_render: STR.analyticsTaskNewVideoRender,
+  new_video_storyboard: STR.analyticsTaskNewVideoStoryboard,
   legacy_combined: STR.analyticsTaskLegacyCombined,
 };
 

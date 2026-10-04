@@ -40,9 +40,15 @@ import { pathToFileURL } from 'node:url';
 export type ReservedZoneGeometry = Readonly<{
   width: number;
   height: number;
-  /** Top-right emblem badge zone. */
+  /** The emblem badge zone, in the top corner named by `lockupSide`. */
   lockupWidth: number;
   lockupHeight: number;
+  /**
+   * Which top corner the badge is stamped into. Absent = 'right', which is every lane's corner
+   * until the social logo rotation (2026-10-03, SOCIAL_LOGO_STYLES in @dgipr/schemas) — and which
+   * keeps every prompt that does not pass it byte-identical.
+   */
+  lockupSide?: 'left' | 'right' | undefined;
   /** Full-width bottom strip. */
   footerHeight: number;
   /**
@@ -65,6 +71,11 @@ export type ReservedZoneGeometry = Readonly<{
    */
   footerAppendedMargin?: number | undefined;
 }>;
+
+/** "top-right" / "top-left": the corner the badge zone sits in. */
+export function lockupCorner(g: ReservedZoneGeometry): string {
+  return `top-${g.lockupSide ?? 'right'}`;
+}
 
 /** True when the footer is joined on below the artwork rather than pasted over it. */
 export function footerIsAppended(g: ReservedZoneGeometry): boolean {
@@ -151,12 +162,12 @@ export function fitToReserveRule(
   // artwork ends on, which is a visibly broken poster rather than a lost one.
   const consequence = footerIsAppended(g)
     ? [
-        `After you finish, software pastes an OPAQUE badge into the top-right corner — any word, numeral, icon or subject you place under it is COVERED AND LOST, the sentence ends mid-word, and the whole image has to be thrown away. Along the bottom, a full-width branding band about ${g.footerHeight} pixels tall is joined on DIRECTLY BELOW this image; it takes no space out of this canvas and covers nothing you draw.`,
+        `After you finish, software pastes an OPAQUE badge into the ${lockupCorner(g)} corner — any word, numeral, icon or subject you place under it is COVERED AND LOST, the sentence ends mid-word, and the whole image has to be thrown away. Along the bottom, a full-width branding band about ${g.footerHeight} pixels tall is joined on DIRECTLY BELOW this image; it takes no space out of this canvas and covers nothing you draw.`,
         `So the design itself must reach the bottom edge in whatever colours it uses — only TEXT stops short, ${g.footerAppendedMargin} pixels above it, so the last line is not jammed against the band. Ending the design early and leaving a plain empty strip above the bottom edge is a broken, letterboxed poster, and is a worse result than slightly smaller type.`,
         'Showing every point in SMALLER type is correct. Showing the same points in larger type with the last lines jammed against the bottom edge is wrong.',
       ]
     : [
-        `After you finish, software pastes an OPAQUE full-width band over the bottom ${g.footerHeight} pixels and an OPAQUE badge into the top-right corner. They are not transparent and they are not moved to suit your layout: any word, numeral, icon or subject you place under them is COVERED AND LOST — the reader never sees it, the sentence ends mid-word, and the whole image has to be thrown away.`,
+        `After you finish, software pastes an OPAQUE full-width band over the bottom ${g.footerHeight} pixels and an OPAQUE badge into the ${lockupCorner(g)} corner. They are not transparent and they are not moved to suit your layout: any word, numeral, icon or subject you place under them is COVERED AND LOST — the reader never sees it, the sentence ends mid-word, and the whole image has to be thrown away.`,
         'Showing every point in SMALLER type is correct. Showing the same points in larger type with the last lines buried under the band is wrong, and is a worse failure than any amount of empty space.',
       ];
 
@@ -352,7 +363,7 @@ export function reservedZoneBlock(
   // canvas the model is painting.
   if (footerIsAppended(g)) {
     return [
-      `RESERVED BADGE CORNER: the top-right ${g.lockupWidth} x ${g.lockupHeight} pixels (a corner square ${fractionOf(g.lockupWidth, g.width)} the width) of the ${g.width} x ${g.height} output is reserved for an official badge composited on later by software.`,
+      `RESERVED BADGE CORNER: the ${lockupCorner(g)} ${g.lockupWidth} x ${g.lockupHeight} pixels (a corner square ${fractionOf(g.lockupWidth, g.width)} the width) of the ${g.width} x ${g.height} output is reserved for an official badge composited on later by software.`,
       ...continuityRules('the reserved corner'),
       `THE BOTTOM EDGE IS A JOIN, NOT A COVER ZONE: the official footer band is attached directly BELOW this image afterwards and takes NO space out of this canvas, so nothing has to be kept clear for it. DESIGN ALL THE WAY DOWN TO THE VERY BOTTOM EDGE: colour blocks, panels, bands, gradients, background and photographs must reach the last row of pixels and run off the edge, exactly as they do at the left and right edges.`,
       `THERE IS NO COLOUR RESTRICTION AT THE BOTTOM: that edge may be any colour the design uses — dark, saturated, patterned or photographic — and it does NOT have to be pale, white, neutral, plain or empty. Do NOT end the design early, do not leave a large empty gap above the bottom edge, and do not park a blank or lighter strip there: an empty band above the footer makes the finished poster look letterboxed and broken.`,
@@ -362,7 +373,7 @@ export function reservedZoneBlock(
   }
 
   const parts = [
-    `RESERVED BRANDING ZONES: only the top-right ${g.lockupWidth} x ${g.lockupHeight} pixels (a corner square ${fractionOf(g.lockupWidth, g.width)} the width) and the full-width bottom ${g.footerHeight} pixels (a strip ${fractionOf(g.footerHeight, g.height)} the height) of the ${g.width} x ${g.height} output are reserved for official branding composited on later by software.`,
+    `RESERVED BRANDING ZONES: only the ${lockupCorner(g)} ${g.lockupWidth} x ${g.lockupHeight} pixels (a corner square ${fractionOf(g.lockupWidth, g.width)} the width) and the full-width bottom ${g.footerHeight} pixels (a strip ${fractionOf(g.footerHeight, g.height)} the height) of the ${g.width} x ${g.height} output are reserved for official branding composited on later by software.`,
   ];
   if (footerNote) parts.push(footerNote);
   parts.push(
@@ -728,6 +739,25 @@ if (
     'FOOTER NOTE.',
     'appended lane emitted the overlay-era footer note',
   );
+
+  // The social logo rotation: a left badge must move every corner mention, and the default must
+  // still say top-right.
+  const LEFT: ReservedZoneGeometry = { ...SOCIAL, lockupSide: 'left' };
+  for (const text of [
+    reservedZoneBlock(LEFT),
+    fitToReserveRule(LEFT, { allowStructuralReflow: true }),
+  ]) {
+    need(
+      text,
+      'top-left',
+      'left-side badge zone does not name the top-left corner',
+    );
+    deny(
+      text,
+      'top-right',
+      'left-side badge zone still names the top-right corner',
+    );
+  }
 
   const socialFit = fitToReserveRule(SOCIAL, { allowStructuralReflow: true });
   need(

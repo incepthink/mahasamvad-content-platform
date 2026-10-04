@@ -57,6 +57,8 @@
 
 import { pathToFileURL } from 'node:url';
 import { GeminiRequestError, geminiFetch } from '../http/gemini-request.js';
+import { probeVideoDurationSeconds } from '@dgipr/poster-renderer';
+import { recordGeminiVideoCost } from '../cost/cost-meter.js';
 
 // The experiment's model, per the brief. Overridable because every Gemini preview id in this
 // repo has been renamed at least once, and a rename must be an .env edit rather than a deploy.
@@ -767,6 +769,25 @@ export async function awaitInteraction(
 export function fileNameFromUri(uri: string): string | null {
   const match = /files\/([^:/?#]+)/.exec(uri);
   return match?.[1] ? `files/${match[1]}` : null;
+}
+
+// Meter one returned video against the ambient cost scope. Gemini returns no usage object, so
+// the billed seconds are MEASURED off the bytes that came back (before any crop or restore —
+// those are local work on a render already paid for). Best effort: a clip whose length cannot
+// be read logs and records nothing rather than guessing a duration. Returns the seconds read.
+export async function meterInteractionVideo(
+  bytes: Buffer,
+  model: string = GEMINI_VIDEO_MODEL,
+): Promise<number | null> {
+  const seconds = await probeVideoDurationSeconds(bytes);
+  if (seconds === null) {
+    console.warn(
+      `[gemini-video] could not read the length of a ${bytes.length}-byte clip; not metered.`,
+    );
+    return null;
+  }
+  recordGeminiVideoCost(seconds, model);
+  return seconds;
 }
 
 // Downloads the finished MP4 into this process so it can be re-hosted. The Gemini URI is

@@ -44,8 +44,14 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import {
+  DEFAULT_SOCIAL_LOGO_STYLE,
   SOCIAL_LOCKUP_MARGIN_RATIO,
   SOCIAL_LOCKUP_WIDTH_RATIO,
+  SOCIAL_LOGO_STYLES,
+  socialLogoShape,
+  socialLogoSide,
+  type SocialLogoSide,
+  type SocialLogoStyle,
 } from '@dgipr/schemas';
 import { loadScaled } from './article-chrome.js';
 import { joinFooterStrip, type FooterJoinSpec } from './footer-extension.js';
@@ -80,6 +86,28 @@ const LABEL_COLOUR = '#17324d';
 // footage. Change this one constant if a light-footage deployment wants the
 // navy back.
 const LABEL_COLOUR_ON_FOOTAGE = '#ffffff';
+// THE TWO SHAPED BADGES (2026-10-03, see SOCIAL_LOGO_STYLES in @dgipr/schemas). Same emblem and
+// wordmark as the card, on a white circle or a white quarter-circle tab instead of a rounded
+// square. Pixels on the 1280px canvas; SOCIAL_LOGO_FOOTPRINT in schemas is what these cover and
+// must be kept in step with them (circle: 8 + 186 = 194; quarter: 224 flush with the corner).
+//
+// The marks are set a little smaller inside both shapes: the wordmark is the widest part of the
+// lockup and sits at the bottom of it, which is exactly where a circle's chord and a quarter's
+// arc narrow fastest.
+const CIRCLE_DIAMETER = 186;
+const CIRCLE_MARGIN = 8;
+const CIRCLE_MARK_SCALE = 0.86;
+// The quarter is centred ON the corner, so its two straight edges are the poster's own top edge
+// and side edge and only the arc shows. Radius chosen so the marks' far corner (the outer end of
+// the wordmark) clears the arc by ~20px.
+const QUARTER_RADIUS = 224;
+const QUARTER_MARK_SCALE = 0.94;
+const QUARTER_PAD_TOP = 16;
+const QUARTER_PAD_SIDE = 18;
+// Gap between the emblem and the wordmark inside the shaped badges, before mark scaling. The card
+// derives its gap from EMBLEM_TOP/LABEL_TOP; this is the same visual gap.
+const SHAPED_MARK_GAP = 10;
+const BADGE_STROKE_COLOUR = '#dce3ea';
 // footer-new-poster.png was exported on a 3376x4219 transparent canvas; the
 // intended footer artwork occupies the bottom 239 pixels.
 const SOCIAL_FOOTER_SOURCE_HEIGHT = 239;
@@ -256,6 +284,224 @@ export async function renderGovernmentLockup(
   );
 }
 
+// The emblem stacked over the wordmark, centred on `axisX`, starting at `top` — the same two
+// marks the card carries, at `markScale` of their card size. Returned as composite operations so
+// the caller decides the shape behind them.
+async function stackedMarks(
+  markScale: number,
+  axisX: number,
+  top: number,
+): Promise<{
+  marks: { input: Buffer; left: number; top: number }[];
+  width: number;
+  height: number;
+}> {
+  const [emblem, label] = await Promise.all([
+    loadScaled('poster-logo-new.png', EMBLEM_TARGET_WIDTH * markScale),
+    renderGovernmentLabel(markScale, LABEL_COLOUR),
+  ]);
+  const gap = Math.round(SHAPED_MARK_GAP * markScale);
+  return {
+    marks: [
+      {
+        input: emblem.data,
+        left: Math.round(axisX - emblem.width / 2),
+        top: Math.round(top),
+      },
+      {
+        input: label.data,
+        left: Math.round(axisX - label.width / 2),
+        top: Math.round(top + emblem.height + gap),
+      },
+    ],
+    width: Math.max(emblem.width, label.width),
+    height: emblem.height + gap + label.height,
+  };
+}
+
+// A white circle with the marks centred in it.
+async function buildCircleLockup(scale: number): Promise<Raster> {
+  const size = Math.round(CIRCLE_DIAMETER * scale);
+  const stroke = Math.max(1, 1.5 * scale);
+  const markScale = scale * CIRCLE_MARK_SCALE;
+  // Measure the stack once at the top, then place it so it is optically centred: a hair below
+  // true centre, because the wordmark's raster carries more blank line-height under it than the
+  // emblem carries above.
+  const probe = await stackedMarks(markScale, size / 2, 0);
+  const top = (size - probe.height) / 2 + 2 * scale;
+  const { marks } = await stackedMarks(markScale, size / 2, top);
+  const shape = Buffer.from(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}">
+      <circle cx="${size / 2}" cy="${size / 2}" r="${size / 2 - stroke / 2}"
+        fill="#ffffff" stroke="${BADGE_STROKE_COLOUR}" stroke-width="${stroke}"/>
+    </svg>`,
+  );
+  return {
+    data: await sharp(shape).composite(marks).png().toBuffer(),
+    width: size,
+    height: size,
+  };
+}
+
+// A white quarter-circle centred on the poster's corner: its straight edges ARE the poster's top
+// edge and side edge, so only the arc is drawn as an edge. The marks sit in the corner, inset by
+// the pads, with their axis kept off the side edge so the wordmark has room.
+async function buildQuarterLockup(
+  scale: number,
+  side: SocialLogoSide,
+): Promise<Raster> {
+  const r = Math.round(QUARTER_RADIUS * scale);
+  const stroke = Math.max(1, 1.5 * scale);
+  const markScale = scale * QUARTER_MARK_SCALE;
+  const probe = await stackedMarks(markScale, 0, 0);
+  const padSide = QUARTER_PAD_SIDE * scale;
+  const axisX =
+    side === 'right'
+      ? r - padSide - probe.width / 2
+      : padSide + probe.width / 2;
+  const { marks } = await stackedMarks(
+    markScale,
+    axisX,
+    QUARTER_PAD_TOP * scale,
+  );
+  // Centre of the circle is the corner: (r, 0) for the top-right, (0, 0) for the top-left. The
+  // filled region is the corner wedge; the stroke follows the arc only, since the two straight
+  // edges lie on the poster's own edges.
+  const arcInset = stroke / 2;
+  const ar = r - arcInset;
+  const fill =
+    side === 'right'
+      ? `M ${r} 0 L ${r - ar} 0 A ${ar} ${ar} 0 0 0 ${r} ${ar} Z`
+      : `M 0 0 L ${ar} 0 A ${ar} ${ar} 0 0 1 0 ${ar} Z`;
+  const arc =
+    side === 'right'
+      ? `M ${r - ar} 0 A ${ar} ${ar} 0 0 0 ${r} ${ar}`
+      : `M ${ar} 0 A ${ar} ${ar} 0 0 1 0 ${ar}`;
+  const shape = Buffer.from(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${r}" height="${r}">
+      <path d="${fill}" fill="#ffffff"/>
+      <path d="${arc}" fill="none" stroke="${BADGE_STROKE_COLOUR}" stroke-width="${stroke}"/>
+    </svg>`,
+  );
+  return {
+    data: await sharp(shape).composite(marks).png().toBuffer(),
+    width: r,
+    height: r,
+  };
+}
+
+export type PlacedSocialLogo = Readonly<{
+  data: Buffer;
+  width: number;
+  height: number;
+  /** Where its top-left corner lands on the poster. */
+  left: number;
+  top: number;
+}>;
+
+/**
+ * The social badge in a given style, rendered for a poster `posterWidth` pixels wide and already
+ * placed. The ONE place that decides where each style goes, shared by the stamp and by the Canva
+ * layer export so the two cannot disagree about which pixels are the badge.
+ *
+ * `card-right` is exactly what overlayTwitterChrome has always stamped.
+ */
+export async function placeSocialLogo(
+  style: SocialLogoStyle,
+  posterWidth: number,
+): Promise<PlacedSocialLogo> {
+  const scale = posterWidth / ASSET_BASE_WIDTH;
+  const shape = socialLogoShape(style);
+  const side = socialLogoSide(style);
+  let raster: Raster;
+  let margin: number;
+  if (shape === 'circle') {
+    raster = await buildCircleLockup(scale);
+    margin = Math.round(CIRCLE_MARGIN * scale);
+  } else if (shape === 'quarter') {
+    raster = await buildQuarterLockup(scale, side);
+    margin = 0;
+  } else {
+    raster = await renderGovernmentLockup(LOCKUP_WIDTH * scale);
+    margin = Math.round(LOCKUP_MARGIN * scale);
+  }
+  return {
+    ...raster,
+    left: side === 'right' ? posterWidth - raster.width - margin : margin,
+    top: margin,
+  };
+}
+
+// Rendered badges are deterministic for a given style and width, and detection below renders all
+// six, so they are kept for the life of the process.
+const placedLogoCache = new Map<string, Promise<PlacedSocialLogo>>();
+function cachedPlacedLogo(
+  style: SocialLogoStyle,
+  width: number,
+): Promise<PlacedSocialLogo> {
+  const key = `${style}@${width}`;
+  let placed = placedLogoCache.get(key);
+  if (!placed) {
+    placed = placeSocialLogo(style, width);
+    placed.catch(() => placedLogoCache.delete(key));
+    placedLogoCache.set(key, placed);
+  }
+  return placed;
+}
+
+/**
+ * Which logo style a FINISHED social poster actually carries, read off its pixels — or null when
+ * none matches (not one of ours, or the corner was edited after stamping).
+ *
+ * WHY READ IT RATHER THAN RECOMPUTE IT. A feedback round erases the badge it is told about and the
+ * stamp puts the run's badge back; if what the prompt describes is not what is on the image, the
+ * old badge survives beside the new one. The poster was stamped by this file into a lossless PNG,
+ * so the badge's opaque pixels match a fresh render of the same style EXACTLY — which makes this
+ * a lookup, not a guess, and it stays right for posters made before the rotation existed, and
+ * across any change to how a run's style is chosen.
+ */
+export async function detectSocialLogoStyle(
+  poster: Buffer,
+): Promise<SocialLogoStyle | null> {
+  const { data, info } = await sharp(poster)
+    .removeAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  let best: { style: SocialLogoStyle; diff: number } | null = null;
+  for (const style of SOCIAL_LOGO_STYLES) {
+    const placed = await cachedPlacedLogo(style, info.width);
+    if (
+      placed.left + placed.width > info.width ||
+      placed.top + placed.height > info.height
+    )
+      continue;
+    const logo = await sharp(placed.data).ensureAlpha().raw().toBuffer();
+    let sum = 0;
+    let n = 0;
+    // Every 3rd pixel of the badge's fully opaque area is plenty and keeps this cheap.
+    for (let i = 0; i < placed.width * placed.height; i += 3) {
+      if (logo[i * 4 + 3]! !== 255) continue;
+      const x = placed.left + (i % placed.width);
+      const y = placed.top + Math.floor(i / placed.width);
+      const p = (y * info.width + x) * info.channels;
+      sum +=
+        Math.abs(data[p]! - logo[i * 4]!) +
+        Math.abs(data[p + 1]! - logo[i * 4 + 1]!) +
+        Math.abs(data[p + 2]! - logo[i * 4 + 2]!);
+      n += 3;
+    }
+    const diff = n > 0 ? sum / n : Number.POSITIVE_INFINITY;
+    if (!best || diff < best.diff) best = { style, diff };
+  }
+  // A stamped badge reproduces to within rounding; anything else is not one of ours.
+  return best && best.diff < 2 ? best.style : null;
+}
+
+export type SocialChromeOptions = Readonly<{
+  /** Which badge to stamp. Absent = DEFAULT_SOCIAL_LOGO_STYLE, the pre-rotation card. */
+  logoStyle?: SocialLogoStyle | undefined;
+}>;
+
 async function loadSocialFooter(targetWidth: number): Promise<Raster> {
   const source = sharp(resolve(ASSETS_DIR, 'footer-new-poster.png'));
   const meta = await source.metadata();
@@ -347,25 +593,31 @@ export async function socialChromeLayers(
 // crops carry the exact pixels that were removed, so stacking base -> logo -> footer is
 // pixel-identical without requiring a separately stored pre-chrome render.
 //
-// The logo crop is deliberately the complete rectangular badge footprint, including its few
-// background-coloured corner pixels. That makes the reconstruction lossless while ensuring
+// The CARD's logo crop is deliberately the complete rectangular badge footprint, including its
+// few background-coloured corner pixels. That makes the reconstruction lossless while ensuring
 // Magic Layers sees none of the emblem or Marathi wordmark underneath the separate Canva layer.
+//
+// The CIRCLE and QUARTER badges are not rectangles: their bounding box holds a good deal of the
+// poster's own artwork (a quarter of radius 224 leaves ~21% of its square outside the arc). So
+// for those the split follows the badge's own alpha — every pixel the badge touches goes to the
+// logo layer, everything else stays in the base — which is still pixel-identical when restacked,
+// because each pixel lives in exactly one layer at its finished value.
 export async function buildCanvaSocialPosterLayers(
   poster: Buffer,
+  options: SocialChromeOptions = {},
 ): Promise<CanvaSocialPosterLayers> {
   const meta = await sharp(poster).metadata();
   if (!meta.width || !meta.height) {
     throw new Error('Could not read social poster dimensions for Canva.');
   }
 
-  const scale = meta.width / ASSET_BASE_WIDTH;
+  const style = options.logoStyle ?? DEFAULT_SOCIAL_LOGO_STYLE;
   const [lockup, footerRaster] = await Promise.all([
-    renderGovernmentLockup(LOCKUP_WIDTH * scale),
+    placeSocialLogo(style, meta.width),
     loadSocialFooter(meta.width),
   ]);
-  const margin = Math.round(LOCKUP_MARGIN * scale);
-  const logoLeft = meta.width - lockup.width - margin;
-  const logoTop = margin;
+  const logoLeft = lockup.left;
+  const logoTop = lockup.top;
   const footerTop = meta.height - footerRaster.height;
   if (logoLeft < 0 || logoTop < 0 || footerTop < 0) {
     throw new Error(
@@ -373,16 +625,48 @@ export async function buildCanvaSocialPosterLayers(
     );
   }
 
+  const rectangular = socialLogoShape(style) === 'card';
+  // The badge's own coverage, one byte per pixel of its box: non-zero wherever it paints.
+  const badgeAlpha = rectangular
+    ? null
+    : await sharp(lockup.data).ensureAlpha().extractChannel(3).raw().toBuffer();
   const [logo, footer, rawBase] = await Promise.all([
-    sharp(poster)
-      .extract({
-        left: logoLeft,
-        top: logoTop,
-        width: lockup.width,
-        height: lockup.height,
-      })
-      .png()
-      .toBuffer(),
+    rectangular
+      ? sharp(poster)
+          .extract({
+            left: logoLeft,
+            top: logoTop,
+            width: lockup.width,
+            height: lockup.height,
+          })
+          .png()
+          .toBuffer()
+      : sharp(poster)
+          .extract({
+            left: logoLeft,
+            top: logoTop,
+            width: lockup.width,
+            height: lockup.height,
+          })
+          .removeAlpha()
+          .raw()
+          .toBuffer({ resolveWithObject: true })
+          .then(({ data, info }) => {
+            // Raw RGB + a binary alpha joined as raw bytes. `removeAlpha().joinChannel()` chained
+            // silently returns a THREE-channel PNG (see source-overlay.ts), so build RGBA by hand.
+            const rgba = Buffer.alloc(info.width * info.height * 4);
+            for (let i = 0; i < info.width * info.height; i += 1) {
+              rgba[i * 4] = data[i * info.channels]!;
+              rgba[i * 4 + 1] = data[i * info.channels + 1]!;
+              rgba[i * 4 + 2] = data[i * info.channels + 2]!;
+              rgba[i * 4 + 3] = badgeAlpha![i]! > 0 ? 255 : 0;
+            }
+            return sharp(rgba, {
+              raw: { width: info.width, height: info.height, channels: 4 },
+            })
+              .png()
+              .toBuffer();
+          }),
     sharp(poster)
       .extract({
         left: 0,
@@ -409,7 +693,17 @@ export async function buildCanvaSocialPosterLayers(
       }
     }
   };
-  clearAlpha(logoLeft, logoTop, lockup.width, lockup.height);
+  if (badgeAlpha) {
+    for (let y = 0; y < lockup.height; y += 1) {
+      for (let x = 0; x < lockup.width; x += 1) {
+        if (badgeAlpha[y * lockup.width + x]! > 0) {
+          rawBase.data[((logoTop + y) * meta.width + logoLeft + x) * 4 + 3] = 0;
+        }
+      }
+    }
+  } else {
+    clearAlpha(logoLeft, logoTop, lockup.width, lockup.height);
+  }
   clearAlpha(0, footerTop, meta.width, footerRaster.height);
   const base = await sharp(rawBase.data, { raw: rawBase.info })
     .png()
@@ -436,8 +730,9 @@ export async function buildCanvaSocialPosterLayers(
   };
 }
 
-// Composite the white emblem + Marathi wordmark lockup into the top-right corner, and
-// footer-new-poster.png onto a strip appended below the artwork, returning a new PNG.
+// Composite the white emblem + Marathi wordmark lockup into its corner (top-right on the default
+// card; see SOCIAL_LOGO_STYLES for the rotation), and footer-new-poster.png onto a strip appended
+// below the artwork, returning a new PNG.
 //
 // IDEMPOTENCE. This runs on initial renders AND on pixel-feedback re-renders, and a feedback
 // round edits the poster this function last produced — which already carries its appended
@@ -446,15 +741,21 @@ export async function buildCanvaSocialPosterLayers(
 // comes back at DESIGN_ASPECT (1:1.175), a finished poster at FINISHED_ASPECT (4:5). Aspect
 // rather than absolute height because the model is not contractually bound to return 1280
 // wide, and everything else in this file already scales off the width it actually got.
-export async function overlayTwitterChrome(poster: Buffer): Promise<Buffer> {
+//
+// THE LOGO STYLE MUST BE THE SAME ON EVERY STAMP OF ONE RUN. A feedback round erases the badge it
+// can see and this function puts it back, so a different style on the second stamp would move the
+// badge between versions. Callers pass the run's style (socialLogoStyleFor in apps/api).
+export async function overlayTwitterChrome(
+  poster: Buffer,
+  options: SocialChromeOptions = {},
+): Promise<Buffer> {
   const meta = await sharp(poster).metadata();
   if (!meta.width || !meta.height) {
     throw new Error('Could not read poster dimensions for chrome overlay.');
   }
-  const scale = meta.width / ASSET_BASE_WIDTH;
 
   const [lockup, footer] = await Promise.all([
-    renderGovernmentLockup(LOCKUP_WIDTH * scale),
+    placeSocialLogo(options.logoStyle ?? DEFAULT_SOCIAL_LOGO_STYLE, meta.width),
     loadSocialFooter(meta.width),
   ]);
 
@@ -466,13 +767,12 @@ export async function overlayTwitterChrome(poster: Buffer): Promise<Buffer> {
   const base = joined.base;
   const baseHeight = joined.height;
 
-  const margin = Math.round(LOCKUP_MARGIN * scale);
   return sharp(base)
     .composite([
       {
         input: lockup.data,
-        left: meta.width - lockup.width - margin,
-        top: margin,
+        left: lockup.left,
+        top: lockup.top,
       },
       { input: footer.data, left: 0, top: baseHeight - footer.height },
     ])

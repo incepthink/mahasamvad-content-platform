@@ -868,6 +868,12 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   events → `packages/database/src/usage-events.ts` (migration 0043); shapes + the INR rate + the
   reporting timezone → `packages/schemas/src/analytics.ts`; web → `apps/web/app/analytics/page.tsx`
   + `analytics/[feature]/page.tsx` + `Analytics*` components + `lib/analytics.ts`/`useAnalytics.ts`.
+  The landing page is the navy dashboard design (2026-10-04): blocks in
+  `components/AnalyticsHomeCharts.tsx`, pure bucketing/paths/heatmap in `lib/analyticsCharts.ts`,
+  CSS scoped under `.an-home` at the end of `dgipr.css`. It reads two additive payload fields —
+  `previousDaily` (the dashed previous-period line) and `yearDaily` (364 days, filled ONLY on the
+  `all` response, which the heatmap always fetches; `useAnalytics` de-duplicates in-flight
+  requests). The design's "most active users" card is the key-figures card: no individuals.
   Six things worth knowing before changing it. **There is no auth**, so every figure is
   DEPARTMENT-WIDE per feature and nothing counts individuals — `dgipr.dlo.mine` is ordering, never
   identity. The क्रिएटिव्ह आणि सोशल / लेख-बातमी split is `dlo_intake_id`, not category, so
@@ -2011,6 +2017,12 @@ Chromium): `pnpm --filter @dgipr/poster-renderer exec playwright install chromiu
   historical — that edit is a direct OpenAI call, not a workflow); neither mode produces
   a scene image, so poster feedback + manual copy-edit (which need `scenePath`) stay
   `html`-only.
+- **The social badge ROTATES (2026-10-03)** — card / circle / quarter-circle × top-left / top-right
+  (`SOCIAL_LOGO_STYLES`, schemas). New renders: `socialLogoStyleFor(row)` (from the id,
+  `apps/api/src/jobs/social-logo.ts`); existing posters (feedback, Canva): `currentSocialLogoStyle`
+  reads it off the pixels. Stamp/placement → `placeSocialLogo` in `twitter-chrome.ts`; prompt
+  corner + description → `socialZonesFor`/`socialChromeFor` in `build-poster-prompt.ts`. Never
+  hard-code "top-right" in a social prompt again. Harness: `poster:preview:chrome:twitter`.
 - **The social footer is APPENDED below the artwork (2026-08-10), so it can never cover text.**
   `overlayTwitterChrome` no longer pastes the band over the render: `footer-extension.ts` adds a
   strip below it and the band is stamped there.

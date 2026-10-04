@@ -41,7 +41,7 @@ export const metadata: Metadata = {
   manifest: '/manifest.webmanifest',
   appleWebApp: {
     capable: true,
-    title: 'Newsroom',
+    title: STR.appName,
     statusBarStyle: 'default',
   },
 };

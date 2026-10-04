@@ -124,6 +124,8 @@ export {
 } from './generation/revise-article.js';
 export {
   generateSocialCaption,
+  captionSystemPrompt,
+  type CaptionMode,
   type GenerateCaptionInput,
 } from './generation/generate-caption.js';
 export {
@@ -355,6 +357,7 @@ export {
   interactionErrorMessage,
   interactionOutputOf,
   isTerminalInteractionStatus,
+  meterInteractionVideo,
   type Interaction,
   type InteractionImage,
   type InteractionOutput,
@@ -536,6 +539,7 @@ export {
   runInCostTask,
   recordImageCost,
   recordGeminiImageCost,
+  recordGeminiVideoCost,
   recordVideoCost,
   recordTtsCost,
   recordSttCost,
@@ -650,6 +654,9 @@ export {
   buildFreshCopyManifest,
   buildCustomPosterPrompt,
   buildFeedbackPrompt,
+  // The reserved corner + chrome description for a run's logo style (2026-10-03 rotation).
+  socialChromeFor,
+  socialZonesFor,
   type DesignMode as PosterDesignMode,
   type BuildPosterPromptInput,
   type BuildCustomPosterPromptInput,

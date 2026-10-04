@@ -39,7 +39,7 @@ function MahasamvadBrand() {
     <>
       <img src={mahasamvadEmblem.src} alt="" className="site-logo" />
       <span className="site-brand-name" lang="mr">
-        महासंवाद
+        {STR.appName}
       </span>
     </>
   );

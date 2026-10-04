@@ -332,6 +332,18 @@ export function NoteComposer({
           </>
         ) : null}
 
+        {/* नवीन — the newer image model, on every lane that renders a poster. Off by default. */}
+        {form.acceptsPromptImages ? (
+          <CheckOption
+            checked={form.newImageModel}
+            disabled={form.submitting}
+            onChange={form.setNewImageModel}
+            label={STR.newImageModelLabel}
+            title={STR.newImageModelHint}
+            learn="check-new-model"
+          />
+        ) : null}
+
         {/* The page's one action, pushed to the end of the same row. `ml-auto` is what
             keeps it at the right edge on a wide card and lets it wrap onto its own line
             with the rest when the row runs out of width. Enabled, it carries the slow

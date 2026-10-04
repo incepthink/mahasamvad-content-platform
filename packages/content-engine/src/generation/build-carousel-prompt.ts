@@ -37,13 +37,16 @@
 // plus the social lane's LIGHT BACKGROUND rule, which every carousel prompt now carries.
 
 import { pathToFileURL } from 'node:url';
-import type {
-  CarouselDesign,
-  CarouselPlan,
-  CarouselPlanSlide,
-  CarouselSlideDesign,
+import {
+  socialLogoShape,
+  socialLogoSide,
+  type CarouselDesign,
+  type CarouselPlan,
+  type CarouselPlanSlide,
+  type CarouselSlideDesign,
+  type SocialLogoStyle,
 } from '@dgipr/schemas';
-import { SOCIAL_ZONES } from './build-poster-prompt.js';
+import { SOCIAL_ZONES, socialZonesFor } from './build-poster-prompt.js';
 import { carouselLayoutById } from './carousel-layouts.js';
 import {
   DO_NOT_USE_RULE,
@@ -57,8 +60,11 @@ import {
 
 const SIZE = `${SOCIAL_ZONES.width} × ${SOCIAL_ZONES.height}`;
 
-// The social poster's rule blocks, in its order. Identical in the cover and every detail slide.
-function socialRules(): string[] {
+// The social poster's rule blocks, in its order. Identical in the cover and every detail slide —
+// including the badge corner, since every slide of one post is stamped with the post's one logo
+// style (socialLogoStyleFor in apps/api). Absent style = the pre-rotation top-right wording.
+function socialRules(logoStyle?: SocialLogoStyle | undefined): string[] {
+  const zones = socialZonesFor(logoStyle);
   return [
     NUMBERS_RULE,
     '',
@@ -68,10 +74,17 @@ function socialRules(): string[] {
     '',
     DO_NOT_USE_RULE,
     '',
-    buildHeadlineMarginsRule(
-      SOCIAL_ZONES.lockupWidth,
-      SOCIAL_ZONES.lockupHeight,
-    ),
+    logoStyle
+      ? buildHeadlineMarginsRule(
+          zones.lockupWidth,
+          zones.lockupHeight,
+          socialLogoSide(logoStyle),
+          socialLogoShape(logoStyle),
+        )
+      : buildHeadlineMarginsRule(
+          SOCIAL_ZONES.lockupWidth,
+          SOCIAL_ZONES.lockupHeight,
+        ),
     '',
     buildAreaRule(SOCIAL_ZONES.width, SOCIAL_ZONES.height),
   ];
@@ -263,6 +276,8 @@ export type CarouselCoverPromptInput = Readonly<{
   // True when a master template is pinned: the model EDITS that image, so one line tells it the
   // image is a layout reference whose own words and branding must not be copied.
   editsReference?: boolean | undefined;
+  // The post's badge, which moves the corner the headline must stay clear of.
+  logoStyle?: SocialLogoStyle | undefined;
 }>;
 
 export function buildCarouselCoverPrompt(
@@ -295,7 +310,7 @@ export function buildCarouselCoverPrompt(
     ...(input.editsReference ? [] : [slideLayout(cover, coverDesign), '']),
     slidePicture(cover, coverDesign),
     '',
-    ...socialRules(),
+    ...socialRules(input.logoStyle),
     '',
     ...(plan.verbatim ? [VERBATIM_TEXT_RULE, ''] : []),
     'TEXT TO PUT ON THE POSTER:',
@@ -311,6 +326,8 @@ export type CarouselDetailPromptInput = Readonly<{
   seriesReference?: boolean | undefined;
   // The director's direction for the post; null/absent = undirected.
   design?: CarouselDesign | null | undefined;
+  // The post's badge — the same on every slide.
+  logoStyle?: SocialLogoStyle | undefined;
 }>;
 
 export function buildCarouselDetailPrompt(
@@ -347,7 +364,7 @@ export function buildCarouselDetailPrompt(
           '- Use a NEW picture made for this slide’s content — not the photograph or scene of any other slide.',
         ]),
     '',
-    ...socialRules(),
+    ...socialRules(input.logoStyle),
     '',
     ...(plan.verbatim ? [VERBATIM_TEXT_RULE, ''] : []),
     'TEXT TO PUT ON THE POSTER:',

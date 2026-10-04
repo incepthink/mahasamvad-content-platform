@@ -10,7 +10,14 @@ export {
   buildArticleScenePrompt,
   buildCmoCirclePhotoPrompt,
 } from './build-scene-prompt.js';
-export { generateImage, editImage, IMAGE_MODEL } from './openai-image.js';
+export {
+  generateImage,
+  editImage,
+  IMAGE_MODEL,
+  NEW_IMAGE_MODEL,
+  runWithImageModel,
+  currentImageModel,
+} from './openai-image.js';
 export type { EditImageOptions, GenerateImageOptions } from './openai-image.js';
 export { loadBrandAssets, loadArticleAssets } from './assets.js';
 export type { BrandAssets } from './assets.js';
@@ -34,6 +41,8 @@ export { overlayArticleChrome } from './article-chrome.js';
 export {
   buildCanvaSocialPosterLayers,
   overlayTwitterChrome,
+  placeSocialLogo,
+  detectSocialLogoStyle,
   // The Government of Maharashtra emblem + Marathi wordmark as one raster.
   // Exported so apps/api can serve it to the video review players, which lay
   // it over an unbranded scene clip in CSS — the stitch owns the burned-in
@@ -48,6 +57,8 @@ export {
 } from './twitter-chrome.js';
 export type {
   CanvaPosterLayer,
+  PlacedSocialLogo,
+  SocialChromeOptions,
   CanvaSocialPosterLayers,
   GovernmentLockupRaster,
 } from './twitter-chrome.js';
@@ -110,6 +121,7 @@ export {
 export {
   cropVideoToAspect,
   cropVideoToRect,
+  probeVideoDurationSeconds,
   restoreSourceOverClip,
 } from './video/crop-video.js';
 export type {

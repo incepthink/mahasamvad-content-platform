@@ -1,6 +1,6 @@
 # Table of contents
 
-- [Introduction — महासंवाद मजकूर मंच](README.md)
+- [Introduction — एआय न्यूजरूम](README.md)
 - [Getting Around the Platform](getting-around.md)
 - [Create a Creative or Social Post](create-content.md)
 - [Create an Article or News Report](article-news.md)

@@ -7,8 +7,10 @@
 // a no-op — the offline scripts (generate:test, finetune) simply don't accumulate.
 
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { currentImageModel } from '@dgipr/poster-renderer';
 import {
   estimateGeminiImageCostUsd,
+  estimateGeminiVideoCostUsd,
   estimateImageCostUsd,
   estimateOcrCostUsd,
   estimateSttCostUsd,
@@ -232,7 +234,9 @@ export function recordImageCost(kind: ImageKind, quality: ImageQuality): void {
   bumpTaskUsage(
     'image',
     'openai',
-    process.env.OPENAI_IMAGE_MODEL ?? 'gpt-image-2',
+    // The model this job actually rendered with — the per-run नवीन override when one is in
+    // scope, else OPENAI_IMAGE_MODEL. Priced at the same tier figure either way.
+    currentImageModel(),
     1,
     1,
     costUsd,
@@ -260,6 +264,21 @@ export function recordGeminiImageCost(): void {
     costUsd,
     true,
   );
+}
+
+// Record one Gemini Interactions video (a /new-video-workflow turn or a Dynamic Poster render).
+// It lands in the same videoSeconds/videoCostUsd line a /video clip does, so a project or a
+// generation's breakdown treats every rendered second alike; the task row keeps the provider
+// and model apart. `seconds` must be the MEASURED length of the returned clip.
+export function recordGeminiVideoCost(seconds: number, model: string): void {
+  const context = storage.getStore();
+  if (!context) return;
+  if (!(seconds > 0)) return;
+  const acc = context.accumulator;
+  const costUsd = estimateGeminiVideoCostUsd(seconds);
+  acc.videoSeconds += seconds;
+  acc.videoCostUsd += costUsd;
+  bumpTaskUsage('clip', 'gemini', model, 1, seconds, costUsd, true);
 }
 
 // Record one Veo clip render: billed per second of output at the tier price

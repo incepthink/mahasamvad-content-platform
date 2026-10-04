@@ -40,6 +40,7 @@ import {
   UnreadableImageError,
   generateArticlePdf,
   generateArticlePoster,
+  NEW_IMAGE_MODEL,
   normalizeReferenceImage,
   normalizeSourceImage,
 } from '@dgipr/poster-renderer';
@@ -847,6 +848,16 @@ export function registerGenerationRoutes(
       promptImagePaths:
         rendersPoster && !isDynamicPosterCategory(body.category)
           ? body.promptImagePaths
+          : undefined,
+      // The नवीन checkbox (migration 0061). The browser says only "the new one"; WHICH model
+      // that is comes from this server's env, and is stored resolved so every later render of
+      // this run uses the same model. Scoped to a run that renders a gpt-image poster — a
+      // caption paints nothing and a Dynamic Poster renders on Gemini.
+      imageModel:
+        body.newImageModel === true &&
+        rendersPoster &&
+        !isDynamicPosterCategory(body.category)
+          ? NEW_IMAGE_MODEL
           : undefined,
       // The uploaded poster a Dynamic Poster run is made from (migration 0052). The schema
       // has already refused it on any other lane and refused a path this API did not mint;

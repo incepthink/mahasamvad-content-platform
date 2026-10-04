@@ -29,6 +29,19 @@ type CacheEntry = { at: number; data: AnalyticsResponse };
 // is its own route and remounts the hook) but never outlives a reload.
 const cache = new Map<AnalyticsRange, CacheEntry>();
 
+// Requests already on the wire, shared by every caller asking for the same range. The landing
+// page reads the selected range AND `all` (for its year heatmap), so on `all` two hooks ask for
+// one response at once — without this they would run the heaviest aggregation twice.
+const inflight = new Map<AnalyticsRange, Promise<AnalyticsResponse>>();
+
+function request(range: AnalyticsRange): Promise<AnalyticsResponse> {
+  const pending = inflight.get(range);
+  if (pending) return pending;
+  const next = getAnalytics(range).finally(() => inflight.delete(range));
+  inflight.set(range, next);
+  return next;
+}
+
 export function useAnalytics(range: AnalyticsRange) {
   const cached = cache.get(range);
   const [data, setData] = useState<AnalyticsResponse | null>(
@@ -46,7 +59,7 @@ export function useAnalytics(range: AnalyticsRange) {
       if (showSpinner) setLoading(true);
       setError(null);
       try {
-        const next = await getAnalytics(range);
+        const next = await request(range);
         cache.set(range, { at: Date.now(), data: next });
         if (ticket === latest.current) setData(next);
       } catch (cause) {

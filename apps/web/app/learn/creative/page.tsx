@@ -8,13 +8,20 @@
 // the sandbox API, so nothing is saved, published or charged, the URL never changes and no
 // /generations link appears — the run does not exist anywhere but here.
 //
+// Autoplay (spoken explanations, the lesson doing each step) is chosen on the intro or with ▶
+// in the coach head. The choice is saved too; after a reload it resumes PAUSED, because a
+// browser plays no sound before the learner's first click on the page.
+//
 // Progress is kept in localStorage so a reload resumes at the same stage. Read after mount,
 // never during render (the server has no localStorage, and a first render that differs from
 // the server's is a hydration mismatch), which is why nothing renders until `boot` is known.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { editChatStorageKey } from '../../../components/EditChat';
-import { LessonRunner } from '../../../components/learn/LessonRunner';
+import {
+  LessonRunner,
+  type AutoplayStart,
+} from '../../../components/learn/LessonRunner';
 import {
   parseSandboxState,
   SAMPLE_ID,
@@ -23,19 +30,30 @@ import {
 
 const STORAGE_KEY = 'dgipr.learn.creative';
 
-type Saved = Readonly<{ started: boolean; sandbox: SandboxState | null }>;
+type Saved = Readonly<{
+  started: boolean;
+  autoplay: boolean;
+  sandbox: SandboxState | null;
+}>;
+
+const EMPTY: Saved = { started: false, autoplay: false, sandbox: null };
 
 function load(): Saved {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { started: false, sandbox: null };
-    const parsed = JSON.parse(raw) as { started?: unknown; sandbox?: unknown };
+    if (!raw) return EMPTY;
+    const parsed = JSON.parse(raw) as {
+      started?: unknown;
+      autoplay?: unknown;
+      sandbox?: unknown;
+    };
     return {
       started: parsed.started === true,
+      autoplay: parsed.autoplay === true,
       sandbox: parseSandboxState(parsed.sandbox),
     };
   } catch {
-    return { started: false, sandbox: null };
+    return EMPTY;
   }
 }
 
@@ -65,6 +83,10 @@ export default function CreativeLessonPage() {
   // Read by `persist`, which is stable: nothing to keep until the lesson has begun.
   const started = useRef(false);
   started.current = boot?.started === true;
+  // The latest saved pieces, so each writer keeps the other's.
+  const autoplay = useRef(false);
+  autoplay.current = boot?.autoplay === true;
+  const sandboxRef = useRef<SandboxState | null>(null);
 
   useEffect(() => {
     // Opened from the /learn list (`?fresh=1`): a new practice from the beginning, not the
@@ -79,19 +101,34 @@ export default function CreativeLessonPage() {
     setBoot(load());
   }, []);
 
-  const start = () => {
+  const start = (withAutoplay: boolean) => {
     clearSaved();
-    const next: Saved = { started: true, sandbox: null };
+    sandboxRef.current = null;
+    const next: Saved = { started: true, autoplay: withAutoplay, sandbox: null };
     save(next);
     setBoot(next);
     setRun((n) => n + 1);
   };
 
   const persist = useCallback((sandbox: SandboxState) => {
-    if (started.current) save({ started: true, sandbox });
+    sandboxRef.current = sandbox;
+    if (started.current)
+      save({ started: true, autoplay: autoplay.current, sandbox });
+  }, []);
+
+  const persistAutoplay = useCallback((on: boolean) => {
+    autoplay.current = on;
+    if (started.current)
+      save({ started: true, autoplay: on, sandbox: sandboxRef.current });
   }, []);
 
   if (boot === null) return null;
+  // On this mount: just chosen on the intro (playing), or restored from storage (paused).
+  const autoplayStart: AutoplayStart = !boot.autoplay
+    ? 'off'
+    : run > 0
+      ? 'playing'
+      : 'paused';
   return (
     <LessonRunner
       key={run}
@@ -100,6 +137,8 @@ export default function CreativeLessonPage() {
       initial={run === 0 ? (boot.sandbox ?? undefined) : undefined}
       onStateChange={persist}
       onRestart={start}
+      autoplayStart={autoplayStart}
+      onAutoplayChange={persistAutoplay}
     />
   );
 }

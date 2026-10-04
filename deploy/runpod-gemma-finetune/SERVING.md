@@ -18,16 +18,26 @@ the Phase 5 A/B free: two arms, one endpoint, no redeploy between them.
 > at worker start (~1 GB). A retrain is published as a NEW repo/name (`dgipr-dlo-v2`), never
 > pushed over v1. A Runpod `env` PATCH replaces the whole map — resend every existing key.
 
-> **Adding `dgipr-dlo-v2` beside v1 (2026-09-29).** Push the new adapter to the private repo
-> `incepthink/dgipr-dlo-v2`, then PATCH the endpoint env with EVERY existing key plus
-> `LORA_MODULES=dgipr-dlo-v1=incepthink/dgipr-dlo-v1 dgipr-dlo-v2=incepthink/dgipr-dlo-v2`
-> (space-separated; `MAX_LORAS` ≥ 2 if the build sets it). A PATCH replaces the whole map, so
-> omitting `HF_TOKEN`, `ENABLE_LORA`, `MAX_LORA_RANK` or the model keys breaks the endpoint.
+> **Adding `dgipr-dlo-v2` beside v1 (done 2026-10-02).** Push the new adapter to the private
+> repo `incepthink/dgipr-dlo-v2`, then PATCH the template env (`xhi467k6gx`) with EVERY existing
+> key, `MAX_LORAS=2`, **no `LORA_MODULES`**, and
+> `VLLM_EXTRA_ARGS=--lora-modules dgipr-dlo-v1=incepthink/dgipr-dlo-v1 dgipr-dlo-v2=incepthink/dgipr-dlo-v2`.
+> **A space-separated `LORA_MODULES` crash-loops every worker**: worker-vllm passes each env var
+> as ONE argv entry, so vLLM gets `"v1=… v2=…"` and dies with `ValueError: too many values to
+> unpack` in `cli_args.py`. Only `VLLM_EXTRA_ARGS` is shell-split (appended last). `LORA_MODULES`
+> is fine for exactly one adapter. A PATCH replaces the whole map, so omitting `HF_TOKEN`,
+> `ENABLE_LORA`, `MAX_LORA_RANK` or the model keys breaks the endpoint. Rotating `HF_TOKEN` also
+> means updating this env: a worker holding a revoked token 401s on the adapter repo and exits.
+> The endpoint's `minCudaVersion` is `13.0` (the vLLM 0.28 image is a CUDA-13 build).
+> **Do the PATCH from a script that reads the token from `.env`, never through the Runpod MCP
+> `update-endpoint`** — its response echoes the whole env, token included. Note the image
+> (84a6b5e8f) also prints `--hf-token <value>` in worker logs, and every release diff stores it.
 > v2 was trained on image tiles at one `max_soft_tokens`: the API must send the same value
 > (`GEMMA_MAX_SOFT_TOKENS`). A/B before switching the lane — one endpoint, both adapters:
 >
 > ```bash
-> pnpm --filter @dgipr/content-engine finetune:eval -- --files --run >   --arms=teacher,tuned --adapters=dgipr-dlo-v1,dgipr-dlo-v2
+> NODE_OPTIONS=--use-system-ca npx tsx --env-file=../../.env src/finetune/eval-dlo-distillation.ts \
+>   --files --run --arms=teacher,tuned --adapters=dgipr-dlo-v1,dgipr-dlo-v2   # from packages/content-engine, DB tunnel up
 > ```
 >
 > Switch with `GEMMA_DLO_MODEL=dgipr-dlo-v2` only when v2 names the signatory on signed notes,

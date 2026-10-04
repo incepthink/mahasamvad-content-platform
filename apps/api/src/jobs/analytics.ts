@@ -70,7 +70,9 @@ import {
 // Categories, as strings rather than through isSocialCategory(): these rows come back from a
 // lean select typed as plain text, and an unrecognised value must be counted somewhere rather
 // than crash the page.
-const SOCIAL_CATEGORIES = ['twitter', 'facebook'] as const;
+// The categories whose `article` column holds a SOCIAL CAPTION. Carousel (0059) writes the
+// long-form caption there too — leaving it out silently dropped every carousel caption.
+const CAPTION_CATEGORIES = ['twitter', 'facebook', 'carousel'] as const;
 const ARTICLE_CATEGORIES = ['news', 'scheme'] as const;
 
 // Measured Marathi speaking rate (see the video narration calibration in AGENTS.md — 16.5
@@ -87,6 +89,16 @@ const ALL_RANGE_TREND_DAYS = 90;
 // explicitly-labelled combined history row; newer rows are explained only by exact task
 // events, preventing their column totals from being counted a second time.
 const TASK_TRACKING_STARTED_AT = Date.parse('2026-08-02T00:00:00+05:30');
+
+// /video clips moved from Veo to Kling on this day. The pre-instrumentation cost column records
+// clip seconds but not which provider rendered them, so the label on that history is inferred
+// from the date rather than read from today's VIDEO_CLIP_PROVIDER — which would have filed every
+// Veo second under Kling. Task rows written after 2026-08-02 carry the real provider.
+const KLING_CLIPS_SINCE = Date.parse('2026-07-26T00:00:00+05:30');
+
+// The /new-video-workflow tasks, metered since 2026-10-04 (new-video-workflow.ts). Before that
+// the lane ran outside a cost scope, so its renders count but carry no seconds or spend.
+const NEW_VIDEO_TASKS = new Set(['new_video_render', 'new_video_storyboard']);
 
 // ---------------------------------------------------------------------------
 // Time windows. Every boundary is an Indian midnight.
@@ -125,7 +137,17 @@ export type AnalyticsWindow = Readonly<{
   previousTo: string | null;
   // Inclusive IST day strings covered by the trend chart.
   trendDays: string[];
+  // The same number of days immediately before `trendDays`, for the dashed comparison line.
+  // Empty for `all`, which has no previous period.
+  previousTrendDays: string[];
+  // The last 52 weeks (364 days, ending today) for the year heatmap. Only filled for `all`,
+  // the one window whose collected rows already cover a year — the page reads it from that
+  // response rather than making every range collect a year of rows it would otherwise skip.
+  yearDays: string[];
 }>;
+
+// 52 weeks: what the heatmap draws, Monday-first columns ending today.
+const YEAR_HEATMAP_DAYS = 364;
 
 // `to` is the start of TOMORROW so today's work is included — a dashboard that silently
 // stopped at midnight would make every morning look like a collapse.
@@ -148,6 +170,8 @@ export function resolveWindow(
       previousFrom: null,
       previousTo: null,
       trendDays: enumerateDays(trendStart, end),
+      previousTrendDays: [],
+      yearDays: enumerateDays(addDays(end, -YEAR_HEATMAP_DAYS), end),
     };
   }
 
@@ -159,6 +183,8 @@ export function resolveWindow(
     previousFrom: istDayStart(prevStart).toISOString(),
     previousTo: istDayStart(start).toISOString(),
     trendDays: enumerateDays(start, end),
+    previousTrendDays: enumerateDays(prevStart, start),
+    yearDays: [],
   };
 }
 
@@ -244,7 +270,7 @@ async function collect(
       client,
       from,
       to,
-      SOCIAL_CATEGORIES,
+      CAPTION_CATEGORIES,
       ARTICLE_CATEGORIES,
     ),
     listUsageEvents(client, from, to).then(
@@ -290,6 +316,20 @@ const isRenderedVideoTurn = (row: AnalyticsNewVideoTurnRow) =>
 
 // The media-room lane: everything not generated from a /dlo intake.
 const isCreative = (row: AnalyticsGenerationRow) => row.dloIntakeId === null;
+
+// A Dynamic Poster that produced a clip. Its output is never a poster_path, so it is counted
+// on its own rather than as a poster.
+const isDynamicPoster = (row: AnalyticsGenerationRow) =>
+  row.category === 'dynamic_poster' && row.motionPath !== null;
+
+// Single-image posters, plus every rendered carousel slide. A carousel's poster_path is its
+// cover, which is one of its slides — counting both would count the cover twice.
+function posterImageCount(rows: readonly AnalyticsGenerationRow[]): number {
+  return rows.reduce((total, row) => {
+    if (row.category === 'carousel') return total + row.carouselSlidesRendered;
+    return total + (row.posterPath !== null ? 1 : 0);
+  }, 0);
+}
 const isFromIntake = (row: AnalyticsGenerationRow) => row.dloIntakeId !== null;
 
 const countEvents = (
@@ -317,6 +357,7 @@ const sumEvents = (
 
 type Counts = Readonly<{
   posters: number;
+  dynamicPosters: number;
   captions: number;
   articles: number;
   transcripts: number;
@@ -331,9 +372,9 @@ type Counts = Readonly<{
 // needed. Nothing is double-counted — a poster, its caption and its translation are three
 // distinct deliverables, and each is counted exactly once.
 function countOutputs(data: WindowData): Counts {
-  const posters = data.generations.filter(
-    (row) => isCreative(row) && row.posterPath !== null,
-  ).length;
+  const creative = data.generations.filter(isCreative);
+  const posters = posterImageCount(creative);
+  const dynamicPosters = creative.filter(isDynamicPoster).length;
   const captions = data.texts.socialCaptions;
   const articles = data.generations.filter(
     (row) => isFromIntake(row) && row.status === 'completed',
@@ -353,6 +394,7 @@ function countOutputs(data: WindowData): Counts {
   const proofreads = countEvents(data.events, 'proofread', 'check');
   return {
     posters,
+    dynamicPosters,
     captions,
     articles,
     transcripts,
@@ -361,6 +403,7 @@ function countOutputs(data: WindowData): Counts {
     proofreads,
     total:
       posters +
+      dynamicPosters +
       captions +
       articles +
       transcripts +
@@ -523,7 +566,10 @@ function bumpService(
 // a video project's clip and TTS lines apart from a generation's, which has neither.
 function foldCostBreakdown(
   map: ServiceMap,
-  rows: ReadonlyArray<{ costBreakdown: AnalyticsCostBreakdown | null }>,
+  rows: ReadonlyArray<{
+    costBreakdown: AnalyticsCostBreakdown | null;
+    createdAt: string;
+  }>,
   includeVideo: boolean,
   includeImage: boolean,
   imageProvider: string,
@@ -565,7 +611,8 @@ function foldCostBreakdown(
     if ((detail.videoSeconds ?? 0) > 0) {
       bumpService(map, 'legacy_combined', 'clip', {
         ...base,
-        provider: clipProvider,
+        provider:
+          Date.parse(row.createdAt) < KLING_CLIPS_SINCE ? 'veo' : clipProvider,
         calls: 1,
         units: detail.videoSeconds ?? 0,
         costEstimated: true,
@@ -699,8 +746,14 @@ const TASK_ORDER = [
   'proofreading',
   'social_post_creation',
   // Carousel (migration 0059): the one planning call, and every slide render.
+  'carousel_creation',
   'carousel_plan',
   'carousel_slide',
+  'carousel_slide_regeneration',
+  'carousel_slide_revision',
+  'dynamic_poster_creation',
+  'dynamic_poster_revision',
+  'dynamic_poster_crop',
   'social_caption_creation',
   'social_caption_revision',
   // The conversational edit box's planning call; the edit it plans is metered separately.
@@ -716,6 +769,8 @@ const TASK_ORDER = [
   'video_clip_creation',
   'video_scene_reanimation',
   'video_narration',
+  'new_video_render',
+  'new_video_storyboard',
   'legacy_combined',
 ] as const;
 
@@ -872,18 +927,41 @@ function buildFeatures(
   // --- क्रिएटिव्ह आणि सोशल -------------------------------------------------
   const creative = current.generations.filter(isCreative);
   const creativeCost = creative.reduce((total, row) => total + row.costUsd, 0);
-  const posterRevisions = current.revisions.filter(
-    (revision) =>
-      revision.target === 'poster_copy' ||
-      revision.target === 'poster_scene' ||
-      revision.target === 'poster_image' ||
-      revision.target === 'manual_copy',
-  ).length;
+  const carousels = creative.filter((row) => row.category === 'carousel');
+  // Feedback rounds: poster edits, Dynamic Poster follow-ups/trims ('motion' revisions), and
+  // carousel slide redos — a carousel keeps its history per slide rather than in the revision
+  // log, so every render past a slide's first is one round.
+  const posterRevisions =
+    current.revisions.filter(
+      (revision) =>
+        revision.target === 'poster_copy' ||
+        revision.target === 'poster_scene' ||
+        revision.target === 'poster_image' ||
+        revision.target === 'manual_copy' ||
+        revision.target === 'motion',
+    ).length +
+    carousels.reduce(
+      (total, row) =>
+        total + Math.max(row.carouselSlideRenders - row.carouselSlidesRendered, 0),
+      0,
+    );
+  const creativeOutputs = now.posters + now.captions + now.dynamicPosters;
   const social: AnalyticsFeature = {
     key: 'social',
     headline: metric('posters', now.posters, 'count', before?.posters),
     stats: [
       metric('captions', now.captions, 'count', before?.captions),
+      metric(
+        'dynamicPosters',
+        now.dynamicPosters,
+        'count',
+        before?.dynamicPosters,
+      ),
+      metric(
+        'carouselPosts',
+        carousels.filter((row) => row.carouselSlidesRendered > 0).length,
+        'count',
+      ),
       metric(
         'published',
         creative.filter((row) => row.publishedAt !== null).length,
@@ -899,12 +977,16 @@ function buildFeatures(
         countPosters(creative, 'news') + countPosters(creative, 'scheme'),
       ],
       ['youtubeThumb', countPosters(creative, 'youtube')],
+      [
+        'carouselSlides',
+        carousels.reduce((total, row) => total + row.carouselSlidesRendered, 0),
+      ],
     ]),
     services: servicesFor('social', creative, false, true, posterImageProvider),
     costInr: round2(usdToInr(creativeCost)),
     costPerOutputInr:
-      now.posters + now.captions > 0
-        ? round2(usdToInr(creativeCost) / (now.posters + now.captions))
+      creativeOutputs > 0
+        ? round2(usdToInr(creativeCost) / creativeOutputs)
         : null,
     eventBacked: false,
   };
@@ -1123,6 +1205,25 @@ function buildFeatures(
     (total, row) => total + row.costUsd,
     0,
   );
+  // The /new-video-workflow half, from its task events (it has no cost column): spend, and the
+  // seconds of video Gemini returned. Zero before the lane was metered (2026-10-04).
+  const newVideoEvents = current.events.filter((event) => {
+    if (event.feature !== 'video') return false;
+    const task = taskFromAction(event.action);
+    return task !== null && NEW_VIDEO_TASKS.has(task);
+  });
+  const newVideoCostUsd = newVideoEvents.reduce(
+    (total, event) =>
+      total +
+      (typeof event.detail.costUsd === 'number' ? event.detail.costUsd : 0),
+    0,
+  );
+  const newVideoSeconds = newVideoEvents
+    .filter((event) => event.detail.service === 'clip')
+    .reduce((total, event) => total + event.charCount, 0);
+  const storyboardTurns = current.newVideoTurns.filter(
+    (row) => row.status === 'completed' && !row.hasVideo,
+  );
   const completedProjects = current.videos.filter(
     (row) => row.status === 'completed',
   );
@@ -1131,12 +1232,13 @@ function buildFeatures(
   // Use metered rendered seconds. Old rows without that detail contribute no
   // guessed duration; the retired short/long bucket is not a generation limit
   // and is no longer presented as one in analytics.
-  const seconds = current.videos
-    .filter((row) => row.status === 'completed')
-    .reduce(
-      (total, row) => total + (row.costBreakdown?.videoSeconds ?? 0),
-      0,
-    );
+  const seconds =
+    current.videos
+      .filter((row) => row.status === 'completed')
+      .reduce(
+        (total, row) => total + (row.costBreakdown?.videoSeconds ?? 0),
+        0,
+      ) + newVideoSeconds;
   const video: AnalyticsFeature = {
     key: 'video',
     headline: metric('videos', now.videos, 'count', before?.videos),
@@ -1146,6 +1248,23 @@ function buildFeatures(
         'estimatedMinutes',
         Math.round((seconds / 60) * 10) / 10,
         'minutes',
+      ),
+      // Every storyboard frame /video bought (start and end frames, redraws included), from
+      // the projects' own cost column — full history.
+      metric(
+        'framesRendered',
+        current.videos.reduce(
+          (total, row) => total + (row.costBreakdown?.imageCount ?? 0),
+          0,
+        ),
+        'count',
+      ),
+      // /new-video-workflow's Storyboard mode (0060): answered turns, and the pictures drawn.
+      metric('storyboardAnswers', storyboardTurns.length, 'count'),
+      metric(
+        'storyboardImages',
+        current.newVideoTurns.reduce((total, row) => total + row.imageCount, 0),
+        'count',
       ),
     ],
     // COMPLETED videos by where they came from, so the slices add up to the headline: the
@@ -1171,10 +1290,11 @@ function buildFeatures(
       true,
       frameImageProvider,
     ),
-    // /new-video-workflow runs outside a cost scope, so only /video projects carry a cost.
-    // The per-video figure divides by THOSE videos alone — dividing by the combined count
-    // would report the unmetered conversation renders as nearly free.
-    costInr: round2(usdToInr(videoCost)),
+    // /video projects from their cost column, plus /new-video-workflow from its task events.
+    // The per-video figure still divides by the /video projects alone: conversation renders
+    // before 2026-10-04 were never metered, and folding them in would report them as nearly
+    // free.
+    costInr: round2(usdToInr(videoCost + newVideoCostUsd)),
     costPerOutputInr:
       completedProjects.length > 0
         ? round2(usdToInr(videoCost) / completedProjects.length)
@@ -1245,6 +1365,7 @@ export async function buildAnalytics(
     metric('totalOutputs', now.total, 'count', before?.total),
     metric('articles', now.articles, 'count', before?.articles),
     metric('posters', now.posters, 'count', before?.posters),
+    metric('videos', now.videos, 'count', before?.videos),
     metric('transcripts', now.transcripts, 'count', before?.transcripts),
     metric('activeDays', activeDays, 'count'),
   ];
@@ -1258,6 +1379,10 @@ export async function buildAnalytics(
     generatedAt: new Date().toISOString(),
     headline,
     daily,
+    previousDaily: previous
+      ? buildDaily(window.previousTrendDays, previous)
+      : [],
+    yearDaily: buildDaily(window.yearDays, current),
     features: buildFeatures(current, previous),
     rates: buildRates(),
     eventsAvailable: current.eventsAvailable,

@@ -38,6 +38,7 @@
 
 import {
   buildCarouselCoverPrompt,
+  socialChromeFor,
   buildCarouselDetailPrompt,
   buildDesignPosterStyle,
   carouselCoverDesign,
@@ -75,7 +76,9 @@ import {
   measurePosterColours,
   overlayTwitterChrome,
 } from '@dgipr/poster-renderer';
+import { currentSocialLogoStyle, socialLogoStyleFor } from './social-logo.js';
 import {
+  type SocialLogoStyle,
   CarouselStateSchema,
   isCarouselCategory,
   type CarouselDesign,
@@ -215,6 +218,9 @@ async function storeSlide(
   raw: Buffer,
   finished: Buffer | null,
   feedback: string | null,
+  // The post's badge (social-logo.ts) — one style for every slide of one carousel, so the set
+  // reads as one post. Only used when `finished` is null (the stamp happens here).
+  logoStyle: SocialLogoStyle,
 ): Promise<void> {
   const slide = state.slides[index];
   if (!slide) throw new Error(`Carousel slide ${index + 1} does not exist.`);
@@ -223,7 +229,7 @@ async function storeSlide(
   await uploadPng(
     client,
     path,
-    finished ?? (await overlayTwitterChrome(raw)),
+    finished ?? (await overlayTwitterChrome(raw, { logoStyle })),
     true,
   );
 
@@ -408,6 +414,7 @@ async function renderCoverRaw(
         plan,
         design: state.design,
         editsReference: true,
+        logoStyle: socialLogoStyleFor(row),
       }),
       {
         count: officerImages.length,
@@ -431,7 +438,11 @@ async function renderCoverRaw(
       leading: [],
       officer: officerImages,
       prompt: withOfficerImages(
-        buildCarouselCoverPrompt({ plan, design: state.design }),
+        buildCarouselCoverPrompt({
+          plan,
+          design: state.design,
+          logoStyle: socialLogoStyleFor(row),
+        }),
         {
           count: officerImages.length,
           leadingImages: [],
@@ -476,6 +487,7 @@ async function renderDetailRaw(
   state: CarouselState,
   index: number,
   coverRaw: Buffer | null,
+  logoStyle: SocialLogoStyle,
 ): Promise<Buffer> {
   const plan = state.plan;
   if (!plan) throw new Error('Carousel has no plan.');
@@ -484,6 +496,7 @@ async function renderDetailRaw(
     index,
     design: state.design,
     seriesReference: coverRaw !== null,
+    logoStyle,
   });
   const raw = coverRaw
     ? await editImage(coverRaw, prompt, { size: SOCIAL_ARTWORK_SIZE })
@@ -525,12 +538,22 @@ async function renderDetails(
   indexes: readonly number[],
   feedback: string | null,
   coverRaw: Buffer | null,
+  logoStyle: SocialLogoStyle,
 ): Promise<void> {
   await inPool(indexes, DETAIL_CONCURRENCY, async (index) => {
     markBusy(id, index + 1);
     try {
-      const raw = await renderDetailRaw(state, index, coverRaw);
-      await storeSlide(client, id, state, index, raw, null, feedback);
+      const raw = await renderDetailRaw(state, index, coverRaw, logoStyle);
+      await storeSlide(
+        client,
+        id,
+        state,
+        index,
+        raw,
+        null,
+        feedback,
+        logoStyle,
+      );
     } finally {
       clearBusy(id, index + 1);
     }
@@ -616,7 +639,16 @@ export function startCarouselJob(
           // carry no palette; see the header).
           if (!state.paletteId) await assignPalette(client, state, id);
           const rendered = await renderCoverRaw(client, row, state, id);
-          await storeSlide(client, id, state, 0, rendered, null, null);
+          await storeSlide(
+            client,
+            id,
+            state,
+            0,
+            rendered,
+            null,
+            null,
+            socialLogoStyleFor(row),
+          );
           clearBusy(id, 1);
           await recordCoverStyle(client, id, state, rendered);
           if (carouselSeriesReferenceEnabled()) coverRaw = rendered;
@@ -626,7 +658,15 @@ export function startCarouselJob(
           .filter((index) => index > 0);
         if (missing.length === 0) return;
         coverRaw ??= await loadCoverRaw(client, id, state);
-        await renderDetails(client, id, state, missing, null, coverRaw);
+        await renderDetails(
+          client,
+          id,
+          state,
+          missing,
+          null,
+          coverRaw,
+          socialLogoStyleFor(row),
+        );
       });
     } finally {
       clearBusy(id);
@@ -637,7 +677,11 @@ export function startCarouselJob(
     if (options.generateCaption && !row.article) {
       await updateGeneration(client, id, { step: 'caption' });
       const caption = await runInCostTask('social_caption_creation', () =>
-        generateSocialCaption({ note: row.note, platform: 'facebook' }),
+        generateSocialCaption({
+          note: row.note,
+          platform: 'facebook',
+          mode: 'with_poster',
+        }),
       );
       await updateGeneration(client, id, { article: caption });
     }
@@ -692,7 +736,16 @@ export function startCarouselSlideRegenerateJob(
           const seed = `${id}:v${(state.slides[0]?.version ?? 0) + 1}`;
           if (target === 'all') await assignPalette(client, state, seed);
           const coverRaw = await renderCoverRaw(client, row, state, seed);
-          await storeSlide(client, id, state, 0, coverRaw, null, feedback);
+          await storeSlide(
+            client,
+            id,
+            state,
+            0,
+            coverRaw,
+            null,
+            feedback,
+            socialLogoStyleFor(row),
+          );
           clearBusy(id, 1);
           await recordCoverStyle(client, id, state, coverRaw);
           if (target === 'all') {
@@ -703,6 +756,7 @@ export function startCarouselSlideRegenerateJob(
               state.slides.map((_, i) => i).filter((i) => i > 0),
               feedback,
               carouselSeriesReferenceEnabled() ? coverRaw : null,
+              socialLogoStyleFor(row),
             );
           }
           return;
@@ -715,6 +769,7 @@ export function startCarouselSlideRegenerateJob(
           [target - 1],
           feedback,
           await loadCoverRaw(client, id, state),
+          socialLogoStyleFor(row),
         );
       });
     } finally {
@@ -760,9 +815,12 @@ export function startCarouselSlideFeedbackJob(
       let feedbackText = input.feedback ?? '';
       let historyFeedback = feedbackText;
       let contentInventory: readonly string[] = [];
+      // The badge this slide actually carries, read off its pixels (social-logo.ts), so the edit
+      // erases that badge and the stamp puts the same one back.
+      const clean = await downloadPng(client, slide.path);
+      const logoStyle = await currentSocialLogoStyle(clean, row);
 
       if (annotations.length > 0 || clearRegions.length > 0) {
-        const clean = await downloadPng(client, slide.path);
         const marked = await annotateFeedbackRegions(
           clean,
           annotations.map((a) => a.region),
@@ -789,6 +847,7 @@ export function startCarouselSlideFeedbackJob(
           })),
           overallNote: input.feedback,
           posterKind: 'twitter',
+          socialLockup: socialChromeFor(logoStyle).lockup,
         });
         contentInventory = interpreted.contentInventory;
         feedbackText = interpreted.instruction;
@@ -819,6 +878,7 @@ export function startCarouselSlideFeedbackJob(
           undefined,
           { actions: clearActions, inventory: contentInventory },
           officerImages,
+          logoStyle,
         );
         recordImageCost('twitter', imageQuality());
         return result;
@@ -831,6 +891,7 @@ export function startCarouselSlideFeedbackJob(
         rendered.raw,
         rendered.png,
         historyFeedback || null,
+        logoStyle,
       );
     } finally {
       clearBusy(id);

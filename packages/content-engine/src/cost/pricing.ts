@@ -159,6 +159,20 @@ export function estimateVideoCostUsd(tier: VideoTier, seconds: number): number {
   return VIDEO_TIER_PRICE_PER_SECOND_USD[tier] * Math.max(seconds, 0);
 }
 
+// The Gemini Interactions video lane (/new-video-workflow and Dynamic Posters) bills per
+// second of returned video, and the response carries no usage object, so this is a CONFIGURED
+// rate like the tier table above — the Veo-fast list price, since gemini-omni publishes none of
+// its own on this account. Reconcile against the Google billing export once and edit the env.
+// The seconds it multiplies are MEASURED off the returned MP4, never assumed.
+export const GEMINI_VIDEO_PRICE_PER_SECOND_USD = (() => {
+  const raw = Number(process.env.GEMINI_VIDEO_PRICE_PER_SECOND_USD);
+  return Number.isFinite(raw) && raw >= 0 ? raw : 0.15;
+})();
+
+export function estimateGeminiVideoCostUsd(seconds: number): number {
+  return GEMINI_VIDEO_PRICE_PER_SECOND_USD * Math.max(seconds, 0);
+}
+
 // Narration TTS, billed per character of input text. Approximate public price for Sarvam
 // bulbul captured 2026-07-22; an estimate like the image tiers, edit if pricing changes.
 // Narration is short (a few hundred chars/scene), so this is a small line beside the clip

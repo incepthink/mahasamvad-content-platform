@@ -67,6 +67,14 @@ export type AnalyticsGenerationRow = Readonly<{
   dloIntakeId: string | null;
   articleProvided: boolean | null;
   posterPath: string | null;
+  // A Dynamic Poster's clip (0052). Its output is an .mp4, never a poster_path, so without
+  // this short path the lane's renders were invisible to every count on the page.
+  motionPath: string | null;
+  // A carousel's slides (0059), reduced to what can be counted: how many are rendered, and
+  // how many renders they took in all (initial + redo + marker rounds). Zero/zero on every
+  // other category.
+  carouselSlidesRendered: number;
+  carouselSlideRenders: number;
   publishedAt: string | null;
   costUsd: number;
   // The per-capability audit detail behind cost_usd (chat calls + tokens + image renders).
@@ -86,14 +94,42 @@ export type AnalyticsCostBreakdown = Readonly<{
   textCostUsd?: number;
   imageCount?: number;
   imageCostUsd?: number;
+  // A video project's (and, since the Gemini lane was metered, a Dynamic Poster's) rendered
+  // seconds.
   videoSeconds?: number;
   videoCostUsd?: number;
   ttsCharacters?: number;
   ttsCostUsd?: number;
 }>;
 
+// `carousel->slides`, NOT `carousel`: the column also holds the slide PLAN (every line of slide
+// copy). The JSON-path select returns only the stored slides — paths, a title and the version
+// list — which is all a count needs.
 const GENERATION_COLUMNS =
-  'id,category,output_type,status,design_mode,template_brand,dlo_intake_id,article_provided,poster_path,published_at,cost_usd,cost_breakdown,created_at';
+  'id,category,output_type,status,design_mode,template_brand,dlo_intake_id,article_provided,poster_path,motion_path,carousel_slides:carousel->slides,published_at,cost_usd,cost_breakdown,created_at';
+
+type CarouselSlideCountable = {
+  path?: string | null;
+  versions?: unknown[] | null;
+};
+
+function countCarouselSlides(slides: unknown): {
+  rendered: number;
+  renders: number;
+} {
+  if (!Array.isArray(slides)) return { rendered: 0, renders: 0 };
+  let rendered = 0;
+  let renders = 0;
+  for (const slide of slides as CarouselSlideCountable[]) {
+    if (!slide || typeof slide !== 'object') continue;
+    if (typeof slide.path === 'string' && slide.path !== '') rendered += 1;
+    // `versions` lists every render of the slide; a slide written before versions were kept
+    // still counts as one render when it has a path.
+    const versions = Array.isArray(slide.versions) ? slide.versions.length : 0;
+    renders += Math.max(versions, typeof slide.path === 'string' ? 1 : 0);
+  }
+  return { rendered, renders };
+}
 
 export async function listGenerationsForAnalytics(
   client: SupabaseClient,
@@ -110,27 +146,35 @@ export async function listGenerationsForAnalytics(
     dlo_intake_id: string | null;
     article_provided: boolean | null;
     poster_path: string | null;
+    motion_path: string | null;
+    carousel_slides: unknown;
     published_at: string | null;
     // numeric(10,4) arrives as a string from PostgREST.
     cost_usd: number | string | null;
     cost_breakdown: AnalyticsCostBreakdown | null;
     created_at: string;
   }>(client, GENERATIONS_TABLE, GENERATION_COLUMNS, from, to);
-  return rows.map((row) => ({
-    id: row.id,
-    category: row.category,
-    outputType: row.output_type,
-    status: row.status,
-    designMode: row.design_mode,
-    templateBrand: row.template_brand,
-    dloIntakeId: row.dlo_intake_id,
-    articleProvided: row.article_provided,
-    posterPath: row.poster_path,
-    publishedAt: row.published_at,
-    costUsd: Number(row.cost_usd ?? 0) || 0,
-    costBreakdown: row.cost_breakdown ?? null,
-    createdAt: row.created_at,
-  }));
+  return rows.map((row) => {
+    const slides = countCarouselSlides(row.carousel_slides);
+    return {
+      id: row.id,
+      category: row.category,
+      outputType: row.output_type,
+      status: row.status,
+      designMode: row.design_mode,
+      templateBrand: row.template_brand,
+      dloIntakeId: row.dlo_intake_id,
+      articleProvided: row.article_provided,
+      posterPath: row.poster_path,
+      motionPath: row.motion_path ?? null,
+      carouselSlidesRendered: slides.rendered,
+      carouselSlideRenders: slides.renders,
+      publishedAt: row.published_at,
+      costUsd: Number(row.cost_usd ?? 0) || 0,
+      costBreakdown: row.cost_breakdown ?? null,
+      createdAt: row.created_at,
+    };
+  });
 }
 
 export type AnalyticsRevisionRow = Readonly<{
@@ -280,6 +324,8 @@ export type AnalyticsNewVideoTurnRow = Readonly<{
   // Whether this turn produced a video. A Storyboard-mode turn (0060) completes with no
   // video, which is what keeps chat answers out of the video count.
   hasVideo: boolean;
+  // Storyboard-mode pictures this turn drew (0060's generated_images).
+  imageCount: number;
   createdAt: string;
 }>;
 
@@ -290,14 +336,40 @@ export async function listNewVideoTurnsForAnalytics(
   from: string,
   to: string,
 ): Promise<AnalyticsNewVideoTurnRow[]> {
-  const rows = await fetchPaged<{
+  type TurnRow = {
     status: string;
     video_url: string | null;
+    generated_images?: unknown;
     created_at: string;
-  }>(client, NEW_VIDEO_TURNS_TABLE, 'status,video_url,created_at', from, to);
+  };
+  // generated_images is a small jsonb list (url, label, one image prompt each); its length is
+  // the count of storyboard pictures. It arrived with 0060, so a database without it falls
+  // back to the old columns and loses the picture count alone, never the video count.
+  let rows: TurnRow[];
+  try {
+    rows = await fetchPaged<TurnRow>(
+      client,
+      NEW_VIDEO_TURNS_TABLE,
+      'status,video_url,generated_images,created_at',
+      from,
+      to,
+    );
+  } catch (error) {
+    if (!String(error).includes('generated_images')) throw error;
+    rows = await fetchPaged<TurnRow>(
+      client,
+      NEW_VIDEO_TURNS_TABLE,
+      'status,video_url,created_at',
+      from,
+      to,
+    );
+  }
   return rows.map((row) => ({
     status: row.status,
     hasVideo: row.video_url !== null && row.video_url !== '',
+    imageCount: Array.isArray(row.generated_images)
+      ? row.generated_images.length
+      : 0,
     createdAt: row.created_at,
   }));
 }

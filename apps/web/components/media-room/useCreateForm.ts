@@ -122,6 +122,10 @@ export function useCreateForm(options: CreateFormOptions = {}) {
   // model call, and plenty of posts are published as an image. It can also be added
   // afterwards from the detail page, so off is a cheap default rather than a lossy one.
   const [wantCaption, setWantCaption] = useState(false);
+  // नवीन: render the poster with the NEWER image model (the API decides which —
+  // OPENAI_IMAGE_MODEL_NEW, gpt-image-2.5-flare). Off by default; held across a format
+  // switch and simply not sent on a lane that renders no gpt-image poster.
+  const [newImageModel, setNewImageModel] = useState(false);
   // Creative only: the officer's OWN prompt for the image model (migration 0045).
   // Blank (the default and the overwhelmingly common case) leaves the platform's built
   // poster prompt in place; filled, it REPLACES it.
@@ -443,6 +447,9 @@ export function useCreateForm(options: CreateFormOptions = {}) {
         acceptsPromptImages && promptImages.paths.length > 0
           ? [...promptImages.paths]
           : undefined,
+      // नवीन — only on a lane that renders a poster, and only when ticked, so an unticked
+      // run's request is byte-for-byte what it was.
+      newImageModel: acceptsPromptImages && newImageModel ? true : undefined,
       referenceImageId: reference?.kind === 'image' ? reference.id : undefined,
       referenceTypeId: reference?.kind === 'type' ? reference.id : undefined,
       // डायनॅमिक पोस्टर only. A PATH, not a URL: it is checked against
@@ -577,6 +584,8 @@ export function useCreateForm(options: CreateFormOptions = {}) {
     setContentSource,
     wantCaption,
     setWantCaption,
+    newImageModel,
+    setNewImageModel,
     imagePrompt,
     setImagePrompt,
     promptImages,

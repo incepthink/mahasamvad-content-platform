@@ -15,6 +15,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type {
   EditAssistantAction,
+  FeedbackRegion,
   GenerationDetail,
   PosterImageFeedbackRequest,
 } from '@dgipr/schemas';
@@ -59,6 +60,8 @@ export function SocialPostView({
   beforeSendMarks,
   onAnnotationChange,
   fillFirstMarkNote,
+  placeMark,
+  clearMarks,
 }: {
   detail: GenerationDetail;
   onChanged: () => Promise<void>;
@@ -83,6 +86,11 @@ export function SocialPostView({
   // Writes `note` into mark ①'s note each time `seq` changes. Only /learn passes one (its
   // coach offers a button that writes the example for the learner).
   fillFirstMarkNote?: { note: string; seq: number } | null | undefined;
+  // Places a red mark at `region` each time `seq` changes, and removes every red mark each
+  // time `clearMarks.seq` changes. Only /learn passes them (its autoplay demo marks the
+  // headline itself); unset, nothing here behaves differently.
+  placeMark?: { region: FeedbackRegion; seq: number } | null | undefined;
+  clearMarks?: { seq: number } | null | undefined;
   // Fired once a POSTER edit has been accepted by the API, handing the run to the navbar's
   // सुरू असलेली कामे panel so it can be followed after leaving this page. Poster work only:
   // a caption edit or revision touches no image, and this run's caption is already on screen
@@ -145,6 +153,23 @@ export function SocialPostView({
     filledSeq.current = fillFirstMarkNote.seq;
     setNote(firstMarkerId, fillFirstMarkNote.note);
   }, [fillFirstMarkNote, firstMarkerId, setNote]);
+  const placedSeq = useRef(0);
+  useEffect(() => {
+    if (!placeMark || placeMark.seq === placedSeq.current) return;
+    placedSeq.current = placeMark.seq;
+    addMarker(placeMark.region);
+    // addMarker is a fresh function each render; the seq is what says "do it now".
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [placeMark]);
+  const clearedSeq = useRef(0);
+  const markerIds = markers.map((m) => m.id).join(',');
+  useEffect(() => {
+    if (!clearMarks || clearMarks.seq === clearedSeq.current) return;
+    clearedSeq.current = clearMarks.seq;
+    for (const id of markerIds.split(',').filter(Boolean))
+      removeMarker(Number(id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clearMarks]);
   // The caption box itself — its draft, autosave and generate button — is
   // SocialCaptionEditor, shared with the carousel card. Change REQUESTS go through the edit
   // assistant below; this state only serves the marks' own send button under the poster.

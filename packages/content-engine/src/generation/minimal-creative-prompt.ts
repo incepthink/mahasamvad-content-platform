@@ -30,6 +30,11 @@ export type MinimalCreativePromptInput = Readonly<{
   bottomMargin?: number | undefined;
   badgeWidth?: number | undefined;
   badgeHeight?: number | undefined;
+  // Which top corner the badge is stamped into, and what shape it is (the social logo rotation,
+  // SOCIAL_LOGO_STYLES in @dgipr/schemas). Absent = 'right' and an unnamed badge, which is the
+  // pre-rotation wording byte-for-byte.
+  badgeSide?: 'left' | 'right' | undefined;
+  badgeShape?: 'card' | 'circle' | 'quarter' | undefined;
   // The design director's brief for THIS poster (poster-design-director.ts) — English style prose,
   // already sanitised. Emitted as a DESIGN DIRECTION block right after the opening line.
   designDirection?: string | undefined;
@@ -86,12 +91,24 @@ export const DO_NOT_USE_RULE = `DO NOT USE:
 // Backwards compatibility alias
 export const NO_LOGOS_RULE = DO_NOT_USE_RULE;
 
+// How the badge is named in the rule. The card keeps the original wording; the two shaped
+// badges are named so the model expects a round shape rather than a square in that corner.
+const BADGE_NOUN: Readonly<Record<'card' | 'circle' | 'quarter', string>> = {
+  card: 'An official emblem badge',
+  circle: 'A round official emblem badge',
+  quarter:
+    'A quarter-circle official emblem badge (its straight edges along the top edge and the side edge)',
+};
+
 export function buildHeadlineMarginsRule(
   badgeWidth: number = DEFAULT_BADGE_WIDTH,
   badgeHeight: number = DEFAULT_BADGE_HEIGHT,
+  badgeSide: 'left' | 'right' = 'right',
+  badgeShape: 'card' | 'circle' | 'quarter' = 'card',
 ): string {
+  const corner = `top-${badgeSide}`;
   return `HEADLINE & MARGINS:
-- An official emblem badge (${badgeWidth} × ${badgeHeight} px) is placed in the far top-right corner afterwards. Keep top headlines sized with comfortable breathing room so no text stretches into that top-right corner. If a headline is wide, reduce its font size or wrap it across multiple lines so it remains clear of that ${badgeWidth} × ${badgeHeight} px corner area.`;
+- ${BADGE_NOUN[badgeShape]} (${badgeWidth} × ${badgeHeight} px) is placed in the far ${corner} corner afterwards. Keep top headlines sized with comfortable breathing room so no text stretches into that ${corner} corner. If a headline is wide, reduce its font size or wrap it across multiple lines so it remains clear of that ${badgeWidth} × ${badgeHeight} px corner area.`;
 }
 
 export const HEADLINE_MARGINS_RULE = buildHeadlineMarginsRule();
@@ -118,7 +135,12 @@ export function buildMinimalCreativePrompt(
 
   const opening = `Make a creative poster for social media platforms in the size ${width} × ${height}. It must look very professional and not be congested.`;
   const areaRule = buildAreaRule(width, height, bottomMargin);
-  const headlineMarginsRule = buildHeadlineMarginsRule(badgeWidth, badgeHeight);
+  const headlineMarginsRule = buildHeadlineMarginsRule(
+    badgeWidth,
+    badgeHeight,
+    input.badgeSide,
+    input.badgeShape,
+  );
 
   const designDirection = input.designDirection?.trim() ?? '';
   // Both optional blocks sit between the opening line and the existing rules, so a prompt with

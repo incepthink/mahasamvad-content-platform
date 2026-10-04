@@ -52,6 +52,10 @@ export type InterpretImageFeedbackInput = Readonly<{
   // Optional whole-poster note submitted alongside the markers.
   overallNote?: string | undefined;
   posterKind: 'article' | 'twitter';
+  // Social only: how the stamped badge looks and where it is, as the prompt builders describe it
+  // (socialChromeFor(logoStyle).lockup). Absent = the pre-rotation top-right card. Without it a
+  // left-hand or circular badge is read as poster content the officer may be pointing at.
+  socialLockup?: string | undefined;
 }>;
 
 export type InterpretedImageFeedback = Readonly<{
@@ -178,7 +182,7 @@ function buildPrompt(input: InterpretImageFeedbackInput): string {
     );
   } else {
     lines.push(
-      '- The top-right white rounded-square महाराष्ट्र शासन emblem-and-wordmark badge and the full-width bottom footer strip are branding stamped by software AFTER editing and cannot be changed by the edit. If a marker points at one of them, say so briefly and interpret the nearest plausible editable intent instead.',
+      `- The ${input.socialLockup ?? 'top-right white rounded-square महाराष्ट्र शासन emblem-and-wordmark badge'} and the full-width bottom footer strip are branding stamped by software AFTER editing and cannot be changed by the edit. If a marker points at one of them, say so briefly and interpret the nearest plausible editable intent instead.`,
     );
   }
   lines.push(

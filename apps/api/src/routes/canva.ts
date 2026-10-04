@@ -18,6 +18,7 @@ import {
   isSocialCategory,
 } from '@dgipr/schemas';
 import { createLayeredSocialPosterPptx } from '../canva/layered-poster.js';
+import { currentSocialLogoStyle } from '../jobs/social-logo.js';
 
 const CANVA_API = 'https://api.canva.com/rest/v1';
 const OAUTH_STATE_MAX_AGE_MS = 10 * 60 * 1000;
@@ -356,7 +357,7 @@ async function uploadPoster(
 ): Promise<string> {
   const metadata = JSON.stringify({
     name_base64: Buffer.from(
-      `Mahasamvad poster ${generationId.slice(0, 8)}`,
+      `AI Newsroom poster ${generationId.slice(0, 8)}`,
       'utf8',
     ).toString('base64'),
   });
@@ -405,7 +406,7 @@ async function createDesign(
       body: JSON.stringify({
         type: 'type_and_asset',
         asset_id: assetId,
-        title: 'Mahasamvad poster',
+        title: 'AI Newsroom poster',
       }),
     },
     'design creation',
@@ -439,7 +440,7 @@ async function importLayeredPoster(
   presentation: Buffer,
   generationId: string,
 ): Promise<string> {
-  const title = `Mahasamvad poster ${generationId.slice(0, 8)}`;
+  const title = `AI Newsroom poster ${generationId.slice(0, 8)}`;
   const metadata = JSON.stringify({
     title_base64: Buffer.from(title, 'utf8').toString('base64'),
     mime_type:
@@ -580,7 +581,11 @@ export function registerCanvaRoutes(
         ? await importLayeredPoster(
             accessToken,
             await createLayeredSocialPosterPptx(
-              await buildCanvaSocialPosterLayers(poster),
+              // The badge is read off the poster, so the logo layer is lifted from wherever it
+              // actually sits and in its actual shape (card, circle or quarter-circle).
+              await buildCanvaSocialPosterLayers(poster, {
+                logoStyle: await currentSocialLogoStyle(poster, row),
+              }),
             ),
             state.generationId,
           )

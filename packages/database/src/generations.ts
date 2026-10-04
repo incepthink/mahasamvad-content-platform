@@ -147,6 +147,9 @@ export type GenerationRow = Readonly<{
   // to put an arbitrary string into one. Null on a run that carried no pictures, which is
   // every run made before the control existed.
   promptImagePaths: unknown;
+  // The image model this run renders with when the officer ticked नवीन (migration 0061).
+  // Null = the deployment default (OPENAI_IMAGE_MODEL).
+  imageModel: string | null;
   // ---------- Dynamic Poster (migration 0052) ----------
   // The still poster the officer uploaded, and the clip made from it. All null on every
   // other lane. `motionInteractionId` is THE CHAIN POINT: the Gemini interaction a follow-up
@@ -200,6 +203,10 @@ export type GenerationCostBreakdown = Readonly<{
   textCostUsd: number;
   imageCount: number;
   imageCostUsd: number;
+  // Seconds of video a generation's jobs rendered — a Dynamic Poster's Gemini clips. Optional:
+  // every row written before the lane was metered lacks them, and reads as zero.
+  videoSeconds?: number;
+  videoCostUsd?: number;
   runs: number;
 }>;
 
@@ -212,6 +219,8 @@ export type GenerationCostIncrement = Readonly<{
   textCostUsd: number;
   imageCount: number;
   imageCostUsd: number;
+  videoSeconds?: number;
+  videoCostUsd?: number;
 }>;
 
 // Shape returned by selects (snake_case column names).
@@ -254,6 +263,7 @@ type GenerationDbRow = {
   scene_path: string | null;
   poster_path: string | null;
   prompt_image_paths: unknown;
+  image_model?: string | null;
   source_image_path: string | null;
   motion_path: string | null;
   motion_gif_path: string | null;
@@ -340,6 +350,8 @@ function fromDbRow(row: GenerationDbRow): GenerationRow {
     // column, and an undefined here would be DROPPED by JSON.stringify rather than reported
     // as absent.
     promptImagePaths: row.prompt_image_paths ?? null,
+    // ?? null: a database without 0061 returns no such column.
+    imageModel: row.image_model ?? null,
     // ?? null: a pre-0052 database returns no such columns (undefined), which JSON.stringify
     // would DROP from the detail payload and fail the web's Zod parse — the 0021 finding.
     sourceImagePath: row.source_image_path ?? null,
@@ -501,6 +513,9 @@ export async function insertGeneration(
     // both rebuild the job by re-reading the row, so pictures held only in the create request
     // would be dropped on the first redo.
     promptImagePaths?: readonly string[] | undefined;
+    // Insert-only (migration 0061): the image model the officer opted into (नवीन). Insert-only
+    // because every redo and feedback round re-reads the row, so the choice must live there.
+    imageModel?: string | undefined;
     // Insert-only (migration 0052): the poster the officer uploaded for a Dynamic Poster
     // run. Insert-only for the reason imagePrompt is — a retry and every follow-up re-read
     // the row, so the source must be the same object every time.
@@ -578,6 +593,9 @@ export async function insertGeneration(
       ...(input.promptImagePaths && input.promptImagePaths.length > 0
         ? { prompt_image_paths: input.promptImagePaths }
         : {}),
+      // Same omit-unless-set treatment (migration 0061): an un-applied 0061 costs only a create
+      // that ticked नवीन.
+      ...(input.imageModel ? { image_model: input.imageModel } : {}),
       // Same again (migration 0052). This one cannot save the run it belongs to — a Dynamic
       // Poster with no source is not a run — but it keeps every OTHER create working on a
       // database where 0052 has not been applied.
@@ -642,7 +660,8 @@ export async function addGenerationCost(
     increment.chatCalls === 0 &&
     increment.imageCount === 0 &&
     increment.textCostUsd === 0 &&
-    increment.imageCostUsd === 0;
+    increment.imageCostUsd === 0 &&
+    (increment.videoCostUsd ?? 0) === 0;
   if (isZero) return;
 
   const { data, error } = await client
@@ -667,9 +686,20 @@ export async function addGenerationCost(
     textCostUsd: round((prev?.textCostUsd ?? 0) + increment.textCostUsd, 6),
     imageCount: (prev?.imageCount ?? 0) + increment.imageCount,
     imageCostUsd: round((prev?.imageCostUsd ?? 0) + increment.imageCostUsd, 6),
+    videoSeconds: round(
+      (prev?.videoSeconds ?? 0) + (increment.videoSeconds ?? 0),
+      3,
+    ),
+    videoCostUsd: round(
+      (prev?.videoCostUsd ?? 0) + (increment.videoCostUsd ?? 0),
+      6,
+    ),
     runs: (prev?.runs ?? 0) + 1,
   };
-  const totalUsd = round(merged.textCostUsd + merged.imageCostUsd, 4);
+  const totalUsd = round(
+    merged.textCostUsd + merged.imageCostUsd + (merged.videoCostUsd ?? 0),
+    4,
+  );
 
   const { error: updateError } = await client
     .from(GENERATIONS_TABLE)
@@ -699,6 +729,28 @@ export async function getGeneration(
     throw new Error(`Failed to fetch generation ${id}: ${error.message}`);
   }
   return data ? fromDbRow(data as GenerationDbRow) : null;
+}
+
+// The image model a run opted into (migration 0061), read on its own because the job wrapper
+// needs it before the job runs and the job's own row read happens inside it. BEST-EFFORT:
+// any error — an un-applied 0061 included — answers null, i.e. the deployment default, so a
+// missing column can never fail a run.
+export async function getGenerationImageModel(
+  client: SupabaseClient,
+  id: string,
+): Promise<string | null> {
+  try {
+    const { data, error } = await client
+      .from(GENERATIONS_TABLE)
+      .select('image_model')
+      .eq('id', id)
+      .maybeSingle();
+    if (error || !data) return null;
+    const value = (data as { image_model?: unknown }).image_model;
+    return typeof value === 'string' && value.trim() ? value.trim() : null;
+  } catch {
+    return null;
+  }
 }
 
 // Which articles came out of these DLO intakes. Lineage is one-way — generations point at

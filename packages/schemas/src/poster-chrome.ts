@@ -26,3 +26,94 @@ export const SOCIAL_LOCKUP_WIDTH_RATIO = 0.125;
 
 /** Its inset from the top and right edges: 6px on the same canvas. */
 export const SOCIAL_LOCKUP_MARGIN_RATIO = 0.0046875;
+
+// --- WHICH LOGO STYLE A SOCIAL POSTER CARRIES (2026-10-03) -----------------------------------
+//
+// The badge used to be the same white rounded card in the same top-right corner on every
+// poster, which made every poster read as the same template. It now rotates through six
+// styles: the card, a white CIRCLE, and a white QUARTER-CIRCLE tab flush with the corner (its
+// two straight edges run along the top edge and the side edge) — each in the top-left or the
+// top-right corner.
+//
+// The style is chosen DETERMINISTICALLY FROM THE GENERATION ID (pickSocialLogoStyle), so every
+// place that needs it — the initial render's prompt and stamp, a redo, every feedback round
+// (which must erase and re-stamp the SAME badge), every carousel slide, and the Canva layer
+// export — can recompute it from the row with no column and no migration.
+//
+// The footprint/reserve numbers live here, not in the renderer, for the reason the two ratios
+// above do: the renderer stamps the badge and the PROMPT reserves room for it, and those are two
+// packages that must agree. All figures are pixels on the 1280px social canvas.
+
+export const SOCIAL_LOGO_STYLES = [
+  'card-right',
+  'card-left',
+  'circle-right',
+  'circle-left',
+  'quarter-right',
+  'quarter-left',
+] as const;
+export type SocialLogoStyle = (typeof SOCIAL_LOGO_STYLES)[number];
+export type SocialLogoShape = 'card' | 'circle' | 'quarter';
+export type SocialLogoSide = 'left' | 'right';
+
+/** What every poster rendered before the rotation carries, and the rollback value. */
+export const DEFAULT_SOCIAL_LOGO_STYLE: SocialLogoStyle = 'card-right';
+
+export function isSocialLogoStyle(value: unknown): value is SocialLogoStyle {
+  return (
+    typeof value === 'string' &&
+    (SOCIAL_LOGO_STYLES as readonly string[]).includes(value)
+  );
+}
+
+export function socialLogoShape(style: SocialLogoStyle): SocialLogoShape {
+  return style.startsWith('circle')
+    ? 'circle'
+    : style.startsWith('quarter')
+      ? 'quarter'
+      : 'card';
+}
+
+export function socialLogoSide(style: SocialLogoStyle): SocialLogoSide {
+  return style.endsWith('left') ? 'left' : 'right';
+}
+
+/**
+ * How far the stamped badge reaches from its corner, margin included — what the renderer
+ * actually covers. Keep in sync with the shape constants in poster-renderer/twitter-chrome.ts.
+ */
+export const SOCIAL_LOGO_FOOTPRINT: Readonly<
+  Record<SocialLogoShape, Readonly<{ width: number; height: number }>>
+> = {
+  card: { width: 166, height: 160 },
+  circle: { width: 194, height: 194 },
+  quarter: { width: 224, height: 224 },
+};
+
+/**
+ * What the PROMPT reserves for it: the footprint plus a little slack, which is the model's
+ * margin of error. The card's 180x170 is the figure every prompt has quoted since 2026-08-07.
+ */
+export const SOCIAL_LOGO_RESERVE: Readonly<
+  Record<SocialLogoShape, Readonly<{ width: number; height: number }>>
+> = {
+  card: { width: 180, height: 170 },
+  circle: { width: 210, height: 210 },
+  quarter: { width: 240, height: 240 },
+};
+
+// FNV-1a: tiny, stable across processes and platforms, and spreads uuids evenly enough for six
+// buckets. Not a security property — only "the same id always lands on the same style".
+function hashSeed(seed: string): number {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash ^= seed.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash >>> 0;
+}
+
+/** The style a run carries, from its id. Same id, same style, every time. */
+export function pickSocialLogoStyle(seed: string): SocialLogoStyle {
+  return SOCIAL_LOGO_STYLES[hashSeed(seed) % SOCIAL_LOGO_STYLES.length]!;
+}

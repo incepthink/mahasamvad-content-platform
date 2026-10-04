@@ -107,6 +107,7 @@ import {
 import { articleStyleReferencesEnabled } from '../generation/no-reference-article-prompt.js';
 import { respondWithSources } from '../generation/responses-with-sources.js';
 import {
+  GemmaSourcesTooLargeError,
   buildGemmaMessages,
   gemmaSourceSettings,
   prepareGemmaSources,
@@ -862,9 +863,24 @@ export async function captureOne(
     // The vision student's tiles are prepared BEFORE anything is uploaded or billed: a
     // document that will not render must not cost a teacher article that can then never be
     // paired.
-    const studentVision = vision
-      ? await prepareGemmaSources(visionDocuments)
-      : null;
+    let studentVision: Awaited<ReturnType<typeof prepareGemmaSources>> | null =
+      null;
+    if (vision) {
+      try {
+        studentVision = await prepareGemmaSources(visionDocuments);
+      } catch (error) {
+        // Over the tile budget: the student could never be shown this row, so it is a skip
+        // (free — nothing has been uploaded or billed yet), not a failure.
+        if (error instanceof GemmaSourcesTooLargeError) {
+          return {
+            ...base,
+            status: 'skipped',
+            reason: `documents exceed the vision student's tile budget (${error.message})`,
+          };
+        }
+        throw error;
+      }
+    }
     if (studentVision) {
       warnings.push(...studentVision.warnings);
       // prepareGemmaSources warns only when a document did not reach the student (most often

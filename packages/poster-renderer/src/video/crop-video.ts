@@ -172,6 +172,26 @@ async function probeVideoSize(
   };
 }
 
+// The container's own duration of a clip held in memory, or null when ffmpeg cannot read one.
+// Used by the cost meter: the Gemini video lane returns no usage object, so the seconds it is
+// billed for are measured off the bytes it sent back. Never throws — a clip whose length cannot
+// be read costs its meter row, never the render.
+export async function probeVideoDurationSeconds(
+  mp4: Buffer,
+): Promise<number | null> {
+  const dir = await mkdtemp(join(tmpdir(), 'dgipr-video-probe-'));
+  try {
+    const inputPath = join(dir, 'clip.mp4');
+    await writeFile(inputPath, mp4);
+    const { durationSeconds } = await probeVideoSize(inputPath);
+    return durationSeconds;
+  } catch {
+    return null;
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
 // One still to burn onto every frame of the cropped clip, already placed in its pixels.
 type CropOverlay = Readonly<{ path: string; x: number; y: number }>;
 

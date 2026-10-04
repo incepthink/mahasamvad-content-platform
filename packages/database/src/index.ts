@@ -27,6 +27,7 @@ export {
   updateGeneration,
   addGenerationCost,
   getGeneration,
+  getGenerationImageModel,
   listGenerations,
   listGenerationsPage,
   countGenerations,

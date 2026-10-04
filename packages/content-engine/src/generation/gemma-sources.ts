@@ -58,6 +58,7 @@ import { createThinkingStripper } from '../chat/qwen-chat.js';
 import { readChatCompletionStream } from '../http/openai-chat-stream.js';
 import { extractDocxText } from '../intake/docx.js';
 import {
+  PdfRasterTooLargeError,
   rasterizePdf,
   type RasterTile,
   type RasterizeOptions,
@@ -636,6 +637,13 @@ export async function prepareGemmaSources(
       // A budget refusal is the officer's to act on and must reach them; anything else is
       // one source failing, which the run survives (the intake-job stance).
       if (error instanceof GemmaSourcesTooLargeError) throw error;
+      // rasterizePdf refuses an over-budget PDF with its OWN error. Swallowed as a warning,
+      // the PDF was silently dropped and the model — handed no source at all — answered
+      // "Please provide the SOURCE INFORMATION", which reached the officer as their article
+      // (5 of 13 test PDFs on 2026-10-02). It is the same budget refusal; surface it as one.
+      if (error instanceof PdfRasterTooLargeError) {
+        throw new GemmaSourcesTooLargeError(imageCount + error.tiles, maxTiles);
+      }
       warnings.push(
         `${document.name}: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -1418,6 +1426,31 @@ if (
     }
     check('over-budget refuses', budgetThrew.includes('मर्यादा'));
     check('and the refusal is Marathi', /[ऀ-ॿ]/.test(budgetThrew));
+
+    // An over-budget PDF is refused by rasterizePdf with its OWN error. It used to be
+    // swallowed into a warning, so the PDF was dropped and the model wrote from nothing.
+    const { PDFDocument } = await import('pdf-lib');
+    const tooLong = await PDFDocument.create();
+    for (let i = 0; i < 3; i++) tooLong.addPage([200, 280]);
+    let pdfError: unknown = null;
+    try {
+      await prepareGemmaSources(
+        [
+          {
+            name: 'long.pdf',
+            kind: 'pdf',
+            data: Buffer.from(await tooLong.save()),
+          },
+        ],
+        { maxTiles: 2, tilesPerPage: 1 },
+      );
+    } catch (error) {
+      pdfError = error;
+    }
+    check(
+      'an over-budget PDF is refused, not dropped into a warning',
+      pdfError instanceof GemmaSourcesTooLargeError,
+    );
 
     const broken = await prepareGemmaSources([
       { name: 'broken.docx', kind: 'docx', data: Buffer.from('not-a-docx') },

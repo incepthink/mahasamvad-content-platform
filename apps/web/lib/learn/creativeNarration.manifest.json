@@ -1,0 +1,72 @@
+{
+  "text": {
+    "src": "/learn/creative/audio/text.df02158911.mp3",
+    "seconds": 16.24,
+    "textHash": "df02158911"
+  },
+  "verbatim": {
+    "src": "/learn/creative/audio/verbatim.6c83c6341f.mp3",
+    "seconds": 18.48,
+    "textHash": "6c83c6341f"
+  },
+  "caption": {
+    "src": "/learn/creative/audio/caption.ba6aa8721d.mp3",
+    "seconds": 14,
+    "textHash": "ba6aa8721d"
+  },
+  "submit": {
+    "src": "/learn/creative/audio/submit.2db218cacb.mp3",
+    "seconds": 5.28,
+    "textHash": "2db218cacb"
+  },
+  "creating": {
+    "src": "/learn/creative/audio/creating.a289fb6118.mp3",
+    "seconds": 6.4,
+    "textHash": "a289fb6118"
+  },
+  "mark-mode": {
+    "src": "/learn/creative/audio/mark-mode.63ae7c47a2.mp3",
+    "seconds": 14.4,
+    "textHash": "63ae7c47a2"
+  },
+  "mark-headline": {
+    "src": "/learn/creative/audio/mark-headline.ee2e78eeda.mp3",
+    "seconds": 9.36,
+    "textHash": "ee2e78eeda"
+  },
+  "describe": {
+    "src": "/learn/creative/audio/describe.236f14c7ac.mp3",
+    "seconds": 9.84,
+    "textHash": "236f14c7ac"
+  },
+  "send": {
+    "src": "/learn/creative/audio/send.bbca26851a.mp3",
+    "seconds": 7.76,
+    "textHash": "bbca26851a"
+  },
+  "editing": {
+    "src": "/learn/creative/audio/editing.175b2eb35d.mp3",
+    "seconds": 3.52,
+    "textHash": "175b2eb35d"
+  },
+  "compare": {
+    "src": "/learn/creative/audio/compare.f83f0e63c4.mp3",
+    "seconds": 11.68,
+    "textHash": "f83f0e63c4"
+  },
+  "redo": {
+    "src": "/learn/creative/audio/redo.acb24a8cfa.mp3",
+    "seconds": 11.36,
+    "textHash": "acb24a8cfa"
+  },
+  "download": {
+    "src": "/learn/creative/audio/download.1246a8196a.mp3",
+    "seconds": 6.96,
+    "textHash": "1246a8196a"
+  },
+  "finish": {
+    "src": "/learn/creative/audio/finish.f8947dda7c.mp3",
+    "seconds": 7.36,
+    "textHash": "f8947dda7c"
+  }
+}

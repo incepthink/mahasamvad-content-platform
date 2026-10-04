@@ -13,12 +13,37 @@
 // and quality stay env-overridable (OPENAI_IMAGE_MODEL / OPENAI_IMAGE_SIZE /
 // OPENAI_IMAGE_QUALITY) as a fallback if an account can't request a given model or size.
 
+import { AsyncLocalStorage } from 'node:async_hooks';
+
 const GENERATIONS_URL = 'https://api.openai.com/v1/images/generations';
 const EDITS_URL = 'https://api.openai.com/v1/images/edits';
 
 // gpt-image-2 (gpt-image-1 is deprecated on OpenAI's model page); matches what both
 // n8n workflows use. Env-overridable if an account can't request it.
 export const IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL ?? 'gpt-image-2';
+// The NEWER model an officer can opt into per run (the नवीन checkbox on the create form).
+// Resolved by the API at create time and STORED on the row (generations.image_model, 0061),
+// so a retry, a redo and every feedback round of that run use the same model.
+export const NEW_IMAGE_MODEL =
+  process.env.OPENAI_IMAGE_MODEL_NEW ?? 'gpt-image-2.5-flare';
+
+// A per-JOB override of IMAGE_MODEL. The API wraps a generation's job in runWithImageModel
+// with the model stored on its row, so every generateImage/editImage that job makes —
+// however deep, and across awaits — uses it, with no model argument threaded through the
+// ~dozen call sites. Outside a scope (or with null) the default above applies, so every
+// caller that never opts in sends a byte-for-byte unchanged request.
+const imageModelScope = new AsyncLocalStorage<string>();
+
+export function runWithImageModel<T>(
+  model: string | null | undefined,
+  fn: () => Promise<T>,
+): Promise<T> {
+  return model ? imageModelScope.run(model, fn) : fn();
+}
+
+export function currentImageModel(): string {
+  return imageModelScope.getStore() ?? IMAGE_MODEL;
+}
 // Landscape 3:2 — object-fit:cover-cropped into the poster's photo zone.
 const SIZE = process.env.OPENAI_IMAGE_SIZE ?? '1536x1024';
 // 'medium' is ~4x cheaper than 'high' with an acceptable poster background; keep in sync
@@ -168,7 +193,7 @@ export async function generateImage(
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        model: IMAGE_MODEL,
+        model: currentImageModel(),
         prompt,
         size: opts.size ?? SIZE,
         quality: QUALITY,
@@ -201,17 +226,18 @@ export async function editImage(
   if (images.length === 0) {
     throw new Error('editImage was called with no image.');
   }
+  const model = currentImageModel();
   const fidelity =
-    opts.inputFidelity && !modelsRejectingInputFidelity.has(IMAGE_MODEL)
+    opts.inputFidelity && !modelsRejectingInputFidelity.has(model)
       ? opts.inputFidelity
       : undefined;
   const response = await postEdit(apiKey, images, prompt, opts, fidelity);
   if (fidelity && response.status === 400) {
     const detail = await response.clone().text();
     if (/input_fidelity/i.test(detail)) {
-      modelsRejectingInputFidelity.add(IMAGE_MODEL);
+      modelsRejectingInputFidelity.add(model);
       console.warn(
-        `[openai-image] ${IMAGE_MODEL} rejected input_fidelity; re-sending the edit without it.`,
+        `[openai-image] ${model} rejected input_fidelity; re-sending the edit without it.`,
       );
       await response.body?.cancel().catch(() => undefined);
       return decode(
@@ -231,7 +257,7 @@ async function postEdit(
   fidelity: 'high' | 'low' | undefined,
 ): Promise<Response> {
   const form = new FormData();
-  form.append('model', IMAGE_MODEL);
+  form.append('model', currentImageModel());
   form.append('prompt', prompt);
   form.append('size', opts.size ?? SIZE);
   form.append('quality', QUALITY);

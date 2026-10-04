@@ -30,6 +30,7 @@ import {
   awaitInteraction,
   createVideoInteraction,
   downloadInteractionVideo,
+  meterInteractionVideo,
   generateMotionPrompt,
   interactionErrorMessage,
   interactionOutputOf,
@@ -402,6 +403,10 @@ async function renderAndStoreMotion(
         'Gemini finished the interaction without returning a video.',
     );
   }
+
+  // Metered off the RAW render — the seconds Google billed — before the crop/restore, which is
+  // local work. runJob's cost scope persists it to cost_usd and writes the task row.
+  await meterInteractionVideo(bytes);
 
   const clip = await cropRenderedClip(
     id,

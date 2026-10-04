@@ -14,7 +14,7 @@ import type {
 } from '@dgipr/schemas';
 
 export const STR = {
-  appName: 'महासंवाद मजकूर मंच',
+  appName: 'एआय न्यूजरूम',
   appSubtitle: 'माहिती व जनसंपर्क महासंचालनालय, महाराष्ट्र शासन',
   navNew: 'क्रिएटिव्ह आणि सोशल',
   navHistory: 'मागील काम',
@@ -33,7 +33,7 @@ export const STR = {
   railExpand: 'यादी मोठी करा',
   railCancel: 'नको',
   poweredBy: 'Powered by',
-  installAppTitle: 'मोबाईलवर Newsroom जोडा',
+  installAppTitle: 'मोबाईलवर एआय न्यूजरूम जोडा',
   installAppHint:
     'एकदा जोडल्यानंतर WhatsApp किंवा Recorder मधून ध्वनिफीत थेट येथे पाठवता येईल.',
   installAppAction: 'मोबाईलवर जोडा',
@@ -1185,6 +1185,12 @@ export const STR = {
   captionToggleHint:
     'पोस्टरसोबत मराठी कॅप्शनही लिहिली जाईल. निवडले नाही तर फक्त पोस्टर तयार होईल — कॅप्शन नंतरही जोडता येते.',
 
+  // नवीन — render this run's poster with the newer image model. Off by default. The vendor
+  // and model are deliberately not named (white-label rule).
+  newImageModelLabel: 'नवीन',
+  newImageModelHint:
+    'नवीन प्रतिमा मॉडेल वापरून पोस्टर तयार होईल. पुन्हा तयार करताना आणि बदल करतानाही हेच मॉडेल वापरले जाईल.',
+
   // Shown on a finished social post that was created poster-only
   captionNoneTitle: 'या पोस्टसाठी कॅप्शन तयार केलेली नाही',
   captionNoneHint:
@@ -1664,7 +1670,7 @@ export const STR = {
   // No hint under the label: the file count and the absence of a size limit are both in the
   // card's ⓘ (infoTranscribeInput), which says them beside the accepted formats.
   transcribeSharedReadError:
-    'मोबाईलवरून पाठवलेली ध्वनिफीत उघडता आली नाही. कृपया पुन्हा Share करून Newsroom निवडा.',
+    'मोबाईलवरून पाठवलेली ध्वनिफीत उघडता आली नाही. कृपया पुन्हा Share करून एआय न्यूजरूम निवडा.',
   transcribeFilesTitle: 'जोडलेली ध्वनिमुद्रणे',
   transcribeNeedFile:
     'कृपया किमान एक ध्वनिमुद्रण जोडा किंवा यूट्युब लिंक द्या.',
@@ -2337,6 +2343,12 @@ export const STR = {
   analyticsTaskSocialPost: 'सोशल मीडिया पोस्टर तयार करणे',
   analyticsTaskCarouselPlan: 'कॅरोसेल स्लाइडची आखणी',
   analyticsTaskCarouselSlide: 'कॅरोसेल स्लाइड तयार करणे',
+  analyticsTaskCarouselCreation: 'कॅरोसेल पोस्ट तयार करणे',
+  analyticsTaskCarouselSlideRegeneration: 'कॅरोसेल स्लाइड पुन्हा तयार करणे',
+  analyticsTaskCarouselSlideRevision: 'निशाणीवरून कॅरोसेल स्लाइड सुधारणा',
+  analyticsTaskDynamicPoster: 'डायनॅमिक पोस्टर तयार करणे',
+  analyticsTaskDynamicPosterRevision: 'डायनॅमिक पोस्टरमध्ये सुधारणा',
+  analyticsTaskDynamicPosterCrop: 'डायनॅमिक पोस्टर क्रॉप करणे',
   analyticsTaskSocialCaption: 'सोशल मीडिया कॅप्शन लिहिणे',
   analyticsTaskSocialCaptionRevision: 'कॅप्शनमध्ये सुधारणा',
   analyticsTaskYoutubeThumbnail: 'YouTube थंबनेल तयार करणे',
@@ -2350,6 +2362,8 @@ export const STR = {
   analyticsTaskVideoClips: 'व्हिडिओ क्लिप तयार करणे',
   analyticsTaskVideoSceneRevision: 'व्हिडिओ दृश्य पुन्हा ॲनिमेट करणे',
   analyticsTaskVideoNarration: 'व्हिडिओ निवेदन तयार करणे',
+  analyticsTaskNewVideoRender: 'AI संवादातून व्हिडिओ तयार करणे',
+  analyticsTaskNewVideoStoryboard: 'AI संवादातून स्टोरीबोर्ड व चित्रे',
   analyticsTaskLegacyCombined: 'पूर्वीची एकत्रित AI नोंद',
   analyticsUnitCalls: 'कॉल',
   analyticsUnitImages: 'प्रतिमा',
@@ -2396,12 +2410,18 @@ export const STR = {
   analyticsMetricFromGenerations: 'लेखांची भाषांतरे',
   analyticsMetricIssuesFound: 'आढळलेल्या त्रुटी',
   analyticsMetricProjectsStarted: 'सुरू केलेले प्रकल्प',
+  analyticsMetricDynamicPosters: 'डायनॅमिक पोस्टर',
+  analyticsMetricCarouselPosts: 'कॅरोसेल पोस्ट',
+  analyticsMetricFramesRendered: 'स्टोरीबोर्ड फ्रेम',
+  analyticsMetricStoryboardAnswers: 'स्टोरीबोर्ड उत्तरे',
+  analyticsMetricStoryboardImages: 'स्टोरीबोर्ड चित्रे',
 
   // Breakdown slice keys → labels.
   analyticsSliceTwitter: 'ट्विटर',
   analyticsSliceFacebook: 'फेसबुक',
   analyticsSliceArticlePoster: 'लेख पोस्टर',
   analyticsSliceYoutubeThumb: 'यूट्युब थंबनेल',
+  analyticsSliceCarouselSlides: 'कॅरोसेल स्लाइड',
   analyticsSliceNews: 'बातमी',
   analyticsSliceScheme: 'योजना-लेख',
   analyticsSliceEnglish: 'इंग्रजी',
@@ -2412,6 +2432,36 @@ export const STR = {
   analyticsSliceVideoConversation: 'AI संवादातून',
   // The video card's own name — not navVideo, which titles the /video storyboard page.
   analyticsFeatureVideo: 'व्हिडिओ',
+  // The landing page's charts. The hero line and the stacked bars count COMPLETED RUNS
+  // (कामे), not artifacts (साहित्य) — one carousel is one run but four slides — so each
+  // chart names its own unit rather than borrowing the headline's.
+  analyticsHeroLegendCurrent: 'हा कालावधी',
+  analyticsHeroLegendPrevious: 'मागील कालावधी',
+  analyticsHeroDailyChart: 'दैनंदिन पूर्ण झालेली कामे',
+  analyticsHeroWeeklyChart: 'साप्ताहिक पूर्ण झालेली कामे',
+  analyticsHeroAllSub: 'सर्व कालावधीतील एकूण · आलेख शेवटच्या ९० दिवसांचा',
+  analyticsHeroWeekPrefix: 'आठवडा · ',
+  analyticsWindowAll: 'सुरुवातीपासून आजपर्यंत',
+  analyticsDonutTitle: 'सुविधानिहाय वाटा',
+  analyticsDonutHint: 'प्रत्येक सुविधेच्या मुख्य आकड्यानुसार',
+  analyticsDonutCenter: 'साहित्य',
+  analyticsBarsDaily: 'दैनंदिन वापर',
+  analyticsBarsWeekly: 'साप्ताहिक वापर',
+  analyticsCompareTitle: 'कालावधी तुलना',
+  analyticsCompareCurrent: 'हा',
+  analyticsComparePrevious: 'मागील',
+  analyticsCompareNone: 'सुरुवातीपासूनच्या कालावधीसाठी तुलना उपलब्ध नाही.',
+  analyticsKeyFiguresTitle: 'मुख्य आकडे',
+  analyticsHeatmapTitle: 'वर्षभरातील दैनंदिन वापर',
+  analyticsHeatmapLess: 'कमी',
+  analyticsHeatmapMore: 'जास्त',
+  analyticsHeatmapMon: 'सोम',
+  analyticsHeatmapWed: 'बुध',
+  analyticsHeatmapFri: 'शुक्र',
+  analyticsHeatmapLoading: 'वर्षभराची आकडेवारी गोळा करत आहोत…',
+  analyticsHeatmapNoWork: 'काम नाही',
+  analyticsHeatmapKeyboardHint:
+    'वर्षभरातील दैनंदिन वापर. दिवस निवडण्यासाठी बाण कळा वापरा.',
 
   // ---------- संपादकीय नियम (/preferences) ----------
   //
@@ -2555,6 +2605,30 @@ export function analyticsDeltaCount(
   return direction === 'up'
     ? `मागील कालावधीपेक्षा ${change} ने जास्त`
     : `मागील कालावधीपेक्षा ${change} ने कमी`;
+}
+
+export function analyticsPreviousTotal(count: string): string {
+  return `मागील कालावधीत ${count} साहित्य`;
+}
+
+export function analyticsWorkCount(count: string): string {
+  return `${count} कामे`;
+}
+
+export function analyticsPreviousValue(count: string): string {
+  return `मागील: ${count}`;
+}
+
+export function analyticsShareOfTotal(percent: string): string {
+  return `एकूणपैकी ${percent}%`;
+}
+
+export function analyticsActiveDaysOf(days: string): string {
+  return `${days} दिवसांपैकी`;
+}
+
+export function analyticsHeatmapSummary(count: string): string {
+  return `गेल्या ५२ आठवड्यांत ${count} कामे`;
 }
 
 // "$1" is deliberately spelled out rather than written as a symbol: `$१` mixes a Latin sign
@@ -3032,6 +3106,18 @@ export const LEARN = {
   ] as readonly string[],
   introPractice: 'हा सराव आहे. यात काहीही जतन, प्रकाशित किंवा खर्च होत नाही.',
   introStart: 'सुरू करा',
+  // Autoplay (/learn/creative): a spoken explanation per step, and the lesson does each step.
+  autoplayStart: 'आपोआप पाहा',
+  selfStart: 'स्वतः करा',
+  autoplayIntroHint:
+    '«आपोआप पाहा» निवडल्यास प्रत्येक पायरी आवाजात समजावून सांगितली जाईल आणि आपोआप होईल. मध्येच तुम्ही स्वतःही करू शकता.',
+  autoplayPause: 'आपोआप सराव थांबवा',
+  autoplayPlay: 'आपोआप सराव चालू करा',
+  autoplayMute: 'आवाज बंद करा',
+  autoplayUnmute: 'आवाज सुरू करा',
+  autoplayOn: 'आपोआप सुरू आहे — हवे तर तुम्ही स्वतःही करू शकता.',
+  autoplayPaused: 'आपोआप सराव थांबला आहे.',
+  autoplayResume: 'आपोआप सुरू ठेवा',
 
   stage1: 'पोस्टर तयार करा',
   stage2: 'भाग निवडा',

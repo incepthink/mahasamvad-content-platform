@@ -27,15 +27,20 @@ import {
   buildNewVideoScaffold,
   classifyNewVideoIntent,
   createVideoInteraction,
+  createCostAccumulator,
   downloadInteractionVideo,
   interactionErrorMessage,
   interactionModeFor,
   interactionOutputOf,
   isTerminalInteractionStatus,
+  meterInteractionVideo,
   newVideoPromptMode,
   newVideoTaskFor,
   promptModeAuthors,
   buildStoryboardImagePrompt,
+  recordImageCost,
+  runInCostScope,
+  runInCostTask,
   runStoryboardTurn,
   type InteractionImage,
   type StoryboardChatTurn,
@@ -82,6 +87,8 @@ import {
   normalizeReferenceImage,
 } from '@dgipr/poster-renderer';
 import { settleJobActivity } from '../activity/actor.js';
+import { imageQuality } from './runner.js';
+import { recordTasksFromCost } from './service-usage.js';
 import {
   NEW_VIDEO_MAX_IMAGES,
   newVideoTitleFrom,
@@ -645,6 +652,28 @@ export async function markTurnFailed(
 // so a shape held only in the request would be lost on the first redo. Nothing re-runs a turn:
 // a failed one is followed by a new turn the officer sends, carrying its own choice. So this
 // needs no migration.
+// METERED, like every other job: this lane ran outside a cost scope until 2026-10-04, so its
+// renders reached /analytics as a count with no seconds and no spend. The scope collects the
+// Gemini video seconds (measured off the returned clip), the OpenAI text calls (intent,
+// authoring, the storyboard chat) and the storyboard pictures, and they are written as
+// usage_events task rows under the video feature — there is no cost column on these tables,
+// and adding one would put a migration in front of the page. Fire-and-forget, like every
+// usage write: a logging failure must never fail a turn.
+function runMeteredTurn(
+  client: SupabaseClient,
+  task: 'new_video_render' | 'new_video_storyboard',
+  job: () => Promise<void>,
+): void {
+  const cost = createCostAccumulator();
+  void runInCostScope(cost, () => runInCostTask(task, job)).finally(() => {
+    try {
+      recordTasksFromCost(client, 'video', cost);
+    } catch (error) {
+      console.error(`[new-video-workflow] could not record task usage:`, error);
+    }
+  });
+}
+
 export function startNewVideoTurn(
   client: SupabaseClient,
   conversation: NewVideoConversationRow,
@@ -671,7 +700,7 @@ export function startNewVideoTurn(
   // argument for the reason `aspect` is: nothing re-runs a turn.
   imageRole: NewVideoImageRole = 'auto',
 ): void {
-  void (async () => {
+  runMeteredTurn(client, 'new_video_render', async () => {
     try {
       await updateNewVideoTurn(client, turn.id, { status: 'generating' });
 
@@ -934,6 +963,9 @@ export function startNewVideoTurn(
       // Re-hosted so the browser can play it: the Gemini URI is authenticated by our API key
       // and must never reach a client. Versioned by turn id, so no path is ever reused (the
       // public buckets are CDN-cached).
+      // The seconds Google billed, measured off the clip it returned.
+      await meterInteractionVideo(bytes);
+
       const path = `new-video-workflow/${conversation.id}/${turn.id}.mp4`;
       await uploadFile(client, VIDEOS_BUCKET, path, bytes, 'video/mp4');
 
@@ -958,7 +990,7 @@ export function startNewVideoTurn(
         );
       }
     }
-  })();
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1064,7 +1096,7 @@ export function startStoryboardTurn(
   turn: NewVideoTurnRow,
   referenceRows: readonly NewVideoImageRow[],
 ): void {
-  void (async () => {
+  runMeteredTurn(client, 'new_video_storyboard', async () => {
     // The answer so far, and the pictures so far. Kept here so a failure can still leave
     // what was written on the row — those tokens were paid for and the officer watched them.
     let text = '';
@@ -1155,6 +1187,12 @@ export function startStoryboardTurn(
                   size: request.size,
                 })
               : await generateImage(prompt, { size: request.size });
+          // gpt-image renders are priced, not measured (no usage object) — the same per-tier
+          // rate every poster render is recorded at, landscape at the article tier.
+          recordImageCost(
+            request.orientation === 'landscape' ? 'article' : 'twitter',
+            imageQuality(),
+          );
           const id = randomUUID();
           // Versioned by turn and a fresh id: the public bucket is CDN-cached, so no path is
           // ever reused.
@@ -1224,5 +1262,5 @@ export function startStoryboardTurn(
         );
       }
     }
-  })();
+  });
 }

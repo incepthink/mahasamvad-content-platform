@@ -7,6 +7,9 @@
 // `fetch` is replaced with a thrower for the whole run: the sandbox API promises no network,
 // and this is the free half of that proof (the browser run asserts zero requests too).
 
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { GenerationDetailSchema } from '@dgipr/schemas';
 import { REAL_API } from '../apiContext';
 import {
@@ -29,6 +32,12 @@ import {
   matchesSampleText,
   type LessonFacts,
 } from './creativeLesson';
+import { autoplayAction, AUTOPLAY_SELECTORS } from './creativeAutoplay';
+import {
+  CREATIVE_NARRATION,
+  NARRATION_KEYS,
+  narrationKey,
+} from './creativeNarration';
 
 let failures = 0;
 let passes = 0;
@@ -275,6 +284,137 @@ async function main() {
       id(facts) === expected,
       id(facts),
     );
+
+  // ---------- autoplay: every step has a line, every line has current audio ----------
+  for (const step of LESSON_STEPS) {
+    const key = narrationKey(step.id, { creating: false, editing: false });
+    check(`step ${step.id} has a narration line`, key !== null, step.id);
+    if (key) check(`line ${key} is not empty`, CREATIVE_NARRATION[key].trim() !== '');
+  }
+  check(
+    'creating has its own clip',
+    narrationKey('submit', { creating: true, editing: false }) === 'creating',
+  );
+  check(
+    'editing has its own clip',
+    narrationKey('send', { creating: false, editing: true }) === 'editing',
+  );
+  // Same formula as packages/content-engine/src/scripts/learn-narration.ts.
+  const textHash = (text: string) =>
+    createHash('sha256').update(text.normalize('NFC').trim()).digest('hex').slice(0, 10);
+  const manifestUrl = new URL('./creativeNarration.manifest.json', import.meta.url);
+  const manifest = JSON.parse(readFileSync(manifestUrl, 'utf8')) as Record<
+    string,
+    { src: string; seconds: number; textHash: string }
+  >;
+  const publicDir = fileURLToPath(new URL('../../public', import.meta.url));
+  for (const key of NARRATION_KEYS) {
+    const entry = manifest[key];
+    check(
+      `clip ${key} is current (re-run learn:narrate if not)`,
+      entry?.textHash === textHash(CREATIVE_NARRATION[key]),
+      entry?.textHash,
+    );
+    check(
+      `clip ${key} file exists`,
+      entry !== undefined && existsSync(`${publicDir}${entry.src}`),
+      entry?.src,
+    );
+  }
+
+  // ---------- autoplay: the demo alone reaches the recap ----------
+  // Each action's effect on the facts, as the real screen would report it.
+  const demo = (start: LessonFacts) => {
+    let f = start;
+    const trail: string[] = [];
+    for (let i = 0; i < 40; i++) {
+      const step = LESSON_STEPS[currentStepIndex(f)];
+      if (!step) return { trail, end: 'none' };
+      if (step.id === 'finish') return { trail, end: 'finish' };
+      const action = autoplayAction(step.id, f);
+      if (!action) {
+        // A sandbox job is running: let it finish.
+        if (f.creating) f = { ...f, creating: false };
+        else if (f.editing) f = { ...f, editing: false, edited: true };
+        else return { trail, end: `stuck at ${step.id}` };
+        trail.push('wait');
+        continue;
+      }
+      trail.push(
+        action.kind === 'click' ? `${step.id}:${action.selector}` : action.kind,
+      );
+      if (action.kind === 'mark')
+        f = {
+          ...f,
+          markerCount: f.markerCount + 1,
+          headlineMarked: f.markerCount === 0 || f.headlineMarked,
+        };
+      else if (action.kind === 'clear-marks')
+        f = { ...f, markerCount: 0, headlineMarked: false, noteWritten: false };
+      else if (action.selector === AUTOPLAY_SELECTORS.insertSample)
+        f = { ...f, noteHasSample: true };
+      else if (action.selector === AUTOPLAY_SELECTORS.next)
+        f = { ...f, acknowledged: [...f.acknowledged, step.id] };
+      else if (action.selector === AUTOPLAY_SELECTORS.fillNote)
+        f = { ...f, noteWritten: f.markerCount === 1 };
+      else if (action.selector === '[data-learn="submit"]')
+        f = { ...f, created: true, creating: true };
+      else if (action.selector === '[data-learn="mark-button"]')
+        f = { ...f, marking: true };
+      else if (action.selector === '[data-learn="send"]')
+        f = {
+          ...f,
+          editing: true,
+          marking: false,
+          markerCount: 0,
+          headlineMarked: false,
+          noteWritten: false,
+        };
+      else return { trail, end: `unknown selector ${action.selector}` };
+    }
+    return { trail, end: 'too long' };
+  };
+  const fromStart = demo(base);
+  check('autoplay alone reaches the recap', fromStart.end === 'finish', fromStart);
+  check(
+    'autoplay inserts the text, then moves on',
+    fromStart.trail[0] === `text:${AUTOPLAY_SELECTORS.insertSample}` &&
+      fromStart.trail[1] === `text:${AUTOPLAY_SELECTORS.next}`,
+    fromStart.trail,
+  );
+  const wrongMark = demo({
+    ...base,
+    created: true,
+    marking: true,
+    markerCount: 1,
+  });
+  check(
+    'a wrong mark is removed, then the headline marked',
+    wrongMark.end === 'finish' &&
+      wrongMark.trail[0] === 'clear-marks' &&
+      wrongMark.trail[1] === 'mark',
+    wrongMark,
+  );
+  const twoMarks = demo({
+    ...base,
+    created: true,
+    marking: true,
+    markerCount: 2,
+    headlineMarked: true,
+  });
+  check(
+    'two headline marks are cleared before the note',
+    twoMarks.end === 'finish' && twoMarks.trail[0] === 'clear-marks',
+    twoMarks,
+  );
+  check(
+    'nothing to do while the poster is made',
+    autoplayAction('submit', { ...base, created: true, creating: true }) === null,
+  );
+  check(
+    'nothing to do at the recap',
+    autoplayAction('finish', afterEdit) === null,
+  );
 
   // ---------- the sandbox job, end to end ----------
   const newId = await api.createGeneration({

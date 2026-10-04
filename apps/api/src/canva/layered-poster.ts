@@ -41,7 +41,7 @@ function imageData(png: Buffer): string {
  * The full-canvas first image contains the model-painted poster with transparent holes where
  * the official chrome lived. The exact logo and footer crops sit above it as independent image
  * objects. Canva therefore imports three selectable elements, and Magic Layers can be applied
- * to `Mahasamvad editable artwork` without ever seeing or reconstructing the brand assets.
+ * to `AI Newsroom editable artwork` without ever seeing or reconstructing the brand assets.
  */
 export async function createLayeredSocialPosterPptx(
   layers: CanvaSocialPosterLayers,
@@ -67,11 +67,11 @@ export async function createLayeredSocialPosterPptx(
     height: slideHeight,
   });
   pptx.layout = LAYOUT_NAME;
-  pptx.author = 'DGIPR Mahasamvad Content Platform';
+  pptx.author = 'DGIPR AI Newsroom';
   pptx.company =
     'Directorate General of Information and Public Relations, Maharashtra';
   pptx.subject = 'Layered Canva poster handoff';
-  pptx.title = 'Mahasamvad poster';
+  pptx.title = 'AI Newsroom poster';
 
   const slide = pptx.addSlide();
   slide.background = { color: 'FFFFFF' };
@@ -81,9 +81,9 @@ export async function createLayeredSocialPosterPptx(
     y: 0,
     w: SLIDE_WIDTH_INCHES,
     h: slideHeight,
-    objectName: 'Mahasamvad editable artwork',
+    objectName: 'AI Newsroom editable artwork',
     altText:
-      'Editable Mahasamvad poster artwork. Apply Magic Layers to this image only.',
+      'Editable AI Newsroom poster artwork. Apply Magic Layers to this image only.',
   });
   slide.addImage({
     data: imageData(layers.logo.png),

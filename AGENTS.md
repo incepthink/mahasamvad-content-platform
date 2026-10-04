@@ -3110,6 +3110,80 @@ client id/secret — see the milestone below.
 
 ## Latest Implementation Milestone
 
+- **/analytics counts every generated thing, not just the original six lanes** (2026-10-04, no
+  migration, no n8n). Dynamic Posters (`motion_path`), carousel slides (`carousel->slides`, a
+  JSON-path select so the plan's text never travels) and carousel captions now count on the
+  क्रिएटिव्ह card (posters = single posters + rendered slides; a carousel's cover is NOT also
+  counted from `poster_path`); the video card adds storyboard frames (from `cost_breakdown.imageCount`),
+  /new-video-workflow storyboard answers and pictures (`generated_images`, with a fallback select
+  for a pre-0060 database) and a videos tile joins the KPI strip. **The Gemini Interactions video
+  lane is now METERED**: `meterInteractionVideo` (gemini-interactions-client.ts) measures the
+  returned MP4 (`probeVideoDurationSeconds`, poster-renderer) and records `recordGeminiVideoCost`
+  at `GEMINI_VIDEO_PRICE_PER_SECOND_USD` (configured, default 0.15); Dynamic Posters reach
+  `generations.cost_usd` (the breakdown gained optional `videoSeconds`/`videoCostUsd`), and
+  /new-video-workflow turns run in a cost scope (`runMeteredTurn`, tasks `new_video_render` /
+  `new_video_storyboard`) whose task rows go to `usage_events` under `video` — earlier renders
+  count but carry no seconds or spend. Pre-2026-08-02 clip history is labelled `veo` before
+  2026-07-26 and the configured provider after (the column never stored it); providers stay hidden
+  in the UI per the white-label rule. Chat and minor stores (glossary, editorial rules, activity)
+  are deliberately not on the page. Deploy: `@dgipr/poster-renderer` → `@dgipr/database` →
+  `@dgipr/content-engine` dists → API + web.
+
+- **नवीन: a per-run opt-in to the newer OpenAI image model** (2026-10-04, migration 0061, no
+  n8n). A checkbox on the create form (every lane that renders a gpt-image poster), off by
+  default, sends `newImageModel: true`; the route stores the RESOLVED id
+  (`NEW_IMAGE_MODEL` = `OPENAI_IMAGE_MODEL_NEW`, default `gpt-image-2.5-flare`, confirmed live
+  in /v1/models and at 1280x1504) in `generations.image_model`, omit-unless-set. `runJob` reads
+  it best-effort (`getGenerationImageModel`) and wraps the whole job in `runWithImageModel`
+  (AsyncLocalStorage in `poster-renderer/openai-image.ts`), so the initial render, redo, pixel
+  feedback and carousel slides all use it with no model threaded through. Null = `IMAGE_MODEL`,
+  byte-identical request. The cost meter records `currentImageModel()` at the old tier price.
+  Not carried by NextActions' "new run from this note" (a new row). Deploy: 0061 →
+  `@dgipr/schemas` → `@dgipr/database` → `@dgipr/poster-renderer` → `@dgipr/content-engine`
+  dists → API + web.
+
+- **The social poster's महाराष्ट्र शासन badge ROTATES: card, circle or quarter-circle, top-left
+  or top-right** (2026-10-03, no migration, no n8n, no web change). Every twitter/facebook/carousel
+  poster carried the same white rounded card in the same top-right corner, which made every poster
+  read as one template. Six styles now (`SOCIAL_LOGO_STYLES` in `@dgipr/schemas`:
+  `card-right|card-left|circle-right|circle-left|quarter-right|quarter-left`); the quarter is a
+  white quarter-circle centred ON the corner, its straight edges being the poster's own top and
+  side edges.
+  - **A run's style is DERIVED from its generation id** (`pickSocialLogoStyle`, FNV-1a), read in
+    ONE place, `socialLogoStyleFor(row)` in `apps/api/src/jobs/social-logo.ts` — so the initial
+    render, every redo and every carousel slide agree with nothing stored. Rows created before
+    `SOCIAL_LOGO_ROTATION_SINCE` (default 2026-10-03T00:00Z) keep `card-right`, so an older
+    carousel's slide redo still matches its published slides. `SOCIAL_LOGO_STYLE` pins one style
+    (`off` = card-right, the rollback).
+  - **An EXISTING poster's style is READ OFF ITS PIXELS** (`detectSocialLogoStyle`,
+    `currentSocialLogoStyle`), used by the feedback rounds (social + carousel slide) and the Canva
+    layer export. We stamp the badge into a lossless PNG, so its opaque pixels match a fresh render
+    exactly (mean diff < 2/255) — a lookup, not a guess. This is load-bearing: a feedback prompt
+    that describes a badge in the wrong corner leaves the real one beside the re-stamp (the
+    duplicate-badge defect of 2026-08-04). Falls back to the row-derived style.
+  - **One placement function**, `placeSocialLogo(style, width)` in `twitter-chrome.ts`, shared by
+    `overlayTwitterChrome(poster, { logoStyle })` and `buildCanvaSocialPosterLayers(poster,
+    { logoStyle })`. Absent style = `card-right`, byte-identical to before (harness-asserted).
+    Canva lifts a circle/quarter by the badge's own ALPHA, not its box (a quarter's box is ~21%
+    artwork); still pixel-identical on restack.
+  - **The prompt moves with it.** `ReservedZoneGeometry.lockupSide` (absent = right, byte-identical)
+    + `socialZonesFor(style)` / `socialChromeFor(style)` in `build-poster-prompt.ts` reach the
+    onbrand, fresh (`buildHeadlineMarginsRule` gained side/shape), template, custom, feedback and
+    carousel prompts, and the marker interpreter (`socialLockup`). Reserves are in schemas
+    (`SOCIAL_LOGO_RESERVE`: card 180x170, circle 210x210, quarter 240x240) beside the stamped
+    footprints (166x160 / 194x194 / 224x224). **The REFERENCE rule on template lanes still
+    describes the top-right card** — that is the master's own branding, wherever this run's badge
+    goes. CMO is untouched (its chrome is its own header).
+  Verified 2026-10-03, all free: workspace typecheck 7/7, eslint clean, prettier clean on every
+  hunk of mine; `poster:preview:chrome:twitter` now renders all six + a contact sheet and asserts
+  footprint, reserve, nothing painted outside the shape, detection of each stamped style (and of
+  none on unstamped artwork) and an even rotation; `poster:verify:canva` restacks all six
+  pixel-identically; prompt harnesses assert every corner mention moves to top-left on all four
+  DGIPR lanes and that an explicit card-right changes nothing. **Left for a real run** (image
+  spend): one fresh and one ठरलेले टेम्पलेट poster on a left/circle/quarter style, then one
+  marker round on it, confirming the headline clears the badge and no second badge appears.
+  Deploy: `@dgipr/schemas` → `@dgipr/poster-renderer` → `@dgipr/content-engine` dists → API.
+
 - **`/learn/dlo` — the second practice lesson, and a revision bug it exposed** (2026-10-01, no
   migration, no n8n). The DLO lane gets the Creative lesson's treatment on the same machinery:
   the real /dlo form (`DloComposer` + `DloAiPromptBox`), the generation page's `ProgressSteps`
