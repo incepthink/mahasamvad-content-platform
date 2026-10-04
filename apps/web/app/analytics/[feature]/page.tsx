@@ -20,7 +20,6 @@ import {
   AnalyticsFeatureKeySchema,
   AnalyticsRangeSchema,
   ANALYTICS_DEFAULT_RANGE,
-  ANALYTICS_INR_PER_USD,
   type AnalyticsDay,
   type AnalyticsFeatureKey,
   type AnalyticsRange,
@@ -33,7 +32,6 @@ import { AnalyticsTrendChart } from '../../../components/AnalyticsTrendChart';
 import {
   ANALYTICS_FEATURE_HREFS,
   ANALYTICS_FEATURE_LABELS,
-  formatNumber,
   isEstimatedMetric,
   serviceLabel,
   sliceLabel,
@@ -42,7 +40,6 @@ import {
 import { useAnalytics } from '../../../lib/useAnalytics';
 import { ErrorNotice } from '../../../components/ErrorNotice';
 import {
-  analyticsCostRateNote,
   analyticsRateLine,
   STR,
 } from '../../../lib/strings';

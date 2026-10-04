@@ -158,8 +158,8 @@ export function SocialPostView({
     if (!placeMark || placeMark.seq === placedSeq.current) return;
     placedSeq.current = placeMark.seq;
     addMarker(placeMark.region);
-    // addMarker is a fresh function each render; the seq is what says "do it now".
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // addMarker is a fresh function each render; the seq is what says "do it now",
+    // so it is deliberately left out of the deps.
   }, [placeMark]);
   const clearedSeq = useRef(0);
   const markerIds = markers.map((m) => m.id).join(',');
@@ -168,7 +168,6 @@ export function SocialPostView({
     clearedSeq.current = clearMarks.seq;
     for (const id of markerIds.split(',').filter(Boolean))
       removeMarker(Number(id));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clearMarks]);
   // The caption box itself — its draft, autosave and generate button — is
   // SocialCaptionEditor, shared with the carousel card. Change REQUESTS go through the edit
