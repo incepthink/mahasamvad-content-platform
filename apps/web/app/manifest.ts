@@ -20,8 +20,8 @@ type ShareTargetManifest = MetadataRoute.Manifest & {
 export default function manifest(): ShareTargetManifest {
   return {
     id: '/',
-    name: 'एआय न्यूजरूम',
-    short_name: 'एआय न्यूजरूम',
+    name: 'AI Newsroom',
+    short_name: 'AI Newsroom',
     description: 'महाराष्ट्र शासनाच्या प्रसिद्धीसाठी मराठी सामग्री मंच',
     start_url: '/transcribe',
     scope: '/',

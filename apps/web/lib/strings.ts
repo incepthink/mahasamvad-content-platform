@@ -14,7 +14,7 @@ import type {
 } from '@dgipr/schemas';
 
 export const STR = {
-  appName: 'एआय न्यूजरूम',
+  appName: 'AI Newsroom',
   appSubtitle: 'माहिती व जनसंपर्क महासंचालनालय, महाराष्ट्र शासन',
   navNew: 'क्रिएटिव्ह आणि सोशल',
   navHistory: 'मागील काम',
@@ -33,7 +33,7 @@ export const STR = {
   railExpand: 'यादी मोठी करा',
   railCancel: 'नको',
   poweredBy: 'Powered by',
-  installAppTitle: 'मोबाईलवर एआय न्यूजरूम जोडा',
+  installAppTitle: 'मोबाईलवर AI Newsroom जोडा',
   installAppHint:
     'एकदा जोडल्यानंतर WhatsApp किंवा Recorder मधून ध्वनिफीत थेट येथे पाठवता येईल.',
   installAppAction: 'मोबाईलवर जोडा',
@@ -1670,7 +1670,7 @@ export const STR = {
   // No hint under the label: the file count and the absence of a size limit are both in the
   // card's ⓘ (infoTranscribeInput), which says them beside the accepted formats.
   transcribeSharedReadError:
-    'मोबाईलवरून पाठवलेली ध्वनिफीत उघडता आली नाही. कृपया पुन्हा Share करून एआय न्यूजरूम निवडा.',
+    'मोबाईलवरून पाठवलेली ध्वनिफीत उघडता आली नाही. कृपया पुन्हा Share करून AI Newsroom निवडा.',
   transcribeFilesTitle: 'जोडलेली ध्वनिमुद्रणे',
   transcribeNeedFile:
     'कृपया किमान एक ध्वनिमुद्रण जोडा किंवा यूट्युब लिंक द्या.',

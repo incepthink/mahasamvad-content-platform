@@ -214,7 +214,7 @@ a {
 }
 
 /* The rail is 260px and shares its head row with the collapse button, so the
-   brand gets ~130px; at 1.5rem एआय न्यूजरूम overflowed it by a few pixels. */
+   brand gets ~130px; at 1.5rem the name overflowed it by a few pixels. */
 .sidebar-logo .site-brand-name {
   font-size: 1.3rem;
 }

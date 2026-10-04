@@ -1,6 +1,6 @@
-# Introduction — एआय न्यूजरूम (AI Newsroom)
+# Introduction — AI Newsroom
 
-**एआय न्यूजरूम** (AI Newsroom) helps Government of Maharashtra communication teams turn official source material into publication-ready content. The interface is Marathi-first and does not require a sign-in.
+**AI Newsroom** helps Government of Maharashtra communication teams turn official source material into publication-ready content. The interface is Marathi-first and does not require a sign-in.
 
 ![The current home page](.gitbook/assets/01-overview--home.png)
 
