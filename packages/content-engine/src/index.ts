@@ -717,6 +717,15 @@ export {
   toDevanagariDigits,
   toLatinDigits,
 } from './generation/digit-grounding.js';
+// Numbers on an image-model poster: spelled digit by digit in the prompt, and read back afterwards
+// (generation 93f948da printed «९९» for «११»).
+export {
+  extractNumeralRuns,
+  findUnsupportedNumerals,
+  keepOfficerNumbers,
+  numberCorrectionBlock,
+  numeralSpellingBlock,
+} from './generation/poster-numerals.js';
 // Step 1 of the Dynamic Poster lane (migration 0052): gpt-5.6-sol reads the officer's still
 // poster and writes the prompt gemini-omni renders the clip from. The measured resolution is
 // supplied to it as fact — see the header for why it is not asked for.

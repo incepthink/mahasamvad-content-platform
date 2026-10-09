@@ -182,6 +182,7 @@ export function sampleDetail(state: SandboxState): GenerationDetail {
     nameDesignations: [],
     designationWarnings: [],
     posterCapacityWarning: null,
+    posterNumeralWarning: null,
     lengthWarning: null,
     learnedPreferences: [],
     articleRevising: false,

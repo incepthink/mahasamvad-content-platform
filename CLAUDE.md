@@ -2023,6 +2023,12 @@ Chromium): `pnpm --filter @dgipr/poster-renderer exec playwright install chromiu
   reads it off the pixels. Stamp/placement → `placeSocialLogo` in `twitter-chrome.ts`; prompt
   corner + description → `socialZonesFor`/`socialChromeFor` in `build-poster-prompt.ts`. Never
   hard-code "top-right" in a social prompt again. Harness: `poster:preview:chrome:twitter`.
+- **Numbers on an image-model poster (2026-10-08)**: gpt-image confuses look-alike Devanagari
+  digits (१ ↔ ९), so every social prompt spells its numbers digit by digit, and edit rounds carry
+  a NUMBER CORRECTION block → `generation/poster-numerals.ts`. Every social render, including
+  feedback rounds, is OCR-read back (`apps/api/src/jobs/poster-numeral-check.ts`). A number not
+  in the source becomes `posterNumeralWarning`, which only warns and never re-renders. Never put
+  a Devanagari digit or a Latin numeral into a rule block; use English digit names.
 - **The social footer is APPENDED below the artwork (2026-08-10), so it can never cover text.**
   `overlayTwitterChrome` no longer pastes the band over the render: `footer-extension.ts` adds a
   strip below it and the band is stamped there.

@@ -30,14 +30,35 @@ const DEVANAGARI_DIGITS = [
 //   **[स्थळ], दि. [दिनांक] :**          an unfilled placeholder copied out of an instruction
 //   मुंबई, दिनांक २३.०९.२०२६ :           a numeric date
 //
+//
+// It still missed every shape with NO place before the date, so the same double came back
+// (generation 6d2a99c2, 2026-10-06: `**दि. ६ ऑक्टोबर २०२६ :**` on its own line, then the
+// platform's `मुंबई, दि. ६ :` on the paragraph below). A scan of 110 production articles found
+// the rest of that family, all handled now:
+//
+//   **दि. ६ ऑक्टोबर २०२६ :**          marker + date, no place
+//   **दि. २८ सप्टेंबर २०२६**           the same with no colon
+//   **मुंबई, दि. :**                   a marker with no date
+//   मुंबई दि. ६ :                      no comma
+//   **२८ सप्टेंबर २०२६**               a bare dated line (must carry a year)
+//   मुंबई : / **फोर्ट :** / पुणे:       a place-only dateline — ONLY at the start of the first
+//                                     body paragraph (or a bold standalone line), never on a
+//                                     heading, where `खरीप दुष्काळस्थिती : …` is a real headline
+//
+// and several of them stacked (`मुंबई, दि. २ : मुंबई : …`), which is why stripping REPEATS.
+//
 // What keeps this from eating a real sentence: the date must be followed by a TERMINATOR — a
 // colon or dash, a closing bold marker, or the end of the line. `पुणे, दि. ५ रोजी बैठक झाली.`
-// has none and is left alone, which is why the old pattern demanded its colon.
+// and `दि. २८ जून २०१८ रोजीच्या शासन निर्णयाद्वारे …` have none and are left alone. A place may
+// not contain digits or quote marks, so `‘प्रहार : द अनटोल्ड …’` is not a place-only dateline.
 const DATELINE_DAY = String.raw`[०-९0-9]{1,2}`;
 const DATELINE_YEAR = String.raw`[०-९0-9]{4}`;
 const DATELINE_WORD = String.raw`[\p{L}\p{M}]+`;
 const DATELINE_PLACEHOLDER = String.raw`\[[^\]\n]{1,24}\]`;
-const DATELINE_PLACE = String.raw`(?:${DATELINE_PLACEHOLDER}|[^\n,*_:\[\]।.?!#]{1,40})`;
+const DATELINE_PLACE = String.raw`(?:${DATELINE_PLACEHOLDER}|[^\n,*_:\[\]।.?!#‘’“”"'०-९0-9–—]{1,40})`;
+// `दि.` / `दिनांक` / `दि` — the dotless forms only when a space, digit or terminator follows, so
+// `दिवस` or `दिनांकाच्या` is never read as one.
+const DATELINE_MARKER = String.raw`दि(?:नांक)?(?:\.|(?=[\s०-९0-9:–—*_]|$))`;
 // Longest alternatives first: the terminator test backtracks into the shorter ones.
 const DATELINE_DATE = [
   DATELINE_PLACEHOLDER,
@@ -49,11 +70,49 @@ const DATELINE_DATE = [
 const DATELINE_BOLD = String.raw`(?:\*\*|__)`;
 const DATELINE_TERMINATOR = String.raw`(?:${DATELINE_BOLD}\s*(?:[:–—]\s*)?|[:–—]\s*(?:${DATELINE_BOLD})?|$)`;
 // Trailing `\s*` already covers U+00A0, which a bold dateline is often followed by.
-const EXISTING_DATELINE = new RegExp(
-  String.raw`^${DATELINE_BOLD}?\s*${DATELINE_PLACE},\s*(?:दि(?:नांक)?\.?\s*)?(?:${DATELINE_DATE})\s*${DATELINE_TERMINATOR}\s*`,
+const DATELINE_LEAD = String.raw`^${DATELINE_BOLD}?\s*`;
+const DATELINE_TAIL = String.raw`\s*${DATELINE_TERMINATOR}\s*`;
+const DATED_DATELINES: readonly RegExp[] = [
+  // पुणे, दि. १८ :   **मुंबई, ०७ ऑगस्ट २०२५**   **मुंबई, दि. :**
+  String.raw`${DATELINE_LEAD}${DATELINE_PLACE}\s*,\s*(?:(?<marker>${DATELINE_MARKER})\s*)?(?<date>${DATELINE_DATE})?${DATELINE_TAIL}`,
+  // मुंबई दि. ६ :
+  String.raw`${DATELINE_LEAD}${DATELINE_PLACE}\s+(?<marker>${DATELINE_MARKER})\s*(?<date>${DATELINE_DATE})?${DATELINE_TAIL}`,
+  // **दि. ६ ऑक्टोबर २०२६ :**
+  String.raw`${DATELINE_LEAD}(?<marker>${DATELINE_MARKER})\s*(?<date>${DATELINE_DATE})?${DATELINE_TAIL}`,
+  // **२८ सप्टेंबर २०२६**
+  String.raw`${DATELINE_LEAD}(?<date>${DATELINE_DATE})${DATELINE_TAIL}`,
+].map((source) => new RegExp(source, 'u'));
+// `मुंबई :` / `**फोर्ट :**` / `पुणे:` — one or two words and a colon, nothing else.
+const PLACE_ONLY_DATELINE = new RegExp(
+  String.raw`^(?<open>${DATELINE_BOLD})?\s*${DATELINE_WORD}(?:\s+${DATELINE_WORD})?\s*(?:${DATELINE_BOLD})?\s*:\s*(?:${DATELINE_BOLD})?\s*`,
   'u',
 );
 const MARKDOWN_HEADING = /^#{1,6}\s+/u;
+
+// Where a place-only dateline (`मुंबई :`) may be recognised: never on a heading, only when
+// bold-wrapped on a standalone line, and in any form at the start of the first body paragraph.
+type PlaceOnly = 'never' | 'bold' | 'any';
+
+// The length of ONE dateline at the start of `text`, or null when it does not open with one.
+function datelinePrefixLength(
+  text: string,
+  placeOnly: PlaceOnly,
+): number | null {
+  for (const pattern of DATED_DATELINES) {
+    const match = pattern.exec(text);
+    if (!match || match[0].length === 0) continue;
+    // Without `दि.` a dateline must carry a year or be a placeholder; otherwise `पुणे, २ लाख` or
+    // `नागपूर, ५ :` in running prose would read as one.
+    const date = match.groups?.date ?? '';
+    if (!match.groups?.marker && !/[०-९0-9]{4}|\[/u.test(date)) continue;
+    return match[0].length;
+  }
+  if (placeOnly === 'never') return null;
+  const match = PLACE_ONLY_DATELINE.exec(text);
+  if (!match || match[0].length === 0) return null;
+  if (placeOnly === 'bold' && !match.groups?.open) return null;
+  return match[0].length;
+}
 // A Marathi news headline is a fragment: it carries no closing full stop, danda, question or
 // exclamation mark. A body paragraph always closes one. That is the discriminator used below,
 // and it is the only reliable one — length is not (a real DGIPR headline runs past 110
@@ -62,25 +121,27 @@ const MARKDOWN_HEADING = /^#{1,6}\s+/u;
 const SENTENCE_END = /[.।?!]["'’”)\]]*$/u;
 
 /**
- * Removes a leading dateline, keeping a Markdown heading marker in front of it. Returns the line
- * unchanged when it does not open with one, and '' when the dateline was the whole line.
+ * Removes EVERY leading dateline (they stack: `मुंबई, दि. २ : मुंबई : …`), keeping a Markdown
+ * heading marker in front. Returns the line unchanged when it does not open with one, and ''
+ * when datelines were the whole line.
  */
-function stripDateline(line: string): string {
+function stripDateline(line: string, placeOnly: PlaceOnly = 'never'): string {
   const heading = /^(#{1,6}\s+)/u.exec(line)?.[1] ?? '';
-  const rest = line.slice(heading.length);
-  const match = EXISTING_DATELINE.exec(rest);
-  if (!match) return line;
-  // Without `दि.` a dateline must carry a year or be a placeholder; otherwise `पुणे, २ लाख` or
-  // `नागपूर, ५ :` in running prose would read as one.
-  if (!/,\s*दि/u.test(match[0]) && !/[०-९0-9]{4}|\[/u.test(match[0])) {
-    return line;
+  const original = line.slice(heading.length);
+  let rest = original;
+  for (;;) {
+    const length = datelinePrefixLength(rest, heading ? 'never' : placeOnly);
+    if (length === null) break;
+    rest = rest.slice(length);
   }
-  const stripped = rest.slice(match[0].length);
-  return stripped ? `${heading}${stripped}` : '';
+  if (rest === original) return line;
+  return rest ? `${heading}${rest}` : '';
 }
 
+// A line that is nothing but a dateline. A heading only counts with a date in it; a plain line
+// may also be a bold place-only one (`**मुंबई :**`).
 function isDatelineOnly(line: string): boolean {
-  return line.length > 0 && stripDateline(line) === '';
+  return line.length > 0 && stripDateline(line, 'bold') === '';
 }
 
 // The bold/italic wrapper a model puts round a subheadline, so the sentence test sees the text.
@@ -165,6 +226,10 @@ export function ensureArticleDateline(
   let placed = false;
 
   for (const [position, line] of filled.entries()) {
+    if (isDatelineOnly(line.value)) {
+      drop.add(line.index);
+      continue;
+    }
     const stripped = stripDateline(line.value);
     if (stripped === '') {
       drop.add(line.index);
@@ -194,7 +259,14 @@ export function ensureArticleDateline(
       lines[line.index] = stripped;
       continue;
     }
-    lines[line.index] = `${dateline.text} ${stripped.trimStart()}`;
+    // The first body paragraph. Everything dateline-shaped at its start goes — including a
+    // place-only `मुंबई :` — and the platform's dateline is written once in front.
+    const body = stripDateline(line.value, 'any').trimStart();
+    if (body === '') {
+      drop.add(line.index);
+      continue;
+    }
+    lines[line.index] = `${dateline.text} ${body}`;
     placed = true;
     break;
   }
@@ -493,6 +565,148 @@ if (process.argv[1]?.endsWith('article-dateline.ts')) {
       { now },
     ),
     '### ग्रामीण रस्त्यांसाठी निधी मंजूर\n\nमुंबई, दि. २९ : राज्य शासनाने निधी मंजूर केला आहे.',
+  );
+
+  // The shapes that still doubled on production (scan of 110 articles, 2026-10-08). Each line
+  // below is verbatim from a stored article.
+  const H =
+    '### *चारा उपलब्धतेचे वेळेत नियोजन करावे*\n\n## *गाळपेर क्षेत्रावर चारा लागवड*';
+  const T = (body: string) => `${H}\n\nमुंबई, दि. २९ : ${body}`;
+  check(
+    '6d2a99c2: a place-less bold dateline line is removed',
+    ensureArticleDateline(
+      `${H}\n\n**दि. ६ ऑक्टोबर २०२६ :**\n\nदुष्काळाच्या पार्श्वभूमीवर नियोजन करावे.`,
+      'news',
+      { now },
+    ),
+    T('दुष्काळाच्या पार्श्वभूमीवर नियोजन करावे.'),
+  );
+  check(
+    'a place-less bold dateline with no colon is removed',
+    ensureArticleDateline(
+      `${H}\n\n**दि. २८ सप्टेंबर २०२६**\n\nपहिला परिच्छेद.`,
+      'news',
+      { now },
+    ),
+    T('पहिला परिच्छेद.'),
+  );
+  check(
+    'a dateline with दि. but no date is removed',
+    ensureArticleDateline(
+      `${H}\n\n**मुंबई, दि. :**\n\nपहिला परिच्छेद.`,
+      'news',
+      {
+        now,
+      },
+    ),
+    T('पहिला परिच्छेद.'),
+  );
+  check(
+    'a bare dated bold line is removed',
+    ensureArticleDateline(
+      `${H}\n\n**२८ सप्टेंबर २०२६**\n\nपहिला परिच्छेद.`,
+      'news',
+      {
+        now,
+      },
+    ),
+    T('पहिला परिच्छेद.'),
+  );
+  check(
+    'a no-comma dateline is replaced',
+    ensureArticleDateline(`${H}\n\nमुंबई दि. ६ : पहिला परिच्छेद.`, 'news', {
+      now,
+    }),
+    T('पहिला परिच्छेद.'),
+  );
+  check(
+    'a place-only dateline after ours collapses (eb60bfd2)',
+    ensureArticleDateline(
+      `${H}\n\nमुंबई, दि. २ : मुंबई : मुंबई वेधशाळेने इशारा दिला.`,
+      'news',
+      { now },
+    ),
+    T('मुंबई वेधशाळेने इशारा दिला.'),
+  );
+  check(
+    'a bold place-only prefix is removed',
+    ensureArticleDateline(
+      `${H}\n\n**फोर्ट :** गणेशोत्सवातून सामाजिक अभिसरण होते.`,
+      'news',
+      { now },
+    ),
+    T('गणेशोत्सवातून सामाजिक अभिसरण होते.'),
+  );
+  check(
+    'a colon-hugging place-only prefix is removed',
+    ensureArticleDateline(`${H}\n\nपुणे: राज्य शासनाने निर्णय घेतला.`, 'news', {
+      now,
+    }),
+    T('राज्य शासनाने निर्णय घेतला.'),
+  );
+  check(
+    'a stacked place-less bold prefix is removed',
+    ensureArticleDateline(
+      `${H}\n\nमुंबई, दि. ३० : **दि. २९ सप्टेंबर :** राज्यात मेळावे झाले.`,
+      'news',
+      { now },
+    ),
+    T('राज्यात मेळावे झाले.'),
+  );
+  check(
+    'a stacked marker-without-date prefix is removed',
+    ensureArticleDateline(
+      `${H}\n\nमुंबई, दि. २९ : मुंबई, दि. : स्टील उद्योजकांच्या समस्या सोडवाव्यात.`,
+      'news',
+      { now },
+    ),
+    T('स्टील उद्योजकांच्या समस्या सोडवाव्यात.'),
+  );
+  check(
+    'the 6d2a99c2 article as stored heals to one dateline',
+    ensureArticleDateline(
+      `${H}\n\n**दि. ६ ऑक्टोबर २०२६ :**\n\nमुंबई, दि. ६ : दुष्काळाच्या पार्श्वभूमीवर नियोजन करावे.\n\nदुसरा परिच्छेद.`,
+      'news',
+      { now },
+    ),
+    `${T('दुष्काळाच्या पार्श्वभूमीवर नियोजन करावे.')}\n\nदुसरा परिच्छेद.`,
+  );
+  // …and what must survive.
+  check(
+    'a sentence opening with a dated GR reference is left alone',
+    ensureArticleDateline(
+      `${H}\n\nदि. २८ जून २०१८ रोजीच्या सुधारित शासन निर्णयाद्वारे निकष ठरले.`,
+      'news',
+      { now },
+    ),
+    T('दि. २८ जून २०१८ रोजीच्या सुधारित शासन निर्णयाद्वारे निकष ठरले.'),
+  );
+  check(
+    'a quoted title with a colon is not a place-only dateline',
+    ensureArticleDateline(
+      `${H}\n\n‘प्रहार : द अनटोल्ड स्टोरी’ हा संदेश देणारा चित्रपट आहे.`,
+      'news',
+      { now },
+    ),
+    T('‘प्रहार : द अनटोल्ड स्टोरी’ हा संदेश देणारा चित्रपट आहे.'),
+  );
+  check(
+    'a headline with a colon is never stripped',
+    ensureArticleDateline(
+      '## *खरीप दुष्काळस्थिती : १९ हजार गावांतील पंचनामे पूर्ण*\n\nपहिला परिच्छेद.',
+      'news',
+      { now },
+    ),
+    '## *खरीप दुष्काळस्थिती : १९ हजार गावांतील पंचनामे पूर्ण*\n\nमुंबई, दि. २९ : पहिला परिच्छेद.',
+  );
+  check(
+    'a lead opening with a dated amount sentence is left alone',
+    ensureArticleDateline(
+      `${H}\n\n२४ मार्च २०२६ रोजी निर्गमित शासन निर्णयानुसार रक्कम वाढली.`,
+      'news',
+      { now },
+    ),
+    T('२४ मार्च २०२६ रोजी निर्गमित शासन निर्णयानुसार रक्कम वाढली.'),
   );
 
   if (failures > 0) process.exitCode = 1;

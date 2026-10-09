@@ -37,6 +37,7 @@ import {
   generatePosterCopy,
   generateSocialCaption,
   interpretImageFeedback,
+  keepOfficerNumbers,
   listSocialTypes,
   buildPosterStyle,
   buildDesignPosterStyle,
@@ -159,6 +160,10 @@ import {
 import { listKnownDesignations } from './translation-terms.js';
 import type { SocialLogoStyle } from '@dgipr/schemas';
 import { currentSocialLogoStyle, socialLogoStyleFor } from './social-logo.js';
+import {
+  checkPosterNumerals,
+  type PosterNumeralWarning,
+} from './poster-numeral-check.js';
 
 const running = new Set<string>();
 
@@ -195,6 +200,21 @@ const posterCapacityWarnings = new Map<
   string,
   { needed: number; available: number }
 >();
+
+// A social poster whose numbers, read back off the finished render, include one the source does
+// not contain — the image model paints the Devanagari and confuses look-alike digits (generation
+// 93f948da: «११» painted «९९»). A "please check" notice, not a verdict: the reader can misread a
+// digit too (poster-numeral-check.ts). Transient like the registries above; every render clears or
+// replaces it, so it always describes the poster on screen.
+const posterNumeralWarnings = new Map<string, PosterNumeralWarning>();
+
+function recordPosterNumeralWarning(
+  id: string,
+  warning: PosterNumeralWarning | null,
+): void {
+  if (warning) posterNumeralWarnings.set(id, warning);
+  else posterNumeralWarnings.delete(id);
+}
 
 // The officer asked for an article of a given length (in तुमची विनंती or in the feedback box)
 // and the run could not reach it. The article is delivered regardless — a length is reached by
@@ -419,6 +439,14 @@ export function getPosterCapacityWarning(
   id: string,
 ): { needed: number; available: number } | null {
   return posterCapacityWarnings.get(id) ?? null;
+}
+
+// Set when the latest social poster shows a number that is not in its source (null when every
+// number matched, the source had none, or no render happened this session).
+export function getPosterNumeralWarning(
+  id: string,
+): PosterNumeralWarning | null {
+  return posterNumeralWarnings.get(id) ?? null;
 }
 
 export function isRevisingArticle(id: string): boolean {
@@ -2378,6 +2406,11 @@ async function renderAndStoreSocialPoster(
   // gpt-image-2 on the social canvas — attribute the fixed tier price (image usage isn't measurable
   // whether it ran in n8n or the direct call). The copy above is metered by chatComplete.
   recordImageCost('twitter', imageQuality());
+  // Read the numbers back off the RAW render (the footer band carries text of its own), in
+  // parallel with the chrome and the upload; awaited after the poster is on the row, so a slow
+  // or failed read never costs the paid render. Every number on a poster must come from the
+  // officer's note — the copy step only re-arranges it.
+  const numeralCheck = checkPosterNumerals(id, rawPoster, row.note);
 
   // 5a. Measure what the render ACTUALLY came out as, BEFORE the chrome is stamped — the footer
   //     band and emblem are the same colours on every poster, so measuring after them biases
@@ -2456,6 +2489,7 @@ async function renderAndStoreSocialPoster(
     referenceTitle: workingTitle,
     posterPath: posterObjectPath,
   });
+  recordPosterNumeralWarning(id, await numeralCheck);
 
   // The assigned style is written SEPARATELY and best-effort, deliberately not bundled into the
   // write above. It targets a column added by migration 0028, and bundling them would mean that
@@ -3732,7 +3766,23 @@ export function startPosterImageFeedbackJob(
           clearActions.join('+') || 'none'
         }; inventory=${contentInventory.length}): ${interpreted.instruction}`,
       );
-      feedbackText = interpreted.instruction;
+      // The interpreter rewrites the officer's note while looking at the poster's current — wrong —
+      // digits; a number they typed that did not survive goes back in, in their own words.
+      feedbackText = keepOfficerNumbers(
+        interpreted.instruction,
+        [
+          ...annotations.map((a) => a.note),
+          ...clearRegions.map((c) => c.note ?? ''),
+          input.feedback ?? '',
+        ]
+          .filter((note) => note.trim().length > 0)
+          .join('\n'),
+      );
+      if (feedbackText !== interpreted.instruction) {
+        console.log(
+          `[job ${id}] the interpreter dropped a number the officer typed — their words were appended`,
+        );
+      }
       historyFeedback = [
         ...annotations.map((a, i) => `[${i + 1}] ${a.note}`),
         // A clear box may carry no note at all, so the gesture itself is what is
@@ -3846,10 +3896,23 @@ export function startPosterImageFeedbackJob(
       }
     }
 
+    // Numbers read back off the edited render, against the note AND this round's request — the
+    // officer may legitimately be adding a number the note never had. Social only, the lane the
+    // notice is shown on.
+    const numeralCheck =
+      rawPoster && isSocialCategory(row.category)
+        ? checkPosterNumerals(
+            id,
+            rawPoster,
+            [row.note, historyFeedback].join('\n'),
+          )
+        : Promise.resolve(null);
+
     const posterObjectPath = posterPath(id, version);
     await uploadPng(client, posterObjectPath, posterPng);
     if (rawPoster) await storePlainPoster(client, id, version, rawPoster);
     await updateGeneration(client, id, { posterPath: posterObjectPath });
+    recordPosterNumeralWarning(id, await numeralCheck);
     await insertRevision(client, {
       generationId: id,
       target: 'poster_image',

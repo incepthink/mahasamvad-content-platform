@@ -322,6 +322,16 @@ export function SocialPostView({
           </p>
         </div>
       ) : null}
+      {/* A number on the poster that is not in the officer's text — read back off the render,
+          so possibly a misread itself; the wording asks the officer to check. */}
+      {detail.posterUrl && detail.posterNumeralWarning ? (
+        <div className="info-callout warn" style={{ marginBottom: 12 }}>
+          <p className="field-label">{STR.posterNumeralWarnTitle}</p>
+          <p className="hint">
+            {STR.posterNumeralWarnBody(detail.posterNumeralWarning.numbers)}
+          </p>
+        </div>
+      ) : null}
       {/* A कॅप्शन run has no poster, so the left column is empty — without this the
           caption would be laid out in the narrow poster column. */}
       <div

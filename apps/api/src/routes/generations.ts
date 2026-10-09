@@ -124,6 +124,7 @@ import {
   getLearnedPreferences,
   getLengthWarning,
   getPosterCapacityWarning,
+  getPosterNumeralWarning,
   nameDesignationsOf,
   plainPathForPoster,
   getTranslatingLanguage,
@@ -635,6 +636,9 @@ async function toDetail(
     // Same in-process registry, for the same reason: the poster is on the row and was rendered
     // with every item, but only the officer can decide to split the note into two posters.
     posterCapacityWarning: getPosterCapacityWarning(row.id),
+    // Numbers read back off the latest social poster that its source does not contain (the image
+    // model confuses look-alike Devanagari digits). Same in-process registry, same reason.
+    posterNumeralWarning: getPosterNumeralWarning(row.id),
     lengthWarning: getLengthWarning(row.id),
     // What the latest feedback round taught the platform (migration 0057). Same in-process
     // registry, for the same reason: the rule is a row and the review page owns it, while

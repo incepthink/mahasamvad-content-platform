@@ -646,6 +646,12 @@ export const STR = {
   posterCapacityWarnTitle: 'मुद्दे टेम्पलेटच्या क्षमतेपेक्षा जास्त आहेत',
   posterCapacityWarnBody: (needed: number, available: number) =>
     `तुम्ही दिलेल्या माहितीत ${needed} मुद्दे आहेत, पण उपलब्ध टेम्पलेटमध्ये साधारण ${available} मुद्दे मावतात. सर्व मुद्दे पोस्टरवर दाखवले आहेत, मात्र मजकूर दाटीवाटीने आला असू शकतो. पोस्टर तपासून पाहा — गरज वाटल्यास माहिती दोन पोस्टरमध्ये विभागून पुन्हा तयार करा.`,
+  // Shown when a number read back off the finished social poster is not in the officer's text.
+  // The image model draws the digits and confuses look-alikes (१ and ९), and the reader can
+  // misread too — so this asks the officer to check, it does not declare the poster wrong.
+  posterNumeralWarnTitle: 'पोस्टरवरील अंक तपासा',
+  posterNumeralWarnBody: (numbers: readonly string[]) =>
+    `पोस्टरवर ${numbers.map((n) => `‘${n}’`).join(', ')} असे दिसते, पण तुम्ही दिलेल्या मजकुरात हा अंक नाही. १ आणि ९ सारखे अंक चित्रात अदलाबदल होऊ शकतात. पोस्टर नीट तपासा — चूक असल्यास त्या अंकावर खूण करून योग्य अंक लिहा, किंवा पोस्टर पुन्हा तयार करा.`,
   dloGenerate: 'बातमी तयार करा →',
   dloOutputTitle: 'तयार झालेली बातमी',
   dloViewDetail: 'सविस्तर पाहा (अभिप्राय, भाषांतर, पोस्टर)',

@@ -3110,6 +3110,51 @@ client id/secret — see the milestone below.
 
 ## Latest Implementation Milestone
 
+- **Poster numbers are spelled digit by digit, edits can change them, and the finished poster
+  is read back** (2026-10-08, no migration, no n8n). Generation 93f948da printed «९९» for the
+  officer's «११»: the text reached gpt-image correctly, and the model drew the look-alike digit.
+  A marker edit could not fix it, because the edit prompt said "add no new numbers" and
+  "preserve ALL existing Devanagari text", which outvoted the request. Kept Devanagari digits
+  (the user's call) and fixed what is ours:
+  - **`generation/poster-numerals.ts`** (pure, free harness `npx tsx
+    src/generation/poster-numerals.ts`). `numeralSpellingBlock` spells every number on the
+    poster in English digit names (`- ११ = Devanagari ONE, Devanagari ONE`), never Latin
+    numerals. When a ONE or NINE is present it adds a ONE/NINE warning that contains no digit
+    glyph, because a NINE written into a prompt is a NINE the model may paint. Capped at 20
+    numbers.
+  - **Where the block appears**: the fresh lanes (`buildMinimalCreativePrompt`'s optional
+    `numeralRuns`, emitted after TEXT ACCURACY), onbrand (after `REPRODUCE_EXACTLY_RULE`) and
+    adaptive/template (after the content). A poster with no numbers gets a byte-identical
+    prompt. The custom `imagePrompt` lane is untouched.
+  - **Edit rounds**:
+    - `numberCorrectionBlock` goes into both `buildFeedbackPrompt` and
+      `buildArticleFeedbackPrompt`. It spells the request's numbers and states that it
+      outranks the keep-text rules.
+    - The plain-text path now says "all OTHER existing text" and "beyond the requested
+      change", as the marker path already did.
+    - `keepOfficerNumbers` (runner, after `interpretImageFeedback`) appends the officer's own
+      words when a number they typed did not survive the vision interpreter's rewrite.
+  - **Read-back, WARN ONLY**: `apps/api/src/jobs/poster-numeral-check.ts` runs the image OCR
+    seam (`extractImageTextViaProvider`, Sarvam by default, metered) on the RAW render.
+    - `findUnsupportedNumerals` reports poster numbers missing from the source. It compares
+      whole digit groups in one script, so «१» is not accepted as part of «११», while the year
+      of a full date is.
+    - It runs in parallel with the chrome stamping and is awaited after the poster write. It
+      is best-effort and never fails or re-renders, because the reader can misread too.
+    - Covers social initial, redo and retry renders, plus social image-feedback rounds (source
+      = note + request). Skipped when the source has no numbers.
+    - The officer sees it as `posterNumeralWarning` on the detail payload (an in-process
+      registry, defaulted in schemas), shown as a Marathi "अंक तपासा" callout on
+      `SocialPostView`.
+  - Verified free: workspace typecheck 7/7, eslint clean, the numerals harness, and
+    `build-poster-prompt` (+ number-block assertions on 3 lanes and both feedback shapes),
+    `build-article-poster-prompt`, `build-youtube-thumbnail-prompt`, `reserved-zone-rule` and
+    `clear-space-rule` all green.
+  - **Left for a real run**: re-render 93f948da's note on its lane a few times, one marker edit
+    «९९ ऐवजी ११», and confirm the callout appears on a mismatch.
+  - Follow-ups: carousel slides and the article poster can reuse the block and the check.
+  - Deploy: `@dgipr/schemas` → `@dgipr/content-engine` dists → API + web.
+
 - **/analytics counts every generated thing, not just the original six lanes** (2026-10-04, no
   migration, no n8n). Dynamic Posters (`motion_path`), carousel slides (`carousel->slides`, a
   JSON-path select so the plan's text never travels) and carousel captions now count on the

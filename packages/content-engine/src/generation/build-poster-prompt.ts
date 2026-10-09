@@ -20,6 +20,11 @@ import type { PosterLayout } from './poster-layouts.js';
 import type { PosterPlacement } from './poster-placements.js';
 import type { PosterDesignDirection } from './poster-design-director.js';
 import {
+  extractNumeralRuns,
+  numberCorrectionBlock,
+  numeralSpellingBlock,
+} from './poster-numerals.js';
+import {
   buildMinimalCreativePrompt,
   DO_NOT_USE_RULE,
   HEADLINE_MARGINS_RULE,
@@ -514,6 +519,12 @@ const TEMPLATE_DECORATION_RULE =
 const DOCUMENT_ARTIFACT_RULE =
   'DOCUMENT-ARTIFACT FILTER: never put source-document production metadata on the poster—page numbers, वृत्त. क्र., issue/report/file/document numbers, running headers or footers, filenames, scan marks, OCR artifacts, or similar administrative labels are not poster information, even if they appear in the supplied text.';
 
+// An optional block as a spreadable list: nothing at all when it is empty, so a prompt without it
+// stays byte-identical.
+function nonEmpty(block: string): string[] {
+  return block ? [block] : [];
+}
+
 export function buildPosterPrompt(input: BuildPosterPromptInput): string {
   const { copy, copyStyle, brand, hasPhoto } = input;
   const designMode = input.designMode;
@@ -593,6 +604,11 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
       // text; typeset Devanagari with Chromium) is what would make it a guarantee, and this
       // template-editing path deliberately trades that away for design fidelity.
       REPRODUCE_EXACTLY_RULE,
+      // THE NUMBERS, DIGIT BY DIGIT (poster-numerals.ts). "Every numeral exactly as written" does
+      // not tell the model WHICH glyphs a number is made of, and Devanagari ONE and NINE look
+      // alike: generation 93f948da printed «९९» for the officer's «११». Absent when the text has
+      // no numbers.
+      ...nonEmpty(numeralSpellingBlock(extractNumeralRuns(information))),
       // NO REPETITION. The other half of "use the officer's text as it is", and the one the
       // prompt was missing: generation 7c33fa93 came back with the same five dated alerts
       // written out twice — once as a left-hand paragraph column and again as right-hand dated
@@ -661,6 +677,7 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
       height: 1504,
       designDirection: input.designDirection?.brief,
       lightGround: true,
+      numeralRuns: extractNumeralRuns(posterContent),
       // Absent style ⇒ the minimal prompt's own defaults, byte-identical to before the rotation.
       ...(input.logoStyle && input.logoStyle !== DEFAULT_SOCIAL_LOGO_STYLE
         ? {
@@ -703,6 +720,8 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
     '',
     change,
   );
+  const numerals = numeralSpellingBlock(extractNumeralRuns(change));
+  if (numerals) lines.push('', numerals);
   if (hasPhoto) {
     lines.push(
       '',
@@ -875,6 +894,14 @@ export function buildFeedbackPrompt(input: BuildFeedbackPromptInput): string {
   // exception whenever any blue box is present.
   const textException =
     clear.count > 0 ? ', except as the SPACE TO FREE block requires' : '';
+  // The numbers the request names, spelled digit by digit, and stated to outrank the two
+  // keep-the-text rules above it — which is what used to win over «९९ ऐवजी ११» (generation
+  // 93f948da). Plain-text rounds also said "Preserve ALL existing Devanagari text", which forbade
+  // the very change requested; it now says "all OTHER", as the marker path always did.
+  const numberCorrection = (() => {
+    const block = numberCorrectionBlock(imageFeedback);
+    return block ? [block] : [];
+  })();
 
   if (markerCount > 0) {
     return [
@@ -887,6 +914,7 @@ export function buildFeedbackPrompt(input: BuildFeedbackPromptInput): string {
       chromeRule,
       'ERASE every red marker rectangle and numbered badge completely from the output, restoring whatever they overlapped — no red outlines, red circles, or annotation numbers may remain anywhere on the poster.',
       `Add no new text, letters, numbers, captions, logos, borders, or decorative elements beyond the requested changes. Preserve all other existing Devanagari text exactly${textException}. Output ONE complete portrait poster filling the canvas, at exactly the same width and height as the input image.`,
+      ...numberCorrection,
       ...inventory,
       ...clear.lines,
     ].join('\n');
@@ -900,7 +928,8 @@ export function buildFeedbackPrompt(input: BuildFeedbackPromptInput): string {
     keepRule,
     reservedZones,
     chromeRule,
-    `Add no new text, letters, numbers, captions, logos, borders, or decorative elements. Preserve all existing Devanagari text exactly${textException}. Output ONE complete portrait poster filling the canvas, at exactly the same width and height as the input image.`,
+    `Add no new text, letters, numbers, captions, logos, borders, or decorative elements beyond the requested change. Preserve all other existing Devanagari text exactly${textException}. Output ONE complete portrait poster filling the canvas, at exactly the same width and height as the input image.`,
+    ...numberCorrection,
     ...inventory,
     ...clear.lines,
   ].join('\n');
@@ -2050,6 +2079,106 @@ if (
         failures.push(
           'fresh prompt does not describe the circle badge at its reserve',
         );
+    }
+
+    // 4h. NUMBERS SPELLED DIGIT BY DIGIT (generation 93f948da: «११» painted as «९९»). Every lane
+    //     that prints numbers names them; a number-free poster is untouched; the chrome blocks
+    //     stay last; and an edit round's requested numbers outrank the keep-the-text rules.
+    {
+      const NOTE = '११ सदस्यांचे आंतरमंत्रालयीन केंद्रीय पथक नियुक्त';
+      const SPELLED = '- ११ = Devanagari ONE, Devanagari ONE';
+      const lanes = {
+        fresh_verbatim: buildPosterPrompt({
+          copy: COPY,
+          information: NOTE,
+          copyStyle: 'info_bullets',
+          designMode: 'fresh_verbatim',
+          brand: 'dgipr',
+          hasPhoto: true,
+        }),
+        onbrand: buildPosterPrompt({
+          copy: {},
+          information: NOTE,
+          itemCount: 1,
+          copyStyle: 'info_bullets',
+          designMode: 'onbrand',
+          brand: 'dgipr',
+          masterUrl: 'https://example.test/master.png',
+          hasPhoto: true,
+        }),
+        adaptive: buildPosterPrompt({
+          copy: { ...COPY, headline: NOTE },
+          copyStyle: 'info_bullets',
+          designMode: 'adaptive',
+          brand: 'dgipr',
+          masterUrl: 'https://example.test/master.png',
+          hasPhoto: true,
+        }),
+      };
+      // The block each lane must keep LAST, which the number block has to precede.
+      const lastBlock: Record<keyof typeof lanes, string> = {
+        fresh_verbatim: 'AREA RULES:',
+        onbrand: 'RESERVED',
+        adaptive: 'Do not paint any logos',
+      };
+      for (const [lane, prompt] of Object.entries(lanes) as [
+        keyof typeof lanes,
+        string,
+      ][]) {
+        if (!prompt.includes(SPELLED))
+          failures.push(`${lane}: the numbers are not spelled digit by digit`);
+        if (!prompt.includes('easily swapped'))
+          failures.push(`${lane}: no ONE/NINE warning for «११»`);
+        const anchor = prompt.lastIndexOf(lastBlock[lane]);
+        if (anchor < 0 || prompt.indexOf(SPELLED) > anchor)
+          failures.push(
+            `${lane}: the number block comes after the chrome blocks`,
+          );
+      }
+      const noNumbers = buildPosterPrompt({
+        copy: COPY,
+        information: 'केंद्रीय पथक नियुक्त',
+        copyStyle: 'info_bullets',
+        designMode: 'fresh_verbatim',
+        brand: 'dgipr',
+        hasPhoto: true,
+      });
+      if (noNumbers.includes('NUMBERS ON THIS POSTER'))
+        failures.push('a number-free poster gained a number block');
+
+      for (const [label, prompt] of [
+        [
+          'plain',
+          buildFeedbackPrompt({
+            imageFeedback: '९९ ऐवजी ११ करा',
+            brand: 'dgipr',
+          }),
+        ],
+        [
+          'marker',
+          buildFeedbackPrompt({
+            imageFeedback: '1. ९९ ऐवजी ११ करा',
+            brand: 'dgipr',
+            markerCount: 1,
+          }),
+        ],
+      ] as const) {
+        if (!prompt.includes('NUMBER CORRECTION'))
+          failures.push(`${label} feedback: no NUMBER CORRECTION block`);
+        if (!prompt.includes(SPELLED))
+          failures.push(`${label} feedback: «११» not spelled`);
+        if (prompt.includes('Preserve all existing Devanagari text'))
+          failures.push(
+            `${label} feedback: still forbids changing ANY existing text`,
+          );
+      }
+      if (
+        buildFeedbackPrompt({
+          imageFeedback: 'शीर्षक मोठे करा',
+          brand: 'dgipr',
+        }).includes('NUMBER CORRECTION')
+      )
+        failures.push('a number-free edit gained a NUMBER CORRECTION block');
     }
 
     if (failures.length > 0) {

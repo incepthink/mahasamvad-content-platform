@@ -17,6 +17,8 @@
 
 import { pathToFileURL } from 'node:url';
 
+import { numeralSpellingBlock } from './poster-numerals.js';
+
 export const DEFAULT_POSTER_WIDTH = 1280;
 export const DEFAULT_POSTER_HEIGHT = 1504;
 export const DEFAULT_BADGE_WIDTH = 180;
@@ -40,6 +42,9 @@ export type MinimalCreativePromptInput = Readonly<{
   designDirection?: string | undefined;
   // Emit LIGHT_GROUND_RULE. The fresh social lane always sets it, with or without a direction.
   lightGround?: boolean | undefined;
+  // The numbers on this poster (extractNumeralRuns of `text`), spelled digit by digit right after
+  // TEXT ACCURACY (poster-numerals.ts). Absent or empty ⇒ byte-identical to before.
+  numeralRuns?: readonly string[] | undefined;
 }>;
 
 // The fresh social lane's light-ground rule (2026-09-26). Every poster sits on a light ground; the
@@ -143,6 +148,7 @@ export function buildMinimalCreativePrompt(
   );
 
   const designDirection = input.designDirection?.trim() ?? '';
+  const numerals = numeralSpellingBlock(input.numeralRuns ?? []);
   // Both optional blocks sit between the opening line and the existing rules, so a prompt with
   // neither is byte-identical to the one that shipped before them.
   const sections = [
@@ -153,6 +159,7 @@ export function buildMinimalCreativePrompt(
     NUMBERS_RULE,
     '',
     TEXT_ACCURACY_RULE,
+    ...(numerals ? ['', numerals] : []),
     '',
     ICONS_RULE,
     '',

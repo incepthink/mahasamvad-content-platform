@@ -1069,6 +1069,14 @@ export const GenerationDetailSchema = z.object({
     .object({ needed: z.number().int(), available: z.number().int() })
     .nullable()
     .default(null),
+  // Set when the numbers read back off the latest social poster include one its source does not
+  // contain — the image model paints the Devanagari and confuses look-alike digits (generation
+  // 93f948da printed «९९» for «११»). A "please check" notice: the reader can misread too. Transient
+  // like the registries above, and defaulted so an older API's payload parses.
+  posterNumeralWarning: z
+    .object({ numbers: z.array(z.string()) })
+    .nullable()
+    .default(null),
   // Set when the officer's request named an article length (तुमची विनंती, or the feedback box)
   // that the run could not reach. The article is delivered either way: a length is reached by
   // covering the supplied information more fully, and where the source does not carry enough,

@@ -31,6 +31,7 @@ import {
   type ClearAction,
 } from './clear-space-rule.js';
 import { stampedChromeRule, type StampedChrome } from './reserved-zone-rule.js';
+import { numberCorrectionBlock } from './poster-numerals.js';
 
 // What overlayArticleChrome stamps, described as the model sees it on the poster it is editing.
 // Keep the wording in sync with poster-renderer/src/article-chrome.ts.
@@ -348,6 +349,12 @@ export function buildArticleFeedbackPrompt(
     : `Keep the exact layout, the poster's existing panels and accent shapes, existing Marathi headline text, colours, typography, and any photograph unchanged except where a requested change${exceptClause} explicitly requires it.`;
   const textException =
     clear.count > 0 ? ', except as the SPACE TO FREE block requires' : '';
+  // The requested numbers, digit by digit — the social feedback prompt's block, kept identical
+  // so the two lanes do not drift (poster-numerals.ts).
+  const numberCorrection = (() => {
+    const block = numberCorrectionBlock(imageFeedback);
+    return block ? [block] : [];
+  })();
 
   if (markerCount > 0) {
     return [
@@ -360,6 +367,7 @@ export function buildArticleFeedbackPrompt(
       reservedZones,
       chromeRule,
       `Add no new text, letters, numbers, captions, logos, borders, or decorative elements beyond the requested changes. Preserve all other existing Devanagari text exactly${textException}. Output ONE complete landscape poster filling the canvas.`,
+      ...numberCorrection,
       ...inventory,
       ...clear.lines,
     ].join('\n');
@@ -373,7 +381,8 @@ export function buildArticleFeedbackPrompt(
     keepRule,
     reservedZones,
     chromeRule,
-    `Add no new text, letters, numbers, captions, logos, borders, or decorative elements. Preserve all existing Devanagari text exactly${textException}. Output ONE complete landscape poster filling the canvas.`,
+    `Add no new text, letters, numbers, captions, logos, borders, or decorative elements beyond the requested change. Preserve all other existing Devanagari text exactly${textException}. Output ONE complete landscape poster filling the canvas.`,
+    ...numberCorrection,
     ...inventory,
     ...clear.lines,
   ].join('\n');
