@@ -2,6 +2,67 @@ import { AUDIO_FILE_EXTENSIONS, VIDEO_FILE_EXTENSIONS } from '@dgipr/schemas';
 
 const SHARE_CACHE = 'dgipr-shared-audio-v1';
 const SHARE_PREFIX = '/__dgipr-shared-audio/';
+// Where the service worker sends a share. Deliberately OUTSIDE SHARE_PREFIX, so the
+// worker's per-share cleanup can never sweep it away. Read by public/sw.js — keep the
+// key and the JSON shape ({ path }) in step with it.
+const SHARE_DESTINATION_KEY = '/__dgipr-share-destination';
+
+// The pages that can receive a shared recording. Android's Share sheet offers ONE entry per
+// app, so it cannot know whether the officer came from /dlo or /transcribe; the share goes
+// to whichever of these the officer was last looking at. Every other page — including the
+// /dlo/[id] workspaces, which take no new recordings — is mapped to the form that can.
+export type ShareDestination = '/dlo' | '/transcribe';
+
+export function shareDestinationFor(pathname: string): ShareDestination {
+  return pathname === '/dlo' || pathname.startsWith('/dlo/')
+    ? '/dlo'
+    : '/transcribe';
+}
+
+let lastRememberedDestination: ShareDestination | null = null;
+
+// Best-effort and silent: a failure here costs only where the next share lands, which then
+// falls back to /transcribe exactly as before.
+export async function rememberShareDestination(
+  pathname: string,
+): Promise<void> {
+  const path = shareDestinationFor(pathname);
+  if (path === lastRememberedDestination) return;
+  if (typeof window === 'undefined' || !('caches' in window)) return;
+  try {
+    const cache = await caches.open(SHARE_CACHE);
+    await cache.put(
+      new Request(new URL(SHARE_DESTINATION_KEY, window.location.origin)),
+      new Response(JSON.stringify({ path }), {
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    lastRememberedDestination = path;
+  } catch {
+    // Private mode, a storage quota, an embedded webview: the share keeps its old default.
+  }
+}
+
+// The one-shot query a share navigation arrives with. Reading it STRIPS it from the address,
+// so a refresh cannot attach (or on /transcribe, submit) the same recording twice.
+export function takeShareParams(): {
+  shareId: string | null;
+  shareError: string | null;
+} {
+  const url = new URL(window.location.href);
+  const shareId = url.searchParams.get('share');
+  const shareError = url.searchParams.get('share_error');
+  if (shareId || shareError) {
+    url.searchParams.delete('share');
+    url.searchParams.delete('share_error');
+    window.history.replaceState(
+      null,
+      '',
+      `${url.pathname}${url.search}${url.hash}`,
+    );
+  }
+  return { shareId, shareError };
+}
 
 type SharedAudioMetadata = Readonly<{
   id: string;

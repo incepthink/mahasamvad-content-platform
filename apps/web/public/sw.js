@@ -5,14 +5,22 @@
 // An installed PWA receives a shared recording as a navigation POST. Sending that POST to
 // a Next/Vercel route would put a meeting-sized file through a serverless request limit, so
 // the service worker intercepts it on the PHONE, stores it briefly in Cache Storage, and
-// redirects to /transcribe. The page consumes and deletes the cached bytes, then uploads
-// through the existing recording API exactly like a file picked by hand.
+// redirects to the page the officer was last on — /dlo or /transcribe, remembered by the
+// app itself (lib/sharedAudio.ts, rememberShareDestination) because Android's Share sheet
+// offers one entry per app and the share carries no hint of where it was started. The page
+// consumes and deletes the cached bytes: /transcribe uploads them at once, /dlo attaches
+// them to its form.
 
 const SHARE_ACTION = '/share/audio';
 const SHARE_CACHE = 'dgipr-shared-audio-v1';
 const SHARE_PREFIX = '/__dgipr-shared-audio/';
 const MAX_FILES = 10;
 const MAX_AGE_MS = 24 * 60 * 60 * 1000;
+// Written by the page, read here. Outside SHARE_PREFIX so removeShare never deletes it.
+const DESTINATION_KEY = '/__dgipr-share-destination';
+// An allow-list, not the stored string: a redirect target must never come from storage.
+const DESTINATIONS = ['/dlo', '/transcribe'];
+const DEFAULT_DESTINATION = '/transcribe';
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (event) =>
@@ -27,6 +35,8 @@ self.addEventListener('fetch', (event) => {
 });
 
 async function receiveSharedAudio(request) {
+  const destination = await readDestination();
+  const redirectBack = (params) => redirectTo(destination, params);
   try {
     const form = await request.formData();
     const shared = form
@@ -42,7 +52,7 @@ async function receiveSharedAudio(request) {
       // 'too-large' is unreachable while nothing is filtered by size, and is kept only so a
       // future ceiling has somewhere to land: told only that the share "could not be
       // opened", an officer re-shares the same rejected file indefinitely.
-      return redirectToTranscribe({
+      return redirectBack({
         share_error: shared.length > 0 ? 'too-large' : 'no-audio',
       });
     }
@@ -83,10 +93,10 @@ async function receiveSharedAudio(request) {
       }),
     );
 
-    return redirectToTranscribe({ share: id });
+    return redirectBack({ share: id });
   } catch (error) {
     console.error('[share-target] Could not receive shared audio:', error);
-    return redirectToTranscribe({ share_error: 'storage' });
+    return redirectBack({ share_error: 'storage' });
   }
 }
 
@@ -99,8 +109,22 @@ function shareRequest(id, leaf) {
   );
 }
 
-function redirectToTranscribe(params) {
-  const target = new URL('/transcribe', self.location.origin);
+async function readDestination() {
+  try {
+    const cache = await caches.open(SHARE_CACHE);
+    const response = await cache.match(
+      new Request(new URL(DESTINATION_KEY, self.location.origin)),
+    );
+    if (!response) return DEFAULT_DESTINATION;
+    const { path } = await response.json();
+    return DESTINATIONS.includes(path) ? path : DEFAULT_DESTINATION;
+  } catch {
+    return DEFAULT_DESTINATION;
+  }
+}
+
+function redirectTo(path, params) {
+  const target = new URL(path, self.location.origin);
   for (const [key, value] of Object.entries(params)) {
     target.searchParams.set(key, value);
   }
