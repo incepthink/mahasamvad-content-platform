@@ -39,7 +39,7 @@
  * /transcribe so the two can never disagree about what a valid file is.
  */
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CirclePlay, FileText, Image as ImageIcon, Mic } from 'lucide-react';
 import {
   DOCUMENT_MAX_BYTES,
@@ -69,6 +69,7 @@ import {
   YOUTUBE_INPUT_OFF,
 } from '@/components/YouTubeLinkInput';
 import { acceptFilePicks } from '@/lib/filePicks';
+import { consumeSharedAudio, takeShareParams } from '@/lib/sharedAudio';
 import { useFilePreviews } from '@/lib/useFilePreviews';
 import {
   recordingCardMeta,
@@ -82,7 +83,17 @@ import type { DloIntakeFormState } from './useDloIntakeForm';
 
 const YOUTUBE_PANEL_ID = 'dlo-youtube-panel';
 
-export function DloComposer({ form }: { form: DloIntakeFormState }) {
+export function DloComposer({
+  form,
+  receiveShare = false,
+}: {
+  form: DloIntakeFormState;
+  // PRODUCTION /dlo ONLY (DloIntakeForm). A recording shared to the installed app from
+  // WhatsApp or the recorder arrives here when /dlo was the last page the officer had open
+  // (public/sw.js). Off by default so the /learn lesson, which renders this same composer,
+  // can never pick up a real recording held on the phone.
+  receiveShare?: boolean;
+}) {
   const audioInput = useRef<HTMLInputElement>(null);
   const imageInput = useRef<HTMLInputElement>(null);
   const documentInput = useRef<HTMLInputElement>(null);
@@ -116,12 +127,48 @@ export function DloComposer({ form }: { form: DloIntakeFormState }) {
   // `acceptFilePicks` as a picked recording, so re-picking the same video is still one file.
   const extraction = useVideoExtraction((file) => acceptAudio([file]));
 
-  const addAudio = (list: FileList | null) => {
-    if (!list || list.length === 0) return;
-    const { audio, videos } = splitRecordingPicks(Array.from(list));
+  const pickRecordings = (picked: readonly File[]) => {
+    const { audio, videos } = splitRecordingPicks(picked);
     if (audio.length > 0) acceptAudio(audio);
     void extraction.start(videos);
   };
+
+  const addAudio = (list: FileList | null) => {
+    if (!list || list.length === 0) return;
+    pickRecordings(Array.from(list));
+  };
+
+  // The shared recordings land asynchronously, so they go through the picker AS IT IS THEN —
+  // a closure from the first render would attach them against a stale list of recordings.
+  const pickRecordingsRef = useRef(pickRecordings);
+  pickRecordingsRef.current = pickRecordings;
+  const handledShare = useRef(false);
+
+  // Unlike /transcribe, a share does NOT submit here: an article run is usually notes plus
+  // recordings plus documents, so the shared recording is ATTACHED, exactly as if it had been
+  // picked, and the officer presses पुढे जा when the rest is in. The token is stripped from
+  // the address first so a refresh cannot attach the same recording twice.
+  useEffect(() => {
+    if (!receiveShare || handledShare.current) return;
+    const { shareId, shareError } = takeShareParams();
+    if (!shareId && !shareError) return;
+    handledShare.current = true;
+    if (shareError) {
+      form.setError(
+        shareError === 'too-large'
+          ? STR.fileTooLargeError
+          : STR.transcribeSharedReadError,
+      );
+      return;
+    }
+    void consumeSharedAudio(shareId!)
+      .then((shared) => pickRecordingsRef.current(shared))
+      .catch((caught: unknown) => {
+        console.error('[share-target] Could not consume shared audio:', caught);
+        form.setError(STR.transcribeSharedReadError);
+      });
+    // A one-shot navigation input, read on mount only.
+  }, []);
 
   const addImages = (list: FileList | null) => {
     if (!list || list.length === 0) return;

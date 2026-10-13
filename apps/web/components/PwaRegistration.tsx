@@ -1,8 +1,18 @@
 'use client';
 
+import { usePathname } from 'next/navigation';
 import { useEffect } from 'react';
+import { rememberShareDestination } from '../lib/sharedAudio';
 
 export function PwaRegistration() {
+  const pathname = usePathname();
+
+  // The officer leaves the page to share from WhatsApp or the recorder, so the share itself
+  // carries no hint of where it came from — the service worker reads this instead.
+  useEffect(() => {
+    if (pathname) void rememberShareDestination(pathname);
+  }, [pathname]);
+
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return;
     void navigator.serviceWorker

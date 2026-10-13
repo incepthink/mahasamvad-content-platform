@@ -41,7 +41,7 @@ export function DloIntakeForm() {
 
   return (
     <div className="flex flex-col gap-5">
-      <DloComposer form={form} />
+      <DloComposer form={form} receiveShare />
       <DloAiPromptBox
         value={form.instructions}
         onChange={form.setInstructions}

@@ -32,7 +32,7 @@ import {
 } from '@dgipr/schemas';
 import { createTranscription } from '../lib/api';
 import { acceptFilePicks } from '../lib/filePicks';
-import { consumeSharedAudio } from '../lib/sharedAudio';
+import { consumeSharedAudio, takeShareParams } from '../lib/sharedAudio';
 import {
   splitRecordingPicks,
   useVideoExtraction,
@@ -136,18 +136,9 @@ export function TranscriptionForm({
   // File objects remain in state and the ordinary submit button is a retry.
   useEffect(() => {
     if (handledShare.current) return;
-    const url = new URL(window.location.href);
-    const shareId = url.searchParams.get('share');
-    const shareError = url.searchParams.get('share_error');
+    const { shareId, shareError } = takeShareParams();
     if (!shareId && !shareError) return;
     handledShare.current = true;
-    url.searchParams.delete('share');
-    url.searchParams.delete('share_error');
-    window.history.replaceState(
-      null,
-      '',
-      `${url.pathname}${url.search}${url.hash}`,
-    );
 
     if (shareError) {
       // The service worker distinguishes "nothing usable was shared" from "every recording
