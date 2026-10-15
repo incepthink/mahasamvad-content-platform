@@ -649,9 +649,6 @@ export const STR = {
   // Shown when a number read back off the finished social poster is not in the officer's text.
   // The image model draws the digits and confuses look-alikes (१ and ९), and the reader can
   // misread too — so this asks the officer to check, it does not declare the poster wrong.
-  posterNumeralWarnTitle: 'पोस्टरवरील अंक तपासा',
-  posterNumeralWarnBody: (numbers: readonly string[]) =>
-    `पोस्टरवर ${numbers.map((n) => `‘${n}’`).join(', ')} असे दिसते, पण तुम्ही दिलेल्या मजकुरात हा अंक नाही. १ आणि ९ सारखे अंक चित्रात अदलाबदल होऊ शकतात. पोस्टर नीट तपासा — चूक असल्यास त्या अंकावर खूण करून योग्य अंक लिहा, किंवा पोस्टर पुन्हा तयार करा.`,
   dloGenerate: 'बातमी तयार करा →',
   dloOutputTitle: 'तयार झालेली बातमी',
   dloViewDetail: 'सविस्तर पाहा (अभिप्राय, भाषांतर, पोस्टर)',
