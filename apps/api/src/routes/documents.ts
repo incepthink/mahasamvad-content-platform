@@ -9,7 +9,11 @@
 // exists to keep a nonsense request from reaching a paid OCR call.
 
 import type { FastifyInstance } from 'fastify';
-import { chatOcrProviderName, documentKindOf } from '@dgipr/content-engine';
+import {
+  chatOcrProviderName,
+  documentKindOf,
+  translateOcrProviderName,
+} from '@dgipr/content-engine';
 import type { SupabaseClient, UsageFeature } from '@dgipr/database';
 import {
   AnalyticsFeatureKeySchema,
@@ -92,6 +96,13 @@ export function registerDocumentRoutes(
         });
       }
       throw error;
+    }
+
+    // /translate's documents are read by Sarvam, the provider that translates them, whatever
+    // the deployment's OCR_PROVIDER says (TRANSLATE_OCR_PROVIDER overrides). Keyed on the
+    // feature the page already sends, so no web change was needed.
+    if (feature === 'translate' && ocrProvider === null) {
+      ocrProvider = translateOcrProviderName();
     }
 
     if (!upload) {

@@ -811,7 +811,6 @@ export function startCarouselSlideFeedbackJob(
       const clearActions: readonly PosterClearAction[] = clearRegions.map(
         (c) => c.action,
       );
-      let inputUrl = publicUrl(client, slide.path);
       let feedbackText = input.feedback ?? '';
       let historyFeedback = feedbackText;
       let contentInventory: readonly string[] = [];
@@ -819,6 +818,8 @@ export function startCarouselSlideFeedbackJob(
       // erases that badge and the stamp puts the same one back.
       const clean = await downloadPng(client, slide.path);
       const logoStyle = await currentSocialLogoStyle(clean, row);
+      // The slide handed to the edit model, from memory — the marked copy when there are marks.
+      let inputImage: Buffer = clean;
 
       if (annotations.length > 0 || clearRegions.length > 0) {
         const marked = await annotateFeedbackRegions(
@@ -826,11 +827,8 @@ export function startCarouselSlideFeedbackJob(
           annotations.map((a) => a.region),
           clearRegions.map((c) => c.region),
         );
-        // A throwaway input for the edit, never a slide version; timestamped per attempt so a
-        // failed round's resubmit never collides on the same path (the poster lane's rule).
-        const markedPath = `generations/${id}/slide-${slideNumber}-feedback-marked-${Date.now()}.png`;
-        await uploadPng(client, markedPath, marked);
-        inputUrl = publicUrl(client, markedPath);
+        // Passed from memory, never uploaded: the edit is a direct call and needs no URL.
+        inputImage = marked;
 
         const interpreted = await interpretImageFeedback({
           markedPosterPng: marked,
@@ -871,7 +869,7 @@ export function startCarouselSlideFeedbackJob(
         index === 0 ? await loadOfficerImages(client, row) : [];
       const rendered = await runInCostTask('carousel_slide', async () => {
         const result = await renderSocialPosterFeedbackEdit(
-          inputUrl,
+          inputImage,
           feedbackText,
           annotations.length,
           'dgipr',

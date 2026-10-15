@@ -13,7 +13,7 @@ import { useGeneration } from '../../../lib/useGeneration';
 import { useGenerationThread } from '../../../lib/useGenerationThread';
 import { retryGeneration } from '../../../lib/api';
 import { useTasks } from '../../../lib/TasksProvider';
-import { STR } from '../../../lib/strings';
+import { STR, runPageTitle } from '../../../lib/strings';
 import { errorMessage, storedErrorMessage } from '../../../lib/errorMessage';
 import { ArticleDraft } from '../../../components/ArticleDraft';
 import { GenerationThread } from '../../../components/GenerationThread';
@@ -362,7 +362,7 @@ export default function GenerationDetailPage({
       // ground, and every poster, thumbnail and caption result continues the
       // Creative lane's. Which file each names is one line in lib/pageBackgrounds.ts.
       background={isDloArticle ? 'dlo' : 'creative'}
-      title={STR.newTitle}
+      title={runPageTitle(detail.category, detail.outputType)}
       statusChip={<StatusChip status={detail.status} />}
     >
       {(detail.status === 'queued' || detail.status === 'running') &&

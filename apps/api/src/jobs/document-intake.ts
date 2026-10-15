@@ -255,8 +255,8 @@ function runExtraction(
             source,
             pages,
             timeoutMs: OCR_TIMEOUT_MS,
-            // Undefined for every surface but /chat, which is what leaves the published-output
-            // surfaces on OCR_PROVIDER exactly as before.
+            // Set for /chat (gemini) and /translate (sarvam); undefined for every other
+            // surface, which is what leaves those surfaces on OCR_PROVIDER exactly as before.
             ...(job.ocrProvider ? { ocrProvider: job.ocrProvider } : {}),
             // OCR runs one ≤10-page Sarvam job at a time, so a long scan is minutes of
             // spinner without this.

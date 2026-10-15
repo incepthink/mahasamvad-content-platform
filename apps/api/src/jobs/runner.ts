@@ -45,6 +45,7 @@ import {
   analyzeInformationShape,
   directPosterDesign,
   posterDesignDirectionEnabled,
+  VERBATIM_DESIGN_MODEL,
   familyHonoured,
   parsePosterStyle,
   pickArticleLayout,
@@ -160,10 +161,7 @@ import {
 import { listKnownDesignations } from './translation-terms.js';
 import type { SocialLogoStyle } from '@dgipr/schemas';
 import { currentSocialLogoStyle, socialLogoStyleFor } from './social-logo.js';
-import {
-  checkPosterNumerals,
-  type PosterNumeralWarning,
-} from './poster-numeral-check.js';
+import type { PosterNumeralWarning } from './poster-numeral-check.js';
 
 const running = new Set<string>();
 
@@ -1697,14 +1695,20 @@ export function startArticlePosterJob(
 // un-chromed artwork for the plain download. Both callers stamp; the initial-render one
 // always did, since it also measures colours on the raw poster. The callers also meter the
 // render (recordImageCost), so this function must NOT — that would double-count every poster.
+// The image to edit: a URL to fetch, or bytes already in memory (a feedback round's marked
+// poster is drawn here and was once uploaded only to be downloaded straight back).
+async function pngOf(image: string | Buffer): Promise<Buffer> {
+  return typeof image === 'string' ? fetchReferencePng(image) : image;
+}
+
 async function renderArticlePosterEdit(
-  imageUrl: string,
+  image: string | Buffer,
   prompt: string,
   // The officer's attached pictures, appended after the edited image (see
   // renderWithOfficerImages). The caller has already prefixed `prompt` to declare them.
   officer: readonly Buffer[] = [],
 ): Promise<Buffer> {
-  const current = await fetchReferencePng(imageUrl);
+  const current = await pngOf(image);
   return renderWithOfficerImages({
     leading: [current],
     officer,
@@ -1724,13 +1728,13 @@ async function renderArticlePosterEdit(
 // officer receives 1280x1600), while CMO's chrome is OVERLAID (so what the model paints is
 // already the finished poster, CMO_POSTER_SIZE).
 async function renderSocialPosterEdit(
-  imageUrl: string,
+  image: string | Buffer,
   prompt: string,
   size: string,
   // As renderArticlePosterEdit's: appended after the edited image, declared by the caller.
   officer: readonly Buffer[] = [],
 ): Promise<Buffer> {
-  const current = await fetchReferencePng(imageUrl);
+  const current = await pngOf(image);
   return renderWithOfficerImages({ leading: [current], officer, prompt, size });
 }
 
@@ -1753,7 +1757,9 @@ function socialPlatformOf(
 // Exported for jobs/carousel.ts: a carousel slide is a DGIPR social poster on the same canvas,
 // so a marker round on one slide is exactly this edit.
 export async function renderSocialPosterFeedbackEdit(
-  currentPosterUrl: string,
+  // The poster to edit — a URL, or the bytes when the caller already holds them (the marked
+  // copy a marker round draws), which saves an upload and a download per round.
+  currentPoster: string | Buffer,
   feedback: string,
   // > 0 when currentPosterUrl carries numbered marker boxes (see the article
   // renderer's note above).
@@ -1802,7 +1808,7 @@ export async function renderSocialPosterFeedbackEdit(
   // artwork, and overlayTwitterChrome joins a fresh band back on — so the poster stays exactly
   // 4:5 through any number of rounds rather than growing or shrinking.
   const rawPoster = await renderSocialPosterEdit(
-    currentPosterUrl,
+    currentPoster,
     prompt,
     brand === 'cmo' ? CMO_POSTER_SIZE : SOCIAL_ARTWORK_SIZE,
     officer,
@@ -2305,6 +2311,7 @@ async function renderAndStoreSocialPoster(
         previous: avoid.previousDesign,
         previousMeasuredBucket: avoid.previousMeasuredBucket,
         redoKind: avoid.redoKind,
+        model: isFreshVerbatim ? VERBATIM_DESIGN_MODEL : undefined,
       })
     : null;
   if (directsDesign) {
@@ -2406,11 +2413,6 @@ async function renderAndStoreSocialPoster(
   // gpt-image-2 on the social canvas — attribute the fixed tier price (image usage isn't measurable
   // whether it ran in n8n or the direct call). The copy above is metered by chatComplete.
   recordImageCost('twitter', imageQuality());
-  // Read the numbers back off the RAW render (the footer band carries text of its own), in
-  // parallel with the chrome and the upload; awaited after the poster is on the row, so a slow
-  // or failed read never costs the paid render. Every number on a poster must come from the
-  // officer's note — the copy step only re-arranges it.
-  const numeralCheck = checkPosterNumerals(id, rawPoster, row.note);
 
   // 5a. Measure what the render ACTUALLY came out as, BEFORE the chrome is stamped — the footer
   //     band and emblem are the same colours on every poster, so measuring after them biases
@@ -2489,7 +2491,8 @@ async function renderAndStoreSocialPoster(
     referenceTitle: workingTitle,
     posterPath: posterObjectPath,
   });
-  recordPosterNumeralWarning(id, await numeralCheck);
+  // The OCR numeral read-back is switched off (2026-10-15); clear any stale warning.
+  recordPosterNumeralWarning(id, null);
 
   // The assigned style is written SEPARATELY and best-effort, deliberately not bundled into the
   // write above. It targets a column added by migration 0028, and bundling them would mean that
@@ -3715,7 +3718,10 @@ export function startPosterImageFeedbackJob(
     const logoStyle = socialPoster
       ? await currentSocialLogoStyle(socialPoster, row)
       : undefined;
-    let inputUrl = publicUrl(client, row.posterPath);
+    // What the edit model is handed. Bytes we already hold are passed as-is; only an
+    // unmarked article/thumbnail round still fetches the poster by URL.
+    let inputImage: string | Buffer =
+      socialPoster ?? publicUrl(client, row.posterPath);
     let feedbackText = input.feedback ?? '';
     // Revision history keeps the user's own words, never the machine text.
     let historyFeedback = feedbackText;
@@ -3730,16 +3736,10 @@ export function startPosterImageFeedbackJob(
         annotations.map((a) => a.region),
         clearRegions.map((c) => c.region),
       );
-      // Throwaway n8n input — never a posterPath / revision snapshot, so it
-      // can't enter the version strip. The version counter only advances when
-      // the round succeeds (insertRevision runs last), so a failed round
-      // orphans this object and a retry recomputes the SAME version; the
-      // timestamp makes each attempt's path unique. upsert is not an option:
-      // the public bucket is CDN-cached and paths must never be reused (n8n
-      // could fetch the stale cached image).
-      const markedPath = `generations/${id}/feedback-marked-v${version}-${Date.now()}.png`;
-      await uploadPng(client, markedPath, marked);
-      inputUrl = publicUrl(client, markedPath);
+      // Handed to the edit model straight from memory. It used to be uploaded to
+      // storage and fetched back by URL — a leftover from when n8n made the edit call
+      // and needed a URL — costing a round trip per round for nothing.
+      inputImage = marked;
 
       const interpreted = await interpretImageFeedback({
         markedPosterPng: marked,
@@ -3818,7 +3818,7 @@ export function startPosterImageFeedbackJob(
       // 1280x720 frame, not the artwork canvas an initial render is asked for:
       // overlayYoutubeChrome recognises it by aspect and re-stamps the band in place rather
       // than joining a second strip on.
-      const current = await fetchReferencePng(inputUrl);
+      const current = await pngOf(inputImage);
       const edited = await renderWithOfficerImages({
         leading: [current],
         officer: officerImages,
@@ -3837,7 +3837,7 @@ export function startPosterImageFeedbackJob(
           ? await downloadPng(client, cmoPhotoPath(id))
           : undefined;
       const rendered = await renderSocialPosterFeedbackEdit(
-        inputUrl,
+        inputImage,
         feedbackText,
         annotations.length,
         row.templateBrand,
@@ -3866,7 +3866,7 @@ export function startPosterImageFeedbackJob(
       // here, which is what keeps it crisp through repeated rounds — and leaves `rawPoster`
       // as a genuine un-branded copy of this version.
       rawPoster = await renderArticlePosterEdit(
-        inputUrl,
+        inputImage,
         prompt,
         officerImages,
       );
@@ -3896,23 +3896,12 @@ export function startPosterImageFeedbackJob(
       }
     }
 
-    // Numbers read back off the edited render, against the note AND this round's request — the
-    // officer may legitimately be adding a number the note never had. Social only, the lane the
-    // notice is shown on.
-    const numeralCheck =
-      rawPoster && isSocialCategory(row.category)
-        ? checkPosterNumerals(
-            id,
-            rawPoster,
-            [row.note, historyFeedback].join('\n'),
-          )
-        : Promise.resolve(null);
 
     const posterObjectPath = posterPath(id, version);
     await uploadPng(client, posterObjectPath, posterPng);
     if (rawPoster) await storePlainPoster(client, id, version, rawPoster);
     await updateGeneration(client, id, { posterPath: posterObjectPath });
-    recordPosterNumeralWarning(id, await numeralCheck);
+    recordPosterNumeralWarning(id, null);
     await insertRevision(client, {
       generationId: id,
       target: 'poster_image',

@@ -181,8 +181,9 @@ function noContentError(label: string, body: ChatResponse): Error {
 // live API: `temperature` other than the default 1 is a 400, the completion cap is
 // `max_completion_tokens` (not `max_tokens`), and it accepts an optional `reasoning_effort`.
 // Everything before gpt-5 keeps the exact body it sent before, byte-for-byte.
+// gpt-6 (e.g. gpt-6-luna) speaks the same dialect, so the test is "gpt-5 or later".
 export function isGpt5Model(model: string): boolean {
-  return /^gpt-5/.test(model);
+  return /^gpt-([5-9]|[1-9]\d)/.test(model);
 }
 
 function requireApiKey(): string {

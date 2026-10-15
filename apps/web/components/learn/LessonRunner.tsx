@@ -36,7 +36,7 @@ import {
 import type { FeedbackRegion } from '@dgipr/schemas';
 import { Pause, Play, Volume2, VolumeX } from 'lucide-react';
 import { ApiProvider } from '../../lib/apiContext';
-import { LEARN, STR } from '../../lib/strings';
+import { LEARN, STR, runPageTitle } from '../../lib/strings';
 import {
   createCreativeSandbox,
   currentFile,
@@ -510,7 +510,7 @@ function LessonWorkspace({
   return (
     <PageShell
       background="creative"
-      title={STR.newTitle}
+      title={runPageTitle(detail.category, detail.outputType)}
       statusChip={
         <>
           <StatusChip status={detail.status} />

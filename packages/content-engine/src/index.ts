@@ -242,6 +242,7 @@ export {
   extractPdfPagesViaProvider,
   ocrProviderName,
   chatOcrProviderName,
+  translateOcrProviderName,
   ocrProviderApiKeyEnv,
   ocrKeyPresent,
 } from './intake/ocr-provider.js';
@@ -817,6 +818,7 @@ export {
 export {
   directPosterDesign,
   posterDesignDirectionEnabled,
+  VERBATIM_DESIGN_MODEL,
   parsePosterDesign,
   sanitizeBrief,
   DESIGN_FORMS,

@@ -1224,8 +1224,6 @@ export const STR = {
   iconDownloadPoster: 'पोस्टर डाउनलोड करा',
   iconDownloadPosterPlain: 'लोगो-फूटरशिवाय डाउनलोड करा',
   iconOpenPosterInCanva: 'Canva मध्ये पोस्टर उघडा',
-  // Shown only when the deployment has more than one Canva integration configured.
-  canvaAccountLabel: 'कोणत्या Canva खात्यातून पाठवायचे?',
   iconRedesignPoster: 'वेगळी रचना तयार करा',
   iconRecolourPoster: 'वेगळ्या रंगात तयार करा',
   iconEditPoster: 'चित्रात बदल करा (पोस्टरवर खूण करा)',
@@ -2834,6 +2832,31 @@ export const RUN_FORMAT_LABELS: Record<RunFormatKey, string> = {
   ...CATEGORY_LABELS,
   caption: STR.captionLabel,
 };
+
+// The run page's heading. It used to be `STR.newTitle` ("नवीन बातमी") on every run, so a
+// poster — new or regenerated — was headed as a news article. It names what the run
+// actually PRODUCES: a news/scheme row with outputType 'poster' is a poster (the banner
+// lane), and 'both' keeps the article's name because the article leads that page.
+export function runPageTitle(
+  category: Category,
+  outputType: OutputType,
+): string {
+  switch (category) {
+    case 'dynamic_poster':
+      return 'नवीन डायनॅमिक पोस्टर';
+    case 'carousel':
+      return 'नवीन कॅरोसेल';
+    case 'youtube':
+      return 'नवीन यूट्यूब थंबनेल';
+    case 'twitter':
+    case 'facebook':
+      return outputType === 'article' ? 'नवीन कॅप्शन' : 'नवीन पोस्टर';
+    case 'scheme':
+      return outputType === 'poster' ? 'नवीन पोस्टर' : 'नवीन योजना लेख';
+    case 'news':
+      return outputType === 'poster' ? 'नवीन पोस्टर' : STR.newTitle;
+  }
+}
 
 export const STATUS_LABELS: Record<GenerationStatus, string> = {
   queued: 'रांगेत',

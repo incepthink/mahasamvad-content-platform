@@ -3623,36 +3623,6 @@ details.fold[aria-disabled='true'] summary {
   height: 18px;
 }
 
-/* The Canva button preceded by its integration picker, drawn only when the deployment has
-   more than one configured. Native <select> for the reason .history-select gives: on a
-   phone it opens as the platform's own full-height list. The pair wraps as a unit so the
-   select never ends a line on its own, orphaned from the button it qualifies. */
-.canva-picker {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.canva-picker select {
-  font: inherit;
-  font-size: 0.84rem;
-  font-weight: 600;
-  color: inherit;
-  max-width: 160px;
-  height: 40px;
-  padding: 0 8px;
-  border: 1.5px solid var(--border);
-  border-radius: var(--r-md);
-  background: var(--card);
-  cursor: pointer;
-}
-
-.canva-picker select:focus-visible {
-  outline: 3px solid var(--ring);
-  outline-offset: 0;
-  border-color: var(--accent);
-}
-
 /* "Same note, other platform" — an .icon-btn carrying the platform mark, its name, and
    a trailing arrow, so it grows past the square. It sits in the same row as the actions
    on this run; the arrow is what says this one navigates instead of acting. */

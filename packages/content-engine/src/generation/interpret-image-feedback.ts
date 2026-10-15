@@ -14,7 +14,7 @@
 // correspondingly numbered change" wording keeps working either way.
 
 import { pathToFileURL } from 'node:url';
-import { chatCompleteVision, VISION_MODEL } from './openai-chat.js';
+import { chatCompleteVision } from './openai-chat.js';
 import type { ClearAction } from './clear-space-rule.js';
 
 export type FeedbackAnnotationInput = Readonly<{
@@ -70,10 +70,10 @@ export type InterpretedImageFeedback = Readonly<{
   source: 'vision' | 'fallback';
 }>;
 
-// Spatial reasoning over a full poster + Devanagari reading needs the authoring tier.
-// VISION_MODEL (gpt-5.6-terra) is that tier and is env-overridable, so this no longer
-// pins its own id.
-const INTERPRETER_MODEL = VISION_MODEL;
+// Runs on gpt-6-luna: it only turns marks + notes into one edit instruction, and a
+// failure falls back to the officer's raw notes. Its own env var so it can be moved
+// back to VISION_MODEL (terra) in one line without touching other vision calls.
+const INTERPRETER_MODEL = process.env.OPENAI_FEEDBACK_INTERPRETER_MODEL ?? 'gpt-6-luna';
 const MAX_INSTRUCTION_CHARS = 1_500;
 // The instruction alone fits in 500; a Marathi inventory of a dense list poster does
 // not (~1 token per 1.2-1.8 chars), and an exhausted budget returns EMPTY content

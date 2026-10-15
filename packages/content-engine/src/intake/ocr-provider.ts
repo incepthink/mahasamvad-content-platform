@@ -65,6 +65,14 @@ export function chatOcrProviderName(): string {
   return raw && raw.trim() !== '' ? raw.trim().toLowerCase() : 'gemini';
 }
 
+// Which backend /translate's documents are read with. Sarvam by default WHATEVER the
+// deployment's OCR_PROVIDER says: the translation itself runs on Sarvam, so the file is read
+// by the same provider. TRANSLATE_OCR_PROVIDER puts it back on another backend in one line.
+export function translateOcrProviderName(): string {
+  const raw = process.env.TRANSLATE_OCR_PROVIDER;
+  return raw && raw.trim() !== '' ? raw.trim().toLowerCase() : 'sarvam';
+}
+
 // Which backend a PHOTOGRAPH is read with. It follows OCR_PROVIDER, because since 2026-08-27
 // both backends take an image and there is no reason for a deployment's document OCR and its
 // photograph OCR to be different products. IMAGE_OCR_PROVIDER overrides it for the one case
@@ -203,6 +211,19 @@ if (
     chatOcrProviderName() === 'sarvam',
   );
   delete process.env.CHAT_OCR_PROVIDER;
+
+  delete process.env.TRANSLATE_OCR_PROVIDER;
+  process.env.OCR_PROVIDER = 'openai';
+  check(
+    'translate reads on sarvam even when OCR_PROVIDER says otherwise',
+    translateOcrProviderName() === 'sarvam',
+  );
+  process.env.TRANSLATE_OCR_PROVIDER = ' OpenAI ';
+  check(
+    'and TRANSLATE_OCR_PROVIDER overrides it',
+    translateOcrProviderName() === 'openai',
+  );
+  delete process.env.TRANSLATE_OCR_PROVIDER;
 
   delete process.env.OCR_PROVIDER;
   delete process.env.IMAGE_OCR_PROVIDER;

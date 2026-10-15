@@ -119,6 +119,9 @@ export type DirectPosterDesignInput = Readonly<{
   // What that previous render measured, for a colour redo.
   previousMeasuredBucket?: string | undefined;
   redoKind?: RedoKind | undefined;
+  // Overrides DESIGN_MODEL for this call (the जसाच्या तसा मजकूर lane runs on
+  // VERBATIM_DESIGN_MODEL). Ignored when `call` is supplied.
+  model?: string | undefined;
   call?: DesignDirectorCall | undefined;
 }>;
 
@@ -132,6 +135,9 @@ export function posterDesignDirectionEnabled(): boolean {
 
 const DESIGN_MODEL =
   process.env.OPENAI_POSTER_DESIGN_MODEL?.trim() || UTILITY_MODEL;
+// The जसाच्या तसा मजकूर (fresh_verbatim) lane's director model.
+export const VERBATIM_DESIGN_MODEL =
+  process.env.OPENAI_POSTER_DESIGN_VERBATIM_MODEL?.trim() || 'gpt-6-luna';
 const DESIGN_EFFORT: ReasoningEffort = 'low';
 const TEXT_MAX_CHARS = 1500;
 // Below this many words, what survived sanitising is not a direction worth sending.
@@ -365,9 +371,11 @@ export function repeatsPrevious(
   return direction.colourMood === previous.colourMood;
 }
 
-const defaultCall: DesignDirectorCall = (messages) =>
+const callWithModel =
+  (model: string): DesignDirectorCall =>
+  (messages) =>
   chatComplete(messages, {
-    model: DESIGN_MODEL,
+    model,
     reasoningEffort: DESIGN_EFFORT,
     maxTokens: 500,
     jsonSchema: {
@@ -392,7 +400,7 @@ export async function directPosterDesign(
   input: DirectPosterDesignInput,
 ): Promise<PosterDesignDirection | null> {
   if (input.text.trim().length === 0) return null;
-  const call = input.call ?? defaultCall;
+  const call = input.call ?? callWithModel(input.model ?? DESIGN_MODEL);
   const ask = async (sharper: boolean): Promise<PosterDesignDirection | null> =>
     parseDirection(
       await call([
