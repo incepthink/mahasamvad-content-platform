@@ -3187,6 +3187,14 @@ client id/secret — see the milestone below.
   `@dgipr/schemas` → `@dgipr/database` → `@dgipr/poster-renderer` → `@dgipr/content-engine`
   dists → API + web.
 
+- **Rotation turned OFF by default (2026-10-15, no migration, API only)**: the officers want the
+  badge back as the white card in the top-right on every poster. `socialLogoStyleFor` now returns
+  `card-right` unless `SOCIAL_LOGO_STYLE` names a style or says `rotate`; card-right makes every
+  prompt and the stamp byte-identical to before the rotation, so nothing else changed. Pixel
+  detection (`currentSocialLogoStyle`) is deliberately kept, so a poster made between 2026-10-03
+  and this deploy keeps its own badge on feedback and in Canva instead of gaining a second one.
+  The milestone below describes the rotation as built; it is now opt-in.
+
 - **The social poster's महाराष्ट्र शासन badge ROTATES: card, circle or quarter-circle, top-left
   or top-right** (2026-10-03, no migration, no n8n, no web change). Every twitter/facebook/carousel
   poster carried the same white rounded card in the same top-right corner, which made every poster

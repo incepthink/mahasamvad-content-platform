@@ -2017,10 +2017,12 @@ Chromium): `pnpm --filter @dgipr/poster-renderer exec playwright install chromiu
   historical — that edit is a direct OpenAI call, not a workflow); neither mode produces
   a scene image, so poster feedback + manual copy-edit (which need `scenePath`) stay
   `html`-only.
-- **The social badge ROTATES (2026-10-03)** — card / circle / quarter-circle × top-left / top-right
-  (`SOCIAL_LOGO_STYLES`, schemas). New renders: `socialLogoStyleFor(row)` (from the id,
-  `apps/api/src/jobs/social-logo.ts`); existing posters (feedback, Canva): `currentSocialLogoStyle`
-  reads it off the pixels. Stamp/placement → `placeSocialLogo` in `twitter-chrome.ts`; prompt
+- **The social badge is the TOP-RIGHT CARD by default again (2026-10-15)**; the 2026-10-03 rotation
+  (card / circle / quarter-circle × top-left / top-right, `SOCIAL_LOGO_STYLES`, schemas) is opt-in
+  with `SOCIAL_LOGO_STYLE=rotate`. New renders: `socialLogoStyleFor(row)`
+  (`apps/api/src/jobs/social-logo.ts`, card-right unless the env says otherwise); existing posters
+  (feedback, Canva): `currentSocialLogoStyle` reads it off the pixels — KEEP that, posters made while
+  rotation was on still carry left/circle/quarter badges. Stamp/placement → `placeSocialLogo` in `twitter-chrome.ts`; prompt
   corner + description → `socialZonesFor`/`socialChromeFor` in `build-poster-prompt.ts`. Never
   hard-code "top-right" in a social prompt again. Harness: `poster:preview:chrome:twitter`.
 - **Numbers on an image-model poster (2026-10-08)**: gpt-image confuses look-alike Devanagari
