@@ -35,10 +35,15 @@
 // The artwork height is NOT 1600 - 91. gpt-image-2 requires BOTH dimensions divisible by 16
 // ("Invalid size '1280x1509'. Width and height must both be divisible by 16." — verified live
 // 2026-08-13, a 400 that arrives in ~1s and would fail the run after the copy call is paid
-// for). So the artwork is 1504 (16 x 94) and the appended strip is the 96px remainder, which
+// for). So the artwork was 1504 (16 x 94) and the appended strip the 96px remainder, which
 // is a little taller than the band's own ~91px: the extra ~5px is filled by the same
 // edge-continuation that makes the join invisible, so it reads as the poster, not as padding.
 // Any future change to either number must keep artwork % 16 === 0 and strip >= band height.
+//
+// NOW 1552 (16 x 97), 2026-10-16. That strip showed through the band's see-through top as
+// smeared generated fill. The artwork now reaches behind that see-through part and the strip is
+// 48px, under the band's solid row — see SOCIAL_FOOTER_UNDERLAP. The rule is now: artwork % 16
+// === 0 and strip >= the band's SOLID height.
 
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -124,7 +129,18 @@ export const SOCIAL_POSTER_HEIGHT = 1600;
  * leave a strip at least as tall as the band. Keep in sync with SOCIAL_ZONES.height in
  * content-engine/src/generation/build-poster-prompt.ts, which is what the prompt reserves.
  */
-export const SOCIAL_ARTWORK_HEIGHT = 1504;
+export const SOCIAL_ARTWORK_HEIGHT = 1552;
+
+/**
+ * How far the footer band lies over the bottom of the artwork, at ASSET_BASE_WIDTH. The band
+ * (~91px) is ~56% opaque across its top 43 rows, round the solid navy title pill, and fully
+ * opaque below (measured off footer-new-poster.png). Since 2026-10-16 the artwork runs down
+ * behind those 43 rows, so what shows beside the pill is the poster itself rather than a strip of
+ * generated fill; the 48px strip that remains sits under the band's solid white row. The prompt
+ * keeps text above y=1488 (SOCIAL_ZONES in build-poster-prompt.ts), clear of the band's top
+ * at y=1509.
+ */
+export const SOCIAL_FOOTER_UNDERLAP = 43;
 
 /** The render size to request for DGIPR social artwork, e.g. for generateImage / n8n. */
 export const SOCIAL_ARTWORK_SIZE = `${ASSET_BASE_WIDTH}x${SOCIAL_ARTWORK_HEIGHT}`;
@@ -138,6 +154,7 @@ const SOCIAL_FOOTER_JOIN: FooterJoinSpec = {
   baseWidth: ASSET_BASE_WIDTH,
   artworkHeight: SOCIAL_ARTWORK_HEIGHT,
   finishedHeight: SOCIAL_POSTER_HEIGHT,
+  bandUnderlap: SOCIAL_FOOTER_UNDERLAP,
 };
 
 export type GovernmentLockupRaster = Readonly<{

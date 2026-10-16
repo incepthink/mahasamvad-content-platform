@@ -73,19 +73,28 @@ import {
 // `height` IS THE ARTWORK, NOT THE FINISHED POSTER (2026-08-13). The finished poster is
 // 1280x1600 — a true 4:5, so it drops into a 1080x1350 Canva/Instagram/Facebook portrait frame
 // with no gap — and the band is joined below what the model paints, so what the model is asked
-// for is 1280x1504. It is 1504 rather than 1600-91 because gpt-image-2 requires both dimensions
+// for was 1280x1504 (1552 since 2026-10-16, see below). It was 1504 rather than 1600-91 because gpt-image-2 requires both dimensions
 // divisible by 16; the 96px remainder is the strip, slightly taller than the band, and the
 // difference is absorbed by the same edge-continuation fill that hides the join. Keep in sync
 // with SOCIAL_ARTWORK_HEIGHT in packages/poster-renderer/src/twitter-chrome.ts.
 // Exported for the carousel lane (build-carousel-prompt.ts), whose slides are the same canvas
 // finished by the same overlayTwitterChrome.
+//
+// 1552 AND THE 48px UNDERLAP (2026-10-16). The band is see-through across its top ~43px (round
+// the solid navy title pill) and solid below, and the strip it was joined onto showed through
+// that see-through part as smeared generated fill. So the artwork now runs down to y=1552 —
+// behind the see-through part — and only a 48px strip is added, hidden entirely by the band's
+// solid white row. Text still stops at y=1488 (1552 - 48 - 16), clear of the band, whose top
+// lands at y=1509. Keep in sync with SOCIAL_ARTWORK_HEIGHT / SOCIAL_FOOTER_UNDERLAP in
+// packages/poster-renderer/src/twitter-chrome.ts.
 export const SOCIAL_ZONES: ReservedZoneGeometry = {
   width: 1280,
-  height: 1504,
+  height: 1552,
   lockupWidth: 180,
   lockupHeight: 170,
   footerHeight: 91,
   footerAppendedMargin: 16,
+  footerUnderlap: 48,
 };
 
 // The stamped footer is a navy ministry title pill sitting ON TOP of a white social-handle
@@ -673,8 +682,8 @@ export function buildPosterPrompt(input: BuildPosterPromptInput): string {
 
     return buildMinimalCreativePrompt({
       text: posterContent,
-      width: 1280,
-      height: 1504,
+      width: SOCIAL_ZONES.width,
+      height: SOCIAL_ZONES.height,
       designDirection: input.designDirection?.brief,
       lightGround: true,
       numeralRuns: extractNumeralRuns(posterContent),
@@ -1008,7 +1017,7 @@ if (
 
       // The minimal prompt contains only: opening line, text accuracy, numbers, area rules, and content.
       for (const needle of [
-        'Make a creative poster for social media platforms in the size 1280 × 1504.',
+        'Make a creative poster for social media platforms in the size 1280 × 1552.',
         'TEXT ACCURACY:',
         'Preserve every अक्षर, मात्रा, जोडाक्षर and अनुस्वार in its correct position',
         'Pay special attention to conjuncts such as “क्ती” and “र्दे”',
@@ -1020,8 +1029,8 @@ if (
         'TEXT TO PUT ON THE POSTER:',
         'MOST IMPORTANT MESSAGE — render the value only; its placement is your decision:',
         'ADDITIONAL EXACT TEXT — render these values only; arrange and group them freely:',
-        'footer is attached below the image and covers nothing',
-        'all text and icons above y=1488',
+        'covers the bottom 48 pixels of this image',
+        'all text, numbers and icons above y=1488',
       ]) {
         if (!prompt.includes(needle))
           failures.push(
@@ -1071,7 +1080,7 @@ if (
         'fixed-template prompt does not rank the reserve over completeness',
       );
     // (b) The consequence. "Reserved for branding" never said the words are destroyed.
-    if (!onbrand.includes('COVERED AND LOST'))
+    if (!onbrand.includes('COVERED OR HALF-HIDDEN'))
       failures.push(
         'fixed-template prompt does not state what happens under the band',
       );
@@ -1132,9 +1141,9 @@ if (
     //     crossing the zone. See reserved-zone-rule.ts.
     for (const needle of [
       'top-right 180 x 170 pixels',
-      '1280 x 1504 output',
+      '1280 x 1552 output',
       'y=1488',
-      'THE BOTTOM EDGE IS A JOIN, NOT A COVER ZONE',
+      'SIT BEHIND THE FOOTER BAND',
       'DO NOT CUT A HOLE IN IT',
       'continue through unbroken',
       'CLEAR OF CONTENT, NOT CLEAR OF DESIGN',
@@ -1143,7 +1152,7 @@ if (
       // bottom is an edge the design runs off, not a reserve — see reserved-zone-rule.ts.
       'DESIGN ALL THE WAY DOWN TO THE VERY BOTTOM EDGE',
       'THERE IS NO COLOUR RESTRICTION AT THE BOTTOM',
-      'the design itself must reach the bottom edge',
+      'must still run all the way down to the bottom edge',
     ]) {
       if (!onbrand.includes(needle))
         failures.push(`fixed-template prompt lost "${needle}"`);
@@ -1277,7 +1286,7 @@ if (
     }
     for (const chromeRule of [
       'y=1488',
-      'footer is attached below the image and covers nothing',
+      'covers the bottom 48 pixels of this image',
     ]) {
       if (!freshPrompt.includes(chromeRule))
         failures.push(`the fresh prompt lost chrome rule "${chromeRule}"`);
@@ -1458,7 +1467,7 @@ if (
       ] as const) {
         if (
           !prompt.startsWith(
-            'Make a creative poster for social media platforms in the size 1280 × 1504.',
+            'Make a creative poster for social media platforms in the size 1280 × 1552.',
           )
         )
           failures.push(`the ${name} prompt lost the minimal opening`);
@@ -1505,11 +1514,11 @@ if (
         "the fresh_verbatim prompt does not carry the officer's text verbatim",
       );
     for (const needle of [
-      'Make a creative poster for social media platforms in the size 1280 × 1504.',
+      'Make a creative poster for social media platforms in the size 1280 × 1552.',
       'TEXT ACCURACY:',
       'Use only Devanagari numerals: ० १ २ ३ ४ ५ ६ ७ ८ ९',
       'AREA RULES:',
-      'footer is attached below the image and covers nothing',
+      'covers the bottom 48 pixels of this image',
       'TEXT TO PUT ON THE POSTER:',
     ]) {
       if (!freshVerbatim.includes(needle))
@@ -1926,7 +1935,7 @@ if (
       // The builder without the new options is byte-identical to the pre-2026-09-26 assembly.
       const plain = minimal({ text: VERBATIM_TEXT });
       const expected = [
-        'Make a creative poster for social media platforms in the size 1280 × 1504. It must look very professional and not be congested.',
+        'Make a creative poster for social media platforms in the size 1280 × 1552. It must look very professional and not be congested.',
         '',
         NUMBERS_RULE,
         '',
@@ -1938,7 +1947,7 @@ if (
         '',
         HEADLINE_MARGINS_RULE,
         '',
-        'AREA RULES:\n- Bottom margin: The footer is attached below the image and covers nothing. Extend the design to the bottom edge, but keep all text and icons above y=1488 (at least 16 pixels above the bottom edge). Do not draw wave patterns or curved decorative swooshes along the bottom. Reflow or shrink content until everything fits.',
+        'AREA RULES:\n- Bottom margin: The see-through top of the footer band covers the bottom 48 pixels of this image. Run the background to the bottom edge, but keep all text, numbers and icons above y=1488. Do not draw wave patterns or curved decorative swooshes along the bottom. Reflow or shrink content until everything fits.',
         '',
         'TEXT TO PUT ON THE POSTER:',
         VERBATIM_TEXT,

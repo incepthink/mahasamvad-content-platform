@@ -438,7 +438,7 @@ if (
   check(
     "cover opens with the department's sentence",
     cover.startsWith(
-      'Make a creative poster for social media platforms in the size 1280 × 1504. It is SLIDE 1 (the cover) of a 3-slide carousel for Maharashtra DGIPR. It must look very professional.',
+      'Make a creative poster for social media platforms in the size 1280 × 1552. It is SLIDE 1 (the cover) of a 3-slide carousel for Maharashtra DGIPR. It must look very professional.',
     ),
   );
   check(
@@ -501,7 +501,7 @@ if (
   check(
     'detail names its position',
     middle.startsWith(
-      'Make a creative poster for social media platforms in the size 1280 × 1504. It is SLIDE 2 OF 3 of a Maharashtra DGIPR social media carousel.',
+      'Make a creative poster for social media platforms in the size 1280 × 1552. It is SLIDE 2 OF 3 of a Maharashtra DGIPR social media carousel.',
     ),
   );
   check(
@@ -603,7 +603,7 @@ if (
     ICONS_RULE,
     DO_NOT_USE_RULE,
     buildHeadlineMarginsRule(180, 170),
-    buildAreaRule(1280, 1504),
+    buildAreaRule(1280, 1552),
   ];
   check(
     "the social poster's rule blocks (incl. ICONS and the no-maps rule) appear verbatim in the cover",
@@ -760,7 +760,7 @@ if (
     "the director's rules never displace the social rule blocks or the text block's position",
     shared.every((rule) => dMiddle.includes(rule)) &&
       dMiddle.lastIndexOf('TEXT TO PUT ON THE POSTER:') >
-        dMiddle.indexOf(buildAreaRule(1280, 1504)),
+        dMiddle.indexOf(buildAreaRule(1280, 1552)),
   );
 
   // जसाच्या तसा मजकूर: the exact-text rule comes before the printed block, never inside it, and

@@ -191,6 +191,13 @@ export type FooterJoinSpec = Readonly<{
   artworkHeight: number;
   /** What the officer receives, once the strip is joined on. */
   finishedHeight: number;
+  /**
+   * How far (at `baseWidth`) the band may lie over the bottom of the artwork. The social band
+   * is see-through across its top and solid below; since 2026-10-16 the artwork runs down behind
+   * the see-through part, so the strip only has to be as tall as the band's SOLID part. Absent
+   * = 0: the band sits wholly on the strip, as before (the YouTube lane).
+   */
+  bandUnderlap?: number;
 }>;
 
 export type FooterJoinResult = Readonly<{
@@ -219,8 +226,8 @@ export type FooterJoinResult = Readonly<{
  *
  * The strip is the REMAINDER that makes the finished image exactly its intended aspect, never
  * the band's own height — that is what absorbs the few pixels a divisible-by-16 artwork height
- * leaves over. `max(bandHeight, …)` is a floor rather than a policy: a band taller than the
- * remainder would otherwise be cropped.
+ * leaves over. The floor (the band's height less any `bandUnderlap`) is not a policy: a band
+ * taller than the remainder would otherwise be cropped.
  */
 export async function joinFooterStrip(
   image: Buffer,
@@ -247,8 +254,14 @@ export async function joinFooterStrip(
     };
   }
 
+  // The floor is the part of the band that must land on the strip: all of it, unless the lane
+  // lets the band's see-through top lie over the artwork (spec.bandUnderlap).
+  const minStrip = Math.max(
+    1,
+    bandHeight - Math.round((spec.bandUnderlap ?? 0) * scale),
+  );
   const strip = Math.max(
-    bandHeight,
+    minStrip,
     Math.round((spec.finishedHeight - spec.artworkHeight) * scale),
   );
   return {

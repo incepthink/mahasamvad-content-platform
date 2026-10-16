@@ -20,16 +20,22 @@ import { pathToFileURL } from 'node:url';
 import { numeralSpellingBlock } from './poster-numerals.js';
 
 export const DEFAULT_POSTER_WIDTH = 1280;
-export const DEFAULT_POSTER_HEIGHT = 1504;
+// 1552, not 1504 (2026-10-16): the artwork now runs down behind the footer band's see-through
+// top half (DEFAULT_FOOTER_UNDERLAP), so the officer sees the poster there instead of a strip of
+// generated fill. Must match SOCIAL_ARTWORK_HEIGHT in poster-renderer/src/twitter-chrome.ts.
+export const DEFAULT_POSTER_HEIGHT = 1552;
 export const DEFAULT_BADGE_WIDTH = 180;
 export const DEFAULT_BADGE_HEIGHT = 170;
 export const DEFAULT_BOTTOM_MARGIN = 16;
+/** Pixels at the bottom of the artwork that the footer band's see-through top lies over. */
+export const DEFAULT_FOOTER_UNDERLAP = 48;
 
 export type MinimalCreativePromptInput = Readonly<{
   text: string;
   width?: number | undefined;
   height?: number | undefined;
   bottomMargin?: number | undefined;
+  footerUnderlap?: number | undefined;
   badgeWidth?: number | undefined;
   badgeHeight?: number | undefined;
   // Which top corner the badge is stamped into, and what shape it is (the social logo rotation,
@@ -122,8 +128,13 @@ export function buildAreaRule(
   width: number,
   height: number,
   bottomMargin: number = DEFAULT_BOTTOM_MARGIN,
+  footerUnderlap: number = DEFAULT_FOOTER_UNDERLAP,
 ): string {
-  const bottomY = height - bottomMargin;
+  const bottomY = height - footerUnderlap - bottomMargin;
+  if (footerUnderlap > 0) {
+    return `AREA RULES:
+- Bottom margin: The see-through top of the footer band covers the bottom ${footerUnderlap} pixels of this image. Run the background to the bottom edge, but keep all text, numbers and icons above y=${bottomY}. Do not draw wave patterns or curved decorative swooshes along the bottom. Reflow or shrink content until everything fits.`;
+  }
   return `AREA RULES:
 - Bottom margin: The footer is attached below the image and covers nothing. Extend the design to the bottom edge, but keep all text and icons above y=${bottomY} (at least ${bottomMargin} pixels above the bottom edge). Do not draw wave patterns or curved decorative swooshes along the bottom. Reflow or shrink content until everything fits.`;
 }
@@ -139,7 +150,12 @@ export function buildMinimalCreativePrompt(
   const text = input.text.trim();
 
   const opening = `Make a creative poster for social media platforms in the size ${width} × ${height}. It must look very professional and not be congested.`;
-  const areaRule = buildAreaRule(width, height, bottomMargin);
+  const areaRule = buildAreaRule(
+    width,
+    height,
+    bottomMargin,
+    input.footerUnderlap ?? DEFAULT_FOOTER_UNDERLAP,
+  );
   const headlineMarginsRule = buildHeadlineMarginsRule(
     badgeWidth,
     badgeHeight,
@@ -210,7 +226,9 @@ if (
     const fs = await import('node:fs/promises');
     const path = await import('node:path');
 
-    const png = await generateImage(prompt, { size: '1280x1504' });
+    const png = await generateImage(prompt, {
+      size: `${DEFAULT_POSTER_WIDTH}x${DEFAULT_POSTER_HEIGHT}`,
+    });
     const outPath = path.resolve(process.cwd(), 'minimal-test-poster.png');
     await fs.writeFile(outPath, png);
     console.log(`[render] Wrote test poster to ${outPath}`);

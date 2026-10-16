@@ -70,6 +70,15 @@ export type ReservedZoneGeometry = Readonly<{
    * and keep the pre-existing behaviour byte-for-byte.
    */
   footerAppendedMargin?: number | undefined;
+  /**
+   * Appended lanes only: how many pixels at the BOTTOM of this artwork the footer band overlaps
+   * (2026-10-16). The social band is see-through across its top (~56% opaque round the navy
+   * title pill) and solid below. The model's canvas now runs down behind that see-through part,
+   * so what shows beside the pill is the poster itself instead of a strip of generated fill.
+   * Background must continue there; TEXT may not — the content floor sits this many pixels
+   * plus `footerAppendedMargin` above the bottom edge. Absent = 0, the pre-existing behaviour.
+   */
+  footerUnderlap?: number | undefined;
 }>;
 
 /** "top-right" / "top-left": the corner the badge zone sits in. */
@@ -84,7 +93,15 @@ export function footerIsAppended(g: ReservedZoneGeometry): boolean {
 
 /** The lowest y-coordinate content may reach. */
 export function contentBottomY(g: ReservedZoneGeometry): number {
-  return g.height - (g.footerAppendedMargin ?? g.footerHeight);
+  if (footerIsAppended(g)) {
+    return g.height - (g.footerUnderlap ?? 0) - (g.footerAppendedMargin ?? 0);
+  }
+  return g.height - g.footerHeight;
+}
+
+/** Pixels at the bottom of an appended-lane artwork that the band overlaps (0 when none). */
+function footerUnderlapOf(g: ReservedZoneGeometry): number {
+  return footerIsAppended(g) ? (g.footerUnderlap ?? 0) : 0;
 }
 
 // A fraction the model can actually see, since it cannot measure pixels. Rendered as
@@ -138,9 +155,11 @@ export function fitToReserveRule(
 ): string {
   // What crossing the floor DOES, in one phrase, reused by both recovery shapes. It has to be
   // true of the lane: on an appended footer nothing falls "behind" anything.
-  const crossing = footerIsAppended(g)
-    ? 'run into the bottom margin'
-    : 'fall behind the footer';
+  const underlap = footerUnderlapOf(g);
+  const crossing =
+    footerIsAppended(g) && underlap === 0
+      ? 'run into the bottom margin'
+      : 'fall behind the footer';
 
   const recovery = options.allowStructuralReflow
     ? [
@@ -160,16 +179,25 @@ export function fitToReserveRule(
   // model's own rendering contradicts, and a rule caught overstating one consequence weakens
   // every rule beside it. What is true there is that the band arrives hard against whatever the
   // artwork ends on, which is a visibly broken poster rather than a lost one.
-  const consequence = footerIsAppended(g)
-    ? [
-        `After you finish, software pastes an OPAQUE badge into the ${lockupCorner(g)} corner — any word, numeral, icon or subject you place under it is COVERED AND LOST, the sentence ends mid-word, and the whole image has to be thrown away. Along the bottom, a full-width branding band about ${g.footerHeight} pixels tall is joined on DIRECTLY BELOW this image; it takes no space out of this canvas and covers nothing you draw.`,
-        `So the design itself must reach the bottom edge in whatever colours it uses — only TEXT stops short, ${g.footerAppendedMargin} pixels above it, so the last line is not jammed against the band. Ending the design early and leaving a plain empty strip above the bottom edge is a broken, letterboxed poster, and is a worse result than slightly smaller type.`,
-        'Showing every point in SMALLER type is correct. Showing the same points in larger type with the last lines jammed against the bottom edge is wrong.',
-      ]
-    : [
-        `After you finish, software pastes an OPAQUE full-width band over the bottom ${g.footerHeight} pixels and an OPAQUE badge into the ${lockupCorner(g)} corner. They are not transparent and they are not moved to suit your layout: any word, numeral, icon or subject you place under them is COVERED AND LOST — the reader never sees it, the sentence ends mid-word, and the whole image has to be thrown away.`,
-        'Showing every point in SMALLER type is correct. Showing the same points in larger type with the last lines buried under the band is wrong, and is a worse failure than any amount of empty space.',
-      ];
+  // With an underlap the band DOES cover the bottom of this canvas — see-through round its navy
+  // title pill, which is itself solid — so text there is genuinely lost, and saying so is true.
+  const consequence =
+    underlap > 0
+      ? [
+          `After you finish, software pastes an OPAQUE badge into the ${lockupCorner(g)} corner and a full-width branding band whose top part lies over the bottom ${underlap} pixels of this image, with a solid navy title pill in the middle of it. Any word, numeral, icon or face you place under the badge, or below y=${contentBottomY(g)}, is COVERED OR HALF-HIDDEN — the reader cannot read it, the sentence ends mid-word, and the whole image has to be thrown away.`,
+          `The background, colours and imagery must still run all the way down to the bottom edge — the band is partly see-through there, so the design shows through it. Only TEXT, numerals and icons stop above y=${contentBottomY(g)}.`,
+          'Showing every point in SMALLER type is correct. Showing the same points in larger type with the last lines behind the footer band is wrong.',
+        ]
+      : footerIsAppended(g)
+        ? [
+            `After you finish, software pastes an OPAQUE badge into the ${lockupCorner(g)} corner — any word, numeral, icon or subject you place under it is COVERED AND LOST, the sentence ends mid-word, and the whole image has to be thrown away. Along the bottom, a full-width branding band about ${g.footerHeight} pixels tall is joined on DIRECTLY BELOW this image; it takes no space out of this canvas and covers nothing you draw.`,
+            `So the design itself must reach the bottom edge in whatever colours it uses — only TEXT stops short, ${g.footerAppendedMargin} pixels above it, so the last line is not jammed against the band. Ending the design early and leaving a plain empty strip above the bottom edge is a broken, letterboxed poster, and is a worse result than slightly smaller type.`,
+            'Showing every point in SMALLER type is correct. Showing the same points in larger type with the last lines jammed against the bottom edge is wrong.',
+          ]
+        : [
+            `After you finish, software pastes an OPAQUE full-width band over the bottom ${g.footerHeight} pixels and an OPAQUE badge into the ${lockupCorner(g)} corner. They are not transparent and they are not moved to suit your layout: any word, numeral, icon or subject you place under them is COVERED AND LOST — the reader never sees it, the sentence ends mid-word, and the whole image has to be thrown away.`,
+            'Showing every point in SMALLER type is correct. Showing the same points in larger type with the last lines buried under the band is wrong, and is a worse failure than any amount of empty space.',
+          ];
 
   return [
     'FIT THE CONTENT INSIDE THE USABLE AREA — this rule OUTRANKS every completeness, density and canvas-filling instruction above.',
@@ -362,13 +390,25 @@ export function reservedZoneBlock(
   // is not emitted here: nothing tucks under anything any more, and the pill is no longer on the
   // canvas the model is painting.
   if (footerIsAppended(g)) {
+    const underlap = footerUnderlapOf(g);
+    // With an underlap, the band's see-through top half lies over the bottom of this canvas
+    // (2026-10-16): the design must still run down behind it — it shows through round the navy
+    // pill — but no information may sit there, since the pill is solid and the rest is dimmed.
+    const bottomEdge =
+      underlap > 0
+        ? `THE BOTTOM ${underlap} PIXELS SIT BEHIND THE FOOTER BAND: the official footer band is added afterwards so that its partly see-through top half lies over the bottom ${underlap} pixels of this image (a strip ${fractionOf(underlap, g.height)} the height), with a solid navy title pill in its middle. DESIGN ALL THE WAY DOWN TO THE VERY BOTTOM EDGE anyway: colour blocks, panels, bands, gradients, background and photographs must reach the last row of pixels and run off the edge, exactly as they do at the left and right edges, because that design is what shows through the band.`
+        : `THE BOTTOM EDGE IS A JOIN, NOT A COVER ZONE: the official footer band is attached directly BELOW this image afterwards and takes NO space out of this canvas, so nothing has to be kept clear for it. DESIGN ALL THE WAY DOWN TO THE VERY BOTTOM EDGE: colour blocks, panels, bands, gradients, background and photographs must reach the last row of pixels and run off the edge, exactly as they do at the left and right edges.`;
+    const textFloor =
+      underlap > 0
+        ? `Keep only TEXT away from the very bottom: no words, numerals, captions, icons, logos, faces or other information below y=${contentBottomY(g)} — the bottom ${underlap} pixels are behind the footer band, and the ${g.footerAppendedMargin} pixels above them are a cushion so the final line is not jammed against it. The background, colour and imagery continue through all of it as normal.`
+        : `Keep only TEXT away from the very bottom: no words, numerals, captions, icons or logos below y=${contentBottomY(g)} — that last ${g.footerAppendedMargin} pixels is a thin typographic cushion so the final line is not jammed against the band, and the background, colour and imagery continue through it as normal.`;
     return [
       `RESERVED BADGE CORNER: the ${lockupCorner(g)} ${g.lockupWidth} x ${g.lockupHeight} pixels (a corner square ${fractionOf(g.lockupWidth, g.width)} the width) of the ${g.width} x ${g.height} output is reserved for an official badge composited on later by software.`,
       ...continuityRules('the reserved corner'),
-      `THE BOTTOM EDGE IS A JOIN, NOT A COVER ZONE: the official footer band is attached directly BELOW this image afterwards and takes NO space out of this canvas, so nothing has to be kept clear for it. DESIGN ALL THE WAY DOWN TO THE VERY BOTTOM EDGE: colour blocks, panels, bands, gradients, background and photographs must reach the last row of pixels and run off the edge, exactly as they do at the left and right edges.`,
+      bottomEdge,
       `THERE IS NO COLOUR RESTRICTION AT THE BOTTOM: that edge may be any colour the design uses — dark, saturated, patterned or photographic — and it does NOT have to be pale, white, neutral, plain or empty. Do NOT end the design early, do not leave a large empty gap above the bottom edge, and do not park a blank or lighter strip there: an empty band above the footer makes the finished poster look letterboxed and broken.`,
-      `Keep only TEXT away from the very bottom: no words, numerals, captions, icons or logos below y=${contentBottomY(g)} — that last ${g.footerAppendedMargin} pixels is a thin typographic cushion so the final line is not jammed against the band, and the background, colour and imagery continue through it as normal.`,
-      'Apart from keeping that corner clear of content and that thin text cushion at the bottom, use all remaining space right up to the edges, following the reference structure.',
+      textFloor,
+      `Apart from keeping that corner clear of content and that ${underlap > 0 ? 'text-free strip' : 'thin text cushion'} at the bottom, use all remaining space right up to the edges, following the reference structure.`,
     ].join(' ');
   }
 
@@ -406,9 +446,20 @@ if (
     footerHeight: 70,
   };
   // The social lane, whose footer is APPENDED below the artwork rather than pasted over it —
-  // so `height` is the ARTWORK the model paints (1504), not the 1600-tall 4:5 poster the
-  // officer receives. Mirrors SOCIAL_ZONES in build-poster-prompt.ts.
+  // so `height` is the ARTWORK the model paints (1552), not the 1600-tall 4:5 poster the
+  // officer receives; its bottom 48px run behind the band's see-through top. Mirrors
+  // SOCIAL_ZONES in build-poster-prompt.ts.
   const SOCIAL: ReservedZoneGeometry = {
+    width: 1280,
+    height: 1552,
+    lockupWidth: 180,
+    lockupHeight: 170,
+    footerHeight: 91,
+    footerAppendedMargin: 16,
+    footerUnderlap: 48,
+  };
+  // The appended lane WITHOUT an underlap (the YouTube thumbnail shape): wording unchanged.
+  const JOIN_ONLY: ReservedZoneGeometry = {
     width: 1280,
     height: 1504,
     lockupWidth: 180,
@@ -673,10 +724,10 @@ if (
     'top-right 180 x 170 pixels',
     'appended lane lost the badge zone, which IS still a destructive overlay',
   );
-  need(
+  deny(
     socialZones,
-    'THE BOTTOM EDGE IS A JOIN, NOT A COVER ZONE',
-    'appended lane still presents the footer as a cover zone',
+    'bottom 91 pixels',
+    'social lane reserves the whole band height as if it were pasted over the artwork',
   );
   need(
     socialZones,
@@ -718,7 +769,7 @@ if (
   // stops being 4:5 — which is the gap officers were closing by hand in Canva.
   need(
     socialZones,
-    '1280 x 1504 output',
+    '1280 x 1552 output',
     'appended lane artwork canvas drifted',
   );
   need(socialZones, 'RESERVED BADGE CORNER', 'appended lane lost its heading');
@@ -763,45 +814,86 @@ if (
   need(
     socialFit,
     'OUTRANKS',
-    'appended fit rule does not resolve the priority conflict',
-  );
-  need(
-    socialFit,
-    'COVERED AND LOST',
-    'appended fit rule dropped the badge consequence, which is still true',
-  );
-  need(
-    socialFit,
-    'joined on DIRECTLY BELOW this image',
-    'appended fit rule does not say the band is appended',
-  );
-  need(
-    socialFit,
-    'the design itself must reach the bottom edge',
-    'appended fit rule does not require the design to reach the bottom edge',
-  );
-  deny(
-    socialFit,
-    'must be calm, plain, even background',
-    'appended fit rule restored the background reserve that letterboxed the poster',
-  );
-  need(
-    socialFit,
-    'run into the bottom margin',
-    'appended fit rule kept overlay-era wording about falling behind the footer',
+    'social fit rule does not resolve the priority conflict',
   );
   need(
     socialFit,
     'Shrink the HEADLINE first',
-    'appended fit rule lost the action that resolves the conflict',
+    'social fit rule lost the action that resolves the conflict',
   );
-  // The bluff check: on this lane the band CANNOT cover the design, so the prompt must not say
-  // it does. A model that renders a poster and sees its own last line perfectly visible has been
-  // taught that this prompt's threats are negotiable.
+  need(socialFit, 'y=1488', 'social fit rule floor drifted');
+  // With the underlap the band DOES lie over the bottom of this canvas, so the consequence is
+  // true again — and the design must still reach the edge, since it shows through the band.
+  need(
+    socialFit,
+    'COVERED OR HALF-HIDDEN',
+    'social fit rule does not say text under the band is lost',
+  );
+  need(
+    socialFit,
+    'must still run all the way down to the bottom edge',
+    'social fit rule stopped the design short of the edge',
+  );
+  need(
+    socialFit,
+    'fall behind the footer',
+    'social fit rule uses join-only wording',
+  );
   deny(
     socialFit,
+    'joined on DIRECTLY BELOW this image',
+    'social fit rule still claims the band covers nothing',
+  );
+  need(
+    socialZones,
+    'THE BOTTOM 48 PIXELS SIT BEHIND THE FOOTER BAND',
+    'social zones do not describe the underlap',
+  );
+  deny(
+    socialZones,
+    'THE BOTTOM EDGE IS A JOIN',
+    'social zones still call the bottom a pure join',
+  );
+
+  // The appended lane with NO underlap (the YouTube thumbnail shape) keeps its wording.
+  const joinFit = fitToReserveRule(JOIN_ONLY, { allowStructuralReflow: true });
+  const joinZones = reservedZoneBlock(JOIN_ONLY, 'FOOTER NOTE.');
+  if (contentBottomY(JOIN_ONLY) !== 1488)
+    failures.push('join-only content floor drifted off y=1488');
+  need(
+    joinFit,
+    'COVERED AND LOST',
+    'join-only fit rule dropped the badge consequence',
+  );
+  need(
+    joinFit,
+    'joined on DIRECTLY BELOW this image',
+    'join-only fit rule does not say the band is appended',
+  );
+  need(
+    joinFit,
+    'the design itself must reach the bottom edge',
+    'join-only fit rule does not require the design to reach the bottom edge',
+  );
+  need(
+    joinFit,
+    'run into the bottom margin',
+    'join-only fit rule kept overlay-era wording',
+  );
+  deny(
+    joinFit,
     'pastes an OPAQUE full-width band',
-    'appended fit rule still claims the footer is pasted over the design',
+    'join-only fit rule claims the footer is pasted over the design',
+  );
+  need(
+    joinZones,
+    'THE BOTTOM EDGE IS A JOIN',
+    'join-only zones lost the join wording',
+  );
+  need(
+    joinZones,
+    'thin text cushion',
+    'join-only zones lost the cushion wording',
   );
 
   console.log(`${'='.repeat(78)}\nPOSTER\n${'='.repeat(78)}`);

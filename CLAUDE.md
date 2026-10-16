@@ -2043,7 +2043,13 @@ Chromium): `pnpm --filter @dgipr/poster-renderer exec playwright install chromiu
   the 96px remainder — deliberately ~5px taller than the band, absorbed by the same join fill.
   Any change here must keep artwork % 16 === 0 and strip ≥ band height; the constants live in
   `twitter-chrome.ts` and are mirrored by `SOCIAL_ZONES.height` (which is the ARTWORK, not the
-  poster). **CMO is the exception and must stay 1280x1600**: `overlayCmoChrome` OVERLAYS its
+  poster). **SUPERSEDED 2026-10-16: the artwork is now 1280x1552** and the strip 48px. The band is
+  ~56% opaque across its top 43px (round the navy pill) and solid below, and the 96px strip of
+  generated fill showed through that see-through part as a smear. The artwork now runs down behind
+  it (`SOCIAL_FOOTER_UNDERLAP` = 43, `FooterJoinSpec.bandUnderlap`; `SOCIAL_ZONES.footerUnderlap` =
+  48 on the prompt side), the strip sits under the solid white row, and text still stops at
+  y=1488, above the band's top at y=1509. Rule now: artwork % 16 === 0 and strip ≥ the band's
+  SOLID height. **CMO is the exception and must stay 1280x1600**: `overlayCmoChrome` OVERLAYS its
   header/footer rather than appending, so its render already is the finished poster — which is
   why the render size now travels in the n8n payload (`size`, defaulted to `1280x1600` in the
   workflow so a half-deploy renders exactly as before) instead of being pinned in the workflow.
