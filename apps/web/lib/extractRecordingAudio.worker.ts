@@ -11,13 +11,21 @@
 // never part of a page bundle.
 
 import {
+  compressRecordingAudio,
   extractRecordingAudio,
   RecordingExtractionError,
   type ExtractedRecording,
   type RecordingExtractionErrorCode,
 } from './extractRecordingAudio';
 
-export type ExtractionWorkerRequest = Readonly<{ file: File }>;
+// `extract` (the default): a video's audio track. `compress`: shrink a large audio recording
+// before upload (compressRecordingAudio) — never an error, at worst the original back.
+export type ExtractionWorkerMode = 'extract' | 'compress';
+
+export type ExtractionWorkerRequest = Readonly<{
+  file: File;
+  mode?: ExtractionWorkerMode;
+}>;
 
 export type ExtractionWorkerMessage =
   | Readonly<{ type: 'progress'; fraction: number }>
@@ -41,7 +49,11 @@ let lastPercent = -1;
 
 scope.onmessage = (event) => {
   lastPercent = -1;
-  void extractRecordingAudio(event.data.file, {
+  const run =
+    event.data.mode === 'compress'
+      ? compressRecordingAudio
+      : extractRecordingAudio;
+  void run(event.data.file, {
     onProgress: (fraction) => {
       const percent = Math.floor(fraction * 100);
       if (percent === lastPercent) return;

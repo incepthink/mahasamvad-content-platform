@@ -116,11 +116,10 @@ export async function transcribeAudioFiles(
           join(outputDir, `${entry.file_name}.json`),
           'utf8',
         ).catch(() => readFile(join(outputDir, outputFile), 'utf8'));
-        const text = transcriptFromOutput(raw).trim();
-        byTempName.set(
-          entry.file_name,
-          text ? { text } : { error: 'Sarvam transcription came back empty.' },
-        );
+        // Empty is a real answer (no speech in the recording), not a failure.
+        byTempName.set(entry.file_name, {
+          text: transcriptFromOutput(raw).trim(),
+        });
       } catch (error) {
         byTempName.set(entry.file_name, {
           error: error instanceof Error ? error.message : String(error),

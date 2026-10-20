@@ -16,6 +16,7 @@
 import { pathToFileURL } from 'node:url';
 import { chatCompleteVision } from './openai-chat.js';
 import type { ClearAction } from './clear-space-rule.js';
+import { groundExactText } from './build-exact-text-prompt.js';
 
 export type FeedbackAnnotationInput = Readonly<{
   // 1-based, matching the badge drawn on the poster.
@@ -66,6 +67,10 @@ export type InterpretedImageFeedback = Readonly<{
   // must survive it — see contentInventoryLines. Empty on the fallback path and
   // whenever no displace was asked for.
   contentInventory: readonly string[];
+  // One per red marker, in order: the EXACT string the text at that mark must read, when the
+  // officer's note states one ("९९ ऐवजी ११", a quoted word), else ''. Every non-empty entry
+  // occurs verbatim in the officer's own words (groundExactText) — the model only points at it.
+  exactTexts: readonly string[];
   // 'fallback' = the vision call failed and the raw notes were used instead.
   source: 'vision' | 'fallback';
 }>;
@@ -185,12 +190,18 @@ function buildPrompt(input: InterpretImageFeedbackInput): string {
       `- The ${input.socialLockup ?? 'top-right white rounded-square महाराष्ट्र शासन emblem-and-wordmark badge'} and the full-width bottom footer strip are branding stamped by software AFTER editing and cannot be changed by the edit. If a marker points at one of them, say so briefly and interpret the nearest plausible editable intent instead.`,
     );
   }
-  lines.push(
-    '',
-    wantsInventory(input)
-      ? 'Respond with STRICT JSON only: {"instruction": "...", "items": ["...", "..."]}'
-      : 'Respond with STRICT JSON only: {"instruction": "..."}',
-  );
+  if (input.annotations.length > 0) {
+    lines.push(
+      '',
+      `EXACT TEXT: also return "exact_texts", an array with exactly ${input.annotations.length} entr${input.annotations.length === 1 ? 'y' : 'ies'}, one per red marker in order. When that marker's note asks for the marked text to read a SPECIFIC string — a corrected number or word ("९९ ऐवजी ११" means the text must read ११), or a word quoted as the replacement — put that exact string there, copied character for character from the note. Otherwise, and whenever the change is not a text correction (colour, size, position, a picture), put "". Never write a string the note does not contain.`,
+    );
+  }
+  const keys = [
+    '"instruction": "..."',
+    ...(wantsInventory(input) ? ['"items": ["...", "..."]'] : []),
+    ...(input.annotations.length > 0 ? ['"exact_texts": ["..."]'] : []),
+  ];
+  lines.push('', `Respond with STRICT JSON only: {${keys.join(', ')}}`);
   return lines.join('\n');
 }
 
@@ -237,6 +248,20 @@ function parseInventory(value: unknown): string[] {
     .slice(0, MAX_INVENTORY_ITEMS);
 }
 
+// One grounded string per marker; anything malformed or not in the officer's words is ''.
+function parseExactTexts(
+  value: unknown,
+  input: InterpretImageFeedbackInput,
+): string[] {
+  const list = Array.isArray(value) ? value : [];
+  return input.annotations.map((a, i) => {
+    const candidate = list[i];
+    return typeof candidate === 'string'
+      ? groundExactText(candidate, [a.note, input.overallNote ?? ''])
+      : '';
+  });
+}
+
 export async function interpretImageFeedback(
   input: InterpretImageFeedbackInput,
 ): Promise<InterpretedImageFeedback> {
@@ -252,6 +277,7 @@ export async function interpretImageFeedback(
     const parsed = JSON.parse(raw) as {
       instruction?: unknown;
       items?: unknown;
+      exact_texts?: unknown;
     };
     const instruction =
       typeof parsed.instruction === 'string' ? parsed.instruction.trim() : '';
@@ -261,6 +287,7 @@ export async function interpretImageFeedback(
     return {
       instruction: instruction.slice(0, MAX_INSTRUCTION_CHARS),
       contentInventory: withInventory ? parseInventory(parsed.items) : [],
+      exactTexts: parseExactTexts(parsed.exact_texts, input),
       source: 'vision',
     };
   } catch (error) {
@@ -270,6 +297,7 @@ export async function interpretImageFeedback(
     return {
       instruction: buildFallbackInstruction(input),
       contentInventory: [],
+      exactTexts: input.annotations.map(() => ''),
       source: 'fallback',
     };
   }

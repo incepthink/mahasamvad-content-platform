@@ -7,7 +7,8 @@
 // API would refuse (the same two-lists-drift argument that put them there).
 
 import { z } from 'zod';
-import { AudioTrimSchema } from './audio-trim.js';
+import { AudioTrimSchema, AudioTrimsSchema } from './audio-trim.js';
+import { YouTubeSourcesSchema } from './youtube.js';
 
 export const TranscriptionStatusSchema = z.enum([
   'queued',
@@ -87,6 +88,68 @@ export const TranscriptionListResponseSchema = z.array(
 export const CreateTranscriptionResponseSchema = z.object({ id: z.string() });
 export type CreateTranscriptionResponse = z.infer<
   typeof CreateTranscriptionResponseSchema
+>;
+
+// ---------- direct-to-S3 upload (2026-10-16) ----------
+//
+// The browser PUTs each recording straight into the private bucket with a presigned URL, so the
+// bytes no longer pass through the API on their way in (and, with Transfer Acceleration, enter
+// AWS at the nearest edge instead of crossing the internet to us-east-2). Two calls:
+//
+//   1. POST /transcriptions/uploads  — names + sizes in, a run id + one signed PUT per file out.
+//   2. POST /transcriptions (JSON)   — after every PUT has landed: the run id, the files as
+//      uploaded, plus the same trims/links the multipart form carries. The server checks each
+//      object really exists under that run's prefix before creating the row.
+//
+// The multipart POST /transcriptions is kept unchanged and is the browser's fallback whenever
+// the direct path fails (a bucket with no CORS rule, an old API) — so a deploy can never make
+// an upload worse than it was.
+
+export const TranscriptionUploadFileSchema = z.object({
+  name: z.string().min(1).max(300),
+  // Bytes. Signed into the PUT, so the object that lands is exactly this size.
+  size: z.number().int().positive(),
+});
+export type TranscriptionUploadFile = z.infer<
+  typeof TranscriptionUploadFileSchema
+>;
+
+export const PrepareTranscriptionUploadsRequestSchema = z.object({
+  files: z
+    .array(TranscriptionUploadFileSchema)
+    .min(1)
+    .max(TRANSCRIPTION_MAX_FILES),
+});
+export type PrepareTranscriptionUploadsRequest = z.infer<
+  typeof PrepareTranscriptionUploadsRequestSchema
+>;
+
+export const PrepareTranscriptionUploadsResponseSchema = z.object({
+  runId: z.string(),
+  uploads: z.array(
+    z.object({
+      storagePath: z.string(),
+      // A presigned PUT. The browser must send exactly this Content-Type.
+      url: z.string(),
+      contentType: z.string(),
+    }),
+  ),
+});
+export type PrepareTranscriptionUploadsResponse = z.infer<
+  typeof PrepareTranscriptionUploadsResponseSchema
+>;
+
+export const CreateTranscriptionFromUploadsRequestSchema = z.object({
+  runId: z.string().uuid(),
+  // In the order they were prepared; `storagePath` must be the one the server issued.
+  files: z
+    .array(z.object({ name: z.string().min(1), storagePath: z.string() }))
+    .max(TRANSCRIPTION_MAX_FILES),
+  audioTrims: AudioTrimsSchema.default([]),
+  youtube: YouTubeSourcesSchema.default([]),
+});
+export type CreateTranscriptionFromUploadsRequest = z.input<
+  typeof CreateTranscriptionFromUploadsRequestSchema
 >;
 
 // Every transcript under its own header, in upload order. Shared so the job and the web

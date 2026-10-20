@@ -515,7 +515,7 @@ export function startDloIntakeJob(client: SupabaseClient, id: string): void {
                   // has no bytes and therefore no key, so it is simply not cached — the
                   // cache is content-addressed and there is no content on our side.
                   try {
-                    if (hashes[position] !== '') {
+                    if (hashes[position] !== '' && result.text !== '') {
                       await putCachedTranscript(
                         client,
                         hashes[position]!,

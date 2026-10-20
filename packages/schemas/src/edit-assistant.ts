@@ -10,7 +10,7 @@
 // is re-sent in full on every turn, which is what lets "आता थोडा लहान करा" mean something.
 
 import { z } from 'zod';
-import { PosterClearActionSchema } from './api.js';
+import { POSTER_EXACT_TEXT_MAX_CHARS, PosterClearActionSchema } from './api.js';
 
 /** How many turns of history travel with a request — the newest are kept. */
 export const EDIT_ASSISTANT_MAX_MESSAGES = 20;
@@ -37,8 +37,11 @@ export type EditAssistantMessage = z.infer<typeof EditAssistantMessageSchema>;
 // What is marked on the poster right now. Positions stay in the browser — the plan only
 // needs to know how many marks there are and what the officer already wrote beside them,
 // so it can supply the notes the image-feedback route requires for the ones left blank.
+// `exactText` is what the officer typed in «हा मजकूर असा हवा», when they did; the plan
+// never overrides it.
 export const EditAssistantMarkerSchema = z.object({
   note: z.string().trim().max(500).default(''),
+  exactText: z.string().trim().max(POSTER_EXACT_TEXT_MAX_CHARS).default(''),
 });
 export const EditAssistantClearRegionSchema = z.object({
   action: PosterClearActionSchema.default('displace'),
@@ -78,6 +81,9 @@ export const EditAssistantActionSchema = z.discriminatedUnion('type', [
     instruction: z.string(),
     // One per mark, in mark order — the officer's own note where they wrote one.
     markerNotes: z.array(z.string()),
+    // One per mark, in mark order: the exact string the text at that mark must read, or ''
+    // when the conversation states none. Every non-empty one is text the officer typed.
+    markerExactTexts: z.array(z.string()).default([]),
   }),
   z.object({ type: z.literal('poster_redesign') }),
   z.object({ type: z.literal('poster_heading'), heading: z.string() }),

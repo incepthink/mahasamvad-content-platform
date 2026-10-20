@@ -103,6 +103,9 @@ import {
   type UpdateGlossaryTermRequest,
   type UpdateReferenceTypeRequest,
   TranscriptionDetailSchema,
+  PrepareTranscriptionUploadsResponseSchema,
+  type PrepareTranscriptionUploadsResponse,
+  type CreateTranscriptionFromUploadsRequest,
   TranscriptionListResponseSchema,
   type TranscriptionDetail,
   type TranscriptionSummary,
@@ -267,6 +270,68 @@ export async function createTranscription(form: FormData): Promise<string> {
   });
   const body = await readJsonResponse(response);
   return z.object({ id: z.string() }).parse(body).id;
+}
+
+// Direct-to-S3 upload, step 1: a run id and one signed PUT per recording (see the schema
+// header in @dgipr/schemas' transcription.ts). Nothing is stored by this call.
+export async function prepareTranscriptionUploads(
+  files: ReadonlyArray<{ name: string; size: number }>,
+): Promise<PrepareTranscriptionUploadsResponse> {
+  const body = await requestJson('/api/transcriptions/uploads', {
+    method: 'POST',
+    body: JSON.stringify({ files }),
+  });
+  return PrepareTranscriptionUploadsResponseSchema.parse(body);
+}
+
+// Direct-to-S3 upload, step 2: every PUT has landed — create the run from them.
+export async function createTranscriptionFromUploads(
+  request: CreateTranscriptionFromUploadsRequest,
+): Promise<string> {
+  const body = await requestJson('/api/transcriptions', {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+  return z.object({ id: z.string() }).parse(body).id;
+}
+
+// A PUT of one file to a presigned S3 URL. XMLHttpRequest rather than fetch for one reason:
+// fetch still cannot report UPLOAD progress, and a meeting recording is minutes of upload the
+// officer should be able to watch. Rejects with DirectUploadError on any failure — including a
+// CORS refusal, which a browser reports exactly like a network error (status 0).
+export class DirectUploadError extends Error {
+  readonly status: number;
+  constructor(status: number) {
+    super(`Direct upload failed (HTTP ${status}).`);
+    this.name = 'DirectUploadError';
+    this.status = status;
+  }
+}
+
+export function putFileToSignedUrl(
+  url: string,
+  file: Blob,
+  contentType: string,
+  onProgress?: (loadedBytes: number) => void,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', url);
+    // Must equal the Content-Type the URL was signed with, or S3 answers 403.
+    xhr.setRequestHeader('content-type', contentType);
+    xhr.upload.onprogress = (event) => onProgress?.(event.loaded);
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        onProgress?.(file.size);
+        resolve();
+      } else {
+        reject(new DirectUploadError(xhr.status));
+      }
+    };
+    xhr.onerror = () => reject(new DirectUploadError(0));
+    xhr.onabort = () => reject(new DirectUploadError(0));
+    xhr.send(file);
+  });
 }
 
 // `includeText` is opt-in for the same reason as getDloIntake: the payload then carries

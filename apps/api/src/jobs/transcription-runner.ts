@@ -248,7 +248,7 @@ export function startTranscriptionJob(
                 // transcribed fine. A URL source has no bytes and therefore no key, so it is
                 // simply not cached.
                 try {
-                  if (hashes[position] !== '') {
+                  if (hashes[position] !== '' && result.text !== '') {
                     await putCachedTranscript(
                       client,
                       hashes[position]!,
@@ -296,7 +296,9 @@ export function startTranscriptionJob(
       );
       // Every recording failed — there is no output at all, so the RUN failed. One bad file
       // among several is not fatal: its error rides on its own entry and the rest deliver.
-      if (!combined) {
+      // A recording that transcribed to NOTHING (no speech in it) is not a failure: the run
+      // is ready with an empty transcript and the page says no speech was found.
+      if (!combined && !entries.some((entry) => entry.status === 'done')) {
         await updateTranscription(client, id, {
           files: entries,
           ...countersFor(entries, ''),

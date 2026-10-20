@@ -77,13 +77,15 @@ export function usePosterMarkers(
     startRound();
     setMarkers((ms) => [
       ...ms,
-      { id: nextMarkerId.current++, region, note: '' },
+      { id: nextMarkerId.current++, region, note: '', exactText: '' },
     ]);
   };
   const removeMarker = (id: number) =>
     setMarkers((ms) => ms.filter((m) => m.id !== id));
   const setNote = (id: number, note: string) =>
     setMarkers((ms) => ms.map((m) => (m.id === id ? { ...m, note } : m)));
+  const setExactText = (id: number, exactText: string) =>
+    setMarkers((ms) => ms.map((m) => (m.id === id ? { ...m, exactText } : m)));
 
   // 'displace' by default — what this gesture has always meant, and the safer
   // default of the two: it cannot lose information if the officer never looks at
@@ -92,7 +94,13 @@ export function usePosterMarkers(
     startRound();
     setClearRegions((cs) => [
       ...cs,
-      { id: nextClearId.current++, region, note: '', action: 'displace' },
+      {
+        id: nextClearId.current++,
+        region,
+        note: '',
+        exactText: '',
+        action: 'displace',
+      },
     ]);
   };
   const removeClearRegion = (id: number) =>
@@ -122,6 +130,7 @@ export function usePosterMarkers(
     addMarker,
     removeMarker,
     setNote,
+    setExactText,
     clearRegions,
     submittedClearRegions: submittedClearRegions ?? [],
     addClearRegion,

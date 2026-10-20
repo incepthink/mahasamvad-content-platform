@@ -16,6 +16,7 @@
 import {
   DeleteObjectsCommand,
   GetObjectCommand,
+  HeadObjectCommand,
   PutObjectCommand,
   S3ServiceException,
 } from '@aws-sdk/client-s3';
@@ -27,6 +28,7 @@ import { pipeline } from 'node:stream/promises';
 
 import {
   encodeObjectPath,
+  getBrowserUploadS3Client,
   getS3Client,
   publicBaseUrl,
   resolveBucket,
@@ -427,6 +429,66 @@ export async function signedDownloadUrl(
     }),
     { expiresIn: expiresInSeconds },
   );
+}
+
+// A presigned PUT a BROWSER uploads one object through, so the bytes go from the officer's
+// machine straight into the bucket without passing through the API (see
+// getBrowserUploadS3Client for why it points at the accelerate endpoint).
+//
+// Content-Type AND Content-Length are signed: the browser must send exactly that type, and S3
+// refuses a body of any other size — so the URL is a capability for ONE object of ONE size, not
+// an open door into the private bucket. The bucket needs a CORS rule allowing PUT from the web
+// origins (scripts/apply-upload-cors.ts); without one the browser's PUT fails and the web falls
+// back to the ordinary multipart upload.
+//
+// The expiry is checked when S3 RECEIVES the request, so a long upload that started in time
+// completes; it only bounds how long the officer may sit between preparing and uploading.
+export async function signedUploadUrl(
+  bucket: string,
+  path: string,
+  contentType: string,
+  contentLength: number,
+  expiresInSeconds = 60 * 60,
+): Promise<string> {
+  return getSignedUrl(
+    // Same type-identity cast as signedDownloadUrl above.
+    getBrowserUploadS3Client() as unknown as Parameters<typeof getSignedUrl>[0],
+    new PutObjectCommand({
+      Bucket: resolveBucket(bucket),
+      Key: path,
+      ContentType: contentType,
+      ContentLength: contentLength,
+    }),
+    {
+      expiresIn: expiresInSeconds,
+      // Without this the presigner HOISTS content-type into the query string as an unsigned
+      // parameter; listing it here keeps it a signed header the browser must match.
+      signableHeaders: new Set(['content-type', 'content-length']),
+    },
+  );
+}
+
+// The stored size of an object, or null when it does not exist. Used to confirm that a
+// browser's direct upload actually landed (and at the size it promised) before a run that
+// depends on it is created.
+export async function storedObjectSize(
+  bucket: string,
+  path: string,
+): Promise<number | null> {
+  try {
+    const response = await getS3Client().send(
+      new HeadObjectCommand({ Bucket: resolveBucket(bucket), Key: path }),
+    );
+    return response.ContentLength ?? null;
+  } catch (error) {
+    if (
+      error instanceof S3ServiceException &&
+      (error.name === 'NotFound' || error.$metadata.httpStatusCode === 404)
+    ) {
+      return null;
+    }
+    throw error;
+  }
 }
 
 // ONE SLICE of a stored object, so a caller can forward a large file somewhere else without

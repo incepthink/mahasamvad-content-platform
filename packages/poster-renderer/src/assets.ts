@@ -117,3 +117,9 @@ export async function loadCaptionAssets(): Promise<CaptionAssets> {
   // The key-point panel is set at 600 and nothing else — one weight to embed.
   return { fontFaceCss: await fontFaceCss([600]) };
 }
+
+// The exact-text edit's spelling reference (spelling-reference.ts): the target string typeset
+// large, black on white, so the image model can COPY the letter shapes. Bold reads best at size.
+export async function loadSpellingAssets(): Promise<CaptionAssets> {
+  return { fontFaceCss: await fontFaceCss([700]) };
+}

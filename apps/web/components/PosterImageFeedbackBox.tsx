@@ -25,6 +25,11 @@ import { ClearActionToggle, clearActionLabel } from './ClearActionToggle';
 import { ComposeSafeInput, ComposeSafeTextarea } from './ComposeSafeInput';
 import { ErrorNotice } from './ErrorNotice';
 import {
+  MarkerExactTextField,
+  markerIsDescribed,
+  markerSummary,
+} from './MarkerExactTextField';
+import {
   CLEAR_LETTERS,
   type AnnotatorMode,
   type PosterClearDraft,
@@ -34,6 +39,7 @@ import {
 export function PosterImageFeedbackBox({
   markers,
   onNoteChange,
+  onExactTextChange,
   onRemoveMarker,
   onOpenChange,
   onSubmit,
@@ -51,6 +57,8 @@ export function PosterImageFeedbackBox({
 }: {
   markers: readonly PosterMarkerDraft[];
   onNoteChange: (id: number, note: string) => void;
+  // «हा मजकूर असा हवा» under each red mark. Absent = the field is not shown.
+  onExactTextChange?: (id: number, exactText: string) => void;
   onRemoveMarker: (id: number) => void;
   // <details> open state — the parent uses it to arm the poster annotator.
   onOpenChange: (open: boolean) => void;
@@ -83,7 +91,7 @@ export function PosterImageFeedbackBox({
       setError(STR.feedbackTooShort);
       return;
     }
-    if (markers.some((m) => m.note.trim().length < 3)) {
+    if (!markers.every(markerIsDescribed)) {
       setError(STR.markerNoteTooShort);
       return;
     }
@@ -97,6 +105,7 @@ export function PosterImageFeedbackBox({
             annotations: markers.map((m) => ({
               region: m.region,
               note: m.note.trim(),
+              ...(m.exactText.trim() ? { exactText: m.exactText.trim() } : {}),
             })),
           }
         : {}),
@@ -166,7 +175,9 @@ export function PosterImageFeedbackBox({
                 <span className="marker-note-badge" aria-hidden="true">
                   {i + 1}
                 </span>
-                <span className="marker-note-text">{marker.note}</span>
+                <span className="marker-note-text">
+                  {markerSummary(marker)}
+                </span>
               </div>
             ))}
           </>
@@ -177,28 +188,38 @@ export function PosterImageFeedbackBox({
           </p>
         ) : null}
         {markers.map((marker, i) => (
-          <div className="marker-note-row" key={marker.id}>
-            <span className="marker-note-badge" aria-hidden="true">
-              {i + 1}
-            </span>
-            <ComposeSafeInput
-              type="text"
-              value={marker.note}
-              placeholder={STR.markerNotePlaceholder}
-              aria-label={`${STR.markerLabel} ${i + 1}`}
-              maxLength={500}
-              disabled={disabled || sending}
-              onChange={(next) => onNoteChange(marker.id, next)}
-            />
-            <button
-              type="button"
-              className="marker-note-remove"
-              aria-label={STR.markerRemove}
-              disabled={disabled || sending}
-              onClick={() => onRemoveMarker(marker.id)}
-            >
-              ✕
-            </button>
+          <div key={marker.id}>
+            <div className="marker-note-row">
+              <span className="marker-note-badge" aria-hidden="true">
+                {i + 1}
+              </span>
+              <ComposeSafeInput
+                type="text"
+                value={marker.note}
+                placeholder={STR.markerNotePlaceholder}
+                aria-label={`${STR.markerLabel} ${i + 1}`}
+                maxLength={500}
+                disabled={disabled || sending}
+                onChange={(next) => onNoteChange(marker.id, next)}
+              />
+              <button
+                type="button"
+                className="marker-note-remove"
+                aria-label={STR.markerRemove}
+                disabled={disabled || sending}
+                onClick={() => onRemoveMarker(marker.id)}
+              >
+                ✕
+              </button>
+            </div>
+            {onExactTextChange ? (
+              <MarkerExactTextField
+                number={i + 1}
+                value={marker.exactText}
+                disabled={disabled || sending}
+                onChange={(next) => onExactTextChange(marker.id, next)}
+              />
+            ) : null}
           </div>
         ))}
         {showClearReservedWarning ? (

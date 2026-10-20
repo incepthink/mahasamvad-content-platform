@@ -41,6 +41,7 @@ import {
 import { EditChat } from './EditChat';
 import { ErrorNotice } from './ErrorNotice';
 import { PosterMarkNotes } from './PosterMarkNotes';
+import { markerIsDescribed } from './MarkerExactTextField';
 import { PosterVersionStrip } from './PosterVersionStrip';
 import { CanvaLink } from './CanvaLink';
 // The poster heading is the officer's own Marathi line, typed on an InScript keyboard, which
@@ -78,6 +79,7 @@ export function PosterPanel({
     addMarker,
     removeMarker,
     setNote,
+    setExactText,
     clearRegions,
     submittedClearRegions,
     addClearRegion,
@@ -164,7 +166,7 @@ export function PosterPanel({
   const sendMarks = async () => {
     if (sendingMarks) return;
     setMarksError(null);
-    if (markers.some((m) => m.note.trim().length < 3)) {
+    if (!markers.every(markerIsDescribed)) {
       setMarksError(STR.markerNoteTooShort);
       return;
     }
@@ -183,6 +185,7 @@ export function PosterPanel({
           posterRoundPayload(markers, clearRegions, {
             feedback: action.instruction,
             markerNotes: action.markerNotes,
+            markerExactTexts: action.markerExactTexts,
           }),
         );
         return;
@@ -491,6 +494,7 @@ export function PosterPanel({
                 clearRegions={clearRegions}
                 submittedClearRegions={submittedClearRegions}
                 onNoteChange={setNote}
+                onExactTextChange={setExactText}
                 onRemoveMarker={removeMarker}
                 onClearNoteChange={setClearNote}
                 onClearActionChange={setClearAction}

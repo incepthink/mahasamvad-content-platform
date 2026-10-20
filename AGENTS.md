@@ -3110,6 +3110,43 @@ client id/secret — see the milestone below.
 
 ## Latest Implementation Milestone
 
+- **A red mark can say what the text there must READ, and is then fixed on its own crop**
+  (2026-10-16, no migration, no n8n). Officers mark a misprinted digit («९» for «१») or a broken
+  jodakshar; the old round sent the whole 1280x1600 poster plus a note and the model repainted
+  the same few-pixel glyph wrong. Now:
+  - **`exactText` on a marker** (schemas, optional, ≤`POSTER_EXACT_TEXT_MAX_CHARS` 80). Web:
+    `MarkerExactTextField` under each red mark in `PosterMarkNotes` and the carousel's
+    `PosterImageFeedbackBox`; a mark is sendable with a note OR an exact text
+    (`markerIsDescribed`). `posterRoundPayload` sends it.
+  - **The crop path** (`apps/api/src/jobs/exact-text-edit.ts`): per mark, `planExactTextCrop`
+    (box + 40% padding, short side grown to aspect ≤3, edit size ~1024² px in multiples of 16 so
+    gpt-image accepts it), `extractCrop`, `renderSpellingReference` (the target typeset in Mukta
+    700, black on white, by Chromium — the model copies SHAPES far better than it spells tokens),
+    `buildExactTextPrompt` (single purpose: this spot reads exactly X; copy letters from image 2
+    in the poster's own font/colour/size; never paste image 2; akshara-by-akshara line;
+    `numeralSpellingBlock`), `editImage([crop, spelling], …, inputFidelity 'high')`, then
+    `compositeCropPatch` with a feather only inside the padding — the marked box is fully opaque
+    and every pixel outside the crop is identical. Marks run in parallel, one image cost each.
+  - **Where it plugs in**: `startPosterImageFeedbackJob` and the carousel slide job. Officer-typed
+    exact-text marks are removed from the whole-poster edit; if nothing else is in the round
+    (no other mark, blue box or free text) there is NO whole-poster call. The crops are cut from
+    the version's un-branded copy when it exists (region mapped onto it; the social copy is
+    shorter by the footer strip) and the lane's chrome is re-stamped from it; otherwise the
+    finished poster is corrected and re-stamped in place. The thumbnail keeps its pre-chrome
+    image in memory for this. History records `[n] note → «X»`.
+  - **A model may PROPOSE an exact text, never invent one**: `interpretImageFeedback` returns
+    `exactTexts` per mark and the edit assistant's plan `markerExactTexts`, each kept only when
+    it occurs verbatim (NFC, quotes stripped) in the officer's own words (`groundExactText`).
+    An interpreter-found one rides the whole-poster edit AND gets the crop pass afterwards.
+  - Step 4 of the plan (n candidates + OCR pick) was deliberately NOT built.
+  Verified free: workspace typecheck 7/7, eslint on touched files, `crop-region.ts` harness
+  (aspect/size limits, crop contains the box, opaque box, feather to 0 at interior edges,
+  outside pixels identical), `build-exact-text-prompt.ts` (prompt contents, akshara split keeps
+  `क्ट्रॉ` whole, grounding), edit-assistant `--check` (+2), interpreter, learn creative check
+  130/130; spelling picture rendered and inspected. **Left for a real run**: 93f948da with
+  exactText «११», then a jodakshar word, 5 rounds each. Deploy `@dgipr/schemas` →
+  `@dgipr/poster-renderer` → `@dgipr/content-engine` → API + web together.
+
 - **Poster numbers are spelled digit by digit, edits can change them, and the finished poster
   is read back** (2026-10-08, no migration, no n8n). Generation 93f948da printed «९९» for the
   officer's «११»: the text reached gpt-image correctly, and the model drew the look-alike digit.

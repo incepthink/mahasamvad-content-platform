@@ -3,10 +3,11 @@
 // jobs/transcription-runner.
 //
 // Unlike /dlo this path ends at the transcript — there is no review contract and no
-// generation lineage, so there are exactly three routes: create, list, detail.
+// generation lineage, so the routes are: create (multipart, or JSON after a direct-to-S3
+// upload prepared by POST /transcriptions/uploads), list, detail.
 
 import { randomUUID } from 'node:crypto';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { trackActivity } from '../activity/actor.js';
 import { activitySummary } from '@dgipr/schemas';
 import { settleAllActivity } from '@dgipr/database';
@@ -16,6 +17,8 @@ import {
   insertTranscription,
   listTranscriptions,
   removeObjectsIn,
+  signedUploadUrl,
+  storedObjectSize,
   updateTranscription,
   uploadStream,
   type SupabaseClient,
@@ -25,8 +28,10 @@ import {
 } from '@dgipr/database';
 import {
   audioMimeForFileName,
+  CreateTranscriptionFromUploadsRequestSchema,
   isAudioFileName,
   parseYouTubeVideoId,
+  PrepareTranscriptionUploadsRequestSchema,
   TRANSCRIPTION_MAX_FILES,
   YouTubeSourcesSchema,
   type AudioTrimEntry,
@@ -61,6 +66,9 @@ import { parseAudioTrimsField, resolveAudioTrims } from './audio-trims.js';
 // streams straight through to S3 (uploadStream), so peak memory is a few MiB per file
 // whatever its length, and the count is back to being an ordinary sanity limit.
 const MAX_FILE_BYTES = Number.POSITIVE_INFINITY;
+
+const AUDIO_ONLY_MESSAGE =
+  'फक्त समर्थित ध्वनिमुद्रण फाईल्स (MP3, M4A, AAC, AIFF, OGG, OPUS, WAV, FLAC, WEBM) स्वीकारल्या जातात. व्हिडिओ थेट पाठवता येत नाही — तो पानावर जोडल्यास त्यातील आवाज ब्राउझरमध्येच वेगळा काढून पाठवला जातो.';
 
 // Storage object names must be ASCII-safe; the index prefix keeps them unique (display
 // names may collide and may be entirely Devanagari). The `transcriptions/` prefix is what
@@ -131,7 +139,239 @@ export function registerTranscriptionRoutes(
   app: FastifyInstance,
   client: SupabaseClient,
 ): void {
+  // Everything after the bytes are in the bucket, shared by the multipart upload and the
+  // direct-to-S3 path below: check the windows against the recordings, write the row, start
+  // the job. `discardStaged` removes the already-stored recordings when this refuses.
+  const createRun = async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+    {
+      runId,
+      uploads,
+      youtube,
+      trimEntries,
+      discardStaged,
+    }: {
+      runId: string;
+      uploads: ReadonlyArray<{
+        name: string;
+        storagePath: string;
+        bytes: number;
+      }>;
+      youtube: readonly YouTubeVideo[];
+      trimEntries: readonly AudioTrimEntry[];
+      discardStaged: () => Promise<void>;
+    },
+  ) => {
+    if (uploads.length === 0 && youtube.length === 0) {
+      return reply.code(400).send({
+        error: {
+          message: 'किमान एक ध्वनिमुद्रण जोडा किंवा यूट्युब लिंक द्या.',
+        },
+      });
+    }
+
+    // Now that every part has arrived, each selected window can be checked against the
+    // recording it names. A mismatch is refused rather than applied to whichever recording
+    // happens to be at that position — see routes/audio-trims.ts.
+    const resolved = resolveAudioTrims(
+      uploads.map((upload) => upload.name),
+      trimEntries,
+    );
+    if (!resolved.ok) {
+      await discardStaged();
+      return reply.code(400).send({ error: { message: resolved.message } });
+    }
+    const trims = resolved.byPosition;
+
+    // The recordings are already archived — they were streamed there as they arrived, under
+    // keys built from `runId`, which is why this insert can carry that id rather than take
+    // one from the database. Everything else is unchanged: the row is still written before
+    // the job starts, and the job still reads it all back off the row.
+    const row = await insertTranscription(client, {
+      id: runId,
+      title: transcriptionTitle([
+        ...uploads.map((upload) => upload.name),
+        // A video's probed title where there is one; the link itself otherwise.
+        ...youtube.map((video) => video.title ?? video.url),
+      ]),
+      files: [],
+    });
+    const entries: TranscriptionFileEntry[] = uploads.map((upload, index) => ({
+      name: upload.name,
+      storagePath: upload.storagePath,
+      // What the upload actually weighed. The job reads it to decide how many recordings it
+      // may hold at once, so it is a memory bound rather than a display figure.
+      bytes: upload.bytes,
+      status: 'pending',
+      // Every upload on this route is a recording, so its position among the audio files IS
+      // its position here. Omitted unless a window was actually selected, which keeps an
+      // untrimmed row identical to what it was before this feature.
+      ...(trims[index] !== undefined ? { trim: trims[index] } : {}),
+    }));
+
+    // Then the links, beside the recordings — the job transcribes both in one pass. No
+    // upload and no archive: there are no bytes on our side at any point, only a URL.
+    for (const video of youtube) {
+      entries.push({
+        name: video.title ?? video.url,
+        status: 'pending',
+        sourceUrl: video.url,
+        ...(video.author !== undefined ? { sourceAuthor: video.author } : {}),
+        ...(video.thumbnailUrl !== undefined
+          ? { sourceThumbnailUrl: video.thumbnailUrl }
+          : {}),
+      });
+    }
+
+    await updateTranscription(client, row.id, {
+      files: entries,
+      fileCount: entries.length,
+    });
+    trackActivity(client, request, {
+      feature: 'transcribe',
+      action: 'transcription_creation',
+      status: 'in_progress',
+      subject: { kind: 'transcription', id: row.id },
+      summary: activitySummary(entries.map((entry) => entry.name).join(', ')),
+      detail: {
+        files: entries.length,
+        youtube: youtube.length,
+        bytes: uploads.reduce((sum, upload) => sum + (upload.bytes ?? 0), 0),
+      },
+    });
+    startTranscriptionJob(client, row.id);
+    return reply.code(202).send({ id: row.id });
+  };
+
+  // Step 1 of the direct-to-S3 upload (see the schema's header in @dgipr/schemas'
+  // transcription.ts): mint the run id and sign one PUT per recording. Nothing is written —
+  // not the row, not an object — so a browser that prepares and then never uploads leaves
+  // nothing behind.
+  app.post('/transcriptions/uploads', async (request, reply) => {
+    const parsed = PrepareTranscriptionUploadsRequestSchema.safeParse(
+      request.body,
+    );
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: { message: 'अपलोड करायच्या फाईल्सची माहिती वाचता आली नाही.' },
+      });
+    }
+    for (const file of parsed.data.files) {
+      if (!isAudioFileName(file.name)) {
+        return reply.code(400).send({ error: { message: AUDIO_ONLY_MESSAGE } });
+      }
+    }
+    const runId = randomUUID();
+    const uploads = await Promise.all(
+      parsed.data.files.map(async (file, index) => {
+        const storagePath = storagePathFor(runId, index, file.name);
+        // Extension-driven, exactly as the multipart path stores it — `isAudioFileName`
+        // above guarantees a hit.
+        const contentType = audioMimeForFileName(file.name) ?? 'audio/mpeg';
+        const url = await signedUploadUrl(
+          DLO_UPLOADS_BUCKET,
+          storagePath,
+          contentType,
+          file.size,
+        );
+        return { storagePath, url, contentType };
+      }),
+    );
+    return { runId, uploads };
+  });
+
+  // Step 2 of the direct upload: the browser has PUT every recording and now asks for the run.
+  // Nothing it says about a file is trusted on its own — each path must be the one step 1
+  // would have issued for this run id at that position, and must actually exist in the bucket.
+  const createFromUploads = async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ) => {
+    const parsed = CreateTranscriptionFromUploadsRequestSchema.safeParse(
+      request.body,
+    );
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: { message: 'अपलोड केलेल्या फाईल्सची माहिती वाचता आली नाही.' },
+      });
+    }
+    const { runId, files, audioTrims, youtube } = parsed.data;
+    const uploads: Array<{ name: string; storagePath: string; bytes: number }> =
+      [];
+    // Only the objects this request has been shown to own are ever removed: a path is added
+    // here only after it has matched the server-issued shape.
+    const discardStaged = async (): Promise<void> => {
+      if (uploads.length === 0) return;
+      try {
+        await removeObjectsIn(
+          client,
+          DLO_UPLOADS_BUCKET,
+          uploads.map((upload) => upload.storagePath),
+        );
+      } catch (error) {
+        console.error(
+          `[transcription ${runId}] could not discard direct uploads:`,
+          error,
+        );
+      }
+    };
+
+    for (const [index, file] of files.entries()) {
+      if (
+        !isAudioFileName(file.name) ||
+        file.storagePath !== storagePathFor(runId, index, file.name)
+      ) {
+        await discardStaged();
+        return reply
+          .code(400)
+          .send({ error: { message: 'अपलोड केलेली फाईल ओळखता आली नाही.' } });
+      }
+      const bytes = await storedObjectSize(
+        DLO_UPLOADS_BUCKET,
+        file.storagePath,
+      );
+      if (bytes === null) {
+        await discardStaged();
+        return reply.code(400).send({
+          error: {
+            message: `"${file.name}" अपलोड पूर्ण झाले नाही. कृपया पुन्हा प्रयत्न करा.`,
+          },
+        });
+      }
+      uploads.push({ name: file.name, storagePath: file.storagePath, bytes });
+    }
+    // Re-derived from the URL rather than trusted — the multipart path's rule.
+    for (const video of youtube) {
+      if (parseYouTubeVideoId(video.url) === null) {
+        await discardStaged();
+        return reply
+          .code(400)
+          .send({ error: { message: 'यूट्युब लिंक वैध नाही.' } });
+      }
+    }
+    // A run id is single-use: the row it names must not exist yet. Checked last, after the
+    // checks that need no database. The objects are NOT discarded here — they belong to the
+    // run that already exists.
+    if (await getTranscription(client, runId)) {
+      return reply.code(409).send({
+        error: { message: 'हे काम आधीच तयार झाले आहे.' },
+      });
+    }
+    return createRun(request, reply, {
+      runId,
+      uploads,
+      youtube,
+      trimEntries: audioTrims,
+      discardStaged,
+    });
+  };
+
   app.post('/transcriptions', async (request, reply) => {
+    // A JSON body is the second step of the direct-to-S3 upload; multipart is the original
+    // path, kept as the browser's fallback and for older clients.
+    if (!request.isMultipart()) return createFromUploads(request, reply);
+
     // The row id is minted HERE rather than by the database, because each recording is
     // streamed to its final storage key while the request is still arriving — the key has to
     // exist before the first byte does. The row itself is still inserted last, after every
@@ -216,12 +456,9 @@ export function registerTranscriptionRoutes(
         const name = part.filename ?? '';
         if (!isAudioFileName(name)) {
           await discardStaged();
-          return reply.code(400).send({
-            error: {
-              message:
-                'फक्त समर्थित ध्वनिमुद्रण फाईल्स (MP3, M4A, AAC, AIFF, OGG, OPUS, WAV, FLAC, WEBM) स्वीकारल्या जातात. व्हिडिओ थेट पाठवता येत नाही — तो पानावर जोडल्यास त्यातील आवाज ब्राउझरमध्येच वेगळा काढून पाठवला जातो.',
-            },
-          });
+          return reply
+            .code(400)
+            .send({ error: { message: AUDIO_ONLY_MESSAGE } });
         }
         // Straight from the wire to S3 — the recording is never assembled in this process.
         // Awaited inside the loop deliberately: busboy delivers one part at a time and stalls
@@ -270,85 +507,13 @@ export function registerTranscriptionRoutes(
       throw error;
     }
 
-    if (uploads.length === 0 && youtube.length === 0) {
-      return reply.code(400).send({
-        error: {
-          message: 'किमान एक ध्वनिमुद्रण जोडा किंवा यूट्युब लिंक द्या.',
-        },
-      });
-    }
-
-    // Now that every part has arrived, each selected window can be checked against the
-    // recording it names. A mismatch is refused rather than applied to whichever recording
-    // happens to be at that position — see routes/audio-trims.ts.
-    const resolved = resolveAudioTrims(
-      uploads.map((upload) => upload.name),
+    return createRun(request, reply, {
+      runId,
+      uploads,
+      youtube,
       trimEntries,
-    );
-    if (!resolved.ok) {
-      await discardStaged();
-      return reply.code(400).send({ error: { message: resolved.message } });
-    }
-    const trims = resolved.byPosition;
-
-    // The recordings are already archived — they were streamed there as they arrived, under
-    // keys built from `runId`, which is why this insert can carry that id rather than take
-    // one from the database. Everything else is unchanged: the row is still written before
-    // the job starts, and the job still reads it all back off the row.
-    const row = await insertTranscription(client, {
-      id: runId,
-      title: transcriptionTitle([
-        ...uploads.map((upload) => upload.name),
-        // A video's probed title where there is one; the link itself otherwise.
-        ...youtube.map((video) => video.title ?? video.url),
-      ]),
-      files: [],
+      discardStaged,
     });
-    const entries: TranscriptionFileEntry[] = uploads.map((upload, index) => ({
-      name: upload.name,
-      storagePath: upload.storagePath,
-      // What the upload actually weighed. The job reads it to decide how many recordings it
-      // may hold at once, so it is a memory bound rather than a display figure.
-      bytes: upload.bytes,
-      status: 'pending',
-      // Every upload on this route is a recording, so its position among the audio files IS
-      // its position here. Omitted unless a window was actually selected, which keeps an
-      // untrimmed row identical to what it was before this feature.
-      ...(trims[index] !== undefined ? { trim: trims[index] } : {}),
-    }));
-
-    // Then the links, beside the recordings — the job transcribes both in one pass. No
-    // upload and no archive: there are no bytes on our side at any point, only a URL.
-    for (const video of youtube) {
-      entries.push({
-        name: video.title ?? video.url,
-        status: 'pending',
-        sourceUrl: video.url,
-        ...(video.author !== undefined ? { sourceAuthor: video.author } : {}),
-        ...(video.thumbnailUrl !== undefined
-          ? { sourceThumbnailUrl: video.thumbnailUrl }
-          : {}),
-      });
-    }
-
-    await updateTranscription(client, row.id, {
-      files: entries,
-      fileCount: entries.length,
-    });
-    trackActivity(client, request, {
-      feature: 'transcribe',
-      action: 'transcription_creation',
-      status: 'in_progress',
-      subject: { kind: 'transcription', id: row.id },
-      summary: activitySummary(entries.map((entry) => entry.name).join(', ')),
-      detail: {
-        files: entries.length,
-        youtube: youtube.length,
-        bytes: uploads.reduce((sum, upload) => sum + (upload.bytes ?? 0), 0),
-      },
-    });
-    startTranscriptionJob(client, row.id);
-    return reply.code(202).send({ id: row.id });
   });
 
   // The recent-run list. Every run, newest first — there is no auth and no owner column.

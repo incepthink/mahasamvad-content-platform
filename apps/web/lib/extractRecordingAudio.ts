@@ -48,6 +48,7 @@ import {
   type ConversionCopyOptions,
   type InputAudioTrack,
 } from 'mediabunny';
+import { mayCompressRecording } from './recordingCompression';
 
 // Past this, a COPIED track is re-encoded instead: ~3.5 h of 128 kbps AAC. A copy that large
 // would be a long upload for audio that Opus carries in a tenth of the bytes — and above it the
@@ -277,6 +278,103 @@ export async function extractRecordingAudio(
     );
   });
   if (encoded === null) throw new RecordingExtractionError('unsupported');
+  return {
+    file: new File([encoded], recordingNameFromVideo(file.name, '.webm'), {
+      type: 'audio/webm',
+      lastModified: file.lastModified,
+    }),
+    method: 'reencode',
+    sourceName,
+    durationSeconds,
+  };
+}
+
+// ---------- shrinking a large AUDIO file before upload (2026-10-16) ----------
+//
+// The same re-encode, applied to a picked RECORDING rather than a video: a WAV, FLAC or
+// high-bitrate MP3 of a meeting is many times the bytes speech-to-text needs, and on an
+// officer's uplink those bytes are most of the wait. Re-encoded to mono 48 kbps Opus it is
+// ~21 MB an hour — a 1411 kbps WAV shrinks ~30x, a 320 kbps MP3 ~6x.
+//
+// It is only worth it where the saving beats the encode time, so it is GATED:
+//   - small files are sent as they are (the encode would cost more than the upload saves);
+//   - files already at or below COMPRESS_MIN_BITRATE are sent as they are — a typical 128 kbps
+//     phone recording would shrink only ~2.7x, which on a reasonable connection is about what
+//     the encode itself costs;
+//   - anything the browser cannot decode or encode, or that would not come out meaningfully
+//     smaller, is sent as it is.
+// It NEVER fails a recording: every "no" is a passthrough of the original, which the upload
+// path already handles. Speech-to-text loses nothing at mono 48 kbps.
+
+export const COMPRESS_MIN_BITRATE = 192_000;
+// A re-encode must save at least this fraction of the bytes to be used.
+const COMPRESS_MIN_SAVING = 0.3;
+
+// Containers that are always lossless: when the duration cannot be read, these are still
+// worth compressing, while a lossy file of unknown bitrate is left alone.
+const LOSSLESS_SUFFIX = /\.(wav|flac|aif|aiff)$/i;
+/**
+ * Shrink a large audio recording to mono Opus before it is uploaded, when that pays off.
+ * Always resolves: `method: 'passthrough'` hands back the original file untouched.
+ */
+export async function compressRecordingAudio(
+  file: File,
+  options: { onProgress?: Progress | undefined } = {},
+): Promise<ExtractedRecording> {
+  const sourceName = file.name;
+  const passthrough = (durationSeconds: number | null): ExtractedRecording => ({
+    file,
+    method: 'passthrough',
+    sourceName,
+    durationSeconds,
+  });
+  if (!mayCompressRecording(file)) return passthrough(null);
+
+  const probe = openInput(file);
+  let durationSeconds: number | null = null;
+  let canDecode = false;
+  try {
+    const audio = await probe.getPrimaryAudioTrack().catch(() => null);
+    if (!audio) return passthrough(null);
+    durationSeconds = await durationOf(audio);
+    canDecode = await audio.canDecode().catch(() => false);
+  } finally {
+    probe.dispose();
+  }
+
+  const worthIt =
+    durationSeconds !== null
+      ? (file.size * 8) / durationSeconds > COMPRESS_MIN_BITRATE
+      : LOSSLESS_SUFFIX.test(file.name);
+  if (!worthIt || !canDecode) return passthrough(durationSeconds);
+
+  const canEncode = await canEncodeAudio('opus', {
+    numberOfChannels: 1,
+    sampleRate: REENCODE_SAMPLE_RATE,
+    bitrate: REENCODE_BITRATE,
+  }).catch(() => false);
+  if (!canEncode) return passthrough(durationSeconds);
+
+  options.onProgress?.(0);
+  const encoded = await convert(
+    file,
+    'webm',
+    {
+      codec: 'opus',
+      numberOfChannels: 1,
+      sampleRate: REENCODE_SAMPLE_RATE,
+      quality: new Quality({ bitrate: REENCODE_BITRATE }),
+      forceTranscode: true,
+    },
+    false,
+    options.onProgress,
+  ).catch(() => null);
+  if (
+    encoded === null ||
+    encoded.byteLength > file.size * (1 - COMPRESS_MIN_SAVING)
+  ) {
+    return passthrough(durationSeconds);
+  }
   return {
     file: new File([encoded], recordingNameFromVideo(file.name, '.webm'), {
       type: 'audio/webm',

@@ -16,17 +16,29 @@ import type {
 export function posterRoundPayload(
   markers: readonly PosterMarkerDraft[],
   clearRegions: readonly PosterClearDraft[],
-  options: { feedback?: string; markerNotes?: readonly string[] } = {},
+  options: {
+    feedback?: string;
+    markerNotes?: readonly string[];
+    // Exact texts the edit assistant found in the conversation; the officer's own field wins.
+    markerExactTexts?: readonly string[];
+  } = {},
 ): PosterImageFeedbackRequest {
   const feedback = options.feedback?.trim() ?? '';
   return {
     ...(feedback.length >= 3 ? { feedback } : {}),
     ...(markers.length > 0
       ? {
-          annotations: markers.map((m, i) => ({
-            region: m.region,
-            note: (options.markerNotes?.[i] ?? m.note).trim(),
-          })),
+          annotations: markers.map((m, i) => {
+            const exactText = (
+              m.exactText.trim() ||
+              (options.markerExactTexts?.[i] ?? '')
+            ).trim();
+            return {
+              region: m.region,
+              note: (options.markerNotes?.[i] ?? m.note).trim(),
+              ...(exactText ? { exactText } : {}),
+            };
+          }),
         }
       : {}),
     ...(clearRegions.length > 0

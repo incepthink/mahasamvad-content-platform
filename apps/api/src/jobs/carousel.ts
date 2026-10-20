@@ -73,9 +73,11 @@ import {
   annotateFeedbackRegions,
   editImage,
   generateImage,
+  imageSize,
   measurePosterColours,
   overlayTwitterChrome,
 } from '@dgipr/poster-renderer';
+import { applyExactTextEdits, type ExactTextMark } from './exact-text-edit.js';
 import { currentSocialLogoStyle, socialLogoStyleFor } from './social-logo.js';
 import {
   type SocialLogoStyle,
@@ -215,7 +217,9 @@ async function storeSlide(
   id: string,
   state: CarouselState,
   index: number,
-  raw: Buffer,
+  // Null only for an exact-text correction of a slide that never had an un-branded copy:
+  // the finished slide is then all there is, and no plain copy is written for this version.
+  raw: Buffer | null,
   finished: Buffer | null,
   feedback: string | null,
   // The post's badge (social-logo.ts) — one style for every slide of one carousel, so the set
@@ -226,19 +230,19 @@ async function storeSlide(
   if (!slide) throw new Error(`Carousel slide ${index + 1} does not exist.`);
   const version = slide.version + 1;
   const path = slidePath(id, index + 1, version);
-  await uploadPng(
-    client,
-    path,
-    finished ?? (await overlayTwitterChrome(raw, { logoStyle })),
-    true,
-  );
+  const finishedPng =
+    finished ?? (raw ? await overlayTwitterChrome(raw, { logoStyle }) : null);
+  if (!finishedPng) throw new Error('storeSlide was given no image.');
+  await uploadPng(client, path, finishedPng, true);
 
   // The un-chromed copy is the plain-download convenience, so it is best-effort. (It used to be
   // REQUIRED for the cover, when every detail slide was edited from it; slides are now each
   // generated fresh.)
-  let plainPath: string | null = slidePlainPath(id, index + 1, version);
+  let plainPath: string | null = raw
+    ? slidePlainPath(id, index + 1, version)
+    : null;
   try {
-    await uploadPng(client, plainPath, raw, true);
+    if (raw && plainPath) await uploadPng(client, plainPath, raw, true);
   } catch (error) {
     console.warn(
       `[job ${id}] could not store slide ${index + 1}'s plain copy:`,
@@ -806,13 +810,37 @@ export function startCarouselSlideFeedbackJob(
     });
     markBusy(id, slideNumber);
     try {
-      const annotations = input.annotations ?? [];
+      const allAnnotations = input.annotations ?? [];
       const clearRegions = input.clearRegions ?? [];
       const clearActions: readonly PosterClearAction[] = clearRegions.map(
         (c) => c.action,
       );
+      // Marks with an officer-typed exact text are corrected on their own crop afterwards
+      // (exact-text-edit.ts) and never go through the whole-slide edit — runner.ts's rule.
+      const annotations = allAnnotations.filter((a) => !a.exactText);
+      const cropMarks: ExactTextMark[] = allAnnotations.flatMap((a) =>
+        a.exactText
+          ? [{ region: a.region, exactText: a.exactText, note: a.note }]
+          : [],
+      );
+      const wholeEdit =
+        annotations.length > 0 ||
+        clearRegions.length > 0 ||
+        Boolean(input.feedback);
       let feedbackText = input.feedback ?? '';
-      let historyFeedback = feedbackText;
+      const historyFeedback = [
+        ...allAnnotations.map(
+          (a, i) =>
+            `[${i + 1}] ${a.note}` +
+            (a.exactText ? `${a.note ? ' ' : ''}→ «${a.exactText}»` : ''),
+        ),
+        ...clearRegions.map(
+          (c, i) =>
+            `[${CLEAR_REGION_LETTERS[i] ?? i + 1}] ${STR_CLEAR_SPACE_HISTORY[c.action]}` +
+            (c.note ? ` — ${c.note}` : ''),
+        ),
+        ...(input.feedback ? [input.feedback] : []),
+      ].join('\n');
       let contentInventory: readonly string[] = [];
       // The badge this slide actually carries, read off its pixels (social-logo.ts), so the edit
       // erases that badge and the stamp puts the same one back.
@@ -849,15 +877,13 @@ export function startCarouselSlideFeedbackJob(
         });
         contentInventory = interpreted.contentInventory;
         feedbackText = interpreted.instruction;
-        historyFeedback = [
-          ...annotations.map((a, i) => `[${i + 1}] ${a.note}`),
-          ...clearRegions.map(
-            (c, i) =>
-              `[${CLEAR_REGION_LETTERS[i] ?? i + 1}] ${STR_CLEAR_SPACE_HISTORY[c.action]}` +
-              (c.note ? ` — ${c.note}` : ''),
-          ),
-          ...(input.feedback ? [input.feedback] : []),
-        ].join('\n');
+        // A mark whose note names its exact text also gets the crop pass on the result.
+        annotations.forEach((a, i) => {
+          const exactText = interpreted.exactTexts[i];
+          if (exactText) {
+            cropMarks.push({ region: a.region, exactText, note: a.note });
+          }
+        });
         console.log(
           `[job ${id}] carousel slide ${slideNumber} marker feedback (${interpreted.source}): ${feedbackText}`,
         );
@@ -868,17 +894,43 @@ export function startCarouselSlideFeedbackJob(
       const officerImages =
         index === 0 ? await loadOfficerImages(client, row) : [];
       const rendered = await runInCostTask('carousel_slide', async () => {
-        const result = await renderSocialPosterFeedbackEdit(
-          inputImage,
-          feedbackText,
-          annotations.length,
-          'dgipr',
-          undefined,
-          { actions: clearActions, inventory: contentInventory },
-          officerImages,
-          logoStyle,
-        );
-        recordImageCost('twitter', imageQuality());
+        let result: { png: Buffer; raw: Buffer | undefined };
+        if (wholeEdit) {
+          result = await renderSocialPosterFeedbackEdit(
+            inputImage,
+            feedbackText,
+            annotations.length,
+            'dgipr',
+            undefined,
+            { actions: clearActions, inventory: contentInventory },
+            officerImages,
+            logoStyle,
+          );
+          recordImageCost('twitter', imageQuality());
+        } else {
+          // Exact-text marks only: the slide as it is, and its un-branded copy if it has one.
+          let raw: Buffer | undefined;
+          if (slide.plainPath) {
+            try {
+              raw = await downloadPng(client, slide.plainPath);
+            } catch {
+              raw = undefined;
+            }
+          }
+          result = { png: clean, raw };
+        }
+        if (cropMarks.length > 0) {
+          const corrected = await applyExactTextEdits(
+            result.raw ?? result.png,
+            await imageSize(result.png),
+            cropMarks,
+            { kind: 'twitter', quality: imageQuality() },
+          );
+          result = {
+            png: await overlayTwitterChrome(corrected, { logoStyle }),
+            raw: result.raw ? corrected : undefined,
+          };
+        }
         return result;
       });
       await storeSlide(
@@ -886,7 +938,7 @@ export function startCarouselSlideFeedbackJob(
         id,
         state,
         index,
-        rendered.raw,
+        rendered.raw ?? null,
         rendered.png,
         historyFeedback || null,
         logoStyle,

@@ -22,6 +22,7 @@ import type {
 import {
   Download,
   ImageDown,
+  Maximize2,
   // Palette — the "वेगळ्या रंगात तयार करा" recolour redo, hidden from the UI (see the
   // commented button below). Restore this import with it.
   RotateCw,
@@ -43,11 +44,19 @@ import {
   type PosterMarkerDraft,
 } from './PosterAnnotator';
 import { PosterMarkNotes } from './PosterMarkNotes';
+import { markerIsDescribed } from './MarkerExactTextField';
 import { PosterVersionStrip } from './PosterVersionStrip';
 import { CanvaLink } from './CanvaLink';
 import { EditChat } from './EditChat';
 import { ErrorNotice } from './ErrorNotice';
 import { SocialCaptionEditor } from './SocialCaptionEditor';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from './ui/dialog';
 
 export type MarksRefusal =
   string | { message: string; suggestion: { label: string; note: string } };
@@ -125,6 +134,7 @@ export function SocialPostView({
     addMarker,
     removeMarker,
     setNote,
+    setExactText,
     clearRegions,
     submittedClearRegions,
     addClearRegion,
@@ -242,7 +252,7 @@ export function SocialPostView({
     if (sendingChange) return;
     setChangeError(null);
     setChangeSuggestion(null);
-    if (markers.some((m) => m.note.trim().length < 3)) {
+    if (!markers.every(markerIsDescribed)) {
       setChangeError(STR.markerNoteTooShort);
       return;
     }
@@ -279,6 +289,7 @@ export function SocialPostView({
           posterRoundPayload(markers, clearRegions, {
             feedback: action.instruction,
             markerNotes: action.markerNotes,
+            markerExactTexts: action.markerExactTexts,
           }),
         );
         return;
@@ -301,6 +312,104 @@ export function SocialPostView({
   // What is left is the one press that could not recover: a publish already in flight —
   // posting is irreversible, so a second click must never make a second live post.
   const publishBlocked = publishingPost;
+
+  // The maximise dialog (see the button beside the marking icons).
+  const [expanded, setExpanded] = useState(false);
+
+  // Rendered twice — on the card and inside the maximise dialog — over the SAME marker
+  // state, so a box drawn in either place is the same box.
+  const renderAnnotator = () => (
+    <PosterAnnotator
+      markers={markers}
+      onAdd={addMarker}
+      onRemove={removeMarker}
+      active={annotOpen && !showSpinner}
+      disabled={showSpinner}
+      submittedMarkers={submittedMarkers}
+      onDismissSubmitted={dismissSubmitted}
+      mode={annotMode ?? 'mark'}
+      clearRegions={clearRegions}
+      onAddClear={addClearRegion}
+      onRemoveClear={removeClearRegion}
+      submittedClearRegions={submittedClearRegions}
+    />
+  );
+
+  // `onCard` keeps the /learn coach's target on the card's copy only.
+  const renderModeButtons = (onCard: boolean) => (
+    <>
+      <button
+        type="button"
+        className="icon-btn"
+        data-learn={onCard ? 'mark-button' : undefined}
+        // Pressed state = marking is armed, so the poster reads as editable.
+        aria-pressed={annotMode === 'mark'}
+        title={annotMode === 'mark' ? STR.iconEditPosterOn : STR.iconEditPoster}
+        aria-label={
+          annotMode === 'mark' ? STR.iconEditPosterOn : STR.iconEditPoster
+        }
+        disabled={showSpinner}
+        onClick={() => setAnnotMode(annotMode === 'mark' ? null : 'mark')}
+      >
+        <SquarePen size={18} strokeWidth={1.9} aria-hidden="true" />
+      </button>
+      {/* The blue gesture: free a rectangle of the poster so the officer can
+          place their own logo or photograph there by hand. Its own button
+          rather than a mode inside the pencil, because it is a different
+          request — nothing is being edited, space is being made. */}
+      <button
+        type="button"
+        className="icon-btn icon-btn-clear"
+        aria-pressed={annotMode === 'clear'}
+        title={
+          annotMode === 'clear' ? STR.iconClearSpaceOn : STR.iconClearSpace
+        }
+        aria-label={
+          annotMode === 'clear' ? STR.iconClearSpaceOn : STR.iconClearSpace
+        }
+        disabled={showSpinner}
+        onClick={() => setAnnotMode(annotMode === 'clear' ? null : 'clear')}
+      >
+        <SquareDashed size={18} strokeWidth={1.9} aria-hidden="true" />
+      </button>
+    </>
+  );
+
+  const renderMarkNotes = () => (
+    <PosterMarkNotes
+      markers={markers}
+      submittedMarkers={submittedMarkers}
+      clearRegions={clearRegions}
+      submittedClearRegions={submittedClearRegions}
+      onNoteChange={setNote}
+      onExactTextChange={setExactText}
+      onRemoveMarker={removeMarker}
+      onClearNoteChange={setClearNote}
+      onClearActionChange={setClearAction}
+      onRemoveClearRegion={removeClearRegion}
+      disabled={showSpinner || sendingChange}
+    />
+  );
+
+  const renderSendMarks = (onCard: boolean) =>
+    markers.length > 0 || clearRegions.length > 0 ? (
+      <div className="btn-row marker-submit-action">
+        <button
+          type="button"
+          className="btn btn-primary"
+          data-learn={onCard ? 'send' : undefined}
+          aria-busy={sendingChange}
+          disabled={showSpinner || sendingChange}
+          onClick={() => {
+            // From the dialog: close it so the re-render (and any refusal) is seen on the card.
+            if (!onCard) setExpanded(false);
+            void sendMarks();
+          }}
+        >
+          {sendingChange ? STR.sendingFeedback : STR.sendFeedback}
+        </button>
+      </div>
+    ) : null;
 
   return (
     <section className="card">
@@ -338,20 +447,7 @@ export function SocialPostView({
                 className="poster-image"
                 draggable={false}
               />
-              <PosterAnnotator
-                markers={markers}
-                onAdd={addMarker}
-                onRemove={removeMarker}
-                active={annotOpen && !showSpinner}
-                disabled={showSpinner}
-                submittedMarkers={submittedMarkers}
-                onDismissSubmitted={dismissSubmitted}
-                mode={annotMode ?? 'mark'}
-                clearRegions={clearRegions}
-                onAddClear={addClearRegion}
-                onRemoveClear={removeClearRegion}
-                submittedClearRegions={submittedClearRegions}
-              />
+              {renderAnnotator()}
               {showSpinner ? (
                 <div
                   className="poster-loading"
@@ -419,53 +515,22 @@ export function SocialPostView({
                 <Palette size={18} strokeWidth={1.9} aria-hidden="true" />
               </button>
               */}
+              {renderModeButtons(true)}
+              {/* The same poster, as large as the screen allows, with the same marking tools —
+                  small text is far easier to box precisely there. Both copies read and write
+                  the one set of marks, so whatever is drawn in the dialog is already here. */}
               <button
                 type="button"
                 className="icon-btn"
-                data-learn="mark-button"
-                // Pressed state = marking is armed, so the poster reads as editable.
-                aria-pressed={annotMode === 'mark'}
-                title={
-                  annotMode === 'mark'
-                    ? STR.iconEditPosterOn
-                    : STR.iconEditPoster
-                }
-                aria-label={
-                  annotMode === 'mark'
-                    ? STR.iconEditPosterOn
-                    : STR.iconEditPoster
-                }
-                disabled={showSpinner}
-                onClick={() =>
-                  setAnnotMode(annotMode === 'mark' ? null : 'mark')
-                }
+                title={STR.iconExpandPoster}
+                aria-label={STR.iconExpandPoster}
+                onClick={() => {
+                  // Opening to draw: arm the pencil if nothing is armed yet.
+                  if (annotMode === null && !showSpinner) setAnnotMode('mark');
+                  setExpanded(true);
+                }}
               >
-                <SquarePen size={18} strokeWidth={1.9} aria-hidden="true" />
-              </button>
-              {/* The blue gesture: free a rectangle of the poster so the officer can
-                  place their own logo or photograph there by hand. Its own button
-                  rather than a mode inside the pencil, because it is a different
-                  request — nothing is being edited, space is being made. */}
-              <button
-                type="button"
-                className="icon-btn icon-btn-clear"
-                aria-pressed={annotMode === 'clear'}
-                title={
-                  annotMode === 'clear'
-                    ? STR.iconClearSpaceOn
-                    : STR.iconClearSpace
-                }
-                aria-label={
-                  annotMode === 'clear'
-                    ? STR.iconClearSpaceOn
-                    : STR.iconClearSpace
-                }
-                disabled={showSpinner}
-                onClick={() =>
-                  setAnnotMode(annotMode === 'clear' ? null : 'clear')
-                }
-              >
-                <SquareDashed size={18} strokeWidth={1.9} aria-hidden="true" />
+                <Maximize2 size={18} strokeWidth={1.9} aria-hidden="true" />
               </button>
               {/* Publish to the official account, one button per platform, brand mark
                   only — where the poster goes is the whole message, so a Marathi label
@@ -497,20 +562,7 @@ export function SocialPostView({
                 <XLogo size={17} />
               </button>
             </div>
-            {markers.length > 0 || clearRegions.length > 0 ? (
-              <div className="btn-row marker-submit-action">
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  data-learn="send"
-                  aria-busy={sendingChange}
-                  disabled={showSpinner || sendingChange}
-                  onClick={() => void sendMarks()}
-                >
-                  {sendingChange ? STR.sendingFeedback : STR.sendFeedback}
-                </button>
-              </div>
-            ) : null}
+            {renderSendMarks(true)}
             {detail.posterStyleLabel ? (
               <p className="hint poster-style-label" style={{ marginTop: 10 }}>
                 {STR.posterStyleLabelPrefix} {detail.posterStyleLabel}
@@ -570,20 +622,7 @@ export function SocialPostView({
           />
 
           {/* What is marked on the poster, with a note beside each mark. */}
-          {detail.posterUrl ? (
-            <PosterMarkNotes
-              markers={markers}
-              submittedMarkers={submittedMarkers}
-              clearRegions={clearRegions}
-              submittedClearRegions={submittedClearRegions}
-              onNoteChange={setNote}
-              onRemoveMarker={removeMarker}
-              onClearNoteChange={setClearNote}
-              onClearActionChange={setClearAction}
-              onRemoveClearRegion={removeClearRegion}
-              disabled={showSpinner || sendingChange}
-            />
-          ) : null}
+          {detail.posterUrl ? renderMarkNotes() : null}
 
           {/* The marks' own send button reports here. */}
           {changeError ? <ErrorNotice message={changeError} /> : null}
@@ -627,6 +666,34 @@ export function SocialPostView({
         onRestoringChange={setPending}
         busy={showSpinner || sendingChange}
       />
+      {detail.posterUrl ? (
+        <Dialog open={expanded} onOpenChange={setExpanded}>
+          <DialogContent className="poster-expand-dialog max-w-[min(96vw,1500px)]">
+            <DialogHeader>
+              <DialogTitle>{STR.posterExpandTitle}</DialogTitle>
+              <DialogDescription>{STR.posterExpandHint}</DialogDescription>
+            </DialogHeader>
+            <div className="poster-expand-body">
+              <div className="poster-expand-frame">
+                <img
+                  className="poster-expand-image"
+                  src={detail.posterUrl}
+                  alt={STR.posterTitle}
+                  draggable={false}
+                />
+                {renderAnnotator()}
+              </div>
+              <div className="poster-expand-side">
+                <div className="poster-icon-actions">
+                  {renderModeButtons(false)}
+                </div>
+                {renderMarkNotes()}
+                {renderSendMarks(false)}
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      ) : null}
     </section>
   );
 }

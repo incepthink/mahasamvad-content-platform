@@ -84,7 +84,9 @@ import {
 // the solid navy title pill) and solid below, and the strip it was joined onto showed through
 // that see-through part as smeared generated fill. So the artwork now runs down to y=1552 —
 // behind the see-through part — and only a 48px strip is added, hidden entirely by the band's
-// solid white row. Text still stops at y=1488 (1552 - 48 - 16), clear of the band, whose top
+// solid white row. Text stops at y=1440 (1552 - 48 - 64) — the cushion was raised 16 -> 64 the
+// same day, because a model overshooting a floor this close to the band put its last line under
+// it; the 112px strip is stated to the model as "about one fourteenth" of the height. The band's top
 // lands at y=1509. Keep in sync with SOCIAL_ARTWORK_HEIGHT / SOCIAL_FOOTER_UNDERLAP in
 // packages/poster-renderer/src/twitter-chrome.ts.
 export const SOCIAL_ZONES: ReservedZoneGeometry = {
@@ -93,7 +95,7 @@ export const SOCIAL_ZONES: ReservedZoneGeometry = {
   lockupWidth: 180,
   lockupHeight: 170,
   footerHeight: 91,
-  footerAppendedMargin: 16,
+  footerAppendedMargin: 64,
   footerUnderlap: 48,
 };
 
@@ -1029,8 +1031,9 @@ if (
         'TEXT TO PUT ON THE POSTER:',
         'MOST IMPORTANT MESSAGE — render the value only; its placement is your decision:',
         'ADDITIONAL EXACT TEXT — render these values only; arrange and group them freely:',
-        'covers the bottom 48 pixels of this image',
-        'all text, numbers and icons above y=1488',
+        'about one fourteenth of its height',
+        'free of all text, numbers and icons',
+        'nothing below y=1440',
       ]) {
         if (!prompt.includes(needle))
           failures.push(
@@ -1142,7 +1145,7 @@ if (
     for (const needle of [
       'top-right 180 x 170 pixels',
       '1280 x 1552 output',
-      'y=1488',
+      'y=1440',
       'SIT BEHIND THE FOOTER BAND',
       'DO NOT CUT A HOLE IN IT',
       'continue through unbroken',
@@ -1285,8 +1288,8 @@ if (
         );
     }
     for (const chromeRule of [
-      'y=1488',
-      'covers the bottom 48 pixels of this image',
+      'y=1440',
+      'about one fourteenth of its height',
     ]) {
       if (!freshPrompt.includes(chromeRule))
         failures.push(`the fresh prompt lost chrome rule "${chromeRule}"`);
@@ -1518,7 +1521,7 @@ if (
       'TEXT ACCURACY:',
       'Use only Devanagari numerals: ० १ २ ३ ४ ५ ६ ७ ८ ९',
       'AREA RULES:',
-      'covers the bottom 48 pixels of this image',
+      'about one fourteenth of its height',
       'TEXT TO PUT ON THE POSTER:',
     ]) {
       if (!freshVerbatim.includes(needle))
@@ -1947,7 +1950,7 @@ if (
         '',
         HEADLINE_MARGINS_RULE,
         '',
-        'AREA RULES:\n- Bottom margin: The see-through top of the footer band covers the bottom 48 pixels of this image. Run the background to the bottom edge, but keep all text, numbers and icons above y=1488. Do not draw wave patterns or curved decorative swooshes along the bottom. Reflow or shrink content until everything fits.',
+        'AREA RULES:\n- Bottom strip: Keep the bottom strip of the poster — about one fourteenth of its height — free of all text, numbers and icons; the footer band covers it. End the last line of content above that strip, with space beneath (nothing below y=1440). Run the background to the bottom edge. Reflow or shrink content until everything fits.',
         '',
         'TEXT TO PUT ON THE POSTER:',
         VERBATIM_TEXT,

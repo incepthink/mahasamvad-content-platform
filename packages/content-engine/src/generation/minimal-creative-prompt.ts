@@ -26,7 +26,10 @@ export const DEFAULT_POSTER_WIDTH = 1280;
 export const DEFAULT_POSTER_HEIGHT = 1552;
 export const DEFAULT_BADGE_WIDTH = 180;
 export const DEFAULT_BADGE_HEIGHT = 170;
-export const DEFAULT_BOTTOM_MARGIN = 16;
+// 64, not 16 (2026-10-16): with the artwork running behind the band (1552 tall), a model that
+// overshoots the floor by a line puts it under the band. A 112px text-free strip (48 underlap +
+// 64 cushion, about one fourteenth of the height) gives that overshoot somewhere harmless to go.
+export const DEFAULT_BOTTOM_MARGIN = 64;
 /** Pixels at the bottom of the artwork that the footer band's see-through top lies over. */
 export const DEFAULT_FOOTER_UNDERLAP = 48;
 
@@ -124,6 +127,29 @@ export function buildHeadlineMarginsRule(
 
 export const HEADLINE_MARGINS_RULE = buildHeadlineMarginsRule();
 
+const STRIP_ORDINALS: Readonly<Record<number, string>> = {
+  8: 'eighth',
+  9: 'ninth',
+  10: 'tenth',
+  11: 'eleventh',
+  12: 'twelfth',
+  13: 'thirteenth',
+  14: 'fourteenth',
+  15: 'fifteenth',
+  16: 'sixteenth',
+  18: 'eighteenth',
+  20: 'twentieth',
+};
+
+/** "about one fourteenth of" — the strip as a proportion the model can see. */
+function stripFraction(part: number, whole: number): string {
+  const n = Math.round(whole / Math.max(1, part));
+  const word = STRIP_ORDINALS[n];
+  return word
+    ? `about one ${word} of`
+    : `about ${Math.round((part / whole) * 100)}% of`;
+}
+
 export function buildAreaRule(
   width: number,
   height: number,
@@ -132,8 +158,10 @@ export function buildAreaRule(
 ): string {
   const bottomY = height - footerUnderlap - bottomMargin;
   if (footerUnderlap > 0) {
+    // Zone language first, the coordinate only as a supporting figure: the model cannot measure
+    // pixels, and a named strip steers spacing better than y= (2026-10-16).
     return `AREA RULES:
-- Bottom margin: The see-through top of the footer band covers the bottom ${footerUnderlap} pixels of this image. Run the background to the bottom edge, but keep all text, numbers and icons above y=${bottomY}. Do not draw wave patterns or curved decorative swooshes along the bottom. Reflow or shrink content until everything fits.`;
+- Bottom strip: Keep the bottom strip of the poster — ${stripFraction(height - bottomY, height)} its height — free of all text, numbers and icons; the footer band covers it. End the last line of content above that strip, with space beneath (nothing below y=${bottomY}). Run the background to the bottom edge. Reflow or shrink content until everything fits.`;
   }
   return `AREA RULES:
 - Bottom margin: The footer is attached below the image and covers nothing. Extend the design to the bottom edge, but keep all text and icons above y=${bottomY} (at least ${bottomMargin} pixels above the bottom edge). Do not draw wave patterns or curved decorative swooshes along the bottom. Reflow or shrink content until everything fits.`;

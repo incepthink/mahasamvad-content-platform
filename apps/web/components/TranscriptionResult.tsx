@@ -140,6 +140,21 @@ export function TranscriptionResult({
         </div>
       ) : null}
 
+      {/* Transcribed fine, but there was no speech in it — not an error, just nothing to
+          show. Said plainly rather than leaving an empty card. */}
+      {detail.status === 'ready' && !text ? (
+        <>
+          <div className="info-callout" style={{ marginTop: 12 }}>
+            <p>{STR.transcribeNoSpeech}</p>
+          </div>
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <Button variant="outline" type="button" onClick={onClose}>
+              {STR.transcribeClose}
+            </Button>
+          </div>
+        </>
+      ) : null}
+
       {text ? (
         <>
           {/* Per-recording line, so a multi-file run shows which source produced what — and

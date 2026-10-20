@@ -34,7 +34,7 @@ type ChatTurn = EditAssistantMessage & {
 };
 
 export type EditChatMarks = Readonly<{
-  markers: readonly Readonly<{ note: string }>[];
+  markers: readonly Readonly<{ note: string; exactText?: string }>[];
   clearRegions: readonly Readonly<{
     action: PosterClearAction;
     note: string;
@@ -167,7 +167,10 @@ export function EditChat({
       const plan = await planEdit(generationId, {
         surface,
         messages: history,
-        markers: (marks?.markers ?? []).map((m) => ({ note: m.note.trim() })),
+        markers: (marks?.markers ?? []).map((m) => ({
+          note: m.note.trim(),
+          exactText: m.exactText?.trim() ?? '',
+        })),
         clearRegions: (marks?.clearRegions ?? []).map((c) => ({
           action: c.action,
           note: c.note.trim(),

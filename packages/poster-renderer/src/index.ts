@@ -76,6 +76,16 @@ export {
   CLEAR_REGION_LETTERS,
 } from './feedback-marker.js';
 export type { NormalizedRegion } from './feedback-marker.js';
+// Exact-text red-box edits: cut the marked text out, edit the enlarged crop, lay it back with a
+// feathered edge (crop-region.ts), and the typeset spelling picture the model copies from.
+export {
+  planExactTextCrop,
+  extractCrop,
+  compositeCropPatch,
+  imageSize,
+} from './crop-region.js';
+export type { CropPlan, PixelRect } from './crop-region.js';
+export { renderSpellingReference } from './spelling-reference.js';
 // Did a "free this space" edit actually free the space? READ-ONLY — it measures the
 // returned poster and reports, and never writes a pixel (see clear-region-check.ts for
 // why a code-composited fill was rejected). Log-only at the call site for now.

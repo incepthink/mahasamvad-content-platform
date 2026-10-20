@@ -10,6 +10,7 @@
 import type { PosterClearAction } from '@dgipr/schemas';
 import { STR } from '../lib/strings';
 import { ClearActionToggle, clearActionLabel } from './ClearActionToggle';
+import { MarkerExactTextField, markerSummary } from './MarkerExactTextField';
 // Written in Marathi on an InScript keyboard, which a controlled box can overwrite
 // half-formed. See ComposeSafeInput.
 import { ComposeSafeInput } from './ComposeSafeInput';
@@ -25,6 +26,7 @@ export function PosterMarkNotes({
   clearRegions,
   submittedClearRegions,
   onNoteChange,
+  onExactTextChange,
   onRemoveMarker,
   onClearNoteChange,
   onClearActionChange,
@@ -39,6 +41,8 @@ export function PosterMarkNotes({
   clearRegions: readonly PosterClearDraft[];
   submittedClearRegions: readonly PosterClearDraft[];
   onNoteChange: (id: number, note: string) => void;
+  // «हा मजकूर असा हवा» under each red mark. Absent = the field is not shown.
+  onExactTextChange?: (id: number, exactText: string) => void;
   onRemoveMarker: (id: number) => void;
   onClearNoteChange: (id: number, note: string) => void;
   onClearActionChange: (id: number, action: PosterClearAction) => void;
@@ -72,37 +76,48 @@ export function PosterMarkNotes({
                   <span className="marker-note-badge" aria-hidden="true">
                     {i + 1}
                   </span>
-                  <span className="marker-note-text">{marker.note}</span>
+                  <span className="marker-note-text">
+                    {markerSummary(marker)}
+                  </span>
                 </div>
               ))
             : markers.map((marker, i) => (
-                <div
-                  className="marker-note-row"
-                  key={marker.id}
-                  // Mark ① is what /learn's coach points at. Inert everywhere else.
-                  data-learn={i === 0 ? 'marker-note' : undefined}
-                >
-                  <span className="marker-note-badge" aria-hidden="true">
-                    {i + 1}
-                  </span>
-                  <ComposeSafeInput
-                    type="text"
-                    value={marker.note}
-                    placeholder={STR.markerNotePlaceholder}
-                    aria-label={`${STR.markerLabel} ${i + 1}`}
-                    maxLength={500}
-                    disabled={disabled}
-                    onChange={(next) => onNoteChange(marker.id, next)}
-                  />
-                  <button
-                    type="button"
-                    className="marker-note-remove"
-                    aria-label={STR.markerRemove}
-                    disabled={disabled}
-                    onClick={() => onRemoveMarker(marker.id)}
+                <div key={marker.id}>
+                  <div
+                    className="marker-note-row"
+                    // Mark ① is what /learn's coach points at. Inert everywhere else.
+                    data-learn={i === 0 ? 'marker-note' : undefined}
                   >
-                    ✕
-                  </button>
+                    <span className="marker-note-badge" aria-hidden="true">
+                      {i + 1}
+                    </span>
+                    <ComposeSafeInput
+                      type="text"
+                      value={marker.note}
+                      placeholder={STR.markerNotePlaceholder}
+                      aria-label={`${STR.markerLabel} ${i + 1}`}
+                      maxLength={500}
+                      disabled={disabled}
+                      onChange={(next) => onNoteChange(marker.id, next)}
+                    />
+                    <button
+                      type="button"
+                      className="marker-note-remove"
+                      aria-label={STR.markerRemove}
+                      disabled={disabled}
+                      onClick={() => onRemoveMarker(marker.id)}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  {onExactTextChange ? (
+                    <MarkerExactTextField
+                      number={i + 1}
+                      value={marker.exactText}
+                      disabled={disabled}
+                      onChange={(next) => onExactTextChange(marker.id, next)}
+                    />
+                  ) : null}
                 </div>
               ))}
         </div>

@@ -7,11 +7,11 @@
 // - THERE IS NO BATCH JOB HERE. Sarvam takes up to 20 files in ONE job
 //   (create → upload → start → poll → download); ElevenLabs is a single
 //   synchronous multipart POST per recording. So this file runs the files
-//   itself, at a small concurrency (ELEVENLABS_STT_CONCURRENCY, default 2) —
+//   itself, at a bounded concurrency (ELEVENLABS_STT_CONCURRENCY, default 5) —
 //   a 6-recording intake is therefore slower than Sarvam's single job, not
-//   more expensive. Concurrency is kept low on purpose: these are whole
-//   meeting recordings and the account's parallel-request limit is a plan
-//   property we would rather not discover mid-intake.
+//   more expensive. The account's parallel-request limit is a plan property,
+//   so a 429 is treated as "wait for a slot" (its own retry budget) rather
+//   than as a failed recording.
 //
 // - A PER-FILE FAILURE IS A RESULT, NOT A THROW. Every recording is wrapped,
 //   so one bad file comes back as { error } and the others still deliver —
@@ -64,7 +64,42 @@ const DEFAULT_MODEL = 'scribe_v1';
 // ISO-639-3, not the BCP-47 `mr-IN` the Sarvam client sends.
 const DEFAULT_LANGUAGE = 'mar';
 
-const DEFAULT_CONCURRENCY = 2;
+// Raised 2 -> 5 on 2026-10-16 to cut the wall-clock time of a multi-recording run. If the
+// plan allows fewer parallel requests, the surplus is answered with 429 and WAITS (see
+// RATE_LIMIT_MAX_WAITS below) rather than failing, so a too-high value costs queueing, never
+// a recording.
+const DEFAULT_CONCURRENCY = 5;
+
+// How long a recording keeps waiting for a free slot when the account is at its
+// parallel-request limit: up to 12 waits of 5-60 s each, i.e. several minutes — about one
+// recording's transcription time, which is what a slot actually becomes free after.
+const RATE_LIMIT_MAX_WAITS = 12;
+const RATE_LIMIT_BASE_MS = 5_000;
+const RATE_LIMIT_MAX_MS = 60_000;
+
+// Honour the server's Retry-After (seconds, or an HTTP date) when it sends one; otherwise
+// back off exponentially. Jittered, so several recordings that hit the limit together do not
+// all come back in the same second and collide again.
+export function rateLimitDelayMs(
+  retryAfter: string | null,
+  waitNumber: number,
+): number {
+  const jitter = Math.floor(Math.random() * 1_000);
+  if (retryAfter !== null && retryAfter.trim() !== '') {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds) && seconds >= 0) {
+      return Math.min(RATE_LIMIT_MAX_MS, seconds * 1_000) + jitter;
+    }
+    const date = Date.parse(retryAfter);
+    if (Number.isFinite(date)) {
+      return (
+        Math.min(RATE_LIMIT_MAX_MS, Math.max(0, date - Date.now())) + jitter
+      );
+    }
+  }
+  const backoff = RATE_LIMIT_BASE_MS * 2 ** Math.max(0, waitNumber - 1);
+  return Math.min(RATE_LIMIT_MAX_MS, backoff) + jitter;
+}
 
 // A whole meeting recording can take minutes to transcribe; this is the ceiling
 // on ONE file, not on the intake.
@@ -180,6 +215,7 @@ async function transcribeOne(file: AudioInput): Promise<string> {
       );
 
   let lastError: Error | null = null;
+  let rateLimitWaits = 0;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     // The form is rebuilt per attempt: a FormData carrying a Blob is consumed
     // by the fetch that sends it and cannot be replayed.
@@ -216,6 +252,25 @@ async function transcribeOne(file: AudioInput): Promise<string> {
         return typeof payload.text === 'string' ? payload.text : '';
       }
       const detail = await response.text();
+      // A 429 is the account's parallel-request limit, not a fault in the request: with
+      // several recordings in flight (and /dlo sharing the same key) it is the expected
+      // answer when the plan allows fewer than ELEVENLABS_STT_CONCURRENCY. It gets its own,
+      // longer budget and does NOT spend one of the MAX_ATTEMPTS — otherwise raising the
+      // concurrency would turn "wait your turn" into a failed recording.
+      if (response.status === 429 && rateLimitWaits < RATE_LIMIT_MAX_WAITS) {
+        rateLimitWaits += 1;
+        const waitMs = rateLimitDelayMs(
+          response.headers.get('retry-after'),
+          rateLimitWaits,
+        );
+        console.warn(
+          `[elevenlabs-stt] 429 on ${file.name}; waiting ${Math.round(waitMs / 1000)}s ` +
+            `(${rateLimitWaits}/${RATE_LIMIT_MAX_WAITS}).`,
+        );
+        await sleep(waitMs);
+        attempt -= 1; // the loop's increment gives this attempt back
+        continue;
+      }
       if (!isRetryableStatus(response.status) || attempt === MAX_ATTEMPTS) {
         throw permanent(
           `ElevenLabs STT failed (${response.status}): ${detail.slice(0, 500)}`,
@@ -271,10 +326,9 @@ export async function transcribeAudioFilesViaElevenLabs(
       if (index >= files.length) return;
       const file = files[index]!;
       try {
-        const text = (await transcribeOne(file)).trim();
-        results[index] = text
-          ? { text }
-          : { error: 'ElevenLabs transcription came back empty.' };
+        // An empty transcript is a real answer (a recording with no speech in it — music,
+        // silence), not a failure: the caller decides what an empty source means.
+        results[index] = { text: (await transcribeOne(file)).trim() };
       } catch (error) {
         results[index] = {
           error: error instanceof Error ? error.message : String(error),

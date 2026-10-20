@@ -137,7 +137,7 @@ export const SOCIAL_ARTWORK_HEIGHT = 1552;
  * opaque below (measured off footer-new-poster.png). Since 2026-10-16 the artwork runs down
  * behind those 43 rows, so what shows beside the pill is the poster itself rather than a strip of
  * generated fill; the 48px strip that remains sits under the band's solid white row. The prompt
- * keeps text above y=1488 (SOCIAL_ZONES in build-poster-prompt.ts), clear of the band's top
+ * keeps text above y=1440 (SOCIAL_ZONES in build-poster-prompt.ts), clear of the band's top
  * at y=1509.
  */
 export const SOCIAL_FOOTER_UNDERLAP = 43;

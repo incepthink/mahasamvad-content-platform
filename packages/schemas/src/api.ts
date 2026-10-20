@@ -701,10 +701,36 @@ export type FeedbackRegion = z.infer<typeof FeedbackRegionSchema>;
 // One numbered pointing gesture plus its instruction. A marker tells the model
 // WHERE the user is looking — the change applies to the element at/around it,
 // never "only inside the box".
-export const PosterFeedbackAnnotationSchema = z.object({
-  region: FeedbackRegionSchema,
-  note: z.string().trim().min(3).max(500),
-});
+//
+// `exactText` («हा मजकूर असा हवा») is the EXACT string the text in this box must
+// read — a misprinted number or a broken jodakshar. A marker carrying one is not
+// sent through the whole-poster edit at all: its box is cropped, enlarged and
+// repainted on its own against a typeset picture of the correct spelling (see
+// apps/api/src/jobs/exact-text-edit.ts). With an exact text the note may be
+// empty — the text says everything.
+export const POSTER_EXACT_TEXT_MAX_CHARS = 80;
+
+export const PosterFeedbackAnnotationSchema = z
+  .object({
+    region: FeedbackRegionSchema,
+    note: z.string().trim().max(500),
+    exactText: z
+      .string()
+      .trim()
+      .min(1)
+      .max(POSTER_EXACT_TEXT_MAX_CHARS)
+      .optional(),
+  })
+  .superRefine((a, ctx) => {
+    if (a.note.length < 3 && !a.exactText) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          'A marker needs a note of at least 3 characters or an exact text.',
+        path: ['note'],
+      });
+    }
+  });
 export type PosterFeedbackAnnotation = z.infer<
   typeof PosterFeedbackAnnotationSchema
 >;

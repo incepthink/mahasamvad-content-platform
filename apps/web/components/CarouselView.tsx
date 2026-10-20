@@ -402,6 +402,7 @@ function SlideEditor({
     addMarker,
     removeMarker,
     setNote,
+    setExactText,
     clearRegions,
     submittedClearRegions,
     addClearRegion,
@@ -540,6 +541,7 @@ function SlideEditor({
       <PosterImageFeedbackBox
         markers={markers}
         onNoteChange={setNote}
+        onExactTextChange={setExactText}
         onRemoveMarker={removeMarker}
         onOpenChange={(open) =>
           setAnnotMode((current) => (open ? (current ?? 'mark') : current))

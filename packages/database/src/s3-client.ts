@@ -75,6 +75,42 @@ export function getS3Client(): S3Client {
 // Test seam: drop the cached client so a changed env is picked up.
 export function resetS3Client(): void {
   cachedClient = undefined;
+  cachedBrowserUploadClient = undefined;
+}
+
+// The client used ONLY to SIGN the PUT URLs a browser uploads a recording through.
+//
+// Separate from getS3Client because the two sit in different places: the API runs beside the
+// buckets in us-east-2, where acceleration buys nothing, while the officers uploading are in
+// India, which is exactly the case S3_USE_ACCELERATE was measured on (a single connection to
+// the bucket is loss-limited to ~26 KiB/s; the accelerate endpoint fixed it). So the signed
+// URLs point at the s3-accelerate endpoint by DEFAULT. The buckets already have Transfer
+// Acceleration enabled; set S3_BROWSER_UPLOAD_ACCELERATE=false to sign against the regular
+// endpoint instead (and avoid the ~$0.04/GB acceleration charge).
+//
+// Signing is local — no request is made — so this client never opens a connection.
+let cachedBrowserUploadClient: S3Client | undefined;
+
+function useBrowserUploadAccelerate(): boolean {
+  return (
+    (process.env.S3_BROWSER_UPLOAD_ACCELERATE ?? 'true')
+      .trim()
+      .toLowerCase() !== 'false'
+  );
+}
+
+export function getBrowserUploadS3Client(): S3Client {
+  if (!cachedBrowserUploadClient) {
+    cachedBrowserUploadClient = new S3Client({
+      region: requireEnv('AWS_REGION'),
+      credentials: {
+        accessKeyId: requireEnv('AWS_ACCESS_KEY_ID'),
+        secretAccessKey: requireEnv('AWS_SECRET_ACCESS_KEY'),
+      },
+      useAccelerateEndpoint: useBrowserUploadAccelerate(),
+    });
+  }
+  return cachedBrowserUploadClient;
 }
 
 // Logical bucket name (as used in code) -> the env var holding its real S3 name.

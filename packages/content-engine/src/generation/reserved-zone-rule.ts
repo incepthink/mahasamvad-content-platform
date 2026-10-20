@@ -99,6 +99,16 @@ export function contentBottomY(g: ReservedZoneGeometry): number {
   return g.height - g.footerHeight;
 }
 
+/**
+ * The text-free bottom strip in ZONE language (2026-10-16): "the bottom strip, about one
+ * fourteenth of the poster's height". Prompting guides for gpt-image agree a named zone steers
+ * spacing far better than a pixel coordinate, which the model cannot measure — so the strip is
+ * stated as a proportion first and y= only as a supporting figure.
+ */
+export function textFreeStripPhrase(g: ReservedZoneGeometry): string {
+  return `the bottom strip of the poster — ${fractionOf(g.height - contentBottomY(g), g.height)} its height`;
+}
+
 /** Pixels at the bottom of an appended-lane artwork that the band overlaps (0 when none). */
 function footerUnderlapOf(g: ReservedZoneGeometry): number {
   return footerIsAppended(g) ? (g.footerUnderlap ?? 0) : 0;
@@ -184,8 +194,8 @@ export function fitToReserveRule(
   const consequence =
     underlap > 0
       ? [
-          `After you finish, software pastes an OPAQUE badge into the ${lockupCorner(g)} corner and a full-width branding band whose top part lies over the bottom ${underlap} pixels of this image, with a solid navy title pill in the middle of it. Any word, numeral, icon or face you place under the badge, or below y=${contentBottomY(g)}, is COVERED OR HALF-HIDDEN — the reader cannot read it, the sentence ends mid-word, and the whole image has to be thrown away.`,
-          `The background, colours and imagery must still run all the way down to the bottom edge — the band is partly see-through there, so the design shows through it. Only TEXT, numerals and icons stop above y=${contentBottomY(g)}.`,
+          `After you finish, software pastes an OPAQUE badge into the ${lockupCorner(g)} corner and a full-width branding band whose top part lies over the bottom ${underlap} pixels of this image, with a solid navy title pill in the middle of it. Any word, numeral, icon or face you place under the badge, or in ${textFreeStripPhrase(g)} (below y=${contentBottomY(g)}), is COVERED OR HALF-HIDDEN — the reader cannot read it, the sentence ends mid-word, and the whole image has to be thrown away.`,
+          `The background, colours and imagery must still run all the way down to the bottom edge — the band is partly see-through there, so the design shows through it. Only TEXT, numerals and icons stop above that strip.`,
           'Showing every point in SMALLER type is correct. Showing the same points in larger type with the last lines behind the footer band is wrong.',
         ]
       : footerIsAppended(g)
@@ -400,7 +410,7 @@ export function reservedZoneBlock(
         : `THE BOTTOM EDGE IS A JOIN, NOT A COVER ZONE: the official footer band is attached directly BELOW this image afterwards and takes NO space out of this canvas, so nothing has to be kept clear for it. DESIGN ALL THE WAY DOWN TO THE VERY BOTTOM EDGE: colour blocks, panels, bands, gradients, background and photographs must reach the last row of pixels and run off the edge, exactly as they do at the left and right edges.`;
     const textFloor =
       underlap > 0
-        ? `Keep only TEXT away from the very bottom: no words, numerals, captions, icons, logos, faces or other information below y=${contentBottomY(g)} — the bottom ${underlap} pixels are behind the footer band, and the ${g.footerAppendedMargin} pixels above them are a cushion so the final line is not jammed against it. The background, colour and imagery continue through all of it as normal.`
+        ? `BOTTOM TEXT-FREE STRIP: keep ${textFreeStripPhrase(g)} free of text — no words, numerals, captions, icons, logos, faces or other information in that strip (everything below y=${contentBottomY(g)}). Its lower part is behind the footer band and its upper part is a generous cushion so the final line sits well clear of the band, not just above it. Treat that strip as NOT AVAILABLE for text when you plan the layout — finish the last line of content above it, with visible space beneath. The background, colour and imagery continue through the whole strip as normal.`
         : `Keep only TEXT away from the very bottom: no words, numerals, captions, icons or logos below y=${contentBottomY(g)} — that last ${g.footerAppendedMargin} pixels is a thin typographic cushion so the final line is not jammed against the band, and the background, colour and imagery continue through it as normal.`;
     return [
       `RESERVED BADGE CORNER: the ${lockupCorner(g)} ${g.lockupWidth} x ${g.lockupHeight} pixels (a corner square ${fractionOf(g.lockupWidth, g.width)} the width) of the ${g.width} x ${g.height} output is reserved for an official badge composited on later by software.`,
@@ -455,7 +465,7 @@ if (
     lockupWidth: 180,
     lockupHeight: 170,
     footerHeight: 91,
-    footerAppendedMargin: 16,
+    footerAppendedMargin: 64,
     footerUnderlap: 48,
   };
   // The appended lane WITHOUT an underlap (the YouTube thumbnail shape): wording unchanged.
@@ -481,8 +491,10 @@ if (
     failures.push('thumbnail content floor drifted off y=650');
   // The appended floor is set by the MARGIN, not by the band height — getting this wrong is
   // how the poster would come back letterboxed above its own footer.
-  if (contentBottomY(SOCIAL) !== 1488)
-    failures.push('appended-footer content floor drifted off y=1488');
+  if (contentBottomY(SOCIAL) !== 1440)
+    failures.push('appended-footer content floor drifted off y=1440');
+  if (!textFreeStripPhrase(SOCIAL).includes('about one fourteenth of'))
+    failures.push('social text-free strip is no longer stated as a proportion');
   if (footerIsAppended(POSTER) || !footerIsAppended(SOCIAL))
     failures.push('footerIsAppended does not distinguish the two lanes');
 
@@ -749,8 +761,8 @@ if (
   );
   need(
     socialZones,
-    'Keep only TEXT away from the very bottom',
-    'appended lane treats the bottom margin as a background reserve, not a text cushion',
+    'BOTTOM TEXT-FREE STRIP',
+    'appended lane treats the bottom margin as a background reserve, not a text strip',
   );
   for (const wrong of [
     'calm, plain, even background',
@@ -762,8 +774,17 @@ if (
       'appended lane restored the wording that produced a flat empty band above the footer',
     );
   }
-  need(socialZones, '16 pixels', 'appended lane lost the text cushion');
-  need(socialZones, 'y=1488', 'appended lane content floor drifted');
+  need(
+    socialZones,
+    'free of text — no words',
+    'appended lane lost the text-free strip heading',
+  );
+  need(
+    socialZones,
+    'about one fourteenth of its height',
+    'appended lane does not state the text-free strip as a proportion',
+  );
+  need(socialZones, 'y=1440', 'appended lane content floor drifted');
   // The artwork canvas, not the 1600-tall finished poster. If this ever reads 1600 again the
   // model is being asked for a canvas the band is then joined below, and the delivered file
   // stops being 4:5 — which is the gap officers were closing by hand in Canva.
@@ -821,7 +842,12 @@ if (
     'Shrink the HEADLINE first',
     'social fit rule lost the action that resolves the conflict',
   );
-  need(socialFit, 'y=1488', 'social fit rule floor drifted');
+  need(socialFit, 'y=1440', 'social fit rule floor drifted');
+  need(
+    socialFit,
+    'the bottom strip of the poster',
+    'social fit rule does not name the text-free strip',
+  );
   // With the underlap the band DOES lie over the bottom of this canvas, so the consequence is
   // true again — and the design must still reach the edge, since it shows through the band.
   need(

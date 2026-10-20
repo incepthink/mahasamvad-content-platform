@@ -486,6 +486,16 @@ export const STR = {
       ? 'व्हिडिओतून आवाज काढत आहे…'
       : `व्हिडिओतून आवाज काढत आहे… ${Math.round(percent).toLocaleString('mr-IN')} %`,
   videoExtractedBadge: 'व्हिडिओमधून',
+  // A large recording (WAV, FLAC, high-bitrate MP3) shrunk to mono Opus before upload, so it
+  // uploads in a fraction of the time. Never an error: one that cannot be shrunk goes as picked.
+  audioCompressing: (percent: number | null) =>
+    percent === null
+      ? 'अपलोडसाठी आकार कमी करत आहे…'
+      : `अपलोडसाठी आकार कमी करत आहे… ${Math.round(percent).toLocaleString('mr-IN')} %`,
+  audioCompressedBadge: 'आकार कमी केला',
+  // The submit button's label while recordings upload straight to storage.
+  transcribeUploading: (percent: number) =>
+    `अपलोड करत आहे… ${Math.round(percent).toLocaleString('mr-IN')} %`,
   videoNoAudio: 'या व्हिडिओमध्ये आवाज नाही.',
   videoUnsupported:
     'हा व्हिडिओ या ब्राउझरमध्ये वेगळा करता आला नाही. कृपया Chrome किंवा Edge ची नवी आवृत्ती वापरा.',
@@ -1126,7 +1136,12 @@ export const STR = {
   markerLabel: 'खूण',
   markerNotePlaceholder: 'या जागी काय बदलायचे ते लिहा…',
   markerRemove: 'खूण काढा',
-  markerNoteTooShort: 'प्रत्येक खुणेसाठी थोडक्यात सूचना लिहा.',
+  markerNoteTooShort:
+    'प्रत्येक खुणेसाठी थोडक्यात सूचना लिहा, किंवा तिथला अचूक मजकूर द्या.',
+  // The exact-text field under a red mark (MarkerExactTextField).
+  markerExactTextLabel: 'हा मजकूर असा हवा',
+  markerExactTextPlaceholder:
+    'ऐच्छिक — आकडा/शब्द चुकला असल्यास अचूक मजकूर लिहा, उदा. ११',
   posterOverallNotePlaceholder: 'संपूर्ण पोस्टरसाठी अतिरिक्त सूचना (ऐच्छिक)…',
   markerReservedZoneWarning:
     'टीप: वरचा लोगो आणि खालची पट्टी नंतर सॉफ्टवेअरने छापली जाते — त्या भागात केलेले बदल दिसणार नाहीत.',
@@ -1228,6 +1243,10 @@ export const STR = {
   iconRecolourPoster: 'वेगळ्या रंगात तयार करा',
   iconEditPoster: 'चित्रात बदल करा (पोस्टरवर खूण करा)',
   iconEditPosterOn: 'खूण करणे बंद करा',
+  iconExpandPoster: 'पोस्टर मोठ्या आकारात उघडा',
+  posterExpandTitle: 'पोस्टरवर मोठ्या आकारात खुणा करा',
+  posterExpandHint:
+    'लाल पेन्सिल किंवा निळा चौकोन निवडा आणि पोस्टरवर ओढून खूण करा. इथे केलेल्या खुणा बंद केल्यावरही पोस्टरवर राहतात.',
   iconPublishDisabled: 'सध्या X वर पोस्ट करता येणार नाही',
   iconCopyCaption: 'कॅप्शन कॉपी करा',
   iconGenerateCaption: 'कॅप्शन तयार करा',
@@ -1685,6 +1704,8 @@ export const STR = {
   // been transcribed before, so nothing was re-run.
   transcribeCached: 'आधीच्या ध्वनिलेखनातून',
   transcribeFileFailed: 'हे ध्वनिमुद्रण उतरवता आले नाही',
+  transcribeNoSpeech:
+    'या ध्वनिमुद्रणात बोललेला मजकूर आढळला नाही. फाईलमध्ये भाषण आहे का ते तपासा.',
   transcribeEmpty: 'या ध्वनिमुद्रणातून मजकूर मिळाला नाही.',
   transcribeRecent: 'मागील ध्वनिलेखने',
   transcribeListEmpty: 'अद्याप कोणतेही ध्वनिलेखन नाही. वरून एक ध्वनिफीत जोडा.',

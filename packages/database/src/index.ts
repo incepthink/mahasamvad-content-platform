@@ -85,6 +85,8 @@ export {
   downloadFile,
   downloadFileRange,
   signedDownloadUrl,
+  signedUploadUrl,
+  storedObjectSize,
   removeObjects,
   removeObjectsIn,
 } from './storage.js';

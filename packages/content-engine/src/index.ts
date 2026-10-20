@@ -727,6 +727,13 @@ export {
   numberCorrectionBlock,
   numeralSpellingBlock,
 } from './generation/poster-numerals.js';
+// Exact-text red-box edits: the crop prompt, and the guard on a model-proposed exact text.
+export {
+  buildExactTextPrompt,
+  groundExactText,
+  aksharaSpelling,
+} from './generation/build-exact-text-prompt.js';
+export type { ExactTextPromptInput } from './generation/build-exact-text-prompt.js';
 // Step 1 of the Dynamic Poster lane (migration 0052): gpt-5.6-sol reads the officer's still
 // poster and writes the prompt gemini-omni renders the clip from. The measured resolution is
 // supplied to it as fact — see the header for why it is not asked for.

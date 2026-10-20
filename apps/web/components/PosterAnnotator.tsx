@@ -32,6 +32,8 @@ export type PosterMarkerDraft = {
   id: number;
   region: FeedbackRegion;
   note: string;
+  // «हा मजकूर असा हवा» — the exact text this spot must read ('' = none). Red marks only.
+  exactText: string;
 };
 
 // A marker's shape plus the ACTION, and two differences in meaning: `note` is
@@ -84,10 +86,22 @@ export function markerInZones(
 }
 
 // Click box: 16% of the poster width, height corrected by the displayed aspect
-// ratio so the box looks square. Drags below the minimum side collapse to this.
+// ratio so the box looks square. Only a true click (pointer barely moved) gets it.
+// Any real drag is kept as drawn, however small — a single misprinted digit or one
+// broken jodakshar is a few pixels wide — and a side thinner than MIN_DRAG_SIDE is
+// widened to it rather than replaced by the default box. MIN_DRAG_SIDE sits just
+// above FeedbackRegionSchema's 0.005 floor (~8px on the 1280px poster).
 const DEFAULT_BOX_WIDTH = 0.16;
-const MIN_DRAG_SIDE = 0.02;
-const CLICK_SLOP_PX = 6;
+const MIN_DRAG_SIDE = 0.006;
+const CLICK_SLOP_PX = 3;
+
+// Widen one axis of a dragged box to the minimum side, centred on the drag and
+// kept inside the poster.
+function widenAxis(start: number, size: number): [number, number] {
+  if (size >= MIN_DRAG_SIDE) return [start, size];
+  const centre = start + size / 2;
+  return [clamp(centre - MIN_DRAG_SIDE / 2, 0, 1 - MIN_DRAG_SIDE), MIN_DRAG_SIDE];
+}
 
 type Draft = {
   startX: number;
@@ -208,15 +222,15 @@ export function PosterAnnotator({
       add(defaultBox(x, y, aspect));
       return;
     }
-    const rx = Math.min(draft.startX, x);
-    const ry = Math.min(draft.startY, y);
-    const rw = Math.abs(x - draft.startX);
-    const rh = Math.abs(y - draft.startY);
-    add(
-      rw < MIN_DRAG_SIDE || rh < MIN_DRAG_SIDE
-        ? defaultBox(x, y, aspect)
-        : { x: rx, y: ry, width: rw, height: rh },
+    const [rx, rw] = widenAxis(
+      Math.min(draft.startX, x),
+      Math.abs(x - draft.startX),
     );
+    const [ry, rh] = widenAxis(
+      Math.min(draft.startY, y),
+      Math.abs(y - draft.startY),
+    );
+    add({ x: rx, y: ry, width: rw, height: rh });
   };
 
   return (

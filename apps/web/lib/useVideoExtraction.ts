@@ -21,14 +21,17 @@
 // Worker cannot be built, by a dynamic import), so no page bundle carries it.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Film } from 'lucide-react';
+import { Film, Minimize2 } from 'lucide-react';
 import { needsAudioExtraction } from '@dgipr/schemas';
 import type { AttachmentItem } from '@/components/common/AttachmentStrip';
 import type {
   ExtractedRecording,
   RecordingExtractionErrorCode,
 } from './extractRecordingAudio';
-import type { ExtractionWorkerMessage } from './extractRecordingAudio.worker';
+import type {
+  ExtractionWorkerMessage,
+  ExtractionWorkerMode,
+} from './extractRecordingAudio.worker';
 import { STR } from './strings';
 
 // ---------- which picks need the extraction ----------
@@ -48,19 +51,23 @@ export function splitRecordingPicks(picked: readonly File[]): {
   return { audio, videos };
 }
 
-// ---------- the "from a video" badge ----------
+// ---------- the "from a video" / "shrunk" badges ----------
 
 const fromVideo = new WeakSet<File>();
+// Recordings shrunk before upload (`compress` mode) — badged so `meeting.wav` turning into
+// `meeting.webm` reads as intended rather than as a bug.
+const compressed = new WeakSet<File>();
 
 export function wasExtractedFromVideo(file: File): boolean {
   return fromVideo.has(file);
 }
 
-// A recording card's second line, badged when the file was made from a video.
+// A recording card's second line, badged when the file was made from a video or shrunk.
 export function recordingCardMeta(file: File, meta: string): string {
-  return wasExtractedFromVideo(file)
-    ? `${STR.videoExtractedBadge} · ${meta}`
-    : meta;
+  if (wasExtractedFromVideo(file))
+    return `${STR.videoExtractedBadge} · ${meta}`;
+  if (compressed.has(file)) return `${STR.audioCompressedBadge} · ${meta}`;
+  return meta;
 }
 
 // ---------- the failure the officer is told about ----------
@@ -94,11 +101,17 @@ let queue: Promise<void> = Promise.resolve();
 async function runOnMainThread(
   file: File,
   onProgress: (fraction: number) => void,
+  mode: ExtractionWorkerMode,
 ): Promise<ExtractedRecording> {
-  const { extractRecordingAudio, RecordingExtractionError } =
-    await import('./extractRecordingAudio');
+  const {
+    compressRecordingAudio,
+    extractRecordingAudio,
+    RecordingExtractionError,
+  } = await import('./extractRecordingAudio');
   try {
-    return await extractRecordingAudio(file, { onProgress });
+    return mode === 'compress'
+      ? await compressRecordingAudio(file, { onProgress })
+      : await extractRecordingAudio(file, { onProgress });
   } catch (error) {
     if (error instanceof RecordingExtractionError) {
       throw new VideoExtractionFailure(error.code, error.message);
@@ -111,8 +124,11 @@ function runInWorker(
   file: File,
   onProgress: (fraction: number) => void,
   signal: AbortSignal | undefined,
+  mode: ExtractionWorkerMode,
 ): Promise<ExtractedRecording> {
-  if (typeof Worker === 'undefined') return runOnMainThread(file, onProgress);
+  if (typeof Worker === 'undefined') {
+    return runOnMainThread(file, onProgress, mode);
+  }
   return new Promise((resolve, reject) => {
     const worker = new Worker(
       new URL('./extractRecordingAudio.worker.ts', import.meta.url),
@@ -146,9 +162,9 @@ function runInWorker(
     worker.onerror = (event) => {
       event.preventDefault();
       finish();
-      runOnMainThread(file, onProgress).then(resolve, reject);
+      runOnMainThread(file, onProgress, mode).then(resolve, reject);
     };
-    worker.postMessage({ file });
+    worker.postMessage({ file, mode });
   });
 }
 
@@ -161,9 +177,12 @@ export function runRecordingExtraction(
   {
     onProgress = () => undefined,
     signal,
+    mode = 'extract',
   }: {
     onProgress?: ((fraction: number) => void) | undefined;
     signal?: AbortSignal | undefined;
+    // `compress` shrinks a large AUDIO recording instead (see compressRecordingAudio).
+    mode?: ExtractionWorkerMode | undefined;
   } = {},
 ): Promise<ExtractedRecording> {
   return new Promise((resolve, reject) => {
@@ -174,8 +193,10 @@ export function runRecordingExtraction(
         return;
       }
       try {
-        const result = await runInWorker(file, onProgress, signal);
-        if (result.method !== 'passthrough') fromVideo.add(result.file);
+        const result = await runInWorker(file, onProgress, signal, mode);
+        if (result.method !== 'passthrough') {
+          (mode === 'compress' ? compressed : fromVideo).add(result.file);
+        }
         resolve(result);
       } catch (error) {
         reject(error);
@@ -189,6 +210,7 @@ export function runRecordingExtraction(
 
 export type VideoExtractionJob = Readonly<{
   id: string;
+  mode: ExtractionWorkerMode;
   sourceName: string;
   sizeBytes: number;
   // 0..1 once the worker reports; null while it is queued or probing.
@@ -204,7 +226,12 @@ export function useVideoExtraction(onReady: (file: File) => void): {
   // An extraction is still running or queued: the composer's send waits for it.
   busy: boolean;
   // Resolves with the files that were extracted, after every one of them has settled.
-  start: (files: readonly File[]) => Promise<File[]>;
+  // `compress` jobs never end in an error card: a recording that cannot be shrunk is handed
+  // to `onReady` exactly as it was picked.
+  start: (
+    files: readonly File[],
+    mode?: ExtractionWorkerMode,
+  ) => Promise<File[]>;
   remove: (id: string) => void;
   items: AttachmentItem[];
 } {
@@ -233,12 +260,16 @@ export function useVideoExtraction(onReady: (file: File) => void): {
   );
 
   const start = useCallback(
-    (files: readonly File[]): Promise<File[]> => {
+    (
+      files: readonly File[],
+      mode: ExtractionWorkerMode = 'extract',
+    ): Promise<File[]> => {
       if (files.length === 0) return Promise.resolve([]);
       const made = files.map((file) => {
         nextJobId += 1;
         return {
           id: `video-${nextJobId}`,
+          mode,
           sourceName: file.name,
           sizeBytes: file.size,
           fraction: null,
@@ -254,12 +285,21 @@ export function useVideoExtraction(onReady: (file: File) => void): {
           try {
             const result = await runRecordingExtraction(files[index]!, {
               signal: controller.signal,
+              mode,
               onProgress: (fraction) => update(job.id, { fraction }),
             });
             setJobs((current) => current.filter((item) => item.id !== job.id));
             onReadyRef.current(result.file);
             return result.file;
           } catch (error) {
+            // Shrinking is an optimisation: when it fails the recording goes up as picked.
+            if (mode === 'compress' && !isAbort(error)) {
+              setJobs((current) =>
+                current.filter((item) => item.id !== job.id),
+              );
+              onReadyRef.current(files[index]!);
+              return files[index]!;
+            }
             if (!isAbort(error)) {
               update(job.id, {
                 error:
@@ -287,12 +327,14 @@ export function useVideoExtraction(onReady: (file: File) => void): {
   const items: AttachmentItem[] = jobs.map((job) => ({
     id: job.id,
     name: job.sourceName,
-    icon: Film,
+    icon: job.mode === 'compress' ? Minimize2 : Film,
     // The percentage and nothing else: the card is 240px wide and truncates, and the one
     // thing it must never cut off is how far along the conversion is.
     meta:
       job.error ??
-      STR.videoExtracting(job.fraction === null ? null : job.fraction * 100),
+      (job.mode === 'compress' ? STR.audioCompressing : STR.videoExtracting)(
+        job.fraction === null ? null : job.fraction * 100,
+      ),
     busy: job.error === null,
     failed: job.error !== null,
     removeLabel: `${STR.dloRemoveAudio}: ${job.sourceName}`,

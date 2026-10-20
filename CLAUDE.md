@@ -296,6 +296,19 @@ AudioTrimDialog.tsx` + `AudioTrimRange.tsx` over `lib/audioWaveform.ts` and `lib
   No raw-video fallback: a browser that can neither copy nor encode gets a Marathi
   "use Chrome/Edge". Free harness (from content-engine, which has tsx + ffmpeg-static):
   `npx tsx --tsconfig ../../apps/web/tsconfig.check.json ../../apps/web/lib/extractRecordingAudio.check.ts`.
+- **/transcribe uploads go STRAIGHT TO S3, shrunk first (2026-10-16, no migration).** Picking a
+  large recording (≥8 MiB, >192 kbps — WAV/FLAC/high-bitrate MP3) shrinks it to mono 48 kbps Opus
+  `.webm` in the video-extraction worker (`compressRecordingAudio`, `mode: 'compress'` on
+  `useVideoExtraction`; never an error — anything not worth it or not encodable goes as picked;
+  pre-check in `lib/recordingCompression.ts`, kept mediabunny-free). Submit runs
+  `lib/transcriptionUpload.ts`: `POST /api/transcriptions/uploads` signs one PUT per file
+  (`signedUploadUrl`, Content-Type AND Content-Length signed, accelerate endpoint via
+  `getBrowserUploadS3Client`), the browser PUTs them with progress, then `POST /api/transcriptions`
+  with a JSON body creates the run after checking each path is the issued one and exists
+  (`storedObjectSize`). ANY failure before that (no bucket CORS, old API) falls back to the
+  original multipart POST, which is unchanged. Bucket CORS: `storage:apply-upload-cors`; live
+  check: `storage:check-direct-upload`. ElevenLabs concurrency default is now 5, and a 429 waits
+  for a slot (`rateLimitDelayMs`, its own budget) instead of failing the recording.
 - **Transcription (`/transcribe`) — recordings in, Marathi text out, nothing else.** The DLO
   intake job's transcribe phase as a product of its own: routes →
   `apps/api/src/routes/transcriptions.ts` (create/list/detail only — no review contract, no
@@ -2031,6 +2044,18 @@ Chromium): `pnpm --filter @dgipr/poster-renderer exec playwright install chromiu
   feedback rounds, is OCR-read back (`apps/api/src/jobs/poster-numeral-check.ts`). A number not
   in the source becomes `posterNumeralWarning`, which only warns and never re-renders. Never put
   a Devanagari digit or a Latin numeral into a rule block; use English digit names.
+- **Exact-text red-box edits (2026-10-16)**: a red mark may carry «हा मजकूर असा हवा»
+  (`exactText`, ≤80 chars, `PosterFeedbackAnnotationSchema`; with it the note may be empty). Such
+  a mark skips the whole-poster edit: `apps/api/src/jobs/exact-text-edit.ts` crops the box + ~40%
+  padding, enlarges it to ~1M px (aspect ≤3, multiples of 16), sends it to `editImage` with a
+  Chromium/Mukta-typeset SPELLING picture (`renderSpellingReference`) and the short
+  `buildExactTextPrompt`, and lays it back with a feather confined to the padding
+  (`poster-renderer/src/crop-region.ts`). Cut from the un-branded copy when one exists, then the
+  lane's chrome is re-stamped. A round of exact-text marks alone makes no whole-poster call; a
+  mixed round edits the poster first, then the crops. The interpreter and the edit assistant may
+  PROPOSE an exact text, accepted only when it occurs verbatim in the officer's words
+  (`groundExactText`). Social, article, thumbnail and carousel slides. Free harnesses:
+  `npx tsx src/crop-region.ts` (poster-renderer), `npx tsx src/generation/build-exact-text-prompt.ts`.
 - **The social footer is APPENDED below the artwork (2026-08-10), so it can never cover text.**
   `overlayTwitterChrome` no longer pastes the band over the render: `footer-extension.ts` adds a
   strip below it and the band is stamped there.

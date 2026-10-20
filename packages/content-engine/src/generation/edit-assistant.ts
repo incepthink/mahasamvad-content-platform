@@ -34,6 +34,7 @@ import { POSTER_HEADING_MAX_CHARS } from '@dgipr/schemas';
 import { chatComplete, type ReasoningEffort } from './openai-chat.js';
 import { POSTER_COPY_MODEL } from './classify-poster-type.js';
 import { digitsAreGrounded } from './digit-grounding.js';
+import { groundExactText } from './build-exact-text-prompt.js';
 
 export const EDIT_ASSISTANT_MODEL =
   process.env.OPENAI_EDIT_ASSISTANT_MODEL?.trim() || POSTER_COPY_MODEL;
@@ -75,7 +76,8 @@ export type EditAssistantContext = Readonly<{
     changeHeading: boolean;
   }>;
   busy: Readonly<{ caption: boolean; poster: boolean }>;
-  markers: readonly Readonly<{ note: string }>[];
+  // `exactText` is what the officer typed in «हा मजकूर असा हवा» ('' when nothing); it wins.
+  markers: readonly Readonly<{ note: string; exactText?: string }>[];
   clearRegions: readonly Readonly<{
     action: PosterClearAction;
     note: string;
@@ -92,6 +94,7 @@ export type RawEditPlan = Readonly<{
   poster_action: 'none' | 'edit' | 'redesign' | 'heading';
   poster_instruction: string;
   marker_notes: readonly string[];
+  marker_exact_texts: readonly string[];
   poster_heading: string;
 }>;
 
@@ -106,6 +109,7 @@ const PLAN_SCHEMA = {
     'poster_action',
     'poster_instruction',
     'marker_notes',
+    'marker_exact_texts',
     'poster_heading',
   ],
   properties: {
@@ -119,6 +123,7 @@ const PLAN_SCHEMA = {
     },
     poster_instruction: { type: 'string' },
     marker_notes: { type: 'array', items: { type: 'string' } },
+    marker_exact_texts: { type: 'array', items: { type: 'string' } },
     poster_heading: { type: 'string' },
   },
 } as const;
@@ -160,7 +165,7 @@ const SYSTEM_PROMPT = [
   'ACTIONS (use only those listed as available in CURRENT STATE):',
   '- caption_action "revise": change the existing caption (length, tone, wording, hashtags, emoji, order, adding or removing a line, numerals written in Marathi/English script, etc.). Write caption_instruction as ONE complete, self-contained instruction that folds in everything from the conversation that still applies (e.g. an earlier "make it shorter" plus the latest "add the helpline hashtag").',
   '- caption_action "generate": write a first caption. Only when the run has no caption and the officer asks for one.',
-  '- poster_action "edit": change something on the existing poster image while keeping the rest — its text, a photo or picture, colours, sizes, an element to add, remove or move. Write poster_instruction as ONE complete, self-contained instruction. If the officer has put numbered red marks on the poster (listed in CURRENT STATE), write marker_notes with exactly one note per mark, in order, saying what should change at that mark, using what the officer said about it; otherwise marker_notes is an empty array. Blue lettered boxes mean "free this space" and need nothing from you.',
+  '- poster_action "edit": change something on the existing poster image while keeping the rest — its text, a photo or picture, colours, sizes, an element to add, remove or move. Write poster_instruction as ONE complete, self-contained instruction. If the officer has put numbered red marks on the poster (listed in CURRENT STATE), write marker_notes with exactly one note per mark, in order, saying what should change at that mark, using what the officer said about it; otherwise marker_notes is an empty array. Also write marker_exact_texts with exactly one entry per red mark, in order: when the officer has said what the text at that mark must READ — a corrected number or word, e.g. "९९ ऐवजी ११" means it must read ११ — copy that exact string from their words; otherwise "". Never write a string the officer did not type. Blue lettered boxes mean "free this space" and need nothing from you.',
   '- poster_action "redesign": a completely new design of the same content, when the officer wants a different poster altogether ("पूर्ण नवीन डिझाइन", "पुन्हा तयार करा", "हे आवडले नाही, दुसरे करा") rather than a specific change. A specific change is always "edit".',
   '- poster_action "heading": article posters only — print exactly the words the officer supplied as the poster\'s text. poster_heading must be those exact words, copied character for character from the conversation.',
   'When the officer asks for changes to both the caption and the poster, do both.',
@@ -202,7 +207,7 @@ export function buildEditAssistantMessages(
   const marks: string[] = [];
   context.markers.forEach((m, i) =>
     marks.push(
-      `red mark ${i + 1}: ${m.note ? `officer's note "${m.note}"` : 'no note yet'}`,
+      `red mark ${i + 1}: ${m.note ? `officer's note "${m.note}"` : 'no note yet'}${m.exactText ? `; must read exactly "${m.exactText}"` : ''}`,
     ),
   );
   context.clearRegions.forEach((c, i) =>
@@ -272,6 +277,9 @@ export function parseRawEditPlan(raw: string): RawEditPlan | null {
     poster_instruction: str('poster_instruction'),
     marker_notes: Array.isArray(v.marker_notes)
       ? v.marker_notes.filter((n): n is string => typeof n === 'string')
+      : [],
+    marker_exact_texts: Array.isArray(v.marker_exact_texts)
+      ? v.marker_exact_texts.map((n) => (typeof n === 'string' ? n : ''))
       : [],
     poster_heading: str('poster_heading'),
   };
@@ -390,8 +398,20 @@ export function finalizeEditPlan(
         (hasMarks && raw.poster_instruction.trim() === ''
           ? ''
           : truncate(fallbackInstruction, INSTRUCTION_MAX_CHARS));
+      // The officer's own exact text wins; a proposed one must be words they typed.
+      const markerExactTexts = context.markers.map((marker, i) => {
+        const own = marker.exactText?.trim() ?? '';
+        if (own) return own;
+        return groundExactText(raw.marker_exact_texts[i] ?? '', [
+          ...userTurns,
+          marker.note,
+        ]);
+      });
       const markerNotes = context.markers.map((marker, i) => {
         const own = marker.note.trim();
+        // A mark with an exact text needs no note — the text says what to change.
+        if (own.length < MIN_INSTRUCTION_CHARS && markerExactTexts[i])
+          return own;
         if (own.length >= MIN_INSTRUCTION_CHARS) return own;
         const proposed = usable(
           raw.marker_notes[i] ?? '',
@@ -412,9 +432,16 @@ export function finalizeEditPlan(
         context.clearRegions.length > 0;
       if (
         sendable &&
-        markerNotes.every((n) => n.length >= MIN_INSTRUCTION_CHARS)
+        markerNotes.every(
+          (n, i) => n.length >= MIN_INSTRUCTION_CHARS || markerExactTexts[i],
+        )
       ) {
-        actions.push({ type: 'poster_edit', instruction, markerNotes });
+        actions.push({
+          type: 'poster_edit',
+          instruction,
+          markerNotes,
+          markerExactTexts,
+        });
       } else {
         notes.push(EDIT_ASSISTANT_TEXT.clarify);
       }
@@ -547,6 +574,7 @@ async function main(): Promise<void> {
     poster_action: 'none',
     poster_instruction: '',
     marker_notes: [],
+    marker_exact_texts: [],
     poster_heading: '',
     ...over,
   });
@@ -735,6 +763,39 @@ async function main(): Promise<void> {
         'a blank mark with no usable model note falls back to the officer’s words',
         action?.type === 'poster_edit' &&
           action.markerNotes[0] === 'ही खूण मोठी कर',
+        plan,
+      );
+    }
+    {
+      const plan = finalizeEditPlan(
+        raw({
+          poster_action: 'edit',
+          marker_notes: ['आकडा दुरुस्त करा', 'शब्द दुरुस्त करा'],
+          marker_exact_texts: ['११', '१२'],
+        }),
+        { ...social, markers: [{ note: '' }, { note: '' }] },
+        say('पहिल्या खुणेवर ९९ ऐवजी ११ करा, दुसऱ्यावरही आकडा बदला'),
+      );
+      const action = plan.actions[0];
+      check(
+        'exact text: one the officer typed is kept, an invented one is dropped',
+        action?.type === 'poster_edit' &&
+          action.markerExactTexts[0] === '११' &&
+          action.markerExactTexts[1] === '',
+        plan,
+      );
+    }
+    {
+      const plan = finalizeEditPlan(
+        raw({ poster_action: 'edit', marker_exact_texts: ['९९'] }),
+        { ...social, markers: [{ note: '', exactText: 'इलेक्ट्रॉनिक्स' }] },
+        say('हा शब्द दुरुस्त कर'),
+      );
+      const action = plan.actions[0];
+      check(
+        'exact text: the officer’s own field wins, and the mark needs no note',
+        action?.type === 'poster_edit' &&
+          action.markerExactTexts[0] === 'इलेक्ट्रॉनिक्स',
         plan,
       );
     }

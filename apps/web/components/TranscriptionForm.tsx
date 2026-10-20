@@ -30,7 +30,8 @@ import {
   TRANSCRIPTION_MAX_FILES,
   type YouTubeVideo,
 } from '@dgipr/schemas';
-import { createTranscription } from '../lib/api';
+import { uploadTranscription } from '../lib/transcriptionUpload';
+import { splitCompressible } from '../lib/recordingCompression';
 import { acceptFilePicks } from '../lib/filePicks';
 import { consumeSharedAudio, takeShareParams } from '../lib/sharedAudio';
 import {
@@ -56,6 +57,9 @@ export function TranscriptionForm({
   const [youtube, setYoutube] = useState<readonly YouTubeVideo[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // 0..100 while recordings upload straight to storage; null otherwise (including the
+  // multipart fallback, which cannot report progress).
+  const [uploadPercent, setUploadPercent] = useState<number | null>(null);
   // Which part of each recording the officer chose on the trim slider (lib/useAudioTrims).
   // Keyed on the picked `File`, so it is deliberately not persisted anywhere: a reload cannot
   // bring those objects back, and a restored window would belong to a recording that is gone.
@@ -84,10 +88,15 @@ export function TranscriptionForm({
   // uploaded.
   const extraction = useVideoExtraction((file) => acceptRecordings([file]));
 
+  // A large recording (WAV, FLAC, high-bitrate MP3) is shrunk to mono Opus in the same worker
+  // while the officer carries on, so the upload is a fraction of the size. One that is not
+  // worth shrinking — or cannot be — joins the list exactly as picked.
   const pickRecordings = (picked: readonly File[]) => {
     const { audio, videos } = splitRecordingPicks(picked);
-    if (audio.length > 0) acceptRecordings(audio);
+    const { asIs, compress } = splitCompressible(audio);
+    if (asIs.length > 0) acceptRecordings(asIs);
     void extraction.start(videos);
+    void extraction.start(compress, 'compress');
   };
 
   const submitSources = async (
@@ -101,20 +110,16 @@ export function TranscriptionForm({
     setSubmitting(true);
     setError(null);
     try {
-      const form = new FormData();
-      for (const file of selectedFiles) {
-        form.append('files', file, file.name);
-      }
-      // The chosen windows, keyed by position among the recordings just appended. Omitted
-      // entirely when nothing was trimmed, which is what keeps an ordinary run's request
-      // byte-for-byte what it was.
+      // The chosen windows, keyed by position among the recordings. Empty when nothing was
+      // trimmed, which is what keeps an ordinary run's request what it was.
       const trimField = audioTrims.fieldValue(selectedFiles);
-      if (trimField !== null) form.append('audioTrims', trimField);
-      // Links, not bytes — nothing about the video travels in this request.
-      if (selectedYoutube.length > 0) {
-        form.append('youtube', JSON.stringify(selectedYoutube));
-      }
-      const id = await createTranscription(form);
+      // Straight to S3 when it can, the multipart upload otherwise (lib/transcriptionUpload).
+      const id = await uploadTranscription({
+        files: selectedFiles,
+        audioTrims: trimField === null ? [] : JSON.parse(trimField),
+        youtube: selectedYoutube,
+        onProgress: (fraction) => setUploadPercent(fraction * 100),
+      });
       // The run owns these sources now, so both lists are emptied — otherwise the next
       // submit would silently transcribe (and archive) the same ones again.
       setFiles([]);
@@ -125,6 +130,7 @@ export function TranscriptionForm({
       setError(errorMessage(e));
     } finally {
       setSubmitting(false);
+      setUploadPercent(null);
     }
   };
 
@@ -168,9 +174,15 @@ export function TranscriptionForm({
           setError(STR.dloFileTypeError);
           return;
         }
-        setFiles(accepted);
-        const extracted = await extraction.start(videos);
-        const ready = [...accepted, ...extracted].slice(
+        // A shared phone recording is shrunk too where it pays off — on mobile data that is
+        // where the saving matters most.
+        const { asIs, compress } = splitCompressible(accepted);
+        setFiles(asIs);
+        const [extracted, shrunk] = await Promise.all([
+          extraction.start(videos),
+          extraction.start(compress, 'compress'),
+        ]);
+        const ready = [...asIs, ...shrunk, ...extracted].slice(
           0,
           TRANSCRIPTION_MAX_FILES,
         );
@@ -206,7 +218,13 @@ export function TranscriptionForm({
       onYoutubeChange={setYoutube}
       onError={setError}
       error={error}
-      submitLabel={submitting ? STR.submitting : STR.transcribeSubmit}
+      submitLabel={
+        uploadPercent !== null
+          ? STR.transcribeUploading(uploadPercent)
+          : submitting
+            ? STR.submitting
+            : STR.transcribeSubmit
+      }
       canSubmit={files.length > 0 || youtube.length > 0}
       submitBusy={submitting || busy}
       onSubmit={submit}

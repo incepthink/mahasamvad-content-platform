@@ -71,6 +71,7 @@ import {
   runInCostTask,
   translateArticle,
   type ArticleDesignMode,
+  type ImageKind,
   type ImageQuality,
   type PaletteFamily,
   type PosterDesignMode,
@@ -99,10 +100,12 @@ import {
   headStrings,
   measurePosterColours,
   overlayArticleChrome,
+  imageSize,
   overlayCmoChrome,
   overlayTwitterChrome,
   runWithImageModel,
 } from '@dgipr/poster-renderer';
+import { applyExactTextEdits, type ExactTextMark } from './exact-text-edit.js';
 import {
   addGenerationCost,
   findGlossaryTermsInText,
@@ -3690,8 +3693,25 @@ export function startPosterImageFeedbackJob(
       error: null,
     });
 
-    const annotations = input.annotations ?? [];
+    const allAnnotations = input.annotations ?? [];
     const clearRegions = input.clearRegions ?? [];
+    // A red mark whose exact text the officer typed («हा मजकूर असा हवा») never goes through
+    // the whole-poster edit: its box is cropped, enlarged and corrected on its own afterwards
+    // (exact-text-edit.ts), so a few-pixel digit is drawn large against a typeset picture of the
+    // right spelling, and nothing else on the poster is repainted. The rest of the round —
+    // other marks, blue boxes, free text — takes the whole-poster path below as before.
+    const annotations = allAnnotations.filter((a) => !a.exactText);
+    const cropMarks: ExactTextMark[] = allAnnotations.flatMap((a) =>
+      a.exactText
+        ? [{ region: a.region, exactText: a.exactText, note: a.note }]
+        : [],
+    );
+    // A round of exact-text marks alone skips the whole-poster edit entirely — faster and
+    // cheaper, and the rest of the poster stays pixel-identical.
+    const wholeEdit =
+      annotations.length > 0 ||
+      clearRegions.length > 0 ||
+      Boolean(input.feedback);
     // Draw order, which is the order annotateFeedbackRegions paints the A/B badges,
     // so the letters in the prompt and the letters in the image always agree.
     const clearActions: readonly PosterClearAction[] = clearRegions.map(
@@ -3723,8 +3743,23 @@ export function startPosterImageFeedbackJob(
     let inputImage: string | Buffer =
       socialPoster ?? publicUrl(client, row.posterPath);
     let feedbackText = input.feedback ?? '';
-    // Revision history keeps the user's own words, never the machine text.
-    let historyFeedback = feedbackText;
+    // Revision history keeps the user's own words, never the machine text — numbered as the
+    // officer drew the marks, with the exact text each one asked for.
+    const historyFeedback = [
+      ...allAnnotations.map(
+        (a, i) =>
+          `[${i + 1}] ${a.note}` +
+          (a.exactText ? `${a.note ? ' ' : ''}→ «${a.exactText}»` : ''),
+      ),
+      // A clear box may carry no note at all, so the gesture itself is what is recorded —
+      // otherwise the history row for such a round would be empty.
+      ...clearRegions.map(
+        (c, i) =>
+          `[${CLEAR_REGION_LETTERS[i] ?? i + 1}] ${STR_CLEAR_SPACE_HISTORY[c.action]}` +
+          (c.note ? ` — ${c.note}` : ''),
+      ),
+      ...(input.feedback ? [input.feedback] : []),
+    ].join('\n');
     // Only a displace produces one (see interpretImageFeedback); best-effort either way.
     let contentInventory: readonly string[] = [];
 
@@ -3761,6 +3796,15 @@ export function startPosterImageFeedbackJob(
         socialLockup: logoStyle ? socialChromeFor(logoStyle).lockup : undefined,
       });
       contentInventory = interpreted.contentInventory;
+      // The interpreter names the exact text a mark's note asks for ("९९ ऐवजी ११"), grounded in
+      // the officer's own words. Such a mark ALSO gets the crop pass on the edited result: the
+      // whole-poster edit may already have drawn it right, and if not, the crop fixes it.
+      annotations.forEach((a, i) => {
+        const exactText = interpreted.exactTexts[i];
+        if (exactText) {
+          cropMarks.push({ region: a.region, exactText, note: a.note });
+        }
+      });
       console.log(
         `[job ${id}] marker feedback (${interpreted.source}; clear=${
           clearActions.join('+') || 'none'
@@ -3783,24 +3827,58 @@ export function startPosterImageFeedbackJob(
           `[job ${id}] the interpreter dropped a number the officer typed — their words were appended`,
         );
       }
-      historyFeedback = [
-        ...annotations.map((a, i) => `[${i + 1}] ${a.note}`),
-        // A clear box may carry no note at all, so the gesture itself is what is
-        // recorded — otherwise the history row for such a round would be empty.
-        ...clearRegions.map(
-          (c, i) =>
-            `[${CLEAR_REGION_LETTERS[i] ?? i + 1}] ${STR_CLEAR_SPACE_HISTORY[c.action]}` +
-            (c.note ? ` — ${c.note}` : ''),
-        ),
-        ...(input.feedback ? [input.feedback] : []),
-      ].join('\n');
     }
+
+    // CMO re-composites the SAME cached circle photo so a visual/text edit never swaps
+    // the photograph (the workflow leaves the circle zone quiet on feedback too).
+    const cmoPhoto =
+      isSocialCategory(row.category) && row.templateBrand === 'cmo'
+        ? await downloadPng(client, cmoPhotoPath(id))
+        : undefined;
+    // The lane's chrome stamp, used again after the exact-text crops. On un-branded artwork it
+    // puts the chrome on; on a finished poster each stamp recognises it and re-stamps in place.
+    const stampChrome = (png: Buffer): Promise<Buffer> => {
+      if (isYoutubeCategory(row.category)) return overlayYoutubeChrome(png);
+      if (!isSocialCategory(row.category)) return overlayArticleChrome(png);
+      if (row.templateBrand !== 'cmo') {
+        return overlayTwitterChrome(png, { logoStyle });
+      }
+      if (!cmoPhoto) {
+        throw new Error('CMO re-stamp requires the cached circle photo.');
+      }
+      return overlayCmoChrome(png, cmoPhoto);
+    };
+    const costKind: ImageKind = isYoutubeCategory(row.category)
+      ? 'youtube'
+      : isSocialCategory(row.category)
+        ? 'twitter'
+        : 'article';
 
     let posterPng: Buffer;
     // The same edit before its chrome is stamped back on, kept for the un-branded download.
     // Left undefined on the थंबनेल lane, which has no plain download.
     let rawPoster: Buffer | undefined;
-    if (isYoutubeCategory(row.category)) {
+    // The thumbnail's artwork before its chrome. Not stored (that lane keeps no plain copy);
+    // held only so the exact-text crops are cut from un-branded pixels.
+    let chromeFree: Buffer | undefined;
+    if (!wholeEdit) {
+      // Exact-text marks only: no whole-poster edit at all. The crops are cut from this
+      // version's un-branded copy when it has one (renders before 2026-09-03 do not), else from
+      // the finished poster, whose chrome is then re-stamped in place.
+      posterPng = socialPoster ?? (await downloadPng(client, row.posterPath));
+      const plainPath = isYoutubeCategory(row.category)
+        ? null
+        : plainPathForPoster(row.posterPath);
+      if (plainPath) {
+        try {
+          rawPoster = await downloadPng(client, plainPath);
+        } catch {
+          console.log(
+            `[job ${id}] no un-branded copy of this poster; correcting the finished one`,
+          );
+        }
+      }
+    } else if (isYoutubeCategory(row.category)) {
       // Thumbnail lane: edit the CURRENT thumbnail directly (no n8n). The marker and
       // clear-space semantics are the shared ones — clearSpaceRule is the same block
       // all three lanes get — so a gesture the officer drew means the same thing here.
@@ -3826,16 +3904,9 @@ export function startPosterImageFeedbackJob(
         size: '1280x720',
       });
       recordImageCost('youtube', imageQuality());
-      posterPng = await overlayYoutubeChrome(
-        await fitToYoutubeThumbnail(edited),
-      );
+      chromeFree = await fitToYoutubeThumbnail(edited);
+      posterPng = await overlayYoutubeChrome(chromeFree);
     } else if (isSocialCategory(row.category)) {
-      // CMO re-composites the SAME cached circle photo so a visual/text edit never swaps
-      // the photograph (the workflow leaves the circle zone quiet on feedback too).
-      const cmoPhoto =
-        row.templateBrand === 'cmo'
-          ? await downloadPng(client, cmoPhotoPath(id))
-          : undefined;
       const rendered = await renderSocialPosterFeedbackEdit(
         inputImage,
         feedbackText,
@@ -3872,6 +3943,26 @@ export function startPosterImageFeedbackJob(
       );
       posterPng = await overlayArticleChrome(rawPoster);
       recordImageCost('article', imageQuality());
+    }
+
+    // The exact-text crops, on the whole-poster edit's result (or on the current poster when
+    // there was none). Cut from the un-branded pixels where they exist, so a crop near the
+    // branding never carries the badge into the plain copy, then the chrome goes back on.
+    if (cropMarks.length > 0) {
+      const frame = await imageSize(posterPng);
+      const corrected = await applyExactTextEdits(
+        rawPoster ?? chromeFree ?? posterPng,
+        frame,
+        cropMarks,
+        { kind: costKind, quality: imageQuality() },
+      );
+      if (rawPoster) rawPoster = corrected;
+      posterPng = await stampChrome(corrected);
+      console.log(
+        `[job ${id}] exact-text crops: ${cropMarks
+          .map((m) => `«${m.exactText}»`)
+          .join(', ')}`,
+      );
     }
 
     // Did the edit actually free the space? READ-ONLY and log-only: it measures the

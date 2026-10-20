@@ -2953,6 +2953,43 @@ details.fold[aria-disabled='true'] summary {
   background: #fff;
 }
 
+/* The social poster's maximise dialog: the poster as tall as the screen allows, with the
+   marking tools and the mark notes beside it (below it on a narrow screen). */
+.poster-expand-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.poster-expand-frame {
+  position: relative;
+  width: fit-content;
+  max-width: 100%;
+  line-height: 0;
+}
+
+.poster-expand-image {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  max-height: calc(100dvh - 170px);
+  border-radius: 10px;
+  background: #fff;
+  user-select: none;
+}
+
+.poster-expand-side {
+  flex: 1 1 280px;
+  min-width: 0;
+  max-width: 420px;
+}
+
+.poster-expand-side .poster-icon-actions {
+  margin-top: 0;
+}
+
 /* The implied closing segment of a lasso still being drawn. */
 .motion-lasso-closing {
   fill: none;
@@ -3411,6 +3448,27 @@ details.fold[aria-disabled='true'] summary {
 
 .marker-note-submitted {
   opacity: 0.75;
+}
+
+/* «हा मजकूर असा हवा» under a red mark — the exact text that spot must read. Indented to
+   the note input (badge 24px + gap 8px) so it reads as part of that mark, and the label sits
+   above the box on its own line because the Marathi label plus a field do not fit side by
+   side on a phone. */
+.marker-exact-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 36px 0 32px;
+}
+
+.marker-exact-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.marker-exact-row input {
+  width: 100%;
+  min-width: 0;
 }
 
 .marker-note-text {
