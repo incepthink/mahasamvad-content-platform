@@ -54,6 +54,7 @@ import {
   sanitizeBrief,
   type PosterDesign,
 } from './poster-design-director.js';
+import { traceSpan } from '../tracing/job-trace.js';
 
 // One env read, so rollback is a single line (the SOCIAL_POSTER_DESIGN_DIRECTION precedent).
 export function carouselDesignDirectionEnabled(): boolean {
@@ -319,7 +320,17 @@ const defaultCall: CarouselDirectorCall = (messages) =>
   });
 
 // Decide this post's direction, or null. Never throws.
-export async function directCarouselDesign(
+// Traced at the definition: one span per decision, with the model call and any guard it ran
+// nested inside it. A plain call outside a traced job.
+export function directCarouselDesign(
+  ...args: Parameters<typeof directCarouselDesignUntraced>
+): ReturnType<typeof directCarouselDesignUntraced> {
+  return traceSpan('decision: carousel design director', () => directCarouselDesignUntraced(...args), {
+    input: args[0],
+  });
+}
+
+async function directCarouselDesignUntraced(
   input: DirectCarouselDesignInput,
 ): Promise<CarouselDesign | null> {
   const count = input.plan.slides.length;

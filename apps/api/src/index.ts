@@ -4,6 +4,7 @@ import multipart from '@fastify/multipart';
 import { fileURLToPath } from 'node:url';
 import { ZodError } from 'zod';
 import { createServiceRoleClient } from '@dgipr/database';
+import { flushJobTraces, initJobTracing } from '@dgipr/content-engine';
 import { isAllowedOrigin } from './cors-origins.js';
 import { registerAnalyticsRoutes } from './routes/analytics.js';
 import { registerCanvaRoutes } from './routes/canva.js';
@@ -187,6 +188,18 @@ export async function createServer() {
 }
 
 async function main() {
+  // Braintrust job traces (docs/evals-error-analysis.md, Track B). Started here and not in
+  // createServer, so a harness that builds the server never traces. Off unless the env says so.
+  if (initJobTracing()) {
+    // Push buffered spans out on a container stop, bounded so a dead Braintrust cannot hold
+    // the shutdown.
+    process.once('SIGTERM', () => {
+      void Promise.race([
+        flushJobTraces(),
+        new Promise((resolve) => setTimeout(resolve, 5_000)),
+      ]).finally(() => process.exit(0));
+    });
+  }
   const server = await createServer();
   const port = Number(process.env.PORT ?? 3001);
   const host = process.env.HOST ?? '127.0.0.1';

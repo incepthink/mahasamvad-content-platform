@@ -13,6 +13,7 @@
 // request, whatever arrives.
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { traceFollowUp } from '@dgipr/content-engine';
 import {
   recordActivity,
   settleActivity,
@@ -96,6 +97,17 @@ export function trackActivity(
     recordActivity(client, actorOf(request), event);
   } catch (error) {
     request.log.warn({ err: error }, 'could not record activity');
+  }
+  // "What happened next", attached to the subject's original Braintrust trace (a no-op when
+  // tracing is off). ACTION AND STATUS ONLY: the actor — IP, device id, user agent — never
+  // reaches the tracer, and neither does the summary.
+  if (event.subject) {
+    traceFollowUp(event.subject.kind, event.subject.id, `officer: ${event.action}`, {
+      feature: event.feature,
+      action: event.action,
+      status: event.status,
+      ...(event.detail ? { detail: event.detail } : {}),
+    });
   }
 }
 

@@ -28,6 +28,7 @@ import {
   type ReferenceArticle,
 } from '../retrieval/retrieve-references.js';
 import type { ArticleCategory } from './category-prompt.js';
+import { traceSpan } from '../tracing/job-trace.js';
 
 export type StyleReferenceSource =
   'officer' | 'retrieval' | 'category_fallback' | 'none';
@@ -217,7 +218,17 @@ export type SelectStyleReferenceInput = Readonly<{
   preferAttribution?: boolean | undefined;
 }>;
 
-export async function selectStyleReference(
+// Traced at the definition: one span per decision, with the model call and any guard it ran
+// nested inside it. A plain call outside a traced job.
+export function selectStyleReference(
+  ...args: Parameters<typeof selectStyleReferenceUntraced>
+): ReturnType<typeof selectStyleReferenceUntraced> {
+  return traceSpan('decision: style reference', () => selectStyleReferenceUntraced(...args), {
+    input: args[0],
+  });
+}
+
+async function selectStyleReferenceUntraced(
   input: SelectStyleReferenceInput,
 ): Promise<StyleReference> {
   // Tier 1 — the officer's own choice wins outright, and retrieval is not even called, so this

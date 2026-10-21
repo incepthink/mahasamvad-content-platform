@@ -37,6 +37,7 @@
 import { pathToFileURL } from 'node:url';
 import { chatComplete } from './openai-chat.js';
 import { POSTER_COPY_MODEL } from './classify-poster-type.js';
+import { traceSpan } from '../tracing/job-trace.js';
 
 /**
  * How many faces a thumbnail may carry. A 1280x656 frame read at ~320px wide holds one
@@ -231,7 +232,17 @@ export function validateThumbnailPeople(
  * NEVER throws: a failure here must render a portrait-free thumbnail, not sink a run. No face
  * is a correct outcome; a wrong face is not.
  */
-export async function resolveThumbnailPeople(
+// Traced at the definition: one span per decision, with the model call and any guard it ran
+// nested inside it. A plain call outside a traced job.
+export function resolveThumbnailPeople(
+  ...args: Parameters<typeof resolveThumbnailPeopleUntraced>
+): ReturnType<typeof resolveThumbnailPeopleUntraced> {
+  return traceSpan('decision: thumbnail people', () => resolveThumbnailPeopleUntraced(...args), {
+    input: args[0],
+  });
+}
+
+async function resolveThumbnailPeopleUntraced(
   input: ResolveThumbnailPeopleInput,
 ): Promise<ThumbnailPerson[]> {
   const source = input.information.trim();

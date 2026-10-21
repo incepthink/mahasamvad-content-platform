@@ -70,6 +70,10 @@ import {
   runInCostScope,
   runInCostTask,
   translateArticle,
+  openGenerationTrace,
+  finishGenerationTrace,
+  jobTracingEnabled,
+  totalCostUsd,
   type ArticleDesignMode,
   type ImageKind,
   type ImageQuality,
@@ -117,7 +121,6 @@ import {
   listRecentPosterStyles,
   listRevisions,
   publicUrl,
-  updateGeneration,
   uploadPng,
   downloadPng,
   upsertGlossaryTerm,
@@ -128,6 +131,7 @@ import {
   type SupabaseClient,
   type TemplateBrand,
 } from '@dgipr/database';
+import { updateGeneration } from './generation-step.js';
 import {
   AttributedStatementsSchema,
   CopySchema,
@@ -687,6 +691,17 @@ export function runJob(
     // Meter every OpenAI text call this job makes (chatComplete records into the ambient
     // accumulator) plus the fixed image-render cost the job records explicitly.
     const cost = createCostAccumulator();
+    // This job's Braintrust trace (a no-op unless tracing is on). Opened before anything runs so
+    // every step, model call and guard inside the job lands in it; finished in the background.
+    const traced = openGenerationTrace(
+      client,
+      id,
+      task,
+      jobTracingEnabled()
+        ? await getGeneration(client, id).catch(() => null)
+        : null,
+    );
+    let jobError: unknown = undefined;
     try {
       // The image model this run opted into with the नवीन checkbox (migration 0061), scoped
       // over the WHOLE job so every gpt-image call inside it — initial render, redo, pixel
@@ -694,8 +709,10 @@ export function runJob(
       // Best-effort: null (unticked, un-applied 0061, or a read error) is the default model.
       const imageModel = await getGenerationImageModel(client, id);
       if (imageModel) console.log(`[job ${id}] image model: ${imageModel}`);
-      await runInCostScope(cost, () =>
-        runWithImageModel(imageModel, () => runInCostTask(task, job)),
+      await traced.trace.run(() =>
+        runInCostScope(cost, () =>
+          runWithImageModel(imageModel, () => runInCostTask(task, job)),
+        ),
       );
       await updateGeneration(client, id, {
         status: 'completed',
@@ -706,6 +723,7 @@ export function runJob(
       // when nothing was opened. Fire-and-forget: it can never affect the run.
       settleGenerationActivity(client, id, task, 'success');
     } catch (error) {
+      jobError = error;
       console.error(`[job ${id}] failed:`, error);
       // Settled FAILED even when the edit is recovered below: the row goes back to
       // `completed`, but the action the officer asked for did not land.
@@ -757,9 +775,70 @@ export function runJob(
       } catch (usageError) {
         console.error(`[job ${id}] could not record task usage:`, usageError);
       }
+      void finishGenerationTrace(client, id, traced, {
+        ...(jobError !== undefined ? { error: jobError } : {}),
+        metadata: jobTraceMetadata(id, cost),
+      });
       running.delete(id);
     }
   })();
+}
+
+// What a job's trace records beside the row: this job's own spend and every warning the officer
+// was shown, which live only in this process's registries.
+function jobTraceMetadata(
+  id: string,
+  cost: ReturnType<typeof createCostAccumulator>,
+): Record<string, unknown> {
+  return {
+    jobCostUsd: totalCostUsd(cost),
+    jobTokens: {
+      input: cost.inputTokens,
+      cachedInput: cost.cachedInputTokens,
+      output: cost.outputTokens,
+    },
+    warnings: {
+      length: getLengthWarning(id),
+      designations: getDesignationWarnings(id),
+      posterCapacity: getPosterCapacityWarning(id),
+      posterNumeral: getPosterNumeralWarning(id),
+      translate: getTranslateWarnings(id),
+      editFailure: getEditFailure(id),
+    },
+  };
+}
+
+// runInCostScope for the jobs that deliberately do not go through runJob (caption, concurrent
+// article feedback, translation): the same cost scope, inside the job's own Braintrust trace.
+// With tracing off it is exactly runInCostScope.
+async function tracedCostScope<T>(
+  client: SupabaseClient,
+  id: string,
+  task: string,
+  cost: ReturnType<typeof createCostAccumulator>,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const traced = openGenerationTrace(
+    client,
+    id,
+    task,
+    jobTracingEnabled()
+      ? await getGeneration(client, id).catch(() => null)
+      : null,
+  );
+  try {
+    const result = await traced.trace.run(() => runInCostScope(cost, fn));
+    void finishGenerationTrace(client, id, traced, {
+      metadata: jobTraceMetadata(id, cost),
+    });
+    return result;
+  } catch (error) {
+    void finishGenerationTrace(client, id, traced, {
+      error,
+      metadata: jobTraceMetadata(id, cost),
+    });
+    throw error;
+  }
 }
 
 // The article pipeline only handles 'news'/'scheme'; the social categories
@@ -3020,7 +3099,7 @@ export function startGenerateCaptionJob(
   void (async () => {
     const cost = createCostAccumulator();
     try {
-      await runInCostScope(cost, () =>
+      await tracedCostScope(client, id, 'social_caption_creation', cost, () =>
         runInCostTask('social_caption_creation', async () => {
           const row = await getGeneration(client, id);
           if (!row) throw new Error(`Generation ${id} not found.`);
@@ -3244,7 +3323,7 @@ export function startConcurrentArticleFeedbackJob(
   void (async () => {
     const cost = createCostAccumulator();
     try {
-      await runInCostScope(cost, () =>
+      await tracedCostScope(client, id, 'article_revision', cost, () =>
         runInCostTask('article_revision', async () => {
           const row = await getGeneration(client, id);
           if (!row) throw new Error(`Generation ${id} not found.`);
@@ -3358,7 +3437,7 @@ export function startCaptionFeedbackJob(
   void (async () => {
     const cost = createCostAccumulator();
     try {
-      await runInCostScope(cost, () =>
+      await tracedCostScope(client, id, 'social_caption_revision', cost, () =>
         runInCostTask('social_caption_revision', async () => {
           const row = await getGeneration(client, id);
           if (!row) throw new Error(`Generation ${id} not found.`);
@@ -3443,7 +3522,12 @@ export function startTranslateJob(
   void (async () => {
     const cost = createCostAccumulator();
     try {
-      await runInCostScope(cost, () =>
+      await tracedCostScope(
+        client,
+        id,
+        language === 'hi' ? 'hindi_translation' : 'english_translation',
+        cost,
+        () =>
         runInCostTask(
           language === 'hi' ? 'hindi_translation' : 'english_translation',
           async () => {

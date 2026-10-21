@@ -32,6 +32,7 @@ import {
   UTILITY_MODEL,
   type ReasoningEffort,
 } from './openai-chat.js';
+import { traceSpan } from '../tracing/job-trace.js';
 
 // How the information is presented. `icon_list` is the overused default this module exists to
 // break; it stays in the vocabulary because for some content it genuinely is right.
@@ -396,7 +397,17 @@ const callWithModel =
   });
 
 // Decide this poster's direction, or null. Never throws.
-export async function directPosterDesign(
+// Traced at the definition: one span per decision, with the model call and any guard it ran
+// nested inside it. A plain call outside a traced job.
+export function directPosterDesign(
+  ...args: Parameters<typeof directPosterDesignUntraced>
+): ReturnType<typeof directPosterDesignUntraced> {
+  return traceSpan('decision: poster design director', () => directPosterDesignUntraced(...args), {
+    input: args[0],
+  });
+}
+
+async function directPosterDesignUntraced(
   input: DirectPosterDesignInput,
 ): Promise<PosterDesignDirection | null> {
   if (input.text.trim().length === 0) return null;

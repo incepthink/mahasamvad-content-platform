@@ -17,6 +17,7 @@ import {
   lockSchemeNames,
   validateDeclaredSchemeNames,
 } from './lock-scheme-names.js';
+import { traceSpan } from '../tracing/job-trace.js';
 
 export type TemplateBrand = 'dgipr' | 'cmo';
 
@@ -258,7 +259,17 @@ function parseJson(raw: string): PosterCopy {
   }
 }
 
-export async function generatePosterCopy(
+// Traced at the definition: one span per decision, with the model call and any guard it ran
+// nested inside it. A plain call outside a traced job.
+export function generatePosterCopy(
+  ...args: Parameters<typeof generatePosterCopyUntraced>
+): ReturnType<typeof generatePosterCopyUntraced> {
+  return traceSpan('decision: poster copy', () => generatePosterCopyUntraced(...args), {
+    input: args[0],
+  });
+}
+
+async function generatePosterCopyUntraced(
   input: GeneratePosterCopyInput,
 ): Promise<GeneratePosterCopyResult> {
   const spec = input.layoutSpec;

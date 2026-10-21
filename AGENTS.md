@@ -3110,6 +3110,18 @@ client id/secret — see the milestone below.
 
 ## Latest Implementation Milestone
 
+- **Error analysis round 1: reconstructed traces in Braintrust** (2026-10-20, no migration, no
+  request-path code). `packages/content-engine/src/evals/` turns rows the database already holds
+  into one trace per user-facing job (~20 per sidebar feature, seeded + stratified by status,
+  reaction, lane, size and time) for a Marathi editor to open-code. Pure builders in
+  `evals/reconstruct/*`, lean sampler in `evals/sample.ts`, uploader in `braintrust-upload.ts`
+  (SDK `braintrust@3.37.2`, exact pin). Trace id `<feature>:<row id>` and derived span ids, so a
+  re-run replaces rows. Posters/clips/recordings go up as Attachments. No IP/device/user agent ever
+  (activity read through `ACTIVITY_LITE_COLUMNS`). A missing v1 is flagged, never invented.
+  /proofread and ad-hoc /translate have no data until instrumentation (Track B). Commands:
+  `evals:check` (free, 16 checks), `evals:export-existing -- --dry-run|--upload`. Needs
+  `pnpm db:tunnel` and `BRAINTRUST_API_KEY`. Review setup: `docs/evals-error-analysis.md`.
+
 - **A red mark can say what the text there must READ, and is then fixed on its own crop**
   (2026-10-16, no migration, no n8n). Officers mark a misprinted digit («९» for «१») or a broken
   jodakshar; the old round sent the whole 1280x1600 poster plus a note and the model repainted

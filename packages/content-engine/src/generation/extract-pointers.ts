@@ -33,6 +33,7 @@ import {
   type ChatMessage,
 } from './openai-chat.js';
 import { CATEGORY_LABEL, type ArticleCategory } from './category-prompt.js';
+import { traceSpan } from '../tracing/job-trace.js';
 
 // Nothing extractable (empty note, or an unusable model reply). The web treats this as "no
 // pointers" and the officer generates from the reviewed text as usual.
@@ -241,7 +242,17 @@ async function extractPointerChunk(
   }
 }
 
-export async function extractPointers(
+// Traced at the definition: one span per decision, with the model call and any guard it ran
+// nested inside it. A plain call outside a traced job.
+export function extractPointers(
+  ...args: Parameters<typeof extractPointersUntraced>
+): ReturnType<typeof extractPointersUntraced> {
+  return traceSpan('decision: pointers', () => extractPointersUntraced(...args), {
+    input: { text: args[0], options: args[1] },
+  });
+}
+
+async function extractPointersUntraced(
   text: string,
   category: ArticleCategory,
   heading?: string,

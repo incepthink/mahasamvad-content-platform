@@ -62,6 +62,7 @@ import {
   SARVAM_TRANSLATE_MAX_INPUT_CHARS,
 } from './sarvam-translate.js';
 import { editDistance } from './edit-distance.js';
+import { traceGuard } from '../tracing/job-trace.js';
 import type { ChatMessage } from './openai-chat.js';
 import { splitNoteIntoSections } from './generate-article.js';
 
@@ -455,6 +456,21 @@ function applyNameLock(
 // text plus the names that could not be accounted for. Everything in the translation other
 // than a repaired name is left byte-for-byte alone.
 function repairLockedNames(
+  ...args: Parameters<typeof repairLockedNamesUntraced>
+): ReturnType<typeof repairLockedNamesUntraced> {
+  // Traced (see apply-designations.ts): which names were repaired and which could not be found.
+  return traceGuard(
+    'guard: Hindi name repair',
+    () => ({
+      translated: args[0],
+      lockedNames: args[1].map((term) => term.marathi),
+      targetLanguage: args[2],
+    }),
+    () => repairLockedNamesUntraced(...args),
+  );
+}
+
+function repairLockedNamesUntraced(
   translated: string,
   lockedNames: readonly GlossaryEntry[],
   targetLanguage: TextTranslationLanguage,

@@ -76,6 +76,7 @@ import {
   hashString,
   type SelectedMaster,
 } from './select-master.js';
+import { traceGuard, traceSpan } from '../tracing/job-trace.js';
 
 // One reference as the ranker sees it. `id` is opaque to the model (it answers with an index);
 // the capacity plus the structural description are what it reasons over.
@@ -475,7 +476,26 @@ export async function rankReferenceByInformation(
 // Returns the id to use plus, when the library simply cannot hold the information, the
 // shortfall to report. `preferredId` is honoured whenever it is eligible — the model chose it
 // on presentation fit, which this function has no way to judge.
+// Traced at the definition (see apply-designations.ts): the model's pick and the item count in,
+// whether the capacity gate overruled it out.
 export function enforceCapacity<T extends { id: string; bulletSlots: number }>(
+  candidates: readonly T[],
+  preferredId: string,
+  itemCount: number,
+  seed: string,
+): { id: string; shortfall: SlotShortfall | null; corrected: boolean } {
+  return traceGuard(
+    'guard: enforceCapacity',
+    () => ({
+      preferredId,
+      itemCount,
+      candidates: candidates.map((c) => ({ id: c.id, bulletSlots: c.bulletSlots })),
+    }),
+    () => enforceCapacityUntraced(candidates, preferredId, itemCount, seed),
+  );
+}
+
+function enforceCapacityUntraced<T extends { id: string; bulletSlots: number }>(
   candidates: readonly T[],
   preferredId: string,
   itemCount: number,
@@ -627,7 +647,32 @@ function candidateFor(
 // master is analysed if it has no spec (so the prompt gets real structure); otherwise one other
 // un-analysed image is warmed opportunistically, so an un-described library becomes rankable over
 // successive runs instead of needing a bulk backfill first.
-export async function selectReferenceByInformation(
+// Traced at the definition: one span per decision, with the model call and any guard it ran
+// nested inside it. A plain call outside a traced job.
+export function selectReferenceByInformation(
+  ...args: Parameters<typeof selectReferenceByInformationUntraced>
+): ReturnType<typeof selectReferenceByInformationUntraced> {
+  return traceSpan(
+    'decision: reference selection',
+    () => selectReferenceByInformationUntraced(...args),
+    {
+      // The candidates as ids and shapes, not whole library rows.
+      input: {
+        candidates: args[1].map((image) => ({
+          id: image.id,
+          subtype: image.subtype,
+          bulletSlots: image.layoutSpec?.bulletSlots ?? null,
+        })),
+        seed: args[3],
+        note: args[4],
+        avoidIds: args[5],
+        options: args[6],
+      },
+    },
+  );
+}
+
+async function selectReferenceByInformationUntraced(
   client: SupabaseClient,
   images: readonly ReferenceImageRow[],
   // Names the type each image belongs to, for the candidate lines.

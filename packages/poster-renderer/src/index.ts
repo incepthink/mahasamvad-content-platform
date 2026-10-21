@@ -19,6 +19,11 @@ export {
   currentImageModel,
 } from './openai-image.js';
 export type { EditImageOptions, GenerateImageOptions } from './openai-image.js';
+export { setModelCallObserver } from './model-call-observer.js';
+export type {
+  ModelCallInfo,
+  ModelCallObserver,
+} from './model-call-observer.js';
 export { loadBrandAssets, loadArticleAssets } from './assets.js';
 export type { BrandAssets } from './assets.js';
 export { loadArticlePdfAssets } from './assets.js';

@@ -55,6 +55,7 @@ import { PREFERENCE_RULE_MAX_CHARS } from '@dgipr/schemas';
 
 import { chatComplete, type ReasoningEffort } from './openai-chat.js';
 import { editDistance } from './edit-distance.js';
+import { traceSpan } from '../tracing/job-trace.js';
 
 // ---------------------------------------------------------------------------------------
 // Model tier
@@ -515,7 +516,17 @@ export type ExtractPreferencesInput = Readonly<{
  * Returns `[]` on any failure, because this is a background pass over a revision the officer
  * has already received: a classifier outage must cost the learning and nothing else.
  */
-export async function extractPreferenceCandidates(
+// Traced at the definition: one span per decision, with the model call and any guard it ran
+// nested inside it. A plain call outside a traced job.
+export function extractPreferenceCandidates(
+  ...args: Parameters<typeof extractPreferenceCandidatesUntraced>
+): ReturnType<typeof extractPreferenceCandidatesUntraced> {
+  return traceSpan('decision: learned-preference extraction', () => extractPreferenceCandidatesUntraced(...args), {
+    input: args[0],
+  });
+}
+
+async function extractPreferenceCandidatesUntraced(
   input: ExtractPreferencesInput,
 ): Promise<PreferenceCandidate[]> {
   const feedback = normalizeSpace(input.feedback ?? '').slice(

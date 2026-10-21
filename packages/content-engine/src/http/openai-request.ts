@@ -24,6 +24,8 @@
 // only be wrong in a new way; with concurrency 1 plus header-driven waits the client already
 // paces itself against the server's own accounting.
 
+import { traceOpenAiHttp } from '../tracing/job-trace.js';
+
 // Exponential-backoff base and ceiling, used only when the response carries no timing header.
 const BASE_BACKOFF_MS = 1_000;
 const MAX_BACKOFF_MS = 60_000;
@@ -283,51 +285,69 @@ export async function openAiFetch(
     headers['content-type'] = 'application/json';
   }
 
-  return getLimiter(lane ?? 'default')(async () => {
-    for (let attempt = 1; attempt <= attempts; attempt++) {
-      let response: Response;
-      try {
-        response = await fetch(url, {
-          method: verb,
-          headers,
-          ...(verb === 'POST'
-            ? { body: formData ?? JSON.stringify(body) }
-            : {}),
-          signal: AbortSignal.timeout(timeoutMs),
-        });
-      } catch (error) {
-        // Network reset, DNS blip, or our own timeout. Nothing reached the model, so a retry
-        // is always safe; the last attempt rethrows the original error with its stack.
-        if (attempt === attempts) throw error;
-        const delay = backoffDelay(attempt);
+  // Observed (never altered) by the job tracer: a no-op outside a traced job. The span covers
+  // the whole retry ladder, so one logical call is one span however many attempts it took.
+  return traceOpenAiHttp(
+    {
+      url,
+      label,
+      method: verb,
+      ...(body !== undefined ? { body } : {}),
+      ...(formData !== undefined ? { formData } : {}),
+    },
+    () => sendOpenAiRequest(),
+  );
+
+  function sendOpenAiRequest(): Promise<Response> {
+    return getLimiter(lane ?? 'default')(async () => {
+      for (let attempt = 1; attempt <= attempts; attempt++) {
+        let response: Response;
+        try {
+          response = await fetch(url, {
+            method: verb,
+            headers,
+            ...(verb === 'POST'
+              ? { body: formData ?? JSON.stringify(body) }
+              : {}),
+            signal: AbortSignal.timeout(timeoutMs),
+          });
+        } catch (error) {
+          // Network reset, DNS blip, or our own timeout. Nothing reached the model, so a retry
+          // is always safe; the last attempt rethrows the original error with its stack.
+          if (attempt === attempts) throw error;
+          const delay = backoffDelay(attempt);
+          console.warn(
+            `[openai] ${label} request errored (${String(error)}); ` +
+              `retrying in ${Math.round(delay)}ms (attempt ${attempt + 1}/${attempts})`,
+          );
+          await sleep(delay);
+          continue;
+        }
+
+        if (response.ok) return response;
+
+        const detail = await response.text();
+        if (
+          !isRetryableStatus(response.status, detail) ||
+          attempt === attempts
+        ) {
+          throw new Error(
+            `OpenAI ${label} request failed: ${response.status} ${response.statusText} — ${detail}`,
+          );
+        }
+
+        const delay =
+          (serverRequestedDelay(response.headers) ?? backoffDelay(attempt)) +
+          CLOCK_SKEW_PAD_MS;
         console.warn(
-          `[openai] ${label} request errored (${String(error)}); ` +
-            `retrying in ${Math.round(delay)}ms (attempt ${attempt + 1}/${attempts})`,
+          `[openai] ${label} got ${response.status}; retrying in ${Math.round(delay)}ms ` +
+            `(attempt ${attempt + 1}/${attempts})`,
         );
         await sleep(delay);
-        continue;
       }
 
-      if (response.ok) return response;
-
-      const detail = await response.text();
-      if (!isRetryableStatus(response.status, detail) || attempt === attempts) {
-        throw new Error(
-          `OpenAI ${label} request failed: ${response.status} ${response.statusText} — ${detail}`,
-        );
-      }
-
-      const delay =
-        (serverRequestedDelay(response.headers) ?? backoffDelay(attempt)) +
-        CLOCK_SKEW_PAD_MS;
-      console.warn(
-        `[openai] ${label} got ${response.status}; retrying in ${Math.round(delay)}ms ` +
-          `(attempt ${attempt + 1}/${attempts})`,
-      );
-      await sleep(delay);
-    }
-
-    // Unreachable: the loop either returns, throws, or sleeps and retries.
-    throw new Error(`OpenAI ${label} request failed: retries exhausted.`);
-  });
+      // Unreachable: the loop either returns, throws, or sleeps and retries.
+      throw new Error(`OpenAI ${label} request failed: retries exhausted.`);
+    });
+  }
 }

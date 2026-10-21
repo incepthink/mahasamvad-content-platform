@@ -34,6 +34,7 @@ import {
   respondWithSources,
   sourceInformationBlock,
 } from './responses-with-sources.js';
+import { traceAsyncGuard } from '../tracing/job-trace.js';
 
 export type { LengthWarning };
 export type LengthUnit = LengthWarning['unit'];
@@ -242,7 +243,19 @@ export type LengthFitResult = Readonly<{
 // call on an article the officer is already waiting for, and a second pass buys far less than
 // the first. A rewrite that comes back WORSE than what it replaced is discarded — a
 // best-effort step must never make the deliverable worse (the shorten-narration.ts rule).
-export async function fitArticleToLength(
+// Traced at the definition (see apply-designations.ts): shows the requested length, whether a
+// rewrite was bought and what it returned.
+export function fitArticleToLength(
+  ...args: Parameters<typeof fitArticleToLengthUntraced>
+): ReturnType<typeof fitArticleToLengthUntraced> {
+  return traceAsyncGuard(
+    'guard: fitArticleToLength',
+    () => ({ article: args[0], sourceChars: args[1].length, request: args[2], category: args[3] }),
+    () => fitArticleToLengthUntraced(...args),
+  );
+}
+
+async function fitArticleToLengthUntraced(
   article: string,
   source: string,
   request: LengthRequest | null,

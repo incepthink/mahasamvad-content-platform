@@ -17,6 +17,7 @@ import { pathToFileURL } from 'node:url';
 import { chatCompleteVision } from './openai-chat.js';
 import type { ClearAction } from './clear-space-rule.js';
 import { groundExactText } from './build-exact-text-prompt.js';
+import { traceSpan } from '../tracing/job-trace.js';
 
 export type FeedbackAnnotationInput = Readonly<{
   // 1-based, matching the badge drawn on the poster.
@@ -262,7 +263,17 @@ function parseExactTexts(
   });
 }
 
-export async function interpretImageFeedback(
+// Traced at the definition: one span per decision, with the model call and any guard it ran
+// nested inside it. A plain call outside a traced job.
+export function interpretImageFeedback(
+  ...args: Parameters<typeof interpretImageFeedbackUntraced>
+): ReturnType<typeof interpretImageFeedbackUntraced> {
+  return traceSpan('decision: marker interpreter', () => interpretImageFeedbackUntraced(...args), {
+    input: args[0],
+  });
+}
+
+async function interpretImageFeedbackUntraced(
   input: InterpretImageFeedbackInput,
 ): Promise<InterpretedImageFeedback> {
   const withInventory = wantsInventory(input);

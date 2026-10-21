@@ -61,12 +61,12 @@ import {
   findGlossaryTermsInText,
   getGeneration,
   publicUrl,
-  updateGeneration,
   uploadPng,
   type GenerationPatch,
   type GenerationRow,
   type SupabaseClient,
 } from '@dgipr/database';
+import { updateGeneration } from './generation-step.js';
 import {
   CLEAR_REGION_LETTERS,
   SOCIAL_ARTWORK_SIZE,

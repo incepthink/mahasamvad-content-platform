@@ -1725,6 +1725,15 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   `ArticleView`'s "rule learned" callout) over the `/api/preferences` routes; turn the flag on only where
   that page is deployed, since it is the only way to see and disable a learned rule.
 
+- **Live job traces in Braintrust (Track B)** → `packages/content-engine/src/tracing/` (`job-trace.ts` core,
+  `generation-trace.ts` for `generations` jobs); opened in `runJob` + `tracedCostScope` (runner.ts), steps via
+  `jobs/generation-step.ts`, model calls via `openAiFetch` + poster-renderer's `model-call-observer.ts`, guards and
+  decisions wrapped at their definitions, officer actions via `trackActivity`. Off unless `BRAINTRUST_TRACING=on` AND
+  the API's `main()` calls `initJobTracing()`; never changes a request; never throws. Free check:
+  `npx tsx src/tracing/job-trace.check.ts`. Coverage + gaps: `docs/evals-error-analysis.md`.
+- **Error analysis exporter (offline, read-only)** → `packages/content-engine/src/evals/` + `docs/evals-error-analysis.md`;
+  builders pure (`evals:check`), export via `evals:export-existing`. Never on the request path.
+
 **Data & schema:** `supabase/migrations/0001…0004_*.sql` — pgvector Mahasamvad
 chunks, `generations` table, generation category + chunk style-category columns;
 `0012`/`0013`/`0015` — reference-image library + `reference_types` catalog

@@ -552,6 +552,29 @@ export {
   type CostAccumulator,
 } from './cost/cost-meter.js';
 export {
+  initJobTracing,
+  jobTracingEnabled,
+  flushJobTraces,
+  openJobTrace,
+  originalTraceRootId,
+  traceFollowUp,
+  traceStep,
+  traceAnnotateJob,
+  traceSpan,
+  traceGuard,
+  traceEvent,
+  traceModelCall,
+  traceAttachment,
+  toTraceValue,
+} from './tracing/job-trace.js';
+export type { JobTrace, JobTraceOpen } from './tracing/job-trace.js';
+export {
+  openGenerationTrace,
+  finishGenerationTrace,
+  generationFeature,
+} from './tracing/generation-trace.js';
+export type { GenerationTrace } from './tracing/generation-trace.js';
+export {
   priceText,
   estimateImageCostUsd,
   estimateGeminiImageCostUsd,

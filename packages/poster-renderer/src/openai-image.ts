@@ -14,6 +14,7 @@
 // OPENAI_IMAGE_QUALITY) as a fallback if an account can't request a given model or size.
 
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { observeModelCall } from './model-call-observer.js';
 
 const GENERATIONS_URL = 'https://api.openai.com/v1/images/generations';
 const EDITS_URL = 'https://api.openai.com/v1/images/edits';
@@ -183,6 +184,22 @@ export async function generateImage(
   prompt: string,
   opts: GenerateImageOptions = {},
 ): Promise<Buffer> {
+  return observeModelCall(
+    {
+      name: 'gpt-image generate',
+      provider: 'openai',
+      model: currentImageModel(),
+      input: { prompt, size: opts.size ?? SIZE, quality: QUALITY },
+    },
+    () => generateImageUntraced(prompt, opts),
+    (png) => ({ image: png }),
+  );
+}
+
+async function generateImageUntraced(
+  prompt: string,
+  opts: GenerateImageOptions,
+): Promise<Buffer> {
   const apiKey = requireApiKey();
   const response = await postWithRetry(
     GENERATIONS_URL,
@@ -220,6 +237,30 @@ export async function editImage(
   imagePng: Buffer | readonly Buffer[],
   prompt: string,
   opts: EditImageOptions = {},
+): Promise<Buffer> {
+  const images = Array.isArray(imagePng) ? imagePng : [imagePng as Buffer];
+  return observeModelCall(
+    {
+      name: 'gpt-image edit',
+      provider: 'openai',
+      model: currentImageModel(),
+      input: {
+        prompt,
+        images,
+        size: opts.size ?? SIZE,
+        quality: QUALITY,
+        ...(opts.inputFidelity ? { inputFidelity: opts.inputFidelity } : {}),
+      },
+    },
+    () => editImageUntraced(imagePng, prompt, opts),
+    (png) => ({ image: png }),
+  );
+}
+
+async function editImageUntraced(
+  imagePng: Buffer | readonly Buffer[],
+  prompt: string,
+  opts: EditImageOptions,
 ): Promise<Buffer> {
   const apiKey = requireApiKey();
   const images = Array.isArray(imagePng) ? imagePng : [imagePng as Buffer];

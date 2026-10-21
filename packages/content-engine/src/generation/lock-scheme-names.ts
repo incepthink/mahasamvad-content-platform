@@ -19,6 +19,7 @@
 // failure, so a full name absent from the copy is fine — only a *truncated* form is fixed.
 
 import { editDistance } from './edit-distance.js';
+import { traceGuard } from '../tracing/job-trace.js';
 
 // Split on Unicode whitespace, dropping empties. Marathi words are space-separated, so a
 // scheme name is a run of these tokens.
@@ -123,7 +124,19 @@ export type SchemeLockResult<T> = Readonly<{
 // verbatim in the note (glossary scheme/org rows in the note). The copy object is returned
 // with the same shape, truncations expanded. Names the poster did not use at all are not
 // reported — only ones it truncated and we could not fix.
+// Traced at the definition (see apply-designations.ts): shows any scheme name it expanded.
 export function lockSchemeNames<T>(
+  copy: T,
+  lockedNames: readonly string[],
+): SchemeLockResult<T> {
+  return traceGuard(
+    'guard: lockSchemeNames',
+    () => ({ copy, lockedNames }),
+    () => lockSchemeNamesUntraced(copy, lockedNames),
+  );
+}
+
+function lockSchemeNamesUntraced<T>(
   copy: T,
   lockedNames: readonly string[],
 ): SchemeLockResult<T> {

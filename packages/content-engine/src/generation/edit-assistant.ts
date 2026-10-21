@@ -35,6 +35,7 @@ import { chatComplete, type ReasoningEffort } from './openai-chat.js';
 import { POSTER_COPY_MODEL } from './classify-poster-type.js';
 import { digitsAreGrounded } from './digit-grounding.js';
 import { groundExactText } from './build-exact-text-prompt.js';
+import { traceSpan } from '../tracing/job-trace.js';
 
 export const EDIT_ASSISTANT_MODEL =
   process.env.OPENAI_EDIT_ASSISTANT_MODEL?.trim() || POSTER_COPY_MODEL;
@@ -504,7 +505,17 @@ export function finalizeEditPlan(
  * One planning turn. Never throws: a failed call answers as a reply asking the officer to
  * say it again, so the conversation carries on rather than breaking.
  */
-export async function planEditRequest(
+// Traced at the definition: one span per decision, with the model call and any guard it ran
+// nested inside it. A plain call outside a traced job.
+export function planEditRequest(
+  ...args: Parameters<typeof planEditRequestUntraced>
+): ReturnType<typeof planEditRequestUntraced> {
+  return traceSpan('decision: edit assistant plan', () => planEditRequestUntraced(...args), {
+    input: args[0],
+  });
+}
+
+async function planEditRequestUntraced(
   context: EditAssistantContext,
   conversation: readonly EditAssistantMessage[],
 ): Promise<EditAssistantPlan> {

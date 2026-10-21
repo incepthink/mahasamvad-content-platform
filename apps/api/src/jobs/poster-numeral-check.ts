@@ -13,6 +13,8 @@ import {
   extractImageTextViaProvider,
   extractNumeralRuns,
   findUnsupportedNumerals,
+  traceGuard,
+  traceModelCall,
 } from '@dgipr/content-engine';
 
 export type PosterNumeralWarning = { numbers: string[] };
@@ -26,10 +28,22 @@ export async function checkPosterNumerals(
 ): Promise<PosterNumeralWarning | null> {
   if (extractNumeralRuns(sourceText).length === 0) return null;
   try {
-    const read = await extractImageTextViaProvider('poster.png', rawPoster, {
-      timeoutMs: READ_TIMEOUT_MS,
-    });
-    const numbers = findUnsupportedNumerals(read, sourceText);
+    // Both halves are traced: what the OCR read off the poster, and which numbers the check
+    // then judged unsupported — a misread and a missed number look different there.
+    const read = await traceModelCall(
+      { name: 'poster numeral OCR', provider: 'image-ocr', input: { poster: rawPoster } },
+      () =>
+        extractImageTextViaProvider('poster.png', rawPoster, {
+          timeoutMs: READ_TIMEOUT_MS,
+        }),
+      (text) => ({ text }),
+    );
+    const numbers = traceGuard(
+      'guard: poster numeral check',
+      () => ({ ocrText: read, sourceText }),
+      () => findUnsupportedNumerals(read, sourceText),
+      (unsupported) => ({ unsupportedNumbers: unsupported }),
+    );
     console.log(
       `[job ${id}] numeral check: ${
         numbers.length > 0

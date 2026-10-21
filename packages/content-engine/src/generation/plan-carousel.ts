@@ -64,6 +64,7 @@ import {
   lockSchemeNames,
   validateDeclaredSchemeNames,
 } from './lock-scheme-names.js';
+import { traceGuard } from '../tracing/job-trace.js';
 
 export type PlanCarouselInput = Readonly<{
   note: string;
@@ -407,7 +408,19 @@ function targetSlideCount(
     : requested;
 }
 
+// Traced at the definition (see apply-designations.ts): the model's raw plan in, the plan the
+// carousel actually renders out — every dropped, moved or merged line is visible.
 export function normalizeCarouselPlan(
+  ...args: Parameters<typeof normalizeCarouselPlanUntraced>
+): PlanCarouselResult {
+  return traceGuard(
+    'guard: normalizeCarouselPlan',
+    () => ({ raw: args[0], requestedSlides: args[1].requestedSlides, verbatim: args[1].verbatim }),
+    () => normalizeCarouselPlanUntraced(...args),
+  );
+}
+
+function normalizeCarouselPlanUntraced(
   raw: unknown,
   input: PlanCarouselInput,
 ): PlanCarouselResult {

@@ -21,6 +21,7 @@
 
 import { pathToFileURL } from 'node:url';
 import { findHeadlineLine } from './article-dateline.js';
+import { traceGuard } from '../tracing/job-trace.js';
 
 // A headline never closes a sentence (the article-dateline.ts discriminator, restated here
 // because this module applies it to the officer's INPUT rather than to the model's output).
@@ -52,7 +53,20 @@ export function looksLikeHeadline(heading: string | null | undefined): boolean {
 // in the exported PDF. When no headline is found at all — a single-paragraph article — one is
 // added as a Markdown heading, which is the only form every downstream consumer reads as a
 // heading rather than as body text.
+// Traced at the definition (see apply-designations.ts): shows whether the officer's headline
+// was written onto the article or left to the model.
 export function ensureArticleHeading(
+  ...args: Parameters<typeof ensureArticleHeadingUntraced>
+): string {
+  return traceGuard(
+    'guard: ensureArticleHeading',
+    () => ({ article: args[0], heading: args[1] }),
+    () => ensureArticleHeadingUntraced(...args),
+    (article) => ({ article, changed: article !== args[0].trim() }),
+  );
+}
+
+function ensureArticleHeadingUntraced(
   article: string,
   heading: string | null | undefined,
 ): string {

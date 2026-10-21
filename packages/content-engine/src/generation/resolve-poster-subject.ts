@@ -44,6 +44,7 @@ import {
   lockSchemeNames,
   validateDeclaredSchemeNames,
 } from './lock-scheme-names.js';
+import { traceGuard, traceSpan } from '../tracing/job-trace.js';
 
 // What kind of named thing the subject is. Reported for the job log only — every kind is
 // treated identically downstream — but asking for it measurably steadies the judgement, and it
@@ -188,7 +189,19 @@ export function isProminent(source: string, name: string): boolean {
 //      its source spelling, never invent one or change a digit.
 //   3. Neither, in which case null.
 // Plus the prominence backstop above.
+// Traced at the definition (see apply-designations.ts): the model's nominated subject in, the
+// verdict out.
 export function validatePosterSubject(
+  ...args: Parameters<typeof validatePosterSubjectUntraced>
+): ReturnType<typeof validatePosterSubjectUntraced> {
+  return traceGuard(
+    'guard: validatePosterSubject',
+    () => ({ candidate: args[1], sourceChars: args[0].length, options: args[2] }),
+    () => validatePosterSubjectUntraced(...args),
+  );
+}
+
+function validatePosterSubjectUntraced(
   source: string,
   candidate: string,
   options: Readonly<{
@@ -223,7 +236,17 @@ export function validatePosterSubject(
 
 // Resolve the poster's named subject, or null. NEVER throws: a failure here must fall back to the
 // ordinary editorial headline, not sink an article poster run that has already been paid for.
-export async function resolvePosterSubject(
+// Traced at the definition: one span per decision, with the model call and any guard it ran
+// nested inside it. A plain call outside a traced job.
+export function resolvePosterSubject(
+  ...args: Parameters<typeof resolvePosterSubjectUntraced>
+): ReturnType<typeof resolvePosterSubjectUntraced> {
+  return traceSpan('decision: poster subject', () => resolvePosterSubjectUntraced(...args), {
+    input: args[0],
+  });
+}
+
+async function resolvePosterSubjectUntraced(
   input: ResolvePosterSubjectInput,
 ): Promise<PosterSubject | null> {
   const note = input.note.trim();

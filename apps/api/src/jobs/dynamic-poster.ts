@@ -43,11 +43,11 @@ import {
   getGeneration,
   insertRevision,
   listRevisions,
-  updateGeneration,
   uploadFile,
   type GenerationRow,
   type SupabaseClient,
 } from '@dgipr/database';
+import { updateGeneration } from './generation-step.js';
 import {
   cropVideoToAspect,
   cropVideoToRect,

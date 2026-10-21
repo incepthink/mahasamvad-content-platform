@@ -3,6 +3,7 @@
 // generation and feedback revisions cannot accidentally omit it or retain yesterday's date.
 
 import type { ArticleCategory } from './category-prompt.js';
+import { traceGuard } from '../tracing/job-trace.js';
 
 export const DEFAULT_NEWS_DATELINE_LOCATION = 'मुंबई';
 export const NEWS_DATELINE_TIME_ZONE = 'Asia/Kolkata';
@@ -201,7 +202,20 @@ export function currentArticleDateline(
   return { location, date, text: `${location}, दि. ${date} :` };
 }
 
+// Traced at the definition (see apply-designations.ts): shows the dateline it added, moved or
+// stripped.
 export function ensureArticleDateline(
+  ...args: Parameters<typeof ensureArticleDatelineUntraced>
+): string {
+  return traceGuard(
+    'guard: ensureArticleDateline',
+    () => ({ article: args[0], category: args[1], options: args[2] }),
+    () => ensureArticleDatelineUntraced(...args),
+    (article) => ({ article, changed: article !== args[0] }),
+  );
+}
+
+function ensureArticleDatelineUntraced(
   article: string,
   category: ArticleCategory,
   options: Readonly<{

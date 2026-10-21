@@ -39,6 +39,7 @@
 // Free to run and free to test: no model call, no I/O. Harness at the bottom.
 
 import { pathToFileURL } from 'node:url';
+import { traceGuard } from '../tracing/job-trace.js';
 
 // Kept structurally identical to NameDesignation in @dgipr/schemas. Declared locally for the
 // same reason translate-article.ts declares GlossaryEntry: this package is not a consumer of
@@ -175,7 +176,23 @@ function orderPairs(pairs: readonly NameDesignation[]): NameDesignation[] {
   );
 }
 
+// Traced at the definition, so every caller (draft, sources lane, revision, media room) shows
+// what this deterministic pass inserted or could not apply. A plain call outside a traced job.
 export function applyDesignations(
+  ...args: Parameters<typeof applyDesignationsUntraced>
+): DesignationResult {
+  return traceGuard(
+    'guard: applyDesignations',
+    () => ({
+      article: args[0],
+      pairs: args[1],
+      knownDesignations: args[2]?.knownDesignations,
+    }),
+    () => applyDesignationsUntraced(...args),
+  );
+}
+
+function applyDesignationsUntraced(
   article: string,
   pairs: readonly NameDesignation[],
   opts: Readonly<{ knownDesignations?: readonly string[] }> = {},
@@ -328,7 +345,13 @@ if (
   };
 
   const CM = { name: 'देवेंद्र फडणवीस', designation: 'मुख्यमंत्री' };
-  const KNOWN = ['मुख्यमंत्री', 'उपमुख्यमंत्री', 'जिल्हाधिकारी', 'अपर जिल्हाधिकारी', 'मंत्री'];
+  const KNOWN = [
+    'मुख्यमंत्री',
+    'उपमुख्यमंत्री',
+    'जिल्हाधिकारी',
+    'अपर जिल्हाधिकारी',
+    'मंत्री',
+  ];
 
   console.log('\nअ. पहिल्या उल्लेखापुरतेच (first mention only)');
   {
@@ -357,7 +380,11 @@ if (
   {
     const src = 'उपमुख्यमंत्री देवेंद्र फडणवीस यांनी आज बैठक घेतली.';
     const out = applyDesignations(src, [CM], { knownDesignations: KNOWN });
-    check('replaced', out.text, 'मुख्यमंत्री देवेंद्र फडणवीस यांनी आज बैठक घेतली.');
+    check(
+      'replaced',
+      out.text,
+      'मुख्यमंत्री देवेंद्र फडणवीस यांनी आज बैठक घेतली.',
+    );
     check('reported', out.issues, [
       { ...CM, reason: 'corrected', replaced: 'उपमुख्यमंत्री' },
     ]);
@@ -365,10 +392,22 @@ if (
 
   console.log('\nई. आदरार्थी शब्दाच्या आधी (honorific-aware insertion)');
   {
-    const out = applyDesignations('श्री. देवेंद्र फडणवीस यांनी सांगितले.', [CM]);
-    check('before the honorific', out.text, 'मुख्यमंत्री श्री. देवेंद्र फडणवीस यांनी सांगितले.');
-    const two = applyDesignations('मा. श्री. देवेंद्र फडणवीस यांनी सांगितले.', [CM]);
-    check('two honorifics', two.text, 'मुख्यमंत्री मा. श्री. देवेंद्र फडणवीस यांनी सांगितले.');
+    const out = applyDesignations('श्री. देवेंद्र फडणवीस यांनी सांगितले.', [
+      CM,
+    ]);
+    check(
+      'before the honorific',
+      out.text,
+      'मुख्यमंत्री श्री. देवेंद्र फडणवीस यांनी सांगितले.',
+    );
+    const two = applyDesignations('मा. श्री. देवेंद्र फडणवीस यांनी सांगितले.', [
+      CM,
+    ]);
+    check(
+      'two honorifics',
+      two.text,
+      'मुख्यमंत्री मा. श्री. देवेंद्र फडणवीस यांनी सांगितले.',
+    );
   }
 
   console.log('\nउ. फक्त आडनाव असले तरी पदनाम (surname-only article)');
@@ -457,7 +496,11 @@ if (
       CM,
       { name: 'देवेंद्र', designation: 'मंत्री' },
     ]);
-    check('only the full name applied', out.text, 'मुख्यमंत्री देवेंद्र फडणवीस यांनी सांगितले.');
+    check(
+      'only the full name applied',
+      out.text,
+      'मुख्यमंत्री देवेंद्र फडणवीस यांनी सांगितले.',
+    );
     check('substring pair dropped', out.applied, ['देवेंद्र फडणवीस']);
   }
 
