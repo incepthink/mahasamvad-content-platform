@@ -167,6 +167,7 @@ import {
   startCarouselSlideFeedbackJob,
   startCarouselSlideRegenerateJob,
 } from '../jobs/carousel.js';
+import { articleProviderForRequest } from '../article-provider-origin.js';
 import { rememberDesignations } from '../jobs/designation-writeback.js';
 import { prepareTranslationTerms } from '../jobs/translation-terms.js';
 import { recordTasksFromCost } from '../jobs/service-usage.js';
@@ -863,6 +864,12 @@ export function registerGenerationRoutes(
         !isDynamicPosterCategory(body.category)
           ? NEW_IMAGE_MODEL
           : undefined,
+      // Which model writes this run's article draft (migration 0062), from the request's
+      // Origin (ARTICLE_PROVIDER_BY_ORIGIN) — how staging writes on gemma while production
+      // stays on ARTICLE_PROVIDER. Article lanes only: no other lane writes an article.
+      articleProvider: isArticleCategory(body.category)
+        ? articleProviderForRequest(request)
+        : null,
       // The uploaded poster a Dynamic Poster run is made from (migration 0052). The schema
       // has already refused it on any other lane and refused a path this API did not mint;
       // scoping it again here is the imagePrompt rule — what gets STORED is checked

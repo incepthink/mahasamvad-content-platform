@@ -1,6 +1,6 @@
 // Minimal creative poster prompt for testing.
 // Contains ONLY:
-// 1. "Make a creative poster for social media platforms in the size {width} × {height}. It must look very professional and not be congested."
+// 1. "Make a creative poster for social media platforms in the size {width} × {height}. It must look very professional and use the whole canvas well, with no large empty areas."
 // 2. Numbers rule (Devanagari numerals ०-९ only, no English numerals)
 // 3. Text accuracy rules (including preserving the loop in 'श')
 // 4. Borders/dividers/icons rule (only when functional; icons small and secondary)
@@ -26,12 +26,17 @@ export const DEFAULT_POSTER_WIDTH = 1280;
 export const DEFAULT_POSTER_HEIGHT = 1552;
 export const DEFAULT_BADGE_WIDTH = 180;
 export const DEFAULT_BADGE_HEIGHT = 170;
-// 64, not 16 (2026-10-16): with the artwork running behind the band (1552 tall), a model that
-// overshoots the floor by a line puts it under the band. A 112px text-free strip (48 underlap +
-// 64 cushion, about one fourteenth of the height) gives that overshoot somewhere harmless to go.
-export const DEFAULT_BOTTOM_MARGIN = 64;
+// 8 (2026-10-21; was 64 from 2026-10-16, 16 before that). 64 made a 112px text-free strip and
+// models answered it by ending the design early: a divider line and a ~100px empty band above the
+// footer. 8 keeps the text floor (y=1496) 13px above the band's top (y=1509) — a 56px strip.
+export const DEFAULT_BOTTOM_MARGIN = 8;
 /** Pixels at the bottom of the artwork that the footer band's see-through top lies over. */
 export const DEFAULT_FOOTER_UNDERLAP = 48;
+// The solid navy footer pill is the ONLY part of the footer that lies over the artwork: x 271-1008
+// at 1280 wide (measured off footer-new-poster.png; fully transparent either side), plus a ~20px
+// margin. Stated as a bottom-centre rectangle (2026-10-21) because describing a full-width footer
+// strip made the model paint a coloured band right across the bottom.
+export const SOCIAL_FOOTER_PILL = { left: 250, right: 1030 } as const;
 
 export type MinimalCreativePromptInput = Readonly<{
   text: string;
@@ -92,6 +97,7 @@ export const TEXT_ACCURACY_RULE = `TEXT ACCURACY:
 export const DECORATION_RULE = `BORDERS, DIVIDERS AND ICONS — ONLY WHEN THEY HELP:
 - Build structure with spacing, alignment, type, colour and imagery. Do not outline every section or block and do not draw decorative divider lines; use a border or divider only where distinct sections would otherwise be hard to tell apart.
 - No icons by default beside headings or points. Use one only when it says something useful the words do not — never one that repeats its heading, and none where a photograph or illustration already gives the context. Any icon stays small and secondary to the text.
+- One marker per point: a number OR an icon, never both.
 - Aim for a clean, editorial government design: if removing a border, divider or icon loses no clarity, leave it out.`;
 
 // Backwards compatibility alias: the block used to be icons-only.
@@ -127,29 +133,6 @@ export function buildHeadlineMarginsRule(
 
 export const HEADLINE_MARGINS_RULE = buildHeadlineMarginsRule();
 
-const STRIP_ORDINALS: Readonly<Record<number, string>> = {
-  8: 'eighth',
-  9: 'ninth',
-  10: 'tenth',
-  11: 'eleventh',
-  12: 'twelfth',
-  13: 'thirteenth',
-  14: 'fourteenth',
-  15: 'fifteenth',
-  16: 'sixteenth',
-  18: 'eighteenth',
-  20: 'twentieth',
-};
-
-/** "about one fourteenth of" — the strip as a proportion the model can see. */
-function stripFraction(part: number, whole: number): string {
-  const n = Math.round(whole / Math.max(1, part));
-  const word = STRIP_ORDINALS[n];
-  return word
-    ? `about one ${word} of`
-    : `about ${Math.round((part / whole) * 100)}% of`;
-}
-
 export function buildAreaRule(
   width: number,
   height: number,
@@ -158,10 +141,9 @@ export function buildAreaRule(
 ): string {
   const bottomY = height - footerUnderlap - bottomMargin;
   if (footerUnderlap > 0) {
-    // Zone language first, the coordinate only as a supporting figure: the model cannot measure
-    // pixels, and a named strip steers spacing better than y= (2026-10-16).
+    // Only the centred pill covers anything (2026-10-21); the corners beside it are canvas.
     return `AREA RULES:
-- Bottom strip: Keep the bottom strip of the poster — ${stripFraction(height - bottomY, height)} its height — free of all text, numbers and icons; the footer band covers it. End the last line of content above that strip, with space beneath (nothing below y=${bottomY}). Run the background to the bottom edge. Reflow or shrink content until everything fits.`;
+- Footer pill: a navy footer pill is added later over the bottom-centre, from x=${SOCIAL_FOOTER_PILL.left} to x=${SOCIAL_FOOTER_PILL.right}, below y=${bottomY}. Keep all text, numbers and icons out of that rectangle; the bottom corners beside it are free. Do not paint a footer band or strip across the bottom. Reflow or shrink content until everything fits.`;
   }
   return `AREA RULES:
 - Bottom margin: The footer is attached below the image and covers nothing. Extend the design to the bottom edge, but keep all text and icons above y=${bottomY} (at least ${bottomMargin} pixels above the bottom edge). Do not draw wave patterns or curved decorative swooshes along the bottom. Reflow or shrink content until everything fits.`;
@@ -177,7 +159,7 @@ export function buildMinimalCreativePrompt(
   const badgeHeight = input.badgeHeight ?? DEFAULT_BADGE_HEIGHT;
   const text = input.text.trim();
 
-  const opening = `Make a creative poster for social media platforms in the size ${width} × ${height}. It must look very professional and not be congested.`;
+  const opening = `Make a creative poster for social media platforms in the size ${width} × ${height}. It must look very professional and use the whole canvas well, with no large empty areas.`;
   const areaRule = buildAreaRule(
     width,
     height,

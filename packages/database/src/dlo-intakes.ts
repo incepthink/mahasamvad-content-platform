@@ -123,6 +123,11 @@ export type DloIntakeRow = Readonly<{
   // does not exist yet, which is what makes an un-applied 0036 a disabled feature rather
   // than a broken intake.
   reviewState: unknown;
+  // Which model writes this intake's article (0062), stamped at create from the request's
+  // Origin. It also decided how the uploads were stored (gemma keeps bytes, openai uploads a
+  // file id), which is why the names/generate routes must read it off the row rather than
+  // re-derive it. Null = ARTICLE_PROVIDER, and null on a database without 0062.
+  articleProvider: string | null;
   createdAt: string;
   updatedAt: string;
 }>;
@@ -138,6 +143,7 @@ type DloIntakeDbRow = {
   files: DloIntakeFileEntry[] | null;
   combined_text: string | null;
   review_state?: unknown;
+  article_provider?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -157,6 +163,7 @@ function fromDbRow(row: DloIntakeDbRow): DloIntakeRow {
     // absent from the response, so the property is undefined and must collapse to "nothing
     // saved" instead of leaking undefined into the detail payload.
     reviewState: row.review_state ?? null,
+    articleProvider: row.article_provider ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -192,6 +199,7 @@ export async function insertDloIntake(
     category: DloIntakeCategory;
     heading?: string | undefined;
     files: readonly DloIntakeFileEntry[];
+    articleProvider?: string | null | undefined;
   }>,
 ): Promise<DloIntakeRow> {
   const { data, error } = await client
@@ -202,6 +210,10 @@ export async function insertDloIntake(
       category: input.category,
       heading: input.heading ?? null,
       files: input.files,
+      // Omitted unless set, so an un-applied 0062 costs only an intake from a mapped origin.
+      ...(input.articleProvider
+        ? { article_provider: input.articleProvider }
+        : {}),
     })
     .select()
     .single();

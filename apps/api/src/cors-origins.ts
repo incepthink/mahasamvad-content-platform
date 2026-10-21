@@ -38,7 +38,7 @@ function wildcardSegmentIsLabel(segment: string): boolean {
   return !segment.includes('.') && !segment.includes('/');
 }
 
-function matchesPattern(pattern: string, origin: string): boolean {
+export function matchesOriginPattern(pattern: string, origin: string): boolean {
   const parts = pattern.split('*');
   if (!origin.startsWith(parts[0]!)) return false;
   let at = parts[0]!.length;
@@ -66,7 +66,9 @@ function matchesPattern(pattern: string, origin: string): boolean {
 
 export function isAllowedOrigin(origin: string): boolean {
   return entries().some((entry) =>
-    entry.includes('*') ? matchesPattern(entry, origin) : entry === origin,
+    entry.includes('*')
+      ? matchesOriginPattern(entry, origin)
+      : entry === origin,
   );
 }
 

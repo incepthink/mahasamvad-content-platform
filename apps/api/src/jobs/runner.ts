@@ -28,6 +28,8 @@ import {
   generateArticleFromSources,
   articleProvider,
   articleProviderReadsSources,
+  parseArticleProvider,
+  runWithArticleProvider,
   assertDloArticleProvider,
   isQwenChatError,
   ensureArticleDateline,
@@ -115,6 +117,7 @@ import {
   findGlossaryTermsInText,
   getGeneration,
   getGenerationImageModel,
+  getGenerationArticleProvider,
   listActiveEditorialPreferences,
   insertGlossaryCandidates,
   insertRevision,
@@ -709,9 +712,18 @@ export function runJob(
       // Best-effort: null (unticked, un-applied 0061, or a read error) is the default model.
       const imageModel = await getGenerationImageModel(client, id);
       if (imageModel) console.log(`[job ${id}] image model: ${imageModel}`);
+      // The article provider this run was created under (migration 0062 — staging's origin
+      // maps to gemma), scoped the same way so the draft, the source download and the name
+      // digest all agree. Best-effort: null is ARTICLE_PROVIDER.
+      const provider = parseArticleProvider(
+        await getGenerationArticleProvider(client, id),
+      );
+      if (provider) console.log(`[job ${id}] article provider: ${provider}`);
       await traced.trace.run(() =>
         runInCostScope(cost, () =>
-          runWithImageModel(imageModel, () => runInCostTask(task, job)),
+          runWithArticleProvider(provider, () =>
+            runWithImageModel(imageModel, () => runInCostTask(task, job)),
+          ),
         ),
       );
       await updateGeneration(client, id, {
@@ -2388,6 +2400,10 @@ async function renderAndStoreSocialPoster(
           : copyResult
             ? posterCopyItemCount(copyResult.copy)
             : 0,
+        // The copy always opens with a headline; the officer's own text may or may not.
+        hasHeadline: isFreshVerbatim
+          ? analyzeInformationShape(row.note).hasExplicitHeadline
+          : copyResult !== null,
         recent: history?.designs,
         recentMeasuredBuckets: history?.measuredBuckets,
         previous: avoid.previousDesign,

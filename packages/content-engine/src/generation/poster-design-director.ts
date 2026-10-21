@@ -109,8 +109,10 @@ export type DirectPosterDesignInput = Readonly<{
   // The text the poster will actually print (the officer's note on fresh_verbatim, the copy
   // manifest on fresh). Read for its SHAPE only; truncated.
   text: string;
-  // How many distinct items that text carries (0 = unknown).
+  // How many distinct items that text carries besides its headline (0 = unknown).
   itemCount: number;
+  // Whether the text opens with a headline, which `itemCount` does not include.
+  hasHeadline?: boolean | undefined;
   // The last few stored directions, newest first.
   recent?: readonly PosterDesign[] | undefined;
   // The hue buckets recent renders were MEASURED in, newest first — what actually shipped.
@@ -146,36 +148,78 @@ export const BRIEF_MIN_WORDS = 25;
 // The prompt asks for ~90; this is the hard ceiling, trimmed at a sentence boundary.
 export const BRIEF_MAX_WORDS = 120;
 
-// The design principles every DGIPR director works to — the single poster's and the carousel's
-// (carousel-design-director.ts). One list, so the two lanes cannot drift about what "creative but
-// official" means, what the overused default is, or what may never be proposed.
+// What no DGIPR director may ever propose — the single poster's and the carousel's
+// (carousel-design-director.ts). Emitted FIRST, straight after each director's role line, because
+// these are the rules a direction must never break. The two reserved areas lead the list: the
+// badge corner and the footer strip are covered by code-stamped branding afterwards, so anything
+// placed there is lost. The footer item still says the background runs to the bottom edge, or the
+// model answers it by leaving a blank strip — the very emptiness officers complain about.
+export const NEVER_PROPOSE: readonly string[] = [
+  'NEVER PROPOSE:',
+  '- Anything in the top-right corner (about 180 × 170). An official badge is stamped there afterwards.',
+  '- Any information in the footer pill area: a small navy footer pill is placed afterwards over the bottom-centre of the poster (roughly the middle three-fifths of the width, the last ~55 pixels). No text, numbers or icons there. The bottom-left and bottom-right corners beside it stay visible and are free to use.',
+  '- A footer band, bar, strip or coloured panel painted across the bottom, or an empty band above the footer. The footer is added by software; the design itself simply continues to the bottom edge.',
+  '- Maps or state/territory outlines.',
+  '- Waves, swooshes or curved ribbons along the bottom.',
+  '- Large or bulky icons (icons stay small).',
+  '- Outlined boxes around every block, decorative divider lines, or an icon beside every heading or point.',
+  '- More than one marker on a single point: a point carries a number OR a small icon OR a plain bullet, never a number tile together with an icon. Every point in a list uses the same kind of marker.',
+  '- Logos, emblems, seals or QR codes.',
+  '- A dark, black, charcoal, navy or night-mode background.',
+];
+
+// The design principles every DGIPR director works to — the single poster's and the carousel's.
+// One list, so the two lanes cannot drift about what "creative but official" means, what the
+// overused default is, or how much of the canvas a design should use.
 export const DESIGN_PRINCIPLES: readonly string[] = [
   'TONE: official government communication. Dignified, uncluttered, trustworthy, and easy to read on a phone at a glance. Professional and contemporary, never gimmicky.',
   '',
   'CHOOSE HOW THE INFORMATION IS SHOWN FROM WHAT IT CONTAINS:',
   '- Numbers-heavy content (amounts, counts, percentages): let the figures carry the design as large, confident type.',
   '- Dated or ordered content (a schedule, steps, a deadline): a sequence the eye can follow.',
-  '- A single message: a strong typographic statement with generous space.',
+  '- A single message: a strong typographic statement set large enough to command the canvas.',
   '- Many mixed points: grouped sections with clear headings.',
   '- Content about a place or about people: led by imagery.',
   '- One column of lines each with a small icon beside it is ONE option among many, and it is the overused default. Use it only when nothing else suits the content and the recent posters did not use it.',
   '',
   'COMPOSITION: decide where the visual weight sits and how the canvas is divided. The shape that has been repeated far too often is: headline at the top left, a list down the left, a photograph at the bottom right. Do not fall back on it.',
+  '',
+  // Officers reported designs with too much blank space. "Generous space" was the old single-
+  // message wording, and the image prompt opened with "not be congested", so nothing pushed the
+  // other way. That opening line now asks for the whole canvas too (minimal-creative-prompt.ts).
+  'USE THE WHOLE CANVAS: the design should fill the poster from edge to edge. Text, imagery, panels and colour fields together occupy most of the canvas; no large empty areas, no empty quadrant or half, and no small block of content floating in a big plain field. Scale the type and the imagery up until the space is well used. Space is used BETWEEN groups to separate them, never as leftover emptiness. A poster with few lines gets larger type and a larger image, not more blank space.',
+  '',
   'IMAGERY: decide whether to use any, of what kind (photograph, illustration, or purely graphic), and how large. Imagery is bright and naturally lit.',
+  '',
   'Also direct typography and hierarchy (what is largest, what is secondary), spacing, and graphic treatment (panels, blocks, texture).',
-  'RESTRAINT: build structure with spacing, alignment, typography, colour and imagery. Do not propose a border or outline around every section, divider lines between items, or icons beside headings and points by default. Mention a border, divider or icon only where it has a clear function (separating genuinely distinct sections, or telling the reader something the words do not); never icons alongside imagery that already gives the visual context. The look is clean and editorial.',
   '',
-  'COLOUR: describe a colour mood in words, ALWAYS on a LIGHT ground (white, off-white, or a pale tint). Saturated colour belongs in panels, headings and accents. Never propose a dark, black, charcoal, navy or night-mode background. Never give hex codes. Do not default to cream with saffron and maroon.',
+  'RESTRAINT: build structure with spacing, alignment, typography, colour and imagery. Use a border, divider or icon only where it has a clear function (separating genuinely distinct sections, or telling the reader something the words do not); never icons alongside imagery that already gives the visual context. A numbered list is numbered, an icon list uses icons — never both on the same point. The look is clean and editorial, like a well-designed government publication.',
   '',
-  'NEVER PROPOSE: maps or state/territory outlines; waves, swooshes or curved ribbons along the bottom; large or bulky icons (icons stay small); outlined boxes around every block, decorative divider lines, or an icon beside every heading or point; anything in the top-right corner, which is reserved for an official badge; logos, emblems, seals or QR codes.',
+  'COLOUR: describe a colour mood in words, ALWAYS on a LIGHT ground (white, off-white, or a pale tint). Saturated colour belongs in panels, headings and accents. Never give hex codes. Do not default to cream with saffron and maroon.',
 ];
+
+// The single poster's own blocks. Kept out of the shared lists: the carousel has its own canvas
+// wording and plans its slide text itself.
+const CANVAS_RULE =
+  'THE CANVAS: a tall portrait poster, about 4:5 (1280 wide × 1552 high). Apart from the two reserved areas above, the whole canvas is yours to design.';
+const TEXT_RULE =
+  'THE TEXT: every line of the poster text is printed in full, in Marathi (Devanagari script). Nothing is dropped or shortened. Choose a presentation that can hold all of it comfortably, and direct the typography for Devanagari: weight, size and line spacing that keep matras and conjuncts clear.';
+// How many of the most recent posters the variety rule compares against.
+const VARIETY_WINDOW = 3;
 
 const SYSTEM_PROMPT = [
   'You are the design director for DGIPR, the Directorate General of Information and Public Relations, Government of Maharashtra. For each social-media poster you decide its visual direction in a few English sentences, which an image model then follows. You never write the poster text: that is supplied separately and is not yours to touch.',
   '',
+  ...NEVER_PROPOSE,
+  '',
+  CANVAS_RULE,
+  '',
+  TEXT_RULE,
+  '',
   ...DESIGN_PRINCIPLES,
   '',
-  'OUTPUT RULES: style only, in English. Never write any poster text, headline, words to print, numbers, names, dates or places, and never quote anything. Where the content allows, make this poster clearly different from the recent posters listed in the message.',
+  'OUTPUT RULES: style only, in English. Never write any poster text, headline, words to print, numbers, names, dates or places, and never quote anything.',
+  `VARIETY RULE: compare your choice with each of the three most recent posters in the message. Against each of them, at least two of form, composition, imagery and colourMood must be different. Your colourMood must not be any colour already used by a listed poster or listed as a colour recent posters came out in, unless every colour mood is already used.`,
   '',
   'Answer with STRICT JSON: form, composition (where the visual weight sits), imagery, colourMood (the hue family of the saturated colours), and brief (about 70 to 90 words of direction for the image model, in plain sentences).',
 ].join('\n');
@@ -184,10 +228,68 @@ function describe(design: PosterDesign): string {
   return `form=${design.form}, weight=${design.composition}, imagery=${design.imagery}, colour=${design.colourMood}`;
 }
 
+function measuredColours(input: DirectPosterDesignInput): string[] {
+  return (input.recentMeasuredBuckets ?? []).filter(
+    (b) => b && b !== 'neutral',
+  );
+}
+
+// The colour moods recent posters used — chosen or measured — and those still free. When every
+// mood is used, `available` is empty and the colour half of the variety rule lapses.
+export function colourAvailability(input: DirectPosterDesignInput): {
+  used: ColourMood[];
+  available: ColourMood[];
+} {
+  const used = new Set<string>([
+    ...(input.recent ?? []).map((d) => d.colourMood),
+    ...measuredColours(input),
+  ]);
+  return {
+    used: COLOUR_MOODS.filter((c) => used.has(c)),
+    available: COLOUR_MOODS.filter((c) => !used.has(c)),
+  };
+}
+
+function sharedFields(a: PosterDesign, b: PosterDesign): number {
+  return (
+    Number(a.form === b.form) +
+    Number(a.composition === b.composition) +
+    Number(a.imagery === b.imagery) +
+    Number(a.colourMood === b.colourMood)
+  );
+}
+
+// Did a direction break the variety rule? Too close to one of the last three posters (fewer than
+// two of the four fields differ), or a used colour while unused ones remain.
+export function breaksVariety(
+  direction: PosterDesign,
+  input: DirectPosterDesignInput,
+): boolean {
+  const tooClose = (input.recent ?? [])
+    .slice(0, VARIETY_WINDOW)
+    .some((r) => sharedFields(direction, r) > 2);
+  const { used, available } = colourAvailability(input);
+  return (
+    tooClose || (available.length > 0 && used.includes(direction.colourMood))
+  );
+}
+
+function describeContent(input: DirectPosterDesignInput): string {
+  const n = input.itemCount;
+  if (n <= 0) {
+    return input.hasHeadline
+      ? 'The poster carries a headline; the number of other items is not known.'
+      : 'The number of items is not known.';
+  }
+  const points = `${n} point${n === 1 ? '' : 's'}`;
+  return `The poster carries ${input.hasHeadline ? `a headline and ${points}` : points}. All of it is printed in full.`;
+}
+
 // Exported for the harness, which prints it for review.
 export function buildDesignDirectorUserPrompt(
   input: DirectPosterDesignInput,
   sharper = false,
+  varietyRetry = false,
 ): string {
   const lines: string[] = [];
   const recent = input.recent ?? [];
@@ -197,17 +299,40 @@ export function buildDesignDirectorUserPrompt(
       ...recent.map((d, i) => `  ${i + 1}. ${describe(d)}`),
     );
   }
-  const measured = (input.recentMeasuredBuckets ?? []).filter(
-    (b) => b && b !== 'neutral',
-  );
+  const measured = measuredColours(input);
   if (measured.length > 0) {
     lines.push(
       `Colours recent posters actually came out in: ${measured.join(', ')}.`,
     );
   }
-  if (lines.length > 0) {
-    lines.push('Differ from these where the content allows.', '');
+  const { used, available } = colourAvailability(input);
+  if (used.length > 0 && available.length > 0) {
+    lines.push(
+      `Colours already used: ${used.join(', ')}. Choose from: ${available.join(', ')}.`,
+    );
+  } else if (used.length > 0 && recent.length > 0) {
+    lines.push(
+      "Every colour mood has been used recently; choose a colour different from poster 1's.",
+    );
   }
+  const window = Math.min(VARIETY_WINDOW, recent.length);
+  if (window > 0) {
+    const which =
+      window === 1
+        ? 'poster 1'
+        : `posters ${Array.from({ length: window }, (_, i) => i + 1)
+            .join(', ')
+            .replace(/, (\d)$/, ' and $1')}`;
+    lines.push(
+      `Against ${which}, at least two of form, composition, imagery and colourMood must differ.`,
+    );
+  }
+  if (varietyRetry) {
+    lines.push(
+      'Your previous answer was too close to a recent poster or reused a recent colour. Follow the two rules above exactly.',
+    );
+  }
+  if (lines.length > 0) lines.push('');
 
   if (input.previous && input.redoKind === 'arrangement') {
     lines.push(
@@ -236,9 +361,7 @@ export function buildDesignDirectorUserPrompt(
   }
 
   lines.push(
-    input.itemCount > 0
-      ? `The poster carries ${input.itemCount} distinct item(s) of information.`
-      : 'The number of items is not known.',
+    describeContent(input),
     'The poster text follows, ONLY so you can judge the shape of its content (figures, dates, one message, many points, places, people). Never copy any of it into your answer:',
     input.text.trim().slice(0, TEXT_MAX_CHARS),
   );
@@ -412,23 +535,29 @@ async function directPosterDesignUntraced(
 ): Promise<PosterDesignDirection | null> {
   if (input.text.trim().length === 0) return null;
   const call = input.call ?? callWithModel(input.model ?? DESIGN_MODEL);
-  const ask = async (sharper: boolean): Promise<PosterDesignDirection | null> =>
+  const ask = async (
+    sharper: boolean,
+    varietyRetry: boolean,
+  ): Promise<PosterDesignDirection | null> =>
     parseDirection(
       await call([
         { role: 'system', content: SYSTEM_PROMPT },
         {
           role: 'user',
-          content: buildDesignDirectorUserPrompt(input, sharper),
+          content: buildDesignDirectorUserPrompt(input, sharper, varietyRetry),
         },
       ]),
     );
   try {
-    const first = await ask(false);
-    if (!first || !repeatsPrevious(first, input.previous, input.redoKind))
-      return first;
-    // ONE retry with a sharper note, then accept whatever comes back: a redo that still repeats
-    // is better than a redo with no direction at all.
-    const second = await ask(true).catch(() => null);
+    const first = await ask(false, false);
+    if (!first) return first;
+    const repeated = repeatsPrevious(first, input.previous, input.redoKind);
+    const unvaried = breaksVariety(first, input);
+    if (!repeated && !unvaried) return first;
+    // ONE retry with a sharper note, then accept whatever comes back: a direction that still
+    // repeats is better than no direction at all. The prompt alone has been seen to repeat a
+    // recent poster's imagery and colour, which is why the variety rule is checked in code too.
+    const second = await ask(repeated, unvaried).catch(() => null);
     return second ?? first;
   } catch (error) {
     console.warn(
@@ -666,6 +795,142 @@ if (
       'the system prompt lost the light-ground rule',
     );
 
+    // 6. The 2026-10-21 revision: bans first, footer named, whole canvas, variety rule.
+    const neverAt = SYSTEM_PROMPT.indexOf('NEVER PROPOSE:');
+    check(
+      neverAt > 0 &&
+        neverAt < SYSTEM_PROMPT.indexOf('THE CANVAS:') &&
+        neverAt < SYSTEM_PROMPT.indexOf('TONE:'),
+      'NEVER PROPOSE is not the first block after the role line',
+    );
+    check(
+      SYSTEM_PROMPT.includes('Any information in the footer pill area') &&
+        SYSTEM_PROMPT.includes('continues to the bottom edge') &&
+        SYSTEM_PROMPT.includes('never a number tile together with an icon'),
+      'the footer ban (and its run-to-the-edge clause) is missing',
+    );
+    check(
+      SYSTEM_PROMPT.includes('USE THE WHOLE CANVAS') &&
+        !SYSTEM_PROMPT.includes('generous space.'),
+      'the whole-canvas rule is missing or "generous space" survived',
+    );
+    check(
+      SYSTEM_PROMPT.includes('VARIETY RULE') &&
+        SYSTEM_PROMPT.includes('printed in full, in Marathi'),
+      'the variety rule or the text rule is missing',
+    );
+    check(
+      prompt.includes('Colours already used: red, orange, green.') &&
+        prompt.includes('Choose from: yellow, teal, blue, purple, neutral.'),
+      'the colour availability line is wrong',
+    );
+    check(
+      prompt.includes(
+        'Against posters 1 and 2, at least two of form, composition, imagery and colourMood must differ.',
+      ),
+      'the variety line does not name the recent posters',
+    );
+    check(
+      !prompt.includes('where the content allows'),
+      'the soft variety sentence survived',
+    );
+    check(
+      buildDesignDirectorUserPrompt({
+        text: 'x',
+        itemCount: 5,
+        hasHeadline: true,
+      }).includes('The poster carries a headline and 5 points.'),
+      'the headline was not separated from the points',
+    );
+    const fiveRecent: PosterDesign[] = [
+      'purple',
+      'blue',
+      'teal',
+      'red',
+      'orange',
+    ].map((colourMood, i) => ({
+      form: (['feature_and_supporting', 'sequence', 'grouped_sections', 'split_columns', 'sequence'] as const)[i]!,
+      composition: (['centre', 'left', 'centre', 'right', 'top'] as const)[i]!,
+      imagery: (['illustration', 'graphic_only', 'graphic_only', 'photo_inset', 'photo_large'] as const)[i]!,
+      colourMood: colourMood as ColourMood,
+    }));
+    const realRun = buildDesignDirectorUserPrompt({
+      text: 'मजकूर',
+      itemCount: 5,
+      hasHeadline: true,
+      recent: fiveRecent,
+      recentMeasuredBuckets: ['purple', 'blue', 'teal'],
+    });
+    console.log(`--- 46186e60-shaped prompt ---\n${realRun}\n-------------------`);
+    check(
+      realRun.includes('Choose from: yellow, green, neutral.') &&
+        realRun.includes('Against posters 1, 2 and 3,'),
+      'the reported run would not have been told which colours and posters to avoid',
+    );
+    // The reported run's own answer breaks the rule (orange was poster 5's colour).
+    check(
+      breaksVariety(
+        {
+          form: 'image_led',
+          composition: 'layered',
+          imagery: 'photo_large',
+          colourMood: 'orange',
+        },
+        { text: 'x', itemCount: 5, recent: fiveRecent },
+      ),
+      'the reported answer was not caught by the variety check',
+    );
+
+    // 7. A first render that breaks variety is asked once more.
+    const varietyRun = async (
+      answers: string[],
+    ): Promise<[PosterDesignDirection | null, number, string[]]> => {
+      const prompts: string[] = [];
+      let calls = 0;
+      const result = await directPosterDesign({
+        text: 'राज्यातील २५ लाख शेतकऱ्यांना सौर कृषी पंप',
+        itemCount: 3,
+        recent: [previous],
+        call: async (messages) => {
+          prompts.push(messages[1]?.content ?? '');
+          const a = answers[calls] ?? answers[answers.length - 1] ?? '';
+          calls += 1;
+          return a;
+        },
+      });
+      return [result, calls, prompts];
+    };
+    const [closeFix, closeCalls, closePrompts] = await varietyRun([
+      answer({ colourMood: 'teal' }),
+      answer({ form: 'figure_led', composition: 'top', colourMood: 'teal' }),
+    ]);
+    check(
+      closeCalls === 2 && closeFix?.form === 'figure_led',
+      'a first render too close to poster 1 was not retried',
+    );
+    check(
+      closePrompts[1]?.includes('too close to a recent poster') ?? false,
+      'the variety retry carried no note',
+    );
+    const [, reusedCalls] = await varietyRun([
+      answer({
+        form: 'figure_led',
+        composition: 'top',
+        imagery: 'none',
+        colourMood: 'orange',
+      }),
+    ]);
+    check(reusedCalls === 2, 'a reused colour was not retried');
+    const [, variedCalls] = await varietyRun([
+      answer({
+        form: 'figure_led',
+        composition: 'top',
+        imagery: 'none',
+        colourMood: 'teal',
+      }),
+    ]);
+    check(variedCalls === 1, 'a varied first render was retried');
+
     if (failures.length > 0) {
       console.error(`\n${failures.length} FAILURE(S):`);
       for (const f of failures) console.error(`  - ${f}`);
@@ -682,13 +947,20 @@ if (
       process.exitCode = 1;
     } else {
       const text = await readFile(fileArg.slice('--file='.length), 'utf8');
-      const itemCount = text
-        .split(/\n+/)
-        .filter((l) => l.trim().length > 0).length;
+      const { analyzeInformationShape } = await import(
+        '../references/select-by-information.js'
+      );
+      const { itemCount, hasExplicitHeadline: hasHeadline } =
+        analyzeInformationShape(text);
       const recent: PosterDesign[] = [];
       let last: PosterDesignDirection | null = null;
       for (let i = 0; i < 5; i += 1) {
-        const d = await directPosterDesign({ text, itemCount, recent });
+        const d = await directPosterDesign({
+          text,
+          itemCount,
+          hasHeadline,
+          recent,
+        });
         console.log(`\n=== run ${i + 1} ===\n${JSON.stringify(d, null, 2)}`);
         if (d) {
           recent.unshift(d);
@@ -700,6 +972,7 @@ if (
         const redo = await directPosterDesign({
           text,
           itemCount,
+          hasHeadline,
           recent,
           previous: last,
           redoKind: 'arrangement',

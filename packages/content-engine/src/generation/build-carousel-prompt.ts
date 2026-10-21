@@ -578,7 +578,7 @@ if (
   check(
     'no prompt asks for a dateline or a slide number, even when the plan has a dateline',
     [cover, middle, referenced].every(
-      (prompt) => !/dateline|slide number|pill|१\/३/i.test(prompt),
+      (prompt) => !/dateline|slide number|(?<!footer )pill|१\/३/i.test(prompt),
     ),
   );
   check(

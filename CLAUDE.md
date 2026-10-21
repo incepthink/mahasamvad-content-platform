@@ -1361,7 +1361,10 @@ Bearer`) — the AK/SK JWT in Kling's docs is legacy-only and 3.0 is not on it; 
   `simple`).** The flag is read in ONE place, `articleGenerationMode()` in
   `apps/api/src/jobs/runner.ts`, beside the `ARTICLE_POSTER_MODE` precedent.
   - **WHICH MODEL writes the `simple` draft is a second, independent flag**:
-    `ARTICLE_PROVIDER` (`openai` default | `qwen` | `gemma`), read in ONE place,
+    `ARTICLE_PROVIDER` (`openai` default | `qwen` | `gemma`), read in ONE place
+    (overridable per ORIGIN by `ARTICLE_PROVIDER_BY_ORIGIN`, stored on the row as
+    `article_provider` (0062) and scoped with `runWithArticleProvider` — how staging writes on
+    gemma against the same API),
     `generation/article-provider.ts` (the `clip-provider.ts` seam). **`gemma` is the only
     non-OpenAI provider that can read the officer's UPLOADS** — a self-hosted
     `google/gemma-4-31B-it` on Runpod serverless, and a VISION model, so the `/dlo` file lane

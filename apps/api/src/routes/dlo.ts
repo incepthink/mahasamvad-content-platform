@@ -58,7 +58,12 @@ import {
   startDloFileReextractionJob,
   startDloIntakeJob,
 } from '../jobs/dlo-runner.js';
-import { uploadSourceFile } from '@dgipr/content-engine';
+import {
+  articleProvider,
+  runWithArticleProvider,
+  uploadSourceFile,
+} from '@dgipr/content-engine';
+import { articleProviderForRequest } from '../article-provider-origin.js';
 import { getDocumentIntakeJob } from '../jobs/document-intake.js';
 import { parseAudioTrimsField, resolveAudioTrims } from './audio-trims.js';
 import { startGenerationJob } from '../jobs/runner.js';
@@ -494,12 +499,17 @@ export function registerDloRoutes(
     // from `intakeId`, which is why this insert carries that id rather than taking one from
     // the database. Documents are uploaded just below, from the bytes still in hand. The row
     // is still written before the job starts, and the job still reads everything back off it.
+    // Which model writes this intake's article (0062): the request's Origin, else the
+    // deployment default. Stored, because it decides how documents are kept just below.
+    const requestProvider = articleProviderForRequest(request);
+    const provider = runWithArticleProvider(requestProvider, articleProvider);
     const row = await insertDloIntake(client, {
       id: intakeId,
       notes: notes.trim(),
       category: parsedCategory.data,
       heading: heading.trim() || undefined,
       files: [],
+      articleProvider: requestProvider,
     });
     const entries: DloIntakeFileEntry[] = [];
     // Recordings share the `files` field with photographs and documents, so a trim's position
@@ -548,6 +558,17 @@ export function registerDloRoutes(
       // 'done' with no text is the shape the lane rests on: the intake job skips a done
       // entry, and `rebuildCombinedText` contributes nothing for it, which the combine step
       // already understands (it checks for `openaiFileId` before deciding nothing survived).
+      // gemma reads the archived bytes itself at generation time (jobs/source-files.ts), so
+      // nothing goes to OpenAI and no file id is needed — the /new-dlo rule.
+      if (provider === 'gemma') {
+        entries.push({
+          name: upload.name,
+          storagePath,
+          kind: upload.kind,
+          status: 'done',
+        });
+        continue;
+      }
       try {
         const fileId = await uploadSourceFile(
           upload.data as Buffer,
@@ -1071,6 +1092,8 @@ export function registerDloRoutes(
         // The officer's trusted request for this article (migration 0041). Same
         // omit-when-empty treatment again.
         instructions: body.instructions,
+        // The intake's provider (0062) travels to the run, so the job writes on it.
+        articleProvider: row.articleProvider,
       });
       trackGenerationActivity(
         client,

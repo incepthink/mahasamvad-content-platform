@@ -232,7 +232,16 @@ export function analyzeInformationShape(note: string): InformationShape {
     !LIST_ITEM_PREFIX.test(firstLine) &&
     laterLinesAreList &&
     /[:：]$/u.test(firstLine);
-  const hasExplicitHeadline = shortStandaloneFirstBlock || listIntroduction;
+  // A short title line directly above a list ("‘योजनेचे नाव’" then "- …" lines) is a headline
+  // too, with no blank line or colon after it — how officers commonly type a poster.
+  const titleAboveList =
+    lines.length > 1 &&
+    firstLine.length <= 120 &&
+    !LIST_ITEM_PREFIX.test(firstLine) &&
+    !/[.!?।]$/u.test(firstLine) &&
+    LIST_ITEM_PREFIX.test(lines[1] ?? '');
+  const hasExplicitHeadline =
+    shortStandaloneFirstBlock || listIntroduction || titleAboveList;
 
   let skippedHeadline = false;
   let itemCount = 0;

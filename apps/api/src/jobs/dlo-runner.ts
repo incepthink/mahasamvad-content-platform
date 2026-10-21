@@ -35,6 +35,9 @@ import {
   transcribeAudio,
   type AudioInput,
   sttProviderFetchesUrls,
+  articleProvider,
+  parseArticleProvider,
+  runWithArticleProvider,
 } from '@dgipr/content-engine';
 import {
   DLO_UPLOADS_BUCKET,
@@ -634,8 +637,19 @@ export function startDloIntakeJob(client: SupabaseClient, id: string): void {
     // not "nothing survived"; it is the entire point of that lane. Without this an intake of
     // one scan and no typed note would fail at the last step with a message telling the
     // officer to check files that are perfectly fine.
+    //
+    // On gemma there is no file id: the bytes are read from the archive at generation time
+    // (jobs/source-files.ts), so an archived, done, non-recording entry counts the same way.
+    const onGemma =
+      runWithArticleProvider(
+        parseArticleProvider(row.articleProvider),
+        articleProvider,
+      ) === 'gemma';
     const readByModel = entries.some(
-      (entry) => entry.status === 'done' && entry.openaiFileId,
+      (entry) =>
+        entry.status === 'done' &&
+        (entry.openaiFileId ||
+          (onGemma && entry.storagePath && entry.kind !== 'audio')),
     );
     if (!combined && !awaitingSelection && !readByModel) {
       throw new Error(

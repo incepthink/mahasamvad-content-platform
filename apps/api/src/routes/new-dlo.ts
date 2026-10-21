@@ -28,6 +28,7 @@
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { trackActivity } from '../activity/actor.js';
+import { articleProviderForRequest } from '../article-provider-origin.js';
 import { trackGenerationActivity } from '../activity/generation.js';
 import { activitySummary, firstLine } from '@dgipr/schemas';
 import {
@@ -59,6 +60,8 @@ import {
   runInCostScope,
   runInCostTask,
   articleProvider,
+  parseArticleProvider,
+  runWithArticleProvider,
   uploadSourceFile,
   type SourceFileRef,
 } from '@dgipr/content-engine';
@@ -299,12 +302,18 @@ export function registerNewDloRoutes(
     // from `intakeId`, which is why this insert carries that id. Documents are archived and
     // uploaded to OpenAI just below, from the bytes still in hand; then the entries are
     // attached and the job starts, which reads everything off the row.
+    // Which model writes this intake's article (0062): the request's Origin, else the
+    // deployment default. Stored, because it decides how the documents are kept just below and
+    // every later route on this intake must agree with that.
+    const requestProvider = articleProviderForRequest(request);
+    const provider = runWithArticleProvider(requestProvider, articleProvider);
     const row = await insertDloIntake(client, {
       id: intakeId,
       notes: notes.trim(),
       category: parsedCategory.data,
       heading: heading.trim() || undefined,
       files: [],
+      articleProvider: requestProvider,
     });
 
     const entries: DloIntakeFileEntry[] = [];
@@ -337,7 +346,7 @@ export function registerNewDloRoutes(
       // gemma reads the archived bytes itself at generation time (see source-files.ts), so
       // there is nothing to upload and no OpenAI key to need. Marked done immediately: the
       // intake job skips a done entry, which is what keeps this file out of the OCR path.
-      if (articleProvider() === 'gemma') {
+      if (provider === 'gemma') {
         entries.push({
           name: upload.name,
           storagePath,
@@ -413,16 +422,21 @@ export function registerNewDloRoutes(
         });
       }
 
-      const { files, documents } = await sourceContextForGeneration(client, {
-        dloIntakeId: row.id,
-      });
+      // The provider this intake was created under (0062), so the name digest reads the
+      // sources the same way the article will.
+      const provider = parseArticleProvider(row.articleProvider);
+      const { files, documents } = await runWithArticleProvider(provider, () =>
+        sourceContextForGeneration(client, { dloIntakeId: row.id }),
+      );
       const cost = createCostAccumulator();
-      const digest = await runInCostScope(cost, () =>
-        runInCostTask('designation_extraction', () =>
-          extractNameContextFromSources(
-            row.combinedText ?? '',
-            files,
-            documents,
+      const digest = await runWithArticleProvider(provider, () =>
+        runInCostScope(cost, () =>
+          runInCostTask('designation_extraction', () =>
+            extractNameContextFromSources(
+              row.combinedText ?? '',
+              files,
+              documents,
+            ),
           ),
         ),
       );
@@ -462,9 +476,10 @@ export function registerNewDloRoutes(
         });
       }
 
-      const { files, documents } = await sourceContextForGeneration(client, {
-        dloIntakeId: row.id,
-      });
+      const provider = parseArticleProvider(row.articleProvider);
+      const { files, documents } = await runWithArticleProvider(provider, () =>
+        sourceContextForGeneration(client, { dloIntakeId: row.id }),
+      );
       const note = (row.combinedText ?? '').trim();
       // Nothing to write from: no readable source reached the model AND nothing was typed or
       // transcribed. Refused here rather than left to the model, which would otherwise be
@@ -474,7 +489,9 @@ export function registerNewDloRoutes(
       // gemma, which carries bytes instead — counting it alone would refuse every gemma
       // intake whose sources are documents with no typed note, i.e. the ordinary case.
       const attachedCount =
-        articleProvider() === 'gemma' ? documents.length : files.length;
+        runWithArticleProvider(provider, articleProvider) === 'gemma'
+          ? documents.length
+          : files.length;
       if (attachedCount === 0 && note.length === 0) {
         return reply.code(400).send({
           error: {
@@ -502,6 +519,8 @@ export function registerNewDloRoutes(
         })),
         styleReference: body.styleReference,
         instructions: body.instructions,
+        // The intake's provider (0062) travels to the run, so the job writes on it.
+        articleProvider: row.articleProvider,
       });
       // The ordinary article runner. It finds this run's files through `dlo_intake_id` and
       // calls generateArticleFromSources instead of generateArticleSimple — the only

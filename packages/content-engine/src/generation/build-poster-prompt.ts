@@ -25,6 +25,7 @@ import {
   numeralSpellingBlock,
 } from './poster-numerals.js';
 import {
+  buildAreaRule,
   buildMinimalCreativePrompt,
   DO_NOT_USE_RULE,
   HEADLINE_MARGINS_RULE,
@@ -84,9 +85,10 @@ import {
 // the solid navy title pill) and solid below, and the strip it was joined onto showed through
 // that see-through part as smeared generated fill. So the artwork now runs down to y=1552 —
 // behind the see-through part — and only a 48px strip is added, hidden entirely by the band's
-// solid white row. Text stops at y=1440 (1552 - 48 - 64) — the cushion was raised 16 -> 64 the
-// same day, because a model overshooting a floor this close to the band put its last line under
-// it; the 112px strip is stated to the model as "about one fourteenth" of the height. The band's top
+// solid white row. Text stops at y=1496 (1552 - 48 - 8). The cushion went 16 -> 64 on 2026-10-16
+// (a last line slipped under the band) and back down to 8 on 2026-10-21, because 64 made models
+// end the design early with a divider and a ~100px empty band above the footer; the 56px strip is
+// stated to the model as "about 4%" of the height. The band's top
 // lands at y=1509. Keep in sync with SOCIAL_ARTWORK_HEIGHT / SOCIAL_FOOTER_UNDERLAP in
 // packages/poster-renderer/src/twitter-chrome.ts.
 export const SOCIAL_ZONES: ReservedZoneGeometry = {
@@ -95,8 +97,11 @@ export const SOCIAL_ZONES: ReservedZoneGeometry = {
   lockupWidth: 180,
   lockupHeight: 170,
   footerHeight: 91,
-  footerAppendedMargin: 64,
+  footerAppendedMargin: 8,
   footerUnderlap: 48,
+  // The navy pill (x 271-1008, measured) plus ~20px either side. Keep in sync with
+  // SOCIAL_FOOTER_PILL in minimal-creative-prompt.ts.
+  footerPill: { left: 250, right: 1030 },
 };
 
 // The stamped footer is a navy ministry title pill sitting ON TOP of a white social-handle
@@ -1031,9 +1036,9 @@ if (
         'TEXT TO PUT ON THE POSTER:',
         'MOST IMPORTANT MESSAGE — render the value only; its placement is your decision:',
         'ADDITIONAL EXACT TEXT — render these values only; arrange and group them freely:',
-        'about one fourteenth of its height',
-        'free of all text, numbers and icons',
-        'nothing below y=1440',
+        'from x=250 to x=1030',
+        'Keep all text, numbers and icons out of that rectangle',
+        'below y=1496',
       ]) {
         if (!prompt.includes(needle))
           failures.push(
@@ -1083,7 +1088,7 @@ if (
         'fixed-template prompt does not rank the reserve over completeness',
       );
     // (b) The consequence. "Reserved for branding" never said the words are destroyed.
-    if (!onbrand.includes('COVERED OR HALF-HIDDEN'))
+    if (!onbrand.includes('is COVERED'))
       failures.push(
         'fixed-template prompt does not state what happens under the band',
       );
@@ -1145,17 +1150,17 @@ if (
     for (const needle of [
       'top-right 180 x 170 pixels',
       '1280 x 1552 output',
-      'y=1440',
-      'SIT BEHIND THE FOOTER BAND',
+      'y=1496',
+      'SMALL CENTRED PILL',
       'DO NOT CUT A HOLE IN IT',
       'continue through unbroken',
       'CLEAR OF CONTENT, NOT CLEAR OF DESIGN',
       // THE 173-PIXEL DEAD BAND (generation 97b64542): 82px of flat grey the model left above
       // the bottom edge, plus the 91px strip footer-extension.ts then filled from it. The
       // bottom is an edge the design runs off, not a reserve — see reserved-zone-rule.ts.
-      'DESIGN ALL THE WAY DOWN TO THE VERY BOTTOM EDGE',
-      'THERE IS NO COLOUR RESTRICTION AT THE BOTTOM',
-      'must still run all the way down to the bottom edge',
+      'all the way to the edge',
+      'bottom-right corners beside it stay fully visible',
+      'are ordinary canvas',
     ]) {
       if (!onbrand.includes(needle))
         failures.push(`fixed-template prompt lost "${needle}"`);
@@ -1288,8 +1293,8 @@ if (
         );
     }
     for (const chromeRule of [
-      'y=1440',
-      'about one fourteenth of its height',
+      'y=1496',
+      'from x=250 to x=1030',
     ]) {
       if (!freshPrompt.includes(chromeRule))
         failures.push(`the fresh prompt lost chrome rule "${chromeRule}"`);
@@ -1521,7 +1526,7 @@ if (
       'TEXT ACCURACY:',
       'Use only Devanagari numerals: ० १ २ ३ ४ ५ ६ ७ ८ ९',
       'AREA RULES:',
-      'about one fourteenth of its height',
+      'from x=250 to x=1030',
       'TEXT TO PUT ON THE POSTER:',
     ]) {
       if (!freshVerbatim.includes(needle))
@@ -1938,7 +1943,7 @@ if (
       // The builder without the new options is byte-identical to the pre-2026-09-26 assembly.
       const plain = minimal({ text: VERBATIM_TEXT });
       const expected = [
-        'Make a creative poster for social media platforms in the size 1280 × 1552. It must look very professional and not be congested.',
+        'Make a creative poster for social media platforms in the size 1280 × 1552. It must look very professional and use the whole canvas well, with no large empty areas.',
         '',
         NUMBERS_RULE,
         '',
@@ -1950,7 +1955,7 @@ if (
         '',
         HEADLINE_MARGINS_RULE,
         '',
-        'AREA RULES:\n- Bottom strip: Keep the bottom strip of the poster — about one fourteenth of its height — free of all text, numbers and icons; the footer band covers it. End the last line of content above that strip, with space beneath (nothing below y=1440). Run the background to the bottom edge. Reflow or shrink content until everything fits.',
+        buildAreaRule(1280, 1552),
         '',
         'TEXT TO PUT ON THE POSTER:',
         VERBATIM_TEXT,

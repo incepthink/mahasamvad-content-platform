@@ -69,6 +69,41 @@ function envOn(value: string | undefined): boolean {
   return /^(1|true|on|yes)$/i.test((value ?? '').trim());
 }
 
+// THE SDK NEVER RETRIES A FAILED LOGIN. A logger logs in lazily on its first flush, and the
+// SDK caches that promise — including a REJECTED one. So one network blip at that moment
+// ("fetch failed") makes every later batch from this logger fail the same way and be dropped,
+// silently, until the process restarts (seen 2026-10-21: 46 spans dropped, none sent). So the
+// login is checked here, and a logger whose login failed is replaced by a fresh one.
+const LOGIN_RETRY_MS = 30_000;
+
+function createLogger(apiKey: string): Logger<true> {
+  return initLogger({
+    projectName: projectName!,
+    apiKey,
+    asyncFlush: true,
+    setCurrent: false,
+  });
+}
+
+function watchLogin(current: Logger<true>, apiKey: string): void {
+  quietly(() => {
+    void current.id.catch((error: unknown) => {
+      if (logger !== current) return;
+      console.warn(
+        `[trace] Braintrust login failed (${errorText(error)}); spans are being dropped — retrying in ${LOGIN_RETRY_MS / 1000}s`,
+      );
+      const timer = setTimeout(() => {
+        if (logger !== current) return;
+        quietly(() => {
+          logger = createLogger(apiKey);
+          watchLogin(logger, apiKey);
+        });
+      }, LOGIN_RETRY_MS);
+      timer.unref?.();
+    });
+  });
+}
+
 // Called once by the API process at boot. Returns whether tracing is active. Never throws.
 export function initJobTracing(
   log: (line: string) => void = console.log,
@@ -82,12 +117,9 @@ export function initJobTracing(
     }
     projectName =
       process.env.BRAINTRUST_TRACE_PROJECT?.trim() || 'mahasamvad-traces-dev';
-    logger = initLogger({
-      projectName,
-      apiKey,
-      asyncFlush: true,
-      setCurrent: false,
-    });
+    logger = createLogger(apiKey);
+    // Log in now rather than at the first job, so a failure is found and repaired early.
+    watchLogin(logger, apiKey);
     setModelCallObserver(observeModelCall);
     log(`[trace] Braintrust job tracing on → project ${projectName}`);
     return true;

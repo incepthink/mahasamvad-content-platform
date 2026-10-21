@@ -516,6 +516,9 @@ export async function insertGeneration(
     // Insert-only (migration 0061): the image model the officer opted into (नवीन). Insert-only
     // because every redo and feedback round re-reads the row, so the choice must live there.
     imageModel?: string | undefined;
+    // Which model writes this run's article draft (0062), resolved by the API from the
+    // request's Origin. Omitted = ARTICLE_PROVIDER, the deployment default.
+    articleProvider?: string | null | undefined;
     // Insert-only (migration 0052): the poster the officer uploaded for a Dynamic Poster
     // run. Insert-only for the reason imagePrompt is — a retry and every follow-up re-read
     // the row, so the source must be the same object every time.
@@ -596,6 +599,11 @@ export async function insertGeneration(
       // Same omit-unless-set treatment (migration 0061): an un-applied 0061 costs only a create
       // that ticked नवीन.
       ...(input.imageModel ? { image_model: input.imageModel } : {}),
+      // Same omit-unless-set treatment (migration 0062): an un-applied 0062 costs only a create
+      // that came from an origin mapped to a non-default article provider.
+      ...(input.articleProvider
+        ? { article_provider: input.articleProvider }
+        : {}),
       // Same again (migration 0052). This one cannot save the run it belongs to — a Dynamic
       // Poster with no source is not a run — but it keeps every OTHER create working on a
       // database where 0052 has not been applied.
@@ -747,6 +755,27 @@ export async function getGenerationImageModel(
       .maybeSingle();
     if (error || !data) return null;
     const value = (data as { image_model?: unknown }).image_model;
+    return typeof value === 'string' && value.trim() ? value.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+// The article provider a run was created under (migration 0062), read on its own for the
+// same reason as getGenerationImageModel: the job wrapper needs it before the job runs.
+// BEST-EFFORT — any error, an un-applied 0062 included, answers null = ARTICLE_PROVIDER.
+export async function getGenerationArticleProvider(
+  client: SupabaseClient,
+  id: string,
+): Promise<string | null> {
+  try {
+    const { data, error } = await client
+      .from(GENERATIONS_TABLE)
+      .select('article_provider')
+      .eq('id', id)
+      .maybeSingle();
+    if (error || !data) return null;
+    const value = (data as { article_provider?: unknown }).article_provider;
     return typeof value === 'string' && value.trim() ? value.trim() : null;
   } catch {
     return null;

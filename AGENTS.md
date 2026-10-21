@@ -3110,6 +3110,27 @@ client id/secret — see the milestone below.
 
 ## Latest Implementation Milestone
 
+- **One API, two article models: staging writes on gemma, production on ARTICLE_PROVIDER**
+  (2026-10-21, migration 0062, no n8n, no web change). `ARTICLE_PROVIDER_BY_ORIGIN`
+  (`origin=provider`, comma-separated, `*` patterns with the CORS_ORIGIN rules) maps the
+  request's Origin to a provider in `apps/api/src/article-provider-origin.ts`; unmatched origins
+  get the env default, so production is unchanged. The SERVER decides from Origin — the browser
+  sends no provider field. The answer is STORED at create (`dlo_intakes.article_provider` and
+  `generations.article_provider`, both omit-unless-set) because it decides how /dlo documents are
+  kept (gemma skips the OpenAI upload and reads the archived bytes) and because retries and jobs
+  re-read the row. `runWithArticleProvider` (AsyncLocalStorage in `article-provider.ts`, the
+  `runWithImageModel` precedent) makes every `articleProvider()` call inside a scope agree: the
+  /dlo and /new-dlo create, names and generate routes, the intake job's "nothing survived" check,
+  and `runJob` (via `getGenerationArticleProvider`, best-effort). A /dlo generation takes its
+  intake's provider, not the generate request's. Article categories only. Two fixes came with it:
+  dlo.ts now skips the OpenAI upload on gemma like /new-dlo, and the intake job no longer fails a
+  gemma intake that has documents but no typed note. Harnesses: `npx tsx
+  ../../apps/api/src/article-provider-origin.ts` (from content-engine) and the scope checks in
+  `tsx src/generation/article-provider.ts`. Same database means staging runs appear in prod
+  history, analytics and learned editorial rules. Deploy: 0062 → `@dgipr/database` →
+  `@dgipr/content-engine` dists → API; set `ARTICLE_PROVIDER_BY_ORIGIN` and the `GEMMA_*` env on
+  the box, and make sure `CORS_ORIGIN` allows the staging origin.
+
 - **Error analysis round 1: reconstructed traces in Braintrust** (2026-10-20, no migration, no
   request-path code). `packages/content-engine/src/evals/` turns rows the database already holds
   into one trace per user-facing job (~20 per sidebar feature, seeded + stratified by status,

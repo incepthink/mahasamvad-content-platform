@@ -369,6 +369,7 @@ const intake: DloIntakeRow = {
     writer: 'w',
     updatedAt: at(3),
   },
+  articleProvider: null,
   createdAt: T0,
   updatedAt: at(4),
 };

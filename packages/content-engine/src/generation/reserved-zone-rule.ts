@@ -79,6 +79,16 @@ export type ReservedZoneGeometry = Readonly<{
    * plus `footerAppendedMargin` above the bottom edge. Absent = 0, the pre-existing behaviour.
    */
   footerUnderlap?: number | undefined;
+  /**
+   * Underlap lanes only (2026-10-21): the x-range of the solid navy title pill, the ONLY part of
+   * the footer that lies over this artwork. Measured off footer-new-poster.png at 1280 wide: the
+   * pill is solid over x 271-1008 for the bottom 43 rows, and the band is FULLY transparent either
+   * side of it (alpha 0 — not the ~56% older comments claimed); the solid white row lies entirely
+   * in the appended strip below the artwork. Describing a "full-width footer band" made the model
+   * paint one — a coloured strip right across the bottom. With this set, the text-free area is
+   * stated as the bottom-centre rectangle alone, and the bottom corners are ordinary canvas.
+   */
+  footerPill?: Readonly<{ left: number; right: number }> | undefined;
 }>;
 
 /** "top-right" / "top-left": the corner the badge zone sits in. */
@@ -107,6 +117,23 @@ export function contentBottomY(g: ReservedZoneGeometry): number {
  */
 export function textFreeStripPhrase(g: ReservedZoneGeometry): string {
   return `the bottom strip of the poster — ${fractionOf(g.height - contentBottomY(g), g.height)} its height`;
+}
+
+/**
+ * The bottom-centre rectangle the footer's navy pill covers, in words and coordinates — or null
+ * when the lane carries no pill geometry.
+ */
+export function footerPillPhrase(g: ReservedZoneGeometry): string | null {
+  const pill = footerUnderlapOf(g) > 0 ? g.footerPill : undefined;
+  if (!pill) return null;
+  return `the bottom-centre rectangle from x=${pill.left} to x=${pill.right} (roughly the middle ${fractionWord(pill.right - pill.left, g.width)} of the width) and below y=${contentBottomY(g)} (the last ${g.height - contentBottomY(g)} pixels)`;
+}
+
+function fractionWord(part: number, whole: number): string {
+  const r = part / whole;
+  if (r > 0.55 && r < 0.65) return 'three-fifths';
+  if (r >= 0.65 && r < 0.7) return 'two-thirds';
+  return `${Math.round(r * 100)}%`;
 }
 
 /** Pixels at the bottom of an appended-lane artwork that the band overlaps (0 when none). */
@@ -169,17 +196,23 @@ export function fitToReserveRule(
   const crossing =
     footerIsAppended(g) && underlap === 0
       ? 'run into the bottom margin'
-      : 'fall behind the footer';
+      : footerPillPhrase(g)
+        ? 'fall behind the footer pill'
+        : 'fall behind the footer';
+  // With a pill, the floor applies only to content in the bottom-centre; the corners are free.
+  const floorScope = footerPillPhrase(g)
+    ? `, unless it sits in a bottom corner outside x=${g.footerPill!.left}-${g.footerPill!.right}`
+    : '';
 
   const recovery = options.allowStructuralReflow
     ? [
         'SMART REFLOW WHEN CONTENT DOES NOT FIT: before making important text too small, hiding it, cropping it, or allowing it to enter a reserved zone, adapt the layout inside the usable canvas.',
         'You MAY widen or extend a text component into adjacent usable space, including an adjacent image area; place an opaque or high-contrast panel over non-essential imagery; narrow, crop or reposition the image area; move components upward; tighten spacing; and change local column widths, component heights or section boundaries.',
-        `For example, when a closing component in a narrow text column becomes too tall, extend that component sideways across the adjacent image instead of letting its final lines ${crossing}. Keep the reference's overall visual concept recognisable, but do not preserve its exact geometry at the cost of hidden, cropped, tiny or unreadable information. The complete component, including its final line and padding, must end above y=${contentBottomY(g)}.`,
+        `For example, when a closing component in a narrow text column becomes too tall, extend that component sideways across the adjacent image instead of letting its final lines ${crossing}. Keep the reference's overall visual concept recognisable, but do not preserve its exact geometry at the cost of hidden, cropped, tiny or unreadable information. The complete component, including its final line and padding, must end above y=${contentBottomY(g)}${floorScope}.`,
         'After smart reflow, if more room is still needed, use this order: Shrink the HEADLINE first because it is the largest block and the cheapest to reduce. Then tighten line spacing and reduce the body type only as much as needed while keeping it clearly readable. Lay the content out again and re-check the bottom.',
       ]
     : [
-        `So lay the content out, then CHECK THE BOTTOM before you finish: read the last line of the lowest block and confirm it ends above y=${contentBottomY(g)} with clear space beneath it. If it does not, do not let it ${crossing} and do not crop it — reduce the type size and tighten the line spacing, and lay it out again.`,
+        `So lay the content out, then CHECK THE BOTTOM before you finish: read the last line of the lowest block and confirm it ends above y=${contentBottomY(g)}${floorScope}, with clear space beneath it. If it does not, do not let it ${crossing} and do not crop it — reduce the type size and tighten the line spacing, and lay it out again.`,
         'Shrink the HEADLINE first: it is the largest block and the cheapest to reduce, it may take as many fewer lines as it needs, and there is no minimum size it has to keep. Then reduce the body type. Repeat until everything clears the band.',
       ];
 
@@ -192,7 +225,13 @@ export function fitToReserveRule(
   // With an underlap the band DOES cover the bottom of this canvas — see-through round its navy
   // title pill, which is itself solid — so text there is genuinely lost, and saying so is true.
   const consequence =
-    underlap > 0
+    underlap > 0 && footerPillPhrase(g)
+      ? [
+          `After you finish, software pastes an OPAQUE badge into the ${lockupCorner(g)} corner and a solid navy footer title pill over ${footerPillPhrase(g)}. Any word, numeral, icon or face you place under the badge or inside that bottom-centre rectangle is COVERED — the reader cannot read it, the sentence ends mid-word, and the whole image has to be thrown away.`,
+          `Nothing else is covered: the bottom-left and bottom-right corners beside the pill, and everything above y=${contentBottomY(g)}, are ordinary canvas you may use for anything. Do NOT paint a footer band, bar, strip or coloured panel across the bottom — the footer is added by software.`,
+          'Showing every point in SMALLER type is correct. Showing the same points in larger type with a line hidden behind the pill is wrong.',
+        ]
+      : underlap > 0
       ? [
           `After you finish, software pastes an OPAQUE badge into the ${lockupCorner(g)} corner and a full-width branding band whose top part lies over the bottom ${underlap} pixels of this image, with a solid navy title pill in the middle of it. Any word, numeral, icon or face you place under the badge, or in ${textFreeStripPhrase(g)} (below y=${contentBottomY(g)}), is COVERED OR HALF-HIDDEN — the reader cannot read it, the sentence ends mid-word, and the whole image has to be thrown away.`,
           `The background, colours and imagery must still run all the way down to the bottom edge — the band is partly see-through there, so the design shows through it. Only TEXT, numerals and icons stop above that strip.`,
@@ -404,21 +443,26 @@ export function reservedZoneBlock(
     // With an underlap, the band's see-through top half lies over the bottom of this canvas
     // (2026-10-16): the design must still run down behind it — it shows through round the navy
     // pill — but no information may sit there, since the pill is solid and the rest is dimmed.
+    const pillZone = footerPillPhrase(g);
     const bottomEdge =
-      underlap > 0
+      pillZone
+        ? `THE ONLY THING THAT COVERS THE BOTTOM IS A SMALL CENTRED PILL: after you finish, software places a solid navy footer title pill over ${pillZone}. The bottom-left and bottom-right corners beside it stay fully visible. Design the bottom of the poster freely, all the way to the edge, in whatever the layout calls for. Do NOT paint a footer band, bar, strip or coloured panel across the bottom — the footer itself is added by software.`
+        : underlap > 0
         ? `THE BOTTOM ${underlap} PIXELS SIT BEHIND THE FOOTER BAND: the official footer band is added afterwards so that its partly see-through top half lies over the bottom ${underlap} pixels of this image (a strip ${fractionOf(underlap, g.height)} the height), with a solid navy title pill in its middle. DESIGN ALL THE WAY DOWN TO THE VERY BOTTOM EDGE anyway: colour blocks, panels, bands, gradients, background and photographs must reach the last row of pixels and run off the edge, exactly as they do at the left and right edges, because that design is what shows through the band.`
         : `THE BOTTOM EDGE IS A JOIN, NOT A COVER ZONE: the official footer band is attached directly BELOW this image afterwards and takes NO space out of this canvas, so nothing has to be kept clear for it. DESIGN ALL THE WAY DOWN TO THE VERY BOTTOM EDGE: colour blocks, panels, bands, gradients, background and photographs must reach the last row of pixels and run off the edge, exactly as they do at the left and right edges.`;
     const textFloor =
-      underlap > 0
-        ? `BOTTOM TEXT-FREE STRIP: keep ${textFreeStripPhrase(g)} free of text — no words, numerals, captions, icons, logos, faces or other information in that strip (everything below y=${contentBottomY(g)}). Its lower part is behind the footer band and its upper part is a generous cushion so the final line sits well clear of the band, not just above it. Treat that strip as NOT AVAILABLE for text when you plan the layout — finish the last line of content above it, with visible space beneath. The background, colour and imagery continue through the whole strip as normal.`
+      pillZone
+        ? `PILL ZONE: no words, numerals, captions, icons, logos, faces or other information inside that bottom-centre rectangle. Text and icons may sit in the bottom corners beside it. Background, colour and imagery continue through the rectangle as normal.`
+        : underlap > 0
+        ? `BOTTOM TEXT-FREE STRIP: keep ${textFreeStripPhrase(g)} free of text — no words, numerals, captions, icons, logos, faces or other information in that strip (everything below y=${contentBottomY(g)}). Its lower part is behind the footer band and its upper part is a thin cushion so the final line is not jammed against the band. Finish the last line of content just above it. The background, colour, panels and imagery continue through the whole strip to the bottom edge — no empty band, no blank strip and no horizontal line or divider above the footer.`
         : `Keep only TEXT away from the very bottom: no words, numerals, captions, icons or logos below y=${contentBottomY(g)} — that last ${g.footerAppendedMargin} pixels is a thin typographic cushion so the final line is not jammed against the band, and the background, colour and imagery continue through it as normal.`;
     return [
       `RESERVED BADGE CORNER: the ${lockupCorner(g)} ${g.lockupWidth} x ${g.lockupHeight} pixels (a corner square ${fractionOf(g.lockupWidth, g.width)} the width) of the ${g.width} x ${g.height} output is reserved for an official badge composited on later by software.`,
       ...continuityRules('the reserved corner'),
       bottomEdge,
-      `THERE IS NO COLOUR RESTRICTION AT THE BOTTOM: that edge may be any colour the design uses — dark, saturated, patterned or photographic — and it does NOT have to be pale, white, neutral, plain or empty. Do NOT end the design early, do not leave a large empty gap above the bottom edge, and do not park a blank or lighter strip there: an empty band above the footer makes the finished poster look letterboxed and broken.`,
+      ...(pillZone ? [] : [`THERE IS NO COLOUR RESTRICTION AT THE BOTTOM: that edge may be any colour the design uses — dark, saturated, patterned or photographic — and it does NOT have to be pale, white, neutral, plain or empty. Do NOT end the design early, do not leave a large empty gap above the bottom edge, and do not park a blank or lighter strip there: an empty band above the footer makes the finished poster look letterboxed and broken.`]),
       textFloor,
-      `Apart from keeping that corner clear of content and that ${underlap > 0 ? 'text-free strip' : 'thin text cushion'} at the bottom, use all remaining space right up to the edges, following the reference structure.`,
+      `Apart from keeping that corner clear of content and that ${pillZone ? 'bottom-centre pill rectangle' : underlap > 0 ? 'text-free strip' : 'thin text cushion'} at the bottom, use all remaining space right up to the edges, following the reference structure.`,
     ].join(' ');
   }
 
@@ -465,8 +509,9 @@ if (
     lockupWidth: 180,
     lockupHeight: 170,
     footerHeight: 91,
-    footerAppendedMargin: 64,
+    footerAppendedMargin: 8,
     footerUnderlap: 48,
+    footerPill: { left: 250, right: 1030 },
   };
   // The appended lane WITHOUT an underlap (the YouTube thumbnail shape): wording unchanged.
   const JOIN_ONLY: ReservedZoneGeometry = {
@@ -491,9 +536,9 @@ if (
     failures.push('thumbnail content floor drifted off y=650');
   // The appended floor is set by the MARGIN, not by the band height — getting this wrong is
   // how the poster would come back letterboxed above its own footer.
-  if (contentBottomY(SOCIAL) !== 1440)
-    failures.push('appended-footer content floor drifted off y=1440');
-  if (!textFreeStripPhrase(SOCIAL).includes('about one fourteenth of'))
+  if (contentBottomY(SOCIAL) !== 1496)
+    failures.push('appended-footer content floor drifted off y=1496');
+  if (!textFreeStripPhrase(SOCIAL).includes('about 4% of'))
     failures.push('social text-free strip is no longer stated as a proportion');
   if (footerIsAppended(POSTER) || !footerIsAppended(SOCIAL))
     failures.push('footerIsAppended does not distinguish the two lanes');
@@ -743,7 +788,7 @@ if (
   );
   need(
     socialZones,
-    'do not leave a large empty gap above the bottom edge',
+    'Do NOT paint a footer band, bar, strip or coloured panel across the bottom',
     'appended lane does not ask for the full canvas height, so posters will letterbox',
   );
   // THE 173-PIXEL DEAD BAND (generation 97b64542). The bottom must read as an edge the design
@@ -751,17 +796,17 @@ if (
   // only TEXT stops short. If a flat empty strip ever comes back above the footer, check these.
   need(
     socialZones,
-    'DESIGN ALL THE WAY DOWN TO THE VERY BOTTOM EDGE',
+    'all the way to the edge',
     'appended lane does not tell the design to reach the bottom edge',
   );
   need(
     socialZones,
-    'THERE IS NO COLOUR RESTRICTION AT THE BOTTOM',
+    'bottom-right corners beside it stay fully visible',
     'appended lane still constrains the colour of the bottom edge',
   );
   need(
     socialZones,
-    'BOTTOM TEXT-FREE STRIP',
+    'PILL ZONE',
     'appended lane treats the bottom margin as a background reserve, not a text strip',
   );
   for (const wrong of [
@@ -776,15 +821,15 @@ if (
   }
   need(
     socialZones,
-    'free of text — no words',
+    'no words, numerals, captions, icons',
     'appended lane lost the text-free strip heading',
   );
   need(
     socialZones,
-    'about one fourteenth of its height',
+    'from x=250 to x=1030',
     'appended lane does not state the text-free strip as a proportion',
   );
-  need(socialZones, 'y=1440', 'appended lane content floor drifted');
+  need(socialZones, 'y=1496', 'appended lane content floor drifted');
   // The artwork canvas, not the 1600-tall finished poster. If this ever reads 1600 again the
   // model is being asked for a canvas the band is then joined below, and the delivered file
   // stops being 4:5 — which is the gap officers were closing by hand in Canva.
@@ -842,22 +887,22 @@ if (
     'Shrink the HEADLINE first',
     'social fit rule lost the action that resolves the conflict',
   );
-  need(socialFit, 'y=1440', 'social fit rule floor drifted');
+  need(socialFit, 'y=1496', 'social fit rule floor drifted');
   need(
     socialFit,
-    'the bottom strip of the poster',
+    'bottom-centre rectangle',
     'social fit rule does not name the text-free strip',
   );
   // With the underlap the band DOES lie over the bottom of this canvas, so the consequence is
   // true again — and the design must still reach the edge, since it shows through the band.
   need(
     socialFit,
-    'COVERED OR HALF-HIDDEN',
+    'is COVERED',
     'social fit rule does not say text under the band is lost',
   );
   need(
     socialFit,
-    'must still run all the way down to the bottom edge',
+    'are ordinary canvas',
     'social fit rule stopped the design short of the edge',
   );
   need(
@@ -872,7 +917,7 @@ if (
   );
   need(
     socialZones,
-    'THE BOTTOM 48 PIXELS SIT BEHIND THE FOOTER BAND',
+    'ONLY THING THAT COVERS THE BOTTOM IS A SMALL CENTRED PILL',
     'social zones do not describe the underlap',
   );
   deny(

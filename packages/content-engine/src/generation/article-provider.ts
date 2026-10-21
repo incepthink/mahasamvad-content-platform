@@ -34,6 +34,7 @@
 //
 // Rollback is deleting ARTICLE_PROVIDER from the environment.
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { pathToFileURL } from 'node:url';
 
 import {
@@ -65,6 +66,30 @@ const ARTICLE_PROVIDERS: readonly ArticleProvider[] = [
   'gemma',
 ];
 
+/** A stored or configured value, read leniently: anything unrecognised is null. */
+export function parseArticleProvider(
+  value: string | null | undefined,
+): ArticleProvider | null {
+  const raw = value?.trim().toLowerCase();
+  return raw === 'openai' || raw === 'qwen' || raw === 'gemma' ? raw : null;
+}
+
+// A per-REQUEST / per-JOB override of ARTICLE_PROVIDER, the runWithImageModel precedent
+// (poster-renderer/openai-image.ts). One API serves production and staging, and staging's
+// /dlo is written on gemma: the API resolves a provider from the request's Origin, STORES it
+// on the intake and the generation (0062), and wraps the routes and the job that read it in
+// this scope — so every articleProvider() call underneath (the upload branch, the name digest,
+// the source download, the draft) agrees, with no provider argument threaded through. Outside
+// a scope (or with null) the env value applies, so production is byte-for-byte unchanged.
+const articleProviderScope = new AsyncLocalStorage<ArticleProvider>();
+
+export function runWithArticleProvider<T>(
+  provider: ArticleProvider | null | undefined,
+  fn: () => T,
+): T {
+  return provider ? articleProviderScope.run(provider, fn) : fn();
+}
+
 /**
  * Which provider writes the draft. Default 'openai' — the deployed behaviour, unchanged.
  *
@@ -73,6 +98,8 @@ const ARTICLE_PROVIDERS: readonly ArticleProvider[] = [
  * they had just switched away from.
  */
 export function articleProvider(): ArticleProvider {
+  const scoped = articleProviderScope.getStore();
+  if (scoped) return scoped;
   const raw = process.env.ARTICLE_PROVIDER?.trim().toLowerCase();
   if (!raw) return 'openai';
   if (raw === 'openai' || raw === 'qwen' || raw === 'gemma') return raw;
@@ -369,6 +396,32 @@ if (
   check(
     'qwen does NOT — it serves a text model, so a run with files stays on OpenAI',
     !articleProviderReadsSources(),
+  );
+
+  // The per-request / per-job scope (0062): one API serving production and staging.
+  process.env.ARTICLE_PROVIDER = 'openai';
+  check(
+    'a gemma scope overrides the env default',
+    runWithArticleProvider('gemma', articleProvider) === 'gemma' &&
+      runWithArticleProvider('gemma', articleProviderReadsSources),
+  );
+  check(
+    'a null scope leaves the env default',
+    runWithArticleProvider(null, articleProvider) === 'openai',
+  );
+  check(
+    'the scope survives an await',
+    (await runWithArticleProvider('gemma', async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      return articleProvider();
+    })) === 'gemma',
+  );
+  check('and ends with it', articleProvider() === 'openai');
+  check(
+    'parseArticleProvider is lenient',
+    parseArticleProvider(' Gemma ') === 'gemma' &&
+      parseArticleProvider('nope') === null &&
+      parseArticleProvider(null) === null,
   );
 
   process.env.ARTICLE_PROVIDER = 'gemma';
