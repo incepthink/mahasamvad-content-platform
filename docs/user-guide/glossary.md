@@ -2,7 +2,7 @@
 
 Use **"शब्दकोश"** to maintain the shared spellings used for translation, name checks, and article designations.
 
-![The current glossary](.gitbook/assets/10-glossary--overview.png)
+![The glossary](.gitbook/assets/10-glossary--overview.png)
 
 ## What a row contains
 
@@ -17,7 +17,7 @@ Only a verified row is treated as an approved dictionary form. An unverified row
 
 ## Find and review rows
 
-Use search, type, and status filters. The list is paginated. Select one or more unverified rows for bulk verification only after checking every spelling and type.
+Use search and the type and status filters. Long lists are split into pages. Select one or more unverified rows for bulk verification only after checking every spelling and type.
 
 For a person, confirm that the designation belongs to that exact full name. A one-word surname must not be used to infer another person's portfolio.
 

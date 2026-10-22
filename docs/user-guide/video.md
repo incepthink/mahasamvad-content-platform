@@ -4,7 +4,7 @@ This is a step-by-step project for a short Marathi explainer video, with two app
 
 For a quicker, conversation-style way to work, see [Storyboards and Videos (Conversations)](video-conversations.md).
 
-![Start a storyboard project](.gitbook/assets/12-video--create.png)
+![The new-project form](.gitbook/assets/12-video--create.png)
 
 ## 1. Choose the source
 
@@ -23,7 +23,7 @@ Select **"संहिता व स्टोरीबोर्ड तयार 
 
 At **"संहिता तपासा व संपादित करा"**, review the overall visual style and each scene card: its title, Marathi narration, frame description (**"दृश्य / स्टोरीबोर्ड फ्रेम"**), key point and end-frame brief.
 
-![The script-review gate](.gitbook/assets/12-video--script-review.png)
+![Reviewing the script](.gitbook/assets/12-video--script-review.png)
 
 - Read all narration boxes in order — they become one continuous voiceover. In ready-script mode the narration is shown as **"निवेदन — जसेच्या तसे"** and cannot be changed.
 - **"चित्र जोडा"** on a scene attaches your own photograph of a specific building, office or object; mention it in that scene's description. It applies once you select **"बदल जतन करा"**.
@@ -36,7 +36,7 @@ Select **"स्टोरीबोर्ड तयार करा"** when the s
 
 At **"स्टोरीबोर्ड तपासा"**, check each scene's start frame and end frame: a Maharashtra/India setting, plausible people and objects, no invented facts, and no stray writing.
 
-![The storyboard-review gate](.gitbook/assets/12-video--storyboard.png)
+![Reviewing a storyboard frame](.gitbook/assets/12-video--storyboard.png)
 
 You may change a frame description and redraw only that frame, use **"पहिली फ्रेमच वापरा"** for a scene that should not change, edit the motion brief, and select **"बदल जतन करा"**.
 
@@ -44,7 +44,7 @@ Select **"व्हिडिओ तयार करा"**, read the cost, then *
 
 ## 4. Completed video
 
-![A completed video](.gitbook/assets/12-video--result.png)
+![A finished video](.gitbook/assets/12-video--result.png)
 
 - **"व्हिडिओ डाउनलोड करा"** — the MP4.
 - **"SRT (निवेदन वेळेसह) डाउनलोड करा"** — subtitles.

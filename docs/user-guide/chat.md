@@ -4,13 +4,15 @@
 
 ## Ask something
 
+![A new chat](.gitbook/assets/15-chat--new.png)
+
 1. Select **"नवीन चॅट"**.
 2. Type in **"इथे लिहा…"** and select **"पाठवा"**. The answer appears as it is written; **"थांबवा"** stops it.
 3. Continue the conversation with follow-up questions.
 
 ## Attach material
 
-Use the attachment tools in the composer — up to ten per message:
+Use the round buttons under the box — up to ten attachments per message:
 
 - **"दस्तऐवज"** — PDF, DOCX or TXT. Large PDFs (up to 512 MB) are searched rather than read word for word, so ask specific questions about long documents.
 - **"ध्वनिमुद्रण"** — a recording (or phone video, whose sound only is used). It is transcribed first; it then also appears in **ध्वनिलेखन**.

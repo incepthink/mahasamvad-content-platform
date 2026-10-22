@@ -4,7 +4,8 @@
 //
 // Phases, in capture order:
 //   preflight     readiness checklist (no secrets printed; nothing captured)
-//   current       current GitBook pass (saved runs + local response fixtures; no paid calls)
+//   current       THE current GitBook pass: every chapter, from saved runs + local fixtures;
+//                 read-only (non-GET API calls are blocked), no paid calls
 //   static        every state capturable without a generation (+1 translate call)
 //   run-article   LIVE: scheme article+poster from trial-input.txt (+ English toggle)
 //   run-feedback  LIVE: one poster image-feedback round on that run

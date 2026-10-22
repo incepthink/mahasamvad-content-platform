@@ -2,7 +2,7 @@
 
 Open **"वापर विश्लेषण"** for a combined view of how much the department uses the platform. All figures are department-wide; nothing on this page counts or identifies individual officers.
 
-![The analytics overview](.gitbook/assets/14-analytics--overview.png)
+![The usage overview](.gitbook/assets/14-analytics--overview.png)
 
 ## Choose a period
 

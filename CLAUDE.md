@@ -1952,11 +1952,12 @@ raw document for a browser Ctrl+P (the fastest loop); `--png` rasterises page 1 
 with no PDF viewer, re-applying the same `A4_MARGIN` as padding so it cannot drift.
 
 User-guide screenshots (`docs/user-guide/assets`):
-`pnpm --filter @dgipr/poster-renderer docs:shots <phase>` — phases
-`preflight|static|run-article|run-feedback|run-twitter|run-rerun|history|optimize|verify`
-(`--force` retakes; idempotent otherwise). The `run-*` phases trigger REAL generations
-(OpenAI spend) and need `pnpm dev` + n8n up (local n8n starts with `npx n8n`). See
-`packages/poster-renderer/scripts/docs-shots/cli.ts`.
+`pnpm --filter @dgipr/poster-renderer docs:shots -- current --force`, then `optimize` and
+`verify`. `current` photographs every chapter from existing completed runs plus local response
+fixtures and blocks every non-GET API request, so it spends nothing and writes nothing (needs
+`pnpm db:tunnel` + `pnpm dev`; the example run ids are at the top of `shoot-current-guide.ts`).
+The older `static`/`run-*` phases predate the current screens and the `run-*` ones spend real
+model credits. See `packages/poster-renderer/scripts/docs-shots/cli.ts`.
 
 One-time per machine (the API process renders posters too, so it needs a local
 Chromium): `pnpm --filter @dgipr/poster-renderer exec playwright install chromium`.

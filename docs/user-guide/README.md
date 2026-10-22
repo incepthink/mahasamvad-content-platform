@@ -2,21 +2,22 @@
 
 **AI Newsroom** helps Government of Maharashtra communication teams turn official source material into publication-ready content. The interface is Marathi-first and does not require a sign-in.
 
-![The current home page](.gitbook/assets/01-overview--home.png)
+![The home page — क्रिएटिव्ह आणि सोशल](.gitbook/assets/01-overview--home.png)
 
-## What you can do
+## Find your task
 
-- Make a Marathi **क्रिएटिव्ह** poster, a multi-slide **कॅरोसेल**, a **यूट्यूब थंबनेल**, a **बॅनर**, or a caption alone (**फक्त कॅप्शन**) from your text.
-- Turn a finished poster into a short moving clip with **डायनॅमिक पोस्टर (beta)**.
-- Turn meeting notes, recordings (including phone videos), photographs of documents, PDF/DOCX/TXT files and YouTube links into a Marathi **बातमी**.
-- Transcribe recordings and YouTube links word for word.
-- Translate between Marathi, English and Hindi with approved name spellings.
-- Proofread Marathi or English for spelling, grammar, punctuation, names and Mahasamvad style.
-- Write video scripts and storyboards, and create short videos, in a conversation.
-- Ask general questions, with attachments, in **चॅट**.
-- Download, revise, publish, restore earlier versions and reuse completed work.
-- Maintain the shared name glossary, the editorial rules and the poster template library.
-- Review department-wide usage and estimated costs.
+| I want to…                                                        | Open this page            | Read                                                                          |
+| ----------------------------------------------------------------- | ------------------------- | ----------------------------------------------------------------------------- |
+| Make a poster, thumbnail, banner or caption from text I have       | **क्रिएटिव्ह आणि सोशल**   | [Create a Creative or Social Post](create-content.md)                         |
+| Make a multi-slide post, or animate a poster I already have        | **क्रिएटिव्ह आणि सोशल**   | [Carousels and Dynamic Posters](carousel-and-dynamic-poster.md)               |
+| Turn notes, recordings, documents or a YouTube link into a बातमी   | **लेख / बातमी**           | [Create a News Report](article-news.md)                                       |
+| Change a finished article, poster or caption                       | the result page           | [Improve Results with Feedback](improve-with-feedback.md)                     |
+| Get a word-for-word transcript                                     | **ध्वनिलेखन**             | [Transcribe Recordings and YouTube](transcription.md)                         |
+| Translate between Marathi, English and Hindi                       | **भाषांतर**               | [Translate Text and Documents](translation.md)                                |
+| Check spelling, grammar and style                                  | **मुद्रितशोधन**           | [Proofread Marathi or English](proofreading.md)                               |
+| Ask a general question or summarise a file                         | **चॅट**                   | [Chat](chat.md)                                                               |
+| Write a video script, storyboard or short clip                     | **स्टोरीबोर्ड / व्हिडिओ** | [Storyboards and Videos](video-conversations.md)                              |
+| Find something made earlier                                        | **मागील काम**             | [Ongoing Tasks, Reuse and History](next-steps-and-history.md)                 |
 
 ## The two accuracy rules
 
@@ -29,10 +30,13 @@ AI assists the officer; it does not replace official approval. Read the final te
 
 ## Practise first
 
-Open **प्रशिक्षण** at the `/learn` address to practise on the real screens with sample material. Two five-minute lessons are available — making and changing a Creative, and turning a meeting note into a news report. Nothing in a practice lesson is saved, published or charged.
+Add `/learn` to the end of the application address (for example `https://…/learn`) to open **प्रशिक्षण**, two five-minute lessons on the real screens with sample material: making and changing a Creative, and turning a meeting note into a news report. Nothing in a practice lesson is saved, published or charged.
 
 ## How this guide is written
 
-Website labels are quoted exactly in Marathi. For example, **"तयार करा →"** means Create. Each chapter follows one user journey and explains what is saved, what may incur processing cost, and what to check before continuing.
+- Website labels are quoted exactly as they appear in Marathi, in bold and quotation marks — for example **"तयार करा →"** (Create).
+- Each chapter follows one task from start to finish, with screenshots of the current screens.
+- Yellow boxes are things to check before you publish; blue boxes are useful background.
+- Steps that have a processing cost (images and video in particular) are pointed out where they happen.
 
 Start with [Getting Around the Platform](getting-around.md), or go directly to the task you need in the table of contents.

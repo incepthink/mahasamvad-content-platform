@@ -116,7 +116,10 @@ async function hideDevIndicator(page: Page): Promise<void> {
 export async function shoot(
   target: Page | Locator,
   name: string,
-  opts: { fullPage?: boolean } = {},
+  opts: {
+    fullPage?: boolean;
+    clip?: { x: number; y: number; width: number; height: number };
+  } = {},
 ): Promise<void> {
   if (haveShot(name)) {
     console.log(`  = ${name} (exists, skipped)`);
@@ -128,6 +131,7 @@ export async function shoot(
     await target.screenshot({
       path: shotPath(name),
       fullPage: opts.fullPage ?? false,
+      ...(opts.clip ? { clip: opts.clip } : {}),
     });
   } else {
     await target.scrollIntoViewIfNeeded();

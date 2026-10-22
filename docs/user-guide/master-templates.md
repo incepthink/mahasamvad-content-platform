@@ -1,6 +1,6 @@
-# Master Templates — Admin
+# Master Templates
 
-**"मास्टर टेम्पलेट"** (page title **"पोस्टर मास्टर टेम्पलेट"**) is the visual reference library for Creative, Carousel, Banner and YouTube-thumbnail posters. It is an administrative workspace.
+**"मास्टर टेम्पलेट"** (page title **"पोस्टर मास्टर टेम्पलेट"**) is the visual reference library for Creative, Carousel, Banner and YouTube-thumbnail posters. It is meant for administrators; changes here affect every officer.
 
 ![The template library](.gitbook/assets/11-templates--overview.png)
 

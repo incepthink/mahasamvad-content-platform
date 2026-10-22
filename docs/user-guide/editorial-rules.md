@@ -2,7 +2,9 @@
 
 **"संपादकीय नियम"** holds the department's standing rules for how news reports are written — for example “शीर्षक १० शब्दांच्या आत ठेवा” or “निर्णयाची तारीख पहिल्या परिच्छेदात द्या”. Every active rule is applied to every new news report and to every revision of one.
 
-The page is not in the menu. Open it at `/preferences`, or from **"संपादकीय नियम तपासा किंवा बदला →"** on an article that has just learned a rule.
+The page is not in the menu. Add `/preferences` to the end of the application address, or open it from **"संपादकीय नियम तपासा किंवा बदला →"** on an article that has just learned a rule.
+
+![The editorial rules page](.gitbook/assets/17-rules--overview.png)
 
 ## Where rules come from
 

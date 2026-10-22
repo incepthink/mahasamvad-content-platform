@@ -4,7 +4,9 @@ The two beta menu entries **"स्टोरीबोर्ड (beta)"** and **"
 
 ## Choose the mode
 
-At the top of a new conversation, **"संभाषणाचा प्रकार"** offers:
+A new conversation shows a switch between the two modes:
+
+![A new conversation, with the mode switch](.gitbook/assets/16-conversation--storyboard.png)
 
 - **"स्टोरीबोर्ड"** — write a script and storyboard, revise scenes, and create pictures of scenes when you ask for them. No video is rendered.
 - **"व्हिडिओ"** — create a short video clip from your prompt, then edit it with follow-up instructions.
@@ -21,9 +23,11 @@ Facts come only from what you supply; missing details are left as placeholders. 
 
 ## Video mode
 
-1. Write the prompt, choose **"व्हिडिओचा आकार"** — **"आडवा १६:९"** or **"उभा ९:१६"** — and optionally attach up to four pictures with **"संदर्भ-चित्र जोडा"**.
+1. Write the prompt, choose the shape with the two frame buttons in the box (**"आडवा १६:९"** or **"उभा ९:१६"**), and optionally attach up to four pictures with **"संदर्भ-चित्र जोडा"**.
 2. Select **"व्हिडिओ तयार करा"**. A clip takes a few minutes; only one can be generated at a time in a conversation.
 3. To change it, write the change and select **"बदल करा"** — for example “पार्श्वभूमी बदला” or “हेच दृश्य, पण संध्याकाळी”.
+
+![A video in a conversation](.gitbook/assets/16-conversation--video.png)
 
 ### How an attached picture is used
 
