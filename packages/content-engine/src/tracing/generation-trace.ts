@@ -49,6 +49,25 @@ const CREATION_TASKS = new Set([
 const ORIGINAL_MAX_AGE_MS = 2 * 60 * 1000;
 const originalsOpened = new Set<string>();
 
+// Every later job on a row (feedback round, redo, recolour, marker or exact-text edit, caption
+// edit, translation, retry) is opened INSIDE the row's original trace, so one generation reads
+// as one tree in Braintrust. That is only safe when the original trace exists, i.e. the row was
+// created while tracing was on — a child of a root that was never logged is invisible in the
+// list. Rows older than this keep one trace per job. Set it to when tracing was switched on in
+// this environment; `off` restores one trace per job everywhere.
+const NEST_SINCE_RAW = (
+  process.env.BRAINTRUST_TRACE_NEST_SINCE ?? '2026-10-21T00:00:00Z'
+).trim();
+const NEST_SINCE_MS = /^off$/i.test(NEST_SINCE_RAW)
+  ? Number.POSITIVE_INFINITY
+  : Date.parse(NEST_SINCE_RAW);
+
+function hasOriginalTrace(row: GenerationRow | null): boolean {
+  if (!row || !Number.isFinite(NEST_SINCE_MS)) return false;
+  const created = Date.parse(row.createdAt);
+  return Number.isFinite(created) && created >= NEST_SINCE_MS;
+}
+
 export function generationFeature(
   row: Pick<GenerationRow, 'dloIntakeId'>,
   task: string,
@@ -138,7 +157,8 @@ export function openGenerationTrace(
       rowKind: 'generation',
       rowId: id,
       original,
-      name: `${row ? generationFeature(row, task) : 'generation'}: ${task}`,
+      nestUnderOriginal: !original && hasOriginalTrace(row),
+      name: `${original || !hasOriginalTrace(row) ? '' : 'follow-up · '}${row ? generationFeature(row, task) : 'generation'}: ${task}`,
       input,
       metadata: compact({
         generationId: id,

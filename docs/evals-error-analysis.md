@@ -175,8 +175,12 @@ Tracing starts only in the API's `main()`. Harnesses, offline scripts and the /l
   repair.
 
 **Linking.** A row's first job gets a root id derived from the row (`live:generation:<id>`), so
-no mapping table is needed. Every later job on the row is its own trace. Its metadata carries
-`originalTraceRootId`, and the original trace gets a `follow-up job: …` span pointing back.
+no mapping table is needed. Every later job on the row (feedback rounds, redos, recolours,
+marker and exact-text edits, caption edits, translations, retries) opens as a `follow-up · …`
+child span INSIDE that original trace, so one generation is one tree. This applies to rows
+created on or after `BRAINTRUST_TRACE_NEST_SINCE` (default `2026-10-21T00:00:00Z`; set it to
+when tracing was switched on in that environment, or `off`). Older rows have no original trace,
+so their follow-ups stay separate traces linked by `metadata.originalTraceRootId`.
 Officer actions logged to /activity (downloads, publish, retries, edits) are attached to the
 original trace as `officer: …` spans. They carry action and status only: never an IP, device id
 or user agent.

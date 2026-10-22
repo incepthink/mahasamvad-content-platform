@@ -312,6 +312,11 @@ export type JobTraceOpen = Readonly<{
   // root id, so any later event on the row (a redo, a download, a feedback round) can attach a
   // "what happened next" span to it without the id having been stored anywhere.
   original: boolean;
+  // A follow-up job (original: false) whose row's ORIGINAL trace is known to exist: open this
+  // job as a child span INSIDE that trace instead of as a trace of its own, so a run and every
+  // feedback round, redo and translation on it read as one tree. Only set it when the original
+  // was traced — a child of a root that was never logged is invisible in the Braintrust list.
+  nestUnderOriginal?: boolean;
   name?: string;
   input?: Readonly<Record<string, unknown>>;
   metadata?: Readonly<Record<string, unknown>>;
@@ -358,19 +363,30 @@ export function openJobTrace(open: JobTraceOpen): JobTrace {
   if (!logger) return NOOP_TRACE;
   try {
     const rowId = open.rowId ?? randomUUID();
-    const rootSpanId = open.original
+    const nested =
+      !open.original && open.nestUnderOriginal === true && open.rowId !== null;
+    const originalRootId = open.rowId
+      ? originalTraceRootId(open.rowKind, open.rowId)
+      : null;
+    // This job's own span id. For a nested follow-up it is a child of the original root, and
+    // the TRACE it belongs to is the original's.
+    const spanId = open.original
       ? originalTraceRootId(open.rowKind, rowId)
       : stableUuid(
           `live:${open.rowKind}:${rowId}:${open.task}:${randomUUID()}`,
         );
+    const rootSpanId = nested ? originalRootId! : spanId;
     const started = Date.now();
     const root = logger.startSpan({
       name: open.name ?? `${open.feature}: ${open.task}`,
       type: 'task',
-      spanId: rootSpanId,
+      spanId,
       // An empty parent list with an explicit root id makes this span the trace root under an id
-      // we chose, rather than one the SDK generated.
-      parentSpanIds: { parentSpanIds: [], rootSpanId },
+      // we chose, rather than one the SDK generated. A nested follow-up instead names the
+      // original root as both its parent and its trace.
+      parentSpanIds: nested
+        ? { spanId: rootSpanId, rootSpanId }
+        : { parentSpanIds: [], rootSpanId },
       event: {
         ...(open.original ? { id: `live:${open.rowKind}:${rowId}` } : {}),
         input: toTraceValue(open.input ?? {}),
@@ -381,6 +397,7 @@ export function openJobTrace(open: JobTraceOpen): JobTrace {
           ...(open.rowId ? { rowId: open.rowId } : {}),
           reconstructed: false,
           original: open.original,
+          ...(nested ? { followUp: true } : {}),
           ...(open.original || !open.rowId
             ? {}
             : {
@@ -401,9 +418,10 @@ export function openJobTrace(open: JobTraceOpen): JobTrace {
       ended: false,
     };
 
-    // A follow-up job is its own trace, linked both ways: metadata above points at the original,
-    // and this span in the original points at the follow-up.
-    if (!open.original && open.rowId) {
+    // A follow-up job that is its own trace is linked both ways: metadata above points at the
+    // original, and this span in the original points at the follow-up. A nested one needs no
+    // pointer — it IS inside the original.
+    if (!open.original && !nested && open.rowId) {
       traceFollowUp(open.rowKind, open.rowId, `follow-up job: ${open.task}`, {
         task: open.task,
         followUpTraceRootId: rootSpanId,

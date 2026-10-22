@@ -368,6 +368,40 @@ check(
   spans.some((s) => s.args.name === 'follow-up job: article_revision'),
 );
 
+// A nested follow-up job lives INSIDE the original trace: one generation, one tree.
+spans.length = 0;
+const nestedJob = openJobTrace({
+  feature: 'creative',
+  task: 'poster_image_feedback',
+  rowKind: 'generation',
+  rowId,
+  original: false,
+  nestUnderOriginal: true,
+});
+await nestedJob.run(job);
+nestedJob.finish({});
+const nestedRoot = spans.find(
+  (s) =>
+    (s.args.event as { metadata?: Record<string, unknown> })?.metadata?.task ===
+    'poster_image_feedback',
+);
+const nestedParent = nestedRoot?.args.parentSpanIds as
+  { spanId?: string; rootSpanId?: string } | undefined;
+check(
+  'nested follow-up is a child of the original root',
+  nestedParent?.spanId === originalTraceRootId('generation', rowId) &&
+    nestedParent?.rootSpanId === originalTraceRootId('generation', rowId) &&
+    nestedRoot?.args.spanId !== originalTraceRootId('generation', rowId),
+);
+check(
+  'nested follow-up reports the original as its trace',
+  nestedJob.rootSpanId === originalTraceRootId('generation', rowId),
+);
+check(
+  'nested follow-up adds no pointer span',
+  !spans.some((s) => String(s.args.name).startsWith('follow-up job:')),
+);
+
 // A tracer that throws must not reach the job.
 setJobTraceLoggerForTests({
   startSpan: () => {
