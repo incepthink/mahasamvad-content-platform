@@ -1,72 +1,64 @@
-# Create a Branded Video
+# Storyboard-to-Video Projects
 
-Use **"व्हिडिओ (Beta)"** for a short Marathi explainer in landscape or vertical format. A project moves through two approval gates before the expensive animation step.
+This is a step-by-step project for a short Marathi explainer video, with two approval gates before the expensive animation step. Open it from **"क्रिएटिव्ह आणि सोशल"** → format menu → **"व्हिडिओ"** (page title **"नवीन स्टोरीबोर्ड तयार करा"**).
 
-![Start a video project](.gitbook/assets/12-video--create.png)
+For a quicker, conversation-style way to work, see [Storyboards and Videos (Conversations)](video-conversations.md).
 
-## 1. Choose the source mode
+![Start a storyboard project](.gitbook/assets/12-video--create.png)
 
-- **"टिपणीवरून"** — the platform writes a short Marathi script from your factual note.
-- **"तयार संहितेवरून"** — every word of your approved Marathi narration is kept unchanged while the platform divides it into scenes. You may also supply narration audio for this mode.
+## 1. Choose the source
 
-![The ready-script input mode](.gitbook/assets/12-video--ready-script.png)
+- **"टिपणीवरून"** — the platform writes a Marathi script from your factual note and divides it into storyboard scenes of at most five seconds each.
+- **"तयार संहितेवरून"** — every word of your approved Marathi narration is kept unchanged while the platform divides it into scenes. Give only the words to be spoken — no scene directions or speaker names. You may also attach **"निवेदनाची ध्वनिफीत (ऐच्छिक)"**, a ready voice recording; it is then used as the voiceover and its length decides the scenes.
 
-Add an optional **"शीर्षक / मुख्य मुद्दा (ऐच्छिक)"**. Choose **"आडवा (16:9)"** for YouTube/web or **"उभा (9:16)"** for reels, status, and shorts. Note mode offers **"३० सेकंद"** or **"१ मिनिट"** targets. A ready script or supplied voice track can be up to two minutes, and a project can contain no more than eight scenes.
+Then:
 
-Under **"दर्जा"**, **"संतुलित"** is the recommended choice and **"सर्वोत्तम"** requests the higher-quality server setting. Read the displayed estimate; the actual tier cost follows the current server configuration.
+- **"AI प्रॉम्प्ट (ऐच्छिक)"** — what you want in your own words: what to stress, how the scenes should look, the tone. Facts still come only from the note or script.
+- **"चित्रे जोडा"** — up to four reference pictures (a place, person, object or look) shown to the AI that plans the storyboard.
+- **"फ्रेमचा आकार"** — **"आडवा (16:9)"** for YouTube/web or **"उभा (9:16)"** for reels, status and shorts.
 
-In note mode select **"संहिता तयार करा"**; in ready-script mode select **"दृश्य आराखडा तयार करा"**. Only one video project can be actively working at a time; if another project is active, open or finish it before starting a new one.
+Select **"संहिता व स्टोरीबोर्ड तयार करा"** (note) or **"स्टोरीबोर्ड तयार करा"** (ready script). This step does not spend on video. Only one project can be in progress at a time.
 
 ## 2. Approval gate: script
 
-At **"संहिता तपासा व संपादित करा"**, review the overall English visual style and every scene's Marathi narration, visual description, key point, and end-frame brief.
+At **"संहिता तपासा व संपादित करा"**, review the overall visual style and each scene card: its title, Marathi narration, frame description (**"दृश्य / स्टोरीबोर्ड फ्रेम"**), key point and end-frame brief.
 
 ![The script-review gate](.gitbook/assets/12-video--script-review.png)
 
-![One editable script scene](.gitbook/assets/12-video--script-scene.png)
+- Read all narration boxes in order — they become one continuous voiceover. In ready-script mode the narration is shown as **"निवेदन — जसेच्या तसे"** and cannot be changed.
+- **"चित्र जोडा"** on a scene attaches your own photograph of a specific building, office or object; mention it in that scene's description. It applies once you select **"बदल जतन करा"**.
+- **"AI ने दृश्य-वर्णन पुन्हा तयार करा"** rewrites the scene descriptions.
+- **"दृश्य जोडा"** inserts a scene; you can also remove one.
 
-Read all narration boxes in order. They become one continuous voice track, so scene boundaries should not create awkward repetition or missing context. In ready-script mode, do not add new words; redistribute the approved words between scenes instead.
-
-You can insert or remove scenes within the limits. Select **"स्टोरीबोर्ड तयार करा"** only after the script is approved. This creates low-cost still frames, not the finished video.
+Select **"स्टोरीबोर्ड तयार करा"** when the script is approved. This creates still frames, which are inexpensive.
 
 ## 3. Approval gate: storyboard
 
-Review the start frame and, when present, the end frame for each scene. Confirm that the setting is appropriate for Maharashtra/India, people and objects are plausible, official facts are not invented visually, and the frame can be animated cleanly.
+At **"स्टोरीबोर्ड तपासा"**, check each scene's start frame and end frame: a Maharashtra/India setting, plausible people and objects, no invented facts, and no stray writing.
 
 ![The storyboard-review gate](.gitbook/assets/12-video--storyboard.png)
 
-You may:
+You may change a frame description and redraw only that frame, use **"पहिली फ्रेमच वापरा"** for a scene that should not change, edit the motion brief, and select **"बदल जतन करा"**.
 
-- change a frame description and redraw only that frame;
-- edit and save the motion brief;
-- move approved narration words between scenes;
-- insert a scene and create only its missing frames;
-- use **"बदल जतन करा"** before animation.
-
-Select **"व्हिडिओ तयार करा"**, then accept the cost confirmation. This is the main paid step because every missing scene clip is animated.
+Select **"व्हिडिओ तयार करा"**, read the cost, then **"होय, व्हिडिओ तयार करा"**. This is the main paid step: every missing scene clip is animated.
 
 ## 4. Completed video
 
-![A completed branded video](.gitbook/assets/12-video--result.png)
+![A completed video](.gitbook/assets/12-video--result.png)
 
-The final card provides:
+- **"व्हिडिओ डाउनलोड करा"** — the MP4.
+- **"SRT (निवेदन वेळेसह) डाउनलोड करा"** — subtitles.
+- **"पडद्यावरील ओळी व्हिडिओत दाखवा"** — show or hide the burned-in Marathi key points.
+- **"आवाज पुन्हा तयार करा"** — redo the voiceover.
+- **"क्लिप्स पुन्हा जोडून व्हिडिओ तयार करा"** — rebuild the video from stored clips and audio at no generation cost.
+- **"स्टोरीबोर्डवर परत जा"** — change frames, scenes or narration.
 
-- **"व्हिडिओ डाउनलोड करा"** for MP4;
-- **"SRT (निवेदन वेळेसह) डाउनलोड करा"**;
-- **"आवाज पुन्हा तयार करा"** to add or replace narration;
-- **"क्लिप्स पुन्हा जोडून व्हिडिओ तयार करा"** to restitch stored clips and audio without generating scenes again;
-- **"स्टोरीबोर्डवर परत जा"** for frame, scene, or narration-division changes.
-
-The **"वेळेसह निवेदन"** card shows which narration plays during each time range.
-
-![The timed narration](.gitbook/assets/12-video--timed-script.png)
-
-Every generated scene and final video carries the DGIPR lockup. The finished video ends with the DGIPR contact slate. Landscape output fits the complete vertical slate on white so contact details are not cropped.
+**"वेळेसह निवेदन"** shows which narration plays in each time range. Every video carries the DGIPR badge and ends with the DGIPR contact slate.
 
 ## Improve one scene
 
-The completed page lets you change a single scene's description, redraw its frames, and choose **"फक्त हे दृश्य पुन्हा तयार करा"**. Only that scene incurs new animation cost; the previous complete video remains available while replacement work runs.
+Under **"एखादे दृश्य सुधारायचे?"**, change one scene's description, redraw its frames and select **"फक्त हे दृश्य पुन्हा तयार करा"**. Only that scene is animated again; the previous video stays available meanwhile.
 
 {% hint style="warning" %}
-Watch the complete MP4 with sound before publication. Check every spoken word, frame, subtitle timing, logo, outro, aspect ratio, and transition—not only the first frame of each scene.
+Watch the complete MP4 with sound before publication. Check every spoken word, frame, subtitle timing, logo, outro and aspect ratio.
 {% endhint %}

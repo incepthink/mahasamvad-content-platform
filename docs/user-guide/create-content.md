@@ -1,47 +1,66 @@
 # Create a Creative or Social Post
 
-Use **"क्रिएटिव्ह आणि सोशल"** when you already have a finished Marathi article and need its visual form.
+Use **"क्रिएटिव्ह आणि सोशल"** (page title **"पोस्टर व सोशल पोस्ट तयार करा"**) when you already have the text and need its visual or social form. No article is written on this page — what you type or attach is the only source.
 
-## 1. Add the article
+![The create form](.gitbook/assets/01-overview--home.png)
 
-Paste the complete article under **"पूर्ण लेख येथे चिकटवा"**, or select **"फाईल निवडा"** to use a PDF, DOCX, or TXT file. Every PDF asks you to select pages before OCR; DOCX and TXT go directly to text review. Uploaded files and extracted text are reviewed before use.
+## 1. Add the text
 
-![Paste or upload a finished article](.gitbook/assets/01-overview--home.png)
+Type or paste into **"पोस्टरवर जो मजकूर हवा आहे तो येथे लिहा"**. Select **[+]** to attach a PDF, DOCX or TXT file as well; you may use the text box, a file, or both. The file's text is counted beside what you typed, not pasted into the box.
+
+- A DOCX or TXT is read immediately.
+- A PDF shows **"पृष्ठे निवडायची आहेत"** on its card. Open the card and tick only the pages you need — only those pages are read (OCR is charged per page).
 
 ## 2. Choose what to create
 
-Under **"काय तयार करायचे?"**, choose one format:
+Open the format menu in the composer's tool row and choose one:
 
-![The current output-format choices](.gitbook/assets/03-creative--formats.png)
+| Format                       | What you get                                                                                       |
+| ---------------------------- | -------------------------------------------------------------------------------------------------- |
+| **क्रिएटिव्ह**               | A DGIPR-branded Marathi social-media poster (the default)                                          |
+| **कॅरोसेल**                  | A 3–4 slide post — a cover and detail slides in one look. See [Carousels and Dynamic Posters](carousel-and-dynamic-poster.md) |
+| **यूट्यूब थंबनेल**           | A Marathi YouTube thumbnail                                                                        |
+| **फक्त कॅप्शन**              | A social-media caption only — no poster, no image cost                                             |
+| **बॅनर**                     | A landscape poster to publish with an article; it prints only the main name or heading             |
+| **डायनॅमिक पोस्टर (beta)**   | A short moving clip made from a poster you already have. See [Carousels and Dynamic Posters](carousel-and-dynamic-poster.md) |
+| **व्हिडिओ**                  | Opens the separate storyboard-to-video workflow. See [Storyboard-to-Video Projects](video.md)      |
 
-- **"यूट्यूब थंबनेल"** — a Marathi YouTube thumbnail.
-- **"क्रिएटिव्ह"** — a DGIPR-branded social-media poster. Tick **"कॅप्शनही तयार करा"** if you also want a caption.
-- **"लेख पोस्टर"** — a landscape poster to publish with an article.
-- **"व्हिडिओ"** — opens the separate video workflow.
+## 3. Choose the options
 
-When **"लेख पोस्टर"** is selected, you may enter an exact poster heading. Leave it blank to let the platform choose the main named subject from the article.
+Only the options that affect the chosen format are shown.
 
-![The article-poster heading option](.gitbook/assets/03-creative--article-poster.png)
+- **"जसाच्या तसा मजकूर"** (Creative and Carousel) — tick it to print your text exactly, without changing a word. Leave it unticked to let the AI write the poster's headline and points from your text.
+- **"कॅप्शनही तयार करा"** (Creative and Carousel) — also write a Marathi caption. You can add one later from the result page instead.
+- **"नवीन"** — use the newer image model for this poster. Redos and changes on the same poster keep using it.
+- **"प्रतिमा जोडा"** — attach up to four of your own pictures (JPG, PNG or WEBP) — a building, a person, a look you want. The image model uses the actual pictures. A picture that fails to upload stays on its card and is not sent.
+- **"पोस्टरवरील मजकूर (ऐच्छिक)"** (Banner only) — the exact words to print. Leave it empty to let the platform pick the scheme, award or programme name from your text.
 
-## 3. Choose a reference only when needed
+## 4. Optional: write the design yourself
 
-Open **"संदर्भ टेम्पलेट निवडा (ऐच्छिक)"** to use a master template. **"आपोआप निवड"** is the recommended default: it selects a layout with enough room for the article's content.
+On the Creative format, **"AI प्रॉम्प्ट (ऐच्छिक)"** lets you describe how the poster should look in your own words, for example “गडद निळ्या पार्श्वभूमीवर शेतकऱ्याचे छायाचित्र…”. When you fill it, the platform's own design instructions are skipped entirely and your description is used instead. The official logo and footer are still added afterwards.
 
-![The optional master-template picker](.gitbook/assets/03-creative--template-picker.png)
+## 5. Choose a template only when needed
 
-The reference controls layout and structure. Its words, numbers, logo, colours, and factual claims are not source material for the new creative.
+Open **"संदर्भ टेम्पलेट निवडा (ऐच्छिक)"** to base the poster on a master template.
 
-## 4. Start
+![The optional template picker](.gitbook/assets/03-creative--template-picker.png)
 
-Select **"तयार करा →"**. The work appears under **"सुरू असलेली कामे"**, and the result page opens automatically.
+- On **क्रिएटिव्ह** and **कॅरोसेल**, leaving it empty means **"संपूर्ण AI रचना — टेम्पलेट नाही"**: colours, layout and arrangement are designed fresh. Pick a template only if you want the poster to follow it.
+- On **यूट्यूब थंबनेल** and **बॅनर**, leaving it empty lets the platform pick a suitable template.
+
+Templates are grouped by how many points they hold (one message, a few points, a medium list, a long list). Choose one that fits all your points. A template controls layout only — its words, numbers, people and logo are never copied.
+
+## 6. Start
+
+Select **"तयार करा →"**. The result page opens and the work appears under **"सुरू असलेली कामे"**. Only one social post and one article can be in progress at a time; the form tells you if you must wait.
 
 Before starting, confirm:
 
-- the pasted text is the final approved Marathi article;
-- the chosen format matches the intended channel;
-- an article-poster heading is exact, if you supplied one;
-- a manually selected template has enough content capacity.
+- the text is final and approved;
+- **"जसाच्या तसा मजकूर"** is ticked if every word must appear unchanged;
+- a banner's exact text is correct, if you supplied one;
+- a chosen template has room for all your points.
 
 {% hint style="info" %}
-The creative follows the fixed DGIPR template treatment and receives official logo/footer chrome after image creation. Do not ask the image model to paint or replace the government identity.
+The महाराष्ट्र शासन badge and the DGIPR footer are added by software after the image is made. Do not ask the image model to paint them.
 {% endhint %}

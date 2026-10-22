@@ -1,35 +1,27 @@
 # Usage Analytics
 
-Open **"वापर विश्लेषण"** to review department-wide platform use. It does not show individual-user activity.
+Open **"वापर विश्लेषण"** for a combined view of how much the department uses the platform. All figures are department-wide; nothing on this page counts or identifies individual officers.
 
 ![The analytics overview](.gitbook/assets/14-analytics--overview.png)
 
 ## Choose a period
 
-Use **"७ दिवस"**, **"३० दिवस"**, **"९० दिवस"**, or **"सुरुवातीपासून"**. The overview includes total outputs, feature-level counts, a daily trend, and a share of work by feature.
+Use **"७ दिवस"**, **"३० दिवस"**, **"९० दिवस"** or **"सुरुवातीपासून"**. The overview shows key figures, daily activity against the previous period, a year-long activity calendar, the share of work by feature, and one card per feature.
 
-Select a feature card to open its detail page.
+Select a feature card to open its detail page. The number on a card always matches its detail page.
 
 ## Read the service table
 
 ![Task-level services and estimated cost](.gitbook/assets/14-analytics--detail.png)
 
-**"वापरलेल्या सेवा"** groups every paid call under the user-facing task that caused it. A task may contain several service rows, each showing:
+**"वापरलेल्या सेवा"** groups paid work under the task that caused it — transcription, document reading, article writing, translation, proofreading, poster and caption work, thumbnails, carousels, Dynamic Posters, storyboards and video phases. Each row shows the service, the number of calls, the unit processed (minutes of audio, pages, images, seconds of video) and the estimated cost in rupees.
 
-- service and provider;
-- configured model;
-- actual call count;
-- the natural unit processed, such as audio minutes, pages, images, or clips;
-- attributable estimated cost.
+A feature whose spend is not measured shows **"या सुविधेचा खर्च स्वतंत्रपणे मोजला जात नाही."** rather than ₹0. Values marked **"अंदाजित"** are estimates.
 
-Examples include transcription, scanned-document OCR, designation extraction, article drafting and verification, translation, proofreading, poster/caption work, thumbnails, and each video phase.
+## Historical limits
 
-Some values carry an **"अंदाजित"** badge because provider pricing or measurement is estimated. Analytics is an operational estimate, not a supplier invoice.
-
-## Historical limitations
-
-Exact task attribution begins from the task-tracking deployment. Older AI usage that cannot be reconstructed truthfully is labelled **"पूर्वीची एकत्रित AI नोंद"**. DLO analytics represents the current article-only UI and does not claim unrelated poster-generation cost.
+Exact task-level history begins from August 2026. Older usage that cannot be broken down truthfully is shown as **"पूर्वीची एकत्रित AI नोंद"**.
 
 {% hint style="info" %}
-Cost logging is fire-and-forget: an analytics-write problem does not fail the officer's content task. Consequently, treat totals as monitoring data, not as a guarantee that every provider charge is present.
+Analytics is operational monitoring, not a supplier invoice. Usage logging never blocks an officer's work, so an occasional missing record is possible; use supplier invoices for financial reconciliation.
 {% endhint %}

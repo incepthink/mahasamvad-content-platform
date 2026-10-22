@@ -1,32 +1,37 @@
-# Transcribe Audio and YouTube
+# Transcribe Recordings and YouTube
 
-Use **"ध्वनिलेखन"** when you need an exact transcript before deciding what to create from it.
+Use **"ध्वनिलेखन"** when you need what was said, word for word, before deciding what to make from it.
 
-![The transcription workspace](.gitbook/assets/07-transcription--page.png)
+![The transcription page](.gitbook/assets/07-transcription--page.png)
 
 ## Start a transcript
 
-1. Select **"ध्वनिफीत जोडा"** for audio files, and/or paste YouTube links in the link box. You may add up to ten YouTube links in one run.
-2. Check that every listed source is intended for this transcript.
+1. Under **"नवीन ध्वनिलेखन"**, select **"ध्वनिफीत जोडा"** (or drag files onto the card) and/or paste YouTube links under **"यूट्युब व्हिडिओ"**.
+2. Check every listed source.
 3. Select **"मजकूर तयार करा"**.
 
-The newest and previous runs appear on the same page. Select a row to open its result inline.
+What you can add:
 
-Uploaded audio is saved with the transcription record so the run can be reopened. A YouTube video is not downloaded or stored; its link and resulting transcript are kept.
+- Up to ten recordings at a time, with no size limit — MP3, M4A, AAC, WAV, FLAC, OGG, OPUS and WEBM.
+- Phone videos (MP4, MOV, MKV, 3GP): only the sound is taken out, in your browser, and the video is never uploaded.
+- Large recordings are compressed in your browser before upload. **"अपलोड करत आहे… N %"** shows the upload progress; keep the page open until it finishes.
+
+To transcribe only part of a recording, select its card, drag the edges of the waveform to the part you need and choose **"हाच भाग वापरा"**.
+
+On an Android phone with the app installed, you can share a recording directly from WhatsApp or the recorder app to this page; the transcript starts automatically.
 
 ## Use the result
 
 ![A completed transcript](.gitbook/assets/07-transcription--result.png)
 
-The transcript is read-only because it represents what the speech service heard. You can:
+Your runs appear on the same page; select one to open its result. The transcript is read-only because it records what the speech service heard. You can:
 
-- select **"मजकूर कॉपी करा"**;
-- download a TXT file;
-- see which individual audio or YouTube source failed;
-- select **"बातमी तयार करा"** to send the transcript into **"लेख / बातमी"** as a draft.
+- select **"मजकूर कॉपी करा"** or download a TXT file;
+- see which individual recording or link failed — the others are still transcribed;
+- select **"बातमी तयार करा"** to start a news report from the transcript.
 
-Using **"बातमी तयार करा"** does not transcribe the source again. Review and correct names, numbers, quotations, and code-mixed words in the article intake before generation.
+A recording that was transcribed before — here or on **लेख / बातमी** — is shown at once, marked **"आधीच्या ध्वनिलेखनातून"**, without being transcribed again.
 
 {% hint style="warning" %}
-Audio transcription is not a verified quotation record. Compare sensitive statements with the recording, especially names, designations, dates, amounts, and English terms spoken in Marathi sentences.
+A transcript is not a verified quotation record. Compare sensitive statements with the recording, especially names, designations, dates, amounts and English words spoken in Marathi sentences.
 {% endhint %}
