@@ -1,60 +1,45 @@
 # Translate Text and Documents
 
-Use **"भाषांतर"** for ad-hoc Marathi-to-English or Marathi-to-Hindi translation. The text and uploaded file are not saved as a permanent generation.
+Use **"भाषांतर"** (page title **"भाषांतर (Translation)"**) to translate between Marathi, English and Hindi. Names and designations follow the shared glossary. Nothing you translate here is saved, so copy or download the result before leaving the page.
 
-![The current translation page](.gitbook/assets/08-translation--form.png)
+![The translation page](.gitbook/assets/08-translation--form.png)
 
-## Translate pasted text
+## Translate
 
-1. Paste the source under **"मराठी मजकूर येथे लिहा किंवा चिकटवा"**.
-2. Choose **"इंग्रजी"** or **"हिंदी"**.
+1. Paste text into the box, or select **"फाईल निवडा"** (the paperclip) to attach one or more PDF, DOCX or TXT files. Each file appears as a card in the box. You may combine pasted text and files.
+2. Open the language menu (**"कोणत्या भाषेत भाषांतर हवे?"**) and choose **"मराठी"**, **"इंग्रजी"** or **"हिंदी"**. The platform recognises the language of your text by itself.
 3. Select **"भाषांतर करा"**.
-4. Review the detected names before translation begins.
 
-The result can be copied or downloaded as TXT.
+Attached files are only checked when you add them. They are read in full when you press **"भाषांतर करा"** — a whole document can be translated at once, and the translation then continues by itself. Large texts can take a minute or two.
 
-## Translate a PDF, DOCX, or TXT file
+An article's **"भाषांतर करा"** link opens this page with the article already filled in.
 
-Select **"फाईल निवडा"** under the upload card.
+## Review names before translating (from Marathi)
 
-- TXT and DOCX files are extracted and go directly to text review.
-- Every PDF stops at page selection. Tick only the pages you need, then start reading them. Only selected pages are sent to OCR so table columns can be preserved.
+When the source is Marathi, the platform first lists the people, places, organisations and schemes it found. Check every row.
 
-![Select pages before scanned-PDF OCR](.gitbook/assets/08-translation--ocr-pages.png)
+![Name-spelling review](.gitbook/assets/08-translation--name-review.png)
 
-The page review identifies text read from the file or by OCR. Edit any extraction mistakes before choosing **"हा मजकूर वापरा"**. PDF text is OCR output and therefore needs special scrutiny for names and numbers.
+For English:
 
-{% hint style="warning" %}
-OCR is a paid, page-based service. Page selection is the spend approval point: exclude covers, blank pages, pages you do not need, and annexures that should not be translated.
-{% endhint %}
-
-The temporary document job is kept only for a limited time and may survive a page refresh in the same browser session. If the API restarts or the job expires, upload the file again.
-
-## Review names before translating
-
-The platform extracts people, places, organisations, schemes, and other likely proper names. Check every row.
-
-![Hindi name-spelling review](.gitbook/assets/08-translation--name-review.png)
-
-For an English translation:
-
-- confirm or correct the English spelling;
+- confirm or correct each English spelling;
 - add a missing name with **"+ आणखी नाव जोडा"**.
 
-For a Hindi translation:
+For Hindi:
 
-- confirm or correct the Hindi spelling;
-- keep **"हिंदीत जसेच्या तसे ठेवा"** selected only for a proper name that must remain exact;
-- untick it for a common noun or designation that should be translated naturally.
+- confirm or correct each Hindi spelling;
+- keep **"हिंदीत जसेच्या तसे ठेवा"** ticked only for a proper name that must stay exactly as written; untick it for a common word or designation that should be translated normally.
 
-Rows marked **"तपासले"** already match a verified glossary entry. Rows marked **"तपासायचे आहे"** still require officer review. Confirmed spellings can become verified glossary entries for future work.
+Rows marked **"तपासले"** already match a verified glossary entry. Confirmed spellings are saved to the glossary for future work. Select **"भाषांतर सुरू करा"** to continue, or **"रद्द करा"** to go back.
 
-Select **"भाषांतर सुरू करा"** after review, or **"रद्द करा"** to return without translating.
+## Use the result
 
-## Hindi name warnings
+![A completed translation](.gitbook/assets/08-translation--result.png)
 
-Hindi translation uses a dedicated translation service. After translation, the platform tries to enforce approved proper-name spellings. If a name still cannot be accounted for, the translated text is delivered with a warning instead of being discarded.
+Copy the result or download it as TXT. **"शब्दकोश संज्ञा वापरल्या"** lists the glossary terms that were locked during translation.
 
-![A completed Hindi translation](.gitbook/assets/08-translation--result.png)
+If the result shows **"ही नावे तपासा"**, the translation was delivered but those names could not be confirmed against the approved spelling. Compare and correct them before publication; there is no need to translate again.
 
-Compare every warned name with the source and correct it before publication. Do not rerun the whole document merely to clear a warning if the text is otherwise usable.
+{% hint style="warning" %}
+Text from a scanned PDF is read by OCR and can contain misread names or digits. Check them in the result against the original document.
+{% endhint %}

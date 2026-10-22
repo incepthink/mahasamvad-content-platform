@@ -4,60 +4,66 @@
 
 ### Do I need to sign in?
 
-No. The current application pages are accessible without login. Use only the address supplied by your department, and do not paste material that is not authorised for this system.
+No. The pages open without login. Use only the address supplied by your department, and do not paste material that is not authorised for this system. Chats, conversations and work lists are visible to anyone with the address.
 
-### Where did the old “new content” screen go?
+### Where do I start?
 
-The current UI separates the journeys:
+- **"क्रिएटिव्ह आणि सोशल"** — you already have the text and need a poster, carousel, thumbnail, banner, caption or Dynamic Poster.
+- **"लेख / बातमी"** — you have notes, recordings, photographs, documents or YouTube links and need a news report.
+- **"स्टोरीबोर्ड (beta)"** / **"व्हिडिओ (beta)"** — you want a video script, storyboard or clip.
 
-- **"क्रिएटिव्ह आणि सोशल"** starts from a finished article and creates a visual.
-- **"लेख / बातमी"** starts from raw notes, recordings, YouTube, or official documents and creates the article.
+### Where did the old article review step go?
 
-### Can I close a generation page?
+**लेख / बातमी** no longer stops for a page-selection, source-review or people-and-designation step. Everything is entered on one form, and the article is written straight away. Put any direction in **"AI साठी सूचना (ऐच्छिक)"**, and check names and designations in the finished article.
 
-Yes. Server-side work continues. Reopen it from **"सुरू असलेली कामे"** or **"मागील काम"**. A local file picker that was never submitted may need to be selected again after refresh.
+### Where is the old video page?
+
+The sidebar's video entries now open the conversation workspace. The step-by-step storyboard-to-video project is still available from **"क्रिएटिव्ह आणि सोशल"** → **"व्हिडिओ"**.
+
+### Can I close a result page?
+
+Yes. Work continues on the server. Reopen it from **"सुरू असलेली कामे"**, **"मागील काम"**, or the list on the relevant page. A file you picked but never submitted may need to be picked again.
 
 ## Input and file messages
 
 | Message                                                                         | Meaning and action                                                     |
 | ------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| **"कृपया किमान २० अक्षरांची टिपणी लिहा."**                                      | The creative source is too short. Add enough factual context.          |
-| **"कृपया टिपणी लिहा, किमान एक फाईल जोडा किंवा यूट्युब लिंक द्या."**             | The article intake has no usable source. Add at least one.             |
-| **"फक्त PDF, DOCX आणि TXT फाईल्स चालतात."**                                     | Choose a supported document type. Audio belongs in the audio picker.   |
-| **"फाईल खूप मोठी आहे. प्रत्येक फाईल कमाल ५० MB असावी. कृपया लहान फाईल निवडा."** | Reduce or split the file, then select it again.                        |
-| **"ही फाईल आता उपलब्ध नाही. कृपया पुन्हा अपलोड करा."**                          | The temporary document job expired or the API restarted. Upload again. |
-| **"किमान एक पृष्ठ निवडा."**                                                     | At least one PDF page must be approved before OCR.                     |
-| **"या फाईलमधून एकही पृष्ठ निवडलेले नाही."**                                     | Return to page selection and include the pages you need.               |
+| **"कृपया किमान २० अक्षरांची टिपणी लिहा."**                                      | The text is too short. Add enough material.                            |
+| **"फक्त PDF, DOCX आणि TXT फाईल्स चालतात."**                                     | Choose a supported document type. Recordings go under **ध्वनिफीत जोडा**. |
+| **"फाईल खूप मोठी आहे. प्रत्येक फाईल कमाल ५० MB असावी. कृपया लहान फाईल निवडा."** | Reduce or split the document. (Recordings have no size limit.)         |
+| **"ही फाईल आता उपलब्ध नाही. कृपया पुन्हा अपलोड करा."**                          | The temporary upload expired or the service restarted. Upload again.   |
+| **"ही लिंक आधीच जोडली आहे."**                                                   | That YouTube link is already listed.                                   |
+| **"एक समाजमाध्यम पोस्ट सध्या तयार होत आहे…"**                                   | Wait for the running social post to finish.                            |
 
-### Why does every PDF ask me to select pages?
+### Why does a PDF ask me to choose pages on the Creative page?
 
-The current PDF path reads selected pages with OCR so table columns can be preserved. OCR is page-based, so the selection screen prevents excluded pages from being processed or charged. DOCX and TXT do not show this page picker.
+On **क्रिएटिव्ह आणि सोशल**, a PDF is read only for the pages you tick, because reading is charged per page. On **लेख / बातमी**, **भाषांतर**, **मुद्रितशोधन** and **चॅट**, documents are read whole.
 
-### The PDF text has the wrong name or number
+### A video file will not convert
 
-OCR guesses from pixels. Correct the page text in the review card before using it. Compare names, dates, amounts, and reference numbers with the PDF image.
+Phone videos are converted to sound inside your browser. If you see a message asking you to use Chrome or Edge, open the page in one of those browsers and pick the file again.
 
-### My YouTube link is rejected
+### The PDF or photograph was read with a wrong name or number
 
-Use a full `youtube.com/watch?v=…` or `youtu.be/…` address. **"ही लिंक आधीच जोडली आहे."** means it is already present. **"एकावेळी कमाल १० लिंक जोडता येतील."** means the current intake has reached its limit.
+Scanned pages and photographs are read from pixels and can be wrong — especially Devanagari digits. Check names, dates, amounts and reference numbers against the original before publishing.
 
-## Article review and generation
+## News reports
 
-### An unrelated minister was suggested
+### The article is shorter than I asked for
 
-Untick that person in **"व्यक्ती व पदनाम तपासा"**. A glossary suggestion is not automatic approval. Add the correct full name and designation if required.
+The notice **"मागितलेली लांबी गाठता आली नाही"** means the sources did not contain enough material. The platform never pads an article. Add more source material, or accept the shorter article.
 
-### “नावे तपासताना अडचण आली” appears
+### A designation is missing or wrong
 
-Choose **"नावे पुन्हा तपासा"**, or continue without a designation after manually confirming the article source. The designation lookup is best-effort and should not prevent urgent work.
+Correct it with article feedback, and ask an administrator to add or correct the person's designation in **शब्दकोश** so future articles get it right.
 
 ### Some source files failed
 
-The review page lists each failed source. You may continue without it only if the remaining approved material is sufficient and the omission will not change the article's meaning. Otherwise start again with a readable file.
+The article is written from the sources that could be read. Check that the missing source did not hold anything essential; if it did, start a new report with a readable copy.
 
 ### The article is ready but the poster is not
 
-They can finish at different times. Review/download the article while the poster continues. The page updates automatically.
+They can finish at different times. The page updates automatically.
 
 ## Translation and proofreading
 
@@ -65,67 +71,65 @@ They can finish at different times. Review/download the article while the poster
 
 Proper names are easy to mistransliterate. English and Hindi use separate approved spellings. Correct every row and add any missing name before selecting **"भाषांतर सुरू करा"**.
 
-### The Hindi result says “ही नावे तपासा”
+### The result says “ही नावे तपासा”
 
-The translation was delivered, but those names could not be matched confidently to the approved spelling. Inspect and correct them manually. The warning is not a reason to discard already translated pages.
+The translation was delivered, but those names could not be matched to the approved spelling. Check and correct them; there is no need to translate again.
 
-### A common Hindi word is being kept unchanged
+### A common Hindi word is kept unchanged
 
-In the name-review row, untick **"हिंदीत जसेच्या तसे ठेवा"**. Use that option for proper names, not generic organisation words or designations.
+In the name review, untick **"हिंदीत जसेच्या तसे ठेवा"** for that row. Use it for proper names only.
 
-### Proofreading says the text is over 10,000 characters
+### Proofreading shows issues but no corrected text
 
-Split it into logical sections and check each section. Do not cut a sentence or table row in half.
+An automatic correction would have changed a number, so the corrected text was withheld. Make that correction yourself against the source.
 
-### Proofreading lists an issue but provides no corrected text
+## Poster, caption and publishing
 
-The numeric-preservation guard may have detected that an automatic patch would change a number. Make the correction manually against the official source.
+| Message                                                                         | What to do                                                                    |
+| ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| **"प्रत्येक खुणेसाठी थोडक्यात सूचना लिहा, किंवा तिथला अचूक मजकूर द्या."**        | Give every red mark an instruction or a **"हा मजकूर असा हवा"** text.          |
+| **"कृपया थोडक्यात अभिप्राय लिहा."**                                             | The feedback box needs a clear instruction.                                   |
+| **"सध्या X वर पोस्ट करता येणार नाही"**                                          | Download the poster and copy the caption for the manual X process.            |
+| **"मुद्दे टेम्पलेटच्या क्षमतेपेक्षा जास्त आहेत"**                                | Pick a template from a larger group, or split the text.                       |
 
-## Poster, caption, and publishing
+### A digit on the poster is wrong (for example ९ instead of १)
 
-| Message                                        | What to do                                                                    |
-| ---------------------------------------------- | ----------------------------------------------------------------------------- |
-| **"प्रत्येक खुणेसाठी थोडक्यात सूचना लिहा."**   | Add an instruction to every red marker.                                       |
-| **"कृपया थोडक्यात अभिप्राय लिहा."**            | The feedback box needs a clear instruction.                                   |
-| **"सध्या X वर पोस्ट करता येणार नाही"**         | Download the poster and copy the caption for the authorised manual X process. |
-| **"काहीतरी चुकले. कृपया पुन्हा प्रयत्न करा."** | Wait briefly and retry the affected action once; preserve the current result. |
+Mark it with a red mark and type the correct number in **"हा मजकूर असा हवा"**. Only that spot is redrawn.
 
-Red marks point to an element; they do not crop it. Blue boxes reserve background space for an item you will add later. Neither can change the software-stamped logo or footer zone.
+### I need the poster without the badge and footer
 
-Direct Facebook publication is immediate and cannot be withdrawn from the result page. Use the official Facebook account to correct or delete a live post.
+Use **"लोगो-फूटरशिवाय डाउनलोड करा"**. Older posters do not have this copy; redrawing one creates it.
+
+### A Dynamic Poster's text came out garbled
+
+Mark the part that should move before creating it. Everything outside that part is then kept exactly as uploaded.
+
+Facebook publication is immediate and cannot be withdrawn from the result page. Use the official Facebook account to correct or delete a live post.
 
 ## Video
 
-### “दुसरा व्हिडिओ प्रकल्प सध्या तयार होत आहे” appears
+### “दुसरा स्टोरीबोर्ड सध्या तयार होत आहे” appears
 
-Only one active video project can generate at a time. Open the active project and wait for it to finish or fail before starting another.
+Only one storyboard-to-video project can work at a time. Open the active project and wait for it to finish or fail.
 
-### When does video become expensive?
+### When does video cost the most?
 
-Script creation and storyboard stills happen before the main animation spend. The cost confirmation appears when you select **"व्हिडिओ तयार करा"**. Redrawing a still is much cheaper than animating the wrong scene.
+In a storyboard project, scripting and still frames are inexpensive; the cost confirmation appears at **"व्हिडिओ तयार करा"**. In the video conversation, every **"व्हिडिओ तयार करा"** and **"बदल करा"** renders a paid clip.
 
-### Can I change only one completed scene?
+### The character's look or voice keeps changing
 
-Yes. Return to the storyboard or use the completed scene controls, then select **"फक्त हे दृश्य पुन्हा तयार करा"**. The old complete video remains available during replacement.
+Save the character under **"पात्रे व आवाज"** and pick it at the start of a new conversation. After many edits, use **"इथून पुढे बदल करा"** on the last good video.
 
-### Why is the video longer than the generated scenes?
-
-Every finished video appends the DGIPR contact slate. Narrated output includes silence through the slate so it is not cut off.
-
-## History, storage, and analytics
+## History, storage and analytics
 
 ### Why is a translation or proofread result missing from history?
 
-Ad-hoc translation, proofreading, and temporary document-intake jobs are not stored as permanent generations. Copy or download their results before leaving.
+Ad-hoc translation and proofreading are never saved. Copy or download the result before leaving.
 
 ### Are analytics costs exact invoices?
 
-No. They are attributable operational estimates based on recorded services, calls, units, and configured prices. Some rows are explicitly marked estimated. Older work may appear as **"पूर्वीची एकत्रित AI नोंद"** because exact task attribution did not exist at the time.
-
-### A completed task is missing from analytics
-
-Usage logging must never fail the officer's work, so an analytics write can be absent even when the task succeeded. Use provider invoices for financial reconciliation.
+No. They are estimates based on recorded services and configured prices. Older work may appear as **"पूर्वीची एकत्रित AI नोंद"**.
 
 ## If the problem remains
 
-Record the page, approximate time, visible message, generation or intake link, and the action you selected. Take a screenshot that excludes confidential source text, then send those details to the platform support team. Do not repeatedly submit a paid action while its status is unknown.
+Note the page, approximate time, the visible message, the result link, and the action you took. Take a screenshot that excludes confidential text and send these to the platform support team. Do not repeatedly submit a paid action while its status is unknown.

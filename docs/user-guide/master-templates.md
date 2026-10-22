@@ -1,38 +1,41 @@
 # Master Templates — Admin
 
-**"मास्टर टेम्पलेट"** is the visual reference library used by creative, article-poster, and YouTube-thumbnail generation. It is an administrative workspace.
+**"मास्टर टेम्पलेट"** (page title **"पोस्टर मास्टर टेम्पलेट"**) is the visual reference library for Creative, Carousel, Banner and YouTube-thumbnail posters. It is an administrative workspace.
 
-![The current template library](.gitbook/assets/11-templates--overview.png)
+![The template library](.gitbook/assets/11-templates--overview.png)
 
 ## Browse the library
 
-Use the tabs for **"ट्विटर / फेसबुक"**, **"लेख पोस्टर"**, and **"यूट्यूब थंबनेल"**. Search by subject, scheme, or template type. Filter templates by photo use, text-only layout, and content capacity.
+Use the tabs **"ट्विटर / फेसबुक"**, **"लेख पोस्टर"** and **"यूट्यूब थंबनेल"**, and search by subject. Templates are grouped by how many points they hold:
 
-Templates are grouped by how much information their analysed structure can hold: a single message, a few points, medium content, many points, or not yet analysed. The create form uses this capacity to avoid placing dense source material into a small layout.
+- **"एकच संदेश"** — no list; one announcement, sentence or quote;
+- **"थोडे मुद्दे"** — 1 to 3 points;
+- **"मध्यम यादी"** — 4 to 6 points;
+- **"मोठी यादी"** — 7 or more points;
+- **"अजून तपासलेली नाहीत"** — not yet analysed.
+
+Use **"आणखी दाखवा"** to see more in a group. When a poster is made without a chosen template (Thumbnail and Banner), one of the templates marked **"वापरात"** is picked automatically — one that has room for all the points.
 
 ## Add a template
 
 1. Select **"नवीन टेम्पलेट जोडा"**.
-2. Upload a PNG, JPEG, or WebP image.
-3. Choose the intended channel and add a short content description.
-4. Save the row and run layout analysis.
+2. Answer **"या टेम्पलेटमध्ये किती मुद्दे मावतात?"** by counting the point spaces in the image and choosing a group. This choice is kept permanently, even after re-analysis.
+3. Select **"चित्र निवडा"** and choose a PNG, JPEG or WebP image. It is added immediately and analysed.
 
-Analysis records structure such as photo zones, text regions, and the approximate number of bullet slots. It does not turn words or facts visible in the master into approved source content.
+Analysis records whether the layout has a photograph area and summarises what it is about and how it arranges information. It never turns words or facts in the template into source material.
 
-## Review a template tile
+## Manage a template
 
-![One analysed template tile](.gitbook/assets/11-templates--tile.png)
+![One template tile](.gitbook/assets/11-templates--tile.png)
 
-An administrator can:
+- **"वापरा"** / **"थांबवा"** — enable or disable it for automatic selection.
+- **"पुन्हा तपासा"** — re-run the analysis.
+- **"“छायाचित्रासह” म्हणून नोंदवा"** / **"“फक्त मजकूर” म्हणून नोंदवा"** — correct whether the layout has a photo area.
+- **"विषय बदला"** — edit **"हे टेम्पलेट कशाबद्दल आहे?"**.
+- **"काढा"** — delete permanently.
 
-- enable or disable the template for automatic selection;
-- rerun layout analysis;
-- correct whether the layout is photo-led or text-only;
-- edit the content summary;
-- delete a wrong or duplicate template.
-
-Disabling is safer than deletion when a template may be needed for audit or later reuse. Deletion is permanent.
+Disabling is safer than deleting when a template may be needed later.
 
 {% hint style="warning" %}
-Do not upload a template unless the department has the right to reuse its visual structure. Reference logos, text, dates, URLs, QR codes, and factual claims are placeholders and must never be copied into a new poster.
+Upload a template only if the department may reuse its visual structure. Logos, text, dates, URLs, QR codes, people and claims in a template are placeholders and are never copied into a new poster.
 {% endhint %}

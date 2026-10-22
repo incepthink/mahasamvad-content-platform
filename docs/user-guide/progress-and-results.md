@@ -1,43 +1,59 @@
-# Progress, Results, Downloads & Translation
+# Progress, Results and Downloads
 
-Generation work continues after the result page opens. A live progress area shows the current phase; you may leave the page and return through **"सुरू असलेली कामे"** or **"मागील काम"**.
+Work continues after the result page opens. A progress area shows the current phase; you may leave the page and return through **"सुरू असलेली कामे"** or **"मागील काम"**.
 
 ## Article result
 
-The article card is available as soon as writing and verification finish. Read the full Marathi article on screen.
+On a news report the article appears on screen while it is being written, then settles into the finished article card.
 
-![A current completed article result](.gitbook/assets/06-results--article.png)
+![A completed article](.gitbook/assets/06-results--article.png)
 
-Available article actions include:
+Article actions:
 
 - **"मजकूर कॉपी करा"**;
-- TXT and Markdown downloads;
-- a publication-ready PDF download;
-- English and Hindi translation;
-- article feedback.
+- **"डाउनलोड"** menu — **"PDF डाउनलोड"** (an A4 document with the DGIPR letterhead), **".txt डाउनलोड"** and **".md डाउनलोड"**;
+- **"भाषांतर करा"** — opens the article on the [translation page](translation.md);
+- **"बातमीत बदल हवा आहे?"** — ask for a revision ([Improve Results with Feedback](improve-with-feedback.md));
+- **"बातमीच्या आवृत्त्या"** — move between versions and select **"ही आवृत्ती पुन्हा वापरा"** to make an older one current;
+- **"याच लेखावरून क्रिएटिव्ह पोस्टर तयार करा"** — start a poster from this article.
 
-When more than one language exists, use the **"मराठी"**, **"English"**, and **"हिंदी"** tabs to switch the visible article. English and Hindi are stored separately, so creating one does not replace the other.
+If English or Hindi versions already exist for the article, the **"मराठी"**, **"English"** and **"हिंदी"** tabs switch between them, and the PDF downloads in the visible language.
 
-Before either translation begins, the platform asks you to review names. The English run uses the approved English spelling. The Hindi run uses the approved Hindi spelling and lets you decide whether each proper name should remain exactly as entered. See [Translate Text and Documents](translation.md) for the full name-review rules.
+**"मूळ टिपणी"** shows the source used for the run; source files can be opened from there. Older runs may also show **"तथ्य-तपासणी (माहिती कुठून आली?)"**.
 
-## Verification sections
+### Notices on an article
 
-Open **"तथ्य-तपासणी (माहिती कुठून आली?)"** to compare important claims with their source coverage. Open **"मूळ टिपणी"** to see the source note used for the run.
-
-![The fact-check section](.gitbook/assets/06-results--fact-check.png)
+- **"मागितलेली लांबी गाठता आली नाही"** — the sources could not honestly fill the length you asked for.
+- **"पदनामाबाबत लक्ष द्या"** — a designation could not be placed; check the names.
+- **"अभिप्रायातून शिकलेले नियम"** — your feedback was saved as a standing rule for future articles. Use **"संपादकीय नियम तपासा किंवा बदला →"** to review it.
 
 {% hint style="warning" %}
-A green or complete-looking result is not publication approval. Check every named person, designation, date, amount, quotation, eligibility rule, and action against the official source.
+A complete-looking result is not publication approval. Check every person, designation, date, amount, quotation, eligibility rule and action against the official source.
 {% endhint %}
 
-## Poster, thumbnail, or social result
+## Poster, thumbnail, banner or social result
 
-The visual appears with its caption, if one was requested. The icon row provides download, redesign/recolour where supported, publishing, point-feedback, and free-space tools.
+The image appears with its caption, if one was requested. The icon row above the poster provides:
+
+| Icon label                                     | What it does                                                         |
+| ---------------------------------------------- | -------------------------------------------------------------------- |
+| **"पोस्टर मोठ्या आकारात उघडा"**                | View at full size                                                    |
+| **"पोस्टर डाउनलोड करा"**                       | Download the finished poster                                         |
+| **"लोगो-फूटरशिवाय डाउनलोड करा"**               | Download the same poster without the badge and footer                |
+| **"Canva मध्ये पोस्टर उघडा"**                  | Open the poster in your own Canva account to edit further            |
+| **"वेगळी रचना तयार करा"**                      | Redraw with a different layout                                       |
+| **"वेगळ्या रंगात तयार करा"**                   | Redraw with a different colour scheme                                |
+| **"चित्रात बदल करा (पोस्टरवर खूण करा)"**       | Mark parts of the poster to change                                   |
+| **"जागा मोकळी करा (स्वतःच्या लोगोसाठी)"**       | Clear a space for your own logo or photograph                        |
 
 ![A completed social result](.gitbook/assets/06-social--result.png)
 
-If the article becomes ready before its poster, the article remains usable while the poster card shows that rendering is still in progress. Refreshing is not required.
+In Canva, the official badge and footer arrive as separate image layers; edit only the artwork layer so the branding stays intact. Posters made before September 2026, and banners in the older text-overlay style, have no logo-free download.
+
+On a **बॅनर**, **"पोस्टरवरील मजकूर बदला"** lets you set the exact words to print and redraw.
+
+If the poster says **"मुद्दे टेम्पलेटच्या क्षमतेपेक्षा जास्त आहेत"**, your text had more points than the chosen template holds. The poster was still made with every point; consider a larger template or splitting the text.
 
 ## If a task fails
 
-The result page keeps any part that already finished successfully and shows the failure beside the affected part. Use the offered retry only for the missing or failed operation; do not start the whole journey again unless the source itself must change.
+The result page keeps any part that already finished and shows the failure beside the affected part. Use the offered retry only for the missing or failed part; do not start the whole journey again unless the source itself must change.

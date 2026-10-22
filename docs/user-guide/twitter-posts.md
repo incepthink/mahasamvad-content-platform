@@ -1,32 +1,36 @@
 # Captions and Social Publishing
 
-A social creative can include a Marathi caption. Tick **"कॅप्शनही तयार करा"** before starting, or add a caption later from the result page.
+A social poster can carry a Marathi caption. There are three ways to get one:
+
+- tick **"कॅप्शनही तयार करा"** before starting a Creative or Carousel;
+- choose **"फक्त कॅप्शन"** in the format menu for a caption with no poster at all (no image cost);
+- add one later from the result page.
 
 ## Edit or generate the caption
 
-The caption box is editable. Changes are saved automatically when you leave the field. Use the copy icon to copy it for another system.
+On the result page, the **"कॅप्शन"** box is editable; changes are saved automatically. Use **"कॅप्शन कॉपी करा"** to copy it. No length limit is enforced — check the platform's own limit before posting.
 
-If no caption was requested originally, choose **"कॅप्शन तयार करा"** or **"स्वतः कॅप्शन लिहा"**. AI caption generation uses only the source article; it must not add a fact that was absent from the article.
+If no caption exists yet, select **"कॅप्शन तयार करा"**, or type one yourself. An AI caption uses only your source text and never adds a fact that was not in it.
 
-Open **"AI ला सूचना द्या"** and select the **"कॅप्शन"** tab for an AI-assisted rewrite. The **"पोस्टर"** tab applies the instruction to the visual instead. Drafts in the two tabs are kept separate.
+For an AI-assisted change, write what you want in **"AI सोबत बदल करा"** under the caption — for example “कॅप्शन थोडे लहान करा”. See [Improve Results with Feedback](improve-with-feedback.md).
 
 ![Poster and caption together](.gitbook/assets/06-social--result.png)
 
-## Direct publication
+## Direct publication to Facebook
 
-Facebook results can show **"फेसबुकवर पोस्ट करा"**. Publication is an external, immediate action:
+A finished poster can show **"फेसबुकवर पोस्ट करा"**. Publication is external and immediate:
 
 1. Read the final caption and inspect the poster at full size.
 2. Select **"फेसबुकवर पोस्ट करा"**.
-3. Read the warning, then select **"होय, प्रकाशित करा"** only with publication authority.
+3. Read the warning, then select **"होय, प्रकाशित करा"** only if you have publication authority.
 4. After success, use **"प्रकाशित पोस्ट पाहा"** to open the live post.
 
-The platform cannot withdraw the post from this screen. Remove or correct it through the official social account if necessary.
+The platform cannot withdraw the post. Remove or correct it through the official account if necessary.
 
 {% hint style="warning" %}
-Direct X publishing is currently unavailable. The disabled X action displays **"सध्या X वर पोस्ट करता येणार नाही"**. Download the poster and copy the caption for an authorised manual X workflow.
+Direct X publishing is currently unavailable; the X button reads **"सध्या X वर पोस्ट करता येणार नाही"**. A caption-only result and a carousel cannot be published from here either. Download the image and copy the caption for your authorised manual process.
 {% endhint %}
 
-## Reuse another result for social
+## Reuse a result for social
 
-Article and poster result pages may offer **"याच मजकुरावरून ट्विटर पोस्ट तयार करा"** or **"याच मजकुरावरून फेसबुक पोस्ट तयार करा"**. This creates a linked follow-up using the same approved source, visible in the work thread.
+Result pages may offer **"याच मजकुरावरून ट्विटर पोस्ट तयार करा"**, **"याच मजकुरावरून फेसबुक पोस्ट तयार करा"** or **"याच लेखावरून क्रिएटिव्ह पोस्टर तयार करा"**. These start a linked follow-up from the same source, shown in the work thread.
