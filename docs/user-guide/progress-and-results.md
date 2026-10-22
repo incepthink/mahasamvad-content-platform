@@ -1,21 +1,23 @@
-# Progress, Results and Downloads
+# Results and Downloads
 
-Work continues after the result page opens. A progress area shows the current phase; you may leave the page and return through **"सुरू असलेली कामे"** or **"मागील काम"**.
+Every run opens on its own result page. While work is still going on, the page shows its progress; you may leave and come back through **"सुरू असलेली कामे"** or **"मागील काम"**.
 
 ## Article result
 
 On a news report the article appears on screen while it is being written, then settles into the finished article card.
 
-![A completed article](.gitbook/assets/06-results--article.png)
+![A finished news report](.gitbook/assets/06-results--article.png)
 
-Article actions:
+The arrows at the top of the article move between its versions. Below the article are its actions:
+
+![The buttons and folds under an article](.gitbook/assets/06-results--article-actions.png)
 
 - **"मजकूर कॉपी करा"**;
 - **"डाउनलोड"** menu — **"PDF डाउनलोड"** (an A4 document with the DGIPR letterhead), **".txt डाउनलोड"** and **".md डाउनलोड"**;
-- **"भाषांतर करा"** — opens the article on the [translation page](translation.md);
+- **"भाषांतर करा →"** — opens the article on the [translation page](translation.md);
 - **"बातमीत बदल हवा आहे?"** — ask for a revision ([Improve Results with Feedback](improve-with-feedback.md));
 - **"बातमीच्या आवृत्त्या"** — move between versions and select **"ही आवृत्ती पुन्हा वापरा"** to make an older one current;
-- **"याच लेखावरून क्रिएटिव्ह पोस्टर तयार करा"** — start a poster from this article.
+- **"क्रिएटिव्ह →"** — start a poster from this article.
 
 If English or Hindi versions already exist for the article, the **"मराठी"**, **"English"** and **"हिंदी"** tabs switch between them, and the PDF downloads in the visible language.
 
@@ -33,7 +35,13 @@ A complete-looking result is not publication approval. Check every person, desig
 
 ## Poster, thumbnail, banner or social result
 
-The image appears with its caption, if one was requested. The icon row above the poster provides:
+The image appears with its caption beside it.
+
+![A finished social poster](.gitbook/assets/06-social--result.png)
+
+The row of icons under the poster provides the following. Hover over an icon to see its name; some icons appear only on certain formats.
+
+![The icon row under a poster](.gitbook/assets/06-social--actions.png)
 
 | Icon label                                     | What it does                                                         |
 | ---------------------------------------------- | -------------------------------------------------------------------- |
@@ -42,11 +50,8 @@ The image appears with its caption, if one was requested. The icon row above the
 | **"लोगो-फूटरशिवाय डाउनलोड करा"**               | Download the same poster without the badge and footer                |
 | **"Canva मध्ये पोस्टर उघडा"**                  | Open the poster in your own Canva account to edit further            |
 | **"वेगळी रचना तयार करा"**                      | Redraw with a different layout                                       |
-| **"वेगळ्या रंगात तयार करा"**                   | Redraw with a different colour scheme                                |
 | **"चित्रात बदल करा (पोस्टरवर खूण करा)"**       | Mark parts of the poster to change                                   |
 | **"जागा मोकळी करा (स्वतःच्या लोगोसाठी)"**       | Clear a space for your own logo or photograph                        |
-
-![A completed social result](.gitbook/assets/06-social--result.png)
 
 In Canva, the official badge and footer arrive as separate image layers; edit only the artwork layer so the branding stays intact. Posters made before September 2026, and banners in the older text-overlay style, have no logo-free download.
 

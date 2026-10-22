@@ -4,7 +4,9 @@ Use feedback when the facts are correct but wording, design, imagery or emphasis
 
 ## Change an article
 
-Open **"बातमीत बदल हवा आहे?"**. Choose a quick suggestion — **"आणखी थोडक्यात लिहा"**, **"आणखी सविस्तर लिहा"**, **"भाषा आणखी सोपी करा"**, **"सुरुवात आणखी आकर्षक करा"** — or write your own instruction, then select **"बदल करा"**.
+Open **"बातमीत बदल हवा आहे?"** under the article. Choose a quick suggestion — **"आणखी थोडक्यात लिहा"**, **"आणखी सविस्तर लिहा"**, **"भाषा आणखी सोपी करा"**, **"सुरुवात आणखी आकर्षक करा"** — or write your own instruction, then select **"बदल करा"**.
+
+![Asking for a change to an article](.gitbook/assets/05-feedback--article.png)
 
 Good instructions describe the outcome without introducing a new fact, for example:
 
@@ -17,7 +19,9 @@ When an instruction is a lasting preference rather than a one-off fix (for examp
 
 ## Ask for any poster change in your own words
 
-Under a poster (and under a caption) is **"AI सोबत बदल करा"**. Write what you want in Marathi or English — a small fix (“शीर्षक मोठे करा”), a whole new design (“हे आवडले नाही, पूर्ण नवीन डिझाइन करा”), a caption change, or both together (“कॅप्शन थोडे लहान करा आणि पोस्टरवरचा फोटो बदला”) — and select **"पाठवा"**.
+Under a poster (and under a caption) is **"AI सोबत बदल करा"**. Write what you want in Marathi or English — a small fix (“शीर्षक मोठे करा”), a whole new design (“हे आवडले नाही, पूर्ण नवीन डिझाइन करा”), a caption change, or both together (“कॅप्शन थोडे लहान करा आणि पोस्टरवरचा फोटो बदला”) — and select **"पाठवा"**. The quick suggestions under the box are a starting point.
+
+![The AI सोबत बदल करा box](.gitbook/assets/06-social--edit-chat.png)
 
 You do not choose an action: the assistant decides whether you mean the caption, the poster, a full redesign or both, and starts it. If it cannot tell, it asks one short question; answer it in the same box. It never adds a name, number or date you did not write.
 
@@ -25,13 +29,13 @@ The conversation is remembered in this browser, so a follow-up such as “आत
 
 ## Point to a poster element (red marks)
 
-Select **"चित्रात बदल करा (पोस्टरवर खूण करा)"**.
+Select the pencil icon, **"चित्रात बदल करा (पोस्टरवर खूण करा)"**, under the poster.
 
 1. Click a point, or drag a box, over the element to change. You can add up to three numbered marks.
 2. Beside each mark, write what should change — or describe it in the **"AI सोबत बदल करा"** box, for example “१ वरचा फोटो बदला आणि २ मधला मजकूर मोठा करा”.
 3. Select **"बदल करा"** (or **"पाठवा"** in the chat box).
 
-![Red change marks and a blue free-space box](.gitbook/assets/06-social--markers.png)
+![A red mark on the headline, with its instruction](.gitbook/assets/06-social--markers.png)
 
 A red mark points to an element; it is not a crop or mask. The change applies to the whole element around the mark.
 
@@ -45,7 +49,7 @@ The image model can confuse look-alike Devanagari digits such as **१** and **�
 
 ## Leave space for your own logo or photograph (blue boxes)
 
-Select **"जागा मोकळी करा (स्वतःच्या लोगोसाठी)"** and drag a blue box over the area. You can add up to two boxes. For each, choose:
+Select the dotted-square icon, **"जागा मोकळी करा (स्वतःच्या लोगोसाठी)"**, and drag a blue box over the area. You can add up to two boxes. For each, choose:
 
 - **"दुसरीकडे हलवा"** — move what is there elsewhere on the poster; the layout may change.
 - **"काढून टाका"** — remove it; nothing else moves.
@@ -58,4 +62,4 @@ Do not mark the software-added badge or footer: they are re-added after every ch
 
 Every successful poster render is kept as its own version. Use **"आधीच्या आवृत्त्या"** to compare, download or restore one — the restored version becomes current and later changes are made on it. No version is deleted.
 
-Every poster change — a redesign, a recolour, a marked change or an exact-text fix — incurs image-generation cost. Caption changes do not.
+Every poster change — a redesign, a marked change or an exact-text fix — incurs image-generation cost. Caption changes do not.

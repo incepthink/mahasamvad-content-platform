@@ -10,15 +10,16 @@ A social poster can carry a Marathi caption. There are three ways to get one:
 
 On the result page, the **"कॅप्शन"** box is editable; changes are saved automatically. Use **"कॅप्शन कॉपी करा"** to copy it. No length limit is enforced — check the platform's own limit before posting.
 
-If no caption exists yet, select **"कॅप्शन तयार करा"**, or type one yourself. An AI caption uses only your source text and never adds a fact that was not in it.
+If no caption exists yet, the box shows **"कॅप्शन तयार करा"** — select it, or type a caption yourself.
+
+![A poster without a caption yet](.gitbook/assets/06-social--result.png)
+ An AI caption uses only your source text and never adds a fact that was not in it.
 
 For an AI-assisted change, write what you want in **"AI सोबत बदल करा"** under the caption — for example “कॅप्शन थोडे लहान करा”. See [Improve Results with Feedback](improve-with-feedback.md).
 
-![Poster and caption together](.gitbook/assets/06-social--result.png)
-
 ## Direct publication to Facebook
 
-A finished poster can show **"फेसबुकवर पोस्ट करा"**. Publication is external and immediate:
+A finished poster shows a Facebook icon, **"फेसबुकवर पोस्ट करा"**, in its icon row. Publication is external and immediate:
 
 1. Read the final caption and inspect the poster at full size.
 2. Select **"फेसबुकवर पोस्ट करा"**.

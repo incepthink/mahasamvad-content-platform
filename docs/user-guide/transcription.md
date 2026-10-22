@@ -6,7 +6,7 @@ Use **"ध्वनिलेखन"** when you need what was said, word for word
 
 ## Start a transcript
 
-1. Under **"नवीन ध्वनिलेखन"**, select **"ध्वनिफीत जोडा"** (or drag files onto the card) and/or paste YouTube links under **"यूट्युब व्हिडिओ"**.
+1. Under **"नवीन ध्वनिलेखन"**, select **"ध्वनिफीत जोडा"** (or drag files onto the card). To add a YouTube link, use the play button under the card.
 2. Check every listed source.
 3. Select **"मजकूर तयार करा"**.
 
@@ -24,9 +24,9 @@ On an Android phone with the app installed, you can share a recording directly f
 
 ![A completed transcript](.gitbook/assets/07-transcription--result.png)
 
-Your runs appear on the same page; select one to open its result. The transcript is read-only because it records what the speech service heard. You can:
+Earlier runs are listed under **"मागील ध्वनिलेखने"** on the same page; select one to open it. The transcript is read-only because it records what the speech service heard. You can:
 
-- select **"मजकूर कॉपी करा"** or download a TXT file;
+- select **"मजकूर कॉपी करा"** or **".txt डाउनलोड"**;
 - see which individual recording or link failed — the others are still transcribed;
 - select **"बातमी तयार करा"** to start a news report from the transcript.
 

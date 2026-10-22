@@ -25,7 +25,7 @@ These follow-ups are linked. **"याच टिपणीवरून तया�
 
 Open **"मागील काम"** to see every saved news report, poster, carousel, thumbnail, banner, caption and Dynamic Poster.
 
-![The history grid](.gitbook/assets/13-history--grid.png)
+![मागील काम](.gitbook/assets/13-history--grid.png)
 
 - Search with **"मागील काम शोधा…"**.
 - Filter by **"प्रकार"** (format), **"स्थिती"** (status) and **"कालावधी"** (**"आज"**, **"७ दिवसांत"**, **"३० दिवसांत"**).

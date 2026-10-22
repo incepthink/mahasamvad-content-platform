@@ -35,9 +35,9 @@ Yes. Work continues on the server. Reopen it from **"सुरू असले�
 | **"ही लिंक आधीच जोडली आहे."**                                                   | That YouTube link is already listed.                                   |
 | **"एक समाजमाध्यम पोस्ट सध्या तयार होत आहे…"**                                   | Wait for the running social post to finish.                            |
 
-### Why does a PDF ask me to choose pages on the Creative page?
+### How do I make a poster from a PDF or Word file?
 
-On **क्रिएटिव्ह आणि सोशल**, a PDF is read only for the pages you tick, because reading is charged per page. On **लेख / बातमी**, **भाषांतर**, **मुद्रितशोधन** and **चॅट**, documents are read whole.
+**क्रिएटिव्ह आणि सोशल** takes pasted text only. Copy the text you want on the poster into the box, or make a news report from the file on **लेख / बातमी** and select **"क्रिएटिव्ह →"** on the finished article. **लेख / बातमी**, **भाषांतर**, **मुद्रितशोधन** and **चॅट** all accept PDF, DOCX and TXT files and read them whole.
 
 ### A video file will not convert
 
@@ -104,7 +104,9 @@ Use **"लोगो-फूटरशिवाय डाउनलोड करा"
 
 Mark the part that should move before creating it. Everything outside that part is then kept exactly as uploaded.
 
-Facebook publication is immediate and cannot be withdrawn from the result page. Use the official Facebook account to correct or delete a live post.
+### Can I undo a Facebook post?
+
+Not from the platform. Publication is immediate; correct or delete a live post through the official Facebook account.
 
 ## Video
 

@@ -1,8 +1,8 @@
 # Getting Around the Platform
 
-The desktop application uses a permanent menu on the left. The highlighted row shows the page you are using.
+On a desktop, the menu is always on the left. The highlighted row is the page you are on.
 
-![The current desktop menu](.gitbook/assets/02-navigation--sidebar.png)
+![The menu on a desktop](.gitbook/assets/02-navigation--sidebar.png)
 
 ## Menu pages
 
@@ -25,8 +25,8 @@ Use the small collapse button beside the logo when you need more horizontal spac
 
 Two pages are not in the menu:
 
-- **संपादकीय नियम** (`/preferences`) — the department's standing writing rules. It also opens from the link that appears on an article after a rule has been learned. See [Editorial Rules](editorial-rules.md).
-- **प्रशिक्षण** (`/learn`) — practice lessons that cost nothing.
+- **संपादकीय नियम** — the department's standing writing rules. It also opens from the link that appears on an article after a rule has been learned. See [Editorial Rules](editorial-rules.md).
+- **प्रशिक्षण** — practice lessons that cost nothing. See [the introduction](README.md#practise-first).
 
 ## Ongoing work
 
@@ -43,7 +43,7 @@ Long operations continue in the background. Select **"सुरू असले�
 
 Select the menu button at the top-left to open the same navigation as a drawer. Select a destination and the drawer closes.
 
-![The mobile navigation drawer](.gitbook/assets/02-navigation--mobile.png)
+![The menu on a phone](.gitbook/assets/02-navigation--mobile.png)
 
 On Android, the site can be installed as an app. Once installed, you can share a recording straight from WhatsApp or the recorder app to **ध्वनिलेखन**, and the transcript starts automatically.
 

@@ -2,18 +2,22 @@
 
 Use **"क्रिएटिव्ह आणि सोशल"** (page title **"पोस्टर व सोशल पोस्ट तयार करा"**) when you already have the text and need its visual or social form. No article is written on this page — what you type or attach is the only source.
 
-![The create form](.gitbook/assets/01-overview--home.png)
-
 ## 1. Add the text
 
-Type or paste into **"पोस्टरवर जो मजकूर हवा आहे तो येथे लिहा"**. Select **[+]** to attach a PDF, DOCX or TXT file as well; you may use the text box, a file, or both. The file's text is counted beside what you typed, not pasted into the box.
+Paste or type your text into the box at the top. Its label depends on one option further along:
 
-- A DOCX or TXT is read immediately.
-- A PDF shows **"पृष्ठे निवडायची आहेत"** on its card. Open the card and tick only the pages you need — only those pages are read (OCR is charged per page).
+- **"तयार लेख येथे चिकटवा"** — the AI will write the poster's headline and points from your text (the default).
+- **"पोस्टरवर जो मजकूर हवा आहे तो येथे लिहा"** — shown when **"जसाच्या तसा मजकूर"** is ticked; your text is printed exactly as written.
+
+This page takes text only. To work from a PDF or Word file, copy its text in, or first make a news report from it on **लेख / बातमी** and use **"क्रिएटिव्ह →"** on the finished article.
+
+![The composer with text added](.gitbook/assets/03-creative--composer.png)
 
 ## 2. Choose what to create
 
-Open the format menu in the composer's tool row and choose one:
+Open the format menu (it reads **"क्रिएटिव्ह"** until you change it) and choose one:
+
+![The format menu](.gitbook/assets/03-creative--formats.png)
 
 | Format                       | What you get                                                                                       |
 | ---------------------------- | -------------------------------------------------------------------------------------------------- |
@@ -52,7 +56,7 @@ Templates are grouped by how many points they hold (one message, a few points, a
 
 ## 6. Start
 
-Select **"तयार करा →"**. The result page opens and the work appears under **"सुरू असलेली कामे"**. Only one social post and one article can be in progress at a time; the form tells you if you must wait.
+Select **"तयार करा →"** at the right of the composer. The result page opens and the work appears under **"सुरू असलेली कामे"**. Only one social post and one article can be in progress at a time; the form tells you if you must wait.
 
 Before starting, confirm:
 
